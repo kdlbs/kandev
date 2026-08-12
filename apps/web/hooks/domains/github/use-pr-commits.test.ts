@@ -107,4 +107,28 @@ describe("usePRCommits request ownership", () => {
     await waitFor(() => expect(result.current.providerHead).toBe("provider-head"));
     expect(result.current.providerCommitsComplete).toBe(true);
   });
+
+  it("refreshes provider evidence on demand", async () => {
+    requestMock
+      .mockResolvedValueOnce({
+        commits: [commit("old-provider-head")],
+        head_sha: "old-provider-head",
+        complete: true,
+      })
+      .mockResolvedValueOnce({
+        commits: [commit("new-provider-head")],
+        head_sha: "new-provider-head",
+        complete: true,
+      });
+
+    const { result } = renderHook(() => usePRCommits("acme", "app", 1, "synced"), { wrapper });
+    await waitFor(() => expect(result.current.providerHead).toBe("old-provider-head"));
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.providerHead).toBe("new-provider-head");
+    expect(requestMock).toHaveBeenCalledTimes(2);
+  });
 });

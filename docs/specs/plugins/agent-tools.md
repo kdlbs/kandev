@@ -20,9 +20,11 @@ Implementation plan: [Plugin-Contributed Agent Tools](../../plans/plugin-agent-t
 
 ## What
 
-- A plugin package may declare zero or more agent tools in its manifest. Each
-  declaration has a plugin-local name, description, input JSON Schema, optional
-  output JSON Schema, supported task surfaces, and optional MCP annotations.
+- A managed plugin package (`runtime.type: binary`) may declare zero or more
+  agent tools in its manifest. Each declaration has a plugin-local name,
+  description, input JSON Schema, optional output JSON Schema, supported task
+  surfaces, and optional MCP annotations. Legacy remote HTTP plugins cannot
+  declare agent tools because they do not implement the managed gRPC runtime.
 - Only active plugins contribute tools. Registered, disabled, errored, and
   uninstalled plugins contribute none.
 - Plugin tools are exposed through the existing task-aware Kandev MCP server.

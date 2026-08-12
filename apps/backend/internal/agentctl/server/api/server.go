@@ -185,6 +185,8 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/pull", s.handleGitPull)
 		api.POST("/git/push", s.handleGitPush)
 		api.POST("/git/push-preflight", s.handleGitPushPreflight)
+		api.POST("/git/contribution/replace", s.handleGitReplaceContribution)
+		api.POST("/git/contribution/use", s.handleGitUseContribution)
 		api.POST("/git/rebase", s.handleGitRebase)
 		api.POST("/git/merge", s.handleGitMerge)
 		api.POST("/git/abort", s.handleGitAbort)
@@ -351,7 +353,10 @@ func (s *Server) handleSetPluginTools(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	s.mcpServer.SetPluginTools(snapshot)
+	if err := s.mcpServer.SetPluginTools(snapshot); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"generation": snapshot.Generation, "revision": snapshot.Revision})
 }
 

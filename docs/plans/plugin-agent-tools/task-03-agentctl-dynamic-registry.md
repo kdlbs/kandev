@@ -77,5 +77,5 @@ wire payload, commands and results, and task/plan status updates.
 - Replacements use mcp-go `SetTools`, which emits one `tools/list_changed`
   notification for initialized clients. Same-generation stale revisions are
   ignored.
-- Verification: `go test -race ./internal/mcp/server ./internal/agentctl/server/api`
-  passed.
+- Verification: `go test -race ./internal/mcp/profile ./internal/mcp/server
+  ./internal/agentctl/server/api ./internal/agent/runtime/agentctl` passed.

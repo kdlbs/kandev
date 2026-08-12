@@ -93,11 +93,11 @@ func TestSetPluginToolsReplacesRuntimeRegistry(t *testing.T) {
 		Description: "Add a tag", InputSchema: []byte(`{"type":"object","properties":{"tag":{"type":"string"}}}`),
 		Surfaces: []string{plugintools.SurfaceKanban},
 	}
-	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}})
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}}))
 	if _, ok := s.mcpServer.ListTools()[definition.ExposedName]; !ok {
 		t.Fatalf("plugin tool was not registered")
 	}
-	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 2})
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 2}))
 	if _, ok := s.mcpServer.ListTools()[definition.ExposedName]; ok {
 		t.Fatalf("plugin tool was not removed on replacement")
 	}
@@ -113,12 +113,85 @@ func TestSetPluginToolsRebuildsArgumentValidators(t *testing.T) {
 		Description: "Add a tag", InputSchema: []byte(`{"type":"object","properties":{"tag":{"type":"string"}},"required":["tag"]}`),
 		Surfaces: []string{plugintools.SurfaceKanban},
 	}
-	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}})
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}}))
 
 	req := mcplib.CallToolRequest{Params: mcplib.CallToolParams{Name: definition.ExposedName, Arguments: map[string]any{"tag": "urgent"}}}
 	if _, err := s.validateToolArguments(definition.ExposedName, req); err != nil {
 		t.Fatalf("validateToolArguments() error = %v", err)
 	}
+}
+
+func TestSetPluginToolsRejectsMalformedSnapshotAndPreservesRegistry(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	definition := plugintools.Definition{
+		PluginID: "echo", LocalName: "echo", ExposedName: plugintools.ExposedName("echo", "echo"),
+		Description: "Echo", InputSchema: []byte(`{"type":"object"}`),
+		Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition},
+	}))
+
+	invalid := definition
+	invalid.InputSchema = []byte(`{"type":`)
+	err := s.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 2, Tools: []plugintools.Definition{invalid},
+	})
+	require.ErrorContains(t, err, "input schema")
+	require.Contains(t, s.mcpServer.ListTools(), definition.ExposedName)
+	require.Equal(t, uint64(1), s.pluginTools.Revision)
+}
+
+func TestSetPluginToolsPublishesDeclaredOutputSchema(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	definition := plugintools.Definition{
+		PluginID: "echo", LocalName: "echo", ExposedName: plugintools.ExposedName("echo", "echo"),
+		Description: "Echo", InputSchema: []byte(`{"type":"object"}`),
+		OutputSchema: []byte(`{"type":"object","properties":{"value":{"type":"string"}}}`),
+		Surfaces:     []string{plugintools.SurfaceKanban},
+	}
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition},
+	}))
+
+	tool := s.mcpServer.ListTools()[definition.ExposedName]
+	require.JSONEq(t, string(definition.OutputSchema), string(tool.Tool.RawOutputSchema))
+}
+
+func TestSetPluginToolsSkipsEquivalentEffectiveRegistry(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	session := &providerRefreshTestSession{
+		id: "initialized-plugin-noop", notifications: make(chan mcplib.JSONRPCNotification, 4),
+	}
+	require.NoError(t, s.mcpServer.RegisterSession(context.Background(), session))
+	definition := plugintools.Definition{
+		PluginID: "echo", LocalName: "echo", ExposedName: plugintools.ExposedName("echo", "echo"),
+		Description: "Echo", InputSchema: []byte(`{"type":"object"}`),
+		Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition},
+	}))
+	<-session.notifications
+
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 2, Tools: []plugintools.Definition{definition},
+	}))
+	select {
+	case notification := <-session.notifications:
+		t.Fatalf("equivalent plugin catalog emitted notification %q", notification.Method)
+	default:
+	}
+	require.Equal(t, uint64(2), s.pluginTools.Revision)
 }
 
 func TestPluginToolCallDoesNotLogArguments(t *testing.T) {
@@ -132,7 +205,7 @@ func TestPluginToolCallDoesNotLogArguments(t *testing.T) {
 		Description: "Echo", InputSchema: []byte(`{"type":"object","properties":{"token":{"type":"string"}}}`),
 		Surfaces: []string{plugintools.SurfaceKanban},
 	}
-	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}})
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}}))
 	callTool(t, s, definition.ExposedName, map[string]interface{}{"token": "secret-value"})
 
 	entries := observed.FilterMessage("MCP tool call").All()
@@ -151,7 +224,7 @@ func TestPluginToolErrorDoesNotLogResult(t *testing.T) {
 		PluginID: "echo", LocalName: "echo", ExposedName: plugintools.ExposedName("echo", "echo"),
 		Description: "Echo", InputSchema: []byte(`{"type":"object"}`), Surfaces: []string{plugintools.SurfaceKanban},
 	}
-	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}})
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}}))
 	callTool(t, s, definition.ExposedName, map[string]interface{}{})
 
 	entries := observed.FilterMessage("MCP tool returned error").All()
@@ -182,7 +255,7 @@ func TestPluginToolInvocationProfileAccessIsRaceFree(t *testing.T) {
 		Description: "Echo", InputSchema: []byte(`{"type":"object"}`),
 		Surfaces: []string{plugintools.SurfaceKanban, plugintools.SurfaceOffice},
 	}
-	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}})
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}}))
 	tool := s.mcpServer.ListTools()[definition.ExposedName]
 	require.NotNil(t, tool)
 	req := mcplib.CallToolRequest{Params: mcplib.CallToolParams{Name: definition.ExposedName, Arguments: map[string]any{}}}
@@ -215,12 +288,39 @@ func TestSetPluginToolsIgnoresStaleRevision(t *testing.T) {
 		Description: "Current", InputSchema: []byte(`{"type":"object"}`),
 		Surfaces: []string{plugintools.SurfaceKanban},
 	}
-	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 2, Tools: []plugintools.Definition{definition}})
-	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1})
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 2, Tools: []plugintools.Definition{definition}}))
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1}))
 	_, ok := s.mcpServer.ListTools()[definition.ExposedName]
 	if !ok {
 		t.Fatal("stale revision replaced the current registry")
 	}
+}
+
+func TestSetPluginToolsIgnoresDivergentSnapshotAtCurrentRevision(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	current := plugintools.Definition{
+		PluginID: "plugin", LocalName: "current", ExposedName: plugintools.ExposedName("plugin", "current"),
+		Description: "Current", InputSchema: []byte(`{"type":"object"}`),
+		Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	replacement := plugintools.Definition{
+		PluginID: "plugin", LocalName: "replacement", ExposedName: plugintools.ExposedName("plugin", "replacement"),
+		Description: "Replacement", InputSchema: []byte(`{"type":"object"}`),
+		Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 2, Tools: []plugintools.Definition{current},
+	}))
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 2, Tools: []plugintools.Definition{replacement},
+	}))
+
+	tools := s.mcpServer.ListTools()
+	require.Contains(t, tools, current.ExposedName)
+	require.NotContains(t, tools, replacement.ExposedName)
 }
 
 func TestSetPluginToolsPreservesCatalogAcrossSurfaceChange(t *testing.T) {
@@ -236,7 +336,7 @@ func TestSetPluginToolsPreservesCatalogAcrossSurfaceChange(t *testing.T) {
 		PluginID: "plugin", LocalName: "office", ExposedName: plugintools.ExposedName("plugin", "office"),
 		Description: "Office", InputSchema: []byte(`{"type":"object"}`), Surfaces: []string{plugintools.SurfaceOffice},
 	}
-	s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{kanban, office}})
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{kanban, office}}))
 	s.SetProfile(mcpprofile.New(mcpprofile.SurfaceOfficeTask, nil, nil))
 
 	tools := s.mcpServer.ListTools()

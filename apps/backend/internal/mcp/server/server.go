@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
+	"github.com/kandev/kandev/internal/mcp/toolschema"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -90,29 +91,30 @@ func normalizeMode(mode string) string {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
-	backend            BackendClient
-	sessionID          string
-	taskID             string
-	disableAskQuestion bool
-	mode               string // "task" (default), "task-title-pending", "config", or "office"
-	mcpProviders       []string
-	profile            mcpprofile.Context
-	mcpServer          *server.MCPServer
-	sseServer          *server.SSEServer
-	httpServer         *server.StreamableHTTPServer
-	logger             *logger.Logger
-	mcpLogger          *zap.Logger // optional file logger for MCP debug traces
-	mu                 sync.RWMutex
-	running            bool
-	attachmentMu       sync.RWMutex
-	attachmentAttempt  streams.MCPAttachmentAttempt
-	attachmentAttempts map[string]streams.MCPAttachmentAttempt
-	attachmentReporter func(streams.MCPAttachmentEvidence)
-	validatorMu        sync.RWMutex
-	toolValidators     map[string]toolArgumentValidator
-	pluginToolsMu      sync.Mutex
-	pluginTools        plugintools.Snapshot
-	pluginToolsReady   bool
+	backend             BackendClient
+	sessionID           string
+	taskID              string
+	disableAskQuestion  bool
+	mode                string // "task" (default), "task-title-pending", "config", or "office"
+	mcpProviders        []string
+	profile             mcpprofile.Context
+	mcpServer           *server.MCPServer
+	sseServer           *server.SSEServer
+	httpServer          *server.StreamableHTTPServer
+	logger              *logger.Logger
+	mcpLogger           *zap.Logger // optional file logger for MCP debug traces
+	mu                  sync.RWMutex
+	running             bool
+	attachmentMu        sync.RWMutex
+	attachmentAttempt   streams.MCPAttachmentAttempt
+	attachmentAttempts  map[string]streams.MCPAttachmentAttempt
+	attachmentReporter  func(streams.MCPAttachmentEvidence)
+	validatorMu         sync.RWMutex
+	toolValidators      map[string]toolArgumentValidator
+	pluginToolsUpdateMu sync.Mutex
+	pluginToolsMu       sync.Mutex
+	pluginTools         plugintools.Snapshot
+	pluginToolsReady    bool
 }
 
 // New creates a new MCP server for agentctl.
@@ -586,24 +588,98 @@ func (s *Server) rebuildTools() {
 	s.mcpServer.SetTools(s.assembleTools()...)
 }
 
-// SetPluginTools atomically replaces sideloaded tools. SetTools emits one
-// tools/list_changed notification to initialized MCP clients.
-func (s *Server) SetPluginTools(snapshot plugintools.Snapshot) {
+// SetPluginTools validates and atomically replaces sideloaded tools. SetTools
+// emits one tools/list_changed notification to initialized MCP clients.
+func (s *Server) SetPluginTools(snapshot plugintools.Snapshot) error {
+	s.pluginToolsUpdateMu.Lock()
+	defer s.pluginToolsUpdateMu.Unlock()
+	if err := validatePluginToolSnapshot(snapshot); err != nil {
+		return err
+	}
+	normalized := plugintools.Normalize(snapshot)
 	s.pluginToolsMu.Lock()
-	if s.pluginToolsReady && snapshot.Generation == s.pluginTools.Generation && snapshot.Revision < s.pluginTools.Revision {
+	if s.pluginToolsReady && normalized.Generation == s.pluginTools.Generation && normalized.Revision <= s.pluginTools.Revision {
 		s.pluginToolsMu.Unlock()
-		return
+		return nil
 	}
-	if s.pluginToolsReady && plugintools.Equal(s.pluginTools, snapshot) {
+	if s.pluginToolsReady && equivalentPluginToolCatalog(s.pluginTools, normalized) {
+		s.pluginTools = normalized
 		s.pluginToolsMu.Unlock()
-		return
+		return nil
 	}
-	s.pluginTools = plugintools.Normalize(snapshot)
+	s.pluginTools = normalized
 	s.pluginToolsReady = true
 	s.pluginToolsMu.Unlock()
 	s.mu.Lock()
 	s.rebuildTools()
 	s.mu.Unlock()
+	return nil
+}
+
+func equivalentPluginToolCatalog(left, right plugintools.Snapshot) bool {
+	left.Generation, right.Generation = "", ""
+	left.Revision, right.Revision = 0, 0
+	return plugintools.Equal(left, right)
+}
+
+func validatePluginToolSnapshot(snapshot plugintools.Snapshot) error {
+	if snapshot.Generation == "" {
+		return fmt.Errorf("plugin tool snapshot generation is required")
+	}
+	seen := make(map[string]struct{}, len(snapshot.Tools))
+	for i, definition := range snapshot.Tools {
+		name := fmt.Sprintf("plugin tool %d", i)
+		if definition.PluginID == "" || definition.LocalName == "" || definition.ExposedName == "" || definition.Description == "" {
+			return fmt.Errorf("%s has incomplete identity or description", name)
+		}
+		if expected := plugintools.ExposedName(definition.PluginID, definition.LocalName); definition.ExposedName != expected {
+			return fmt.Errorf("%s exposed name %q does not match %q", name, definition.ExposedName, expected)
+		}
+		if _, ok := seen[definition.ExposedName]; ok {
+			return fmt.Errorf("duplicate plugin tool exposed name %q", definition.ExposedName)
+		}
+		seen[definition.ExposedName] = struct{}{}
+		if err := validatePluginToolSurfaces(name, definition.Surfaces); err != nil {
+			return err
+		}
+		if err := validatePluginToolSchema(definition.ExposedName+"/input", definition.InputSchema); err != nil {
+			return fmt.Errorf("%s input schema: %w", name, err)
+		}
+		if len(definition.OutputSchema) > 0 {
+			if err := validatePluginToolSchema(definition.ExposedName+"/output", definition.OutputSchema); err != nil {
+				return fmt.Errorf("%s output schema: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validatePluginToolSurfaces(name string, surfaces []string) error {
+	if len(surfaces) == 0 {
+		return fmt.Errorf("%s has no surfaces", name)
+	}
+	seen := make(map[string]struct{}, len(surfaces))
+	for _, surface := range surfaces {
+		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice {
+			return fmt.Errorf("%s has unsupported surface %q", name, surface)
+		}
+		if _, ok := seen[surface]; ok {
+			return fmt.Errorf("%s duplicates surface %q", name, surface)
+		}
+		seen[surface] = struct{}{}
+	}
+	return nil
+}
+
+func validatePluginToolSchema(name string, raw json.RawMessage) error {
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return fmt.Errorf("decode schema: %w", err)
+	}
+	if _, err := toolschema.Compile(name, document); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) syncPluginTools(ctx context.Context) {
@@ -619,7 +695,9 @@ func (s *Server) syncPluginTools(ctx context.Context) {
 	if err := s.backend.RequestPayload(requestCtx, ws.ActionMCPListPluginTools, map[string]string{"surface": surface}, &snapshot); err != nil {
 		return
 	}
-	s.SetPluginTools(snapshot)
+	if err := s.SetPluginTools(snapshot); err != nil {
+		s.logger.Warn("ignoring invalid plugin tool catalog", zap.Error(err))
+	}
 }
 
 func (s *Server) registerPluginTools() {
@@ -635,6 +713,7 @@ func (s *Server) registerPluginTools() {
 			continue
 		}
 		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
+		tool.RawOutputSchema = append(json.RawMessage(nil), definition.OutputSchema...)
 		tool.Annotations = mcp.ToolAnnotation{
 			ReadOnlyHint: &definition.ReadOnlyHint, DestructiveHint: &definition.DestructiveHint,
 			IdempotentHint: &definition.IdempotentHint, OpenWorldHint: &definition.OpenWorldHint,

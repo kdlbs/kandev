@@ -83,5 +83,6 @@ updates.
 - Agentctl retains the complete revisioned catalog and applies surface filters
   while rebuilding the active MCP profile, so live surface changes do not lose
   declarations.
-- Verification: focused `-race` suites passed for MCP handlers, lifecycle,
-  agentctl client/server, backendapp, plugin service, MCP server, and SDK.
+- Verification: `go test -race ./internal/mcp/handlers ./internal/mcp/scope
+  ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle
+  ./internal/backendapp` passed.

@@ -144,6 +144,9 @@ func (m *Manifest) validateAgentTools() []error {
 		return nil
 	}
 	var errs []error
+	if !m.IsManaged() {
+		errs = append(errs, errors.New("agent_tools require runtime.type binary"))
+	}
 	if len(m.AgentTools) > 16 {
 		errs = append(errs, errors.New("agent_tools must declare at most 16 tools"))
 	}

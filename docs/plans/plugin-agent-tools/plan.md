@@ -193,7 +193,7 @@ Wave 4:
 
 Wave 5:
 
-- [ ] [Task 06: Plugin agent-tool documentation](task-06-authoring-docs.md)
+- [x] [Task 06: Plugin agent-tool documentation](task-06-authoring-docs.md)
 
 The default implementation order is sequential in the primary conversation.
 Wave labels do not authorize subagents.

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import Link from "@/components/routing/app-link";
 import { IconArrowLeft, IconMenu2, IconGitBranch, IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -22,6 +22,14 @@ import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
 import { useTranslation } from "react-i18next";
+import { openExternalLink } from "@/lib/desktop/external-links";
+import {
+  buildRemoteContributionResolutionTarget,
+  useRemoteContributionResolution,
+  useRemoteContributionResolutionConfirmation,
+  type RemoteContributionResolutionTarget,
+} from "../use-remote-contribution-resolution";
+import { MobileContributionResolutionDrawer } from "./mobile-contribution-resolution-drawer";
 
 type SessionMobileTopBarProps = {
   taskId?: string | null;
@@ -143,8 +151,11 @@ function useMobileGitMetrics(
 }
 
 function useMobileRemoteActionPolicy(sessionId: string | null | undefined) {
-  const { relation } = useRemoteContributionRelation(sessionId);
-  return remoteContributionActionPolicy(relation);
+  const contribution = useRemoteContributionRelation(sessionId);
+  return {
+    ...contribution,
+    ...remoteContributionActionPolicy(contribution.relation),
+  };
 }
 
 type MobileGitDialogsProps = {
@@ -189,6 +200,78 @@ function MobileGitDialogs(props: MobileGitDialogsProps) {
         branchPushed={props.branchPushed}
       />
     </>
+  );
+}
+
+function useMobileContributionResolutionActions(sessionId: string | null | undefined) {
+  const { t } = useTranslation();
+  const remoteActionPolicy = useMobileRemoteActionPolicy(sessionId);
+  const resolution = useRemoteContributionResolution(
+    sessionId,
+    remoteActionPolicy.refreshProviderEvidence,
+  );
+  const remoteRepositoryLabel = t("task:remoteRepository");
+  const resolutionTarget = useMemo(
+    () =>
+      buildRemoteContributionResolutionTarget(
+        remoteActionPolicy.relation,
+        remoteActionPolicy.repositoryName,
+        remoteActionPolicy.selectedPR,
+        remoteRepositoryLabel,
+      ),
+    [
+      remoteActionPolicy.relation,
+      remoteActionPolicy.repositoryName,
+      remoteActionPolicy.selectedPR,
+      remoteRepositoryLabel,
+    ],
+  );
+  const requestReplace = useCallback(() => {
+    if (resolutionTarget) resolution.requestReplace(resolutionTarget);
+  }, [resolution, resolutionTarget]);
+  const requestUse = useCallback(() => {
+    if (resolutionTarget) resolution.requestUse(resolutionTarget);
+  }, [resolution, resolutionTarget]);
+  const viewPRVersion = useCallback(() => {
+    const url = remoteActionPolicy.selectedPR?.pr_url;
+    if (url) void openExternalLink(url).catch(() => undefined);
+  }, [remoteActionPolicy.selectedPR?.pr_url]);
+  const confirmResolution = useRemoteContributionResolutionConfirmation(resolution);
+
+  return {
+    remoteActionPolicy,
+    resolution,
+    resolutionTarget,
+    requestReplace,
+    requestUse,
+    viewPRVersion,
+    confirmResolution,
+  };
+}
+
+function MobileResolutionDrawer({
+  resolution,
+  resolutionTarget,
+  confirmResolution,
+}: {
+  resolution: ReturnType<typeof useRemoteContributionResolution>;
+  resolutionTarget: RemoteContributionResolutionTarget | null;
+  confirmResolution: () => Promise<void>;
+}) {
+  if (!resolution.pending || !resolutionTarget) return null;
+  return (
+    <MobileContributionResolutionDrawer
+      open
+      action={resolution.pending.action}
+      repositoryName={resolutionTarget.repositoryName ?? ""}
+      expectedRemoteHead={resolution.pending.expectedRemoteHead}
+      isLoading={resolution.isLoading}
+      errorKey={resolution.errorKey}
+      onOpenChange={(open) => {
+        if (!open) resolution.cancel();
+      }}
+      onConfirm={confirmResolution}
+    />
   );
 }
 
@@ -246,7 +329,15 @@ function MobileTopBarActions({
   onMenuClick,
 }: MobileTopBarActionsProps) {
   const { t } = useTranslation();
-  const remoteActionPolicy = useMobileRemoteActionPolicy(sessionId);
+  const {
+    remoteActionPolicy,
+    resolution,
+    resolutionTarget,
+    requestReplace,
+    requestUse,
+    viewPRVersion,
+    confirmResolution,
+  } = useMobileContributionResolutionActions(sessionId);
   return (
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
@@ -285,6 +376,18 @@ function MobileTopBarActions({
         onMerge={onMerge}
         pushDisabled={remoteActionPolicy.pushDisabled}
         pullDisabled={remoteActionPolicy.pullDisabled}
+        showContributionResolution={remoteActionPolicy.action === "diverged_replace"}
+        replaceDisabled={remoteActionPolicy.replaceDisabled}
+        useDisabled={remoteActionPolicy.useDisabled}
+        onReplaceContribution={requestReplace}
+        onUseContribution={requestUse}
+        onViewPRVersion={viewPRVersion}
+        prNumber={remoteActionPolicy.selectedPR?.pr_number}
+      />
+      <MobileResolutionDrawer
+        resolution={resolution}
+        resolutionTarget={resolutionTarget}
+        confirmResolution={confirmResolution}
       />
       <Button
         variant="ghost"

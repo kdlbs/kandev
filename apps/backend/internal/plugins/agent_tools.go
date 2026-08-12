@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+	"go.uber.org/zap"
 )
 
 const maxAgentToolResultBytes = 1 << 20
@@ -88,7 +89,7 @@ func buildAgentToolDefinitions(records []*store.Record) ([]plugintools.Definitio
 				ReadOnlyHint:      boolValue(tool.Annotations.ReadOnlyHint, false),
 				DestructiveHint:   boolValue(tool.Annotations.DestructiveHint, true),
 				IdempotentHint:    boolValue(tool.Annotations.IdempotentHint, false),
-				OpenWorldHint:     boolValue(tool.Annotations.OpenWorldHint, false),
+				OpenWorldHint:     boolValue(tool.Annotations.OpenWorldHint, true),
 			})
 		}
 	}
@@ -127,7 +128,28 @@ func boolValue(value *bool, fallback bool) bool {
 // InvokeAgentTool validates the declaration and arguments, then forwards one
 // bounded call to the plugin's gRPC subprocess. It deliberately does not
 // retry because tools may have side effects.
-func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName string, arguments map[string]any, invocation AgentToolInvocationContext) (*pluginsdk.AgentToolResult, error) {
+func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName string, arguments map[string]any, invocation AgentToolInvocationContext) (result *pluginsdk.AgentToolResult, err error) {
+	started := time.Now()
+	defer func() {
+		if s.log == nil {
+			return
+		}
+		outcome := "success"
+		if err != nil {
+			outcome = "error"
+		} else if result != nil && result.IsError {
+			outcome = "tool_error"
+		}
+		s.log.Info("plugin agent tool invocation",
+			zap.String("invocation_id", invocation.InvocationID),
+			zap.String("plugin_id", pluginID),
+			zap.String("local_name", localName),
+			zap.String("task_id", invocation.TaskID),
+			zap.String("session_id", invocation.SessionID),
+			zap.Duration("duration", time.Since(started)),
+			zap.String("outcome", outcome))
+	}()
+
 	record, err := s.Get(pluginID)
 	if err != nil {
 		return nil, err
@@ -147,7 +169,7 @@ func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName strin
 	if !ok {
 		return nil, fmt.Errorf("plugins: plugin %q is not running", pluginID)
 	}
-	result, err := invokeRemoteAgentTool(ctx, remote, localName, arguments, invocation)
+	result, err = invokeRemoteAgentTool(ctx, remote, localName, arguments, invocation)
 	if err != nil {
 		return nil, err
 	}

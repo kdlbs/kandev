@@ -66,8 +66,12 @@ func TestInvokeAgentToolEchoesContext(t *testing.T) {
 		Context: pluginsdk.AgentToolContext{TaskID: "task-1", Surface: "kanban-task"},
 	})
 	require.NoError(t, err)
+	require.NotNil(t, result)
 	require.Equal(t, "fixture echo: hello", result.Text)
+	require.False(t, result.IsError)
+	require.Equal(t, "hello", result.StructuredContent["value"])
 	require.Equal(t, "task-1", result.StructuredContent["task_id"])
+	require.Equal(t, "kanban-task", result.StructuredContent["surface"])
 }
 
 func TestOnEvent_AppendsMultipleDeliveriesInOrder(t *testing.T) {

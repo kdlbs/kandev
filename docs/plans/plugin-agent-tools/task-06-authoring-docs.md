@@ -1,7 +1,7 @@
 ---
 id: "06-authoring-docs"
 title: "Plugin agent-tool documentation"
-status: pending
+status: done
 wave: 5
 depends_on: ["05-end-to-end-fixture"]
 plan: "plan.md"
@@ -66,4 +66,14 @@ remaining client-compatibility caveats, and task/plan status updates.
 
 ## Results
 
-Pending.
+- Documented the agent-tool manifest fields, SDK handler, derived MCP names,
+  supported task surfaces, conservative annotations, bound context, limits,
+  timeout/no-retry behavior, and a complete echo-tool example.
+- Updated automation/MCP and feature-status documentation with live catalog
+  replacement, `tools/list_changed` client compatibility, and reconnect
+  fallback behavior.
+- Updated the core plugin spec, feature spec, ADR index, and backend authoring
+  guidance so terminology and contract links agree.
+- Verification: `git diff --check && make -C apps/backend build` passed. The
+  cross-platform build emitted only the expected unsigned Darwin binary
+  warnings in this Linux environment.
