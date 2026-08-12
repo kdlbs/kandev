@@ -111,7 +111,7 @@ export function WatcherRepositoryFields({
       <PickSelect
         label={t("common:baseBranch")}
         description={t("common:theBaseBranchTheAgentStarts")}
-        value={baseBranch || DEFAULT_BRANCH}
+        value={repositoryId && !branchesLoading ? baseBranch || DEFAULT_BRANCH : undefined}
         onChange={(v) => onBaseBranchChange(resolveBaseBranch(v))}
         placeholder={branchPlaceholderLabel}
         items={[

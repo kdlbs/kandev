@@ -78,7 +78,7 @@ the mobile-parity exception; no new mobile Playwright scenario is required.
 
 ## Verification Results
 
-- Focused Vitest: 44 tests passed across 6 files.
+- Focused Vitest: 46 tests passed across 7 files, including repository-first and branch-loading rendered placeholder coverage added during PR review.
 - `pnpm run i18n:check`: passed with 0 orphans, pseudo in sync, and 127 unchanged out-of-scope real-locale parity advisories.
 - `pnpm run i18n:sweep -- components lib`: completed across 1,850 files; only the two documented prompt-builder plural findings and 91 unrelated review-by-eye candidates remain.
 
