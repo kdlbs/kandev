@@ -137,6 +137,9 @@ func TestBuildWorkspaceCallbacksToleratesUnwiredHandlers(t *testing.T) {
 func TestStreamManagerStartRejectsWorkAfterWait(t *testing.T) {
 	stopCh := newTestStopCh(t)
 	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, stopCh)
+	// Registered before the Wait below and before any t.Fatal path, so the
+	// drain still runs if this test fails early.
+	cleanupStreamManager(t, stopCh, sm)
 	sm.Wait()
 
 	execution := &AgentExecution{ID: "exec-1", SessionID: "session-1"}
@@ -150,8 +153,8 @@ func TestStreamManagerStartRejectsWorkAfterWait(t *testing.T) {
 	}
 
 	// ConnectMCPStream has no ready channel — it simply must not spawn.
+	// The registered cleanup drains; no trailing Wait needed here.
 	sm.ConnectMCPStream(execution)
-	sm.Wait()
 }
 
 func TestStopChannelContextErrReportsFirstClosedSignal(t *testing.T) {

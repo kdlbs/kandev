@@ -48,7 +48,13 @@ func newFakeAgentctlProcessServer(t *testing.T) (*fakeAgentctlProcessServer, *ag
 			w.WriteHeader(http.StatusOK)
 		case r.URL.Path == "/api/v1/processes/start":
 			var req agentctl.StartProcessRequest
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				// t.Errorf, not require: this runs on the server's goroutine and
+				// require's FailNow/Goexit is only valid on the test goroutine.
+				t.Errorf("decode start process request: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 			f.startRequests = append(f.startRequests, req)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"process": agentctl.ProcessInfo{
@@ -59,7 +65,11 @@ func newFakeAgentctlProcessServer(t *testing.T) (*fakeAgentctlProcessServer, *ag
 			var req struct {
 				ProcessID string `json:"process_id"`
 			}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode stop process request: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 			f.stopIDs = append(f.stopIDs, req.ProcessID)
 			if f.stopShouldErr {
 				_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "already gone"})

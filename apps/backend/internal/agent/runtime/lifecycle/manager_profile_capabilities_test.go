@@ -258,7 +258,13 @@ func TestPushBaseBranchesForTaskTargetsOnlyThatTask(t *testing.T) {
 		var body struct {
 			BaseBranches map[string]string `json:"base_branches"`
 		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			// t.Errorf, not require: this runs on the server's goroutine and
+			// require's FailNow/Goexit is only valid on the test goroutine.
+			t.Errorf("decode base-branches request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		mu.Lock()
 		pushes = append(pushes, body.BaseBranches)
 		mu.Unlock()
