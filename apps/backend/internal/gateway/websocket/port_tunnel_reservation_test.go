@@ -10,7 +10,7 @@ import (
 // resolves and binds, and returns the settle function the owning start would
 // call. Binding is a real syscall of unbounded duration, so this window is wide
 // enough in production for every other method to run inside it.
-func reserveInFlightStart(t *testing.T, manager *TunnelManager, cacheKey string) func(port int, err error) {
+func reserveInFlightStart(t *testing.T, manager *TunnelManager, cacheKey string) (*pendingTunnel, func(port int, err error)) {
 	t.Helper()
 	started := &pendingTunnel{done: make(chan struct{})}
 	manager.mu.Lock()
@@ -28,7 +28,7 @@ func reserveInFlightStart(t *testing.T, manager *TunnelManager, cacheKey string)
 	// Registered immediately: a t.Fatal below must not strand callers that are
 	// already blocked on this reservation.
 	t.Cleanup(func() { settle(0, errors.New("test cleanup")) })
-	return settle
+	return started, settle
 }
 
 // A start that has not finished binding is invisible to every other method:
@@ -36,7 +36,7 @@ func reserveInFlightStart(t *testing.T, manager *TunnelManager, cacheKey string)
 // in-flight bind.
 func TestInFlightStartIsInvisibleToTheOtherReaders(t *testing.T) {
 	manager := newRacingTunnelManager(t)
-	settle := reserveInFlightStart(t, manager, "sess-inflight:3000")
+	_, settle := reserveInFlightStart(t, manager, "sess-inflight:3000")
 
 	mustNotBlock(t, "ListTunnels during an in-flight start", func() {
 		if listed := tunnelList(t, manager, "sess-inflight"); len(listed) != 0 {
@@ -48,17 +48,17 @@ func TestInFlightStartIsInvisibleToTheOtherReaders(t *testing.T) {
 			t.Error("StopTunnel() error = nil during an in-flight start, want a not-found error")
 		}
 	})
-	mustNotBlock(t, "InvalidateSession during an in-flight start", func() {
-		manager.InvalidateSession("sess-inflight")
+	mustNotBlock(t, "InvalidateSession for another session during an in-flight start", func() {
+		manager.InvalidateSession("sess-unrelated")
 	})
-	mustNotBlock(t, "Shutdown during an in-flight start", manager.Shutdown)
-
 	// A start for a different session:port is not blocked by this reservation.
 	mustNotBlock(t, "StartTunnel for another key during an in-flight start", func() {
 		if _, err := manager.StartTunnel("sess-other", 3000, 0); err == nil {
 			t.Error("StartTunnel(sess-other) error = nil, want the missing-session failure")
 		}
 	})
+	// Last, because Shutdown is terminal.
+	mustNotBlock(t, "Shutdown during an in-flight start", manager.Shutdown)
 
 	settle(41234, nil)
 }
@@ -80,7 +80,7 @@ func TestDuplicateStartWaitsForTheInFlightResult(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := newRacingTunnelManager(t)
-			settle := reserveInFlightStart(t, manager, "sess-wait:3000")
+			_, settle := reserveInFlightStart(t, manager, "sess-wait:3000")
 
 			gate := make(chan struct{})
 			close(gate)
@@ -91,6 +91,9 @@ func TestDuplicateStartWaitsForTheInFlightResult(t *testing.T) {
 			mustNotBlock(t, "ListTunnels while a duplicate start waits", func() {
 				_ = manager.ListTunnels("sess-wait")
 			})
+			// ListTunnels above is the m.mu liveness proof. This select is a
+			// secondary sanity-check that the waiter has not returned early;
+			// 50ms is ample for an in-process channel wait to park.
 			select {
 			case outcome := <-waiter:
 				t.Fatalf("duplicate StartTunnel returned %+v before the in-flight start settled", outcome)
@@ -120,7 +123,7 @@ func TestDuplicateStartWaitsForTheInFlightResult(t *testing.T) {
 // session:port can be started again.
 func TestFinishStartReleasesTheReservation(t *testing.T) {
 	manager := newRacingTunnelManager(t)
-	settle := reserveInFlightStart(t, manager, "sess-release:3000")
+	_, settle := reserveInFlightStart(t, manager, "sess-release:3000")
 	settle(0, errors.New("bind exploded"))
 
 	manager.mu.Lock()

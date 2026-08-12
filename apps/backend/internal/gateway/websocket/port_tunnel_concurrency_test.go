@@ -4,6 +4,9 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // startOutcome is one concurrent StartTunnel result. A panic in a racing
@@ -76,11 +79,10 @@ func mustNotBlock(t *testing.T, what string, fn func()) {
 	}
 }
 
-// newRacingTunnelManager returns a manager whose cleanup cannot hang the suite:
-// Shutdown takes m.mu, so a leaked lock would block teardown forever.
-func newRacingTunnelManager(t *testing.T, sessionIDs ...string) *TunnelManager {
+// newTunnelRaceBackend returns a lifecycle manager whose named sessions all
+// resolve to one fake agentctl, so tunnel starts against them succeed.
+func newTunnelRaceBackend(t *testing.T, log *logger.Logger, sessionIDs ...string) *lifecycle.Manager {
 	t.Helper()
-	log, _ := observedTerminalLogger(t)
 	upstream := newFakeAgentctl(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -88,9 +90,22 @@ func newRacingTunnelManager(t *testing.T, sessionIDs ...string) *TunnelManager {
 	for _, sessionID := range sessionIDs {
 		addExecutionForURL(t, lifecycleMgr, sessionID, upstream.server.URL, "", log)
 	}
+	return lifecycleMgr
+}
+
+// newBoundedTunnelManager returns a manager whose cleanup cannot hang the
+// suite: Shutdown takes m.mu, so a leaked lock would block teardown forever.
+func newBoundedTunnelManager(t *testing.T, lifecycleMgr *lifecycle.Manager, log *logger.Logger) *TunnelManager {
+	t.Helper()
 	manager := NewTunnelManager(lifecycleMgr, log)
 	t.Cleanup(func() { mustNotBlock(t, "Shutdown", manager.Shutdown) })
 	return manager
+}
+
+func newRacingTunnelManager(t *testing.T, sessionIDs ...string) *TunnelManager {
+	t.Helper()
+	log, _ := observedTerminalLogger(t)
+	return newBoundedTunnelManager(t, newTunnelRaceBackend(t, log, sessionIDs...), log)
 }
 
 // Two clicks on "expose port" arrive as two ports.tunnel.start actions, and
@@ -138,8 +153,8 @@ func TestStartTunnelIsSafeUnderConcurrentDuplicateStarts(t *testing.T) {
 
 // The serious half of the defect: StartTunnel dereferenced the reservation
 // while holding m.mu behind a non-deferred Unlock, so a panic there stranded
-// the lock and every later start/stop/list/invalidate/shutdown blocked for the
-// process lifetime, graceful backend shutdown included.
+// the lock and every later start, stop, list and invalidate blocked for the
+// process lifetime.
 func TestTunnelManagerStaysUsableAfterConcurrentDuplicateStarts(t *testing.T) {
 	manager := newRacingTunnelManager(t, "sess-usable")
 
