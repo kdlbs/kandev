@@ -91,6 +91,14 @@ Completed 2026-08-12.
   (113.217s), the exact MCP regression 10 times, 9 focused frontend files / 104 tests, the repaired
   status-surface file / 10 tests, web typecheck, changed-code Go lint (zero issues), focused
   ESLint/Prettier, all 60 public-doc validator tests, and all 41 published pages.
+- The independent exact-head Sol review verified all six preceding findings closed, then found one
+  cascade-delete blocker: `PrepareTaskResourceCleanup` lost legacy runtime-secret references because
+  `TaskEnvironment` intentionally marks them `json:"-"` and the task FK removed the source row before
+  the worker ran. Direct and prepared cleanup now share one snapshot builder that copies both IDs.
+  The real cascade-delete regression failed before implementation and passed afterward; its focused
+  race set passed 10 repetitions, the full task-service suite passed (59.186s), the full race suite
+  passed (91.743s), the exact MCP regression passed 10 repetitions, and changed-code Go lint reported
+  zero issues.
 
 ## Files
 

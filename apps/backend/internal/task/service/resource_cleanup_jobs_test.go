@@ -35,6 +35,28 @@ type joinCleanupBarrier struct {
 	stopped   chan struct{}
 }
 
+type recordedRuntimeSecretDelete struct {
+	environmentID     string
+	authSecretID      string
+	bootstrapSecretID string
+}
+
+type recordingRuntimeSecretDeleter struct {
+	calls []recordedRuntimeSecretDelete
+}
+
+func (d *recordingRuntimeSecretDeleter) DeleteTaskEnvironmentRuntimeSecrets(
+	_ context.Context,
+	environmentID, authSecretID, bootstrapSecretID string,
+) error {
+	d.calls = append(d.calls, recordedRuntimeSecretDelete{
+		environmentID:     environmentID,
+		authSecretID:      authSecretID,
+		bootstrapSecretID: bootstrapSecretID,
+	})
+	return nil
+}
+
 func newJoinCleanupBarrier() *joinCleanupBarrier {
 	return &joinCleanupBarrier{
 		started: make(chan struct{}), cancelled: make(chan struct{}),
@@ -989,6 +1011,40 @@ func TestDeleteInheritedSubtaskRestoresSharedEnvironmentOwnershipOnEarlyAbort(t 
 				t.Fatalf("aborted deletion stranded environment ownership: env=%#v err=%v", env, err)
 			}
 		})
+	}
+}
+
+func TestCascadeDeleteCleanupPersistsLegacyRuntimeSecretReferences(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	const taskID = "task-cascade-secret-cleanup"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-cascade-secret-cleanup")
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-cascade-secret-cleanup", TaskID: taskID,
+		ExecutorType:              string(models.ExecutorTypeLocal),
+		AgentctlAuthSecretID:      "legacy-auth-secret-id",
+		AgentctlBootstrapSecretID: "legacy-bootstrap-secret-id",
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	secretDeleter := &recordingRuntimeSecretDeleter{}
+	taskSvc.SetTaskEnvironmentRuntimeSecretDeleter(secretDeleter)
+	taskSvc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+	handoff := NewHandoffService(repo, repo, nil, nil, nil, nil)
+	handoff.SetTaskResourceCleaner(taskSvc)
+
+	if _, err := handoff.DeleteTaskTree(ctx, taskID, true); err != nil {
+		t.Fatalf("DeleteTaskTree: %v", err)
+	}
+	waitForCleanupDone(t, taskSvc)
+
+	want := recordedRuntimeSecretDelete{
+		environmentID:     "env-cascade-secret-cleanup",
+		authSecretID:      "legacy-auth-secret-id",
+		bootstrapSecretID: "legacy-bootstrap-secret-id",
+	}
+	if len(secretDeleter.calls) != 1 || secretDeleter.calls[0] != want {
+		t.Fatalf("runtime secret cleanup calls = %#v, want [%#v]", secretDeleter.calls, want)
 	}
 }
 

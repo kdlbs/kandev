@@ -439,6 +439,12 @@ Completed 2026-08-05.
   frontend files / 104 tests, the repaired status-surface file / 10 tests, and web typecheck passed
   with changed-code Go lint, focused ESLint/Prettier, the 60-test public-doc validator, and all 41
   published pages before replacement review and CI.
+- The independent exact-head Sol review verified the prior six findings closed and found one final
+  cascade-delete credential blocker: the prepared snapshot serialized environment secret fields
+  marked `json:"-"` without copying their durable IDs before the task FK removed the environment
+  row. Direct and prepared cleanup now share one snapshot builder. A real cascade-delete regression
+  failed before the fix and passes afterward; focused race repetitions, the full task-service suite
+  and race suite, the exact MCP regression, and changed-code Go lint pass.
 
 ---
 
