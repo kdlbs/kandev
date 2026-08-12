@@ -360,11 +360,9 @@ test.describe("Utility Agents settings page", () => {
     ).toBeVisible();
   });
 
-  test("wraps each settings sub-section in a bounded card, matching Voice Mode", async ({
-    testPage,
-  }) => {
+  test("wraps each settings sub-section in a bounded card", async ({ testPage }) => {
     // Regression guard: these sub-sections used to be bare divs with no
-    // visible border, unlike every other settings page (e.g. Voice Mode's
+    // visible border, unlike every other settings page (whose
     // Card-wrapped Enable/Engine/Behavior sections).
     //
     // Mock the inference-agent + builtin-agent APIs so the Actions card

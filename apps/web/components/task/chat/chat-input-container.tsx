@@ -289,8 +289,6 @@ type EnhancePromptExtras = {
   onEnhancePrompt?: () => void;
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
-  onVoiceTranscript?: (text: string) => void;
-  onVoiceAutoSend?: () => void;
 };
 
 export function shouldShowCancelAgent(
@@ -348,8 +346,6 @@ function buildEditorAreaProps(
     onEnhancePrompt: extras.onEnhancePrompt,
     isEnhancingPrompt: extras.isEnhancingPrompt,
     isUtilityConfigured: extras.isUtilityConfigured,
-    onVoiceTranscript: extras.onVoiceTranscript,
-    onVoiceAutoSend: extras.onVoiceAutoSend,
     hideSessionsDropdown: p.hideSessionsDropdown,
     minimalToolbar: p.minimalToolbar,
     hideAgentControls: p.hideAgentControls,
@@ -419,21 +415,6 @@ function useChatPromptEnhancement({
   return { handleEnhancePrompt, isEnhancingPrompt, isUtilityConfigured, promptDelivery };
 }
 
-function insertVoiceTranscript(inputRef: ContainerState["inputRef"], text: string): void {
-  const editor = inputRef.current;
-  if (!editor) return;
-
-  const trimmed = text.trim();
-  if (!trimmed) return;
-
-  const cursor = editor.getSelectionStart();
-  const current = editor.getValue();
-  const charBefore = cursor > 0 ? current.charAt(cursor - 1) : "";
-  const needsLeadingSpace = charBefore !== "" && !/\s/.test(charBefore);
-  const insert = needsLeadingSpace ? ` ${trimmed}` : trimmed;
-  editor.insertText(insert, cursor, cursor);
-}
-
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
   function ChatInputContainer(props, ref) {
     const { sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isStarting, isSending } =
@@ -476,23 +457,6 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       taskDescription,
     });
 
-    const handleVoiceTranscript = useCallback(
-      (text: string) => {
-        insertVoiceTranscript(s.inputRef, text);
-      },
-      [s.inputRef],
-    );
-
-    // Auto-send fires the same submit path as the regular send button. Guards
-    // against firing while the input is in a disabled state (e.g. the agent
-    // is currently booting) — the button is hidden in that case anyway, but
-    // defence-in-depth so a stale keyboard shortcut press doesn't trigger.
-    const { submitDisabled: voiceSubmitDisabled, handleSubmitWithReset: voiceSubmit } = s;
-    const handleVoiceAutoSend = useCallback(() => {
-      if (voiceSubmitDisabled) return;
-      voiceSubmit();
-    }, [voiceSubmitDisabled, voiceSubmit]);
-
     if (p.isFailed || executorUnavailable) {
       return (
         <FailedSessionBanner
@@ -534,8 +498,6 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
           isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
           isUtilityConfigured: promptEnhancement.isUtilityConfigured,
-          onVoiceTranscript: handleVoiceTranscript,
-          onVoiceAutoSend: handleVoiceAutoSend,
         })}
       />
     );

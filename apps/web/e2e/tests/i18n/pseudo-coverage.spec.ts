@@ -238,8 +238,7 @@ const SCREENS: Screen[] = [
     // translation — the same rule the eslint guard's keyboard pattern encodes.
     //
     // Shortcut names come from CONFIGURABLE_SHORTCUTS in
-    // lib/keyboard/shortcut-overrides.ts, a registry shared with the
-    // un-migrated voice-mode settings page; it migrates with that page.
+    // lib/keyboard/shortcut-overrides.ts.
     allow: [
       "Ctrl",
       "Shift",
@@ -262,7 +261,6 @@ const SCREENS: Screen[] = [
       "Toggle Plan Mode",
       "Recent Task Switcher",
       "Recent Task Switcher (Backward)",
-      "Voice Input",
       "Reverse Chat Search",
       "Open Task Pull Request",
       "Open Workspace Picker",
@@ -272,10 +270,6 @@ const SCREENS: Screen[] = [
     name: "settings — task behavior",
     url: "/settings/preferences/task-behavior",
     anchor: "[data-testid=archive-confirmation-card]",
-    // Voice Mode reuses the shared keyboard shortcut registry. Its persisted
-    // shortcut label and rendered key chord are intentionally ASCII values,
-    // not translatable Task Behavior copy.
-    allow: ["Voice Input", "Ctrl+Shift+M"],
   },
   {
     name: "settings — plugins",
@@ -419,7 +413,7 @@ const SCREENS: Screen[] = [
   // The settings-nav half of this blocker is now GONE: `settings-tree.tsx`,
   // `workspaces-group.tsx`, `executors-group.tsx`, `account-group.tsx` and
   // `theme-toggle.tsx` are migrated, so "Workspaces", "Integrations",
-  // "Automations", "Executors", "Voice Mode", "Utility Agents", "External MCP",
+  // "Automations", "Executors", "Utility Agents", "External MCP",
   // "Plugins" and "Toggle theme" render accented on every screen. Only "System"
   // is left, from `sections/settings/system-group.tsx`, which the System-routes
   // migration owns.
@@ -435,7 +429,7 @@ const SCREENS: Screen[] = [
   // `components/integrations/settings-section.tsx` chrome and `@kandev/ui`'s
   // built-in dialog "Close" label.
   //
-  // NOT YET: "settings — external mcp", "… prompts", "… voice mode",
+  // NOT YET: "settings — external mcp", "… prompts",
   // "… utility agents". All four pages' own copy is fully migrated and was
   // verified by running this oracle against each of them — every string those
   // routes own renders accented, including the 43 in the MCP tool catalog

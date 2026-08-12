@@ -2,6 +2,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -39,6 +40,84 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 	r.migrate.Apply("task_sessions.cost_subcents", `ALTER TABLE task_sessions ADD COLUMN cost_subcents INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.tokens_in", `ALTER TABLE task_sessions ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.tokens_out", `ALTER TABLE task_sessions ADD COLUMN tokens_out INTEGER NOT NULL DEFAULT 0`)
+	// BIGINT, not INTEGER: office_cost_events.tokens_cached_in routinely
+	// accumulates well past int4's 2,147,483,647 ceiling over a long-running
+	// session (the reported bug measured up to 98,805,109 on one already-
+	// completed task). SQLite's INTEGER is 64-bit regardless, but on Postgres
+	// INTEGER is int4 - an overflowing session would abort the single
+	// multi-column UPDATE in IncrementTaskSessionUsage and the single
+	// table-wide UPDATE in BackfillSessionTokensCachedIn, silently taking
+	// tokens_in/tokens_out/cost_subcents down with it for that session.
+	r.migrate.Apply("task_sessions.tokens_cached_in", `ALTER TABLE task_sessions ADD COLUMN tokens_cached_in BIGINT NOT NULL DEFAULT 0`)
+}
+
+// BackfillSessionTokensCachedIn recomputes task_sessions.tokens_cached_in from
+// the office_cost_events ledger. The rollup is purely derived from the ledger,
+// so recomputing from it is restoring data, not inventing it.
+//
+// Deliberately NOT called from runMigrations(): office_cost_events is owned and
+// created by internal/office/repository/sqlite, a separate repository that
+// shares this database but initializes independently, and on a fresh boot the
+// task repository's own migrations run first (internal/backendapp/storage.go).
+// An earlier version of this method guarded on the ledger table's existence to
+// tolerate that ordering from inside runMigrations(); that guard, and the table
+// existence it checked, both went away in favor of the caller in
+// internal/backendapp/storage.go, which only invokes this after office.Provide
+// has already succeeded — construction order guarantees office_cost_events
+// exists by then, so no guard is needed here. This keeps the task repository
+// from having to know office's schema/table-existence details, and lets the
+// office_cost_events(session_id) index it depends on live with the table it
+// indexes (internal/office/repository/sqlite/base.go createCostTables).
+//
+// Deliberately unconditional per session it touches (assignment, not
+// increment, so it is idempotent across replays) rather than gated on
+// "already nonzero": the rollup can go out of sync with the ledger without
+// erroring — a live IncrementTaskSessionUsage call is a best-effort
+// UPDATE ... WHERE id = ? that silently matches zero rows if the session row
+// doesn't exist yet (see the "missing row" case in
+// TestIncrementTaskSessionUsage_UnknownSessionNoError), and
+// event_subscribers.go only logs a Warn when the rollup write fails while the
+// ledger insert has already committed. A "skip if nonzero" guard would make
+// exactly that drift permanent instead of self-healing it on the next boot.
+// (If the ledger for a session was deleted separately from the session row
+// itself - see the two-transaction delete in workspace_deletion.go - this
+// recompute correctly zeroes that session's tokens_cached_in, since an empty
+// ledger sums to zero; the rollup's only contract is to equal the ledger sum.)
+//
+// The WHERE clause below is a boot-cost optimization, not a correctness gate:
+// it restricts the write to sessions that either have ledger rows (need a
+// possible recompute) or already hold a nonzero value (need a possible
+// zeroing, per the paragraph above). Every row it excludes has
+// tokens_cached_in = 0 AND no ledger rows, so the unconditional
+// COALESCE(NULL, 0) = 0 this statement would otherwise compute for it is
+// already what the row holds — excluding it is a provable no-op, never a
+// skip of a row that needs correcting. This runs unconditionally on every
+// boot (no run-once tracking - see MigrateLogger.Apply, which this method
+// deliberately does not use so a real failure propagates instead of being
+// swallowed as a Warn), so office_cost_events(session_id) must already be
+// indexed: an unindexed correlated subquery here is quadratic in
+// (sessions x ledger rows), measured at 76.72s at a modest 4,000 sessions /
+// 80,000 events versus 0.17s indexed.
+//
+// Returns the number of task_sessions rows the WHERE clause matched, so a
+// caller can log it for boot-time observability; not otherwise used for
+// correctness.
+func (r *Repository) BackfillSessionTokensCachedIn(ctx context.Context) (int64, error) {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE task_sessions
+		   SET tokens_cached_in = COALESCE(
+		       (SELECT SUM(e.tokens_cached_in) FROM office_cost_events e
+		         WHERE e.session_id = task_sessions.id), 0)
+		 WHERE EXISTS (SELECT 1 FROM office_cost_events e WHERE e.session_id = task_sessions.id)
+		    OR tokens_cached_in <> 0`)
+	if err != nil {
+		return 0, fmt.Errorf("backfill task_sessions.tokens_cached_in: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("backfill task_sessions.tokens_cached_in: rows affected: %w", err)
+	}
+	return affected, nil
 }
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
@@ -155,6 +234,10 @@ func (r *Repository) runMigrations() error {
 	// task_sessions rebuilds above so it repairs legacy DBs whose schema can no
 	// longer trigger a rebuild (see migrateSessionsAddCostColumns).
 	r.migrateSessionsAddCostColumns()
+	// BackfillSessionTokensCachedIn is deliberately NOT called here - see its
+	// doc comment. It runs from internal/backendapp/storage.go, after both
+	// this repository and the office repository (which owns office_cost_events)
+	// have finished initializing.
 
 	// Office task extensions - net-new columns on existing main tables.
 	// Idempotent ALTERs; main upgrades pick them up at first boot.
@@ -192,9 +275,9 @@ func (r *Repository) runMigrations() error {
 
 	// Office session cost tracking extensions are declared in
 	// initSessionWorktreeSchema's CREATE TABLE (cost_subcents, tokens_in,
-	// tokens_out). task_sessions.agent_profile_id existed on main as
-	// NOT NULL; migrateSessionsRemoveAgentExecutionID rebuilds the table
-	// with the column nullable and the cost columns added.
+	// tokens_cached_in, tokens_out). task_sessions.agent_profile_id existed
+	// on main as NOT NULL; migrateSessionsRemoveAgentExecutionID rebuilds the
+	// table with the column nullable and the cost columns added.
 
 	r.migrate.Apply("workflows.is_system", `ALTER TABLE workflows ADD COLUMN is_system INTEGER DEFAULT 0`)
 
@@ -632,6 +715,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			task_environment_id TEXT DEFAULT '',
 			cost_subcents INTEGER NOT NULL DEFAULT 0,
 			tokens_in INTEGER NOT NULL DEFAULT 0,
+			tokens_cached_in BIGINT NOT NULL DEFAULT 0,
 			tokens_out INTEGER NOT NULL DEFAULT 0,
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
@@ -642,7 +726,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, is_passthrough, review_status,
 			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, ''),
-			0, 0, 0
+			0, 0, 0, 0
 		FROM task_sessions`,
 		`DROP TABLE task_sessions`,
 		`ALTER TABLE task_sessions_new RENAME TO task_sessions`,

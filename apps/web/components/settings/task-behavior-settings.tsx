@@ -7,7 +7,6 @@ import { TaskActionsSettings } from "@/components/settings/general-settings";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { MessageQueueSettings } from "@/components/settings/system/message-queue-settings";
-import { VoiceModeSettings } from "@/components/settings/voice-mode-settings";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 /** Task behavior: the former Task Actions and Message Queue pages as one page. */
@@ -27,7 +26,6 @@ export function TaskBehaviorSettings() {
         </SettingsSection>
       </SettingsTarget>
       <Separator />
-      <VoiceModeSettings />
     </div>
   );
 }

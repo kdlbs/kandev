@@ -126,7 +126,6 @@ type UserSettings struct {
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
 	AppStatusBarOrder                 AppStatusBarOrder                 `json:"app_status_bar_order"`
-	VoiceMode                         VoiceModeSettings                 `json:"voice_mode"`
 	KanbanHiddenStepIDs               map[string][]string               `json:"kanban_hidden_step_ids"`
 	Revision                          int64                             `json:"revision"`
 	CreatedAt                         time.Time                         `json:"created_at"`
@@ -141,31 +140,6 @@ type SystemMetricsDisplaySettings struct {
 type AppStatusBarOrder struct {
 	LeftItemIDs  []string `json:"left_item_ids"`
 	RightItemIDs []string `json:"right_item_ids"`
-}
-
-// VoiceModeSettings is the per-user configuration surface for the chat
-// voice-input feature. Stored as a nested JSON object inside the `users.settings`
-// blob — adding fields here does not require a schema migration.
-type VoiceModeSettings struct {
-	// Enabled gates the whole feature. When false, the mic button is hidden
-	// entirely and no voice-related hooks run on the chat input. Defaults to
-	// true for new users; pre-existing user rows that have no `enabled` field
-	// in their stored JSON are also treated as enabled (see store layer).
-	Enabled bool `json:"enabled"`
-	// Engine is the user's preferred transcription engine.
-	// "auto" | "webSpeech" | "whisperWeb" | "whisperServer". Default "auto".
-	Engine string `json:"engine"`
-	// Language is the BCP-47 tag or "auto" to use the browser's language.
-	// Examples: "en-US", "pt-PT", "ja-JP". Default "auto".
-	Language string `json:"language"`
-	// Mode controls how the mic button is activated: "toggle" (click to start/stop)
-	// or "hold" (push-to-talk). Default "toggle".
-	Mode string `json:"mode"`
-	// AutoSend submits the chat message immediately after the transcript is inserted.
-	AutoSend bool `json:"auto_send"`
-	// WhisperWebModel selects the in-browser Whisper model when engine = whisperWeb.
-	// "tiny" | "base" | "small". Default "base".
-	WhisperWebModel string `json:"whisper_web_model"`
 }
 
 // SavedLayout represents a user-saved dockview layout configuration.

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: shipped
 created: 2026-08-11
 owner: kandev
 ---
@@ -52,7 +52,8 @@ Decision: [ADR-2026-08-11-composer-access-authenticated-webhooks](../../decision
 - Disabling, uninstalling, or reloading a plugin aborts its in-flight webhook requests, unregisters
   its composer actions, and leaves native drafts intact.
 - The current core Voice Mode stays present until a separately delivered Voice plugin proves parity
-  on all listed surfaces. Removing core Voice Mode is not part of these host prerequisites.
+  on all listed surfaces. Removing core Voice Mode is not part of these host prerequisites. That
+  removal has since happened; see [Voice Mode leaves core](voice-extraction.md).
 
 ## API Surface
 

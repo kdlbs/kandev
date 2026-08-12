@@ -279,6 +279,13 @@ func (r *Repository) createCostTables() error {
 	CREATE INDEX IF NOT EXISTS idx_office_cost_agent ON office_cost_events(agent_profile_id);
 	CREATE INDEX IF NOT EXISTS idx_office_cost_occurred ON office_cost_events(occurred_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_office_cost_task ON office_cost_events(task_id);
+	-- Indexes the join column internal/task/repository/sqlite's
+	-- BackfillSessionTokensCachedIn correlates task_sessions against. Lives
+	-- here (not in the task repository) because it indexes a table this
+	-- repository owns. Without it that correlated subquery falls back to a
+	-- full table scan per task_sessions row - measured at 76.72s at a modest
+	-- 4,000 sessions / 80,000 events versus 0.17s indexed.
+	CREATE INDEX IF NOT EXISTS idx_office_cost_events_session_id ON office_cost_events(session_id);
 
 	CREATE TABLE IF NOT EXISTS office_budget_policies (
 		id TEXT PRIMARY KEY,
