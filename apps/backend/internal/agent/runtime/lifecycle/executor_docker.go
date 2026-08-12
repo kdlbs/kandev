@@ -320,17 +320,18 @@ func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result
 		metadata["worktree_branch"] = getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
 	}
 	return &ExecutorInstance{
-		InstanceID:     req.InstanceID,
-		TaskID:         req.TaskID,
-		SessionID:      req.SessionID,
-		RuntimeName:    r.Name(),
-		Client:         result.Client,
-		ContainerID:    result.ContainerID,
-		ContainerIP:    containerIP,
-		WorkspacePath:  dockerWorkspacePath,
-		Metadata:       metadata,
-		AuthToken:      result.AuthToken,
-		BootstrapNonce: result.BootstrapNonce,
+		InstanceID:       req.InstanceID,
+		TaskID:           req.TaskID,
+		SessionID:        req.SessionID,
+		RuntimeName:      r.Name(),
+		Client:           result.Client,
+		ContainerID:      result.ContainerID,
+		ContainerIP:      containerIP,
+		WorkspacePath:    dockerWorkspacePath,
+		Metadata:         metadata,
+		AuthToken:        result.AuthToken,
+		ControlAuthToken: result.AuthToken,
+		BootstrapNonce:   result.BootstrapNonce,
 	}
 }
 
@@ -382,7 +383,8 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 			MetadataKeyContainerID:   info.ID,
 			"reuse_existing_process": conn.reusingProcess,
 		},
-		AuthToken: refreshedAuthToken,
+		AuthToken:        refreshedAuthToken,
+		ControlAuthToken: conn.authToken,
 	}, nil
 }
 
@@ -895,8 +897,12 @@ func (r *DockerExecutor) deleteTaskHostInstance(ctx context.Context, instance *E
 	controlHost, controlPort := resolveDockerEndpoint(
 		ctx, dockerClient, instance.ContainerID, AgentCtlPort, instance.ContainerIP, r.logger,
 	)
+	authToken := instance.ControlAuthToken
+	if authToken == "" {
+		authToken = instance.AuthToken
+	}
 	control := agentctl.NewControlClient(controlHost, controlPort, r.logger,
-		agentctl.WithControlAuthToken(instance.AuthToken))
+		agentctl.WithControlAuthToken(authToken))
 	return deleteDockerTaskHostInstance(ctx, control, instance.InstanceID)
 }
 

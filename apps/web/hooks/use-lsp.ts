@@ -144,9 +144,10 @@ export function useLsp(
       return;
     }
     if (attachmentStatus.state !== "error") return;
-    const delay = ATTACHMENT_RETRY_DELAYS_MS[retryIndex.current];
+    const delayIndex = Math.min(retryIndex.current, ATTACHMENT_RETRY_DELAYS_MS.length - 1);
+    const delay = ATTACHMENT_RETRY_DELAYS_MS[delayIndex];
     if (delay === undefined) return;
-    retryIndex.current++;
+    retryIndex.current = Math.min(delayIndex + 1, ATTACHMENT_RETRY_DELAYS_MS.length - 1);
     const timer = window.setTimeout(() => setAttachmentAttempt((attempt) => attempt + 1), delay);
     return () => window.clearTimeout(timer);
   }, [taskId, sessionId, lspLanguage, snapshot?.phase, attachmentStatus.state, attachmentAttempt]);

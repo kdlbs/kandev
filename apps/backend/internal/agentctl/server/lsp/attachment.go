@@ -31,7 +31,10 @@ type Attachment struct {
 
 	outMu    sync.Mutex
 	outgoing chan []byte
+	queued   chan []byte
 	failed   bool
+	pumpOnce sync.Once
+	pumpDone chan struct{}
 
 	failOnce  sync.Once
 	closeOnce sync.Once
@@ -46,7 +49,44 @@ func newAttachment(id uint64, owner *hub) *Attachment {
 		cancel:   cancel,
 		done:     make(chan struct{}),
 		pending:  make(map[string]*attachmentRequest),
-		outgoing: make(chan []byte, attachmentQueueSize),
+		outgoing: make(chan []byte),
+		queued:   make(chan []byte, attachmentQueueSize),
+		pumpDone: make(chan struct{}),
+	}
+}
+
+func (a *Attachment) start(replay [][]byte) {
+	a.pumpOnce.Do(func() {
+		go a.pump(replay)
+	})
+}
+
+func (a *Attachment) pump(replay [][]byte) {
+	defer close(a.pumpDone)
+	defer close(a.outgoing)
+	for _, message := range replay {
+		if !a.deliver(message) {
+			return
+		}
+	}
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case message := <-a.queued:
+			if !a.deliver(message) {
+				return
+			}
+		}
+	}
+}
+
+func (a *Attachment) deliver(message []byte) bool {
+	select {
+	case <-a.ctx.Done():
+		return false
+	case a.outgoing <- message:
+		return true
 	}
 }
 
@@ -112,9 +152,7 @@ func (a *Attachment) close(detach bool) {
 		if detach {
 			a.hub.detach(a.id)
 		}
-		a.outMu.Lock()
-		close(a.outgoing)
-		a.outMu.Unlock()
+		<-a.pumpDone
 	})
 }
 
@@ -124,6 +162,9 @@ func (a *Attachment) fail() {
 		a.failed = true
 		a.outMu.Unlock()
 		a.cancel()
+		if a.id != 0 {
+			a.hub.detach(a.id)
+		}
 		close(a.done)
 	})
 }
@@ -240,7 +281,7 @@ func (a *Attachment) enqueue(message []byte) bool {
 	}
 	copy := append([]byte(nil), message...)
 	select {
-	case a.outgoing <- copy:
+	case a.queued <- copy:
 		return true
 	default:
 		return false

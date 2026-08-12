@@ -207,6 +207,77 @@ func TestHubHandshakeDiagnosticReplayAndNotificationFanout(t *testing.T) {
 	}
 }
 
+func TestHubAttachmentReplaysEveryCachedDiagnosticBeyondLiveQueueCapacity(t *testing.T) {
+	upstream := &recordingFeatureUpstream{}
+	hub, snapshot := newHubForTest(upstream)
+	snapshot.Diagnostics = make([]json.RawMessage, attachmentQueueSize+44)
+	for index := range snapshot.Diagnostics {
+		snapshot.Diagnostics[index] = json.RawMessage(fmt.Sprintf(
+			`{"uri":"file:///workspace/File%d.kt","diagnostics":[{"message":"diagnostic-%d"}]}`,
+			index,
+			index,
+		))
+	}
+	t.Cleanup(hub.Close)
+	attachment := hub.Attach(snapshot)
+	t.Cleanup(attachment.Close)
+
+	drainAttached(t, attachment)
+	for index := range snapshot.Diagnostics {
+		message := readAttachmentMessage(t, attachment)
+		if !rawContains(message, fmt.Sprintf(`diagnostic-%d`, index)) {
+			t.Fatalf("diagnostic replay %d = %s", index, message)
+		}
+	}
+
+	hub.Broadcast("window/logMessage", json.RawMessage(`{"type":3,"message":"live"}`))
+	if message := readAttachmentMessage(t, attachment); !rawContains(message, `"message":"live"`) {
+		t.Fatalf("live notification after replay = %s", message)
+	}
+}
+
+func TestHubQueueOverflowClosesAttachmentMessageStream(t *testing.T) {
+	upstream := &recordingFeatureUpstream{}
+	hub, snapshot := newHubForTest(upstream)
+	t.Cleanup(hub.Close)
+	attachment := hub.Attach(snapshot)
+	drainAttached(t, attachment)
+	t.Cleanup(attachment.Close)
+
+overflow:
+	for index := 0; index < attachmentQueueSize*2; index++ {
+		hub.Broadcast("window/logMessage", json.RawMessage(fmt.Sprintf(`{"message":"%d"}`, index)))
+		select {
+		case <-attachment.Done():
+			break overflow
+		default:
+		}
+	}
+	select {
+	case <-attachment.Done():
+	case <-time.After(time.Second):
+		t.Fatal("attachment did not fail after its live queue overflowed")
+	}
+	hub.mu.RLock()
+	_, stillAttached := hub.attachments[attachment.id]
+	hub.mu.RUnlock()
+	if stillAttached {
+		t.Fatal("failed attachment remained registered for live fanout")
+	}
+
+	streamClosed := make(chan struct{})
+	go func() {
+		for range attachment.Messages() {
+		}
+		close(streamClosed)
+	}()
+	select {
+	case <-streamClosed:
+	case <-time.After(time.Second):
+		t.Fatal("failed attachment left its message stream open")
+	}
+}
+
 func TestHubAttachPublishesHandshakeBeforeConcurrentBroadcast(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
 	hub, snapshot := newHubForTest(upstream)

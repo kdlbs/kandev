@@ -407,6 +407,11 @@ type ExecutorInstance struct {
 	// Empty for standalone (launcher-owned token wired via cfg.Agent.StandaloneAuthToken)
 	// and Sprites (no agentctl auth).
 	AuthToken string
+	// ControlAuthToken is the effective Docker container-wide credential used
+	// for runtime cleanup. Unlike AuthToken, it is populated even when a
+	// reconnect reused an unchanged token and no durable secret rewrite is
+	// needed.
+	ControlAuthToken string
 
 	// BootstrapNonce is the one-time nonce injected into Docker container env.
 	// It is persisted so a restarted container can complete a fresh handshake

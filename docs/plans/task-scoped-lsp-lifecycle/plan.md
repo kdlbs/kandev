@@ -505,6 +505,13 @@ Completed 2026-08-05.
   and SQLite suites (66.548s and 25.059s), changed-code Go lint with zero issues, 22 focused frontend
   tests, web typecheck, all 62 public-doc validator tests, validation of all 41 published pages, and
   the three-dot diff whitespace check.
+- A fresh separate-workspace GPT-5.6 Sol audit found four attachment and rollback blockers despite
+  green CI: cached diagnostic replay overflowed the live queue, live queue overflow did not close
+  the transport, same-generation browser retries exhausted permanently, and unchanged Docker
+  credentials were unavailable to failed task-host rollback. Replay now has a lossless pre-live
+  stage, overflow fails and detaches the attachment while closing its stream, browser recovery
+  continues at the capped backoff, and Docker instances retain a non-persisted effective cleanup
+  credential. Each defect has a red-first regression, including an auth-enforcing rollback server.
 
 ---
 

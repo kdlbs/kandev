@@ -182,6 +182,15 @@ Completed 2026-08-12.
   and SQLite suites (66.548s and 25.059s), changed-code Go lint with zero issues, 22 focused frontend
   tests, web typecheck, all 62 public-doc validator tests, validation of all 41 published pages, and
   the three-dot diff whitespace check.
+- A fresh separate-workspace GPT-5.6 Sol audit found four attachment and rollback blockers despite
+  green CI. Red-first tests reproduced loss after 255 cached diagnostic URIs, an overflowed but open
+  attachment transport, permanent same-generation browser retry exhaustion, and unauthenticated
+  Docker task-host rollback when the container token had not rotated. Replay now bypasses the
+  bounded live queue, overflow detaches and closes the message stream, browser retries continue at
+  the capped five-second backoff, and Docker retains the effective control credential separately
+  from the optional durable-token update. The two attachment regressions passed 10 race-enabled
+  repetitions; full agentctl LSP/API and lifecycle race suites passed; 29 focused frontend tests,
+  strict targeted ESLint, and web typecheck passed.
 
 ## Files
 

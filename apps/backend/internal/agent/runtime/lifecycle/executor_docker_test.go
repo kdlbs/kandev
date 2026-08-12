@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -18,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -250,6 +252,74 @@ func TestRollbackLaunchExecutionForceKillsAndRemovesUnregisteredDockerContainer(
 	got := []string{<-requests, <-requests}
 	requireDockerRequest(t, got, http.MethodPost, "/containers/failed-container/kill")
 	requireDockerRequest(t, got, http.MethodDelete, "/containers/failed-container")
+}
+
+func TestDockerTaskHostRollbackUsesEffectiveReconnectCredential(t *testing.T) {
+	const authToken = "unchanged-container-token"
+	authenticatedDelete := make(chan struct{}, 1)
+	controlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+authToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		authenticatedDelete <- struct{}{}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(controlServer.Close)
+	controlHost, controlPortString, err := net.SplitHostPort(strings.TrimPrefix(controlServer.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/container-1/json") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w,
+				`{"Id":"container-1","NetworkSettings":{"Ports":{"%d/tcp":[{"HostIp":%q,"HostPort":%q}]}}}`,
+				AgentCtlPort,
+				controlHost,
+				controlPortString,
+			)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(dockerDaemon.Close)
+	dockerExec := NewDockerExecutor(config.DockerConfig{
+		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+	}, "", newTestDockerLogger())
+	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+
+	manager := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger()}
+	execution := &AgentExecution{
+		ID: "task-host-1", TaskID: "task-1", TaskEnvironmentID: "env-1",
+		RuntimeName: agentruntime.RuntimeDocker, IsTaskHost: true,
+	}
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+	runtimeInstance := &ExecutorInstance{
+		InstanceID: "task-host-1", ContainerID: "container-1", ContainerIP: "127.0.0.1",
+		Metadata: map[string]interface{}{"task_host": true}, ControlAuthToken: authToken,
+	}
+	if err := manager.rollbackTaskHostExecution(dockerExec, runtimeInstance, execution, "readiness failed"); err != nil {
+		t.Fatalf("rollbackTaskHostExecution: %v", err)
+	}
+	select {
+	case <-authenticatedDelete:
+	default:
+		t.Fatal("rollback did not authenticate task-host instance deletion")
+	}
+	if _, exists := manager.executionStore.Get(execution.ID); exists {
+		t.Fatal("successful rollback retained task-host execution")
+	}
 }
 
 func TestDockerStopInstanceStopsAndRemovesContainerOnTaskArchive(t *testing.T) {

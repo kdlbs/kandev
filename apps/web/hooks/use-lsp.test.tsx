@@ -186,7 +186,9 @@ describe("task-scoped useLsp", () => {
     const view = renderHook(() => useLspStatus(SESSION_ID, LANGUAGE));
     expect(view.result.current.status).toEqual({ state: "error", reason: "Gradle import failed" });
   });
+});
 
+describe("task-scoped LSP attachment recovery", () => {
   it("reattaches after a transient browser connection loss without restarting the task server", () => {
     vi.useFakeTimers();
     current = snapshot("ready");
@@ -208,5 +210,25 @@ describe("task-scoped useLsp", () => {
 
     view.unmount();
     expect(secondRelease).toHaveBeenCalledOnce();
+  });
+
+  it("keeps reattaching with capped backoff throughout a longer browser outage", () => {
+    vi.useFakeTimers();
+    current = snapshot("ready");
+    mocks.connect.mockImplementation(() => vi.fn());
+    const view = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
+    expect(mocks.connect).toHaveBeenCalledOnce();
+
+    mocks.getStatus.mockReturnValue({ state: "error", reason: "proxy unavailable" });
+    act(() => mocks.listeners.forEach((listener) => listener(`${TASK_ID}:${LANGUAGE}`)));
+
+    for (const [index, delay] of [1_000, 2_000, 5_000, 5_000].entries()) {
+      act(() => vi.advanceTimersByTime(delay));
+      expect(mocks.connect).toHaveBeenCalledTimes(index + 2);
+    }
+
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.restart).not.toHaveBeenCalled();
+    view.unmount();
   });
 });
