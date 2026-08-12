@@ -84,10 +84,11 @@ Completed 2026-08-12.
   `9c3e7a2d3`. Exact rebased-head verification repeated the full task-service race suite, the exact
   MCP CI regression 10 times, changed-code Go lint, 20 focused frontend tests plus ESLint/typecheck,
   and the 60-test/41-page public-doc validators; all passed.
-- A subsequent release-only main update rebased cleanly onto `2089e7c92`. Fresh exact-base
-  verification passed the full task-service race suite (96.469s), the exact MCP regression 10
-  times, 24 focused frontend tests, changed-code Go lint (zero issues), focused ESLint, web
-  typecheck, all 60 public-doc validator tests, and all 41 published pages.
+- Subsequent main updates rebased cleanly through release commit `2089e7c92` and unrelated Message
+  Queue UI commit `db4fc039a`. Fresh final-base verification passed the full task-service race suite
+  (122.663s), the exact MCP regression 10 times, 24 focused frontend tests, changed-code Go lint
+  (zero issues), focused ESLint, web typecheck, all 60 public-doc validator tests, and all 41
+  published pages.
 
 ## Files
 

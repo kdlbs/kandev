@@ -432,10 +432,11 @@ Completed 2026-08-05.
   rebased head repeated the full task-service race suite, exact MCP CI regression, changed-code Go
   lint, focused frontend tests/typecheck/lint, and public-doc validators successfully before its
   replacement review and CI run.
-- A release-only follow-up moved `origin/main` to `2089e7c92`; the branch rebased cleanly again.
-  On that exact base, the full task-service race suite, the exact MCP regression 10 times, 24
-  focused frontend tests, changed-code Go lint, focused ESLint, web typecheck, the 60-test
-  public-doc validator, and all 41 published pages passed before replacement review and CI.
+- Follow-up main updates moved through release commit `2089e7c92` and unrelated Message Queue UI
+  commit `db4fc039a`; the branch rebased cleanly each time. On the final exact base, the full
+  task-service race suite, the exact MCP regression 10 times, 24 focused frontend tests,
+  changed-code Go lint, focused ESLint, web typecheck, the 60-test public-doc validator, and all 41
+  published pages passed before replacement review and CI.
 
 ---
 
