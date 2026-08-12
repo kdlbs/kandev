@@ -483,7 +483,7 @@ Completed 2026-08-05.
   controls reset exhausted recovery; workspace refresh shares teardown admission; pre-ready task
   hosts stay private and recover by physical cleanup; and Docker auth state follows confirmed
   container lifetime. Every finding has a synchronized or real-repository regression.
-- The resulting 41-commit branch rebased cleanly onto `origin/main` at `ff9f0f48b`. Exact-base
+- The branch rebased cleanly onto `origin/main` at `2c6a9c287`. Exact-base
   verification passed the five affected backend packages under the race detector, changed-code Go
   lint with zero issues, 60 public-doc validator tests, validation of all 41 published pages, and
   the three-dot diff whitespace check.

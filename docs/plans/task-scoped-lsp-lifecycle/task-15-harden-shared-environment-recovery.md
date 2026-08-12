@@ -150,8 +150,8 @@ Completed 2026-08-12.
   `internal/agent/runtime/lifecycle`, `internal/task/service`, and
   `internal/task/repository/sqlite`. A broader run exposed and fixed command coalescing into an
   exclusive watch callback before all five packages passed again.
-- The 41-commit branch rebased without conflict onto `origin/main` at `ff9f0f48b`. On that exact
-  base, the five-package race suite passed (task service 103.629s), changed-code Go lint reported
+- The branch rebased without conflict onto `origin/main` at `2c6a9c287`. On that exact
+  base, the five-package race suite passed (task service 138.920s), changed-code Go lint reported
   zero issues, all 60 public-doc validator tests passed, all 41 published pages validated, and
   `git diff --check origin/main...HEAD` passed.
 
