@@ -21,6 +21,7 @@ type worktreeCutover struct {
 	sessionEnvIDs             map[string]string
 	sessionWorktreeSuperseded map[string]bool
 	demotedWorktrees          map[string]bool
+	demotedFlatEnvironments   map[string]bool
 	demotions                 []string
 	authoritativeWorktreeIDs  map[string]bool
 	envRepos                  []legacyEnvRepo
@@ -263,6 +264,8 @@ type taskWorktreeTargets struct {
 type envRepoTarget struct {
 	key                      string
 	repositoryID, branchSlug string
+	canonical                bool
+	canonicalEnvironmentID   string
 	worktreeID               string
 	worktreePath             string
 	worktreeBranch           string
@@ -355,12 +358,32 @@ func (c *worktreeCutover) mergeFlatEnvironmentFields() {
 			continue
 		}
 		targets := c.targetsForTask(env.taskID)
+		if canonical := targets.canonicalOwnerForSlot(env.id, env.repositoryID, ""); canonical != nil && env.worktreeID != "" && env.worktreeID != canonical.worktreeID {
+			c.demoteFlatEnvironment(env, canonical)
+			continue
+		}
 		if err := targets.mergeFlatEnv(env); err != nil {
 			c.conflicts = append(c.conflicts, fmt.Sprintf("environment %s flat worktree fields: %v", env.id, err))
 			continue
 		}
 		c.recordAuthoritativeWorktree(env.taskID, env.worktreeID)
 	}
+}
+
+// demoteFlatEnvironment records deprecated flat metadata that lost the exact
+// empty-branch slot to a non-deleted canonical repository row. The migration
+// keeps the physical flat worktree untouched and logs it after commit.
+func (c *worktreeCutover) demoteFlatEnvironment(env *legacyEnv, winner *envRepoTarget) {
+	if c.demotedFlatEnvironments == nil {
+		c.demotedFlatEnvironments = make(map[string]bool)
+	}
+	if c.demotedFlatEnvironments[env.id] {
+		return
+	}
+	c.demotedFlatEnvironments[env.id] = true
+	c.demotions = append(c.demotions, fmt.Sprintf(
+		"environment %s flat worktree %s (repository %s, path %q, branch %q) superseded by canonical worktree %s",
+		env.id, env.worktreeID, env.repositoryID, env.worktreePath, env.worktreeBranch, winner.worktreeID))
 }
 
 // worktreeSlot is one normalized repository slot — a (repository, branch

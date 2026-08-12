@@ -125,6 +125,13 @@ branch slot, either a canonical repository row or the surviving flat
 environment row, remains the owner even when a terminal reference carries a
 different physical `worktree_id`.
 
+A non-deleted canonical repository row also takes precedence over deprecated
+flat fields for the same environment, repository, and empty branch slot. This
+rule applies when the two sources contain different physical `worktree_id`
+values. The upgrade records the flat worktree as historical evidence and logs
+its identity, path, and branch after the transaction commits. The upgrade does
+not remove its directory, Git registration, or branch.
+
 The task-owned model holds exactly one physical worktree per (repository,
 branch slug) slot, while the legacy per-session model let one task accumulate
 several for the same slot through handoffs, re-materialized workspaces, and
@@ -241,6 +248,10 @@ remain the authorization boundary for physical cleanup.
   cannot block migration solely because its path or branch metadata is stale,
   including when the session is resumable. The higher-precedence repository or
   flat environment metadata remains authoritative.
+- Deprecated flat fields cannot block migration when a non-deleted canonical
+  row owns the same environment, repository, and empty branch slot. The
+  canonical row remains authoritative, and the upgrade records the flat
+  worktree as historical evidence.
 - A session bound to another task's environment does not block migration and
   does not create a second owner for the shared worktree.
 - If migration fails after shadow tables are populated or after legacy DDL has
@@ -304,6 +315,10 @@ remain the authorization boundary for physical cleanup.
   row for the same physical worktree, **WHEN** the new binary starts, **THEN**
   the canonical repository path and branch are retained and the cutover
   completes.
+- **GIVEN** a non-deleted canonical repository row and deprecated flat fields
+  contain different worktree IDs for the same empty branch slot, **WHEN** the
+  new binary starts, **THEN** the canonical row remains the owner, the flat
+  worktree is logged as history, and the cutover completes.
 - **GIVEN** a resumable legacy session and a canonical task-owned repository row
   carry the same `worktree_id` but different path or branch metadata, **WHEN**
   the new binary starts, **THEN** the canonical metadata is retained and the

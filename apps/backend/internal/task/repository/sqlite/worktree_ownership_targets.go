@@ -58,12 +58,26 @@ func (t *taskWorktreeTargets) targetForWorktree(worktreeID string) *envRepoTarge
 // physical-worktree identity, which must agree everywhere).
 func (t *taskWorktreeTargets) mergeLegacyEnvRepo(row legacyEnvRepo) error {
 	target := t.rowForKey(row.repositoryID, row.branchSlug)
+	target.canonical = true
+	target.canonicalEnvironmentID = row.envID
 	if err := target.claimWorktree(row.worktreeID, row.worktreePath, row.worktreeBranch, row.position, row.errorMessage, row.createdAt, row.updatedAt, row.status); err != nil {
 		return err
 	}
 	target.mergedAt = row.mergedAt
 	target.deletedAt = row.deletedAt
 	return target.mergeCreation(row.createdAt, row.updatedAt)
+}
+
+// canonicalOwnerForSlot returns the active canonical owner for a repository
+// slot in the specified environment. A canonical row with no physical
+// worktree does not block flat data from filling that slot.
+func (t *taskWorktreeTargets) canonicalOwnerForSlot(environmentID, repositoryID, branchSlug string) *envRepoTarget {
+	target, ok := t.byKey[envRepoKey(repositoryID, branchSlug)]
+	if !ok || !target.canonical || target.canonicalEnvironmentID != environmentID || target.worktreeID == "" ||
+		target.status == worktreeRepoStatusDeleted || target.deletedAt != nil {
+		return nil
+	}
+	return target
 }
 
 // mergeFlatEnv merges the deprecated flat worktree columns of the surviving
@@ -357,7 +371,7 @@ func (c *worktreeCutover) legacyWorktreeInventory() map[string]bool {
 		inventory[worktreeInventoryKey(row.worktreeID, row.worktreePath, row.worktreeBranch)] = true
 	}
 	for _, env := range c.envs {
-		if env.worktreeID == "" || c.loserEnvIDs[env.id] || canonicalIDs[env.worktreeID] {
+		if env.worktreeID == "" || c.loserEnvIDs[env.id] || c.demotedFlatEnvironments[env.id] || canonicalIDs[env.worktreeID] {
 			continue
 		}
 		inventory[worktreeInventoryKey(env.worktreeID, env.worktreePath, env.worktreeBranch)] = true
