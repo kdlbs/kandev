@@ -96,7 +96,7 @@ func (c *Controller) inspectReconcileState(
 	if err != nil {
 		return nil, err
 	}
-	settings, err := c.loadSettings(ctx)
+	settings, err := c.loadSettings(ctx, state.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -200,9 +200,18 @@ func (c *Controller) adoptExistingRuntime(
 	if !runtimeHasProcess(runtime) {
 		return nil, false, nil
 	}
-	stored, err := c.adoptRuntime(ctx, state, *runtime)
+	stored, accepted, err := c.adoptRuntime(ctx, state, *runtime)
 	if err != nil {
 		return nil, false, err
+	}
+	if !accepted {
+		if !stateMayHaveProcess(*stored) {
+			return nil, false, nil
+		}
+		// The GET response can trail an already-persisted watch update. The
+		// durable high-water state still proves a live or ambiguous runtime, so
+		// treating this as absent would allocate a duplicate generation.
+		runtime = nil
 	}
 	if action == ActionStart {
 		stored, err = c.recordExplicitStartIntent(ctx, *stored, origin)
@@ -211,7 +220,7 @@ func (c *Controller) adoptExistingRuntime(
 		}
 	}
 	key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
-	c.capacity.Adopt(key, runtime.Generation)
+	c.capacity.Adopt(key, stored.Generation)
 	c.ensureWatch(key)
 	snapshot := c.languageSnapshot(*stored, settings, runtime)
 	return &snapshot, true, nil
@@ -274,8 +283,10 @@ func (c *Controller) reconcileLiveRuntime(
 		}
 		return &reconcileCandidate{state: state, settings: settings}, nil
 	}
-	if _, err := c.adoptRuntime(ctx, state, runtime); err != nil {
+	if _, accepted, err := c.adoptRuntime(ctx, state, runtime); err != nil {
 		return nil, err
+	} else if !accepted {
+		return nil, nil
 	}
 	key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
 	c.capacity.Adopt(key, runtime.Generation)
@@ -295,7 +306,7 @@ func (c *Controller) adoptRuntime(
 	ctx context.Context,
 	state TaskLanguageState,
 	runtime RuntimeSnapshot,
-) (*TaskLanguageState, error) {
+) (*TaskLanguageState, bool, error) {
 	return c.updateStateWithRuntime(ctx, state.TaskID, state.Language, &runtime, func(next *TaskLanguageState) {
 		if runtime.Generation < next.Generation {
 			return
@@ -548,4 +559,15 @@ func runtimeFailureProvesNoProcess(snapshot *RuntimeSnapshot, generation uint64)
 	default:
 		return false
 	}
+}
+
+func stateMayHaveProcess(state TaskLanguageState) bool {
+	if !phaseHasServer(state.Phase) {
+		return false
+	}
+	return !runtimeFailureProvesNoProcess(&RuntimeSnapshot{
+		Generation: state.Generation,
+		Phase:      state.Phase,
+		ErrorCode:  state.ErrorCode,
+	}, state.Generation)
 }

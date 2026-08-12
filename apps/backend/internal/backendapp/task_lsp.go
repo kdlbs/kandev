@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agentctllsp "github.com/kandev/kandev/internal/agentctl/server/lsp"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -16,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	"go.uber.org/zap"
 )
@@ -36,11 +38,28 @@ func (p taskLSPStatePublisher) PublishTaskLSP(ctx context.Context, snapshot task
 }
 
 type taskLSPSettingsProvider struct {
-	users *userservice.Service
+	users taskLSPUserSettingsReader
+	tasks taskLSPSettingsOwnerSource
 }
 
-func (p taskLSPSettingsProvider) TaskLSPSettings(ctx context.Context) (tasklsp.TaskSettings, error) {
-	settings, err := p.users.GetUserSettings(ctx)
+type taskLSPUserSettingsReader interface {
+	GetUserSettings(ctx context.Context) (*usermodels.UserSettings, error)
+}
+
+type taskLSPSettingsOwnerSource interface {
+	GetTask(ctx context.Context, taskID string) (*models.Task, error)
+	GetWorkspace(ctx context.Context, workspaceID string) (*models.Workspace, error)
+}
+
+func (p taskLSPSettingsProvider) TaskLSPSettings(
+	ctx context.Context,
+	taskID string,
+) (tasklsp.TaskSettings, error) {
+	settingsCtx, err := p.taskOwnerContext(ctx, taskID)
+	if err != nil {
+		return tasklsp.TaskSettings{}, err
+	}
+	settings, err := p.users.GetUserSettings(settingsCtx)
 	if err != nil {
 		return tasklsp.TaskSettings{}, err
 	}
@@ -60,6 +79,28 @@ func (p taskLSPSettingsProvider) TaskLSPSettings(ctx context.Context) (tasklsp.T
 		AutoInstallLanguages: append([]string(nil), settings.LspAutoInstallLanguages...),
 		ServerConfigs:        configs,
 	}, nil
+}
+
+func (p taskLSPSettingsProvider) taskOwnerContext(ctx context.Context, taskID string) (context.Context, error) {
+	task, err := p.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil || task.WorkspaceID == "" {
+		return nil, fmt.Errorf("resolve LSP settings owner for task %q: task workspace is unavailable", taskID)
+	}
+	workspace, err := p.tasks.GetWorkspace(ctx, task.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if workspace == nil {
+		return nil, fmt.Errorf("resolve LSP settings owner for task %q: workspace is unavailable", taskID)
+	}
+	identity := authn.Identity{Role: authn.RoleAdmin, Synthetic: true}
+	if workspace.OwnerID != "" {
+		identity = authn.Identity{UserID: workspace.OwnerID, Role: authn.RoleMember}
+	}
+	return authn.WithIdentity(ctx, identity), nil
 }
 
 type taskLSPRuntimeProvider struct {
@@ -150,7 +191,7 @@ func newTaskLSPController(
 		return nil
 	}
 	return tasklsp.NewController(tasklsp.ControllerConfig{
-		Tasks: tasks, Store: store, Settings: taskLSPSettingsProvider{users: users},
+		Tasks: tasks, Store: store, Settings: taskLSPSettingsProvider{users: users, tasks: tasks},
 		Runtimes: taskLSPRuntimeProvider{
 			taskHosts: taskHosts,
 			tasks:     taskLSPWorkspaceAdapter{tasks: tasks},

@@ -107,6 +107,7 @@ func TestTaskLSPPolicyEvidenceRoundTripAndRevisionCAS(t *testing.T) {
 	initializeStarted := now.Add(2 * time.Second)
 	readyAt := now.Add(3 * time.Second)
 	actionAt := now.Add(4 * time.Second)
+	runtimeStartedAt := now.Add(-time.Minute)
 	next := lsp.TaskLanguageState{
 		TaskID:                "task-lsp-roundtrip",
 		Language:              "kotlin",
@@ -117,6 +118,9 @@ func TestTaskLSPPolicyEvidenceRoundTripAndRevisionCAS(t *testing.T) {
 		DetectionTruncated:    true,
 		Phase:                 lsp.PhaseReady,
 		Generation:            7,
+		RuntimeIncarnation:    "task-host-a",
+		RuntimeStartedAt:      &runtimeStartedAt,
+		RuntimeRevision:       12,
 		ProcessStartedAt:      &processStarted,
 		InitializeStartedAt:   &initializeStarted,
 		ReadyAt:               &readyAt,
@@ -145,6 +149,8 @@ func TestTaskLSPPolicyEvidenceRoundTripAndRevisionCAS(t *testing.T) {
 	}
 	if loaded.Policy != next.Policy || loaded.DetectionState != next.DetectionState ||
 		loaded.Generation != 7 || loaded.LastRestartReason != next.LastRestartReason ||
+		loaded.RuntimeIncarnation != next.RuntimeIncarnation || loaded.RuntimeRevision != next.RuntimeRevision ||
+		loaded.RuntimeStartedAt == nil || !loaded.RuntimeStartedAt.Equal(runtimeStartedAt) ||
 		loaded.RestartRequiredReason != next.RestartRequiredReason || loaded.ErrorMessage != next.ErrorMessage {
 		t.Fatalf("round-tripped state = %#v", loaded)
 	}
@@ -188,6 +194,14 @@ func TestTaskLSPGenerationAllocationIsMonotonic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("allocate first generation: %v", err)
 	}
+	runtimeStartedAt := acceptedAt.Add(-time.Minute)
+	withRuntime := *first
+	withRuntime.RuntimeIncarnation = "task-host-before-restart"
+	withRuntime.RuntimeStartedAt = &runtimeStartedAt
+	withRuntime.RuntimeRevision = 9
+	if _, err := repo.CompareAndUpdateTaskLSPLanguage(ctx, withRuntime, first.Revision); err != nil {
+		t.Fatalf("seed runtime ordering evidence: %v", err)
+	}
 	second, err := repo.AllocateTaskLSPGeneration(
 		ctx,
 		"task-lsp-generation",
@@ -203,8 +217,11 @@ func TestTaskLSPGenerationAllocationIsMonotonic(t *testing.T) {
 	if first.Generation != 1 || first.Revision != 1 {
 		t.Fatalf("first allocation = generation %d revision %d", first.Generation, first.Revision)
 	}
-	if second.Generation != 2 || second.Revision != 2 || second.LastRestartReason != "crash_recovery" {
+	if second.Generation != 2 || second.Revision != 3 || second.LastRestartReason != "crash_recovery" {
 		t.Fatalf("second allocation = %#v", second)
+	}
+	if second.RuntimeIncarnation != "" || second.RuntimeStartedAt != nil || second.RuntimeRevision != 0 {
+		t.Fatalf("new generation retained runtime ordering evidence: %#v", second)
 	}
 	if second.Phase != lsp.PhaseStarting || second.LastInitiator != lsp.InitiatorAutomatic {
 		t.Fatalf("second allocation evidence = %#v", second)

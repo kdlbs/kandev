@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -48,6 +49,8 @@ type Manager struct {
 	snapshots   map[string]Snapshot
 	subscribers map[string]map[uint64]chan Snapshot
 	nextSubID   uint64
+	incarnation string
+	startedAt   time.Time
 	closed      bool
 	closeErr    error
 
@@ -68,6 +71,8 @@ func NewManager(cfg Config, processes ProcessManager, installerRegistry Installe
 		slots:       make(map[string]*languageSlot),
 		snapshots:   make(map[string]Snapshot),
 		subscribers: make(map[string]map[uint64]chan Snapshot),
+		incarnation: uuid.NewString(),
+		startedAt:   time.Now().UTC(),
 	}
 }
 
@@ -686,6 +691,8 @@ func (m *Manager) snapshotLocked(language string) Snapshot {
 	}
 	return Snapshot{
 		Language:         language,
+		Incarnation:      m.incarnation,
+		RuntimeStartedAt: m.startedAt,
 		Phase:            sharedlsp.PhaseOff,
 		Activity:         ActivityIdle,
 		Work:             []WorkItem{},
@@ -699,6 +706,8 @@ func (m *Manager) snapshotLocked(language string) Snapshot {
 func (m *Manager) publishForGeneration(language string, generation uint64, mutate func(*Snapshot)) Snapshot {
 	m.mu.Lock()
 	snapshot := m.snapshotLocked(language)
+	snapshot.Incarnation = m.incarnation
+	snapshot.RuntimeStartedAt = m.startedAt
 	if snapshot.Generation > generation {
 		m.mu.Unlock()
 		return cloneSnapshot(snapshot)

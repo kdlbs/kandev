@@ -414,6 +414,77 @@ func TestPolicyExplicitStartStopAndRestartUseOneTaskHostGeneration(t *testing.T)
 	}
 }
 
+func TestDelayedRestartErrorCannotRegressNewerWatchState(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+		LastInitiator: InitiatorUser,
+	})
+	host := newFakeLSPHost()
+	runtimeStartedAt := time.Unix(200, 0).UTC()
+	controller := newTestController(
+		&fakeControllerTasks{}, store, &fakeLSPSettings{}, &fakeLSPRuntimes{host: host},
+	)
+	host.restartBeforeReturn = func(request TaskHostStartRequest) {
+		if err := controller.observeRuntimeSnapshot(context.Background(), TaskLanguageKey{
+			TaskID: "task-1", Language: request.Language,
+		}, RuntimeSnapshot{
+			Language: request.Language, Generation: request.Generation, Phase: PhaseReady,
+			Revision: 2, Incarnation: "task-host-new", RuntimeStartedAt: runtimeStartedAt,
+		}); err != nil {
+			t.Errorf("observe newer watch state: %v", err)
+		}
+	}
+	host.restartResponse = &RuntimeSnapshot{
+		Phase: PhaseError, ErrorCode: errorCodeProcessStartFailed, Revision: 1,
+		Incarnation: "task-host-new", RuntimeStartedAt: runtimeStartedAt,
+	}
+	host.restartErr = errors.New("delayed restart failure")
+
+	restarted, err := controller.Restart(context.Background(), "task-1", "go", Origin{
+		Initiator: InitiatorUser, Reason: "user_control",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restarted.Phase != PhaseReady || restarted.Generation != 2 || restarted.RuntimeRevision != 2 {
+		t.Fatalf("delayed restart response regressed newer watch state: %#v", restarted)
+	}
+	if host.restartCalls != 1 || controller.capacity.Active() != 1 {
+		t.Fatalf("restart calls=%d active=%d", host.restartCalls, controller.capacity.Active())
+	}
+}
+
+func TestStartDoesNotDuplicateRuntimeWhenSnapshotTrailsWatch(t *testing.T) {
+	store := newMemoryLSPStore()
+	runtimeStartedAt := time.Unix(200, 0).UTC()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+		RuntimeIncarnation: "task-host", RuntimeStartedAt: &runtimeStartedAt, RuntimeRevision: 2,
+		LastInitiator: InitiatorAutomatic,
+	})
+	host := newFakeLSPHost()
+	host.snapshots["go"] = RuntimeSnapshot{
+		Language: "go", Generation: 1, Phase: PhaseProcessStarted,
+		Revision: 1, Incarnation: "task-host", RuntimeStartedAt: runtimeStartedAt,
+	}
+	controller := newTestController(
+		&fakeControllerTasks{}, store, &fakeLSPSettings{}, &fakeLSPRuntimes{host: host},
+	)
+
+	started, err := controller.Start(context.Background(), "task-1", "go", Origin{
+		Initiator: InitiatorUser, Reason: "user_control",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.Phase != PhaseReady || started.Generation != 1 || host.startCalls != 0 {
+		t.Fatalf("stale reconnect snapshot launched a duplicate: snapshot=%#v starts=%d", started, host.startCalls)
+	}
+}
+
 func newTestController(
 	tasks *fakeControllerTasks,
 	store *memoryLSPStore,
@@ -526,7 +597,7 @@ func (p *recordingLSPPublisher) all() []LanguageSnapshot {
 	return append([]LanguageSnapshot(nil), p.snapshots...)
 }
 
-func (f *fakeLSPSettings) TaskLSPSettings(context.Context) (TaskSettings, error) {
+func (f *fakeLSPSettings) TaskLSPSettings(context.Context, string) (TaskSettings, error) {
 	return f.settings, nil
 }
 
@@ -594,28 +665,31 @@ func (f *fakeLSPRuntimes) DiscoverTaskLanguages(context.Context, string) (*Disco
 }
 
 type fakeLSPHost struct {
-	mu                 sync.Mutex
-	startCalls         int
-	restartCalls       int
-	stopCalls          int
-	configurationCalls int
-	lastStart          TaskHostStartRequest
-	lastStop           TaskHostStopRequest
-	lastConfiguration  TaskHostConfigurationRequest
-	snapshots          map[string]RuntimeSnapshot
-	startEntered       chan struct{}
-	startRelease       chan struct{}
-	startErr           error
-	startErrorSnapshot *RuntimeSnapshot
-	stopErr            error
-	discovery          *DiscoveryResult
-	discoveryErr       error
-	discoveries        int
-	workspaceResult    *WorkspaceUpdateResult
-	workspaceErr       error
-	workspaceRefreshes int
-	snapshotErr        error
-	watchErr           error
+	mu                  sync.Mutex
+	startCalls          int
+	restartCalls        int
+	stopCalls           int
+	configurationCalls  int
+	lastStart           TaskHostStartRequest
+	lastStop            TaskHostStopRequest
+	lastConfiguration   TaskHostConfigurationRequest
+	snapshots           map[string]RuntimeSnapshot
+	startEntered        chan struct{}
+	startRelease        chan struct{}
+	startErr            error
+	startErrorSnapshot  *RuntimeSnapshot
+	restartBeforeReturn func(TaskHostStartRequest)
+	restartResponse     *RuntimeSnapshot
+	restartErr          error
+	stopErr             error
+	discovery           *DiscoveryResult
+	discoveryErr        error
+	discoveries         int
+	workspaceResult     *WorkspaceUpdateResult
+	workspaceErr        error
+	workspaceRefreshes  int
+	snapshotErr         error
+	watchErr            error
 }
 
 func (f *fakeLSPHost) RefreshTaskLSPWorkspace(context.Context) (*WorkspaceUpdateResult, error) {
@@ -690,7 +764,22 @@ func (f *fakeLSPHost) RestartTaskLSP(_ context.Context, request TaskHostStartReq
 	f.mu.Lock()
 	f.restartCalls++
 	f.lastStart = request
+	beforeReturn := f.restartBeforeReturn
+	response := f.restartResponse
+	restartErr := f.restartErr
 	f.mu.Unlock()
+	if beforeReturn != nil {
+		beforeReturn(request)
+	}
+	if response != nil {
+		snapshot := *response
+		snapshot.Language = request.Language
+		snapshot.Generation = request.Generation
+		return &snapshot, restartErr
+	}
+	if restartErr != nil {
+		return nil, restartErr
+	}
 	return f.setReady(request.Language, request.Generation), nil
 }
 

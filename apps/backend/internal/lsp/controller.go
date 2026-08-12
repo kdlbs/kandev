@@ -48,7 +48,7 @@ type TaskService interface {
 }
 
 type SettingsProvider interface {
-	TaskLSPSettings(ctx context.Context) (TaskSettings, error)
+	TaskLSPSettings(ctx context.Context, taskID string) (TaskSettings, error)
 }
 
 type TaskHost interface {
@@ -140,7 +140,7 @@ type Controller struct {
 	watches          map[TaskLanguageKey]*taskLanguageWatch
 	recoveries       map[TaskLanguageKey]*recoveryState
 	settingsApplyMu  sync.Mutex
-	appliedSettings  *TaskSettings
+	appliedSettings  map[string]TaskSettings
 	settingsSignal   chan struct{}
 	discoveryMu      sync.Mutex
 	discoveries      map[string]*discoveryCall
@@ -162,6 +162,7 @@ func NewController(config ControllerConfig) *Controller {
 		scheduler: config.Scheduler, publisher: config.Publisher,
 		watches:          make(map[TaskLanguageKey]*taskLanguageWatch),
 		recoveries:       make(map[TaskLanguageKey]*recoveryState),
+		appliedSettings:  make(map[string]TaskSettings),
 		settingsSignal:   make(chan struct{}, 1),
 		discoveries:      make(map[string]*discoveryCall),
 		discoveryRetries: make(map[string]*discoveryRetryState),
@@ -185,7 +186,7 @@ func (c *Controller) Snapshot(ctx context.Context, taskID string) (*TaskSnapshot
 		// represented on the language rows so the status surface remains usable.
 		_ = c.ReconcileTask(ctx, taskID)
 	}
-	settings, err := c.loadSettings(ctx)
+	settings, err := c.loadSettings(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +391,7 @@ func (c *Controller) setPolicy(
 	if err != nil {
 		return nil, err
 	}
-	settings, err := c.loadSettings(ctx)
+	settings, err := c.loadSettings(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +421,7 @@ func (c *Controller) start(
 	if err != nil {
 		return nil, err
 	}
-	settings, err := c.loadSettings(ctx)
+	settings, err := c.loadSettings(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -582,58 +583,6 @@ func (c *Controller) startAllocatedWithEnvironment(
 	return c.launchReserved(ctx, state, settings, environment, action)
 }
 
-func (c *Controller) launchReserved(
-	ctx context.Context,
-	state TaskLanguageState,
-	settings TaskSettings,
-	environment *taskmodels.TaskEnvironment,
-	action Action,
-) (*LanguageSnapshot, error) {
-	key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
-	host, err := c.runtimes.EnsureTaskHost(ctx, environment.ID)
-	if err != nil {
-		c.releaseCapacity(ctx, key, state.Generation)
-		snapshot, transitionErr := c.transition(ctx, state, settings, PhaseError, "task_host_unavailable", err.Error())
-		c.scheduleDesiredRecovery(key, snapshot)
-		return snapshot, transitionErr
-	}
-	request := TaskHostStartRequest{
-		Language: state.Language, Generation: state.Generation,
-		AutoInstall: contains(settings.AutoInstallLanguages, state.Language) &&
-			installer.SupportsAutoInstall(state.Language),
-		Configuration: append(json.RawMessage(nil), settings.ServerConfigs[state.Language]...),
-	}
-	var runtimeSnapshot *RuntimeSnapshot
-	if action == ActionRestart {
-		runtimeSnapshot, err = host.RestartTaskLSP(ctx, request)
-	} else {
-		runtimeSnapshot, err = host.StartTaskLSP(ctx, request)
-	}
-	if err != nil {
-		// Transport failures remain ambiguous unless the task host returned
-		// generation-scoped evidence that no process was created.
-		if runtimeFailureProvesNoProcess(runtimeSnapshot, state.Generation) {
-			c.releaseCapacity(ctx, key, state.Generation)
-		}
-		if runtimeSnapshot != nil {
-			persisted, persistErr := c.persistRuntime(ctx, state, *runtimeSnapshot)
-			if persistErr == nil {
-				state = *persisted
-			}
-		}
-		snapshot, transitionErr := c.transition(ctx, state, settings, PhaseError, "task_host_control_failed", err.Error())
-		c.scheduleDesiredRecovery(key, snapshot)
-		return snapshot, transitionErr
-	}
-	stored, err := c.persistRuntime(ctx, state, *runtimeSnapshot)
-	if err != nil {
-		return nil, err
-	}
-	c.ensureWatch(key)
-	snapshot := c.languageSnapshot(*stored, settings, runtimeSnapshot)
-	return &snapshot, nil
-}
-
 func (c *Controller) transition(
 	ctx context.Context,
 	state TaskLanguageState,
@@ -658,9 +607,9 @@ func (c *Controller) persistRuntime(
 	ctx context.Context,
 	state TaskLanguageState,
 	runtime RuntimeSnapshot,
-) (*TaskLanguageState, error) {
-	if runtime.Generation != state.Generation {
-		return nil, fmt.Errorf("task-host generation %d does not match controller generation %d", runtime.Generation, state.Generation)
+) (*TaskLanguageState, bool, error) {
+	if runtime.Generation > state.Generation {
+		return nil, false, fmt.Errorf("task-host generation %d does not match controller generation %d", runtime.Generation, state.Generation)
 	}
 	return c.updateStateWithRuntime(ctx, state.TaskID, state.Language, &runtime, func(next *TaskLanguageState) {
 		if next.Generation != runtime.Generation {
@@ -681,7 +630,8 @@ func (c *Controller) updateState(
 	taskID, language string,
 	mutate func(*TaskLanguageState),
 ) (*TaskLanguageState, error) {
-	return c.updateStateWithRuntime(ctx, taskID, language, nil, mutate)
+	state, _, err := c.updateStateWithRuntime(ctx, taskID, language, nil, mutate)
+	return state, err
 }
 
 func (c *Controller) updateStateWithRuntime(
@@ -689,14 +639,21 @@ func (c *Controller) updateStateWithRuntime(
 	taskID, language string,
 	runtime *RuntimeSnapshot,
 	mutate func(*TaskLanguageState),
-) (*TaskLanguageState, error) {
+) (*TaskLanguageState, bool, error) {
 	for range 5 {
 		state, _, err := c.store.GetTaskLSPLanguage(ctx, taskID, language)
 		if err != nil {
-			return nil, err
+			return nil, false, err
+		}
+		if runtime != nil && staleRuntimeObservation(*state, *runtime) {
+			return state, false, nil
 		}
 		expected := state.Revision
+		previousGeneration := state.Generation
 		mutate(state)
+		if runtime != nil {
+			recordRuntimeObservation(state, previousGeneration, *runtime)
+		}
 		updated, err := c.store.CompareAndUpdateTaskLSPLanguage(ctx, *state, expected)
 		if errors.Is(err, ErrRevisionConflict) {
 			continue
@@ -704,9 +661,44 @@ func (c *Controller) updateStateWithRuntime(
 		if err == nil && updated != nil {
 			c.publishState(ctx, *updated, runtime)
 		}
-		return updated, err
+		return updated, err == nil, err
 	}
-	return nil, ErrRevisionConflict
+	return nil, false, ErrRevisionConflict
+}
+
+func staleRuntimeObservation(state TaskLanguageState, runtime RuntimeSnapshot) bool {
+	if runtime.Generation < state.Generation {
+		return true
+	}
+	if runtime.Generation > state.Generation || runtime.Incarnation == "" || state.RuntimeIncarnation == "" {
+		return false
+	}
+	if runtime.Incarnation == state.RuntimeIncarnation {
+		return runtime.Revision <= state.RuntimeRevision
+	}
+	if runtime.RuntimeStartedAt.IsZero() || state.RuntimeStartedAt == nil {
+		return false
+	}
+	return !runtime.RuntimeStartedAt.After(*state.RuntimeStartedAt)
+}
+
+func recordRuntimeObservation(state *TaskLanguageState, previousGeneration uint64, runtime RuntimeSnapshot) {
+	if state.Generation != previousGeneration {
+		state.RuntimeIncarnation = ""
+		state.RuntimeStartedAt = nil
+		state.RuntimeRevision = 0
+	}
+	if runtime.Incarnation == "" {
+		return
+	}
+	state.RuntimeIncarnation = runtime.Incarnation
+	state.RuntimeRevision = runtime.Revision
+	if runtime.RuntimeStartedAt.IsZero() {
+		state.RuntimeStartedAt = nil
+		return
+	}
+	startedAt := runtime.RuntimeStartedAt
+	state.RuntimeStartedAt = &startedAt
 }
 
 func (c *Controller) languageSnapshot(
@@ -743,11 +735,11 @@ func taskAllowsLSPRuntime(task *taskmodels.Task) bool {
 	return task != nil && task.ArchivedAt == nil
 }
 
-func (c *Controller) loadSettings(ctx context.Context) (TaskSettings, error) {
+func (c *Controller) loadSettings(ctx context.Context, taskID string) (TaskSettings, error) {
 	if c.settings == nil {
 		return TaskSettings{}, nil
 	}
-	return c.settings.TaskLSPSettings(ctx)
+	return c.settings.TaskLSPSettings(ctx, taskID)
 }
 
 func effectivePolicy(state TaskLanguageState, settings TaskSettings) Policy {

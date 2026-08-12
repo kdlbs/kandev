@@ -147,14 +147,17 @@ func (m *Manager) RescanWorkspaceForTaskHost(ctx context.Context, taskEnvironmen
 		return fmt.Errorf("task-host execution has no agentctl client")
 	}
 
-	newRoots := workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories)
+	newPath, newRoots, err := taskHostWorkspaceProjection(execution.RuntimeName, info)
+	if err != nil {
+		return fmt.Errorf("project task-host workspace: %w", err)
+	}
 	execution.promptLifecycleMu.Lock()
 	defer execution.promptLifecycleMu.Unlock()
 	oldPath := execution.WorkspacePath
 	oldRoots := append([]string(nil), execution.WorkspaceSourceRoots...)
-	execution.WorkspacePath = info.WorkspacePath
+	execution.WorkspacePath = newPath
 	execution.WorkspaceSourceRoots = append([]string(nil), newRoots...)
-	if err := client.RescanWorkspace(ctx, info.WorkspacePath, newRoots); err != nil {
+	if err := client.RescanWorkspace(ctx, newPath, newRoots); err != nil {
 		execution.WorkspacePath = oldPath
 		execution.WorkspaceSourceRoots = oldRoots
 		return fmt.Errorf("rescan task-host workspace via agentctl: %w", err)

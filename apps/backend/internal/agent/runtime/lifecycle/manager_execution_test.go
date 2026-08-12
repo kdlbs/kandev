@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -1018,7 +1019,7 @@ func TestTaskHostCredentialPersistenceFailurePreventsReady(t *testing.T) {
 		agentctl: newReadyAgentctlClient(t, newTestLogger()),
 	}
 	manager := &Manager{
-		executionStore: NewExecutionStore(), logger: newTestLogger(), secretStore: store,
+		executionStore: NewExecutionStore(), logger: newTestLogger(), runtimeSecretStore: store,
 		taskEnvironmentRuntimeSecretWriter: &captureTaskEnvironmentRuntimeSecretWriter{},
 	}
 	if err := manager.executionStore.Add(execution); err != nil {
@@ -1212,6 +1213,8 @@ func TestRecoverTaskHostForEnvironmentDoesNotEvictConcurrentReplacement(t *testi
 
 func TestTaskHostUsesDedicatedInstanceInsideExistingDockerTaskEnvironment(t *testing.T) {
 	log := newTestLogger()
+	primaryPath := t.TempDir()
+	siblingPath := t.TempDir()
 	backend := &createInstanceExecutor{
 		MockExecutor: MockExecutor{name: executor.NameDocker},
 		client:       newReadyAgentctlClient(t, log),
@@ -1222,6 +1225,10 @@ func TestTaskHostUsesDedicatedInstanceInsideExistingDockerTaskEnvironment(t *tes
 		"env-docker": {
 			TaskID: "task-docker", TaskEnvironmentID: "env-docker",
 			ExecutorType: string(models.ExecutorTypeLocalDocker), WorkspacePath: t.TempDir(),
+			WorkspaceRepositories: []WorkspaceRepositorySpec{
+				{RepositoryPath: primaryPath, RepoName: "primary", BaseBranch: "main", Position: 0},
+				{RepositoryPath: siblingPath, RepoName: "API", CheckoutBranch: "feature/add-source", Position: 1},
+			},
 			Metadata: map[string]interface{}{
 				MetadataKeyContainerID:          "container-task",
 				MetadataKeyAuthTokenSecret:      "auth-secret",
@@ -1236,7 +1243,7 @@ func TestTaskHostUsesDedicatedInstanceInsideExistingDockerTaskEnvironment(t *tes
 	)
 	mgr.workspaceInfoProvider = provider
 	mgr.taskEnvironmentRuntimeSecretWriter = &captureTaskEnvironmentRuntimeSecretWriter{}
-	mgr.secretStore = &inMemorySecretStore{store: map[string]*secrets.SecretWithValue{
+	mgr.runtimeSecretStore = &inMemorySecretStore{store: map[string]*secrets.SecretWithValue{
 		"auth-secret":  {Secret: secrets.Secret{ID: "auth-secret"}, Value: "task-auth-token"},
 		"nonce-secret": {Secret: secrets.Secret{ID: "nonce-secret"}, Value: "task-bootstrap-nonce"},
 	}}
@@ -1255,6 +1262,10 @@ func TestTaskHostUsesDedicatedInstanceInsideExistingDockerTaskEnvironment(t *tes
 	}
 	if request.AgentConfig != nil || request.AgentProfileID != "" || request.OfficeAgentProfileID != "" {
 		t.Fatalf("docker task host inherited agent identity: %#v", request)
+	}
+	wantRoots := []string{dockerWorkspacePath, path.Join(dockerWorkspacePath, "API-feature-add-source")}
+	if !sameStrings(request.WorkspaceSourceRoots, wantRoots) {
+		t.Fatalf("docker task-host roots = %v, want runtime roots %v", request.WorkspaceSourceRoots, wantRoots)
 	}
 	if request.Metadata[MetadataKeyContainerID] != "container-task" || request.Metadata["task_host"] != true {
 		t.Fatalf("docker task-host metadata = %#v", request.Metadata)
@@ -1290,7 +1301,7 @@ func TestTaskHostUsesLiveDockerControlCredentialsBeforeDurableMirror(t *testing.
 	)
 	mgr.workspaceInfoProvider = provider
 	mgr.taskEnvironmentRuntimeSecretWriter = &captureTaskEnvironmentRuntimeSecretWriter{}
-	mgr.secretStore = &inMemorySecretStore{store: map[string]*secrets.SecretWithValue{
+	mgr.runtimeSecretStore = &inMemorySecretStore{store: map[string]*secrets.SecretWithValue{
 		"auth-secret":  {Secret: secrets.Secret{ID: "auth-secret"}, Value: "live-auth-token"},
 		"nonce-secret": {Secret: secrets.Secret{ID: "nonce-secret"}, Value: "live-bootstrap-nonce"},
 	}}

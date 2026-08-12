@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -155,7 +156,7 @@ func TestPersistAuthToken(t *testing.T) {
 
 	t.Run("stores token and sets metadata", func(t *testing.T) {
 		store := newInMemorySecretStore()
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		instance := &ExecutorInstance{
 			InstanceID: "exec-123456789012",
@@ -193,7 +194,7 @@ func TestPersistAuthToken(t *testing.T) {
 
 	t.Run("no-op when auth token is empty", func(t *testing.T) {
 		store := newInMemorySecretStore()
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		instance := &ExecutorInstance{InstanceID: "exec-123456789012"}
 		execution := &AgentExecution{metadata: make(map[string]interface{})}
@@ -223,7 +224,7 @@ func TestPersistAuthToken(t *testing.T) {
 
 	t.Run("handles nil metadata in execution", func(t *testing.T) {
 		store := newInMemorySecretStore()
-		m := &Manager{logger: log, secretStore: store}
+		m := &Manager{logger: log, runtimeSecretStore: store}
 
 		instance := &ExecutorInstance{
 			InstanceID: "exec-123456789012",
@@ -243,7 +244,7 @@ func TestPersistAuthToken(t *testing.T) {
 func TestPersistRuntimeSecrets(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	store := newInMemorySecretStore()
-	m := &Manager{logger: log, secretStore: store}
+	m := &Manager{logger: log, runtimeSecretStore: store}
 
 	instance := &ExecutorInstance{
 		InstanceID:     "exec-123456789012",
@@ -275,12 +276,40 @@ func TestPersistRuntimeSecrets(t *testing.T) {
 	}
 }
 
+func TestRuntimeSecretsCannotResolveAsUserCredentials(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	raw := newInMemorySecretStore()
+	m := &Manager{
+		logger:             log,
+		secretStore:        secrets.NewUserVisibleStore(raw),
+		runtimeSecretStore: raw,
+	}
+	execution := &AgentExecution{
+		RuntimeName: agentruntime.RuntimeDocker, TaskEnvironmentID: "env-1",
+		metadata: make(map[string]interface{}),
+	}
+	if err := m.persistAuthToken(context.Background(), &ExecutorInstance{
+		InstanceID: "exec-1", AuthToken: "agentctl-token",
+	}, execution); err != nil {
+		t.Fatal(err)
+	}
+	secretID, _ := execution.metadataValue(MetadataKeyAuthTokenSecret)
+	if _, err := m.revealGlobalSecret(context.Background(), secretID.(string)); !errors.Is(err, secrets.ErrNotFound) {
+		t.Fatalf("runtime secret resolved through user store: %v", err)
+	}
+	if got := m.revealRuntimeSecret(
+		context.Background(), execution.MetadataSnapshot(), MetadataKeyAuthTokenSecret,
+	); got != "agentctl-token" {
+		t.Fatalf("runtime secret = %q, want agentctl-token", got)
+	}
+}
+
 func TestPersistRuntimeSecretsPropagatesRotatedDockerTokenAcrossTaskEnvironment(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	store := newInMemorySecretStore()
 	writer := &captureExecutorRunningWriter{}
 	m := &Manager{
-		logger: log, secretStore: store, executionStore: NewExecutionStore(), runningWriter: writer,
+		logger: log, runtimeSecretStore: store, executionStore: NewExecutionStore(), runningWriter: writer,
 		taskEnvironmentRuntimeSecretWriter: &captureTaskEnvironmentRuntimeSecretWriter{},
 	}
 
@@ -320,12 +349,81 @@ func TestPersistRuntimeSecretsPropagatesRotatedDockerTokenAcrossTaskEnvironment(
 	}
 }
 
+func TestPersistRuntimeSecretsPropagatesDockerTokenBeforeDurableWrite(t *testing.T) {
+	persistErr := errors.New("durable credential write failed")
+	tests := []struct {
+		name      string
+		configure func(*Manager, *inMemorySecretStore)
+	}{
+		{
+			name: "secret store failure",
+			configure: func(_ *Manager, store *inMemorySecretStore) {
+				store.err = persistErr
+			},
+		},
+		{
+			name: "task environment writer failure",
+			configure: func(manager *Manager, _ *inMemorySecretStore) {
+				manager.taskEnvironmentRuntimeSecretWriter = errorTaskEnvironmentRuntimeSecretWriter{err: persistErr}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+			store := newInMemorySecretStore()
+			manager := &Manager{
+				logger: log, runtimeSecretStore: store, executionStore: NewExecutionStore(),
+				taskEnvironmentRuntimeSecretWriter: &captureTaskEnvironmentRuntimeSecretWriter{},
+			}
+			tt.configure(manager, store)
+
+			clients := make(map[string]*agentctl.Client)
+			var source *AgentExecution
+			for _, entry := range []struct {
+				id, sessionID string
+				isTaskHost    bool
+			}{
+				{id: "source", sessionID: "session-1"},
+				{id: "sibling", sessionID: "session-2"},
+				{id: "task-host", sessionID: taskHostRuntimeSessionPrefix + "env-1", isTaskHost: true},
+			} {
+				client := agentctl.NewClient("127.0.0.1", 41001, log, agentctl.WithAuthToken("stale-token"))
+				execution := &AgentExecution{
+					ID: entry.id, TaskID: "task-1", SessionID: entry.sessionID,
+					TaskEnvironmentID: "env-1", RuntimeName: agentruntime.RuntimeDocker,
+					IsTaskHost: entry.isTaskHost, agentctl: client,
+				}
+				if err := manager.executionStore.Add(execution); err != nil {
+					t.Fatal(err)
+				}
+				clients[entry.id] = client
+				if entry.id == "source" {
+					source = execution
+				}
+			}
+
+			err := manager.persistRuntimeSecrets(context.Background(), &ExecutorInstance{
+				InstanceID: source.ID, AuthToken: "rotated-token",
+			}, source)
+			if !errors.Is(err, persistErr) {
+				t.Fatalf("persist runtime secrets error = %v, want %v", err, persistErr)
+			}
+			for name, client := range clients {
+				if got := client.AuthToken(); got != "rotated-token" {
+					t.Errorf("%s auth token = %q, want rotated token", name, got)
+				}
+			}
+		})
+	}
+}
+
 func TestTaskHostRotatedDockerTokenUpdatesSessionCredentialOwner(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	store := newInMemorySecretStore()
 	writer := &captureExecutorRunningWriter{}
 	m := &Manager{
-		logger: log, secretStore: store, executionStore: NewExecutionStore(), runningWriter: writer,
+		logger: log, runtimeSecretStore: store, executionStore: NewExecutionStore(), runningWriter: writer,
 		taskEnvironmentRuntimeSecretWriter: &captureTaskEnvironmentRuntimeSecretWriter{},
 	}
 
@@ -369,6 +467,19 @@ type captureTaskEnvironmentRuntimeSecretWriter struct {
 	nonceSecretID string
 }
 
+type errorTaskEnvironmentRuntimeSecretWriter struct {
+	err error
+}
+
+func (w errorTaskEnvironmentRuntimeSecretWriter) UpdateTaskEnvironmentRuntimeSecretRefs(
+	context.Context,
+	string,
+	string,
+	string,
+) error {
+	return w.err
+}
+
 func (w *captureTaskEnvironmentRuntimeSecretWriter) UpdateTaskEnvironmentRuntimeSecretRefs(
 	_ context.Context,
 	environmentID, authSecretID, nonceSecretID string,
@@ -384,7 +495,7 @@ func TestTaskHostPersistsDockerCredentialsToTaskEnvironmentOwner(t *testing.T) {
 	store := newInMemorySecretStore()
 	writer := &captureTaskEnvironmentRuntimeSecretWriter{}
 	m := &Manager{
-		logger: log, secretStore: store, executionStore: NewExecutionStore(),
+		logger: log, runtimeSecretStore: store, executionStore: NewExecutionStore(),
 		taskEnvironmentRuntimeSecretWriter: writer,
 	}
 	host := &AgentExecution{
@@ -416,5 +527,28 @@ func TestTaskHostPersistsDockerCredentialsToTaskEnvironmentOwner(t *testing.T) {
 		if !secrets.IsInternalID(id) {
 			t.Fatalf("runtime credential %q is user-visible", id)
 		}
+	}
+}
+
+func TestDeleteTaskEnvironmentRuntimeSecretsRemovesOnlyDeterministicCredentials(t *testing.T) {
+	store := newInMemorySecretStore()
+	authSecretID := "runtime:legacy-task-environment-auth"
+	for id, value := range map[string]string{
+		authSecretID: "auth",
+		deterministicTaskEnvironmentRuntimeSecretID("env-1", MetadataKeyBootstrapNonceSecret): "nonce",
+		"user-visible": "keep",
+	} {
+		store.store[id] = &secrets.SecretWithValue{Secret: secrets.Secret{ID: id}, Value: value}
+	}
+	manager := &Manager{runtimeSecretStore: store}
+
+	if err := manager.DeleteTaskEnvironmentRuntimeSecrets(context.Background(), "env-1", authSecretID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := store.store["user-visible"]; !exists || len(store.store) != 1 {
+		t.Fatalf("remaining secrets = %v, want only user-visible", store.store)
+	}
+	if err := manager.DeleteTaskEnvironmentRuntimeSecrets(context.Background(), "env-1", "", ""); err != nil {
+		t.Fatalf("idempotent cleanup: %v", err)
 	}
 }

@@ -331,6 +331,13 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	}, nil
 }
 
+func (a *lifecycleAdapter) DeleteTaskEnvironmentRuntimeSecrets(
+	ctx context.Context,
+	taskEnvironmentID, authSecretID, bootstrapSecretID string,
+) error {
+	return a.mgr.DeleteTaskEnvironmentRuntimeSecrets(ctx, taskEnvironmentID, authSecretID, bootstrapSecretID)
+}
+
 func buildLifecycleLaunchRequest(
 	req *executor.LaunchAgentRequest, workspacePath, officeProfileID string,
 ) *lifecycle.LaunchRequest {

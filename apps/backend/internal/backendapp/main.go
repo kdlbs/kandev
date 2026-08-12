@@ -456,7 +456,7 @@ func startAgentInfrastructure(
 	agentctlBinaryPath string,
 	runCleanups func(),
 ) bool {
-	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
+	agentSecrets := newAgentSecretStores(repos.Secrets)
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
@@ -467,7 +467,7 @@ func startAgentInfrastructure(
 		eventBus,
 		repos.AgentSettings,
 		agentRegistry,
-		userSecretStore,
+		agentSecrets,
 		services.Task.TaskBaseBranches,
 		services.ManagedRuntimeSelections,
 	)
@@ -499,10 +499,11 @@ func startAgentInfrastructure(
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	// Session/environment-scoped HTTP surfaces (shell, files, ports, vscode,
-	// LSP, terminals) enforce per-user workspace scoping (opt-in auth). The
+	// terminals) enforce per-user workspace scoping (opt-in auth). Their
 	// GetOrEnsure* execution paths run these checks internally; the vscode and
 	// port reverse proxies (bare lookup + cache) call CheckSessionAccess at
-	// the handler.
+	// the handler. Task-scoped LSP authorizes the task before resolving its canonical
+	// task environment through the environment checker below.
 	lifecycleMgr.SetSessionAccessChecker(services.Task.AuthorizeSessionAccess)
 	lifecycleMgr.SetEnvironmentAccessChecker(services.Task.AuthorizeEnvironmentAccess)
 	log.Info("Workspace info provider configured for session recovery")
@@ -557,7 +558,7 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
-		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials)
+		lifecycleMgr, agentRegistry, services.Workflow, agentSecrets.userVisible, repoCloner, services.Prompts, services.GitHub, services.GitCredentials)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false

@@ -647,7 +647,10 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 			return nil, err
 		}
 	}
-	e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg)
+	if err := e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
+		e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
+		return nil, err
+	}
 
 	worktreePath := resp.WorktreePath
 	worktreeBranch := resp.WorktreeBranch

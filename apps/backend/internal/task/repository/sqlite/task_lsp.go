@@ -14,6 +14,7 @@ import (
 const taskLSPColumns = `
 	task_id, language, policy, detected, detection_state,
 	detection_scanned_at, detection_truncated, phase, generation, revision,
+	runtime_incarnation, runtime_started_at, runtime_revision,
 	process_started_at, initialize_started_at, ready_at, last_transition_at,
 	last_action, last_action_at, last_stop_reason, last_restart_reason,
 	last_initiator, restart_required, restart_required_reason, error_code,
@@ -132,12 +133,13 @@ func (r *Repository) insertTaskLSPLanguage(
 		INSERT INTO task_lsp_languages (
 			task_id, language, policy, detected, detection_state,
 			detection_scanned_at, detection_truncated, phase, generation, revision,
+			runtime_incarnation, runtime_started_at, runtime_revision,
 			process_started_at, initialize_started_at, ready_at, last_transition_at,
 			last_action, last_action_at, last_stop_reason, last_restart_reason,
 			last_initiator, restart_required, restart_required_reason, error_code,
 			error_message, created_at, updated_at
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		)
 		ON CONFLICT (task_id, language) DO NOTHING
 		RETURNING ` + taskLSPColumns
@@ -163,6 +165,7 @@ func (r *Repository) updateTaskLSPLanguage(
 		UPDATE task_lsp_languages SET
 			policy = ?, detected = ?, detection_state = ?, detection_scanned_at = ?,
 			detection_truncated = ?, phase = ?, generation = ?, revision = revision + 1,
+			runtime_incarnation = ?, runtime_started_at = ?, runtime_revision = ?,
 			process_started_at = ?, initialize_started_at = ?, ready_at = ?,
 			last_transition_at = ?, last_action = ?, last_action_at = ?,
 			last_stop_reason = ?, last_restart_reason = ?, last_initiator = ?,
@@ -221,6 +224,9 @@ func (r *Repository) AllocateTaskLSPGeneration(
 			phase = 'starting',
 			generation = task_lsp_languages.generation + 1,
 			revision = task_lsp_languages.revision + 1,
+			runtime_incarnation = '',
+			runtime_started_at = NULL,
+			runtime_revision = 0,
 			process_started_at = NULL,
 			initialize_started_at = NULL,
 			ready_at = NULL,
@@ -259,7 +265,7 @@ func (r *Repository) AllocateTaskLSPGeneration(
 }
 
 func taskLSPWriteArgs(next lsp.TaskLanguageState, now time.Time, includeKey bool) []any {
-	args := make([]any, 0, 25)
+	args := make([]any, 0, 28)
 	if includeKey {
 		args = append(args, next.TaskID, next.Language)
 	}
@@ -271,6 +277,9 @@ func taskLSPWriteArgs(next lsp.TaskLanguageState, now time.Time, includeKey bool
 		next.DetectionTruncated,
 		next.Phase,
 		next.Generation,
+		next.RuntimeIncarnation,
+		next.RuntimeStartedAt,
+		next.RuntimeRevision,
 		next.ProcessStartedAt,
 		next.InitializeStartedAt,
 		next.ReadyAt,
@@ -301,7 +310,9 @@ func scanTaskLSPLanguage(scanner taskLSPScanner) (*lsp.TaskLanguageState, error)
 		state               lsp.TaskLanguageState
 		generation          int64
 		revision            int64
+		runtimeRevision     int64
 		detectionScannedAt  sql.NullTime
+		runtimeStartedAt    sql.NullTime
 		processStartedAt    sql.NullTime
 		initializeStartedAt sql.NullTime
 		readyAt             sql.NullTime
@@ -318,6 +329,9 @@ func scanTaskLSPLanguage(scanner taskLSPScanner) (*lsp.TaskLanguageState, error)
 		&state.Phase,
 		&generation,
 		&revision,
+		&state.RuntimeIncarnation,
+		&runtimeStartedAt,
+		&runtimeRevision,
 		&processStartedAt,
 		&initializeStartedAt,
 		&readyAt,
@@ -336,12 +350,14 @@ func scanTaskLSPLanguage(scanner taskLSPScanner) (*lsp.TaskLanguageState, error)
 	); err != nil {
 		return nil, err
 	}
-	if generation < 0 || revision < 0 {
+	if generation < 0 || revision < 0 || runtimeRevision < 0 {
 		return nil, fmt.Errorf("negative task LSP generation/revision")
 	}
 	state.Generation = uint64(generation)
 	state.Revision = uint64(revision)
+	state.RuntimeRevision = uint64(runtimeRevision)
 	state.DetectionScannedAt = nullTimePointer(detectionScannedAt)
+	state.RuntimeStartedAt = nullTimePointer(runtimeStartedAt)
 	state.ProcessStartedAt = nullTimePointer(processStartedAt)
 	state.InitializeStartedAt = nullTimePointer(initializeStartedAt)
 	state.ReadyAt = nullTimePointer(readyAt)

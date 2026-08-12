@@ -3057,6 +3057,9 @@ func (s *Service) cleanupTaskEnvironment(
 		if cause := context.Cause(ctx); cause != nil {
 			return []error{cause}
 		}
+		if err := s.deleteTaskEnvironmentRuntimeSecrets(ctx, cleanup.env); err != nil {
+			return []error{err}
+		}
 		if err := s.taskEnvironments.DeleteTaskEnvironment(ctx, cleanup.env.ID); err != nil &&
 			!errors.Is(err, taskrepo.ErrTaskEnvironmentNotFound) {
 			s.logger.Warn("failed to delete task environment row during task cleanup",

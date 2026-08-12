@@ -67,31 +67,37 @@ var (
 // TaskLanguageState is the durable lifecycle projection for one task/language.
 // Runtime transport and execution identifiers deliberately do not appear here.
 type TaskLanguageState struct {
-	TaskID                string         `json:"task_id"`
-	Language              string         `json:"language"`
-	Policy                Policy         `json:"policy"`
-	Detected              bool           `json:"detected"`
-	DetectionState        DetectionState `json:"detection_state"`
-	DetectionScannedAt    *time.Time     `json:"detection_scanned_at,omitempty"`
-	DetectionTruncated    bool           `json:"detection_truncated"`
-	Phase                 Phase          `json:"phase"`
-	Generation            uint64         `json:"generation"`
-	Revision              uint64         `json:"revision"`
-	ProcessStartedAt      *time.Time     `json:"process_started_at,omitempty"`
-	InitializeStartedAt   *time.Time     `json:"initialize_started_at,omitempty"`
-	ReadyAt               *time.Time     `json:"ready_at,omitempty"`
-	LastTransitionAt      time.Time      `json:"last_transition_at"`
-	LastAction            Action         `json:"last_action"`
-	LastActionAt          *time.Time     `json:"last_action_at,omitempty"`
-	LastStopReason        string         `json:"last_stop_reason,omitempty"`
-	LastRestartReason     string         `json:"last_restart_reason,omitempty"`
-	LastInitiator         Initiator      `json:"last_initiator"`
-	RestartRequired       bool           `json:"restart_required"`
-	RestartRequiredReason string         `json:"restart_required_reason,omitempty"`
-	ErrorCode             string         `json:"error_code,omitempty"`
-	ErrorMessage          string         `json:"error_message,omitempty"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
+	TaskID             string         `json:"task_id"`
+	Language           string         `json:"language"`
+	Policy             Policy         `json:"policy"`
+	Detected           bool           `json:"detected"`
+	DetectionState     DetectionState `json:"detection_state"`
+	DetectionScannedAt *time.Time     `json:"detection_scanned_at,omitempty"`
+	DetectionTruncated bool           `json:"detection_truncated"`
+	Phase              Phase          `json:"phase"`
+	Generation         uint64         `json:"generation"`
+	Revision           uint64         `json:"revision"`
+	// Runtime* is internal ordering evidence from the task host. It prevents an
+	// older HTTP response or retired host watch from regressing durable state,
+	// but is not part of the user-visible task LSP contract.
+	RuntimeIncarnation    string     `json:"-"`
+	RuntimeStartedAt      *time.Time `json:"-"`
+	RuntimeRevision       uint64     `json:"-"`
+	ProcessStartedAt      *time.Time `json:"process_started_at,omitempty"`
+	InitializeStartedAt   *time.Time `json:"initialize_started_at,omitempty"`
+	ReadyAt               *time.Time `json:"ready_at,omitempty"`
+	LastTransitionAt      time.Time  `json:"last_transition_at"`
+	LastAction            Action     `json:"last_action"`
+	LastActionAt          *time.Time `json:"last_action_at,omitempty"`
+	LastStopReason        string     `json:"last_stop_reason,omitempty"`
+	LastRestartReason     string     `json:"last_restart_reason,omitempty"`
+	LastInitiator         Initiator  `json:"last_initiator"`
+	RestartRequired       bool       `json:"restart_required"`
+	RestartRequiredReason string     `json:"restart_required_reason,omitempty"`
+	ErrorCode             string     `json:"error_code,omitempty"`
+	ErrorMessage          string     `json:"error_message,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
 func DefaultTaskLanguageState(taskID, language string) TaskLanguageState {
@@ -127,7 +133,7 @@ func (s TaskLanguageState) Validate() error {
 	if !validInitiator(s.LastInitiator) {
 		return fmt.Errorf("invalid task LSP initiator %q", s.LastInitiator)
 	}
-	if s.Generation > math.MaxInt64 || s.Revision > math.MaxInt64 {
+	if s.Generation > math.MaxInt64 || s.Revision > math.MaxInt64 || s.RuntimeRevision > math.MaxInt64 {
 		return fmt.Errorf("task LSP generation/revision exceeds database range")
 	}
 	if s.RestartRequired != (s.RestartRequiredReason != "") {

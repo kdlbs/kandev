@@ -11,7 +11,7 @@ func (c *Controller) stop(
 	if _, err := c.tasks.GetTask(ctx, taskID); err != nil {
 		return nil, err
 	}
-	settings, err := c.loadSettings(ctx)
+	settings, err := c.loadSettings(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -81,9 +81,12 @@ func (c *Controller) stopRuntime(
 	}
 	c.releaseCapacity(ctx, key, state.Generation)
 	c.cancelWatch(key)
-	stored, err := c.persistRuntime(ctx, state, *runtimeSnapshot)
+	stored, accepted, err := c.persistRuntime(ctx, state, *runtimeSnapshot)
 	if err != nil {
 		return nil, err
+	}
+	if !accepted {
+		runtimeSnapshot = nil
 	}
 	snapshot := c.languageSnapshot(*stored, settings, runtimeSnapshot)
 	return &snapshot, nil

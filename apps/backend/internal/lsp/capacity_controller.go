@@ -31,7 +31,7 @@ func (c *Controller) promoteCapacityEntry(
 		c.releaseCapacity(ctx, entry.Key, entry.Generation)
 		return nil, err
 	}
-	settings, err := c.loadSettings(ctx)
+	settings, err := c.loadSettings(ctx, entry.Key.TaskID)
 	if err != nil {
 		c.releaseCapacity(ctx, entry.Key, entry.Generation)
 		return nil, err

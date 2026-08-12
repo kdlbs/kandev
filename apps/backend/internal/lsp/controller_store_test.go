@@ -100,6 +100,9 @@ func (m *memoryLSPStore) AllocateTaskLSPGeneration(
 	}
 	state.Generation++
 	state.Revision++
+	state.RuntimeIncarnation = ""
+	state.RuntimeStartedAt = nil
+	state.RuntimeRevision = 0
 	state.Phase = PhaseStarting
 	state.LastAction = action
 	state.LastActionAt = &acceptedAt

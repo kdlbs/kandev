@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -42,7 +43,7 @@ func (m *Manager) createTaskHostExecution(
 		return nil, fmt.Errorf("no runtime configured: %w", err)
 	}
 	executionID := taskHostExecutionID(info.TaskEnvironmentID)
-	request, err := m.prepareTaskHostCreateRequest(ctx, taskID, info, executionID)
+	request, err := m.prepareTaskHostCreateRequest(ctx, taskID, info, executionID, rt.Name())
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +76,7 @@ func (m *Manager) prepareTaskHostCreateRequest(
 	taskID string,
 	info *WorkspaceInfo,
 	executionID string,
+	runtimeName agentruntime.Runtime,
 ) (*ExecutorCreateRequest, error) {
 	runtimeSessionID := taskHostRuntimeSessionPrefix + info.TaskEnvironmentID
 	hostInfo := *info
@@ -94,6 +96,10 @@ func (m *Manager) prepareTaskHostCreateRequest(
 	if err != nil {
 		return nil, err
 	}
+	workspacePath, workspaceSourceRoots, err := taskHostWorkspaceProjection(runtimeName, info)
+	if err != nil {
+		return nil, err
+	}
 	previousExecutionID, authToken, bootstrapNonce := m.taskHostReconnectDetails(ctx, info, executionID)
 	return &ExecutorCreateRequest{
 		InstanceID:            executionID,
@@ -101,8 +107,8 @@ func (m *Manager) prepareTaskHostCreateRequest(
 		SessionID:             runtimeSessionID,
 		TaskEnvironmentID:     info.TaskEnvironmentID,
 		IsTaskHost:            true,
-		WorkspacePath:         info.WorkspacePath,
-		WorkspaceSourceRoots:  workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
+		WorkspacePath:         workspacePath,
+		WorkspaceSourceRoots:  workspaceSourceRoots,
 		Env:                   environment.env,
 		Metadata:              metadata,
 		ApprovedSecretEnvKeys: append([]string(nil), environment.approvedSecretEnvKeys...),

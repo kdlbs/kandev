@@ -309,6 +309,7 @@ type sessionExecutorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	DeleteTaskEnvironment(ctx context.Context, id string) error
 }
 
 // ClaimTaskTitleSession claims the first-turn generated-title handoff for a

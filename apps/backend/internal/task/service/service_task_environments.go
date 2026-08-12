@@ -29,6 +29,15 @@ type EnvironmentDestroyer interface {
 	GetContainerLiveStatus(ctx context.Context, containerID string) (*ContainerLiveStatus, error)
 }
 
+// TaskEnvironmentRuntimeSecretDeleter removes internal control credentials
+// after runtime teardown and before the durable environment owner is deleted.
+type TaskEnvironmentRuntimeSecretDeleter interface {
+	DeleteTaskEnvironmentRuntimeSecrets(
+		ctx context.Context,
+		taskEnvironmentID, authSecretID, bootstrapSecretID string,
+	) error
+}
+
 // ContainerLiveStatus mirrors lifecycle.ContainerLiveStatus for the task service
 // layer so the EnvironmentDestroyer interface doesn't import lifecycle types.
 type ContainerLiveStatus struct {
@@ -84,6 +93,10 @@ var ErrNoEnvironment = errors.New("no environment exists for this task")
 // SetEnvironmentDestroyer wires the runtime-resource destroyer used by ResetTaskEnvironment.
 func (s *Service) SetEnvironmentDestroyer(d EnvironmentDestroyer) {
 	s.envDestroyer = d
+}
+
+func (s *Service) SetTaskEnvironmentRuntimeSecretDeleter(d TaskEnvironmentRuntimeSecretDeleter) {
+	s.runtimeSecretDeleter = d
 }
 
 // SetSessionRunningChecker wires a custom running-session guard. When unset, the
@@ -326,6 +339,9 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 	if err := s.teardownEnvironmentResources(ctx, env); err != nil {
 		return err
 	}
+	if err := s.deleteTaskEnvironmentRuntimeSecrets(ctx, env); err != nil {
+		return err
+	}
 
 	if err := s.taskEnvironments.DeleteTaskEnvironment(ctx, env.ID); err != nil {
 		return fmt.Errorf("delete task environment row: %w", err)
@@ -333,6 +349,26 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 	s.logger.Info("task environment reset complete",
 		zap.String("task_id", taskID),
 		zap.String("env_id", env.ID))
+	return nil
+}
+
+func (s *Service) deleteTaskEnvironmentRuntimeSecrets(ctx context.Context, env *models.TaskEnvironment) error {
+	if env == nil || env.ID == "" {
+		return nil
+	}
+	needsCleanup := env.ExecutorType == string(models.ExecutorTypeLocalDocker) ||
+		env.AgentctlAuthSecretID != "" || env.AgentctlBootstrapSecretID != ""
+	if !needsCleanup {
+		return nil
+	}
+	if s.runtimeSecretDeleter == nil {
+		return fmt.Errorf("runtime secret deleter not configured; preserve task environment %s", env.ID)
+	}
+	if err := s.runtimeSecretDeleter.DeleteTaskEnvironmentRuntimeSecrets(
+		ctx, env.ID, env.AgentctlAuthSecretID, env.AgentctlBootstrapSecretID,
+	); err != nil {
+		return fmt.Errorf("delete task environment runtime secrets: %w", err)
+	}
 	return nil
 }
 

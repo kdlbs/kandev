@@ -27,36 +27,64 @@ func (c *Controller) ApplySettings(ctx context.Context) error {
 	c.settingsApplyMu.Lock()
 	defer c.settingsApplyMu.Unlock()
 
-	loaded, err := c.loadSettings(ctx)
+	states, err := c.store.ListAllTaskLSPLanguages(ctx)
 	if err != nil {
 		return err
 	}
-	next := normalizeTaskSettings(loaded)
-	if c.appliedSettings != nil && taskSettingsEqual(*c.appliedSettings, next) {
-		return nil
+	type settingsChange struct {
+		taskID   string
+		previous *TaskSettings
+		next     TaskSettings
 	}
-
-	applyErrors := c.pushSettingsToLiveGenerations(ctx, next)
-	if reconcileErr := c.ReconcileAll(ctx); reconcileErr != nil {
-		applyErrors = append(applyErrors, reconcileErr)
+	changes := make([]settingsChange, 0)
+	var applyErrors []error
+	for _, taskID := range settingsTaskIDs(states) {
+		loaded, loadErr := c.loadSettings(ctx, taskID)
+		if loadErr != nil {
+			applyErrors = append(applyErrors, loadErr)
+			continue
+		}
+		next := normalizeTaskSettings(loaded)
+		previous, applied := c.appliedSettings[taskID]
+		if applied && taskSettingsEqual(previous, next) {
+			continue
+		}
+		var previousSettings *TaskSettings
+		if applied {
+			previousCopy := previous
+			previousSettings = &previousCopy
+		}
+		changes = append(changes, settingsChange{
+			taskID: taskID, previous: previousSettings, next: next,
+		})
+		applyErrors = append(applyErrors,
+			c.pushSettingsToLiveGenerations(ctx, states, taskID, previousSettings, next)...)
+	}
+	if len(changes) > 0 {
+		if reconcileErr := c.ReconcileAll(ctx); reconcileErr != nil {
+			applyErrors = append(applyErrors, reconcileErr)
+		}
 	}
 	if err := errors.Join(applyErrors...); err != nil {
 		return err
 	}
-	remembered := normalizeTaskSettings(next)
-	c.appliedSettings = &remembered
+	for _, change := range changes {
+		c.appliedSettings[change.taskID] = normalizeTaskSettings(change.next)
+	}
 	return nil
 }
 
-func (c *Controller) pushSettingsToLiveGenerations(ctx context.Context, next TaskSettings) []error {
-	states, err := c.store.ListAllTaskLSPLanguages(ctx)
-	if err != nil {
-		return []error{err}
-	}
+func (c *Controller) pushSettingsToLiveGenerations(
+	ctx context.Context,
+	states []TaskLanguageState,
+	taskID string,
+	previous *TaskSettings,
+	next TaskSettings,
+) []error {
 	var applyErrors []error
 	for _, state := range states {
-		if !phaseHasServer(state.Phase) || state.Generation == 0 ||
-			!serverConfigurationChanged(c.appliedSettings, next, state.Language) {
+		if state.TaskID != taskID || !phaseHasServer(state.Phase) || state.Generation == 0 ||
+			!serverConfigurationChanged(previous, next, state.Language) {
 			continue
 		}
 		host, hostErr := c.resolveExistingHost(ctx, state.TaskID)
@@ -100,11 +128,38 @@ func (c *Controller) runSettingsWorker(ctx context.Context) {
 	}
 }
 
-func (c *Controller) rememberSettings(settings TaskSettings) {
-	normalized := normalizeTaskSettings(settings)
+func (c *Controller) rememberCurrentTaskSettings(ctx context.Context) error {
 	c.settingsApplyMu.Lock()
-	c.appliedSettings = &normalized
-	c.settingsApplyMu.Unlock()
+	defer c.settingsApplyMu.Unlock()
+	states, err := c.store.ListAllTaskLSPLanguages(ctx)
+	if err != nil {
+		return err
+	}
+	var loadErrors []error
+	for _, taskID := range settingsTaskIDs(states) {
+		settings, loadErr := c.loadSettings(ctx, taskID)
+		if loadErr != nil {
+			loadErrors = append(loadErrors, loadErr)
+			continue
+		}
+		c.appliedSettings[taskID] = normalizeTaskSettings(settings)
+	}
+	return errors.Join(loadErrors...)
+}
+
+func settingsTaskIDs(states []TaskLanguageState) []string {
+	unique := make(map[string]struct{}, len(states))
+	for _, state := range states {
+		if state.TaskID != "" {
+			unique[state.TaskID] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(unique))
+	for taskID := range unique {
+		result = append(result, taskID)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func normalizeTaskSettings(settings TaskSettings) TaskSettings {

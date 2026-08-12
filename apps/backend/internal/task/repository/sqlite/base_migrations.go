@@ -343,6 +343,12 @@ func (r *Repository) runMigrations() error {
 			ON task_status_summaries(workspace_id)`)
 
 	r.migrate.Apply("task_lsp_languages.table", taskLSPSchemaDDL)
+	r.migrate.Apply("task_lsp_languages.runtime_incarnation", `
+		ALTER TABLE task_lsp_languages ADD COLUMN runtime_incarnation TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_lsp_languages.runtime_started_at", `
+		ALTER TABLE task_lsp_languages ADD COLUMN runtime_started_at TIMESTAMP`)
+	r.migrate.Apply("task_lsp_languages.runtime_revision", `
+		ALTER TABLE task_lsp_languages ADD COLUMN runtime_revision BIGINT NOT NULL DEFAULT 0`)
 
 	if err := r.clearRecoveredAgentErrors(); err != nil {
 		return err

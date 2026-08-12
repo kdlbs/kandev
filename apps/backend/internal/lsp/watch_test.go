@@ -307,6 +307,83 @@ func TestProcessExitReleasesCapacityAndPromotesQueuedGeneration(t *testing.T) {
 	}
 }
 
+func TestStaleRuntimeRevisionCannotRegressPhaseOrReacquireCapacity(t *testing.T) {
+	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
+		"crashed": readyEnvironment("crashed", executorTypeLocalPC),
+		"queued":  readyEnvironment("queued", executorTypeLocalPC),
+	}}
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "crashed", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+		LastInitiator: InitiatorAutomatic,
+	})
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "queued", Language: "kotlin", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseQueued, Generation: 1,
+		LastInitiator: InitiatorAutomatic,
+	})
+	controller := newTestController(tasks, store, &fakeLSPSettings{}, &fakeLSPRuntimes{host: newFakeLSPHost()})
+	controller.capacity = NewCapacity(1)
+	crashedKey := TaskLanguageKey{TaskID: "crashed", Language: "go"}
+	queuedKey := TaskLanguageKey{TaskID: "queued", Language: "kotlin"}
+	controller.capacity.Adopt(crashedKey, 1)
+	if controller.capacity.Admit(queuedKey, 1, time.Unix(1, 0)) {
+		t.Fatal("queued generation unexpectedly admitted")
+	}
+	runtimeStartedAt := time.Unix(100, 0).UTC()
+
+	if err := controller.observeRuntimeSnapshot(context.Background(), crashedKey, RuntimeSnapshot{
+		Language: "go", Generation: 1, Phase: PhaseError, ErrorCode: errorCodeProcessExited,
+		Revision: 3, Incarnation: "task-host-a", RuntimeStartedAt: runtimeStartedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.observeRuntimeSnapshot(context.Background(), crashedKey, RuntimeSnapshot{
+		Language: "go", Generation: 1, Phase: PhaseProcessStarted,
+		Revision: 2, Incarnation: "task-host-a", RuntimeStartedAt: runtimeStartedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	crashed := storedLSPState(t, store, "crashed", "go")
+	queued := storedLSPState(t, store, "queued", "kotlin")
+	if crashed.Phase != PhaseError || crashed.RuntimeRevision != 3 {
+		t.Fatalf("crashed state regressed to %#v", crashed)
+	}
+	if queued.Phase != PhaseReady || controller.capacity.Active() != 1 || controller.capacity.Queued() != 0 {
+		t.Fatalf("queued=%#v active=%d queued-count=%d", queued, controller.capacity.Active(), controller.capacity.Queued())
+	}
+}
+
+func TestNewTaskHostIncarnationReplacesOldHighWaterAndRejectsLateWatch(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseStarting, Generation: 1,
+		LastInitiator: InitiatorAutomatic,
+	})
+	controller := newTestController(&fakeControllerTasks{}, store, &fakeLSPSettings{}, &fakeLSPRuntimes{})
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	oldStartedAt := time.Unix(100, 0).UTC()
+	newStartedAt := time.Unix(200, 0).UTC()
+
+	for _, runtime := range []RuntimeSnapshot{
+		{Language: "go", Generation: 1, Phase: PhaseInitializing, Revision: 8, Incarnation: "old", RuntimeStartedAt: oldStartedAt},
+		{Language: "go", Generation: 1, Phase: PhaseReady, Revision: 1, Incarnation: "new", RuntimeStartedAt: newStartedAt},
+		{Language: "go", Generation: 1, Phase: PhaseError, Revision: 9, Incarnation: "old", RuntimeStartedAt: oldStartedAt, ErrorCode: errorCodeProcessExited},
+	} {
+		if err := controller.observeRuntimeSnapshot(context.Background(), key, runtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	state := storedLSPState(t, store, key.TaskID, key.Language)
+	if state.Phase != PhaseReady || state.RuntimeIncarnation != "new" || state.RuntimeRevision != 1 {
+		t.Fatalf("late retired-host watch replaced current state: %#v", state)
+	}
+}
+
 func TestProcessCleanupFailureRetainsCapacityWithoutRecovery(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{

@@ -10,9 +10,61 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/auth/authn"
 	tasklsp "github.com/kandev/kandev/internal/lsp"
 	"github.com/kandev/kandev/internal/task/models"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 )
+
+type fakeTaskLSPSettingsOwnerSource struct {
+	task      *models.Task
+	workspace *models.Workspace
+}
+
+func (f fakeTaskLSPSettingsOwnerSource) GetTask(context.Context, string) (*models.Task, error) {
+	return f.task, nil
+}
+
+func (f fakeTaskLSPSettingsOwnerSource) GetWorkspace(context.Context, string) (*models.Workspace, error) {
+	return f.workspace, nil
+}
+
+type recordingTaskLSPUserSettings struct {
+	identity authn.Identity
+	settings *usermodels.UserSettings
+}
+
+func (r *recordingTaskLSPUserSettings) GetUserSettings(ctx context.Context) (*usermodels.UserSettings, error) {
+	r.identity, _ = authn.IdentityFromContext(ctx)
+	return r.settings, nil
+}
+
+func TestTaskLSPSettingsComeFromTaskWorkspaceOwner(t *testing.T) {
+	users := &recordingTaskLSPUserSettings{settings: &usermodels.UserSettings{
+		LspAutoStartLanguages: []string{"kotlin"},
+	}}
+	provider := taskLSPSettingsProvider{
+		users: users,
+		tasks: fakeTaskLSPSettingsOwnerSource{
+			task:      &models.Task{ID: "task-1", WorkspaceID: "workspace-1"},
+			workspace: &models.Workspace{ID: "workspace-1", OwnerID: "owner-1"},
+		},
+	}
+	callerCtx := authn.WithIdentity(context.Background(), authn.Identity{
+		UserID: "worker-identity", Role: authn.RoleAdmin,
+	})
+
+	settings, err := provider.TaskLSPSettings(callerCtx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if users.identity.UserID != "owner-1" || users.identity.Role != authn.RoleMember || users.identity.Synthetic {
+		t.Fatalf("settings identity = %#v, want real task owner", users.identity)
+	}
+	if len(settings.AutoStartLanguages) != 1 || settings.AutoStartLanguages[0] != "kotlin" {
+		t.Fatalf("settings = %#v", settings)
+	}
+}
 
 type fakeTaskLSPWorkspaceProvider struct {
 	info *taskLSPWorkspace

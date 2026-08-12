@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -999,6 +1000,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		primaryRepo = &repoInfo{}
 	}
 
+	// Environment creation and its first runtime launch are one task-scoped
+	// critical section. A second session that passed the earlier fast path waits
+	// here, then observes and reuses the first session's durable environment.
+	taskEnvironmentLock := e.taskEnvLock(task.ID)
+	taskEnvironmentLock.Lock()
+	defer taskEnvironmentLock.Unlock()
+
 	// Resolve the env ID before LaunchAgent so the in-memory AgentExecution
 	// is env-scoped from the first shell/layout request, not only after DB
 	// persistence succeeds. GetTaskEnvironmentByTaskID returns (nil, nil)
@@ -1088,15 +1096,34 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err := e.resolveLaunchEnvironment(ctx, req, execCfg.ProfileEnvVars, allRepos); err != nil {
 		return nil, err
 	}
+	reservedEnvironment := false
+	resolvedExecutorType, _ := taskEnvironmentExecutorIdentity(req, execCfg)
+	if existingEnv == nil && resolvedExecutorType == string(models.ExecutorTypeLocalDocker) {
+		existingEnv, err = e.createTaskEnvironmentReservation(ctx, task.ID, session, req, execCfg)
+		if err != nil {
+			return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, "", err)
+		}
+		reservedEnvironment = true
+	}
 
 	// Call the AgentManager to launch the container
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
 	if err != nil {
+		if reservedEnvironment {
+			err = errors.Join(err, e.rollbackTaskEnvironmentReservation(context.WithoutCancel(ctx), existingEnv, ""))
+		}
 		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, failingLaunchRepositoryID(req, err), err)
 	}
 
 	// Create or update the task environment with launch results
-	e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg)
+	if err := e.persistTaskEnvironmentLocked(ctx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
+		if reservedEnvironment {
+			err = errors.Join(err, e.rollbackTaskEnvironmentReservation(context.WithoutCancel(ctx), existingEnv, resp.AgentExecutionID))
+		} else {
+			e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
+		}
+		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, "", err)
+	}
 
 	// Capture the current HEAD commit as the base commit for this session asynchronously.
 	// This allows us to filter git log to only show commits made during the session.
@@ -1821,6 +1848,64 @@ func computeWorkspacePath(req *LaunchAgentRequest, resp *LaunchAgentResponse) st
 	return resp.WorkspacePath
 }
 
+func (e *Executor) createTaskEnvironmentReservation(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	execCfg executorConfig,
+) (*models.TaskEnvironment, error) {
+	executorType, executorID := taskEnvironmentExecutorIdentity(req, execCfg)
+	environment := &models.TaskEnvironment{
+		ID:                session.TaskEnvironmentID,
+		TaskID:            taskID,
+		ExecutorType:      executorType,
+		ExecutorID:        executorID,
+		ExecutorProfileID: session.ExecutorProfileID,
+		Status:            models.TaskEnvironmentStatusCreating,
+		WorkspacePath:     req.WorkspacePath,
+		TaskDirName:       req.TaskDirName,
+	}
+	if err := e.repo.CreateTaskEnvironment(ctx, environment); err != nil {
+		return nil, fmt.Errorf("reserve task environment before runtime launch: %w", err)
+	}
+	session.TaskEnvironmentID = environment.ID
+	req.TaskEnvironmentID = environment.ID
+	return environment, nil
+}
+
+type taskEnvironmentRuntimeSecretDeleter interface {
+	DeleteTaskEnvironmentRuntimeSecrets(context.Context, string, string, string) error
+}
+
+func (e *Executor) rollbackTaskEnvironmentReservation(
+	ctx context.Context,
+	environment *models.TaskEnvironment,
+	executionID string,
+) error {
+	if environment == nil || environment.ID == "" {
+		return nil
+	}
+	if executionID != "" {
+		if err := e.agentManager.StopAgentWithReason(ctx, executionID, "task environment finalization failed", true); err != nil &&
+			!errors.Is(err, lifecycle.ErrExecutionNotFound) {
+			return fmt.Errorf("stop runtime after environment finalization failure: %w", err)
+		}
+	}
+	deleter, ok := e.agentManager.(taskEnvironmentRuntimeSecretDeleter)
+	if !ok {
+		return fmt.Errorf("runtime secret cleanup is not configured")
+	}
+	if err := deleter.DeleteTaskEnvironmentRuntimeSecrets(ctx, environment.ID, "", ""); err != nil {
+		return fmt.Errorf("delete reserved environment runtime secrets: %w", err)
+	}
+	if err := e.repo.DeleteTaskEnvironment(ctx, environment.ID); err != nil &&
+		!errors.Is(err, taskrepo.ErrTaskEnvironmentNotFound) {
+		return fmt.Errorf("delete reserved task environment: %w", err)
+	}
+	return nil
+}
+
 // persistTaskEnvironment creates or updates the task environment record after a successful launch.
 // It also links the session to the environment via TaskEnvironmentID. For
 // multi-repo launches it additionally writes one TaskEnvironmentRepo row per repo.
@@ -1838,10 +1923,22 @@ func (e *Executor) persistTaskEnvironment(
 	req *LaunchAgentRequest,
 	resp *LaunchAgentResponse,
 	execCfg executorConfig,
-) {
+) error {
 	mu := e.taskEnvLock(taskID)
 	mu.Lock()
 	defer mu.Unlock()
+	return e.persistTaskEnvironmentLocked(ctx, taskID, session, existingEnv, req, resp, execCfg)
+}
+
+func (e *Executor) persistTaskEnvironmentLocked(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	existingEnv *models.TaskEnvironment,
+	req *LaunchAgentRequest,
+	resp *LaunchAgentResponse,
+	execCfg executorConfig,
+) error {
 
 	// Re-fetch under the lock — a sibling launch for the same task may have
 	// just created the env and released the lock. Without this we'd still
@@ -1886,17 +1983,14 @@ func (e *Executor) persistTaskEnvironment(
 			existingEnv.TaskDirName = req.TaskDirName
 		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
-			e.logger.Warn("failed to update task environment",
-				zap.String("task_id", taskID),
-				zap.String("env_id", existingEnv.ID),
-				zap.Error(err))
+			return fmt.Errorf("update task environment %s: %w", existingEnv.ID, err)
 		}
 		session.TaskEnvironmentID = existingEnv.ID
 		// Persist per-repo rows for launches that didn't have them yet. The
 		// environment-repository rows are the only physical-worktree record,
 		// so single-repo launches write one row here too.
 		e.persistTaskEnvironmentRepos(ctx, existingEnv.ID, environmentReposForLaunch(req, resp))
-		return
+		return nil
 	}
 
 	env := &models.TaskEnvironment{
@@ -1917,12 +2011,10 @@ func (e *Executor) persistTaskEnvironment(
 	// launches produce one row so the worktree identity is always recorded.
 	env.Repos = environmentReposForLaunch(req, resp)
 	if err := e.repo.CreateTaskEnvironment(ctx, env); err != nil {
-		e.logger.Warn("failed to create task environment",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return
+		return fmt.Errorf("create task environment: %w", err)
 	}
 	session.TaskEnvironmentID = env.ID
+	return nil
 }
 
 func taskEnvironmentExecutorIdentity(req *LaunchAgentRequest, execCfg executorConfig) (string, string) {

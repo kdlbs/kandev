@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -41,17 +43,63 @@ func remoteWorkspaceProjectionFromLaunch(req *LaunchRequest) ([]WorkspaceReposit
 		if spec.RepositoryURL == "" {
 			return nil, fmt.Errorf("remote repository %q has no clone URL", spec.RepoName)
 		}
-		branch := spec.CheckoutBranch
-		if branch == "" {
-			branch = spec.BaseBranch
+		destination, err := remoteWorkspaceEntryName(spec.RepoName, spec.BaseBranch, spec.CheckoutBranch)
+		if err != nil {
+			return nil, err
 		}
-		name, branchSlug := worktree.SanitizeRepoDirName(spec.RepoName), worktree.SanitizeBranchSlug(branch)
-		if name == "" || branchSlug == "" {
-			return nil, fmt.Errorf("remote repository %q has unsafe runtime name", spec.RepoName)
-		}
-		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch, RemoteContribution: spec.RemoteContribution})
+		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: destination, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch, RemoteContribution: spec.RemoteContribution})
 	}
 	return projection, nil
+}
+
+func remoteWorkspaceEntryName(repoName, baseBranch, checkoutBranch string) (string, error) {
+	branch := checkoutBranch
+	if branch == "" {
+		branch = baseBranch
+	}
+	name, branchSlug := worktree.SanitizeRepoDirName(repoName), worktree.SanitizeBranchSlug(branch)
+	if name == "" || branchSlug == "" {
+		return "", fmt.Errorf("remote repository %q has unsafe runtime name", repoName)
+	}
+	return name + "-" + branchSlug, nil
+}
+
+// taskHostWorkspaceProjection converts durable host-side workspace sources to
+// the paths visible inside the task host's runtime. Docker establishes the
+// primary repository at /workspace and materializes durable siblings below it;
+// forwarding host paths would leave agentctl watching nonexistent directories.
+func taskHostWorkspaceProjection(runtimeName agentruntime.Runtime, info *WorkspaceInfo) (string, []string, error) {
+	if info == nil {
+		return "", nil, fmt.Errorf("workspace info is required")
+	}
+	if runtimeName != agentruntime.RuntimeDocker {
+		return info.WorkspacePath, workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories), nil
+	}
+	if len(info.WorkspaceFolders) > 0 {
+		return "", nil, fmt.Errorf("docker task hosts do not support host workspace folders")
+	}
+	repositories := append([]WorkspaceRepositorySpec(nil), info.WorkspaceRepositories...)
+	sort.SliceStable(repositories, func(i, j int) bool {
+		return repositories[i].Position < repositories[j].Position
+	})
+	roots := make([]string, 0, len(repositories))
+	seen := make(map[string]struct{}, len(repositories))
+	for index, repository := range repositories {
+		root := dockerWorkspacePath
+		if index > 0 {
+			entry, err := remoteWorkspaceEntryName(repository.RepoName, repository.BaseBranch, repository.CheckoutBranch)
+			if err != nil {
+				return "", nil, err
+			}
+			root = path.Join(dockerWorkspacePath, entry)
+		}
+		if _, exists := seen[root]; exists {
+			continue
+		}
+		seen[root] = struct{}{}
+		roots = append(roots, root)
+	}
+	return dockerWorkspacePath, roots, nil
 }
 
 type workspaceRepositoryClient interface {

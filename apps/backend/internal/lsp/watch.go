@@ -55,10 +55,7 @@ func (c *Controller) StartReconciler(ctx context.Context) error {
 	c.lifecycleWG.Add(1)
 	c.lifecycleMu.Unlock()
 
-	settings, settingsErr := c.loadSettings(workerCtx)
-	if settingsErr == nil {
-		c.rememberSettings(settings)
-	}
+	settingsErr := c.rememberCurrentTaskSettings(workerCtx)
 	go c.runSettingsWorker(workerCtx)
 	reconcileErr := c.ReconcileAll(workerCtx)
 	states, listErr := c.store.ListAllTaskLSPLanguages(workerCtx)
@@ -155,7 +152,7 @@ func (c *Controller) watchTaskLanguage(
 	if err != nil {
 		state, _, stateErr := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
 		if stateErr == nil {
-			settings, _ := c.loadSettings(ctx)
+			settings, _ := c.loadSettings(ctx, key.TaskID)
 			snapshot, _ := c.transition(ctx, *state, settings, PhaseError, "task_host_watch_lost", err.Error())
 			c.scheduleDesiredRecovery(key, snapshot)
 		}
@@ -199,18 +196,21 @@ func (c *Controller) observeRuntimeSnapshot(
 	if runtime.Generation < state.Generation {
 		return nil
 	}
+	stored, accepted, err := c.adoptRuntime(ctx, *state, runtime)
+	if err != nil {
+		return err
+	}
+	if !accepted {
+		return nil
+	}
 	processGone := runtimeFailureProvesNoProcess(&runtime, runtime.Generation)
 	if processGone {
 		c.releaseCapacity(ctx, key, runtime.Generation)
 	}
-	stored, err := c.adoptRuntime(ctx, *state, runtime)
-	if err != nil {
-		return err
-	}
 	if runtimeHasProcess(&runtime) {
 		c.capacity.Adopt(key, runtime.Generation)
 	}
-	settings, settingsErr := c.loadSettings(ctx)
+	settings, settingsErr := c.loadSettings(ctx, key.TaskID)
 	if settingsErr != nil {
 		return settingsErr
 	}
@@ -289,7 +289,7 @@ func (c *Controller) attemptRecovery(
 			return false
 		}
 		candidate = &reconcileCandidate{state: state}
-		settings, settingsErr := c.loadSettings(ctx)
+		settings, settingsErr := c.loadSettings(ctx, key.TaskID)
 		if settingsErr != nil {
 			return false
 		}
@@ -410,7 +410,7 @@ func (c *Controller) publishState(ctx context.Context, state TaskLanguageState, 
 	if c.publisher == nil {
 		return
 	}
-	settings, err := c.loadSettings(ctx)
+	settings, err := c.loadSettings(ctx, state.TaskID)
 	if err != nil {
 		return
 	}

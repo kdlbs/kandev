@@ -47,6 +47,8 @@ type RuntimeSnapshot struct {
 	Language            string             `json:"language"`
 	Generation          uint64             `json:"generation"`
 	Revision            uint64             `json:"revision"`
+	Incarnation         string             `json:"incarnation,omitempty"`
+	RuntimeStartedAt    time.Time          `json:"runtime_started_at,omitempty"`
 	Phase               Phase              `json:"phase"`
 	Activity            Activity           `json:"activity"`
 	ProcessStartedAt    *time.Time         `json:"process_started_at,omitempty"`
