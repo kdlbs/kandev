@@ -339,6 +339,12 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 // The returned bool reports whether a new row was actually inserted, so
 // callers can distinguish a fresh observation from a re-observed duplicate
 // for writer-health counters.
+//
+// pre_commit_snapshot_id / post_commit_snapshot_id are always written empty
+// (commit.PreCommitSnapshotID / PostCommitSnapshotID are never populated by
+// any caller). No writer for either column exists anywhere in this codebase;
+// they do not link a commit row to the task_session_git_snapshots chain.
+// Treat them as reserved/unpopulated, not as live data.
 func (r *Repository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error) {
 	if commit.ID == "" {
 		commit.ID = uuid.New().String()

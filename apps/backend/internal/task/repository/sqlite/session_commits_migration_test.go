@@ -159,6 +159,43 @@ func TestInitSchemaSurvivesLegacyDuplicateCommitRows(t *testing.T) {
 	}
 }
 
+// Regression: migrateSessionCommitsDedupeAndActivation must not swallow a
+// failure in the dedupe DELETE or the CREATE UNIQUE INDEX step. Both used to
+// run through r.migrate.Apply, which logs a WARN and returns void on any
+// error that isn't "already exists" - so a failure there left the function
+// returning nil, publishing the activation marker, and leaving
+// CreateSessionCommit's `ON CONFLICT (session_id, commit_sha)` writer
+// permanently broken (no matching unique constraint) with nothing visibly
+// wrong at boot. Dropping the table before calling the migration function
+// directly reproduces a failure in that first step without needing to
+// fabricate a real duplicate-data edge case DELETE/CREATE INDEX IF NOT
+// EXISTS can't otherwise hit.
+func TestMigrateSessionCommitsDedupeAndActivationPropagatesDedupeOrIndexFailure(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+
+	// newRepoForSessionTests already ran this migration once successfully
+	// (via NewWithDB -> initSchema -> runMigrations), so the activation
+	// marker already exists with a real timestamp. Capture it, then prove a
+	// second, failing call does not touch it - the failure must be surfaced
+	// as an error, not silently absorbed and treated as another successful
+	// (re-)activation.
+	activatedAtBefore := readCommitCaptureActivatedAt(t, repo)
+
+	if _, err := repo.db.Exec(`DROP TABLE task_session_commits`); err != nil {
+		t.Fatalf("drop table to simulate a failed dedupe/index step: %v", err)
+	}
+
+	if err := repo.migrateSessionCommitsDedupeAndActivation(); err == nil {
+		t.Fatal("migrateSessionCommitsDedupeAndActivation returned nil after the dedupe/index step failed - " +
+			"the unique index the ON CONFLICT write path depends on may now be silently missing")
+	}
+
+	if got := readCommitCaptureActivatedAt(t, repo); got != activatedAtBefore {
+		t.Errorf("commit_capture_activated_at changed to %q despite the dedupe/index step failing, want unchanged %q",
+			got, activatedAtBefore)
+	}
+}
+
 // insertRawCommit writes a task_session_commits row bypassing
 // CreateSessionCommit, so a test can construct pre-migration states
 // (duplicates) the production write path would now refuse.

@@ -95,6 +95,55 @@ func TestCaptureSessionCommitsSweep_AgentNotRunningIsNoop(t *testing.T) {
 	}
 }
 
+// Regression: captureSessionCommitsSweep runs inside handleAgentCompletedLocked
+// while it holds the per-session cancel-in-flight mutex (see
+// acquireCancelInFlightGuard) - the same mutex stopTaskSessionForCoordinator
+// and DeleteSession must acquire to serve a user's Stop/Cancel/Delete for
+// this session. GetGitLog is a real `git log --shortstat` shellout through
+// agentctl, bounded only by the agentctl HTTP client's 60s default timeout
+// when passed an undecorated context. The archive-capture call site
+// (service_tasks.go's CaptureArchiveSnapshot) deliberately wraps the same
+// GetGitLog call in a 10s context.WithTimeout for exactly this reason
+// ("prevent blocking the archive operation if agentctl is stuck") - the
+// sweep must do the same so a stuck agentctl cannot block Stop/Cancel/Delete
+// for up to a minute on every turn completion.
+func TestCaptureSessionCommitsSweep_BoundsGetGitLogWithTimeout(t *testing.T) {
+	ctx := context.Background()
+	testRepo := setupTestRepo(t)
+	seedSession(t, testRepo, "t-sweep-bound", "s-sweep-bound", "step1")
+
+	session, err := testRepo.GetTaskSession(ctx, "s-sweep-bound")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.BaseCommitSHA = "base-sha"
+	if err := testRepo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set base commit: %v", err)
+	}
+
+	var sawDeadline bool
+	agentMgr := &mockAgentManager{
+		getGitLogFunc: func(callCtx context.Context, _, _ string, _ int, _ string) (*client.GitLogResult, error) {
+			deadline, ok := callCtx.Deadline()
+			sawDeadline = ok
+			if ok && time.Until(deadline) > 11*time.Second {
+				t.Errorf("GetGitLog context deadline is %s out, want <= ~10s (matching the archive-capture bound)",
+					time.Until(deadline))
+			}
+			return &client.GitLogResult{Success: true}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(testRepo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	svc.captureSessionCommitsSweep(ctx, "s-sweep-bound")
+
+	if !sawDeadline {
+		t.Fatal("captureSessionCommitsSweep called GetGitLog with an unbounded context (no deadline) - " +
+			"it runs inside the per-session cancel mutex and must not be able to block Stop/Cancel/Delete " +
+			"for up to the agentctl client's full 60s timeout")
+	}
+}
+
 // Regression: handleAgentCompletedLocked must run captureSessionCommitsSweep
 // for every completed turn - including one that ends with a pending
 // clarification. The pending-clarification branch returns early (deferring

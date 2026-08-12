@@ -3060,8 +3060,25 @@ func (s *Service) captureCommitsForTrigger(ctx context.Context, sessionID, baseC
 // `git log --shortstat base..HEAD`, the same command agentctl's own poller
 // already runs on every tick. Best-effort: errors are logged and swallowed,
 // matching captureGitStatusSnapshot alongside which this is called.
+//
+// Called from handleAgentCompletedLocked while it holds the per-session
+// cancel-in-flight mutex (acquireCancelInFlightGuard) - the same mutex
+// stopTaskSessionForCoordinator and DeleteSession need to serve a user's
+// Stop/Cancel/Delete for this session. GetGitLog is a real git shellout
+// through agentctl with no bound of its own beyond the agentctl HTTP
+// client's 60s default timeout, so an undecorated ctx here could hold that
+// mutex - and therefore Stop/Cancel/Delete - for up to a minute on every
+// single turn completion. Bound it the same way the pre-existing archive
+// capture call site already does (service_tasks.go's CaptureArchiveSnapshot:
+// "Use a bounded timeout to prevent blocking the archive operation if
+// agentctl is stuck"). A timeout here falls through the existing
+// warn-and-continue path in captureCommitsForTrigger; archive capture
+// remains the reconciliation pass, so nothing is permanently lost.
 func (s *Service) captureSessionCommitsSweep(ctx context.Context, sessionID string) {
-	baseCommit, baseBranch, err := s.resolveArchiveBaseCommitAndBranch(ctx, sessionID)
+	sweepCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	baseCommit, baseBranch, err := s.resolveArchiveBaseCommitAndBranch(sweepCtx, sessionID)
 	if err != nil {
 		s.logger.Debug("failed to resolve base commit for commit sweep",
 			zap.String("session_id", sessionID),
@@ -3071,7 +3088,7 @@ func (s *Service) captureSessionCommitsSweep(ctx context.Context, sessionID stri
 	if baseCommit == "" && baseBranch == "" {
 		return
 	}
-	s.captureCommitsForTrigger(ctx, sessionID, baseCommit, baseBranch, commitCaptureTriggerSweep)
+	s.captureCommitsForTrigger(sweepCtx, sessionID, baseCommit, baseBranch, commitCaptureTriggerSweep)
 }
 
 // captureGitStatusSnapshot fetches the current (cached) git status from agentctl

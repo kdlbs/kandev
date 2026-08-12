@@ -722,9 +722,13 @@ const commitCaptureActivatedAtMetaKey = "commit_capture_activated_at"
 // CREATE UNIQUE INDEX fails on an existing duplicate pair, and
 // MigrateLogger.Apply swallows non-"already exists" errors, so an unhandled
 // duplicate would silently leave both the index and every future
-// ON CONFLICT missing.
+// ON CONFLICT missing. That is exactly why these two statements, unlike most
+// migrations in this file, do NOT go through r.migrate.Apply: the writer's
+// ON CONFLICT (session_id, commit_sha) target hard-requires this index to
+// exist, so a failure here must abort boot (propagated below) rather than
+// leave every future commit insert failing silently forever.
 func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
-	r.migrate.Apply("task_session_commits.dedupe", `
+	if _, err := r.db.Exec(`
 		DELETE FROM task_session_commits
 		WHERE id NOT IN (
 			SELECT id FROM (
@@ -737,9 +741,17 @@ func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
 			) ranked
 			WHERE rn = 1
 		)
-	`)
-	r.migrate.Apply("uniq_session_commits_session_sha",
-		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_commits_session_sha ON task_session_commits(session_id, commit_sha)`)
+	`); err != nil {
+		return fmt.Errorf("dedupe task_session_commits: %w", err)
+	}
+	if _, err := r.db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_commits_session_sha ON task_session_commits(session_id, commit_sha)`,
+	); err != nil {
+		return fmt.Errorf("create uniq_session_commits_session_sha: %w", err)
+	}
+	if r.log != nil {
+		r.log.Info("migration applied", zap.String("name", "task_session_commits.dedupe_and_unique_index"))
+	}
 
 	// kandev_meta already exists by the time repository migrations run in
 	// production (persistence.Provide creates it before opening any
