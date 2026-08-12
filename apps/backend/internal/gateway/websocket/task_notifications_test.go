@@ -3,11 +3,14 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	githubsvc "github.com/kandev/kandev/internal/github"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -240,6 +243,80 @@ func TestTaskEventBroadcaster_CancellationIsSessionScoped(t *testing.T) {
 	}
 	if clientReceived(second) {
 		t.Fatal("cancellation notification crossed the session boundary")
+	}
+}
+
+func TestTaskEventBroadcaster_DropsUnscopedGitHubCIOptionsWhenAuthIsEnforced(t *testing.T) {
+	hub := newTestHub(t)
+	hub.setAuthPolicy(AuthPolicy{Enforced: func() bool { return true }})
+	msg, err := ws.NewNotification(ws.ActionGitHubTaskCIOptionsUpdated, map[string]any{
+		"task_id": "task-without-workspace",
+	})
+	require.NoError(t, err)
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+
+	require.NoError(t, broadcaster.routeBroadcast(
+		ws.ActionGitHubTaskCIOptionsUpdated,
+		msg.Payload,
+		"",
+		"",
+		msg,
+	))
+
+	select {
+	case leaked := <-hub.broadcast:
+		t.Fatalf("unscoped GitHub CI options update was globally broadcast: %s", leaked.Action)
+	default:
+	}
+}
+
+func TestTaskEventBroadcaster_ScopesGitHubCIOptionsToOwningWorkspace(t *testing.T) {
+	hub := newTestHub(t)
+	hub.setAuthPolicy(AuthPolicy{
+		Enforced: func() bool { return true },
+		WorkspaceOwner: func(_ context.Context, workspaceID string) (string, error) {
+			switch workspaceID {
+			case "workspace-a":
+				return "user-a", nil
+			case "workspace-b":
+				return "user-b", nil
+			default:
+				return "", errors.New("unknown workspace")
+			}
+		},
+	})
+	clientA := newTestClient("client-a")
+	clientA.identity = authn.Identity{UserID: "user-a", Role: authn.RoleMember}
+	clientB := newTestClient("client-b")
+	clientB.identity = authn.Identity{UserID: "user-b", Role: authn.RoleMember}
+	registerTestClient(hub, clientA)
+	registerTestClient(hub, clientB)
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+
+	for _, test := range []struct {
+		workspaceID string
+		owner       *Client
+		foreign     *Client
+	}{
+		{workspaceID: "workspace-a", owner: clientA, foreign: clientB},
+		{workspaceID: "workspace-b", owner: clientB, foreign: clientA},
+	} {
+		payload := &githubsvc.TaskCIOptionsResponse{TaskID: "task-" + test.workspaceID, WorkspaceID: test.workspaceID}
+		msg, err := ws.NewNotification(ws.ActionGitHubTaskCIOptionsUpdated, payload)
+		require.NoError(t, err)
+		require.NoError(t, broadcaster.routeBroadcast(
+			ws.ActionGitHubTaskCIOptionsUpdated,
+			payload,
+			"",
+			extractWorkspaceID(payload),
+			msg,
+		))
+		if !clientReceived(test.owner) {
+			t.Fatalf("owner of %s did not receive CI options update", test.workspaceID)
+		}
+		if clientReceived(test.foreign) {
+			t.Fatalf("CI options update for %s crossed workspace boundary", test.workspaceID)
+		}
 	}
 }
 

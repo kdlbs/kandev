@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Link from "@/components/routing/app-link";
@@ -17,6 +17,13 @@ type Deferred = {
 };
 
 const SAVE_CHANGES_LABEL = "Save changes";
+const RESET_LABEL = "Reset";
+const RETRY_RESET_LABEL = "Retry reset";
+const COULDNT_SAVE_LABEL = "Couldn't save";
+const COULDNT_RESET_LABEL = "Couldn't reset";
+const APPEARANCE_ID = "appearance";
+const FLOATING_SAVE_TEST_ID = "settings-floating-save";
+const SAVE_AND_LEAVE_LABEL = "Save and leave";
 const APPEARANCE_PATH = "/settings/general/appearance";
 const TERMINAL_PATH = "/settings/general/terminal";
 
@@ -45,6 +52,8 @@ function DraftContributor({
 }) {
   const [revision, setRevision] = useState(initialRevision);
   const [savedRevision, setSavedRevision] = useState(0);
+  const latestRevisionRef = useRef(revision);
+  latestRevisionRef.current = revision;
 
   useSettingsSaveContributor({
     id,
@@ -57,10 +66,45 @@ function DraftContributor({
       await onSave(submittedRevision);
       setSavedRevision(submittedRevision as number);
     },
-    discard: async () => {
+    discard: async (submittedRevision) => {
       await onDiscard?.();
+      if (
+        submittedRevision !== undefined &&
+        !Object.is(submittedRevision, latestRevisionRef.current)
+      ) {
+        return;
+      }
       setRevision(savedRevision);
     },
+  });
+
+  return (
+    <button type="button" onClick={() => setRevision((current) => current + 1)}>
+      Edit {id}
+    </button>
+  );
+}
+
+/** A contributor that starts clean (revision equals savedRevision) and dirties on Edit. */
+function CleanStartDraftContributor({
+  id,
+  onSave,
+}: {
+  id: string;
+  onSave: () => Promise<void> | void;
+}) {
+  const [revision, setRevision] = useState(1);
+  const [savedRevision, setSavedRevision] = useState(1); // starts clean
+
+  useSettingsSaveContributor({
+    id,
+    revision,
+    isDirty: revision !== savedRevision,
+    save: async () => {
+      await onSave();
+      setSavedRevision(revision);
+    },
+    discard: () => setRevision(savedRevision),
   });
 
   return (
@@ -113,18 +157,134 @@ afterEach(() => {
 });
 
 describe("SettingsSaveProvider", () => {
-  it("offsets the standalone save action above the app status bar", async () => {
+  it("keeps the generic standalone save action above the app status bar", async () => {
     render(
       <SettingsSaveProvider>
-        <DraftContributor id="appearance" onSave={vi.fn()} />
+        <DraftContributor id={APPEARANCE_ID} onSave={vi.fn()} />
       </SettingsSaveProvider>,
     );
 
-    expect((await screen.findByTestId("settings-floating-save")).className).toContain(
+    expect((await screen.findByTestId(FLOATING_SAVE_TEST_ID)).className).toContain(
       "var(--app-status-bar-height)",
     );
   });
 
+  it("does not double-reserve status-bar space for the content-hosted save action", async () => {
+    render(
+      <SettingsSaveProvider placement="content">
+        <DraftContributor id={APPEARANCE_ID} onSave={vi.fn()} />
+      </SettingsSaveProvider>,
+    );
+
+    expect((await screen.findByTestId(FLOATING_SAVE_TEST_ID)).className).not.toContain(
+      "var(--app-status-bar-height)",
+    );
+  });
+});
+
+describe("SettingsFloatingSave", () => {
+  it("renders a centered neutral surface with Reset and Save changes", async () => {
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor id={APPEARANCE_ID} onSave={vi.fn()} />
+      </SettingsSaveProvider>,
+    );
+
+    const surface = await screen.findByTestId(FLOATING_SAVE_TEST_ID);
+    expect(surface.className).toContain("justify-center");
+    expect(surface.className).toContain("inset-x-0");
+    expect(surface.getAttribute("data-status")).toBe("dirty");
+    expect(screen.getByRole("button", { name: RESET_LABEL })).toBeTruthy();
+    expect(screen.getByRole("button", { name: SAVE_CHANGES_LABEL }).className).toContain(
+      "bg-success",
+    );
+    expect(surface.className).not.toContain("bg-success");
+  });
+
+  it("resets every dirty contributor without saving and hides the surface", async () => {
+    const discarded: string[] = [];
+    const saved = vi.fn();
+
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor
+          id="second"
+          order={20}
+          onSave={saved}
+          onDiscard={() => {
+            discarded.push("second");
+          }}
+        />
+        <DraftContributor
+          id="first"
+          order={10}
+          onSave={saved}
+          onDiscard={() => {
+            discarded.push("first");
+          }}
+        />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: RESET_LABEL }));
+
+    await waitFor(() => expect(screen.queryByTestId(FLOATING_SAVE_TEST_ID)).toBeNull());
+    expect(discarded).toEqual(["first", "second"]);
+    expect(saved).not.toHaveBeenCalled();
+  });
+
+  it("prevents duplicate resets while a contributor is discarding", async () => {
+    const pending = deferred();
+    const discarded = vi.fn(() => pending.promise);
+
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor id={APPEARANCE_ID} onSave={vi.fn()} onDiscard={discarded} />
+      </SettingsSaveProvider>,
+    );
+
+    const reset = await screen.findByRole("button", { name: RESET_LABEL });
+    fireEvent.click(reset);
+    fireEvent.click(reset);
+
+    expect(discarded).toHaveBeenCalledOnce();
+    expect((reset as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => pending.resolve());
+    await waitFor(() => expect(screen.queryByTestId(FLOATING_SAVE_TEST_ID)).toBeNull());
+  });
+
+  it("keeps the route dirty when Reset fails", async () => {
+    let shouldFail = true;
+    const discarded = vi.fn(() => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error("discard failed");
+      }
+    });
+
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor id={APPEARANCE_ID} onSave={vi.fn()} onDiscard={discarded} />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: RESET_LABEL }));
+
+    expect(await screen.findByText(COULDNT_RESET_LABEL)).toBeTruthy();
+    expect(screen.queryByText(COULDNT_SAVE_LABEL)).toBeNull();
+    expect(screen.getByTestId(FLOATING_SAVE_TEST_ID)).toBeTruthy();
+    expect((screen.getByRole("button", { name: RESET_LABEL }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: RETRY_RESET_LABEL }));
+    await waitFor(() => expect(screen.queryByTestId(FLOATING_SAVE_TEST_ID)).toBeNull());
+    expect(discarded).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("SettingsSaveProvider", () => {
   it("saves dirty contributors in stable order and retries only failures", async () => {
     const calls: string[] = [];
     let failSecond = true;
@@ -161,7 +321,7 @@ describe("SettingsSaveProvider", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
 
-    expect(await screen.findByText("Couldn't save")).toBeTruthy();
+    expect(await screen.findByText(COULDNT_SAVE_LABEL)).toBeTruthy();
     expect(calls).toEqual(["first", "second", "failing"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Retry save" }));
@@ -326,13 +486,13 @@ describe("SettingsSaveProvider navigation", () => {
     );
 
     fireEvent.click(screen.getByRole("link", { name: "Terminal" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Save and leave" }));
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_AND_LEAVE_LABEL }));
 
     expect(await screen.findByText("Couldn't save")).toBeTruthy();
     expect(window.location.pathname).toBe(APPEARANCE_PATH);
 
     shouldFail = false;
-    fireEvent.click(screen.getByRole("button", { name: "Save and leave" }));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_AND_LEAVE_LABEL }));
     await waitFor(() => expect(window.location.pathname).toBe(TERMINAL_PATH));
   });
 
@@ -347,7 +507,7 @@ describe("SettingsSaveProvider navigation", () => {
     );
 
     fireEvent.click(screen.getByRole("link", { name: "Terminal" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Save and leave" }));
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_AND_LEAVE_LABEL }));
 
     await waitFor(() => expect(window.location.pathname).toBe(TERMINAL_PATH));
   });
@@ -371,8 +531,113 @@ describe("SettingsSaveProvider navigation", () => {
       </SettingsSaveProvider>,
     );
 
-    expect(await screen.findByTestId("settings-floating-save")).toBeTruthy();
+    expect(await screen.findByTestId(FLOATING_SAVE_TEST_ID)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Remove draft" }));
-    await waitFor(() => expect(screen.queryByTestId("settings-floating-save")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId(FLOATING_SAVE_TEST_ID)).toBeNull());
+  });
+});
+
+describe("SettingsSaveProvider mid-save edits", () => {
+  it("stays put when a contributor becomes dirty while the save is in flight", async () => {
+    window.history.replaceState({}, "", APPEARANCE_PATH);
+    const pending = deferred();
+
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor id="appearance" onSave={() => pending.promise} />
+        <CleanStartDraftContributor id="mcp" onSave={vi.fn()} />
+        <Link href={TERMINAL_PATH}>Terminal</Link>
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit appearance" }));
+    fireEvent.click(screen.getByRole("link", { name: "Terminal" }));
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_AND_LEAVE_LABEL }));
+    // The MCP contributor (clean at the save snapshot) becomes dirty while
+    // the appearance save is pending. Radix aria-hides the page behind the
+    // modal, so query with hidden:true.
+    fireEvent.click(screen.getByRole("button", { name: "Edit mcp", hidden: true }));
+
+    await act(async () => pending.resolve());
+
+    // The newly dirty contributor blocks leaving: the navigation must not
+    // proceed (saveAll reports canLeave=false).
+    await waitFor(() => expect(window.location.pathname).toBe(APPEARANCE_PATH));
+    expect(screen.getByRole("button", { name: SAVE_AND_LEAVE_LABEL })).toBeTruthy();
+  });
+
+  it("does not treat a re-rendered same-id contributor as newly dirty mid-save", async () => {
+    window.history.replaceState({}, "", APPEARANCE_PATH);
+    const pending = deferred();
+    const onSave = vi.fn(() => pending.promise);
+
+    function PokingContributor() {
+      const [, setPoke] = useState(0);
+      return (
+        <>
+          <DraftContributor id="appearance" onSave={onSave} />
+          <button type="button" onClick={() => setPoke((n) => n + 1)}>
+            Poke appearance
+          </button>
+        </>
+      );
+    }
+
+    render(
+      <SettingsSaveProvider>
+        <PokingContributor />
+        <Link href={TERMINAL_PATH}>Terminal</Link>
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit appearance" }));
+    fireEvent.click(screen.getByRole("link", { name: "Terminal" }));
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_AND_LEAVE_LABEL }));
+    // Re-render the contributor while its save is pending: the registry
+    // replaces the contributor object on every upsert, so an identity-based
+    // "newly dirty" check would wrongly block leaving. Same id must not count.
+    fireEvent.click(screen.getByRole("button", { name: "Poke appearance", hidden: true }));
+
+    await act(async () => pending.resolve());
+
+    await waitFor(() => expect(window.location.pathname).toBe(TERMINAL_PATH));
+  });
+});
+
+describe("SettingsSaveProvider reset coordination", () => {
+  it("settles navigation requested while a standalone reset is pending", async () => {
+    window.history.replaceState({}, "", APPEARANCE_PATH);
+    const pending = deferred();
+
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor id="appearance" onSave={vi.fn()} onDiscard={() => pending.promise} />
+        <Link href={TERMINAL_PATH}>Terminal</Link>
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: RESET_LABEL }));
+    fireEvent.click(screen.getByRole("link", { name: "Terminal" }));
+    expect(await screen.findByRole("alertdialog")).toBeTruthy();
+
+    await act(async () => pending.resolve());
+    await waitFor(() => expect(window.location.pathname).toBe(TERMINAL_PATH));
+  });
+
+  it("preserves a newer edit made during an asynchronous reset", async () => {
+    const pending = deferred();
+
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor id="profile" onSave={vi.fn()} onDiscard={() => pending.promise} />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: RESET_LABEL }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit profile" }));
+
+    await act(async () => pending.resolve());
+    await waitFor(() => expect(screen.getByTestId(FLOATING_SAVE_TEST_ID)).toBeTruthy());
+    expect(screen.getByRole("button", { name: SAVE_CHANGES_LABEL })).toBeTruthy();
   });
 });

@@ -317,6 +317,39 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
 		h.Broadcast(msg)
 		return
 	}
+	h.broadcastToOwner(owner, msg)
+}
+
+// BroadcastToWorkspaceOrDrop is the fail-closed sibling of
+// BroadcastToWorkspace: when per-user auth is enforced it DROPS the message
+// unless the workspace is non-empty AND resolves to a known owner — it never
+// falls back to a global broadcast. Every Office notification is
+// workspace-scoped, so an office payload whose workspace could not be
+// resolved must never cross user boundaries. With auth disabled (single
+// user) it degrades to a plain global broadcast, preserving today's
+// behavior.
+func (h *Hub) BroadcastToWorkspaceOrDrop(workspaceID string, msg *ws.Message) {
+	if !h.workspaceScopeEnforced() {
+		h.BroadcastToWorkspace(workspaceID, msg)
+		return
+	}
+	if workspaceID == "" {
+		return // fail closed: no unattributed office fan-out under auth
+	}
+	resolver := h.authPolicy.WorkspaceOwner
+	if resolver == nil {
+		return // fail closed: cannot scope without an owner resolver
+	}
+	owner, err := resolver(h.DispatchContext(), workspaceID)
+	if err != nil || owner == "" {
+		return // fail closed: unresolvable workspace must not go global
+	}
+	h.broadcastToOwner(owner, msg)
+}
+
+// broadcastToOwner fans a message out to the clients allowed to see the
+// workspace owner. Shared by the workspace-scoped broadcast paths.
+func (h *Hub) broadcastToOwner(owner string, msg *ws.Message) {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		h.logger.Error("Failed to marshal workspace broadcast", zap.Error(err))
@@ -331,19 +364,6 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
 	}
 	h.mu.RUnlock()
 	h.sendToClients(data, recipients, msg.Action)
-}
-
-// BroadcastToWorkspaceOrDrop routes like BroadcastToWorkspace but, when auth is
-// enforced and the workspace is unknown, DROPS the message instead of falling
-// back to a global broadcast. Every Office notification is workspace-scoped, so
-// an office payload whose workspace could not be resolved must never cross user
-// boundaries. With auth disabled (single user) it degrades to a plain global
-// broadcast, preserving today's behavior.
-func (h *Hub) BroadcastToWorkspaceOrDrop(workspaceID string, msg *ws.Message) {
-	if workspaceID == "" && h.workspaceScopeEnforced() {
-		return // fail closed: no unattributed office fan-out under auth
-	}
-	h.BroadcastToWorkspace(workspaceID, msg)
 }
 
 // workspaceScopeEnforced reports whether per-user auth is currently on.

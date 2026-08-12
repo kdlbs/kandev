@@ -33,7 +33,7 @@ export function findingLocation(finding: TaskReviewFinding): string {
  */
 export function formatFindingAsMarkdown(finding: TaskReviewFinding): string {
   const lines: string[] = ["### Code Review Finding", ""];
-  lines.push(`**${findingLocation(finding)}** — ${severityLabel(finding.severity)}`);
+  lines.push(`**${findingLocation(finding)}** - ${severityLabel(finding.severity)}`);
   if (finding.category) lines.push(`Category: ${finding.category}`);
   lines.push("", `**${finding.title}**`, "", finding.body);
   if (finding.suggestion) {

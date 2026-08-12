@@ -36,6 +36,15 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 5. `publish-npm` publishes 5 `@kdlbs/runtime-*` packages + main `kandev` package to npmjs.
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
 
+**Workflow-control invariant:** When a channel intentionally skips a job, every
+downstream job reachable through that dependency chain must use a status function
+such as `!cancelled()` plus explicit `needs.<job>.result == 'success'` checks.
+For a partial Stable release, preserve the existing signed tag and rerun with
+`backfill_tag`; never run a normal bump against an existing tag. Declare Stable
+complete only after `publish-release`, `publish-npm`, and `update-homebrew-tap`
+each succeed and their artifacts are verified—an aggregate green run can hide
+skipped publication jobs.
+
 Stable has no local release driver; the entire Stable flow runs in GHA. The Nightly metadata and
 publication revalidation state machine lives in `scripts/release/nightly-release.sh`, which GHA
 invokes for scheduled and manual Nightly runs.
@@ -79,11 +88,11 @@ Desktop signing is automatic. Complete macOS/Windows signing and notarization se
 
 ## Runtime resolution
 
-In `apps/cli/src/runtime.ts`, the CLI locates its bundled runtime via:
+The published npm shim (`apps/cli/bin/native-shim.js`) locates its bundled runtime via:
 
 1. `KANDEV_BUNDLE_DIR` env var (set by Homebrew wrapper, used by tests).
 2. Installed `@kdlbs/runtime-{platform}` npm package via `require.resolve()`.
-3. `--runtime-version <tag>` cache fallback (debug only — downloads from GitHub).
+3. The Homebrew/manual install path execs `bin/kandev` directly. (`--runtime-version` is rejected by the native launcher.)
 
 ## Runtime helper binary checklist
 

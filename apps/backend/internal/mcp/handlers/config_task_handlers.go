@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -334,6 +335,14 @@ func (h *Handlers) handleArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 	if taskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	callerTaskID, err := unmarshalStringField(msg.Payload, "caller_task_id")
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if err := h.validateAutomationArchiveTarget(ctx, callerTaskID, taskID); err != nil {
+		h.logger.Warn("rejected archive target", zap.String("task_id", taskID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 
 	if err := h.taskSvc.ArchiveTask(ctx, taskID); err != nil {
 		// Archiving is a goal-state operation: a task that is already archived
@@ -350,6 +359,31 @@ func (h *Handlers) handleArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to archive task", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+func (h *Handlers) validateAutomationArchiveTarget(ctx context.Context, callerTaskID, targetTaskID string) error {
+	if callerTaskID == "" {
+		return nil
+	}
+	if h.taskSvc == nil {
+		return errors.New("archive caller task is unavailable")
+	}
+	caller, err := h.taskSvc.GetTask(ctx, callerTaskID)
+	if err != nil || caller == nil {
+		if err != nil {
+			return fmt.Errorf("archive caller task cannot be resolved: %w", err)
+		}
+		return errors.New("archive caller task cannot be resolved")
+	}
+	if caller.Origin != models.TaskOriginAutomationRun ||
+		models.StringFromAny(caller.Metadata["trigger_type"]) != string(automation.TriggerTypeGitHubPRMerged) {
+		return nil
+	}
+	expectedTarget := models.StringFromAny(caller.Metadata[models.MetaKeyAutomationTargetTaskID])
+	if expectedTarget == "" || expectedTarget != targetTaskID {
+		return errors.New("archive target is not bound to this automation run")
+	}
+	return nil
 }
 
 func (h *Handlers) handleUpdateTaskState(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

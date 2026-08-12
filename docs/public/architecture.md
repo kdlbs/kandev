@@ -31,9 +31,8 @@ flowchart LR
 
 These adjacent launch layers have different jobs:
 
-- `apps/cli/src/` supplies the TypeScript development supervisor used by `make dev`.
+- `apps/backend/internal/launcher/` implements all four launch modes: `dev` (supervised `make -C apps/backend dev` backend + Vite dev-server child, state under `<repo>/.kandev-dev/`), installed `run`, `start`, and service behavior.
 - The published `apps/cli/bin/` npm shim selects the matching `@kdlbs/runtime-*` package and starts its native `kandev` binary.
-- `apps/backend/internal/launcher/` implements installed `run`, `start`, and service behavior.
 - `apps/desktop/` is a Tauri shell. Rust starts its bundled `kandev --headless` on an owned loopback origin and owns native windows, external links, notifications, and updates. The product UI is still the backend-served SPA.
 
 The root build embeds generated web assets in the Go binary. `make dev` instead starts Vite and configures Go to proxy it, so HTTP, API, and WebSocket traffic still enters through Go.

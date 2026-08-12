@@ -11,15 +11,16 @@
  * the mobile menu without a recorded reason.
  *
  * What this manifest currently drives: the sidebar's integrations section and
- * footer insight buttons, the sidebar and mobile plugin nav groups, the mobile
- * menu's integrations and utility groups, and the command palette's Navigation
- * group.
+ * footer insight buttons, the sidebar and mobile plugin nav groups, the shared
+ * `AppNavSections` block (the mobile nav sheet and the kanban drawer's global
+ * tail), the topbar's home crumb (via `homeDestinationHref`), and the command
+ * palette's Navigation group.
  *
  * What it does not drive yet (deliberately, see the notes below): the sidebar's
- * primary nav and the mobile header/View-toggle affordances for Home and Tasks,
- * action-shaped controls (New task, Inbox, quick chat, the settings gear, the
- * Office↔Kanban switch), the settings tree, and Office's own navigation section.
- * Those stay bespoke until the shared-shell work lands.
+ * primary nav, action-shaped controls (New task, Inbox, quick chat, the
+ * settings gear, the Office↔Kanban switch), the settings tree, and Office's own
+ * navigation section — the latter two travel as `pageNav` through `PageShell`
+ * instead of flattening into this catalog.
  */
 import {
   IconBrandGithub,
@@ -33,8 +34,20 @@ import {
 } from "@tabler/icons-react";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import { linkToTaskOverview, linkToTasks } from "@/lib/links";
-import { EVERYWHERE, MENU_AND_PALETTE, PALETTE_ONLY, SIDEBAR_AND_MENU } from "./surface-policy";
-import type { Destination } from "./types";
+import { EVERYWHERE, MENU_AND_PALETTE, SIDEBAR_AND_MENU } from "./surface-policy";
+import type { Destination, NavContext } from "./types";
+
+/**
+ * Where "home" is for the current mode and workspace — the office dashboard
+ * inside Office, the workspace task overview otherwise. Exported so the
+ * topbar's home crumb (`useHomeAffordance`) and the manifest's home entry
+ * resolve one rule and cannot disagree.
+ */
+export function homeDestinationHref(ctx: NavContext): string {
+  return ctx.inOffice
+    ? "/office"
+    : linkToTaskOverview({ workspaceId: ctx.workspaceId ?? undefined });
+}
 
 /**
  * Not listed here, on purpose:
@@ -52,11 +65,12 @@ export const APP_DESTINATIONS: Destination[] = [
     labelKey: "sidebar:home",
     icon: IconHome,
     section: "primary",
-    href: (ctx) =>
-      ctx.inOffice ? "/office" : linkToTaskOverview({ workspaceId: ctx.workspaceId ?? undefined }),
-    // Palette-only: the sidebar's primary nav and the mobile header's brand link
-    // already own "go home", so a second entry would duplicate them.
-    surfaces: PALETTE_ONLY,
+    href: homeDestinationHref,
+    // The sidebar's primary nav still owns "go home" on desktop; the mobile
+    // menu offers it so shells without kanban's brand link (Settings, Office,
+    // plugin pages) keep a phone home row. Kanban's drawer opts out via
+    // omitSections.
+    surfaces: MENU_AND_PALETTE,
     palette: {
       id: "nav-home",
       labelKey: "common:commandGoToHome",
@@ -72,9 +86,9 @@ export const APP_DESTINATIONS: Destination[] = [
     icon: IconList,
     section: "primary",
     href: (ctx) => linkToTasks(ctx.workspaceId ?? undefined),
-    // Palette-only: the sidebar's Tasks section and the mobile menu's View
-    // toggle are the established ways to reach the task list.
-    surfaces: PALETTE_ONLY,
+    // The sidebar's Tasks section still owns this on desktop; the mobile menu
+    // offers it for shells without kanban's View toggle.
+    surfaces: MENU_AND_PALETTE,
     palette: {
       id: "nav-tasks",
       labelKey: "common:commandGoToAllTasks",
@@ -104,11 +118,14 @@ export const APP_DESTINATIONS: Destination[] = [
     // The sidebar's gear also toggles the sidebar's settings takeover, so it
     // stays bespoke; this entry serves the mobile menu and the palette.
     surfaces: MENU_AND_PALETTE,
+    // No href override: the command lands on `/settings`, which resolves to the
+    // page you were last on (desktop) or the settings index (phone). It used to
+    // point at `/settings/general` to skip the card grid that `/settings`
+    // rendered; that grid is gone and `/settings/general` only redirects now.
     palette: {
       id: "nav-settings",
       labelKey: "common:commandGoToSettings",
       keywordsKey: "common:commandGoToSettingsKeywords",
-      href: "/settings/general",
     },
   },
   {

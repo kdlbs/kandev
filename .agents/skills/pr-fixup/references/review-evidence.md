@@ -21,13 +21,49 @@ The summary fields are:
   from timestamps.
 - `errors`: affected data is unknown; do not reconstruct it from memory.
 
+Record `checks_head_sha`, `checks_snapshot_complete`, `failed_checks`,
+`pending_checks`, review counts, and the PR delivery fields
+(`pr.head_repository_owner`, `pr.head_repository_name`, `pr.head_ref_name`,
+`pr.head_ref_oid`, and `pr.maintainer_can_modify`). For a cross-repository PR, those
+delivery fields are the only authoritative push target. A named-reviewer
+shortcut requires `review_evidence.trusted_producer="true"` and is not valid
+for forks, security, or architecture.
+
+Inspect every non-empty body in
+`review_evidence.exact_current_head_reviews[]`, including `COMMENTED`
+aggregate-bot reviews, and classify it as actionable, already addressed,
+optional, or invalid before declaring reviews clear. `trusted_producer=true`
+qualifies only for the dedicated OpenCode App, never merely because a reviewer
+name matches.
+
+If `gh`, `scripts/pr-state`, or `scripts/pr-resolve` fails with an
+authentication or transport error (including a broker 401), do not treat empty
+or unknown output as clean. If GitHub connector tools are available, use their
+equivalents of `github_fetch_pr`,
+`github_list_pull_request_review_threads` (including `is_resolved` and
+`is_outdated`), `github_fetch_pr_comments`,
+`github_fetch_commit_workflow_runs`, and
+`github_get_commit_combined_status`. Gather PR metadata, review threads and
+discussion comments, and commit workflow/status evidence. Keep SSH Git
+operations available for fetch, rebase, and push; after a push, require the
+connector-reported PR head OID to equal local `HEAD`. If the fallback cannot
+provide CI or review evidence, report it as unknown or pending, never clean.
+
+For connector-backed review writes, prefer structured workflow results and
+`github_list_pull_request_review_threads`; do not request full PR HTML or diffs.
+Map a GraphQL thread ID to its REST numeric top-level comment ID with
+`github_fetch_pr_comments` before replying, but resolve using the GraphQL thread
+ID. After every push and after automated review aggregation, refresh current-head
+checks and threads.
+
 If head metadata fails but check/thread data is usable, use that data only for
 the current poll and retry once at the next cadence. If review-thread state is
 unknown, do not call review clean/blocked; retry once, then use
 `scripts/pr-resolve list <PR>` before a final status. If total unresolved count
 is nonzero while visible threads are empty, fetch the authoritative thread list
-and full bodies with `scripts/pr-state --comment <comment_id>` or
-`scripts/pr-resolve show <PR> <THREAD_ID_OR_COMMENT_ID>`.
+and full bodies with `scripts/pr-resolve show <PR> <THREAD_ID>`; use
+`scripts/pr-state --comment <comment_id>` only when a flat comment view is all
+that is available.
 
 If `branch:"unknown"` or PR-view resolution is transient, retry the explicit
 PR-number command once before using direct targeted GitHub fallback. Do not
@@ -58,16 +94,22 @@ scripts/pr-resolve list <PR>
 Transport/collection failure leaves checks unknown. Parseable pending/failing
 rows remain usable when `gh pr checks` exits 8; never hide diagnostics in a pipe.
 
-When `hidden_unresolved_threads` exists or total unresolved count exceeds the
-visible list, fetch each body with `scripts/pr-state --comment <comment_id>` or
-`scripts/pr-resolve show <PR> <THREAD_ID_OR_COMMENT_ID>`. A listed thread that
-is already resolved is stale summary state: re-poll and do not reply again.
+When `hidden_unresolved_threads` is non-empty, fetch each thread body with
+`scripts/pr-resolve show <PR> <THREAD_ID>`; use the flat comment command only
+for a comment without thread context. A listed thread that is already resolved
+is stale summary state: re-poll and do not reply again.
 
 Poll at 30-second cadence with a 20-minute cap using bounded one-shot commands;
-avoid long inline loops and `gh pr checks --watch`. Stop early on a required
-failure. Queued/in-progress jobs are pending, not speculative-fix triggers. On
-an explicit wait-through-CI request, repeat bounded checks until failures,
-pending checks, and unresolved-thread count are all empty/zero.
+avoid long inline loops and `gh pr checks --watch`. In default monitoring,
+stop early on a required failure. For an explicit fixed-duration request, use
+strict-deadline mode: accumulate failures and comments until the absolute
+deadline, stopping early only if the PR is merged/closed or access is revoked.
+Queued/in-progress jobs are pending, not speculative-fix triggers. On an
+explicit wait-through-CI request without a fixed deadline, use the same
+20-minute absolute cap: repeat bounded checks until failures, pending checks,
+and unresolved-thread count are all empty/zero, or stop at the deadline and
+report remaining pending checks or unresolved threads. Preserve early stopping
+for failures and merged/closed or access-revoked conditions.
 
 For E2E-only pending work, summarize a saved snapshot before printing shards:
 

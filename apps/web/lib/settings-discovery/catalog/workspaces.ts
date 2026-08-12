@@ -1,6 +1,6 @@
 import type { SettingsDiscoveryDefinition } from "../types";
 
-export const WORKSPACES_SETTINGS_HREF = "/settings/workspace";
+export const WORKSPACES_SETTINGS_HREF = "/settings/workspaces";
 
 export const WORKSPACE_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
   {
@@ -11,14 +11,5 @@ export const WORKSPACE_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     groupId: "workspaces",
     href: WORKSPACES_SETTINGS_HREF,
     order: 200,
-  },
-  {
-    id: "automations",
-    kind: "page",
-    labelKey: "common:automations",
-    parentId: "workspaces",
-    groupId: "workspaces",
-    href: "/settings/automations",
-    order: 210,
   },
 ];

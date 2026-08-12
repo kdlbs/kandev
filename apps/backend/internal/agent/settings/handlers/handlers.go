@@ -75,6 +75,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agent-update/jobs/:id", h.httpGetAgentUpdateJob)
 	api.PATCH("/agent-profiles/:id", h.interlock, h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", h.interlock, h.httpDeleteProfile)
+	api.POST("/agent-profiles/:id/duplicate", h.interlock, h.httpDuplicateProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
 	api.POST("/agent-profiles/:id/mcp-config", h.interlock, h.httpUpdateProfileMcpConfig)
 }
@@ -544,12 +545,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create profile"})
 		return
 	}
-	if h.hub != nil {
-		notification, _ := ws.NewNotification(ws.ActionAgentProfileCreated, gin.H{
-			"profile": resp,
-		})
-		h.hub.Broadcast(notification)
-	}
+	h.broadcastProfileEvent(ws.ActionAgentProfileCreated, resp)
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -614,13 +610,60 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update profile"})
 		return
 	}
-	if h.hub != nil {
-		notification, _ := ws.NewNotification(ws.ActionAgentProfileUpdated, gin.H{
-			"profile": resp,
-		})
-		h.hub.Broadcast(notification)
-	}
+	h.broadcastProfileEvent(ws.ActionAgentProfileUpdated, resp)
 	c.JSON(http.StatusOK, resp)
+}
+
+// httpDuplicateProfile copies a profile's full configuration into a new row
+// named "<source> copy" and returns the new profile. No request body: the
+// copy name is derived server-side. The existing agent.profile.created
+// notification lets every open settings surface pick the copy up live.
+func (h *Handlers) httpDuplicateProfile(c *gin.Context) {
+	profileID := c.Param("id")
+	if profileID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
+		return
+	}
+	resp, err := h.controller.DuplicateProfile(c.Request.Context(), controller.DuplicateProfileRequest{
+		ID: profileID,
+	})
+	if err != nil {
+		if err == controller.ErrAgentProfileNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
+			return
+		}
+		h.logger.Error("failed to duplicate profile", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to duplicate profile"})
+		return
+	}
+	h.broadcastProfileEvent(ws.ActionAgentProfileCreated, resp)
+	c.JSON(http.StatusOK, resp)
+}
+
+// broadcastProfileEvent fans a profile create/update/delete event out.
+// Kanban profiles (empty WorkspaceID) go to every settings client.
+// Office-scoped profiles are routed through the workspace-scoped broadcaster
+// so their configuration (env vars, servers, ...) never leaks across
+// workspace/user boundaries — the HTTP agent list hides them via
+// filterGlobalProfiles, and the WS path must not contradict that. When the
+// hub does not support workspace routing (test fakes), the office event is
+// dropped fail-closed.
+func (h *Handlers) broadcastProfileEvent(action string, profile *dto.AgentProfileDTO) {
+	if h.hub == nil {
+		return
+	}
+	notification, _ := ws.NewNotification(action, gin.H{
+		"profile": profile,
+	})
+	if profile.WorkspaceID != "" {
+		if workspaceHub, ok := h.hub.(interface {
+			BroadcastToWorkspaceOrDrop(string, *ws.Message)
+		}); ok {
+			workspaceHub.BroadcastToWorkspaceOrDrop(profile.WorkspaceID, notification)
+		}
+		return
+	}
+	h.hub.Broadcast(notification)
 }
 
 func (h *Handlers) httpDeleteProfile(c *gin.Context) {
@@ -647,12 +690,7 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete profile"})
 		return
 	}
-	if h.hub != nil {
-		notification, _ := ws.NewNotification(ws.ActionAgentProfileDeleted, gin.H{
-			"profile": profile,
-		})
-		h.hub.Broadcast(notification)
-	}
+	h.broadcastProfileEvent(ws.ActionAgentProfileDeleted, profile)
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 

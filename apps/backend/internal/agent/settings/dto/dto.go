@@ -46,6 +46,16 @@ type AgentProfileDTO struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// GetWorkspaceID lets struct-shaped profile payloads (e.g. the MCP event-bus
+// publisher wrapping *AgentProfileDTO under "profile") be routed by the
+// gateway's extractWorkspaceID without a JSON round-trip.
+func (p *AgentProfileDTO) GetWorkspaceID() string {
+	if p == nil {
+		return ""
+	}
+	return p.WorkspaceID
+}
+
 // CLIFlagDTO mirrors models.CLIFlag on the wire. Each entry is one user-facing
 // CLI argument on a profile; at launch time the `flag` string is shell-split
 // and only entries with `enabled:true` reach the agent subprocess argv.

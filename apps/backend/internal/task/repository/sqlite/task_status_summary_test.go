@@ -139,6 +139,16 @@ func TestTaskStatusSummaryBatchCompareAndUpdate(t *testing.T) {
 	if loaded["task-summary-repository"].Revision != 2 || loaded["task-summary-repository"].ForegroundActivity != "generating" {
 		t.Fatalf("newer summary was not retained: %#v", loaded["task-summary-repository"])
 	}
+	if err := repo.DeleteTaskStatusSummary(ctx, "task-summary-repository"); err != nil {
+		t.Fatalf("DeleteTaskStatusSummary: %v", err)
+	}
+	if err := repo.DeleteTaskStatusSummary(ctx, ""); err != nil {
+		t.Fatalf("DeleteTaskStatusSummary(empty): %v", err)
+	}
+	loaded, err = repo.LoadTaskStatusSummaries(ctx, []string{"task-summary-repository"})
+	if err != nil || len(loaded) != 0 {
+		t.Fatalf("summaries after delete = %+v, %v", loaded, err)
+	}
 }
 
 func TestTaskStatusSummaryConcurrentUpdatesRemainMonotonic(t *testing.T) {

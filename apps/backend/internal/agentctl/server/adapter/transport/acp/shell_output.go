@@ -21,10 +21,10 @@ type normalizedShellResult struct {
 	stderrTruncated bool
 }
 
-func applyFinalShellResult(payload *streams.ShellExecPayload, result any) {
+func applyFinalShellResult(payload *streams.ShellExecPayload, result any) bool {
 	normalized := normalizeFinalShellResult(result)
 	if !normalized.hasStdout && !normalized.hasStderr && normalized.exitCode == nil {
-		return
+		return false
 	}
 	output := ensureShellOutput(payload)
 	if normalized.hasStdout {
@@ -41,6 +41,7 @@ func applyFinalShellResult(payload *streams.ShellExecPayload, result any) {
 	if normalized.exitCode != nil {
 		output.ExitCode = normalized.exitCode
 	}
+	return normalized.hasStdout
 }
 
 // stripLeadingCommandEcho removes a leading terminal-prompt echo of the tool
@@ -198,9 +199,8 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 		recognized = true
 	}
 	if rawOutput != nil {
-		applyFinalShellResult(shell, rawOutput)
+		finalStdoutCommitted = applyFinalShellResult(shell, rawOutput)
 		recognized = true
-		finalStdoutCommitted = true
 	}
 	if data, ok := terminalOutputData(meta, "terminal_output"); ok {
 		if rawOutput != nil {

@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ImproveKandevDialog } from "./improve-kandev-dialog";
-import { IMPROVE_KANDEV_WORKSPACE_NAME } from "./improve-kandev-dialog-model";
+import {
+  IMPROVE_KANDEV_SKIP_INTRO_KEY,
+  IMPROVE_KANDEV_WORKSPACE_NAME,
+} from "./improve-kandev-dialog-model";
 import type { ImproveKandevBootstrapResponse } from "@/lib/api/domains/improve-kandev-api";
 
 const ACTIVE_WORKSPACE = { id: "ws-active", name: "Active Workspace" };
@@ -119,6 +122,23 @@ describe("ImproveKandevDialog bootstrap workspace wiring", () => {
     await waitFor(() =>
       expect(screen.getByTestId("create-mode-view").dataset.workspace).toBe("ws-active"),
     );
+  });
+
+  it("re-runs bootstrap when the dialog reopens with the dedicated workspace present (skip-intro)", async () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
+    window.localStorage.setItem(IMPROVE_KANDEV_SKIP_INTRO_KEY, "true");
+    const { rerender } = render(
+      <ImproveKandevDialog open onOpenChange={() => {}} workspaceId="ws-active" />,
+    );
+
+    await waitFor(() => expect(mocks.bootstrap).toHaveBeenCalledTimes(1));
+
+    // Close, then reopen — a re-open must re-run bootstrap instead of sitting
+    // at the idle "Preparing kandev repository" banner with submit blocked.
+    rerender(<ImproveKandevDialog open={false} onOpenChange={() => {}} workspaceId="ws-active" />);
+    rerender(<ImproveKandevDialog open onOpenChange={() => {}} workspaceId="ws-active" />);
+
+    await waitFor(() => expect(mocks.bootstrap).toHaveBeenCalledTimes(2));
   });
 
   it("shows the workspace-creation choice when the dedicated workspace is missing and defers bootstrap", async () => {

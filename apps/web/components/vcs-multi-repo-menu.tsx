@@ -32,6 +32,8 @@ export type PerRepoStatus = {
   branch: string | null;
   ahead: number;
   behind: number;
+  pushAhead: number;
+  pullBehind: number;
   hasStaged: boolean;
   hasUnstaged: boolean;
 };
@@ -70,10 +72,23 @@ const PICK_REPOSITORY_KEYS: Record<"commit" | "push" | "pr" | "rebase", string> 
 const ITEM_CLASS = "cursor-pointer gap-3";
 const ICON_CLASS = "h-4 w-4 text-muted-foreground";
 
-type ActionKey = "commit" | "push" | "pr" | "pull" | "rebase" | "merge" | "force-push";
+export type VcsActionKey = "commit" | "push" | "pr" | "pull" | "rebase" | "merge" | "force-push";
+
+export function isRemoteActionBlockedForRepository(
+  action: VcsActionKey,
+  repositoryName: string,
+  blockedRepositoryName: string | undefined,
+  pushDisabled: boolean,
+  pullDisabled: boolean,
+): boolean {
+  const actionBlocked =
+    (action === "push" || action === "force-push" ? pushDisabled : false) ||
+    (action === "pull" ? pullDisabled : false);
+  return actionBlocked && (!blockedRepositoryName || repositoryName === blockedRepositoryName);
+}
 
 type ActionDef = {
-  key: ActionKey;
+  key: VcsActionKey;
   /** Catalog key, resolved at render: `t()` here would freeze at the boot locale. */
   labelKey: string;
   icon: ReactNode;
@@ -94,7 +109,7 @@ const ACTION_DEFS: ActionDef[] = [
     key: "push",
     labelKey: "integrations:push",
     icon: <IconCloudUpload className={ICON_CLASS} />,
-    disabledFor: (s) => (s?.ahead ?? 0) === 0,
+    disabledFor: (s) => (s?.pushAhead ?? 0) === 0,
     invoke: (repo, cb) => cb.onPush(false, repo),
   },
   {
@@ -129,7 +144,7 @@ const ACTION_DEFS: ActionDef[] = [
     key: "force-push",
     labelKey: "integrations:forcePush",
     icon: <IconAlertTriangle className={ICON_CLASS} />,
-    disabledFor: (s) => (s?.ahead ?? 0) === 0,
+    disabledFor: (s) => (s?.pushAhead ?? 0) === 0,
     invoke: (repo, cb) => cb.onPush(true, repo),
   },
 ];
@@ -143,6 +158,9 @@ const ACTION_DEFS: ActionDef[] = [
 function PerRepoActionSub({
   action,
   disabled,
+  pushDisabled,
+  pullDisabled,
+  blockedRepositoryName,
   repoNames,
   perRepoStatus,
   repoDisplayName,
@@ -150,6 +168,9 @@ function PerRepoActionSub({
 }: {
   action: ActionDef;
   disabled: boolean;
+  pushDisabled: boolean;
+  pullDisabled: boolean;
+  blockedRepositoryName: string | undefined;
   repoNames: string[];
   perRepoStatus: PerRepoStatus[];
   repoDisplayName: (repositoryName: string) => string | undefined;
@@ -166,15 +187,26 @@ function PerRepoActionSub({
       <DropdownMenuSubContent className="w-52">
         {repoNames.map((repo) => {
           const status = statusByName.get(repo);
-          const ahead = status?.ahead ?? 0;
-          const behind = status?.behind ?? 0;
+          const ahead = status?.pushAhead ?? 0;
+          const behind = status?.pullBehind ?? 0;
           const label = repoDisplayName(repo) || repo || t("integrations:repository");
+          const actionBlocked = isRemoteActionBlockedForRepository(
+            action.key,
+            repo,
+            blockedRepositoryName,
+            pushDisabled,
+            pullDisabled,
+          );
+          const blockedTitle = actionBlocked
+            ? t("task:remoteActionsDisabledHistoryChanged")
+            : undefined;
           return (
             <DropdownMenuItem
               key={repo || "__no_repo__"}
               className={ITEM_CLASS}
               onClick={() => action.invoke(repo, callbacks)}
-              disabled={disabled || action.disabledFor(status)}
+              disabled={disabled || actionBlocked || action.disabledFor(status)}
+              title={blockedTitle}
             >
               <span className="flex-1 truncate">{label}</span>
               <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -202,6 +234,9 @@ function MultiRepoVcsDropdown({
   baseBranch,
   repoNames,
   perRepoStatus,
+  pushDisabled,
+  pullDisabled,
+  blockedRepositoryName,
   repoDisplayName,
   callbacks,
 }: {
@@ -209,6 +244,9 @@ function MultiRepoVcsDropdown({
   baseBranch: string;
   repoNames: string[];
   perRepoStatus: PerRepoStatus[];
+  pushDisabled: boolean;
+  pullDisabled: boolean;
+  blockedRepositoryName: string | undefined;
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
 }) {
@@ -226,6 +264,9 @@ function MultiRepoVcsDropdown({
           <PerRepoActionSub
             action={action}
             disabled={disabled}
+            pushDisabled={pushDisabled}
+            pullDisabled={pullDisabled}
+            blockedRepositoryName={blockedRepositoryName}
             repoNames={repoNames}
             perRepoStatus={perRepoStatus}
             repoDisplayName={repoDisplayName}
@@ -268,6 +309,9 @@ export function MultiRepoVcsButton({
   baseBranch,
   repoNames,
   perRepoStatus,
+  pushDisabled,
+  pullDisabled,
+  blockedRepositoryName,
   repoDisplayName,
   callbacks,
 }: {
@@ -278,6 +322,9 @@ export function MultiRepoVcsButton({
   baseBranch: string;
   repoNames: string[];
   perRepoStatus: PerRepoStatus[];
+  pushDisabled: boolean;
+  pullDisabled: boolean;
+  blockedRepositoryName?: string;
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
 }) {
@@ -314,6 +361,9 @@ export function MultiRepoVcsButton({
               baseBranch={baseBranch}
               repoNames={repoNames}
               perRepoStatus={perRepoStatus}
+              pushDisabled={pushDisabled}
+              pullDisabled={pullDisabled}
+              blockedRepositoryName={blockedRepositoryName}
               repoDisplayName={repoDisplayName}
               callbacks={callbacks}
             />

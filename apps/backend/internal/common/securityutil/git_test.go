@@ -42,3 +42,35 @@ func TestIsKnownSafeGitFlagRejectsPushOptionPrefixes(t *testing.T) {
 		}
 	}
 }
+
+// TestIsKnownSafeGitFlagAllowsRebaseAndAbort pins the two flags the git-pull
+// rebase path needs. GitOperator.Pull builds "pull --rebase <remote> <branch>"
+// and, when the rebase conflicts, recovers with "rebase --abort"; both were
+// rejected here, so POST /api/v1/git/pull {"rebase":true} could never succeed
+// and POST /api/v1/git/abort never worked at all.
+func TestIsKnownSafeGitFlagAllowsRebaseAndAbort(t *testing.T) {
+	for _, flag := range []string{"--rebase", "--abort"} {
+		if !IsKnownSafeGitFlag(flag) {
+			t.Fatalf("IsKnownSafeGitFlag(%q) = false, want true — the git pull --rebase path needs it", flag)
+		}
+	}
+}
+
+// TestIsKnownSafeGitFlagRejectsRebaseAndAbortVariants pins that --rebase and
+// --abort are allowed as exact arguments only. The bulk of the allowlist
+// matches by prefix, which for these two would also admit "--rebase-merges",
+// "--rebase=interactive" (spawns an editor), and "--abort-on-*", none of which
+// this codebase issues.
+func TestIsKnownSafeGitFlagRejectsRebaseAndAbortVariants(t *testing.T) {
+	for _, flag := range []string{
+		"--rebase-merges",
+		"--rebase=interactive",
+		"--rebase=i",
+		"--abort-on-error",
+		"--aborted",
+	} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Fatalf("IsKnownSafeGitFlag(%q) = true, want false — only the exact flags are allowed", flag)
+		}
+	}
+}

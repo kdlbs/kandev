@@ -132,6 +132,9 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
   // so the next iteration starts from a clean slate.
   test.afterEach(async ({ apiClient }) => {
     await uninstallViaApi(apiClient);
+    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      app_status_bar_enabled: false,
+    });
   });
 
   test("shows an install spinner while an upload install is pending", async ({ testPage }) => {
@@ -167,6 +170,9 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     backend,
   }) => {
     test.setTimeout(90_000);
+    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      app_status_bar_enabled: true,
+    });
 
     const pluginsDir = path.join(backend.tmpDir, ".kandev", "plugins");
 

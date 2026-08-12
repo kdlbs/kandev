@@ -436,7 +436,6 @@ function NewSubtaskForm({
     autopilot: fs.autopilot,
     workspaceId,
     availableRepositories,
-    parentRepositoryId,
     worktreeBranch,
     profileOptions,
     executorProfileOptions,

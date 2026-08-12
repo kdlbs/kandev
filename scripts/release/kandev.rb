@@ -3,6 +3,8 @@
 class Kandev < Formula
   desc "Manage tasks, orchestrate agents, review changes, and ship value"
   homepage "https://github.com/kdlbs/kandev"
+  # Conditional asset names end in x64/arm64; without this, Homebrew uses version 64.
+  version "__VERSION__"
   license "AGPL-3.0-only"
 
   on_macos do

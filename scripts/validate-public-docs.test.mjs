@@ -54,7 +54,7 @@ async function createCoverageRepo({
     "docs/public/index.md": validPage,
     "apps/web/src/settings-routes.tsx": `const SETTINGS_ROUTES = {\n${settingsRoutes
       .map((route) => `  "${route}": () => null,`)
-      .join("\n")}\n};\n\nexport function SettingsRoutes() {}`,
+      .join("\n")}\n};\n\nexport const SETTINGS_ROUTE_PATHS = new Set(Object.keys(SETTINGS_ROUTES));\n\nexport function SettingsRoutes() {}`,
     "apps/web/src/settings-routes.test.ts": "// settings route coverage",
     "apps/backend/internal/mcp/server/server.go": mcpTools
       .map((tool) => `mcp.NewTool("${tool}")`)
@@ -212,6 +212,18 @@ test("accepts explicitly ordered pages with required frontmatter", async () => {
   );
 
   await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("rejects public pages that contain an em dash", async () => {
+  const dir = await createDocs(
+    { "index.md": validPage.replace("Page body.", "Public — copy.") },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /public docs contain em dash \(U\+2014\): index\.md:8/,
+  );
 });
 
 test("rejects published pages omitted from meta.json", async () => {
@@ -842,6 +854,24 @@ test("rejects site-root links because public docs use relative sources", async (
 
 test("accepts source-backed coverage for every settings route and MCP tool", async () => {
   const fixture = await createCoverageRepo();
+
+  await assert.doesNotReject(validateCoverageInventory(fixture));
+});
+
+test("accepts a route-path export between the settings table and renderer", async () => {
+  const fixture = await createCoverageRepo();
+  const routePath = path.join(
+    fixture.repoRoot,
+    "apps/web/src/settings-routes.tsx",
+  );
+  const source = await fs.readFile(routePath, "utf8");
+  await fs.writeFile(
+    routePath,
+    source.replace(
+      "};\n\nexport function SettingsRoutes",
+      "};\n\nexport const SETTINGS_ROUTE_PATHS = new Set(Object.keys(SETTINGS_ROUTES));\n\nexport function SettingsRoutes",
+    ),
+  );
 
   await assert.doesNotReject(validateCoverageInventory(fixture));
 });

@@ -94,5 +94,9 @@ test.describe("Mobile task status summary", () => {
       ),
     ).toBe(true);
     expect(viewport!.width).toBeGreaterThan(0);
+
+    // The passive PR icon must not steal the row's native touch target.
+    await targetRow.tap();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.task_id}$`));
   });
 });

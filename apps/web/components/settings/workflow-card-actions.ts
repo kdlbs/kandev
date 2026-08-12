@@ -316,6 +316,7 @@ async function createMissingSteps(
       name: step.name,
       position: step.position,
       color: step.color,
+      stage_type: step.stage_type ?? "custom",
       cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
     });
     mappings.set(step.id, created.id);
@@ -392,6 +393,7 @@ function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
     name: step.name,
     position: step.position,
     color: step.color,
+    stage_type: step.stage_type ?? "custom",
     prompt: step.prompt ?? "",
     events: step.events ?? {},
     allow_manual_move: step.allow_manual_move ?? true,

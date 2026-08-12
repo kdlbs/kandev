@@ -13,17 +13,29 @@ func (s *Service) GetTaskCIOptionsResponse(ctx context.Context, taskID string) (
 	if s.store == nil {
 		return nil, errStoreUnavailable
 	}
+	workspaceID, err := s.resolveAuthorizedTaskWorkspace(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
 	opts, err := s.store.GetTaskCIOptions(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
-	return s.buildTaskCIOptionsResponse(ctx, opts)
+	response, err := s.buildTaskCIOptionsResponse(ctx, opts)
+	if response != nil {
+		response.WorkspaceID = workspaceID
+	}
+	return response, err
 }
 
 // UpdateTaskCIOptions updates task CI automation options and returns the response shape.
 func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch TaskCIOptionsPatch) (*TaskCIOptionsResponse, error) {
 	if s.store == nil {
 		return nil, errStoreUnavailable
+	}
+	workspaceID, err := s.resolveAuthorizedTaskWorkspace(ctx, taskID)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.populateReviewReviewer(ctx, taskID, &patch); err != nil {
 		return nil, err
@@ -32,7 +44,40 @@ func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch 
 	if err != nil {
 		return nil, err
 	}
-	return s.buildTaskCIOptionsResponse(ctx, opts)
+	response, err := s.buildTaskCIOptionsResponse(ctx, opts)
+	if response != nil {
+		response.WorkspaceID = workspaceID
+	}
+	return response, err
+}
+
+// resolveAuthorizedTaskWorkspace resolves ownership through the task service
+// before any user-facing CI-option read or mutation. Unit tests and legacy
+// auth-disabled embeddings without a task store retain their unscoped path;
+// an installed authorizer without the resolver fails closed.
+func (s *Service) resolveAuthorizedTaskWorkspace(ctx context.Context, taskID string) (string, error) {
+	taskStore := s.getTaskIssueStore()
+	if taskStore == nil {
+		if s.workspaceAuthorizer != nil {
+			return "", errStoreUnavailable
+		}
+		return "", nil
+	}
+	task, err := taskStore.GetTask(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	if task == nil {
+		return "", ErrTaskNotFound
+	}
+	workspaceID := strings.TrimSpace(task.WorkspaceID)
+	if workspaceID == "" {
+		return "", ErrGitHubWorkspaceRequired
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return "", err
+	}
+	return workspaceID, nil
 }
 
 func (s *Service) populateReviewReviewer(

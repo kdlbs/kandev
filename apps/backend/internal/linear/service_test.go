@@ -247,6 +247,41 @@ func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {
 	}
 }
 
+func TestService_LegacySecretOnlyAppliesToMigratedWorkspace(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	f.store.migratedToWorkspace = "default"
+	for _, workspaceID := range []string{"default", "other"} {
+		if err := f.store.UpsertConfigForWorkspace(ctx, workspaceID, &LinearConfig{
+			AuthMethod: AuthMethodAPIKey,
+		}); err != nil {
+			t.Fatalf("upsert config for %s: %v", workspaceID, err)
+		}
+	}
+	if err := f.secrets.Set(ctx, SecretKey, "Legacy Linear API key", "legacy-token"); err != nil {
+		t.Fatalf("set legacy secret: %v", err)
+	}
+
+	migrated, err := f.svc.GetConfigForWorkspace(ctx, "default")
+	if err != nil {
+		t.Fatalf("get migrated workspace config: %v", err)
+	}
+	if !migrated.HasSecret {
+		t.Fatal("expected migrated workspace to retain the legacy secret fallback")
+	}
+
+	other, err := f.svc.GetConfigForWorkspace(ctx, "other")
+	if err != nil {
+		t.Fatalf("get unrelated workspace config: %v", err)
+	}
+	if other.HasSecret {
+		t.Fatal("legacy secret must not leak into an unrelated workspace")
+	}
+	if secret, _ := f.svc.revealSecret(ctx, "other"); secret != "" {
+		t.Fatalf("reveal unrelated workspace secret = %q", secret)
+	}
+}
+
 func TestService_SetConfig_InvalidatesClientCache(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()

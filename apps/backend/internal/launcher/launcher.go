@@ -39,6 +39,8 @@ func Run(args []string, build BuildInfo) int {
 		return runStart(ctx, opts)
 	case CommandRun:
 		return runInstalled(ctx, opts)
+	case CommandDev:
+		return runDev(ctx, opts)
 	}
 	fmt.Fprintf(os.Stderr, "[kandev] native launcher command %q is not implemented yet\n", opts.Command)
 	return 1

@@ -266,7 +266,7 @@ export function OfficePageClient({ initialDashboard }: OfficePageClientProps) {
 
   const metrics = extractMetrics(dashboard);
   const topUtilization = maxUtilization(agents);
-  const quotaLabel = topUtilization > 0 ? `${Math.round(topUtilization)}%` : "—";
+  const quotaLabel = topUtilization > 0 ? `${Math.round(topUtilization)}%` : "-";
   const hasSubscriptionAgents = agents.some((a) => a.billingType === "subscription");
 
   return (

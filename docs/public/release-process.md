@@ -18,12 +18,12 @@ Kandev uses one semantic version across the Git tag, native runtime bundles, des
 
 The workflow has four mutually exclusive operating modes:
 
-| Mode | Inputs | Result |
-|---|---|---|
-| Normal release | `bump=patch`, `minor`, or `major` | Creates and merges a release PR, tags its merge, builds, and publishes |
-| Dry run | `dry_run=true` | Computes the next version and exercises CLI package/lock plus changelog generation in the runner; no PR, tag, artifact build, or publication |
-| Desktop validation | `desktop_validation_only=true` | Builds web, five runtime bundles, and five desktop targets from the selected commit; no PR, tag, GitHub release, GHCR, npm, or Homebrew publication |
-| Backfill | `backfill_tag=vX.Y.Z` | Rebuilds and repairs channels for the latest existing release tag without creating a version or tag |
+| Mode               | Inputs                            | Result                                                                                                                                              |
+| ------------------ | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Normal release     | `bump=patch`, `minor`, or `major` | Creates and merges a release PR, tags its merge, builds, and publishes                                                                              |
+| Dry run            | `dry_run=true`                    | Computes the next version and exercises CLI package/lock plus changelog generation in the runner; no PR, tag, artifact build, or publication        |
+| Desktop validation | `desktop_validation_only=true`    | Builds web, five runtime bundles, and five desktop targets from the selected commit; no PR, tag, GitHub release, GHCR, npm, or Homebrew publication |
+| Backfill           | `backfill_tag=vX.Y.Z`             | Rebuilds and repairs channels for the latest existing release tag without creating a version or tag                                                 |
 
 `dry_run` and desktop validation are not release candidates. Backfill cannot be combined with either and accepts only the latest exact SemVer tag after version manifests are checked for agreement.
 
@@ -65,7 +65,7 @@ Normal mode performs these stages:
 5. **Build containers.** Publish amd64/arm64 base manifests, enforce the universal-image size gate, then publish multi-architecture universal images.
 6. **Publish GitHub Release.** Attach runtime archives, checksums, desktop artifacts, notes, and the updater feed when eligible.
 7. **Publish npm.** Use OIDC trusted publishing for five `@kdlbs/runtime-*` packages first, then the `kandev` launcher. Existing versions are skipped; the main package is not published after a runtime-package failure.
-8. **Update Homebrew.** Push the formula update to `kdlbs/homebrew-kandev` using release checksums and the deploy key.
+8. **Update Homebrew.** Push the formula update to `kdlbs/homebrew-kandev` using release checksums and the deploy key. The generated formula records `X.Y.Z` explicitly; platform archive suffixes such as `x64` are not version identifiers.
 
 GHCR images are built before the GitHub Release. npm and Homebrew start only after the GitHub Release and may run in parallel. A late failure can therefore leave some channels complete and others missing.
 
@@ -105,7 +105,7 @@ After publication, verify:
 - the Git tag points at the generated release merge;
 - GitHub notes, five runtime archives, checksums, expected desktop installers, and conditional `latest.json`;
 - all five runtime npm packages plus `kandev`, including a clean `npx kandev@latest`;
-- Homebrew install/upgrade and `kandev --version`;
+- Homebrew install/upgrade, a `Cellar/kandev/X.Y.Z` install path, and `kandev --version`;
 - GHCR base and universal images on amd64 and arm64, including their immutable version tags;
 - desktop launch on affected platforms and signed/notarized status where configured;
 - backend health, a minimal task, agentctl startup, and Updates-screen behavior;

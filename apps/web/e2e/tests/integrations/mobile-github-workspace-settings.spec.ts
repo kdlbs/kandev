@@ -17,7 +17,7 @@ test.describe("GitHub workspace settings on mobile", () => {
       { host: "github.com", login: "mobile-cli", active: true, state: "active" },
     ]);
     await stubGitHubRateLimits(testPage, workspaceId);
-    await testPage.goto(`/settings/workspace/${workspaceId}/integrations/github`);
+    await testPage.goto(`/settings/workspaces/${workspaceId}/integrations/github`);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
       "Inherit executor Git credentials",
@@ -70,13 +70,30 @@ test.describe("GitHub workspace settings on mobile", () => {
     const footer = drawer.getByTestId("github-connection-footer");
     const fixedSaveButton = footer.getByRole("button", { name: "Save changes" });
     await expect(fixedSaveButton).toBeVisible();
+    expect(drawerBox).not.toBeNull();
+    await expect
+      .poll(
+        async () => {
+          const [currentScrollBox, currentFadeBox] = await Promise.all([
+            scrollBody.boundingBox(),
+            scrollFade.boundingBox(),
+          ]);
+          if (!currentScrollBox || !currentFadeBox) return Number.POSITIVE_INFINITY;
+          return Math.abs(
+            currentFadeBox.y +
+              currentFadeBox.height -
+              (currentScrollBox.y + currentScrollBox.height),
+          );
+        },
+        { timeout: 10_000 },
+      )
+      .toBeLessThanOrEqual(2);
     const [scrollBox, fadeBox, footerBox, initialSaveBox] = await Promise.all([
       scrollBody.boundingBox(),
       scrollFade.boundingBox(),
       footer.boundingBox(),
       fixedSaveButton.boundingBox(),
     ]);
-    expect(drawerBox).not.toBeNull();
     expect(scrollBox).not.toBeNull();
     expect(fadeBox).not.toBeNull();
     expect(footerBox).not.toBeNull();
@@ -162,7 +179,7 @@ test.describe("GitHub workspace settings on mobile", () => {
     testPage,
     seedData,
   }) => {
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
 
     const issueWatchesHeading = testPage.getByRole("heading", { name: "Issue Watches" });
     const repositoryScopeHeading = testPage.getByRole("heading", {

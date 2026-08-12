@@ -12,16 +12,16 @@ test.describe("Workspace settings", () => {
     const workspaceName = `Settings Kanban ${Date.now().toString(36)}`;
     const taskTitle = `Kanban Bootstrap Task ${Date.now().toString(36)}`;
 
-    await testPage.goto("/settings/workspace");
+    await testPage.goto("/settings/workspaces");
     await testPage.getByRole("button", { name: "Add Workspace" }).click();
     await testPage.getByLabel("Workspace Name").fill(workspaceName);
     await testPage.locator("form").getByRole("button", { name: "Add Workspace" }).click();
 
     // Follow the newly rendered workspace link rather than seeding or creating
-    // it through the API: this covers the standard Settings creation flow.
-    const workspaceLink = testPage.getByRole("link").filter({
-      has: testPage.getByRole("heading", { name: workspaceName, exact: true }),
-    });
+    // it through the API: this covers the standard Settings creation flow. The
+    // card's link is an empty overlay named by `aria-label` — the workspace
+    // name is a sibling `h4`, not the link's child.
+    const workspaceLink = testPage.getByRole("link", { name: workspaceName, exact: true });
     await expect(workspaceLink).toBeVisible();
     const workspaceHref = await workspaceLink.getAttribute("href");
     const workspaceId = new URL(workspaceHref ?? "", "http://kandev.test").pathname.split("/")[3];
@@ -29,11 +29,14 @@ test.describe("Workspace settings", () => {
     let createdTaskId: string | undefined;
 
     try {
-      await workspaceLink.click();
+      // The card's section tiles sit above the overlay link (z-10) and cover
+      // its centre, so click near a corner — the card padding, where the
+      // overlay is what a user's pointer actually reaches.
+      await workspaceLink.click({ position: { x: 8, y: 8 } });
 
-      await expect(
-        testPage.getByRole("heading", { name: workspaceName, exact: true }),
-      ).toBeVisible();
+      // The workspace name heads the page through the switcher trigger, not a
+      // heading: the shell doubles it as the workspace-to-workspace navigator.
+      await expect(testPage.getByTestId("workspace-settings-switcher")).toHaveText(workspaceName);
       await testPage
         .getByTestId("settings-scroll-container")
         .getByRole("link", { name: "Workflows", exact: true })
@@ -94,8 +97,8 @@ test.describe("Workspace settings", () => {
     const workspaceName = `Settings Delete ${suffix}`;
     const workspace = await apiClient.createWorkspace(workspaceName);
 
-    await testPage.goto(`/settings/workspace/${workspace.id}`);
-    await expect(testPage.getByRole("heading", { name: workspaceName })).toBeVisible({
+    await testPage.goto(`/settings/workspaces/${workspace.id}`);
+    await expect(testPage.getByTestId("workspace-settings-switcher")).toHaveText(workspaceName, {
       timeout: 15_000,
     });
 
@@ -127,7 +130,7 @@ test.describe("Workspace settings", () => {
     // outcome: redirect to the workspace list and the workspace gone from the
     // backend.
     await confirmButton.click();
-    await expect(testPage).toHaveURL(/\/settings\/workspace$/, { timeout: 10_000 });
+    await expect(testPage).toHaveURL(/\/settings\/workspaces$/, { timeout: 10_000 });
 
     const { workspaces } = await apiClient.listWorkspaces();
     expect(workspaces.some((item) => item.id === workspace.id)).toBe(false);
@@ -156,8 +159,8 @@ test.describe("Workspace settings", () => {
       content: "# Settings cleanup skill\n",
     });
 
-    await testPage.goto(`/settings/workspace/${onboarded.workspaceId}`);
-    await expect(testPage.getByRole("heading", { name: workspaceName })).toBeVisible({
+    await testPage.goto(`/settings/workspaces/${onboarded.workspaceId}`);
+    await expect(testPage.getByTestId("workspace-settings-switcher")).toHaveText(workspaceName, {
       timeout: 15_000,
     });
 
@@ -169,7 +172,7 @@ test.describe("Workspace settings", () => {
     await confirmInput.fill(workspaceName);
     await expect(confirmButton).toBeEnabled();
     await confirmButton.click();
-    await expect(testPage).toHaveURL(/\/settings\/workspace$/, { timeout: 10_000 });
+    await expect(testPage).toHaveURL(/\/settings\/workspaces$/, { timeout: 10_000 });
 
     const { workspaces } = await apiClient.listWorkspaces();
     expect(workspaces.some((item) => item.id === onboarded.workspaceId)).toBe(false);

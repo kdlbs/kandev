@@ -278,7 +278,7 @@ func (r *SpritesExecutor) fallbackToFreshSandbox(
 	})
 
 	notice := beginStep("Reconnecting cloud sandbox")
-	notice.Warning = "Previous sandbox is no longer available — provisioning a fresh one for this branch."
+	notice.Warning = "Previous sandbox is no longer available; provisioning a fresh one for this branch."
 	notice.WarningDetail = fmt.Sprintf(
 		"The Sprites sandbox %s could not be reached (it was likely destroyed or expired). "+
 			"Kandev is starting a fresh sandbox %s on the same branch %s; this typically takes 30–60 seconds.",

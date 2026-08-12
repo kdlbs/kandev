@@ -702,13 +702,20 @@ export class ApiClient {
     workflowId: string,
     name: string,
     position: number,
-    opts?: { is_start_step?: boolean },
+    opts?: {
+      is_start_step?: boolean;
+      events?: {
+        on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
+      };
+    },
   ): Promise<{ id: string }> {
     return this.request("POST", `/api/v1/workflow/steps`, {
       workflow_id: workflowId,
       name,
       position,
       ...(opts?.is_start_step != null ? { is_start_step: opts.is_start_step } : {}),
+      ...(opts?.events != null ? { events: opts.events } : {}),
     });
   }
 
@@ -787,6 +794,7 @@ export class ApiClient {
     repositoryId: string,
     updates: {
       provider?: string;
+      provider_repo_id?: string;
       provider_host?: string;
       provider_owner?: string;
       provider_name?: string;
@@ -916,6 +924,7 @@ export class ApiClient {
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
       show_todo_list_panel?: boolean;
+      show_todo_list_panel_only_when_not_empty?: boolean;
       agent_generated_task_titles?: boolean;
       [key: string]: unknown;
     };
@@ -926,6 +935,7 @@ export class ApiClient {
   async saveUserSettings(settings: {
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
+    prevent_auto_start_agent_on_open?: boolean;
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
@@ -949,6 +959,7 @@ export class ApiClient {
     sidebar_active_view_id?: string;
     sidebar_draft?: unknown;
     saved_layouts?: unknown[];
+    app_status_bar_enabled?: boolean;
     lsp_auto_start_languages?: string[];
     lsp_auto_install_languages?: string[];
     lsp_server_configs?: Record<string, Record<string, unknown>>;
@@ -959,6 +970,7 @@ export class ApiClient {
     tasks_list_group?: string;
     task_create_last_used?: TaskCreateLastUsedApi;
     voice_mode?: VoiceModeSettings;
+    kanban_hidden_step_ids?: Record<string, string[]>;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
@@ -998,6 +1010,7 @@ export class ApiClient {
       wip_limit?: number;
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
+      stage_type?: "work" | "review" | "approval" | "custom";
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });
@@ -2324,6 +2337,19 @@ export class ApiClient {
     );
   }
 
+  async associateAzureDevOpsTaskPR(
+    workspaceId: string,
+    taskId: string,
+    repositoryId: string,
+    pullRequestId: number,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/v1/azure-devops/tasks/${encodeURIComponent(taskId)}/pull-requests?workspace_id=${encodeURIComponent(workspaceId)}`,
+      { repositoryId, pullRequestId },
+    );
+  }
+
   // --- Jira Mock Control ---
 
   async mockJiraReset(): Promise<void> {
@@ -2893,6 +2919,20 @@ export class ApiClient {
      */
     prompt?: string;
     /**
+     * Agent profile to run the automation's spawned tasks under. Required for
+     * tests that need the automation to actually launch an agent — without it
+     * autoStartAutomationTask calls StartTask with an empty profile ID, the
+     * lifecycle layer fails to resolve the agent, and the run task sits idle.
+     * Typically seedData.agentProfileId.
+     */
+    agentProfileId?: string;
+    /**
+     * Executor profile for the automation's spawned tasks. Typically
+     * seedData.worktreeExecutorProfileId. Optional — omit for tests that only
+     * assert on automation UI/list state and do not need agent execution.
+     */
+    executorProfileId?: string;
+    /**
      * Backdate the row's `execution_mode` to `task` after creation, which is
      * what an install predating the withdrawal of execution modes carries on
      * disk. The API ignores `execution_mode` on input by design, so this is
@@ -2908,6 +2948,8 @@ export class ApiClient {
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
       prompt: opts.prompt ?? "",
+      agent_profile_id: opts.agentProfileId ?? "",
+      executor_profile_id: opts.executorProfileId ?? "",
       legacy_board_card: opts.legacyBoardCard ?? false,
     });
   }
@@ -2926,6 +2968,20 @@ export class ApiClient {
     await this.request("PATCH", `/api/v1/e2e/tasks/${taskId}/origin`, { origin });
   }
 
+  async seedTrigger(opts: {
+    automationId: string;
+    type: string;
+    config?: Record<string, unknown>;
+    enabled?: boolean;
+  }): Promise<{ id: string; automation_id: string; type: string; enabled: boolean }> {
+    return this.request("POST", "/api/v1/e2e/automation-triggers", {
+      automation_id: opts.automationId,
+      type: opts.type,
+      config: opts.config ?? {},
+      enabled: opts.enabled ?? true,
+    });
+  }
+
   async seedAutomationRun(
     automationId: string,
     status = "skipped",
@@ -2936,6 +2992,42 @@ export class ApiClient {
       status,
       task_id: taskId ?? "",
     });
+  }
+
+  /**
+   * Fire a fake github_pr_merged event into the in-process event bus so the
+   * automation subscriber picks it up without real GitHub polling. The backend
+   * polls until the resulting automation run task is created and returns its id.
+   * Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async firePRMerged(opts: {
+    taskId: string;
+    automationId: string;
+    owner: string;
+    repo: string;
+    prNumber?: number;
+    baseBranch?: string;
+  }): Promise<{ run_task_id: string }> {
+    return this.request("POST", "/api/v1/e2e/github/fire-pr-merged", {
+      task_id: opts.taskId,
+      automation_id: opts.automationId,
+      owner: opts.owner,
+      repo: opts.repo,
+      pr_number: opts.prNumber ?? 1,
+      base_branch: opts.baseBranch ?? "main",
+    });
+  }
+
+  /**
+   * Fire a manual automation trigger, mirroring the "Run" button path. The
+   * backend polls until the resulting run task is created and returns its id.
+   * Returns { skipped, reason } when the automation is at its concurrency cap.
+   * Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async triggerAutomationManual(
+    automationId: string,
+  ): Promise<{ run_task_id?: string; skipped?: boolean; reason?: string }> {
+    return this.request("POST", `/api/v1/e2e/automations/${automationId}/trigger`, {});
   }
 
   /**

@@ -11,7 +11,7 @@
   "apiKey": "API Key",
   "areYouSureThisActionCannot": "Are you sure? This action cannot be undone.",
   "areYouSureYouWantTo": "Are you sure you want to delete this profile? This action cannot be undone.",
-  "authFilesNotFoundOnThisMachine": "{{files}} — files not found on this machine",
+  "authFilesNotFoundOnThisMachine": "{{files}}; files not found on this machine",
   "backToExecutor": "Back to Executor",
   "backToExecutors": "Back to Executors",
   "buildFailedWithMessage": "Build failed: {{message}}",

@@ -186,6 +186,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// A UI filter is not an authorization boundary: reject a workflow owned
 		// by another workspace even when a request names it directly.
 		automationComponents.Service.SetWorkflowLocator(&automationWorkflowLocatorAdapter{svc: taskSvc})
+		automationComponents.Service.SetTaskOriginLookup(&automationTaskOriginLookupAdapter{svc: taskSvc, log: log})
 		// Profile deletion disables the automations bound to a profile before
 		// the row goes, but nothing ever checked that the binding pointed at a
 		// real profile in the first place — so a create or rebind naming an id
@@ -739,13 +740,17 @@ func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string)
 		return nil, err
 	}
 	profileID := agent.AgentProfileID
-	if profileID == "" && agent.ProfileBindingState == utilitymodels.ProfileBindingInherit && a.userSvc != nil {
+	bindingState := agent.ProfileBindingState
+	if utilitymodels.UsesDefaultProfile(agent) && a.userSvc != nil {
 		profileID, err = a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
 		if err != nil {
 			return nil, err
 		}
+		if profileID != "" {
+			bindingState = utilitymodels.ProfileBindingExplicit
+		}
 	}
-	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, AgentProfileID: profileID, ProfileBindingState: agent.ProfileBindingState, Enabled: agent.Enabled}, nil
+	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, AgentProfileID: profileID, ProfileBindingState: bindingState, Enabled: agent.Enabled}, nil
 }
 
 // pluginsTaskWriterAdapter adapts the task service to the plugins package's

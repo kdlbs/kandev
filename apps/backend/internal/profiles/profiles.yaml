@@ -44,13 +44,6 @@ features:
     dev:  "true"
     e2e:  "true"
 
-  # App status bar. Off until a user opts in; on only in e2e so browser tests
-  # continuously exercise the global surface without changing user defaults.
-  KANDEV_FEATURES_APP_STATUS_BAR:
-    prod: "false"
-    dev:  "false"
-    e2e:  "true"
-
   # Opt-in authentication + per-user workspaces. This flag IS the on/off
   # switch: when on, every visitor must sign in (the first becomes admin via
   # a setup wizard) and workspaces are private per user. Off everywhere by
@@ -134,8 +127,8 @@ debug:
     dev:  "true"
     e2e:  ""
 
-  # Legacy alias for KANDEV_DEBUG_DEV_MODE — kept for compatibility
-  # with older deploy scripts that grep for "pprof".
+  # Legacy debug behavior variable — kept for compatibility with older
+  # deploy scripts that enable pprof. It does not select the dev profile.
   KANDEV_DEBUG_PPROF_ENABLED:
     prod: ""
     dev:  "true"

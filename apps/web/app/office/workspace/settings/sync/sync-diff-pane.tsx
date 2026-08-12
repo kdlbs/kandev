@@ -137,7 +137,7 @@ function ParseErrorsSection({
         {errors.map((err) => (
           <li key={err.file_path} className="text-xs">
             <code className="font-mono">{err.file_path}</code>
-            <span className="text-muted-foreground"> — {err.error}</span>
+            <span className="text-muted-foreground"> - {err.error}</span>
           </li>
         ))}
       </ul>

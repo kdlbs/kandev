@@ -70,7 +70,7 @@ After startup it returns HTTP 200 with:
 {"status":"ok","service":"kandev","mode":"websocket+http","version":"1.2.3"}
 ```
 
-It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready. The supplied Kubernetes probes use this endpoint. `/health` is unauthenticated even when auth is enabled, so it's also the credential-free way for monitoring to read the running version — no need to authenticate to **System > About** just to check what build is deployed.
+It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready. The supplied Kubernetes probes use this endpoint. `/health` is unauthenticated even when auth is enabled, so it's also the credential-free way for monitoring to read the running version; there is no need to authenticate to **System > About** just to check what build is deployed.
 
 For application diagnostics, open **Settings > System > Status** or request:
 
@@ -144,7 +144,7 @@ Scheduled cleanup is disabled by default and runs only after the configured reso
 period. Orphaned task workspaces and rotated Go caches move into Kandev's quarantine before
 permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
 **Clear eligible** cannot remove it before that time. The deadline is the earliest safe deletion
-time, not an exact promise—the first successful scheduled or full manual maintenance run after the
+time, not an exact promise, the first successful scheduled or full manual maintenance run after the
 deadline performs the purge, subject to the idle gate and any preemption.
 
 Use **Clear eligible** to remove only entries whose deadlines have passed. It reports protected
@@ -251,7 +251,7 @@ authoritative. Do not delete ownership rows by hand. Start a compatible
 pre-cutover binary to restore service, or deploy the migration hotfix and retry
 the upgrade against the unchanged database.
 
-The normalized schema is intentionally incompatible with older binaries. To downgrade, stop all instances and restore the pre-upgrade backup — never start an older binary against a post-cutover database. SQLite restores from its automatic pre-migration snapshot; PostgreSQL restores your verified `pg_dump` backup.
+The normalized schema is intentionally incompatible with older binaries. To downgrade, stop all instances and restore the pre-upgrade backup; never start an older binary against a post-cutover database. SQLite restores from the verified manual snapshot created before the upgrade; PostgreSQL restores your verified `pg_dump` backup.
 
 Switching `database.driver` does not migrate data. PostgreSQL and shared NATS remove two single-process data constraints, but they do not make Kandev horizontally scalable: WebSocket subscriptions, execution lifecycle/control state, and task workspaces remain process- or filesystem-local. The current product and supplied deployment validate one backend replica only; do not add replicas based on the database and event bus alone.
 
@@ -422,25 +422,31 @@ After restart, verify `/health`, **System > About**, **System > Status**, the da
 
 ## Resource metrics
 
-Configure sampling at **Settings > General > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or 1-minute system load remains selected. System load is the average number of tasks running or waiting for CPU during the last minute; compare it with the host's CPU core count. Enable **Simplified metrics** to show only each metric icon and value in the status bar or phone Status drawer, without the Host marker or percentage progress bars.
+Configure sampling at **Settings > Preferences > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or 1-minute system load remains selected. System load is the average number of tasks running or waiting for CPU during the last minute; compare it with the host's CPU core count. Enable **Simplified metrics** to show only each metric icon and value in the status bar, fallback top bar, or phone Status drawer, without the Host marker or percentage progress bars.
 
-Collection starts only while at least one connected client displays metrics in the global status bar. Phone clients subscribe only while their Status drawer is open. The built-in status surface renders the Kandev host source only. Enabling execution metrics also adds active Docker, SSH, and Sprites `agentctl` sources to the metrics stream for separately owned consumers such as plugins; execution disk sampling uses `/`. A provider hook also exists for remote Docker, but creating that runtime currently returns a not-implemented error. Missing platform APIs, container permissions, an invalid disk path, a disconnected executor, macOS/Windows temperature support, or Windows load-average support produce unavailable samples rather than quotas.
+Collection starts only while at least one connected client displays metrics in the status bar, fallback top bar, or an open phone Status drawer. Phone clients subscribe only while their Status drawer is open. The built-in status surface renders the Kandev host source only. Enabling execution metrics also adds active Docker, SSH, and Sprites `agentctl` sources to the metrics stream for separately owned consumers such as plugins; execution disk sampling uses `/`. A provider hook also exists for remote Docker, but creating that runtime currently returns a not-implemented error. Missing platform APIs, container permissions, an invalid disk path, a disconnected executor, macOS/Windows temperature support, or Windows load-average support produce unavailable samples rather than quotas.
 
 These metrics are lightweight UI observability. Set alerts, retention, CPU/memory limits, and disk quotas in the host, container platform, or external monitoring stack.
 
+## Status bar visibility
+
+The status surface is off by default for each user. Open **Settings > Preferences > Appearance > Status Bar**, enable **Show status bar**, and use the page's shared **Save changes** action. The portable preference applies immediately without restarting Kandev. It shows a 24 px bottom bar on desktop and fine-pointer tablets; phones use native Status controls and an inset Status drawer.
+
+Turning it off removes ordinary status chrome. Host metrics remain controlled separately by **Show host metrics in status bar** and move to the existing top-bar fallback when enabled. A saved language-server **Status location** also falls back to the editor toolbar when the status surface is unavailable. Active WebSocket connectivity warnings remain reachable through the warning-only fallbacks described below.
+
 ## WebSocket connectivity warnings
 
-Kandev warns when its live WebSocket connection has not recovered for three seconds: yellow means the connection is unstable and reconnecting; after ten seconds the warning turns red, meaning live updates may be stale. The warning clears as soon as the connection recovers. With **App status bar** enabled, it appears in the bottom bar on desktop/tablet and through the existing Status controls on phones. When that feature is disabled, an active warning still appears beside the sidebar theme control on desktop/tablet and opens a connection-only Status drawer on phones.
+Kandev warns when its live WebSocket connection has not recovered for three seconds: yellow means the connection is unstable and reconnecting; after ten seconds the warning turns red, meaning live updates may be stale. The warning clears as soon as the connection recovers. With **Show status bar** on, it appears in the bottom bar on desktop/tablet and through the existing Status controls on phones. When the preference is off, an active warning still appears beside the sidebar theme control on desktop/tablet and opens a connection-only Status drawer on phones.
 
 ## Feature toggles
 
 **Settings > System > Feature Toggles** currently exposes:
 
-- **Office mode** — experimental, medium risk, and off in the production profile by default.
-- **App status bar** — stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins. Urgent WebSocket connectivity warnings still remain visible while the feature is off.
-- **Claude background prompt handoff** — experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
-- **Unread divider** — a per-user setting at **Settings > General > Task Actions**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
-- **Debug mode** — high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
+- **Office mode**: experimental, medium risk, and off in the production profile by default.
+- **App status bar**: stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins. Urgent WebSocket connectivity warnings still remain visible while the feature is off.
+- **Claude background prompt handoff**: experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
+- **Unread divider**: a per-user setting at **Settings > General > Task Actions**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
+- **Debug mode**: high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
 
 Each feature toggle requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
 
@@ -471,8 +477,8 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 
 ## Related pages
 
-- [Configuration](configuration.md) — paths, database, logging, NATS, Docker, and security-sensitive environment variables
-- [Executors](executors.md) — runtime lifecycle, credentials, cleanup, and isolation boundaries
-- [Git operations](git-operations.md) — branches, worktrees, push, and pull-request behavior
-- [Automation and MCP](automation-and-mcp.md) — external MCP routes and their current unauthenticated trust boundary
-- [Windows support](windows-support.md) — Windows-native limitations and supported alternatives
+- [Configuration](configuration.md); paths, database, logging, NATS, Docker, and security-sensitive environment variables
+- [Executors](executors.md); runtime lifecycle, credentials, cleanup, and isolation boundaries
+- [Git operations](git-operations.md); branches, worktrees, push, and pull-request behavior
+- [Automation and MCP](automation-and-mcp.md); external MCP routes and their current unauthenticated trust boundary
+- [Windows support](windows-support.md); Windows-native limitations and supported alternatives

@@ -11,7 +11,11 @@ vi.mock("@/lib/routing/client-router", () => ({
 // model well. Render them as plain elements so the focus stays on the picker's
 // routing logic: `onSelect` fires on click of the item.
 vi.mock("@kandev/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenu: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
+    <div data-testid="dropdown-root" data-open={String(open)}>
+      {children}
+    </div>
+  ),
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuItem: ({
@@ -110,7 +114,7 @@ describe("AppSidebarWorkspacePicker — Add workspace routing", () => {
 
     fireEvent.click(screen.getByText("New kanban workspace"));
 
-    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspace");
+    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspaces");
   });
 
   it("keeps the legacy add-workspace route when the office feature is disabled", () => {
@@ -119,7 +123,7 @@ describe("AppSidebarWorkspacePicker — Add workspace routing", () => {
 
     fireEvent.click(screen.getByText("Add workspace"));
 
-    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspace");
+    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspaces");
   });
 
   it("calls onActionComplete after navigating to add a workspace", () => {
@@ -235,6 +239,25 @@ describe("AppSidebarWorkspacePicker — active workspace display and routing", (
     expect(screen.getByTestId(OFFICE_WORKSPACE_ITEM).textContent).toContain("Office");
   });
 
+  it("marks the active workspace with the Active badge between its name and its type", () => {
+    storeState.workspaces.activeId = "w1";
+    render(<AppSidebarWorkspacePicker />);
+
+    const activeRow = screen.getByTestId(KANBAN_WORKSPACE_ITEM).textContent ?? "";
+    expect(activeRow).toContain("Active");
+    expect(activeRow.indexOf("Active")).toBeGreaterThan(activeRow.indexOf("Default Workspace"));
+    expect(activeRow.indexOf("Active")).toBeLessThan(activeRow.indexOf("Kanban"));
+  });
+
+  it("leaves non-active workspace rows unbadged and drops the check icon", () => {
+    storeState.workspaces.activeId = "w1";
+    const { container } = render(<AppSidebarWorkspacePicker />);
+
+    expect(screen.getByTestId(OFFICE_WORKSPACE_ITEM).textContent).not.toContain("Active");
+    expect(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM).textContent).not.toContain("Active");
+    expect(container.querySelector(".tabler-icon-check")).toBeNull();
+  });
+
   it("renders the trigger as an obvious selector", () => {
     render(<AppSidebarWorkspacePicker />);
 
@@ -275,5 +298,56 @@ describe("AppSidebarWorkspacePicker — active workspace display and routing", (
     fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
 
     expect(onActionComplete).toHaveBeenCalledOnce();
+  });
+});
+
+function menuOpenState(): string | null {
+  return screen.getByTestId("dropdown-root").getAttribute("data-open");
+}
+
+describe("AppSidebarWorkspacePicker — controlled open state", () => {
+  beforeEach(resetWorkspaceSelectTest);
+
+  afterEach(cleanupWorkspaceSelectTest);
+
+  it("stays closed and self-managed when no open prop is passed", () => {
+    render(<AppSidebarWorkspacePicker />);
+
+    expect(menuOpenState()).toBe("false");
+  });
+
+  it("passes a controlled open prop straight through to the menu", () => {
+    render(<AppSidebarWorkspacePicker open onOpenChange={vi.fn()} />);
+
+    expect(menuOpenState()).toBe("true");
+  });
+
+  it("keeps the controlled value when the picker asks to close", () => {
+    // A controlled owner that ignores the request keeps the menu open — proof
+    // the component does not fall back to its internal state.
+    render(<AppSidebarWorkspacePicker open onOpenChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM));
+
+    expect(menuOpenState()).toBe("true");
+  });
+
+  it("reports the close request to the controlled owner on workspace select", () => {
+    const onOpenChange = vi.fn();
+    render(<AppSidebarWorkspacePicker open onOpenChange={onOpenChange} />);
+
+    fireEvent.click(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM));
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("reports open changes while still self-managing state", () => {
+    const onOpenChange = vi.fn();
+    render(<AppSidebarWorkspacePicker onOpenChange={onOpenChange} />);
+
+    fireEvent.click(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM));
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(menuOpenState()).toBe("false");
   });
 });

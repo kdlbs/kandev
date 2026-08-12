@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 
-const KEYBOARD_SETTINGS_PATH = "/settings/general/keyboard-shortcuts";
+const KEYBOARD_SETTINGS_PATH = "/settings/preferences/keyboard-shortcuts";
 
 test.describe("Keyboard Shortcuts Settings", () => {
   test.describe.configure({ retries: 1 });
@@ -27,6 +27,8 @@ test.describe("Keyboard Shortcuts Settings", () => {
     await expect(testPage.getByTestId("shortcut-recorder-TASK_SWITCHER")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-TASK_SWITCHER_REVERSE")).toBeVisible();
     await expect(testPage.getByTestId("shortcut-recorder-REVERSE_SEARCH")).toBeVisible();
+    await expect(testPage.getByTestId("shortcut-recorder-WORKSPACE_PICKER")).toBeVisible();
+    await expect(testPage.getByText("Open Workspace Picker")).toBeVisible();
   });
 
   test("can record a new shortcut and persist it", async ({ testPage, apiClient, seedData }) => {

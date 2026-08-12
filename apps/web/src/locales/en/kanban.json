@@ -89,5 +89,7 @@
   "whenEnabledClickingATaskOpens": "When enabled, clicking a task opens the preview panel. When disabled, clicking navigates directly to the session.",
   "wipTaskCount": "{{label}} tasks",
   "workflow": "Workflow",
-  "workflowStepFallback": "workflow step {{stepId}}"
+  "workflowStepFallback": "workflow step {{stepId}}",
+  "columns": "Columns",
+  "columnsForWorkflow": "Columns for {{name}}"
 }

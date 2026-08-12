@@ -16,12 +16,18 @@ type runtimeFlagIdentity struct {
 	envVar string
 }
 
+const (
+	retiredAppStatusBarKey    = "features.appStatusBar"
+	retiredAppStatusBarEnvVar = "KANDEV_FEATURES_APP_STATUS_BAR"
+)
+
 // retiredRuntimeFlagIdentities is append-only. When a flag graduates, remove
 // its active registration and move its identity here. Persisted overrides for
 // unknown keys are intentionally retained, so neither the key nor environment
 // variable may ever be reused for a different flag.
 var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: "features.plugins", envVar: "KANDEV_FEATURES_PLUGINS"},
+	{key: retiredAppStatusBarKey, envVar: retiredAppStatusBarEnvVar},
 }
 
 var registrations = []runtimeFlagRegistration{
@@ -41,23 +47,6 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.Office },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.Office = value },
-	},
-	{
-		definition: RuntimeFlagDefinition{
-			Key:         "features.appStatusBar",
-			EnvVar:      "KANDEV_FEATURES_APP_STATUS_BAR",
-			Kind:        KindFeature,
-			Label:       "App status bar",
-			Description: "Adds the global connection, optional host metrics, and plugin status surface.",
-			Stability:   StabilityStable,
-			RiskLevel:   RiskLow,
-			RiskDescription: "Changing this adds or removes the desktop and tablet status bar and the phone Status drawer entry " +
-				"after restart. It does not stop connections, metrics collection requested by other clients, or plugins.",
-			RestartRequired: true,
-			Mutable:         true,
-		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.AppStatusBar },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.AppStatusBar = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

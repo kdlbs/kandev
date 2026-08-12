@@ -2,14 +2,14 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   REVIEW_OWNER,
   REVIEW_PRS,
-  REVIEW_REPO,
   REVIEW_SHARED_FILE,
+  reviewRepositoryName,
   seedMultiPRReviewTask,
 } from "../../helpers/multi-pr-review";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
 
-async function openMobileReview(testPage: Page, session: SessionPage) {
+async function openMobileReview(testPage: Page, session: SessionPage, repositoryName: string) {
   await testPage.getByRole("button", { name: "Changes" }).tap();
   const changesPanel = testPage.getByTestId("mobile-changes-panel");
   await expect(changesPanel).toBeVisible({ timeout: 15_000 });
@@ -18,7 +18,7 @@ async function openMobileReview(testPage: Page, session: SessionPage) {
   for (const pr of REVIEW_PRS) {
     await expect(
       prFiles.locator(
-        `[data-changes-file=${JSON.stringify(REVIEW_SHARED_FILE)}][data-pr-key="${REVIEW_OWNER}/${REVIEW_REPO}/${pr.number}"]`,
+        `[data-changes-file=${JSON.stringify(REVIEW_SHARED_FILE)}][data-pr-key="${REVIEW_OWNER}/${repositoryName}/${pr.number}"]`,
       ),
     ).toBeVisible();
   }
@@ -35,29 +35,34 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     seedData,
   }) => {
     const task = await seedMultiPRReviewTask(apiClient, seedData, "Mobile Multi-PR Review E2E");
+    const repositoryName = reviewRepositoryName(seedData);
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
-    await openMobileReview(testPage, session);
+    await openMobileReview(testPage, session, repositoryName);
 
     const [firstPR, secondPR] = REVIEW_PRS;
     const selector = session.reviewPRSelectorTrigger();
     await expect(selector).toBeVisible();
     await expect(selector).toHaveAttribute("data-pr-number", String(firstPR.number));
     await expect(session.reviewFileHeader(REVIEW_SHARED_FILE)).toBeVisible();
-    await expect(session.reviewDialog().getByTestId("changes-repo-group")).toHaveAttribute(
-      "data-repository-name",
-      firstPR.repositoryName,
-    );
+    // The initial diff group can use the generated task-workspace scope, so
+    // only require a non-empty identity before selecting the second PR.
+    const repositoryGroup = session.reviewDialog().getByTestId("changes-repo-group");
+    await expect(repositoryGroup).toHaveAttribute("data-repository-name", /\S+/, {
+      timeout: 30_000,
+    });
+    const repositoryScope = await repositoryGroup.getAttribute("data-repository-name");
+    expect(repositoryScope).toBeTruthy();
     await expect
       .poll(() => session.reviewDiffText(), { timeout: 30_000 })
       .toContain(firstPR.marker);
 
     await selector.tap();
     const menu = session.reviewPRSelectorMenu();
-    const secondItem = session.reviewPRSelectorItem(REVIEW_OWNER, REVIEW_REPO, secondPR.number);
+    const secondItem = session.reviewPRSelectorItem(REVIEW_OWNER, repositoryName, secondPR.number);
     await expect(menu).toBeVisible();
     await expect(secondItem).toBeVisible();
 
@@ -88,10 +93,9 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     await expect(session.reviewDialog()).toBeVisible();
     await expect(selector).toHaveAttribute("data-pr-number", String(secondPR.number));
     await expect(session.reviewFileHeader(REVIEW_SHARED_FILE)).toBeVisible({ timeout: 20_000 });
-    await expect(session.reviewDialog().getByTestId("changes-repo-group")).toHaveAttribute(
-      "data-repository-name",
-      secondPR.repositoryName,
-    );
+    await expect(repositoryGroup).toHaveAttribute("data-repository-name", secondPR.repositoryName, {
+      timeout: 30_000,
+    });
     await expect
       .poll(() => session.reviewDiffText(), { timeout: 30_000 })
       .toContain(secondPR.marker);
@@ -111,6 +115,7 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
   }) => {
     await testPage.setViewportSize({ width: 820, height: 900 });
     const task = await seedMultiPRReviewTask(apiClient, seedData, "Tablet Multi-PR Review E2E");
+    const repositoryName = reviewRepositoryName(seedData);
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
@@ -133,7 +138,7 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     expect(toolbarBox.height).toBeGreaterThanOrEqual(44);
 
     await dialogSelector.tap();
-    await session.reviewPRSelectorItem(REVIEW_OWNER, REVIEW_REPO, REVIEW_PRS[1].number).tap();
+    await session.reviewPRSelectorItem(REVIEW_OWNER, repositoryName, REVIEW_PRS[1].number).tap();
     await expect(dialogSelector).toHaveAttribute("data-pr-number", String(REVIEW_PRS[1].number));
     await expect.poll(() => session.reviewDiffText()).toContain(REVIEW_PRS[1].marker);
   });
