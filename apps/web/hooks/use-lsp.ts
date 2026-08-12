@@ -111,6 +111,7 @@ export function useLsp(
   status: LspStatus;
   progress: LspProgressSnapshot;
   lspLanguage: string | null;
+  taskId: string | null;
   toggle: () => void;
 } {
   const lspLanguage = toLspLanguage(monacoLanguage);
@@ -150,5 +151,5 @@ export function useLsp(
     return () => window.clearTimeout(timer);
   }, [taskId, sessionId, lspLanguage, snapshot?.phase, attachmentStatus.state, attachmentAttempt]);
 
-  return { status, progress, lspLanguage, toggle };
+  return { status, progress, lspLanguage, taskId, toggle };
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   getTaskLsp,
@@ -44,6 +44,10 @@ function taskPending(
   );
 }
 
+function isLoadedTaskState(task: { loaded: boolean } | undefined): boolean {
+  return task?.loaded ?? false;
+}
+
 function useTaskLspSubscription(taskId: string | null, connectionStatus: string) {
   useEffect(() => {
     if (!taskId) return;
@@ -51,6 +55,30 @@ function useTaskLspSubscription(taskId: string | null, connectionStatus: string)
     if (!client) return;
     return client.subscribe(taskId);
   }, [connectionStatus, taskId]);
+}
+
+function useAuthoritativeSubscriptionRefresh(
+  taskId: string | null,
+  connectionStatus: string,
+  loaded: boolean,
+  load: (signal?: AbortSignal) => Promise<void>,
+) {
+  const previous = useRef<{ taskId: string | null; connectionStatus: string }>({
+    taskId: null,
+    connectionStatus: "disconnected",
+  });
+  useEffect(() => {
+    const prior = previous.current;
+    previous.current = { taskId, connectionStatus };
+    const subscriptionEstablished =
+      taskId !== null &&
+      connectionStatus === "connected" &&
+      (prior.taskId !== taskId || prior.connectionStatus !== "connected");
+    if (!subscriptionEstablished || !loaded) return;
+    const controller = new AbortController();
+    void load(controller.signal).catch(() => undefined);
+    return () => controller.abort();
+  }, [connectionStatus, load, loaded, taskId]);
 }
 
 function useTransientRefresh(taskId: string | null, loaded: boolean, needed: boolean) {
@@ -85,6 +113,7 @@ export function useTaskLsp(taskId: string | null) {
   const task = useAppStore((state) => (taskId ? state.taskLsp.byTaskId[taskId] : undefined));
   const pendingByKey = useAppStore((state) => state.taskLsp.pendingByKey);
   const connectionStatus = useAppStore((state) => state.connection.status);
+  const loaded = isLoadedTaskState(task);
 
   useTaskLspSubscription(taskId, connectionStatus);
 
@@ -105,11 +134,13 @@ export function useTaskLsp(taskId: string | null) {
   );
 
   useEffect(() => {
-    if (!taskId || task?.loaded) return;
+    if (!taskId || loaded) return;
     const controller = new AbortController();
     void load(controller.signal).catch(() => undefined);
     return () => controller.abort();
-  }, [load, task?.loaded, taskId]);
+  }, [load, loaded, taskId]);
+
+  useAuthoritativeSubscriptionRefresh(taskId, connectionStatus, loaded, load);
 
   const runControl = useCallback(
     async (language: string, action: Exclude<TaskLspAction, "" | "set_policy" | "reconcile">) => {
@@ -162,14 +193,14 @@ export function useTaskLsp(taskId: string | null) {
       language.progress.length > 0,
   );
 
-  useTransientRefresh(taskId, task?.loaded ?? false, needsAuthoritativeRefresh);
+  useTransientRefresh(taskId, loaded, needsAuthoritativeRefresh);
 
   return {
     taskId,
     byLanguage,
     languages,
     capacity: task?.capacity ?? { active: 0, queued: 0, limit: 0 },
-    loaded: task?.loaded ?? false,
+    loaded,
     loading: task?.loading ?? false,
     error: task?.error ?? null,
     pending,

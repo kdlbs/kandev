@@ -301,6 +301,7 @@ type Service struct {
 	worktreeCleanup             WorktreeCleanup
 	executionStopper            TaskExecutionStopper
 	taskLSP                     TaskLSPLifecycle
+	taskEnvironmentResetGuard   TaskEnvironmentResetGuard
 	rowLivenessProber           TaskRowLivenessProber
 	contextWindowResetter       func(context.Context, string) error
 	cleanupActivity             TaskResourceCleanupActivityGate
@@ -310,6 +311,8 @@ type Service struct {
 	workspaceSourceLocks        map[string]*sync.Mutex
 	taskLSPAdmissionMu          sync.Mutex
 	taskLSPAdmissions           map[string]*sync.RWMutex
+	taskEnvLSPAdmissionMu       sync.Mutex
+	taskEnvLSPAdmissions        map[string]*sync.RWMutex
 	providerProber              ProviderDefaultBranchProber
 	gitArchiveCapture           GitArchiveCapture
 	workflowStepCreator         WorkflowStepCreator
@@ -387,12 +390,35 @@ func (s *Service) AcquireTaskLSPAdmission(
 	if !lock.TryRLock() {
 		return nil, ErrTaskLSPAdmissionBlocked
 	}
+	environment, err := s.GetTaskEnvironmentForTaskLSP(ctx, taskID)
+	if err != nil {
+		lock.RUnlock()
+		return nil, err
+	}
+	var environmentLock *sync.RWMutex
+	if environment != nil && environment.ID != "" {
+		environmentLock = s.taskLSPEnvironmentAdmissionLock(environment.ID)
+		if !environmentLock.TryRLock() {
+			lock.RUnlock()
+			return nil, ErrTaskLSPAdmissionBlocked
+		}
+	}
 	if err := context.Cause(ctx); err != nil {
+		if environmentLock != nil {
+			environmentLock.RUnlock()
+		}
 		lock.RUnlock()
 		return nil, err
 	}
 	var once sync.Once
-	return func() { once.Do(lock.RUnlock) }, nil
+	return func() {
+		once.Do(func() {
+			if environmentLock != nil {
+				environmentLock.RUnlock()
+			}
+			lock.RUnlock()
+		})
+	}, nil
 }
 
 func (s *Service) taskLSPAdmissionLock(taskID string) *sync.RWMutex {
@@ -411,6 +437,26 @@ func (s *Service) taskLSPAdmissionLock(taskID string) *sync.RWMutex {
 
 func (s *Service) acquireTaskLSPMutation(taskID string) func() {
 	lock := s.taskLSPAdmissionLock(taskID)
+	lock.Lock()
+	return lock.Unlock
+}
+
+func (s *Service) taskLSPEnvironmentAdmissionLock(environmentID string) *sync.RWMutex {
+	s.taskEnvLSPAdmissionMu.Lock()
+	defer s.taskEnvLSPAdmissionMu.Unlock()
+	if s.taskEnvLSPAdmissions == nil {
+		s.taskEnvLSPAdmissions = make(map[string]*sync.RWMutex)
+	}
+	lock := s.taskEnvLSPAdmissions[environmentID]
+	if lock == nil {
+		lock = &sync.RWMutex{}
+		s.taskEnvLSPAdmissions[environmentID] = lock
+	}
+	return lock
+}
+
+func (s *Service) acquireTaskLSPEnvironmentMutation(environmentID string) func() {
+	lock := s.taskLSPEnvironmentAdmissionLock(environmentID)
 	lock.Lock()
 	return lock.Unlock
 }
@@ -527,6 +573,18 @@ func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 // SetTaskLSPLifecycle wires the task-owned language-server controller.
 func (s *Service) SetTaskLSPLifecycle(lifecycle TaskLSPLifecycle) {
 	s.taskLSP = lifecycle
+}
+
+// TaskEnvironmentResetGuard protects physical environments referenced by a
+// wider workspace ownership boundary, such as an inherited workspace group.
+type TaskEnvironmentResetGuard interface {
+	ValidateTaskEnvironmentReset(ctx context.Context, taskID, environmentID string) error
+}
+
+// SetTaskEnvironmentResetGuard wires the cross-task workspace owner used by
+// ResetTaskEnvironment before any runtime resource is touched.
+func (s *Service) SetTaskEnvironmentResetGuard(guard TaskEnvironmentResetGuard) {
+	s.taskEnvironmentResetGuard = guard
 }
 
 // CleanupTaskLSP exposes the task-owned cleanup hook to cascade composition.

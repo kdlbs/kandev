@@ -402,6 +402,15 @@ Completed 2026-08-05.
   Exact-head backend-wide tests and lint pass; the affected task-host/controller/lifecycle/executor/
   task-service race suite passes; and 7 focused frontend files / 80 tests, web typecheck, lint,
   i18n checks, the new-code ratchet, production Vite build, and public-doc validators pass.
+- The 2026-08-12 post-rebase GPT-5.6 Sol audit is tracked in Task 15. It closed eight concrete
+  lifecycle/recovery defects: shared-environment reset races, cascaded runtime-secret cleanup,
+  physical Docker repository projection, stale inherited environment references, editor-toolbar
+  task identity, reconnect hydration, backend-clock rollback in capacity epochs, and reset-route
+  authorization mapping. The branch was rebased onto `origin/main` at `6033d5717`. Focused backend
+  packages and the synchronized LSP race suite pass; five focused frontend files pass 27 tests,
+  followed by web typecheck, lint, i18n checks, and the new-code ratchet. The repository-wide
+  backend run reached only the environment's 10-minute package ceiling under severe SQLite I/O
+  latency; it reported no assertion failure, and the affected packages pass independently.
 
 ---
 
@@ -438,6 +447,10 @@ Wave 6 — status-surface usability follow-up:
 - [x] [Task 12: Persist LSP status visibility](task-12-persist-status-visibility.md)
 - [x] [Task 13: Refine language disclosure](task-13-refine-language-disclosure.md)
 - [x] [Task 14: Verify status customization](task-14-verify-status-customization.md)
+
+Wave 7 — independent review and CI remediation:
+
+- [x] [Task 15: Harden shared-environment recovery](task-15-harden-shared-environment-recovery.md)
 
 After all task checks pass, follow the repository commit, push, PR, and PR-fixup workflows. The PR
 must use the repository template, include docs impact and production E2E evidence, and remain in

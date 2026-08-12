@@ -1873,6 +1873,27 @@ func (r *Repository) HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx con
 	return err == nil, err
 }
 
+// HasLiveTaskSessionsByTaskEnvironmentExcludingTask reports durable borrowers
+// even when their latest session is terminal. A task-level keep-warm LSP can
+// outlive that session state, so physical environment reset must treat every
+// non-archived borrowing task as live.
+func (r *Repository) HasLiveTaskSessionsByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (bool, error) {
+	var exists int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT 1
+		FROM task_sessions ts
+		INNER JOIN tasks t ON t.id = ts.task_id
+		WHERE ts.task_environment_id = ?
+			AND ts.task_id != ?
+			AND t.archived_at IS NULL
+		LIMIT 1
+	`), taskEnvironmentID, taskID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (r *Repository) FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (string, error) {
 	var borrowerTaskID string
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`

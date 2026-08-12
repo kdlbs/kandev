@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -87,6 +88,11 @@ type SessionRunningChecker interface {
 // on the task is still actively running and the caller must stop it first.
 var ErrSessionRunning = errors.New("active session is running on this task; stop it before resetting the environment")
 
+// ErrEnvironmentShared is returned when another live task still references
+// the physical environment. Resetting from one task would destroy warm LSP and
+// workspace state owned by the other task.
+var ErrEnvironmentShared = errors.New("environment is shared by another active task; release the shared workspace before resetting it")
+
 // ErrNoEnvironment is returned when the task has no TaskEnvironment to reset.
 var ErrNoEnvironment = errors.New("no environment exists for this task")
 
@@ -110,6 +116,9 @@ func (s *Service) SetSessionRunningChecker(c SessionRunningChecker) {
 // the task has no environment yet. Callers (e.g. Executor Settings popover)
 // poll this endpoint to surface live state changes.
 func (s *Service) GetTaskEnvironmentLiveStatus(ctx context.Context, taskID string) (*ContainerLiveStatus, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
 	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil || env == nil {
 		return nil, err
@@ -129,6 +138,9 @@ func (s *Service) GetTaskEnvironmentLiveStatus(ctx context.Context, taskID strin
 // the popover polls this endpoint and a per-poll SSH dial would be both
 // slow and a lot of TCP traffic.
 func (s *Service) GetSSHLiveStatus(ctx context.Context, taskID string) (*SSHLiveStatus, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
 	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil || env == nil {
 		return nil, err
@@ -272,6 +284,9 @@ func sessionBlocksEnvironmentReset(state models.TaskSessionState) bool {
 // GetTaskEnvironmentByTaskID returns the active task environment for a task.
 // Returns nil if no environment exists yet.
 func (s *Service) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
 	return s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 }
 
@@ -294,22 +309,30 @@ func (s *Service) GetTaskEnvironmentForTaskLSP(
 	if err != nil {
 		return nil, fmt.Errorf("list task sessions for LSP environment: %w", err)
 	}
-	environmentID := ""
+	seenEnvironmentIDs := make(map[string]struct{})
+	var environment *models.TaskEnvironment
 	for _, session := range sessions {
 		if session == nil || session.TaskEnvironmentID == "" {
 			continue
 		}
-		if environmentID != "" && environmentID != session.TaskEnvironmentID {
+		if _, seen := seenEnvironmentIDs[session.TaskEnvironmentID]; seen {
+			continue
+		}
+		seenEnvironmentIDs[session.TaskEnvironmentID] = struct{}{}
+		candidate, lookupErr := s.taskEnvironments.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+		if errors.Is(lookupErr, taskrepo.ErrTaskEnvironmentNotFound) {
+			continue
+		}
+		if lookupErr != nil {
+			return nil, fmt.Errorf("resolve inherited task LSP environment: %w", lookupErr)
+		}
+		if candidate == nil {
+			continue
+		}
+		if environment != nil && environment.ID != candidate.ID {
 			return nil, fmt.Errorf("task %s references multiple physical environments", taskID)
 		}
-		environmentID = session.TaskEnvironmentID
-	}
-	if environmentID == "" {
-		return nil, nil
-	}
-	environment, err := s.taskEnvironments.GetTaskEnvironment(ctx, environmentID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve inherited task LSP environment: %w", err)
+		environment = candidate
 	}
 	return environment, nil
 }
@@ -339,6 +362,13 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 	if env == nil {
 		return ErrNoEnvironment
 	}
+	releaseEnvironmentReset := s.acquireTaskLSPEnvironmentMutation(env.ID)
+	defer releaseEnvironmentReset()
+	if s.taskEnvironmentResetGuard != nil {
+		if err := s.taskEnvironmentResetGuard.ValidateTaskEnvironmentReset(ctx, taskID, env.ID); err != nil {
+			return err
+		}
+	}
 
 	// Fail closed: if the running-session check itself errors (DB hiccup,
 	// locked table) we cannot prove the task is idle and must abort rather
@@ -350,6 +380,13 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 	}
 	if running {
 		return ErrSessionRunning
+	}
+	shared, err := s.hasOtherLiveTasksForEnvironment(ctx, taskID, env)
+	if err != nil {
+		return fmt.Errorf("check shared environment sessions before reset: %w", err)
+	}
+	if shared {
+		return ErrEnvironmentShared
 	}
 
 	s.logger.Info("resetting task environment",

@@ -29,7 +29,11 @@ function mergeLanguage(
   return true;
 }
 
-function mergeCapacity(task: TaskLspTaskState, incoming: TaskLspCapacity): void {
+function mergeCapacity(
+  task: TaskLspTaskState,
+  incoming: TaskLspCapacity,
+  authoritativeEpoch = false,
+): void {
   const currentEpoch = task.capacity.epoch;
   if (currentEpoch && !incoming.epoch) return;
   if (!currentEpoch && incoming.epoch) {
@@ -37,7 +41,7 @@ function mergeCapacity(task: TaskLspTaskState, incoming: TaskLspCapacity): void 
     return;
   }
   if (currentEpoch && incoming.epoch && currentEpoch !== incoming.epoch) {
-    if (currentEpoch > incoming.epoch) return;
+    if (!authoritativeEpoch) return;
     task.capacity = incoming;
     return;
   }
@@ -53,7 +57,7 @@ export const createLspSlice: StateCreator<AppState, [["zustand/immer", never]], 
     set((draft) => {
       const task = draft.taskLsp.byTaskId[snapshot.task_id] ?? emptyTaskState();
       for (const language of snapshot.languages) mergeLanguage(task.languages, language);
-      mergeCapacity(task, snapshot.capacity);
+      mergeCapacity(task, snapshot.capacity, true);
       task.loaded = true;
       task.loading = false;
       task.error = null;

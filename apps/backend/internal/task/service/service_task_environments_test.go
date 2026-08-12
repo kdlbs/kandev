@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 type stubEnvRepo struct {
@@ -104,9 +105,39 @@ type stubRunningChecker struct {
 	err     error
 }
 
+type stubSharedEnvironmentSessions struct {
+	repository.SessionRepository
+	shared bool
+	err    error
+}
+
+func (s *stubSharedEnvironmentSessions) HasActiveTaskSessionsByTaskEnvironmentExcludingTask(
+	context.Context,
+	string,
+	string,
+) (bool, error) {
+	return s.shared, s.err
+}
+
+func (s *stubSharedEnvironmentSessions) HasLiveTaskSessionsByTaskEnvironmentExcludingTask(
+	context.Context,
+	string,
+	string,
+) (bool, error) {
+	return s.shared, s.err
+}
+
 type stubRuntimeSecretDeleter struct {
 	calls []string
 	err   error
+}
+
+type stubTaskEnvironmentResetGuard struct {
+	err error
+}
+
+func (g stubTaskEnvironmentResetGuard) ValidateTaskEnvironmentReset(context.Context, string, string) error {
+	return g.err
 }
 
 func (s *stubRuntimeSecretDeleter) DeleteTaskEnvironmentRuntimeSecrets(
@@ -153,6 +184,47 @@ func TestResetTaskEnvironment_SessionRunningBlocks(t *testing.T) {
 	}
 	if repo.deleted {
 		t.Error("expected environment row to be preserved when session is running")
+	}
+}
+
+func TestResetTaskEnvironment_SharedBorrowerBlocks(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ContainerID: "container-1",
+	}}
+	destroyer := &stubDestroyer{}
+	svc := newResetTestService(t, repo)
+	svc.sessions = &stubSharedEnvironmentSessions{shared: true}
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{})
+	if !errors.Is(err, ErrEnvironmentShared) {
+		t.Fatalf("expected ErrEnvironmentShared, got %v", err)
+	}
+	if len(destroyer.containerCalls) != 0 {
+		t.Fatalf("shared environment was destroyed: %v", destroyer.containerCalls)
+	}
+	if repo.deleted {
+		t.Fatal("shared environment row was deleted")
+	}
+}
+
+func TestResetTaskEnvironment_WorkspaceGroupReferenceBlocks(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ContainerID: "container-1",
+	}}
+	destroyer := &stubDestroyer{}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetTaskEnvironmentResetGuard(stubTaskEnvironmentResetGuard{err: ErrEnvironmentShared})
+
+	err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{})
+	if !errors.Is(err, ErrEnvironmentShared) {
+		t.Fatalf("workspace-group reset error = %v, want ErrEnvironmentShared", err)
+	}
+	if len(destroyer.containerCalls) != 0 || repo.deleted {
+		t.Fatalf("group-referenced environment mutated: destroy=%v deleted=%v", destroyer.containerCalls, repo.deleted)
 	}
 }
 
@@ -570,6 +642,31 @@ func TestPerformTaskCleanup_TearsDownTaskEnvironmentAndDeletesRow(t *testing.T) 
 	}
 	if len(secretDeleter.calls) != 1 || secretDeleter.calls[0] != "env-1" {
 		t.Fatalf("runtime secret cleanup calls = %v, want env-1", secretDeleter.calls)
+	}
+}
+
+func TestPerformTaskCleanup_DeletesRuntimeSecretsAfterTaskRowCascade(t *testing.T) {
+	env := &models.TaskEnvironment{
+		ID: "env-cascaded", TaskID: "task-deleted", ExecutorType: string(models.ExecutorTypeLocalDocker),
+		AgentctlAuthSecretID: "legacy-runtime-auth",
+	}
+	repo := &stubEnvRepo{env: env}
+	secretDeleter := &stubRuntimeSecretDeleter{}
+	svc := newResetTestService(t, repo)
+	svc.SetTaskEnvironmentRuntimeSecretDeleter(secretDeleter)
+
+	errs := svc.performTaskCleanup(context.Background(), "task-deleted", nil, nil, nil, taskEnvironmentCleanup{
+		env: env, deleteSecrets: true,
+	}, nil)
+
+	if len(errs) != 0 {
+		t.Fatalf("unexpected cleanup errors: %v", errs)
+	}
+	if len(secretDeleter.calls) != 1 || secretDeleter.calls[0] != "env-cascaded" {
+		t.Fatalf("runtime secret cleanup calls = %v, want env-cascaded", secretDeleter.calls)
+	}
+	if repo.deleted {
+		t.Fatal("cleanup attempted to delete an environment row already removed by task cascade")
 	}
 }
 

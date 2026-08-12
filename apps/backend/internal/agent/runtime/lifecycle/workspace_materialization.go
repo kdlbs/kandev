@@ -64,6 +64,31 @@ func remoteWorkspaceEntryName(repoName, baseBranch, checkoutBranch string) (stri
 	return name + "-" + branchSlug, nil
 }
 
+func validatePhysicalTaskHostPositions(repositories []WorkspaceRepositorySpec) (bool, error) {
+	hasPhysicalMapping := false
+	allPhysicallyMapped := true
+	physicalPositions := make(map[int]struct{}, len(repositories))
+	for _, repository := range repositories {
+		if repository.TaskHostPosition == nil {
+			allPhysicallyMapped = false
+			continue
+		}
+		hasPhysicalMapping = true
+		position := *repository.TaskHostPosition
+		if position < 0 {
+			return false, fmt.Errorf("repository %q has invalid physical task-host position %d", repository.RepositoryID, position)
+		}
+		if _, exists := physicalPositions[position]; exists {
+			return false, fmt.Errorf("duplicate physical task-host repository position %d", position)
+		}
+		physicalPositions[position] = struct{}{}
+	}
+	if hasPhysicalMapping && !allPhysicallyMapped {
+		return false, fmt.Errorf("physical task-host repository mapping is incomplete")
+	}
+	return hasPhysicalMapping, nil
+}
+
 // taskHostWorkspaceProjection converts durable host-side workspace sources to
 // the paths visible inside the task host's runtime. Docker establishes the
 // primary repository at /workspace and materializes durable siblings below it;
@@ -79,14 +104,25 @@ func taskHostWorkspaceProjection(runtimeName agentruntime.Runtime, info *Workspa
 		return "", nil, fmt.Errorf("docker task hosts do not support host workspace folders")
 	}
 	repositories := append([]WorkspaceRepositorySpec(nil), info.WorkspaceRepositories...)
+	hasPhysicalMapping, err := validatePhysicalTaskHostPositions(repositories)
+	if err != nil {
+		return "", nil, err
+	}
 	sort.SliceStable(repositories, func(i, j int) bool {
+		if hasPhysicalMapping {
+			return *repositories[i].TaskHostPosition < *repositories[j].TaskHostPosition
+		}
 		return repositories[i].Position < repositories[j].Position
 	})
 	roots := make([]string, 0, len(repositories))
 	seen := make(map[string]struct{}, len(repositories))
 	for index, repository := range repositories {
+		physicalPosition := index
+		if hasPhysicalMapping {
+			physicalPosition = *repository.TaskHostPosition
+		}
 		root := dockerWorkspacePath
-		if index > 0 {
+		if physicalPosition > 0 {
 			entry, err := remoteWorkspaceEntryName(repository.RepoName, repository.BaseBranch, repository.CheckoutBranch)
 			if err != nil {
 				return "", nil, err

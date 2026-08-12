@@ -224,6 +224,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
         lspStatus={lsp.lspStatus}
         lspProgress={lsp.lspProgress}
         lspLanguage={lsp.lspLanguage}
+        lspTaskId={lsp.lspTaskId}
         showLspStatus
         onToggleLsp={lsp.toggleLsp}
         onToggleWrap={() => state.setWrapEnabled(!state.wrapEnabled)}

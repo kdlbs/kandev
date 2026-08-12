@@ -67,6 +67,27 @@ function wrapper({ children }: { children: ReactNode }) {
   return createElement(StateProvider, null, children);
 }
 
+function cachedConnectedWrapper({ children }: { children: ReactNode }) {
+  return createElement(StateProvider, {
+    children,
+    initialState: {
+      connection: { status: "connected", error: null, issueSeverity: "none" },
+      taskLsp: {
+        byTaskId: {
+          "task-1": {
+            languages: { kotlin: language(4, "ready") },
+            capacity: { active: 1, queued: 0, limit: 4 },
+            loaded: true,
+            loading: false,
+            error: null,
+          },
+        },
+        pendingByKey: {},
+      },
+    },
+  });
+}
+
 function subject(taskId: string | null) {
   return { lsp: useTaskLsp(taskId), store: useAppStoreApi() };
 }
@@ -103,7 +124,55 @@ describe("useTaskLsp", () => {
     await act(async () => resolve(snapshot(language(7, "starting"))));
     expect(view.result.current.lsp.byLanguage.kotlin?.phase).toBe("ready");
   });
+});
 
+describe("useTaskLsp reconnection", () => {
+  it("refreshes stable task state after the WebSocket subscription reconnects", async () => {
+    let serverSnapshot = snapshot(language(4, "ready"));
+    api.get.mockImplementation(async () => serverSnapshot);
+    const view = renderHook(() => subject("task-1"), { wrapper });
+    await waitFor(() => expect(view.result.current.lsp.byLanguage.kotlin?.phase).toBe("ready"));
+
+    act(() => view.result.current.store.getState().setConnectionStatus("disconnected"));
+    serverSnapshot = snapshot(language(5, "off"));
+    act(() => view.result.current.store.getState().setConnectionStatus("connected"));
+
+    await waitFor(() => expect(view.result.current.lsp.byLanguage.kotlin?.phase).toBe("off"));
+    expect(websocket.subscribe).toHaveBeenLastCalledWith("task-1");
+  });
+
+  it("refreshes cached stable state when a connected subscription is established", async () => {
+    api.get.mockResolvedValue(snapshot(language(5, "off")));
+    const view = renderHook(() => subject("task-1"), { wrapper: cachedConnectedWrapper });
+
+    await waitFor(() => expect(view.result.current.lsp.byLanguage.kotlin?.phase).toBe("off"));
+    expect(api.get).toHaveBeenCalled();
+  });
+
+  it("does not let a delayed reconnect refresh rewind a newer live event", async () => {
+    let resolveReconnect!: (value: TaskLspSnapshot) => void;
+    api.get.mockResolvedValueOnce(snapshot(language(4, "ready")));
+    const view = renderHook(() => subject("task-1"), { wrapper });
+    await waitFor(() => expect(view.result.current.lsp.loaded).toBe(true));
+    act(() => view.result.current.store.getState().setConnectionStatus("disconnected"));
+    const callsBeforeReconnect = api.get.mock.calls.length;
+    api.get.mockReturnValueOnce(
+      new Promise<TaskLspSnapshot>((resolve) => {
+        resolveReconnect = resolve;
+      }),
+    );
+
+    act(() => view.result.current.store.getState().setConnectionStatus("connected"));
+    await waitFor(() => expect(api.get.mock.calls.length).toBeGreaterThan(callsBeforeReconnect));
+    act(() => view.result.current.store.getState().mergeTaskLspLanguage(language(6, "error")));
+    await act(async () => resolveReconnect(snapshot(language(5, "off"))));
+
+    expect(view.result.current.lsp.byLanguage.kotlin?.phase).toBe("error");
+    expect(view.result.current.lsp.byLanguage.kotlin?.revision).toBe(6);
+  });
+});
+
+describe("useTaskLsp controls", () => {
   it("runs controls through one API seam and merges the authoritative result", async () => {
     api.start.mockResolvedValue(language(2, "starting"));
     const view = renderHook(() => subject("task-1"), { wrapper });

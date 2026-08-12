@@ -2040,7 +2040,7 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 		return buildTaskEnvironmentRepos(resp.Worktrees)
 	}
 	if resp.WorktreeID == "" {
-		return nil
+		return dockerEnvironmentReposForLaunch(req)
 	}
 	return []*models.TaskEnvironmentRepo{{
 		RepositoryID:   req.RepositoryID,
@@ -2050,6 +2050,37 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 		WorktreeBranch: resp.WorktreeBranch,
 		Position:       0,
 	}}
+}
+
+// dockerEnvironmentReposForLaunch persists repository identity to physical
+// task-host position without pretending the container checkout is a host
+// worktree. Borrowing tasks use this durable mapping instead of projecting
+// their own repository order onto an already-materialized container.
+func dockerEnvironmentReposForLaunch(req *LaunchAgentRequest) []*models.TaskEnvironmentRepo {
+	if req == nil || req.ExecutorType != string(models.ExecutorTypeLocalDocker) {
+		return nil
+	}
+	if len(req.Repositories) == 0 {
+		if req.RepositoryID == "" {
+			return nil
+		}
+		return []*models.TaskEnvironmentRepo{{
+			RepositoryID: req.RepositoryID, BranchSlug: req.BranchIdentitySlug, Position: 0,
+		}}
+	}
+
+	repos := make([]*models.TaskEnvironmentRepo, 0, len(req.Repositories))
+	for physicalPosition, spec := range req.Repositories {
+		if spec.RepositoryID == "" {
+			continue
+		}
+		repos = append(repos, &models.TaskEnvironmentRepo{
+			RepositoryID: spec.RepositoryID,
+			BranchSlug:   launchRepoBranchIdentitySlug(spec),
+			Position:     physicalPosition,
+		})
+	}
+	return repos
 }
 
 // buildTaskEnvironmentRepos converts per-repo worktree results into env-repo rows.

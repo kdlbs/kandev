@@ -633,6 +633,10 @@ type WorkspaceRepositorySpec struct {
 	RemoteSyncHandled      bool
 	BranchSlug             string
 	BranchIdentitySlug     string
+	// TaskHostPosition is the repository's persisted physical order inside an
+	// already-materialized task host. Nil means the host has not yet been
+	// materialized and launch ordering may establish the mapping.
+	TaskHostPosition *int
 }
 
 // RouteOverride carries a fully resolved provider profile for one

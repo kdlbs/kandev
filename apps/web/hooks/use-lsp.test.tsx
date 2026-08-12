@@ -129,10 +129,12 @@ describe("task-scoped useLsp", () => {
     mocks.storeState.taskSessions.items = {};
 
     const view = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
+    expect(view.result.current.taskId).toBeNull();
     expect(mocks.connect).not.toHaveBeenCalled();
 
     mocks.storeState.taskSessions.items = { [SESSION_ID]: { task_id: TASK_ID } };
     view.rerender();
+    expect(view.result.current.taskId).toBe(TASK_ID);
     expect(mocks.connect).toHaveBeenCalledWith(TASK_ID, SESSION_ID, LANGUAGE);
   });
 
