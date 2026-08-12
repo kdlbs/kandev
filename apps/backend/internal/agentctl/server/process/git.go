@@ -477,10 +477,6 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 		result.Error = err.Error()
 		return result, nil
 	}
-	if err := g.validateContributionDestinationRemote(ctx); err != nil {
-		result.Error = err.Error()
-		return result, nil
-	}
 
 	branch, err := g.getCurrentBranch(ctx)
 	if err != nil {
@@ -1246,25 +1242,7 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 		return result, nil
 	}
 	if g.contributionDestination != nil {
-		if err := g.validateContributionDestinationRemote(ctx); err != nil {
-			result.Error = err.Error()
-			return result, nil
-		}
-		branch, err := g.getCurrentBranch(ctx)
-		if err != nil {
-			result.Error = fmt.Sprintf("failed to get current branch: %s", err.Error())
-			return result, nil
-		}
-		output, err := g.runGitCommand(ctx, "push", g.contributionDestination.ContributionRemoteName(), "HEAD:refs/heads/"+branch)
-		if err != nil {
-			result.Error = fmt.Sprintf("failed to push contribution destination: %s", g.sanitizePRFailure(output, title, body))
-			result.Output = g.sanitizeGitPushOutput(output)
-			return result, nil
-		}
-		result.Provider = string(prProviderGitHub)
-		result.BranchPushed = true
-		created, createErr := g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
-		return finalizePRCreationAfterPush(created, createErr)
+		return g.createManagedContributionPR(ctx, title, body, baseBranch, draft)
 	}
 
 	branch, err := g.getCurrentBranch(ctx)
@@ -1330,6 +1308,42 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 		result.Error = "unsupported git remote for PR creation"
 		return result, nil
 	}
+}
+
+func (g *GitOperator) createManagedContributionPR(
+	ctx context.Context,
+	title, body, baseBranch string,
+	draft bool,
+) (*PRCreateResult, error) {
+	result := &PRCreateResult{}
+	originURL, err := g.getOriginRemoteURL(ctx)
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	if g.detectPRProvider(originURL) != prProviderGitHub {
+		result.Error = fmt.Sprintf("managed contribution destination requires a GitHub origin: %s", redactRemoteURL(originURL))
+		return result, nil
+	}
+	if err := g.validateContributionDestinationRemote(ctx); err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	branch, err := g.getCurrentBranch(ctx)
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to get current branch: %s", err.Error())
+		return result, nil
+	}
+	output, err := g.runGitCommand(ctx, "push", g.contributionDestination.ContributionRemoteName(), "HEAD:refs/heads/"+branch)
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to push contribution destination: %s", g.sanitizePRFailure(output, title, body))
+		result.Output = g.sanitizeGitPushOutput(output)
+		return result, nil
+	}
+	result.Provider = string(prProviderGitHub)
+	result.BranchPushed = true
+	created, createErr := g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
+	return finalizePRCreationAfterPush(created, createErr)
 }
 
 func finalizePRCreationAfterPush(result *PRCreateResult, createErr error) (*PRCreateResult, error) {

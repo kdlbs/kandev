@@ -295,7 +295,7 @@ func configureContributionDestination(ctx context.Context, checkout string, dest
 		return errors.New("contribution destination could not be configured")
 	}
 	pushURLs, pushErr := materializeGitOutput(ctx, "-C", checkout, "config", "--get-all", "remote."+remoteName+".pushurl")
-	if pushErr == nil && strings.TrimSpace(pushURLs) != destination.TargetRepository.RemoteURL {
+	if pushErr == nil && !contributionDestinationPushURLsMatch(pushURLs, destination.TargetRepository.RemoteURL) {
 		return errors.New("contribution destination push identity conflict")
 	}
 	if pushErr != nil {
@@ -311,6 +311,19 @@ func configureContributionDestination(ctx context.Context, checkout string, dest
 		return errors.New("contribution destination push remote could not be configured")
 	}
 	return nil
+}
+
+func contributionDestinationPushURLsMatch(configured, target string) bool {
+	urls := strings.Split(strings.TrimSpace(configured), "\n")
+	if len(urls) == 0 || (len(urls) == 1 && urls[0] == "") {
+		return false
+	}
+	for _, configuredURL := range urls {
+		if strings.TrimSpace(configuredURL) != target {
+			return false
+		}
+	}
+	return true
 }
 
 func checkoutMaterializedBranch(ctx context.Context, checkout, baseBranch, checkoutBranch string) error {

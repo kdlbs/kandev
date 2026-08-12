@@ -86,6 +86,7 @@ func TestGitOperatorCreatePR_ContributionDestinationUsesCanonicalTargetAndForkHe
 	targetDir := t.TempDir()
 	runGit(t, targetDir, "init", "--bare", "--initial-branch=main")
 	runGit(t, repoDir, "checkout", "-b", "feature/managed-destination")
+	runGit(t, repoDir, "remote", "set-url", "origin", "https://github.com/kdlbs/kandev.git")
 	writeFile(t, repoDir, "managed-destination.txt", "managed destination\n")
 	runGit(t, repoDir, "add", ".")
 	runGit(t, repoDir, "commit", "-m", "managed destination")
@@ -131,6 +132,50 @@ func TestGitOperatorCreatePR_ContributionDestinationUsesCanonicalTargetAndForkHe
 	}
 	if got := readScriptArgs(t, ghArgsPath); strings.Join(got, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("gh args = %q, want %q", got, wantArgs)
+	}
+}
+
+func TestGitOperatorCreatePR_ContributionDestinationRejectsNonGitHubOrigin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell wrapper test is Unix-only")
+	}
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	targetDir := t.TempDir()
+	runGit(t, targetDir, "init", "--bare", "--initial-branch=main")
+	runGit(t, repoDir, "remote", "set-url", "origin", "https://gitlab.com/kdlbs/kandev.git")
+	runGit(t, repoDir, "remote", "add", "contrib-destination", "https://github.com/agent/kandev.git")
+	runGit(t, repoDir, "remote", "set-url", "--push", "contrib-destination", "https://github.com/agent/kandev.git")
+	runGit(t, repoDir, "checkout", "-b", "feature/managed-gitlab-origin")
+	writeFile(t, repoDir, "managed-gitlab-origin.txt", "managed destination\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "managed destination")
+
+	destination := &taskmodels.ContributionDestination{
+		Version:  taskmodels.ContributionDestinationVersion,
+		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		SourceRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+		},
+	}
+	if err := destination.Validate(); err != nil {
+		t.Fatalf("destination.Validate() = %v", err)
+	}
+	runGit(t, repoDir, "remote", "rename", "contrib-destination", destination.ContributionRemoteName())
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setContributionDestination(destination)
+	result, err := operator.CreatePR(context.Background(), "Managed title", "Managed body", "main", false)
+	if err != nil {
+		t.Fatalf("CreatePR returned error: %v", err)
+	}
+	if result.Success || !strings.Contains(result.Error, "GitHub origin") {
+		t.Fatalf("CreatePR = %+v, want a GitHub-origin rejection", result)
+	}
+	if _, statErr := os.Stat(filepath.Join(targetDir, "refs", "heads", "feature", "managed-gitlab-origin")); !os.IsNotExist(statErr) {
+		t.Fatalf("destination branch was pushed despite origin rejection, stat error = %v", statErr)
 	}
 }
 

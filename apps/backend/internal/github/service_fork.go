@@ -13,9 +13,9 @@ import (
 
 const (
 	contributionForkPreparationTimeout = 30 * time.Second
-	contributionForkPollAttempts       = 10
-	contributionForkPollInterval       = 200 * time.Millisecond
 )
+
+var contributionForkPollInterval = 200 * time.Millisecond
 
 // ContributionForkStatus reports the workspace automation capability without
 // exposing credentials or relying on an ambient executor identity.
@@ -148,14 +148,19 @@ func resolveContributionFork(
 	if !create {
 		return ContributionForkResolution{Status: ContributionForkStatusCreatable, ActorLogin: login, Repository: canonical}, nil
 	}
-	if _, err := client.CreateFork(ctx, owner, repo); err != nil {
+	created, err := client.CreateFork(ctx, owner, repo)
+	if err != nil {
 		return ContributionForkResolution{}, fmt.Errorf("create contribution fork for %s/%s: %w", owner, repo, err)
 	}
-	fork, err := waitForContributionFork(ctx, client, login, repo)
+	forkOwner, forkName, err := repositoryOwnerAndName(created)
+	if err != nil {
+		return ContributionForkResolution{}, fmt.Errorf("create contribution fork for %s/%s: %w", owner, repo, err)
+	}
+	fork, err := waitForContributionFork(ctx, client, canonical, forkOwner, forkName)
 	if err != nil {
 		return ContributionForkResolution{}, err
 	}
-	return buildContributionForkResolution(canonical, fork, login, owner, repo)
+	return buildContributionForkResolution(canonical, fork, login, forkOwner, forkName)
 }
 
 var errContributionForkMissing = errors.New("contribution fork is missing")
@@ -173,14 +178,14 @@ func findContributionFork(
 		}
 		return ContributionForkResolution{}, fmt.Errorf("verify contribution fork %s/%s: %w", login, repo, err)
 	}
-	return buildContributionForkResolution(canonical, fork, login, owner, repo)
+	return buildContributionForkResolution(canonical, fork, login, login, repo)
 }
 
 func buildContributionForkResolution(
 	canonical, fork *GitHubRepository,
-	login, owner, repo string,
+	actorLogin, expectedOwner, expectedRepo string,
 ) (ContributionForkResolution, error) {
-	if err := validateContributionFork(canonical, fork, login, repo); err != nil {
+	if err := validateContributionFork(canonical, fork, expectedOwner, expectedRepo); err != nil {
 		return ContributionForkResolution{}, err
 	}
 	destination, err := makeContributionDestination(canonical, fork)
@@ -189,7 +194,7 @@ func buildContributionForkResolution(
 	}
 	return ContributionForkResolution{
 		Status:      ContributionForkStatusReady,
-		ActorLogin:  login,
+		ActorLogin:  actorLogin,
 		Repository:  fork,
 		Destination: destination,
 	}, nil
@@ -259,10 +264,21 @@ func repositoryBinding(repository *GitHubRepository) (taskmodels.RemoteContribut
 }
 
 func repositoryFullName(repository *GitHubRepository) string {
+	if repository == nil {
+		return ""
+	}
 	if strings.TrimSpace(repository.FullName) != "" {
 		return strings.TrimSpace(repository.FullName)
 	}
 	return strings.TrimSpace(repository.Owner) + "/" + strings.TrimSpace(repository.Name)
+}
+
+func repositoryOwnerAndName(repository *GitHubRepository) (string, string, error) {
+	parts := strings.Split(repositoryFullName(repository), "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", errors.New("provider repository full name is invalid")
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), nil
 }
 
 func sameRepositoryName(repository *GitHubRepository, owner, repo string) bool {
@@ -290,28 +306,28 @@ func contributionActorLogin(ctx context.Context, client contributionForkClient, 
 func waitForContributionFork(
 	ctx context.Context,
 	client contributionForkClient,
-	login, repo string,
+	canonical *GitHubRepository,
+	owner, repo string,
 ) (*GitHubRepository, error) {
-	for attempt := 0; attempt < contributionForkPollAttempts; attempt++ {
-		fork, err := client.GetRepository(ctx, login, repo)
+	for {
+		fork, err := client.GetRepository(ctx, owner, repo)
 		if err == nil {
-			return fork, nil
-		}
-		if !isContributionRepositoryNotFound(err) {
-			return nil, fmt.Errorf("verify created contribution fork %s/%s: %w", login, repo, err)
-		}
-		if attempt == contributionForkPollAttempts-1 {
-			return nil, fmt.Errorf("%w: %s/%s", ErrContributionForkNotReady, login, repo)
+			if validationErr := validateContributionFork(canonical, fork, owner, repo); validationErr == nil {
+				return fork, nil
+			} else if !errors.Is(validationErr, ErrContributionForkNotWritable) {
+				return nil, validationErr
+			}
+		} else if !isContributionRepositoryNotFound(err) {
+			return nil, fmt.Errorf("verify created contribution fork %s/%s: %w", owner, repo, err)
 		}
 		timer := time.NewTimer(contributionForkPollInterval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("%w: %s/%s: %v", ErrContributionForkNotReady, owner, repo, ctx.Err())
 		case <-timer.C:
 		}
 	}
-	return nil, fmt.Errorf("%w: %s/%s", ErrContributionForkNotReady, login, repo)
 }
 
 func isContributionRepositoryNotFound(err error) bool {
@@ -322,6 +338,5 @@ func isContributionRepositoryNotFound(err error) bool {
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == 404
 	}
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "404") || strings.Contains(lower, "not found")
+	return false
 }

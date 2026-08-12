@@ -11,6 +11,8 @@ type forkResolverFakeClient struct {
 	user       string
 	repos      map[string]*GitHubRepository
 	getErrors  map[string]error
+	getCalls   map[string]int
+	readyAfter int
 	created    []string
 	createRepo *GitHubRepository
 }
@@ -21,12 +23,20 @@ func (f *forkResolverFakeClient) GetAuthenticatedUser(context.Context) (string, 
 
 func (f *forkResolverFakeClient) GetRepository(_ context.Context, owner, repo string) (*GitHubRepository, error) {
 	key := owner + "/" + repo
+	if f.getCalls == nil {
+		f.getCalls = make(map[string]int)
+	}
+	f.getCalls[key]++
 	if err := f.getErrors[key]; err != nil {
 		return nil, err
 	}
 	repository, ok := f.repos[key]
 	if !ok {
 		return nil, &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/" + key}
+	}
+	if f.readyAfter > 0 && key != "kdlbs/kandev" && f.getCalls[key] >= f.readyAfter {
+		repository.PushAccess = true
+		repository.AdminAccess = true
 	}
 	return repository, nil
 }
@@ -94,6 +104,26 @@ func TestResolveContributionForkAcceptsOnlyExactWritableFork(t *testing.T) {
 	}
 	if len(client.created) != 0 {
 		t.Fatalf("created forks = %v, want none", client.created)
+	}
+}
+
+func TestResolveContributionForkRejectsExistingNonWritableFork(t *testing.T) {
+	canonical := testGitHubRepository("kdlbs/kandev", "100", false)
+	fork := testGitHubRepository("alice/kandev", "200", false)
+	fork.Fork = true
+	fork.ParentID = canonical.ID
+	fork.ParentFullName = canonical.FullName
+	client := &forkResolverFakeClient{
+		user:  "alice",
+		repos: map[string]*GitHubRepository{"kdlbs/kandev": canonical, "alice/kandev": fork},
+	}
+
+	_, err := resolveContributionFork(
+		context.Background(), client, AuthPrincipal{Kind: AuthPrincipalHuman, Login: "alice"},
+		"kdlbs", "kandev", true,
+	)
+	if !errors.Is(err, ErrContributionForkNotWritable) {
+		t.Fatalf("error = %v, want ErrContributionForkNotWritable", err)
 	}
 }
 
@@ -191,6 +221,45 @@ func TestResolveContributionForkCreatesAndVerifiesMissingHumanFork(t *testing.T)
 	}
 	if len(client.created) != 1 || client.created[0] != "kdlbs/kandev" {
 		t.Fatalf("created forks = %v, want [kdlbs/kandev]", client.created)
+	}
+}
+
+func TestResolveContributionForkUsesCreatedRepositoryIdentityAndWaitsForReadiness(t *testing.T) {
+	canonical := testGitHubRepository("kdlbs/kandev", "100", false)
+	fork := testGitHubRepository("alice/kandev-renamed", "200", false)
+	fork.Fork = true
+	fork.ParentID = canonical.ID
+	fork.ParentFullName = canonical.FullName
+	client := &forkResolverFakeClient{
+		user:       "alice",
+		repos:      map[string]*GitHubRepository{"kdlbs/kandev": canonical},
+		createRepo: fork,
+		readyAfter: 11,
+	}
+
+	result, err := resolveContributionFork(
+		context.Background(), client, AuthPrincipal{Kind: AuthPrincipalHuman, Source: ConnectionSourcePAT, Login: "alice"},
+		"kdlbs", "kandev", true,
+	)
+	if err != nil {
+		t.Fatalf("resolveContributionFork: %v", err)
+	}
+	if result.Destination == nil || result.Destination.TargetRepository.Path != "alice/kandev-renamed" {
+		t.Fatalf("destination = %#v, want created repository identity", result.Destination)
+	}
+	if client.getCalls["alice/kandev-renamed"] < client.readyAfter {
+		t.Fatalf("fork readiness checks = %d, want at least %d", client.getCalls["alice/kandev-renamed"], client.readyAfter)
+	}
+}
+
+func TestIsContributionRepositoryNotFoundRequiresProviderError(t *testing.T) {
+	for _, err := range []error{
+		errors.New("endpoint /repos/alice/404-user returned 500"),
+		errors.New("repository not found in a wrapped provider failure"),
+	} {
+		if isContributionRepositoryNotFound(err) {
+			t.Fatalf("isContributionRepositoryNotFound(%v) = true, want false", err)
+		}
 	}
 }
 

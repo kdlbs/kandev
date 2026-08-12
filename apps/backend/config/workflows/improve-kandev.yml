@@ -119,8 +119,9 @@ steps:
       implemented and verified in the previous steps.
 
       STEP 1: PRE-FLIGHT
-      - Run `gh auth status` to confirm GitHub CLI is authenticated.
       - Confirm your changes are committed (`git status`).
+      - For executor-owned credentials without a server-authored managed
+        destination, run `gh auth status` to confirm GitHub CLI access.
 
       STEP 2: PUBLISH THROUGH THE TASK'S PREPARED ROUTE
       Task creation prepares the publication route before a managed task
@@ -142,8 +143,13 @@ steps:
 
       Executor-owned credentials are a separate compatibility path. It may
       use the executor's own publication setup only when the task has no
-      server-authored managed destination. Never select that path to recover
-      from a managed preparation failure or a missing managed push remote.
+      server-authored managed destination. In that case, verify `gh auth
+      status`, then run `gh repo fork kdlbs/kandev --remote
+      --remote-name=origin` when the executor does not already have a
+      writable fork. Verify that `origin` points at the executor-owned fork
+      and that the canonical repository remains available as `upstream`.
+      Never select this path to recover from a managed preparation failure or
+      a missing managed push remote.
 
       STEP 3: INVOKE THE PR SKILL
       Use the `pr` skill (see `.claude/skills/pr/SKILL.md`):

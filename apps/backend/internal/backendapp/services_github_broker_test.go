@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -198,7 +199,8 @@ func TestGitHubBrokerScopeAuthorizerValidatesSessionOwnershipAndState(t *testing
 		session: &taskmodels.TaskSession{ID: "session-1", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning},
 		repository: &taskmodels.Repository{
 			ID: "repository-1", WorkspaceID: "workspace-1", Provider: "github",
-			ProviderOwner: "kdlbs", ProviderName: kandevName,
+			ProviderHost:  "https://github.com",
+			ProviderOwner: "kdlbs", ProviderName: "kandev",
 		},
 		links: []*taskmodels.TaskRepository{{TaskID: "task-1", RepositoryID: "repository-1"}},
 	}
@@ -249,7 +251,7 @@ func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionFork(t *testin
 	repo := &fakeGitHubBrokerTaskRepository{
 		task:       &taskmodels.Task{ID: "task-fork", WorkspaceID: "workspace-fork"},
 		session:    &taskmodels.TaskSession{ID: "session-fork", TaskID: "task-fork", State: taskmodels.TaskSessionStateRunning},
-		repository: &taskmodels.Repository{ID: "repository-fork", WorkspaceID: "workspace-fork", Provider: "github", ProviderOwner: "acme", ProviderName: "widget"},
+		repository: &taskmodels.Repository{ID: "repository-fork", WorkspaceID: "workspace-fork", Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "acme", ProviderName: "widget"},
 		links:      []*taskmodels.TaskRepository{{TaskID: "task-fork", RepositoryID: "repository-fork", Metadata: metadata}},
 	}
 	authorizer := &githubBrokerScopeAuthorizer{repo: repo}
@@ -294,7 +296,7 @@ func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionDestination(t 
 	repo := &fakeGitHubBrokerTaskRepository{
 		task:       &taskmodels.Task{ID: "task-destination", WorkspaceID: "workspace-destination"},
 		session:    &taskmodels.TaskSession{ID: "session-destination", TaskID: "task-destination", State: taskmodels.TaskSessionStateRunning},
-		repository: &taskmodels.Repository{ID: "repository-destination", WorkspaceID: "workspace-destination", Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+		repository: &taskmodels.Repository{ID: "repository-destination", WorkspaceID: "workspace-destination", Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "kdlbs", ProviderName: "kandev"},
 		links:      []*taskmodels.TaskRepository{{TaskID: "task-destination", RepositoryID: "repository-destination", Metadata: metadata}},
 	}
 	authorizer := &githubBrokerScopeAuthorizer{repo: repo}
@@ -304,5 +306,50 @@ func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionDestination(t 
 	}
 	if err := authorizer.AuthorizeGitHubRepository(context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "other"); err == nil || !strings.Contains(err.Error(), "identity does not match") {
 		t.Fatalf("unbound destination error = %v, want identity denial", err)
+	}
+}
+
+func TestIsCanonicalKandevRepositoryInputRequiresPublicGitHubHost(t *testing.T) {
+	for _, host := range []string{"", "https://github.enterprise.example"} {
+		input := &taskservice.TaskRepositoryInput{
+			Provider: "github", ProviderHost: host, ProviderOwner: "kdlbs", ProviderName: "kandev",
+		}
+		if isCanonicalKandevRepositoryInput(input, nil) {
+			t.Fatalf("host %q was accepted as the public canonical GitHub repository", host)
+		}
+	}
+	if !isCanonicalKandevRepositoryInput(&taskservice.TaskRepositoryInput{
+		Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "kdlbs", ProviderName: "kandev",
+	}, nil) {
+		t.Fatal("public GitHub canonical repository was rejected")
+	}
+}
+
+func TestGitHubBrokerScopeAuthorizerRejectsNonPublicProviderHostsForDestination(t *testing.T) {
+	destination := taskmodels.ContributionDestination{
+		Version:  taskmodels.ContributionDestinationVersion,
+		Provider: taskmodels.ContributionDestinationProviderGitHub,
+		SourceRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: taskmodels.ContributionDestinationRepository{
+			Host: "github.com", Path: "automation/kandev", ProviderID: "200", RemoteURL: "https://github.com/automation/kandev.git",
+		},
+	}
+	metadata := map[string]interface{}{}
+	if err := taskmodels.PutContributionDestination(metadata, &destination); err != nil {
+		t.Fatalf("PutContributionDestination() = %v", err)
+	}
+	for _, host := range []string{"", "https://github.enterprise.example"} {
+		repo := &fakeGitHubBrokerTaskRepository{
+			task:       &taskmodels.Task{ID: "task-host", WorkspaceID: "workspace-host"},
+			session:    &taskmodels.TaskSession{ID: "session-host", TaskID: "task-host", State: taskmodels.TaskSessionStateRunning},
+			repository: &taskmodels.Repository{ID: "repository-host", WorkspaceID: "workspace-host", Provider: "github", ProviderHost: host, ProviderOwner: "kdlbs", ProviderName: "kandev"},
+			links:      []*taskmodels.TaskRepository{{TaskID: "task-host", RepositoryID: "repository-host", Metadata: metadata}},
+		}
+		authorizer := &githubBrokerScopeAuthorizer{repo: repo}
+		if err := authorizer.AuthorizeGitHubRepository(context.Background(), "workspace-host", "task-host", "session-host", "repository-host", "automation", "kandev"); err == nil {
+			t.Fatalf("provider host %q was accepted for a managed destination", host)
+		}
 	}
 }

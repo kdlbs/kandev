@@ -61,7 +61,7 @@ func (r *SSHExecutor) resolvePrepareScript(req *ExecutorCreateRequest, workspace
 		script += "\n" + sshRemoteContributionScript(workspacePath, targetURL, &binding)
 	}
 	if destination, ok := req.ContributionDestinations[""]; ok {
-		destinationScript, err := scriptengine.ContributionDestinationSetupScript(&destination)
+		destinationScript, err := scriptengine.ContributionDestinationSetupScriptAt(&destination, workspacePath)
 		if err != nil {
 			return "", err
 		}

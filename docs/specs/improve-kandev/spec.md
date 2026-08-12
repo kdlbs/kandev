@@ -92,8 +92,10 @@ the user's own agent picks up immediately — turning every report into a contri
   checks for sensitive data and likely duplicates, then publishes the issue to
   `kdlbs/kandev` with the matching template and reports the issue URL. The agent
   must ask follow-up questions instead of inventing missing required details.
-- A pre-flight check surfaces `gh auth` status from `/api/v1/system/health` and
-  prevents submission with a clear error when GitHub auth is missing.
+- For executor-owned credentials, a pre-flight check surfaces `gh auth` status
+  from `/api/v1/system/health` and prevents submission with a clear error when
+  GitHub CLI auth is missing. Managed credentials use the workspace automation
+  capability and bound destination result instead of executor `gh` auth.
 - An account that cannot fork `kdlbs/kandev` is blocked from the implementation
   workflows but may still use the issue-only workflow.
 
@@ -267,9 +269,11 @@ the user's own agent picks up immediately — turning every report into a contri
   task uses the workspace's visible workflow rather than inheriting the hidden
   task-detail workflow.
 
-- **GIVEN** the user has not configured `gh auth`, **WHEN** they open the
-  Improve Kandev dialog, **THEN** the dialog shows a blocking error referencing
-  the health-check result and disables the submit button.
+- **GIVEN** the task uses executor-owned credentials and the user has not
+  configured `gh auth`, **WHEN** they open the Improve Kandev dialog, **THEN**
+  the dialog shows a blocking error referencing the health-check result and
+  disables the submit button. Managed credentials use the workspace
+  automation capability instead.
 
 - **GIVEN** the user opens the dedicated workspace's workflows settings page,
   **WHEN** the page loads, **THEN** it lists `improve-kandev` with steps

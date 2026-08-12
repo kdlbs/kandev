@@ -121,7 +121,10 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	// isScriptEffectivelyEmpty.
 	scriptReq := *req // shallow copy — Env map is shared (read-only in runSetupScriptStep)
 	scriptReq.RepoSetupScript = ""
-	resolvedScript := resolvePreparerSetupScript(&scriptReq, workspacePath)
+	resolvedScript, err := resolvePreparerSetupScript(&scriptReq, workspacePath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve setup script: %w", err)
+	}
 	if resolvedScript != "" {
 		totalSteps++
 		steps = runSetupScriptStep(ctx, &scriptReq, workspacePath, resolvedScript, stepIdx, totalSteps, onProgress, steps, p.logger)

@@ -345,18 +345,25 @@ func TestLoadTemplates_ImproveKandevManagedPublicationPromptContract(t *testing.
 		"gh pr create --repo kdlbs/kandev --base main",
 		"<fork-owner>:<branch>",
 		"Executor-owned credentials are a separate compatibility path",
-		"Never select that path to recover from a managed preparation failure",
+		"Never select this path to recover from a managed preparation failure",
+		"gh repo fork kdlbs/kandev",
+		"executor-owned credentials",
+		"--remote-name=origin",
 	} {
 		if !strings.Contains(normalizedPrompt, required) {
 			t.Errorf("managed publication prompt must contain %q", required)
 		}
+	}
+	managedPrompt := normalizedPrompt
+	if executorSection := strings.Index(managedPrompt, "Executor-owned credentials"); executorSection >= 0 {
+		managedPrompt = managedPrompt[:executorSection]
 	}
 	for _, forbidden := range []string{
 		"gh repo fork",
 		"remote-name=origin",
 		"rename the existing `origin`",
 	} {
-		if strings.Contains(normalizedPrompt, forbidden) {
+		if strings.Contains(managedPrompt, forbidden) {
 			t.Errorf("managed publication prompt must not contain %q", forbidden)
 		}
 	}

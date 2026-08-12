@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -337,10 +338,28 @@ func isCanonicalKandevRepositoryInput(
 ) bool {
 	if repository != nil {
 		return repository.Provider == "github" &&
+			isPublicGitHubProviderHost(repository.ProviderHost) &&
 			repository.ProviderOwner == canonicalKandevOwner && repository.ProviderName == canonicalKandevName
 	}
 	return input != nil && input.Provider == "github" &&
+		isPublicGitHubProviderHost(input.ProviderHost) &&
 		input.ProviderOwner == canonicalKandevOwner && input.ProviderName == canonicalKandevName
+}
+
+func isPublicGitHubProviderHost(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User != nil || parsed.Hostname() == "" {
+		return false
+	}
+	return strings.EqualFold(parsed.Hostname(), "github.com") && parsed.Port() == "" &&
+		(parsed.Path == "" || parsed.Path == "/") && parsed.RawQuery == "" && parsed.Fragment == ""
 }
 
 type githubBrokerScopeAuthorizer struct {
@@ -379,7 +398,8 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
 	if err != nil {
 		return err
 	}
-	if repository == nil || repository.WorkspaceID != workspaceID || !strings.EqualFold(repository.Provider, "github") {
+	if repository == nil || repository.WorkspaceID != workspaceID ||
+		!strings.EqualFold(repository.Provider, "github") || !isPublicGitHubProviderHost(repository.ProviderHost) {
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
 	binding, found, err := taskmodels.LoadRemoteContribution(link.Metadata)

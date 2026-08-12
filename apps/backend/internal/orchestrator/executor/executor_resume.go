@@ -1300,7 +1300,7 @@ func (e *Executor) applyResumeWorktreeConfig(
 		req.CheckoutBranch = primaryTaskRepo.CheckoutBranch
 		req.PRNumber = prNumberFromMetadata(primaryTaskRepo.Metadata)
 	}
-	if primaryTaskRepo != nil {
+	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID && req.ContributionDestination == nil {
 		if destination, found, err := models.LoadContributionDestination(primaryTaskRepo.Metadata); err == nil && found {
 			req.ContributionDestination = &destination
 		}

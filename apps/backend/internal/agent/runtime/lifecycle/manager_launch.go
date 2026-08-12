@@ -246,8 +246,11 @@ func collectContributionDestinations(req *LaunchRequest) (map[string]models.Cont
 		if index > 0 {
 			key = baseBranchMetadataKey(spec)
 		}
-		if existing, ok := destinations[key]; ok && existing.TargetRepository.Path != spec.ContributionDestination.TargetRepository.Path {
-			return nil, fmt.Errorf("multiple contribution destinations target workspace repository %q", key)
+		if existing, ok := destinations[key]; ok {
+			if !sameContributionDestinationTarget(existing, *spec.ContributionDestination) {
+				return nil, fmt.Errorf("multiple contribution destinations target workspace repository %q", key)
+			}
+			continue
 		}
 		destinations[key] = *spec.ContributionDestination
 	}
@@ -255,6 +258,13 @@ func collectContributionDestinations(req *LaunchRequest) (map[string]models.Cont
 		return nil, nil
 	}
 	return destinations, nil
+}
+
+func sameContributionDestinationTarget(left, right models.ContributionDestination) bool {
+	return strings.EqualFold(left.TargetRepository.Host, right.TargetRepository.Host) &&
+		left.TargetRepository.Path == right.TargetRepository.Path &&
+		left.TargetRepository.ProviderID == right.TargetRepository.ProviderID &&
+		left.TargetRepository.RemoteURL == right.TargetRepository.RemoteURL
 }
 
 // collectBaseBranches builds the per-repo {RepositoryName → base_branch}

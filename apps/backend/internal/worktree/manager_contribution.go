@@ -97,7 +97,7 @@ func (m *Manager) configureContributionDestination(
 	}
 	pushURL := m.newNonInteractiveGitCmd(ctx, repoPath, "config", "--get-all", "remote."+remoteName+".pushurl")
 	configured, readErr := runGitCmdOutput(ctx, pushURL)
-	if readErr == nil && strings.TrimSpace(string(configured)) != destination.TargetRepository.RemoteURL {
+	if readErr == nil && !contributionDestinationPushURLsMatch(string(configured), destination.TargetRepository.RemoteURL) {
 		return fmt.Errorf("contribution destination push URL does not match the validated target")
 	}
 	if readErr != nil {
@@ -114,6 +114,19 @@ func (m *Manager) configureContributionDestination(
 		return fmt.Errorf("set contribution destination push remote: %w", err)
 	}
 	return nil
+}
+
+func contributionDestinationPushURLsMatch(configured, target string) bool {
+	urls := strings.Split(strings.TrimSpace(configured), "\n")
+	if len(urls) == 0 || (len(urls) == 1 && urls[0] == "") {
+		return false
+	}
+	for _, configuredURL := range urls {
+		if strings.TrimSpace(configuredURL) != target {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Manager) validateContributionAncestor(ctx context.Context, repoPath, expectedSHA, descendantRef string) error {
