@@ -36,6 +36,8 @@
   "appriseServiceUrls": "服务 URL",
   "appriseUrlRequired": "至少需要一个 Apprise 服务 URL。",
   "archiveConfirmation": "归档确认",
+  "preventAutoStartAgentOnOpen": "打开时阻止自动启动",
+  "preventAutoStartAgentOnOpenHelp": "重启后或从工作流最后一步打开任务时，不会自动启动代理，而是显示启动代理按钮。",
   "arrangeSplit": "调整拆分布局",
   "autoApprove": "自动批准",
   "autoInstallIfNotFound": "未找到时自动安装",

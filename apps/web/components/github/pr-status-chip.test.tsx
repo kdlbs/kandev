@@ -6,8 +6,12 @@ import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { PRStatusChip, aggregateChipStatus } from "./pr-status-chip";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS } from "./pr-ci-popover";
+import {
+  makeTestCIOptions as makeCIOptions,
+  makeTestPR as makePR,
+} from "./pr-status-chip.test-fixtures";
 import type { AppState } from "@/lib/state/store";
-import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
+import type { TaskPR } from "@/lib/types/github";
 
 const AUTO_FIX_BADGE_TESTID = "pr-status-auto-fix-chip";
 const testConstants = vi.hoisted(() => ({ defaultCIFixPrompt: "Default CI fix prompt" }));
@@ -48,6 +52,7 @@ vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
       using_default_prompt: true,
       updated_at: "2026-06-18T10:00:00Z",
       pr_states: [],
+      pr_options: [],
     }),
     listWorkspaceTaskPRs: vi.fn().mockResolvedValue({ task_prs: {} }),
   };
@@ -65,53 +70,6 @@ function renderWithStore(initialState: Partial<AppState> | undefined, ui: ReactN
       </ToastProvider>
     </StateProvider>,
   );
-}
-
-function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
-  return {
-    id: "pr-id",
-    task_id: "task-1",
-    owner: "acme",
-    repo: "demo",
-    pr_number: 42,
-    pr_url: "https://github.com/acme/demo/pull/42",
-    pr_title: "Test PR",
-    head_branch: "feat",
-    base_branch: "main",
-    author_login: "alice",
-    state: "open",
-    review_state: "approved",
-    checks_state: "success",
-    mergeable_state: "clean",
-    review_count: 1,
-    pending_review_count: 0,
-    comment_count: 0,
-    unresolved_review_threads: 0,
-    checks_total: 2,
-    checks_passing: 2,
-    additions: 0,
-    deletions: 0,
-    created_at: "",
-    merged_at: null,
-    closed_at: null,
-    last_synced_at: null,
-    updated_at: "",
-    ...overrides,
-  };
-}
-
-function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
-  return {
-    task_id: "task-1",
-    auto_fix_enabled: false,
-    auto_merge_enabled: false,
-    auto_fix_prompt_override: null,
-    effective_auto_fix_prompt: testConstants.defaultCIFixPrompt,
-    using_default_prompt: true,
-    updated_at: "2026-06-18T10:00:00Z",
-    pr_states: [],
-    ...overrides,
-  };
 }
 
 beforeEach(() => {

@@ -8,11 +8,24 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func TestExecutionToLaunchResponseReportsAgentProfile(t *testing.T) {
+	response := executionToLaunchResponse("task-1", &executor.TaskExecution{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		AgentProfileID:   "effective-profile",
+		SessionState:     v1.TaskSessionStateRunning,
+	})
+	if got, want := response.AgentProfileID, "effective-profile"; got != want {
+		t.Fatalf("agent_profile_id = %v, want %v", got, want)
+	}
+}
 
 func TestResolveIntent(t *testing.T) {
 	tests := []struct {

@@ -71,6 +71,7 @@ export type UserSettings = {
   show_todo_list_panel_only_when_not_empty?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
+  prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
@@ -135,6 +136,7 @@ export type UserSettingsUpdatePayload = {
   show_todo_list_panel_only_when_not_empty?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
+  prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;

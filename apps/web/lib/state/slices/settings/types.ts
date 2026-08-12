@@ -268,6 +268,7 @@ export type UserSettingsState = {
   chatSubmitKey: "enter" | "cmd_enter";
   reviewAutoMarkOnScroll: boolean;
   confirmTaskArchive: boolean;
+  preventAutoStartAgentOnOpen: boolean;
   unreadDivider: boolean;
   agentGeneratedTaskTitles: boolean;
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;

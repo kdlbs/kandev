@@ -26,4 +26,11 @@ const (
 	// SessionLoadTimeout is the maximum time for ACP session/load (resume).
 	// Session loading may involve deserializing large conversation histories.
 	SessionLoadTimeout = 2 * time.Minute
+
+	// StepHistoryWriteTimeout bounds the ADR 0015 session_step_history audit
+	// insert issued after a step transition has already been durably
+	// persisted. It runs on context.WithoutCancel so a client disconnect (or
+	// turn-end context cancellation) cannot drop the audit row for a
+	// transition that already committed.
+	StepHistoryWriteTimeout = 5 * time.Second
 )

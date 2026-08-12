@@ -156,4 +156,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-10-debug-launcher-profile-selection | [Keep Debug Launches on the Production Profile](2026-08-10-debug-launcher-profile-selection.md) | accepted | backend, frontend, cli | 2026-08-10 |
 | 2026-08-10-remote-contribution-head-drift | [Separate Current Contribution and Local Checkout Histories](2026-08-10-remote-contribution-head-drift.md) | accepted | backend, frontend, protocol, GitHub, GitLab | 2026-08-10 |
 | 2026-08-11-user-owned-status-bar-visibility | [Make Status Bar Visibility a Portable User Preference](2026-08-11-user-owned-status-bar-visibility.md) | accepted | backend, frontend, protocol | 2026-08-11 |
+| 2026-08-12-built-in-utility-default-inheritance | [Built-in Utility Actions Inherit the Global Profile by Default](2026-08-12-built-in-utility-default-inheritance.md) | accepted | backend, frontend | 2026-08-12 |
 | 2026-08-10-no-em-dash-public-copy | [Keep Em Dashes Out of Public Copy](2026-08-10-no-em-dash-public-copy.md) | accepted | frontend, infra | 2026-08-10 |

@@ -28,6 +28,13 @@ type EnsureSessionOptions struct {
 	// but the agent process (agentctl) is not running. Used by office advanced
 	// mode to bring up file/terminal/changes panels.
 	EnsureExecution bool
+	// AutoStart overrides the workflow-step auto-start decision. When
+	// explicitly false, the session is created workspace-only (prepare,
+	// CREATED) even when the step's on-enter has auto_start_agent, and the
+	// launch is marked NoAgentLaunch so passthrough profiles are never
+	// upgraded into an agent start. Absent (nil) keeps the step-derived
+	// decision.
+	AutoStart *bool
 }
 
 // ensureLocks serializes EnsureSession calls per task id so concurrent callers
@@ -38,6 +45,8 @@ type EnsureSessionOptions struct {
 // Growth is bounded by the number of distinct task IDs (~160 B per entry).
 var ensureLocks sync.Map // map[taskID]*sync.Mutex
 
+// acquireEnsureLock serializes concurrent EnsureSession calls per task,
+// returning an unlock function.
 func acquireEnsureLock(taskID string) func() {
 	v, _ := ensureLocks.LoadOrStore(taskID, &sync.Mutex{})
 	mu := v.(*sync.Mutex)
@@ -85,6 +94,9 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 
 	agentProfileID, step := s.resolveTaskAgentProfile(ctx, task)
 	autoStart := stepAllowsAutoStart(step)
+	if o.AutoStart != nil {
+		autoStart = *o.AutoStart
+	}
 
 	intent := IntentPrepare
 	source := "created_prepare"
@@ -100,6 +112,7 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 		WorkflowStepID:  task.WorkflowStepID,
 		LaunchWorkspace: true,
 		AutoStart:       intent == IntentStart,
+		NoAgentLaunch:   o.AutoStart != nil && !*o.AutoStart,
 	})
 	if err != nil {
 		return nil, err
@@ -191,6 +204,8 @@ func WithViewerAgent(ctx context.Context, agentInstanceID string) context.Contex
 	return context.WithValue(ctx, viewerAgentContextKey, agentInstanceID)
 }
 
+// existingResponse builds an ensure response for a pre-existing session,
+// attaching the task's workspace path when the session row lacks one.
 func (s *Service) existingResponse(ctx context.Context, taskID string, sess *models.TaskSession, source string) *EnsureSessionResponse {
 	resp := &EnsureSessionResponse{
 		Success:        true,
@@ -251,6 +266,8 @@ func (s *Service) resolveTaskAgentProfile(ctx context.Context, task *models.Task
 	return "", step
 }
 
+// lookupWorkflowStep loads a workflow step by id, returning nil when the id
+// is empty, the getter is unavailable, or the lookup fails.
 func (s *Service) lookupWorkflowStep(ctx context.Context, stepID string) *wfmodels.WorkflowStep {
 	if stepID == "" || s.workflowStepGetter == nil {
 		return nil

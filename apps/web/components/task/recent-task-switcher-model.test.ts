@@ -81,6 +81,7 @@ function buildContext(): RecentTaskBuildContext {
     kanbanTasks: [
       {
         id: CURRENT_TASK_ID,
+        workflowId: WF_MAIN,
         workflowStepId: "step-1",
         title: "Current live title",
         position: 0,
@@ -100,6 +101,7 @@ function buildContext(): RecentTaskBuildContext {
         tasks: [
           {
             id: PREVIOUS_TASK_ID,
+            workflowId: WF_REVIEW,
             workflowStepId: "step-2",
             title: "Previous live title",
             position: 0,

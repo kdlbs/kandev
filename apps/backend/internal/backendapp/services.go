@@ -117,6 +117,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Wire start step resolver to task service for CreateTask
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
+	// Session history is owned by workflow service, but access is owned by the
+	// task service. Keep the authorization check at the service boundary.
+	workflowSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+
+	// Wire the ADR 0015 audit-trail writer for manual step transitions.
+	// workflowSvc.CreateStepTransition already matches
+	// taskservice.StepHistoryRecorder structurally, so no adapter is needed.
+	taskSvc.SetStepHistoryRecorder(workflowSvc)
 
 	// Wire workflow provider to workflow service for export/import
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
@@ -762,13 +770,17 @@ func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string)
 		return nil, err
 	}
 	profileID := agent.AgentProfileID
-	if profileID == "" && agent.ProfileBindingState == utilitymodels.ProfileBindingInherit && a.userSvc != nil {
+	bindingState := agent.ProfileBindingState
+	if utilitymodels.UsesDefaultProfile(agent) && a.userSvc != nil {
 		profileID, err = a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
 		if err != nil {
 			return nil, err
 		}
+		if profileID != "" {
+			bindingState = utilitymodels.ProfileBindingExplicit
+		}
 	}
-	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, AgentProfileID: profileID, ProfileBindingState: agent.ProfileBindingState, Enabled: agent.Enabled}, nil
+	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, AgentProfileID: profileID, ProfileBindingState: bindingState, Enabled: agent.Enabled}, nil
 }
 
 // pluginsTaskWriterAdapter adapts the task service to the plugins package's

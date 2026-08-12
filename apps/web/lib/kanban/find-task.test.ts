@@ -5,7 +5,7 @@ import type { KanbanState } from "@/lib/state/slices";
 type Task = KanbanState["tasks"][number];
 
 function task(id: string): Task {
-  return { id, workflowStepId: "s", title: id, position: 0 };
+  return { id, workflowId: "wf-1", workflowStepId: "s", title: id, position: 0 };
 }
 
 describe("findTaskInSnapshots", () => {

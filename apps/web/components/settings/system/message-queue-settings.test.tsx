@@ -214,6 +214,17 @@ describe("MessageQueueSettings — per-session limit", () => {
   });
 });
 
+describe("MessageQueueSettings — card surface", () => {
+  it("fills the available page width like the other settings boxes", async () => {
+    fetchSettingsMock.mockResolvedValueOnce(response());
+    render(<MessageQueueSettings />);
+
+    const root = await screen.findByTestId("message-queue-settings");
+    expect(root.className).toContain("w-full");
+    expect(root.className).not.toMatch(/\bmax-w-/);
+  });
+});
+
 describe("MessageQueueSettings — merge toggle", () => {
   it("is enabled by default and shows its limitations notice", async () => {
     render(<MessageQueueSettings />);

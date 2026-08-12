@@ -207,6 +207,25 @@ background** after its foreground yields while a recognized async subagent,
 immediately and the child may continue streaming. Other providers and
 foreground-generating Claude turns retain the coarse queueing behavior.
 
+### Prevent auto-start on open
+
+Under **Settings → General → Task actions**, the **Prevent auto-start on open**
+preference is off by default. When enabled, opening a task never launches or
+resumes its agent on its own; it shows the **Start agent** button instead. The
+preference applies in two situations:
+
+- **Opening a task in the final step of its workflow.** The task opens with a
+  prepared session and the agent stays stopped until you select **Start agent**.
+  Opening the same task with the preference off keeps the workflow step's
+  normal auto-start behavior.
+- **Opening a task whose agent was stopped by a Kandev restart.** The session
+  is recovered and shown stopped instead of being resumed automatically. Select
+  **Start agent** to resume it.
+
+The preference only gates opening a task. Choosing **Start agent** (or a
+workflow step transition) always starts the agent as usual, and a failed or
+interrupted session still shows its recovery actions.
+
 ## Find and organize tasks
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Kandev remembers the last selected view in that browser on the current device. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.

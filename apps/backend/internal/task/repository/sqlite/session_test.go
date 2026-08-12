@@ -645,6 +645,37 @@ func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestSetSessionMetadataKeyIfAbsentOrDifferentStepSQLiteReplacesOnlyStaleStep(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-step-claim", "session-step-claim", "turn-step-claim")
+	ctx := context.Background()
+
+	first := models.PendingStepCompletionSignal{StepID: "step-1", Summary: "first"}
+	stored, err := repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-1", first)
+	require.NoError(t, err)
+	require.True(t, stored, "an empty signal bag should be claimed")
+
+	second := models.PendingStepCompletionSignal{StepID: "step-2", Summary: "second"}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-2", second)
+	require.NoError(t, err)
+	require.True(t, stored, "a signal from an older step should be replaced")
+
+	third := models.PendingStepCompletionSignal{StepID: "step-2", Summary: "third"}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-2", third)
+	require.NoError(t, err)
+	require.False(t, stored, "a signal for the current step should keep the first payload")
+
+	session, err := repo.GetTaskSession(ctx, "session-step-claim")
+	require.NoError(t, err)
+	signal, ok := models.LoadPendingStepSignal(session.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "step-2", signal.StepID)
+	require.Equal(t, "second", signal.Summary)
+}
+
 func TestUpdateSessionContextWindowSQLiteCountsStrictUsageDrops(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -697,6 +728,16 @@ func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
 	}
 	if !strings.Contains(query, "jsonb_set") || !strings.Contains(query, "jsonb_extract_path") {
 		t.Fatalf("postgres write-once query must use JSONB set/existence operations: %s", query)
+	}
+}
+
+func TestSetSessionMetadataKeyIfAbsentOrDifferentStepQueryUsesPostgresJSONB(t *testing.T) {
+	query := setSessionMetadataKeyIfAbsentOrDifferentStepQuery(dialect.PGX)
+	if strings.Contains(query, "json_set") || strings.Contains(query, "json_extract") || strings.Contains(query, "json(?)") {
+		t.Fatalf("postgres step-aware claim query uses SQLite JSON functions: %s", query)
+	}
+	if !strings.Contains(query, "jsonb_set") || !strings.Contains(query, "jsonb_extract_path_text") || !strings.Contains(query, "IS DISTINCT FROM") {
+		t.Fatalf("postgres step-aware claim query must use atomic JSONB comparison: %s", query)
 	}
 }
 

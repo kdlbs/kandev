@@ -32,10 +32,15 @@ type sqliteRepository struct {
 
 var _ Repository = (*sqliteRepository)(nil)
 
+// newSQLiteRepositoryWithDB builds a repository over caller-owned database
+// handles (the writer/reader pair is not closed by the repository).
 func newSQLiteRepositoryWithDB(writer, reader *sqlx.DB) (*sqliteRepository, error) {
 	return newSQLiteRepository(writer, reader, false)
 }
 
+// newSQLiteRepository builds a repository, initializing the schema and the
+// default user; when ownsDB is set the writer connection is closed on schema
+// failure.
 func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
 	repo := &sqliteRepository{db: writer, ro: reader, ownsDB: ownsDB}
 	if err := repo.initSchema(); err != nil {
@@ -49,6 +54,8 @@ func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepositor
 	return repo, nil
 }
 
+// initSchema creates the users table, applies idempotent migrations, and
+// seeds the default user.
 func (r *sqliteRepository) initSchema() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS users (
@@ -86,6 +93,8 @@ func (r *sqliteRepository) runMigrations() {
 	m.Apply("users.email_unique", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
 }
 
+// ensureDefaultUser inserts the pre-auth default user row when it does not
+// exist yet.
 func (r *sqliteRepository) ensureDefaultUser() error {
 	ctx := context.Background()
 	var count int
@@ -105,6 +114,7 @@ func (r *sqliteRepository) ensureDefaultUser() error {
 	return nil
 }
 
+// Close releases the writer connection when the repository owns it.
 func (r *sqliteRepository) Close() error {
 	if !r.ownsDB {
 		return nil
@@ -114,6 +124,7 @@ func (r *sqliteRepository) Close() error {
 
 const userColumns = "id, email, display_name, role, status, created_at, updated_at"
 
+// GetUser returns the user row for the given id.
 func (r *sqliteRepository) GetUser(ctx context.Context, id string) (*models.User, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT `+userColumns+`
@@ -122,10 +133,12 @@ func (r *sqliteRepository) GetUser(ctx context.Context, id string) (*models.User
 	return scanUser(row)
 }
 
+// GetDefaultUser returns the pre-auth default user row.
 func (r *sqliteRepository) GetDefaultUser(ctx context.Context) (*models.User, error) {
 	return r.GetUser(ctx, DefaultUserID)
 }
 
+// GetUserByEmail returns the user row matching the email.
 func (r *sqliteRepository) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT `+userColumns+`
@@ -134,6 +147,7 @@ func (r *sqliteRepository) GetUserByEmail(ctx context.Context, email string) (*m
 	return scanUser(row)
 }
 
+// ListUsers returns all users ordered by creation time.
 func (r *sqliteRepository) ListUsers(ctx context.Context) ([]*models.User, error) {
 	rows, err := r.ro.QueryContext(ctx, `
 		SELECT `+userColumns+`
@@ -154,11 +168,14 @@ func (r *sqliteRepository) ListUsers(ctx context.Context) ([]*models.User, error
 	return users, rows.Err()
 }
 
+// DeleteUser removes the user row with the given id.
 func (r *sqliteRepository) DeleteUser(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM users WHERE id = ?`), id)
 	return err
 }
 
+// CreateUser inserts a new user row with an empty settings blob, stamping
+// creation timestamps.
 func (r *sqliteRepository) CreateUser(ctx context.Context, user *models.User) error {
 	now := time.Now().UTC()
 	user.CreatedAt = now
@@ -187,6 +204,8 @@ func (r *sqliteRepository) UpdateUserProfile(ctx context.Context, id, email, dis
 	return r.getUserFromWriter(ctx, id)
 }
 
+// UpdateUserRoleStatus updates a user's role and status, returning the
+// refreshed row.
 func (r *sqliteRepository) UpdateUserRoleStatus(ctx context.Context, id, role, status string) (*models.User, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE users SET role = ?, status = ?, updated_at = ?
@@ -211,6 +230,8 @@ func (r *sqliteRepository) getUserFromWriter(ctx context.Context, id string) (*m
 	return scanUser(row)
 }
 
+// checkUserRowsAffected fails when a user mutation affected no rows, i.e.
+// the target user does not exist.
 func checkUserRowsAffected(result sqlResult, userID string) error {
 	rows, err := result.RowsAffected()
 	if err != nil {
@@ -226,10 +247,12 @@ type sqlResult interface {
 	RowsAffected() (int64, error)
 }
 
+// GetUserSettings reads the user's settings through the reader connection.
 func (r *sqliteRepository) GetUserSettings(ctx context.Context, userID string) (*models.UserSettings, error) {
 	return r.getUserSettings(ctx, r.ro, userID)
 }
 
+// getUserSettings reads settings through an explicit connection.
 func (r *sqliteRepository) getUserSettings(ctx context.Context, conn *sqlx.DB, userID string) (*models.UserSettings, error) {
 	row := conn.QueryRowContext(ctx, conn.Rebind(`
 		SELECT settings, updated_at, settings_revision
@@ -242,6 +265,9 @@ func (r *sqliteRepository) getUserSettings(ctx context.Context, conn *sqlx.DB, u
 	return settings, nil
 }
 
+// UpsertUserSettingsPreservingTaskCreateLastUsed writes the settings blob,
+// merging the task_create_last_used patch into the stored JSON rather than
+// replacing it, and returns the persisted settings.
 func (r *sqliteRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
 	ctx context.Context,
 	settings *models.UserSettings,
@@ -288,6 +314,9 @@ func (r *sqliteRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
 	)
 }
 
+// upsertUserSettingsPreservingTaskCreateLastUsedPostgres writes settings via
+// a jsonb_set expression so task_create_last_used merges instead of
+// replacing.
 func (r *sqliteRepository) upsertUserSettingsPreservingTaskCreateLastUsedPostgres(
 	ctx context.Context,
 	settings *models.UserSettings,
@@ -303,6 +332,8 @@ func (r *sqliteRepository) upsertUserSettingsPreservingTaskCreateLastUsedPostgre
 	)
 }
 
+// UpdateTaskCreateLastUsed merges the last task-creation choices into the
+// stored settings JSON and bumps the revision.
 func (r *sqliteRepository) UpdateTaskCreateLastUsed(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
 	if dialect.IsPostgres(r.db.DriverName()) {
 		return r.updateTaskCreateLastUsedPostgres(ctx, userID, patch)
@@ -334,6 +365,8 @@ func (r *sqliteRepository) UpdateTaskCreateLastUsed(ctx context.Context, userID 
 	)
 }
 
+// updateTaskCreateLastUsedPostgres merges the patch via a Postgres jsonb_set
+// expression.
 func (r *sqliteRepository) updateTaskCreateLastUsedPostgres(ctx context.Context, userID string, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
 	query, args := buildPostgresTaskCreateLastUsedUpdate(patch)
 	if len(args) == 0 {
@@ -347,6 +380,8 @@ func (r *sqliteRepository) updateTaskCreateLastUsedPostgres(ctx context.Context,
 	)
 }
 
+// makeTaskCreateLastUsedJSONSetArgs flattens the patch into JSON1 json_set
+// path/value arguments, skipping empty fields and unsafe workspace path keys.
 func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
 	args := []any{}
 	if patch.RepositoryID != "" {
@@ -382,6 +417,9 @@ func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
 	return args
 }
 
+// isSafeTaskCreateWorkspacePathKey reports whether a workspace id can be
+// embedded in a JSON path segment without punctuation that would change the
+// path.
 func isSafeTaskCreateWorkspacePathKey(value string) bool {
 	if value == "" {
 		return false
@@ -398,6 +436,8 @@ func isSafeTaskCreateWorkspacePathKey(value string) bool {
 	return true
 }
 
+// buildPostgresTaskCreateLastUsedUpdate builds the jsonb_set UPDATE statement
+// and its arguments for a task_create_last_used patch.
 func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (string, []any) {
 	base := "(CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}'::jsonb ELSE settings::jsonb END)"
 	expr := fmt.Sprintf(
@@ -416,6 +456,8 @@ func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (str
 	return query, args
 }
 
+// buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate builds the
+// jsonb_set UPDATE for a full settings write that merges the patch.
 func buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(patch *models.TaskCreateLastUsed) (string, []any) {
 	base := "(CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}'::jsonb ELSE settings::jsonb END)"
 	expr := fmt.Sprintf(
@@ -435,6 +477,8 @@ func buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(patch *models.T
 	return query, args
 }
 
+// normalizePostgresTaskCreateLastUsedExpr builds the jsonb expression that
+// reads (or defaults) the task_create_last_used object and its workflow map.
 func normalizePostgresTaskCreateLastUsedExpr(base string) string {
 	taskCreate := fmt.Sprintf("COALESCE(%s->'task_create_last_used', '{}'::jsonb)", base)
 	workflowMap := fmt.Sprintf(
@@ -449,6 +493,8 @@ func normalizePostgresTaskCreateLastUsedExpr(base string) string {
 	)
 }
 
+// applyPostgresTaskCreateLastUsedPatch appends jsonb_set calls for each
+// non-empty patch field and the corresponding arguments.
 func applyPostgresTaskCreateLastUsedPatch(expr string, patch models.TaskCreateLastUsed, args []any) (string, []any) {
 	if patch.RepositoryID != "" {
 		expr = fmt.Sprintf("jsonb_set(%s, '{task_create_last_used,repository_id}', to_jsonb(?::text), true)", expr)
@@ -485,6 +531,8 @@ func applyPostgresTaskCreateLastUsedPatch(expr string, patch models.TaskCreateLa
 	return expr, args
 }
 
+// marshalUserSettingsPayload serializes the settings model to the stored JSON
+// blob, normalizing enums and defaulting nil slices/maps.
 func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	lspAutoStart := settings.LspAutoStartLanguages
 	if lspAutoStart == nil {
@@ -527,6 +575,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"chat_submit_key":                          settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":               settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                     settings.ConfirmTaskArchive,
+		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
@@ -570,6 +619,8 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	})
 }
 
+// scanUpdatedUserSettings scans a settings row after an UPDATE, mapping a
+// missing row to a user-not-found error.
 func scanUpdatedUserSettings(scanner interface{ Scan(dest ...any) error }, userID string) (*models.UserSettings, error) {
 	settings, err := scanUserSettings(scanner, userID)
 	if err == sql.ErrNoRows {
@@ -578,6 +629,7 @@ func scanUpdatedUserSettings(scanner interface{ Scan(dest ...any) error }, userI
 	return settings, err
 }
 
+// scanUser scans a single user row into a models.User.
 func scanUser(scanner interface{ Scan(dest ...any) error }) (*models.User, error) {
 	user := &models.User{}
 	if err := scanner.Scan(&user.ID, &user.Email, &user.DisplayName, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt); err != nil {
@@ -638,6 +690,8 @@ func mergeVoiceModeDefaults(stored *storedVoiceMode) models.VoiceModeSettings {
 	return out
 }
 
+// defaultUserSettings returns the baseline settings for a user with no saved
+// preferences.
 func defaultUserSettings(userID string) *models.UserSettings {
 	return &models.UserSettings{
 		UserID:                            userID,
@@ -676,6 +730,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 	}
 }
 
+// DefaultSidebarViews returns the default single "All tasks" sidebar view.
 func DefaultSidebarViews() []models.SidebarView {
 	return []models.SidebarView{{
 		ID:              DefaultSidebarViewID,
@@ -687,6 +742,8 @@ func DefaultSidebarViews() []models.SidebarView {
 	}}
 }
 
+// scanUserSettings scans and decodes the settings row, starting from defaults
+// and merging every field present in the stored JSON blob.
 func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID string) (*models.UserSettings, error) {
 	settings := defaultUserSettings(userID)
 	var settingsRaw string
@@ -712,6 +769,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ChatSubmitKey                     string                              `json:"chat_submit_key"`
 		ReviewAutoMarkOnScroll            *bool                               `json:"review_auto_mark_on_scroll"`
 		ConfirmTaskArchive                *bool                               `json:"confirm_task_archive"`
+		PreventAutoStartAgentOnOpen       *bool                               `json:"prevent_auto_start_agent_on_open"`
 		UnreadDivider                     *bool                               `json:"unread_divider"`
 		AgentGeneratedTaskTitles          *bool                               `json:"agent_generated_task_titles"`
 		MCPTaskAgentProfileDefault        string                              `json:"mcp_task_agent_profile_default"`
@@ -779,6 +837,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.ConfirmTaskArchive != nil {
 		settings.ConfirmTaskArchive = *payload.ConfirmTaskArchive
+	}
+	if payload.PreventAutoStartAgentOnOpen != nil {
+		settings.PreventAutoStartAgentOnOpen = *payload.PreventAutoStartAgentOnOpen
 	}
 	if payload.UnreadDivider != nil {
 		settings.UnreadDivider = *payload.UnreadDivider
@@ -901,6 +962,8 @@ func decodeKanbanHiddenStepIDs(raw json.RawMessage) map[string][]string {
 	return decoded
 }
 
+// normalizeSidebarTaskPrefs defaults nil sidebar task pref collections so the
+// stored JSON never carries null.
 func normalizeSidebarTaskPrefs(prefs models.SidebarTaskPrefs) models.SidebarTaskPrefs {
 	if prefs.PinnedTaskIDs == nil {
 		prefs.PinnedTaskIDs = []string{}
@@ -914,6 +977,8 @@ func normalizeSidebarTaskPrefs(prefs models.SidebarTaskPrefs) models.SidebarTask
 	return prefs
 }
 
+// normalizeAppStatusBarOrder defaults nil status bar item lists so the stored
+// JSON never carries null.
 func normalizeAppStatusBarOrder(order models.AppStatusBarOrder) models.AppStatusBarOrder {
 	if order.LeftItemIDs == nil {
 		order.LeftItemIDs = []string{}

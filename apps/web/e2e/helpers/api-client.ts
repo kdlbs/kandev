@@ -702,13 +702,20 @@ export class ApiClient {
     workflowId: string,
     name: string,
     position: number,
-    opts?: { is_start_step?: boolean },
+    opts?: {
+      is_start_step?: boolean;
+      events?: {
+        on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
+      };
+    },
   ): Promise<{ id: string }> {
     return this.request("POST", `/api/v1/workflow/steps`, {
       workflow_id: workflowId,
       name,
       position,
       ...(opts?.is_start_step != null ? { is_start_step: opts.is_start_step } : {}),
+      ...(opts?.events != null ? { events: opts.events } : {}),
     });
   }
 
@@ -928,6 +935,7 @@ export class ApiClient {
   async saveUserSettings(settings: {
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
+    prevent_auto_start_agent_on_open?: boolean;
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
