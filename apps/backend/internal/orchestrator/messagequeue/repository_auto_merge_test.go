@@ -3,6 +3,7 @@ package messagequeue
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -372,6 +373,10 @@ func autoMergeSkipCases() []autoMergeSkipCase {
 			target.Metadata = map[string]interface{}{MetadataEntityReferences: manyEntityRefs(entityrefs.MaxReferencesPerMessage)}
 			source.Metadata = map[string]interface{}{MetadataEntityReferences: entityRefs("overflow")}
 		}},
+		{name: "context file overflow", mutate: func(target, source *QueuedMessage) {
+			target.Metadata = map[string]interface{}{MetadataContextFiles: autoContextFiles("target", messageconstraints.MaxContextFilesPerMessage/2+1)}
+			source.Metadata = map[string]interface{}{MetadataContextFiles: autoContextFiles("source", messageconstraints.MaxContextFilesPerMessage/2)}
+		}},
 		{name: "malformed context files", mutate: func(target, source *QueuedMessage) {
 			target.Metadata = map[string]interface{}{MetadataContextFiles: []interface{}{map[string]interface{}{"path": "valid", "name": "valid"}}}
 			source.Metadata = map[string]interface{}{MetadataContextFiles: "invalid"}
@@ -413,6 +418,14 @@ func autoFileAttachments(prefix string, count int, size int64) []MessageAttachme
 		attachments[index] = MessageAttachment{AttachmentID: prefix + string(rune('a'+index)), SizeBytes: size}
 	}
 	return attachments
+}
+
+func autoContextFiles(prefix string, count int) []apiv1.ContextFileMeta {
+	files := make([]apiv1.ContextFileMeta, count)
+	for index := range files {
+		files[index] = apiv1.ContextFileMeta{Path: prefix + "/file-" + fmt.Sprint(index), Name: "file"}
+	}
+	return files
 }
 
 func testAutoMergeWriteRollback(t *testing.T, repo Repository, createTrigger string) {

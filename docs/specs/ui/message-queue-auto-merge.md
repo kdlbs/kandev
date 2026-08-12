@@ -44,7 +44,8 @@ handled together.
 - Entity references form a stable target-then-source union, deduplicated by
   canonical reference, and must remain within the per-message reference limit.
   Context files form a stable target-then-source union with exact duplicates
-  removed.
+  removed and remain capped at 200 descriptors. Exceeding that cap keeps the
+  newly admitted entry separate.
 - If any compatibility, provenance, metadata, attachment, or reference check
   fails, the newly admitted message remains a separate FIFO entry. Automatic
   merge incompatibility never rejects an otherwise valid message.
@@ -223,9 +224,9 @@ rows remain separate; enabling the switch does not sweep them.
   references within all limits, **WHEN** they merge, **THEN** every value is
   present in target-then-source order with only exact/canonical duplicates
   removed.
-- **GIVEN** a combined attachment or entity-reference limit would be exceeded,
-  **WHEN** the later message is admitted, **THEN** both entries remain separate
-  and the admission succeeds if queue capacity permits.
+- **GIVEN** a combined attachment, context-file, or entity-reference limit would
+  be exceeded, **WHEN** the later message is admitted, **THEN** both entries
+  remain separate and the admission succeeds if queue capacity permits.
 - **GIVEN** a compatible file-backed message whose attachment claim fails,
   **WHEN** admission rolls back, **THEN** the prior tail is byte-for-byte
   unchanged.

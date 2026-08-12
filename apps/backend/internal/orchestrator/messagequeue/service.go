@@ -459,7 +459,12 @@ func lifecycleGenerationFromMetadata(metadata map[string]interface{}) (int64, bo
 // ReserveQueued atomically takes an ordinary head entry or reserves a durable
 // lifecycle head entry. A reserved lifecycle row survives until acknowledged.
 func (s *Service) ReserveQueued(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
-	msg, err := s.repo.ReserveHead(ctx, sessionID)
+	var msg *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		msg, err = s.repo.ReserveHead(admittedCtx, sessionID)
+		return err
+	})
 	if err != nil {
 		s.logger.Error("reserve head failed",
 			zap.String("session_id", sessionID),
@@ -471,7 +476,9 @@ func (s *Service) ReserveQueued(ctx context.Context, sessionID string) (*QueuedM
 
 // AcknowledgeQueued removes a server-reserved entry after prompt acceptance.
 func (s *Service) AcknowledgeQueued(ctx context.Context, sessionID, entryID string) error {
-	err := s.repo.AcknowledgeByID(ctx, sessionID, entryID)
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.AcknowledgeByID(admittedCtx, sessionID, entryID)
+	})
 	if errors.Is(err, ErrEntryNotFound) {
 		return nil
 	}
@@ -543,7 +550,12 @@ func (s *Service) AppendContent(ctx context.Context, sessionID, taskID, content,
 // TakeQueued atomically removes and returns the head entry. Returns nil, false
 // when the queue is empty.
 func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
-	msg, err := s.repo.TakeHead(ctx, sessionID)
+	var msg *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		msg, err = s.repo.TakeHead(admittedCtx, sessionID)
+		return err
+	})
 	if err != nil {
 		s.logger.Error("take head failed",
 			zap.String("session_id", sessionID),
@@ -572,7 +584,12 @@ func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMess
 // InterruptForPeerMessage to dispatch the specific message that triggered
 // the interrupt instead of whatever happens to be at the FIFO head.
 func (s *Service) TakeQueuedEntry(ctx context.Context, sessionID, entryID string) (*QueuedMessage, bool, error) {
-	msg, err := s.repo.TakeByID(ctx, sessionID, entryID)
+	var msg *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		msg, err = s.repo.TakeByID(admittedCtx, sessionID, entryID)
+		return err
+	})
 	if err != nil {
 		s.logger.Error("take by id failed",
 			zap.String("session_id", sessionID),
@@ -621,7 +638,12 @@ func (s *Service) GetEntry(ctx context.Context, sessionID, entryID string) (*Que
 // mutating any row, so aggregate validation failures or click-time edits leave
 // the queue untouched.
 func (s *Service) ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
-	claim, err := s.repo.ClaimSendNow(ctx, sessionID, expected)
+	var claim *SendNowClaim
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		claim, err = s.repo.ClaimSendNow(admittedCtx, sessionID, expected)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -664,7 +686,9 @@ func (s *Service) AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowCla
 // UpdateMessageWithMetadata atomically edits queue content and applies
 // metadata replacements while retaining unrelated metadata keys.
 func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
-	if err := s.repo.UpdateContentAndMetadata(ctx, sessionID, entryID, content, attachments, metadataUpdates, queuedBy); err != nil {
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.UpdateContentAndMetadata(admittedCtx, sessionID, entryID, content, attachments, metadataUpdates, queuedBy)
+	}); err != nil {
 		return err
 	}
 	s.logger.Info("queued entry updated",
@@ -677,7 +701,9 @@ func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entr
 // the rationale on the Repository.DeleteByID contract for why. Returns
 // ErrEntryNotFound when no entry matches.
 func (s *Service) RemoveEntry(ctx context.Context, sessionID, entryID string) error {
-	if err := s.repo.DeleteByID(ctx, sessionID, entryID); err != nil {
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.DeleteByID(admittedCtx, sessionID, entryID)
+	}); err != nil {
 		return err
 	}
 	s.logger.Info("queued entry removed",
@@ -693,7 +719,12 @@ func (s *Service) MergeIntoAbove(ctx context.Context, sessionID, entryID, queued
 	if !s.MergeEnabled() {
 		return nil, ErrMergeDisabled
 	}
-	merged, err := s.repo.MergeIntoAbove(ctx, sessionID, entryID, queuedBy)
+	var merged *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		merged, err = s.repo.MergeIntoAbove(admittedCtx, sessionID, entryID, queuedBy)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -712,7 +743,9 @@ func (s *Service) ReorderEntries(ctx context.Context, sessionID string, orderedI
 	if err := validateReorderInput(orderedIDs); err != nil {
 		return err
 	}
-	if err := s.repo.ReorderEntries(ctx, sessionID, orderedIDs); err != nil {
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.ReorderEntries(admittedCtx, sessionID, orderedIDs)
+	}); err != nil {
 		return err
 	}
 	s.logger.Info("queued entries reordered",
@@ -724,7 +757,12 @@ func (s *Service) ReorderEntries(ctx context.Context, sessionID string, orderedI
 // CancelAll clears every queued entry for a session. Returns the number of
 // rows removed.
 func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) {
-	n, err := s.repo.DeleteAllBySession(ctx, sessionID)
+	var n int
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		n, err = s.repo.DeleteAllBySession(admittedCtx, sessionID)
+		return err
+	})
 	if err != nil {
 		return 0, err
 	}

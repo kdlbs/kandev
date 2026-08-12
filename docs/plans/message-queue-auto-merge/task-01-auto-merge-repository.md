@@ -80,6 +80,8 @@ update this task plus `plan.md` status in the same conversation.
 - Added shared memory/SQLite/env-gated Postgres contract coverage, including
   mismatch and limit skips, immediate-predecessor selection, missing/drained
   sources, identity preservation, and transaction rollback.
+- Review remediation caps merged context-file metadata at 200 descriptors and
+  makes the identity assertion tolerant of Postgres timestamp precision.
 - Verification passed:
   - `cd apps/backend && go test -count=1 ./internal/orchestrator/messagequeue`
   - `cd apps/backend && go test -race -count=1 -run 'Test.*AutoMerge' ./internal/orchestrator/messagequeue`

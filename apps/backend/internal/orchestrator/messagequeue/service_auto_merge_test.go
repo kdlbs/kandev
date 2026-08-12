@@ -149,6 +149,87 @@ func TestService_AutoMergeSerializesDeferredFinalizationAndLaterAdmission(t *tes
 	}
 }
 
+func TestService_AutoMergeSerializesFinalizationWithDrainAndRemoval(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  func(*testing.T, *Service, *QueuedMessage, chan struct{})
+	}{
+		{
+			name: "drain",
+			run: func(t *testing.T, svc *Service, source *QueuedMessage, release chan struct{}) {
+				started := make(chan struct{})
+				result := make(chan struct {
+					msg *QueuedMessage
+					ok  bool
+				}, 1)
+				go func() {
+					close(started)
+					msg, ok := svc.ReserveQueued(context.Background(), source.SessionID)
+					result <- struct {
+						msg *QueuedMessage
+						ok  bool
+					}{msg: msg, ok: ok}
+				}()
+				<-started
+				select {
+				case got := <-result:
+					t.Fatalf("drain bypassed admission finalization: %+v", got)
+				case <-time.After(50 * time.Millisecond):
+				}
+				close(release)
+				got := <-result
+				if !got.ok || got.msg == nil || got.msg.ID != source.ID {
+					t.Fatalf("drain result = %+v, want source %s", got, source.ID)
+				}
+			},
+		},
+		{
+			name: "remove",
+			run: func(t *testing.T, svc *Service, source *QueuedMessage, release chan struct{}) {
+				started := make(chan struct{})
+				result := make(chan error, 1)
+				go func() {
+					close(started)
+					result <- svc.RemoveEntry(context.Background(), source.SessionID, source.ID)
+				}()
+				<-started
+				select {
+				case err := <-result:
+					t.Fatalf("removal bypassed admission finalization: %v", err)
+				case <-time.After(50 * time.Millisecond):
+				}
+				close(release)
+				if err := <-result; err != nil {
+					t.Fatalf("remove after finalization: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc := newAutoMergeTestService(t, 10)
+			release := make(chan struct{})
+			inserted := make(chan *QueuedMessage, 1)
+			admissionDone := make(chan error, 1)
+			go func() {
+				_, err := svc.QueueMessageWithMetadataAfterInsert(
+					context.Background(), "session", "task", "first", "", QueuedByUser, false, nil, nil,
+					func(_ context.Context, source *QueuedMessage) error {
+						inserted <- source
+						<-release
+						return nil
+					},
+				)
+				admissionDone <- err
+			}()
+			source := <-inserted
+			test.run(t, svc, source, release)
+			if err := <-admissionDone; err != nil {
+				t.Fatalf("admission: %v", err)
+			}
+		})
+	}
+}
+
 func TestService_AutoMergeSkipsExplicitMutationContracts(t *testing.T) {
 	t.Run("coalesce insert", func(t *testing.T) {
 		svc := newAutoMergeTestService(t, 10)

@@ -42,9 +42,10 @@ func autoMergeAllowed(target, source *QueuedMessage) bool {
 		return false
 	}
 	if source.QueuedBy == QueuedByAgent {
+		sourceSenderTaskID := metadataString(source.Metadata, MetadataSenderTaskID)
 		return target.QueuedBy == QueuedByAgent &&
-			metadataString(source.Metadata, MetadataSenderTaskID) != "" &&
-			metadataString(source.Metadata, MetadataSenderTaskID) == metadataString(target.Metadata, MetadataSenderTaskID)
+			sourceSenderTaskID != "" &&
+			sourceSenderTaskID == metadataString(target.Metadata, MetadataSenderTaskID)
 	}
 	return source.QueuedBy != "" && source.QueuedBy == target.QueuedBy && !IsReservedQueuedBy(source.QueuedBy)
 }
@@ -174,7 +175,7 @@ func unionAutoContextFiles(target, source map[string]interface{}) ([]apiv1.Conte
 			union = append(union, contextFile)
 		}
 	}
-	return union, true
+	return union, len(union) <= messageconstraints.MaxContextFilesPerMessage
 }
 
 func normalizeAutoContextFiles(raw interface{}) ([]apiv1.ContextFileMeta, bool) {

@@ -90,6 +90,9 @@ update this task plus `plan.md` status in the same conversation.
 - Added service, handler, concurrency, storage-error, four-switch-combination,
   and exact surviving-ID parent-interrupt coverage. Legacy tests that require
   multiple compatible rows now explicitly disable automatic merging.
+- Review remediation serializes queue drains, targeted takes, removals, edits,
+  reorders, manual merges, cancel-all, and send-now claims with admission
+  finalization; drain/removal race coverage now guards the provisional source.
 - Verification passed:
   - `cd apps/backend && go test -count=1 ./internal/orchestrator/messagequeue ./internal/orchestrator/handlers ./internal/orchestrator ./internal/mcp/handlers ./internal/backendapp`
   - `cd apps/backend && go test -race -count=1 ./internal/orchestrator/messagequeue ./internal/orchestrator/handlers`
