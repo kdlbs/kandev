@@ -1,10 +1,9 @@
 "use client";
 
 import {
+  IconAlertTriangle,
   IconCloudDownload,
-  IconCloudUpload,
   IconDots,
-  IconEye,
   IconGitCherryPick,
   IconGitCommit,
   IconGitMerge,
@@ -21,9 +20,22 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useChangeRequestTerminology } from "@/hooks/use-git-operations";
+import { RemoteContributionActionItems } from "../remote-contribution-action-items";
 import { PushSubmenu } from "./mobile-git-push-submenu";
 
 const DEFAULT_BASE_BRANCH = "main";
+
+function GitActionsIcon({
+  isGitLoading,
+  showContributionResolution,
+}: {
+  isGitLoading: boolean;
+  showContributionResolution: boolean;
+}) {
+  if (isGitLoading) return <IconLoader2 className="h-4 w-4 animate-spin" />;
+  if (showContributionResolution) return <IconAlertTriangle className="h-4 w-4 text-yellow-500" />;
+  return <IconDots className="h-4 w-4" />;
+}
 
 export type GitActionsDropdownProps = {
   sessionId: string | null | undefined;
@@ -100,34 +112,17 @@ function ContributionResolutionItems({
   | "onUseContribution"
   | "onViewPRVersion"
 > & { disabled: boolean }) {
-  const { t } = useTranslation();
   return (
-    <>
-      <DropdownMenuItem
-        className="min-h-11 cursor-pointer gap-3"
-        onClick={onReplaceContribution}
-        disabled={disabled || replaceDisabled || !onReplaceContribution}
-      >
-        <IconCloudUpload className="h-4 w-4 text-orange-500" />
-        <span className="flex-1">{t("task:replacePRBranch")}</span>
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        className="min-h-11 cursor-pointer gap-3"
-        onClick={onUseContribution}
-        disabled={disabled || useDisabled || !onUseContribution}
-      >
-        <IconGitCherryPick className="h-4 w-4 text-blue-500" />
-        <span className="flex-1">{t("task:usePRVersion")}</span>
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        className="min-h-11 cursor-pointer gap-3"
-        onClick={onViewPRVersion}
-        disabled={disabled || !onViewPRVersion}
-      >
-        <IconEye className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">{t("task:viewPRVersion")}</span>
-      </DropdownMenuItem>
-    </>
+    <RemoteContributionActionItems
+      disabled={disabled}
+      replaceDisabled={replaceDisabled}
+      useDisabled={useDisabled}
+      onReplaceContribution={onReplaceContribution}
+      onUseContribution={onUseContribution}
+      onViewPRVersion={onViewPRVersion}
+      descriptionMode="inline"
+      testIdPrefix="mobile"
+    />
   );
 }
 
@@ -192,13 +187,15 @@ export function GitActionsDropdown({
           variant="ghost"
           className="h-11 w-11 cursor-pointer"
           aria-label={t("task:gitActions")}
+          title={
+            showContributionResolution ? t("task:remoteContributionChangedTooltip") : undefined
+          }
           data-testid="mobile-git-actions"
         >
-          {isGitLoading ? (
-            <IconLoader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <IconDots className="h-4 w-4" />
-          )}
+          <GitActionsIcon
+            isGitLoading={isGitLoading}
+            showContributionResolution={showContributionResolution}
+          />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">

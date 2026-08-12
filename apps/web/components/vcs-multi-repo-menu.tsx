@@ -10,7 +10,6 @@ import {
   IconGitMerge,
   IconGitPullRequest,
   IconLoader2,
-  IconEye,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
@@ -26,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { RemoteContributionActionItems } from "@/components/task/remote-contribution-action-items";
 import type { ReactNode } from "react";
 
 export type PerRepoStatus = {
@@ -350,30 +350,15 @@ function MultiRepoVcsDropdown({
       {showContributionResolution && blockedRepositoryName !== undefined && (
         <>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className={ITEM_CLASS}
-            disabled={disabled || replaceDisabled}
-            onClick={() => callbacks.onReplaceContribution(blockedRepositoryName)}
-          >
-            <IconAlertTriangle className="h-4 w-4 text-destructive" />
-            <span className="flex-1">{t("task:replacePRBranch")}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className={ITEM_CLASS}
-            disabled={disabled || useDisabled}
-            onClick={() => callbacks.onUseContribution(blockedRepositoryName)}
-          >
-            <IconCloudDownload className={ICON_CLASS} />
-            <span className="flex-1">{t("task:usePRVersion")}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className={ITEM_CLASS}
+          <RemoteContributionActionItems
             disabled={disabled}
-            onClick={() => callbacks.onViewContribution(blockedRepositoryName)}
-          >
-            <IconEye className={ICON_CLASS} />
-            <span className="flex-1">{t("task:viewPRVersion")}</span>
-          </DropdownMenuItem>
+            replaceDisabled={replaceDisabled}
+            useDisabled={useDisabled}
+            itemClassName={ITEM_CLASS}
+            onReplaceContribution={() => callbacks.onReplaceContribution(blockedRepositoryName)}
+            onUseContribution={() => callbacks.onUseContribution(blockedRepositoryName)}
+            onViewPRVersion={() => callbacks.onViewContribution(blockedRepositoryName)}
+          />
         </>
       )}
     </DropdownMenuContent>

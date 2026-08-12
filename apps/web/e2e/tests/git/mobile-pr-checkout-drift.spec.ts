@@ -195,12 +195,15 @@ test.describe("Mobile rewritten contribution history", () => {
       "aria-disabled",
       "true",
     );
-    await expect(menuItems.filter({ hasText: /^Replace PR branch$/ })).toBeVisible();
-    await expect(menuItems.filter({ hasText: /^Use PR version$/ })).toBeVisible();
-    await expect(menuItems.filter({ hasText: /^View PR version$/ })).toBeVisible();
+    await expect(openMenu.getByTestId("mobile-replace-pr-branch")).toBeVisible();
+    await expect(openMenu.getByTestId("mobile-use-pr-version")).toBeVisible();
+    await expect(openMenu.getByTestId("mobile-view-pr-version")).toBeVisible();
+    await expect(openMenu).toContainText("Replace the published PR branch");
+    await expect(openMenu).toContainText("Use the current PR version");
+    await expect(openMenu).toContainText("Open the current PR version");
     await expect(menuItems.filter({ hasText: /^Pull$/ })).toHaveCount(0);
     await expect(openMenu.locator('[data-slot="dropdown-menu-sub-trigger"]')).toHaveCount(0);
-    await menuItems.filter({ hasText: /^Replace PR branch$/ }).tap();
+    await openMenu.getByTestId("mobile-replace-pr-branch").tap();
     const drawer = testPage.getByTestId("mobile-remote-contribution-drawer");
     await expect(drawer).toBeVisible();
     await expect(drawer).toContainText(providerHistory.head);

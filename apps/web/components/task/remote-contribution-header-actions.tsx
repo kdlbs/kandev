@@ -2,54 +2,89 @@
 
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { useTranslation } from "react-i18next";
 import {
   remoteContributionActionPolicy,
   type RemoteContributionRelation,
 } from "@/hooks/domains/session/remote-contribution-relation";
+import { openExternalLink } from "@/lib/desktop/external-links";
 import {
   type RemoteContributionResolutionTarget,
   type useRemoteContributionResolution,
 } from "./use-remote-contribution-resolution";
+import { RemoteContributionActionItems } from "./remote-contribution-action-items";
 import { RemoteContributionResolutionDialog } from "./remote-contribution-resolution-dialog";
 
 export function RemoteContributionHeaderActions({
   relation,
   resolution,
   resolutionTarget,
+  prUrl,
 }: {
   relation?: RemoteContributionRelation;
   resolution?: ReturnType<typeof useRemoteContributionResolution>;
   resolutionTarget?: RemoteContributionResolutionTarget | null;
+  prUrl?: string;
 }) {
   const { t } = useTranslation();
   if (relation?.kind !== "diverged" || !resolution || !resolutionTarget) return null;
   const policy = remoteContributionActionPolicy(relation);
   return (
     <div className="flex items-center gap-1">
-      <Button
-        type="button"
-        size="sm"
-        variant="destructive"
-        className="h-5 px-1.5 text-[11px] gap-1 cursor-pointer"
-        data-testid="header-replace-pr-branch"
-        disabled={policy.replaceDisabled || resolution.isLoading}
-        onClick={() => resolution.requestReplace(resolutionTarget)}
-      >
-        <IconAlertTriangle className="h-3 w-3" />
-        {t("task:replacePRBranch")}
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        className="h-5 px-1.5 text-[11px] cursor-pointer"
-        data-testid="header-use-pr-version"
-        disabled={policy.useDisabled || resolution.isLoading}
-        onClick={() => resolution.requestUse(resolutionTarget)}
-      >
-        {t("task:usePRVersion")}
-      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6 cursor-pointer text-yellow-600 hover:bg-yellow-500/10 hover:text-yellow-600 dark:text-yellow-400 dark:hover:text-yellow-300"
+            aria-label={t("task:remoteContributionChangedTitle")}
+            title={t("task:remoteContributionChangedTooltip")}
+            data-testid="header-remote-contribution-warning"
+            disabled={resolution.isLoading}
+          >
+            <IconAlertTriangle className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-80"
+          data-testid="header-remote-contribution-menu"
+        >
+          <DropdownMenuLabel className="whitespace-normal px-2 py-2">
+            <div className="flex items-start gap-2">
+              <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
+              <div className="space-y-1">
+                <p className="font-medium text-foreground">
+                  {t("task:remoteContributionChangedTitle")}
+                </p>
+                <p className="font-normal leading-relaxed text-muted-foreground">
+                  {t("task:remoteContributionChangedBody")}
+                </p>
+              </div>
+            </div>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <RemoteContributionActionItems
+            disabled={resolution.isLoading}
+            replaceDisabled={policy.replaceDisabled}
+            useDisabled={policy.useDisabled}
+            onReplaceContribution={() => resolution.requestReplace(resolutionTarget)}
+            onUseContribution={() => resolution.requestUse(resolutionTarget)}
+            onViewPRVersion={
+              prUrl ? () => void openExternalLink(prUrl).catch(() => undefined) : undefined
+            }
+            testIdPrefix="header"
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
       {resolution.pending && (
         <RemoteContributionResolutionDialog
           open

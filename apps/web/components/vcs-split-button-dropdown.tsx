@@ -5,7 +5,6 @@ import {
   IconAlertTriangle,
   IconCloudDownload,
   IconCloudUpload,
-  IconEye,
   IconGitCherryPick,
   IconGitMerge,
   IconGitPullRequest,
@@ -19,6 +18,7 @@ import {
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { AHEAD_MARK, BEHIND_MARK, DEFAULT_BASE_BRANCH } from "./vcs-constants";
+import { RemoteContributionActionItems } from "@/components/task/remote-contribution-action-items";
 
 function StandardPushDropdownItems({
   disabled,
@@ -91,30 +91,17 @@ function ContributionDropdownItems({
   onUseContribution: () => void;
   onViewPRVersion: () => void;
 }) {
-  const { t } = useTranslation();
   return (
     <>
       <DropdownMenuSeparator />
-      <DropdownMenuItem
-        className="cursor-pointer gap-3"
-        onClick={onReplaceContribution}
-        disabled={disabled || replaceDisabled}
-      >
-        <IconAlertTriangle className="h-4 w-4 text-destructive" />
-        <span className="flex-1">{t("task:replacePRBranch")}</span>
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        className="cursor-pointer gap-3"
-        onClick={onUseContribution}
-        disabled={disabled || useDisabled}
-      >
-        <IconCloudDownload className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">{t("task:usePRVersion")}</span>
-      </DropdownMenuItem>
-      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onViewPRVersion}>
-        <IconEye className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">{t("task:viewPRVersion")}</span>
-      </DropdownMenuItem>
+      <RemoteContributionActionItems
+        disabled={disabled}
+        replaceDisabled={replaceDisabled}
+        useDisabled={useDisabled}
+        onReplaceContribution={onReplaceContribution}
+        onUseContribution={onUseContribution}
+        onViewPRVersion={onViewPRVersion}
+      />
     </>
   );
 }

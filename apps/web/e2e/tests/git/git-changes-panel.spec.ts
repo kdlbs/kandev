@@ -1681,9 +1681,23 @@ test.describe("Git Changes Panel", () => {
 
     const changesPull = changes.getByRole("button", { name: /^Pull$/ });
     await expect(changesPull).toBeDisabled();
-    await expect(changes.getByTestId("header-replace-pr-branch")).toBeVisible();
-    await expect(changes.getByTestId("header-use-pr-version")).toBeVisible();
-    await changes.getByTestId("header-replace-pr-branch").click();
+    const driftWarning = changes.getByTestId("header-remote-contribution-warning");
+    await expect(driftWarning).toBeVisible();
+    await driftWarning.click();
+    const driftMenu = testPage.getByTestId("header-remote-contribution-menu");
+    await expect(driftMenu).toBeVisible();
+    await expect(driftMenu.getByTestId("header-replace-pr-branch")).toBeVisible();
+    await expect(driftMenu.getByTestId("header-use-pr-version")).toBeVisible();
+    await expect(driftMenu.getByTestId("header-view-pr-version")).toBeVisible();
+    const replaceInfo = driftMenu.getByRole("img", {
+      name: /Replace the published PR branch/,
+    });
+    await replaceInfo.hover();
+    await expect(replaceInfo).toHaveAttribute("title", /Replace the published PR branch/);
+    const useInfo = driftMenu.getByRole("img", { name: /Use the current PR version/ });
+    await useInfo.hover();
+    await expect(useInfo).toHaveAttribute("title", /Use the current PR version/);
+    await driftMenu.getByTestId("header-replace-pr-branch").click();
     const resolutionDialog = testPage.getByTestId("remote-contribution-resolution-dialog");
     await expect(resolutionDialog).toBeVisible();
     await expect(resolutionDialog).toContainText(providerHistory.head);
