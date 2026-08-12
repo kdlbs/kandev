@@ -116,9 +116,14 @@ curated React, UI, and app-store surface.
   capabilities.events controls event delivery.
 - GetConfig and EmitEvent are ungated. GetConfig returns this plugin's own
   config, including cleartext secret fields, so do not log or commit it.
-- Declared webhook keys are routable, but Kandev does not authenticate callers
-  or enforce webhooks[].method. Validate the method, provider signature, and
-  replay/timestamp rules inside the plugin before side effects.
+- Declared webhook keys are routable, but Kandev enforces webhooks[].method
+  from the manifest only informationally, not against the inbound request.
+  By default Kandev requires a real caller identity (a session or PAT, or the
+  synthetic identity while authentication is disabled) before relaying to a
+  webhook; set `webhooks[].public: true` only when the plugin itself
+  authenticates the caller (see "Webhook receiver" below), and still validate
+  the method, provider signature, and replay/timestamp rules inside the
+  plugin before side effects.
 - capabilities.auth is the highest-risk capability. A webhook response may
   assert a verified external identity with X-Kandev-Auth-Login; only assert an
   email the IdP verified as owned by the subject. See [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
@@ -191,7 +196,7 @@ bookkeeping is host-internal; plugins do not call lifecycle methods.
 | registerTaskFilter | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository | Active ui.bundle | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | host.React / host.jsx | Shared React instance and React.createElement alias | Active ui.bundle | No cleanup; never bundle a second React/Radix runtime | const h = host.jsx |
 | host.store | Curated Zustand { getState, setState, subscribe } for the live app store | Active ui.bundle | Unsubscribe in destroy; setState mutates the whole SPA and is not a plugin database | const stop = host.store.subscribe(render) |
-| host.api.fetch / baseUrl | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments | Active ui.bundle; backend path must be a declared webhook when relayed | Abort/ignore requests after destroy; do not assume a webhook authenticates callers | host.api.fetch("webhooks/inbound", { method: "POST" }) |
+| host.api.fetch / baseUrl | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments | Active ui.bundle; backend path must be a declared webhook when relayed | Abort/ignore requests after destroy; sends the caller's own session credentials (credentials: "include"), so it reaches a non-public webhook fine, but do not assume Kandev authenticates a caller that is not the logged-in browser | host.api.fetch("webhooks/inbound", { method: "POST" }) |
 | host.storage | Authenticated, per-user key/value storage: get(scope, scopeId, key)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key)/list(scope, scopeId) plus subscribe(filter, handler); no plugin backend required | capabilities.user_state: true | set/delete accept an optional writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId }) |
 | host.ui | Curated host instances: Alert*, Badge, Button, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, RichTextEditor, RichTextReadOnly, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle | Host owns contexts/portals; render with host React and let modal/slot cleanup run | const Button = host.ui.Button |
 | host.theme | Current "light" or "dark" theme | Active ui.bundle | Read during render; subscribe through host/app patterns if theme-sensitive | host.theme === "dark" |
@@ -612,14 +617,23 @@ task, not for an unbounded per-item collection.
 ### 4. Webhook receiver
 
 Declare the route, validate the method and provider signature inside the
-backend, and return a bounded status/body. Kandev caps incoming bodies at 4 MiB
-but does not authenticate the caller.
+backend, and return a bounded status/body. Kandev caps incoming bodies at 4 MiB.
+
+By default Kandev requires a real caller identity (a session or PAT, or the
+synthetic identity while authentication is disabled) before relaying a
+request to `HandleWebhook` — an anonymous request gets `401` before your code
+ever runs. Set `public: true` only for a webhook a third party calls directly
+with no Kandev credential (a Slack/GitHub/Jira callback, an SSO
+initiate/callback pair) **and** that your handler authenticates itself
+(signing secret, HMAC, IdP token) — Kandev cannot verify that you actually do
+this, so treat it as your responsibility, not a default Kandev provides.
 
 ```yaml
 webhooks:
   - key: "provider-events"
     description: "Provider event callback"
     method: "POST" # informational; enforce it in HandleWebhook
+    public: true # only if this handler verifies the caller itself
 ```
 
 ```go
@@ -818,9 +832,11 @@ repackaging.
   uninstall.
 - **Importing direct DB/internal packages:** use apps/backend/pkg/pluginsdk and
   typed Host methods. Direct database access is outside the plugin contract.
-- **Trusting webhook metadata:** webhooks[].method is informational and the route
-  is not authenticated by Kandev. Validate method, signature, timestamp, replay
-  protection, and body before side effects.
+- **Trusting webhook metadata:** webhooks[].method is informational, not enforced.
+  A non-public webhook (the default) is authenticated by Kandev before your handler
+  runs; a `public: true` webhook is not — Kandev cannot verify you actually
+  authenticate its caller, so validate method, signature, timestamp, replay
+  protection, and body before side effects on any webhook you mark public.
 - **Bundling React:** use host.React, host.jsx, and host.ui; a second React or
   Radix copy breaks shared contexts and portals.
 - **Shipping the wrong binary name:** every declared executable must be under

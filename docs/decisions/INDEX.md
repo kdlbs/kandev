@@ -146,3 +146,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-10-duration-aware-e2e-sharding | [Duration-aware E2E sharding uses rolling `main` timings](2026-08-10-duration-aware-e2e-sharding.md) | accepted | infra, workflow | 2026-08-10 |
 | 2026-08-10-debug-launcher-profile-selection | [Keep Debug Launches on the Production Profile](2026-08-10-debug-launcher-profile-selection.md) | accepted | backend, frontend, cli | 2026-08-10 |
 | 2026-08-11-user-owned-status-bar-visibility | [Make Status Bar Visibility a Portable User Preference](2026-08-11-user-owned-status-bar-visibility.md) | accepted | backend, frontend, protocol | 2026-08-11 |
+| 2026-08-12-plugin-webhook-auth-gate | [Require Auth for Plugin Webhooks Unless the Manifest Declares Them Public](2026-08-12-plugin-webhook-auth-gate.md) | accepted | backend, frontend, security | 2026-08-12 |
