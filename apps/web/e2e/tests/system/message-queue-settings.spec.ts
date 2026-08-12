@@ -57,7 +57,9 @@ test.describe.serial("Message Queue general settings", () => {
     // The Message Queue box spans the full settings column like every other
     // settings box; it must not be width-restricted.
     const queueCard = testPage.getByTestId("message-queue-settings");
-    const siblingCard = testPage.getByTestId("voice-enable-card");
+    // Any other unconditional card on this page works as the reference width;
+    // this used to be the Voice Mode card, which moved out to the Voice plugin.
+    const siblingCard = testPage.getByTestId("archive-confirmation-card");
     await expect(queueCard).toBeVisible();
     await expect(siblingCard).toBeVisible();
     expect((await queueCard.boundingBox())?.width ?? 0).toBeCloseTo(
