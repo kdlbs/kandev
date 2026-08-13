@@ -610,7 +610,52 @@ func (r *Repository) initSessionSchema() error {
 	if err := r.initSessionWorktreeSchema(); err != nil {
 		return err
 	}
-	return r.initMessageTurnSchema()
+	if err := r.initMessageTurnSchema(); err != nil {
+		return err
+	}
+	return r.initSubagentContextSchema()
+}
+
+// initSubagentContextSchema creates task_session_subagents, the durable
+// relational record of a subagent (Task tool) invocation. See
+// docs/specs/subagent-context-persistence/spec.md. The three measurement
+// columns (total_tokens, tool_use_count, duration_ms) deliberately carry no
+// DEFAULT: an unreported value must store NULL, never 0 (75% of observed
+// invocations report none of them). turn_id carries no FOREIGN KEY so a turn
+// deletion never silently deletes the fan-out record it measured.
+func (r *Repository) initSubagentContextSchema() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_session_subagents (
+		id                  TEXT PRIMARY KEY,
+		task_session_id     TEXT NOT NULL,
+		task_id             TEXT NOT NULL,
+		turn_id             TEXT,
+		tool_call_id        TEXT NOT NULL,
+		parent_tool_call_id TEXT,
+		subagent_type       TEXT,
+		description         TEXT,
+		agent_id            TEXT,
+		child_session_id    TEXT,
+		model               TEXT,
+		agent_status        TEXT,
+		tool_status         TEXT,
+		is_async            INTEGER NOT NULL DEFAULT 0,
+		total_tokens        INTEGER,
+		tool_use_count      INTEGER,
+		duration_ms         INTEGER,
+		source              TEXT NOT NULL DEFAULT 'live',
+		observed_at         TIMESTAMP NOT NULL,
+		settled_at          TIMESTAMP,
+		updated_at          TIMESTAMP NOT NULL,
+		UNIQUE (task_session_id, tool_call_id),
+		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_subagents_session_id ON task_session_subagents(task_session_id);
+	CREATE INDEX IF NOT EXISTS idx_subagents_task_id    ON task_session_subagents(task_id);
+	CREATE INDEX IF NOT EXISTS idx_subagents_turn_id    ON task_session_subagents(turn_id);
+	`)
+	return err
 }
 
 func (r *Repository) initMessageTurnSchema() error {
