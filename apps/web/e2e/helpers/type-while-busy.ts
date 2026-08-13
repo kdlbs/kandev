@@ -57,12 +57,23 @@ export async function typeWhileBusy(page: Page, editor: Locator, text: string): 
       .then(() => true)
       .catch(() => false);
     if (typed) return;
-    // Text wasn't entered; select all and clear for retry.
-    await page.keyboard.press(`${modifier}+a`);
-    await page.keyboard.press("Backspace");
-    // Wait for the clear to land instead of guessing: the next attempt's
-    // `toContainText` would otherwise match leftovers from this one.
-    await expect(editor).not.toContainText(text, { timeout: 5_000 });
+    // Text wasn't entered; select all and clear for retry. Scoped to the editor
+    // rather than sent through `page.keyboard`, because this branch runs
+    // precisely when the typing may have gone somewhere else -- a page-level
+    // select-all + Backspace is aimed at whatever holds focus, which is the one
+    // thing this path cannot assume. `locator.press` focuses first.
+    await editor.press(`${modifier}+a`);
+    await editor.press("Backspace");
+    // Wait for the clear to land instead of guessing, and require the editor to
+    // be *empty*: asserting only that `text` is gone would let leftovers from a
+    // partial attempt survive and concatenate with the next one, which the
+    // following `toContainText` would then happily accept.
+    await expect
+      .poll(async () => (await editor.innerText()).trim(), {
+        timeout: 5_000,
+        message: "editor still had content after select-all + Backspace",
+      })
+      .toBe("");
   }
   throw new Error(`Failed to type "${text}" into editor after 3 attempts`);
 }
