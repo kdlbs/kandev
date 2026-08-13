@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { dwell } from "../helpers/causal-waits";
 
 /**
  * Image used by the Docker E2E project. Built once per machine and reused.
@@ -192,7 +193,11 @@ export async function removeScopedKandevContainers(scope = E2E_DOCKER_SCOPE): Pr
       }
     }
 
-    await new Promise((resolve) => setTimeout(resolve, SCOPED_CONTAINER_CLEANUP_POLL_MS));
+    await dwell(
+      SCOPED_CONTAINER_CLEANUP_POLL_MS,
+      "poll-interval",
+      "Docker label visibility has no event notification",
+    );
   }
 
   throw new Error(

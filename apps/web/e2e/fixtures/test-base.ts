@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
 import { ApiClient } from "../helpers/api-client";
+import { dwell } from "../helpers/causal-waits";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
 import type { WorkflowStep } from "../../lib/types/http";
@@ -77,7 +78,11 @@ async function waitForSeedAgentProfile(
       lastObservation = error instanceof Error ? error.message : String(error);
     }
 
-    await new Promise((resolve) => setTimeout(resolve, AGENT_PROFILE_READY_POLL_MS));
+    await dwell(
+      AGENT_PROFILE_READY_POLL_MS,
+      "poll-interval",
+      "agent profile readiness has no event notification",
+    );
   }
 
   throw new Error(
