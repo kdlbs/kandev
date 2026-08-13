@@ -115,6 +115,54 @@ func TestFactoryReset_Confirmed_RunsFullSequence(t *testing.T) {
 	}
 }
 
+// TestFactoryReset_DeletesDeliveryLedgerActivationKeys covers
+// docs/specs/task-delivery-ledger/spec.md, "Reset parity": an activated
+// database resets with both telemetry.*.activated_at keys absent from
+// kandev_meta afterward, while the table itself (and unrelated keys) are
+// kept.
+func TestFactoryReset_DeletesDeliveryLedgerActivationKeys(t *testing.T) {
+	svc, tracker, _, _ := newTestService(t)
+
+	if _, err := svc.pool.Writer().Exec(`
+		INSERT OR REPLACE INTO kandev_meta (key, value) VALUES
+			('telemetry.delivery_ledger.activated_at', '2026-08-01T00:00:00Z'),
+			('telemetry.run_outcome.activated_at', '2026-08-01T00:00:00Z')
+	`); err != nil {
+		t.Fatalf("seed activation keys: %v", err)
+	}
+
+	id, err := svc.FactoryReset(context.Background(), "RESET")
+	if err != nil {
+		t.Fatalf("FactoryReset: %v", err)
+	}
+	job := waitForState(t, tracker, id, jobs.StateSucceeded)
+	if job.State != jobs.StateSucceeded {
+		t.Fatalf("state = %s, want succeeded; message=%s", job.State, job.Message)
+	}
+
+	var count int
+	if err := svc.pool.Reader().QueryRow(`
+		SELECT COUNT(*) FROM kandev_meta
+		WHERE key IN ('telemetry.delivery_ledger.activated_at', 'telemetry.run_outcome.activated_at')
+	`).Scan(&count); err != nil {
+		t.Fatalf("query kandev_meta: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("activation keys remaining = %d, want 0", count)
+	}
+
+	// kandev_meta itself, and its unrelated keys, must survive the reset.
+	var version string
+	if err := svc.pool.Reader().QueryRow(
+		`SELECT value FROM kandev_meta WHERE key = 'kandev_version'`,
+	).Scan(&version); err != nil {
+		t.Fatalf("kandev_version missing after reset: %v", err)
+	}
+	if version != "v0.99.0" {
+		t.Errorf("kandev_version = %q, want unchanged v0.99.0", version)
+	}
+}
+
 func TestHandleReset_WrongConfirm_Returns400(t *testing.T) {
 	svc, _, _, _ := newTestService(t)
 	gin.SetMode(gin.TestMode)
