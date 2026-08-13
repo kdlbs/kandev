@@ -306,16 +306,18 @@ func (p *Projector) applyQueueStatusEvent(ctx context.Context, state *projection
 		if count == state.queuedCount {
 			return nil
 		}
+		previousCount := state.queuedCount
 		state.queuedCount = count
 		accepted, err := p.persistAndPublishLocked(ctx, taskID, state)
 		if err != nil {
-			// Delete cascades the summary row and the tasks FK before the
-			// post-commit queue-status event runs. With a warm in-memory
-			// state (workspace already known) the recount hits this path
-			// rather than resolveWorkspace. Clients already drop the row
-			// on task.deleted; when pending is already 0 there is nothing
-			// left to project.
-			if count == 0 {
+			// Keep in-memory state aligned with the last persisted value so a
+			// later zero-count event can retry instead of short-circuiting.
+			state.queuedCount = previousCount
+			// Delete cascades the summary row (FK) before the post-commit
+			// queue-status event. With warm state the recount hits persist
+			// rather than resolveWorkspace. Only suppress a verified gone-task
+			// failure; transient DB errors must propagate.
+			if count == 0 && isGoneTaskPersistErr(err) {
 				p.logger.Debug("skipping queue status persist for gone task",
 					zap.String("task_id", taskID),
 					zap.Error(err))
@@ -1054,4 +1056,17 @@ func deriveGitSummary(state *projectionState) *GitSummary {
 		return nil
 	}
 	return &git
+}
+
+// isGoneTaskPersistErr reports whether a summary write failed because the task
+// row is already gone (FK cascade after delete). Transient failures must not
+// match so zero-count updates can retry on a still-live task.
+func isGoneTaskPersistErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "foreign key") ||
+		strings.Contains(msg, "constraint failed") ||
+		strings.Contains(msg, "violates foreign key")
 }

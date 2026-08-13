@@ -270,9 +270,11 @@ func TestProjectorQueueEventForMissingTaskIsNoop(t *testing.T) {
 }
 
 // failOnInsertStore rejects every write so a warm projector cannot recreate a
-// summary after the task/summary FK cascade on delete.
+// summary after the task/summary FK cascade on delete. err overrides the
+// default FK failure when testing transient persist errors.
 type failOnInsertStore struct {
 	base *projectorTestStore
+	err  error
 }
 
 func (s *failOnInsertStore) LoadTaskStatusSummaries(
@@ -286,10 +288,13 @@ func (s *failOnInsertStore) CompareAndUpdateTaskStatusSummary(
 	_ context.Context,
 	_ *StoredTaskStatusSummary,
 ) (bool, error) {
+	if s.err != nil {
+		return false, s.err
+	}
 	return false, fmt.Errorf("FOREIGN KEY constraint failed")
 }
 
-func TestProjectorQueueEventZeroCountToleratesPersistFailure(t *testing.T) {
+func TestProjectorQueueEventZeroCountToleratesGoneTaskPersistFailure(t *testing.T) {
 	const taskID = "task-warm-deleted-queue"
 	// Warm in-process state: a prior projection already knows the workspace and
 	// a stale non-zero count. After delete the FK cascade removes the row; the
@@ -334,6 +339,62 @@ func TestProjectorQueueEventZeroCountToleratesPersistFailure(t *testing.T) {
 		"task_id": taskID,
 	}))
 	if err != nil {
-		t.Fatalf("zero-count queue status with persist failure returned error: %v", err)
+		t.Fatalf("zero-count queue status with gone-task persist failure returned error: %v", err)
 	}
+}
+
+func TestProjectorQueueEventZeroCountDoesNotPoisonStateOnTransientPersistFailure(t *testing.T) {
+	const taskID = "task-zero-transient"
+	store := &failOnInsertStore{
+		base: newProjectorTestStore(),
+		err:  fmt.Errorf("database is locked"),
+	}
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	projector := NewProjector(ProjectorConfig{
+		Store:    store,
+		EventBus: eventBus,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		CountQueuedPrompts: func(context.Context, string) (int, error) {
+			return 0, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 8, 1, 18, 0, 0, 0, time.UTC) },
+	})
+	if err := projector.Start(ctx); err != nil {
+		cancel()
+		eventBus.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		projector.Close()
+		eventBus.Close()
+	})
+
+	unlock := projector.lockTask(taskID)
+	state, err := projector.ensureState(ctx, taskID)
+	if err != nil {
+		unlock()
+		t.Fatalf("ensureState: %v", err)
+	}
+	state.workspaceID = "workspace-1"
+	state.queuedCount = 11
+	state.revision = 4
+	unlock()
+
+	err = projector.handleEvent(ctx, bus.NewEvent(events.MessageQueueStatusChanged, "test", map[string]interface{}{
+		"task_id": taskID,
+	}))
+	if err == nil {
+		t.Fatal("expected transient persist error to propagate")
+	}
+
+	unlock = projector.lockTask(taskID)
+	if state.queuedCount != 11 {
+		unlock()
+		t.Fatalf("queuedCount poisoned to %d, want previous 11 so a later event can retry", state.queuedCount)
+	}
+	unlock()
 }
