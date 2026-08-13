@@ -29,6 +29,10 @@ import type { Page, Response } from "@playwright/test";
  * `expect.poll(() => apiClient.getX(id))` against `helpers/api-client.ts`
  * already reads the backend directly rather than through the DOM.
  *
+ * Two things here are not causal waits and are named so they stay visible:
+ * {@link dwell}, the only sanctioned wall-clock wait, and
+ * {@link injectLatency}, for slowing a mocked response on purpose.
+ *
  * ## The one rule: arm before you act
  *
  * Every wait here is *armed* before the action that triggers it and awaited
@@ -407,4 +411,43 @@ export function dwell(
   // With a page, delegate: the wait then dies with the page instead of hanging
   // past it. Without one, a plain timer is all there is.
   return page ? page.waitForTimeout(ms) : new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ---------------------------------------------------------------------------
+// Latency injection
+// ---------------------------------------------------------------------------
+
+/**
+ * Slow a mocked response down inside a `page.route()` handler, so a pending or
+ * loading state becomes observable.
+ *
+ * ```ts
+ * await page.route("**\/runs?*", async (route) => {
+ *   await injectLatency(800, "make the in-flight spinner observable");
+ *   await route.continue();
+ * });
+ * ```
+ *
+ * This is deliberately **not** a {@link dwell} category, even though both end in
+ * a timer. `dwell` delays the *test* because no event exists to wait on, and its
+ * `reason` is contractually an answer to "why can I not wait for something
+ * here?". Latency injection delays the *system under test*: the delay is the
+ * stimulus, not synchronisation, and shortening or removing it destroys the
+ * scenario. There is no honest answer it could give to `dwell`'s question, so
+ * folding it in would mean weakening that contract for all seven categories to
+ * accommodate one that does not fit.
+ *
+ * The remedy differs too. Every `dwell` category is a compromise, ranging from
+ * "permanent" to "fixable in principle". This one is correct by construction and
+ * must never be converted to an event wait.
+ *
+ * `reason` should name the slowness being simulated and the state it exposes.
+ */
+export function injectLatency(ms: number, reason: string): Promise<void> {
+  if (typeof reason !== "string" || reason.trim() === "") {
+    throw new Error(
+      "injectLatency: a reason is required, and must name the state the delay exposes",
+    );
+  }
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

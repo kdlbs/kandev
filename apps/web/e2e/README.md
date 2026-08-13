@@ -358,6 +358,37 @@ make visible, and an empty reason throws rather than passing silently.
 `dwell` takes no options and has no defaults, on purpose. All of its value is in
 the name, the closed category set, and the required reason; keep it that way.
 
+### `injectLatency` — slowing a mocked response on purpose
+
+A sleep inside a `page.route()` handler is not a wait. It slows the _system
+under test_ so a pending or loading state becomes observable, and shortening or
+removing it destroys the scenario:
+
+```ts
+await page.route("**/runs?*", async (route) => {
+  await injectLatency(800, "make the in-flight spinner observable");
+  await route.continue();
+});
+```
+
+**This is a sibling of `dwell`, not a `dwell` category**, for two reasons:
+
+- `dwell`'s `reason` is contractually an answer to "why can I not wait for an
+  event here?". A latency-injection site has no such answer, so folding it in
+  would mean weakening that contract for all seven categories to accommodate the
+  one case that does not fit.
+- Every `dwell` category is a compromise, from "permanent" to "fixable in
+  principle". This one is correct by construction and must **never** be
+  converted to an event wait.
+
+Keeping them apart also keeps the numbers honest: counting fixture configuration
+as sleep debt would inflate the population a ratchet is trying to drive down.
+
+A ratchet banning raw sleeps needs to allow **both** tokens, `dwell(` and
+`injectLatency(`. Do not try to exempt route handlers by scope detection
+instead — a proximity heuristic misfires, and a wrong exemption silently
+unguards real sleeps.
+
 ## Adding a new spec
 
 1. Pick a directory under `tests/` (or create one for a new feature).

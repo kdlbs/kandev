@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Page, Response } from "@playwright/test";
-import { DWELL_CATEGORIES, dwell, waitForHttp, watchWs } from "./causal-waits";
+import { DWELL_CATEGORIES, dwell, injectLatency, waitForHttp, watchWs } from "./causal-waits";
 
 // ---------------------------------------------------------------------------
 // Doubles for the slivers of the Playwright API these primitives touch.
@@ -414,5 +414,32 @@ describe("dwell", () => {
       "browser-chrome",
       "unverified",
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// injectLatency
+// ---------------------------------------------------------------------------
+
+describe("injectLatency", () => {
+  it("delays for the requested time so a pending state becomes observable", async () => {
+    const started = Date.now();
+    await injectLatency(40, "make the in-flight spinner observable");
+    expect(Date.now() - started).toBeGreaterThanOrEqual(35);
+  });
+
+  it("requires a reason naming the state the delay exposes", () => {
+    expect(() => injectLatency(40, "  ")).toThrow(
+      "injectLatency: a reason is required, and must name the state the delay exposes",
+    );
+  });
+
+  // It is a sibling of `dwell`, not a `dwell` category: the delay is the
+  // stimulus under test, so it never answers "why can I not wait for an event".
+  // Keeping it out of the union is what stops the category counts from mixing
+  // sleep debt with deliberate fixture configuration.
+  it("is not a dwell category", () => {
+    expect(DWELL_CATEGORIES).not.toContain("latency-injection");
+    expect(DWELL_CATEGORIES).toHaveLength(7);
   });
 });
