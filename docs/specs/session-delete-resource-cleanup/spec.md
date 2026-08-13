@@ -127,11 +127,13 @@ different physical `worktree_id`.
 Legacy session-worktree rows can also outlive their referenced session in
 databases written by older releases. An orphaned row is historical evidence
 when it is marked deleted or when its exact non-empty physical `worktree_id` is
-already represented by a non-deleted canonical repository row or surviving
-flat environment. The higher-precedence task-owned source remains authoritative
-and the orphan does not prevent cutover. An active orphan with no matching
-higher-precedence physical identity remains irreconcilable because the cutover
-cannot recover its task or environment owner, so startup fails closed.
+already represented by a non-deleted normalized target built from a canonical
+repository row or surviving flat environment. The higher-precedence task-owned
+source remains authoritative and the orphan does not prevent cutover. A raw
+flat row absorbed into a deleted canonical target is not an active owner. An
+active orphan with no matching non-deleted normalized target remains
+irreconcilable because the cutover cannot recover its task or environment
+owner, so startup fails closed.
 
 A non-deleted canonical repository row also takes precedence over deprecated
 flat fields for the same normalized task-owned repository slot: the repository
@@ -257,10 +259,14 @@ remain the authorization boundary for physical cleanup.
   remains authoritative.
 - An orphaned legacy session-worktree row does not block migration when it is
   deleted history or its exact non-empty physical `worktree_id` is already
-  represented by a non-deleted canonical repository row or the surviving flat
-  environment. The orphan contributes no ownership or metadata.
+  represented by a non-deleted normalized target built from a canonical
+  repository row or the surviving flat environment. The orphan contributes no
+  ownership or metadata.
 - An active orphaned session-worktree row with no higher-precedence source for
   the same physical `worktree_id` remains irreconcilable and fails closed.
+- A raw surviving flat row does not suppress an active orphan when source
+  merging leaves that physical identity only on a deleted normalized target.
+  Startup fails closed rather than dropping the only active legacy evidence.
 - A legacy session row that repeats a higher-precedence physical `worktree_id`
   cannot block migration solely because its path or branch metadata is stale,
   including when the session is resumable. The higher-precedence repository or
@@ -354,10 +360,11 @@ remain the authorization boundary for physical cleanup.
   starts, **THEN** the flat environment remains the owner and the cutover
   completes.
 - **GIVEN** a legacy session-worktree row references a missing session and the
-  same non-empty `worktree_id` is owned by a surviving flat environment or a
-  non-deleted canonical repository row, **WHEN** the new binary starts,
-  **THEN** the task-owned source remains authoritative, the orphan contributes
-  no metadata, and the cutover completes without manual database edits.
+  same non-empty `worktree_id` remains on a non-deleted normalized target built
+  from a surviving flat environment or canonical repository row, **WHEN** the
+  new binary starts, **THEN** the task-owned source remains authoritative, the
+  orphan contributes no metadata, and the cutover completes without manual
+  database edits.
 - **GIVEN** a deleted legacy session-worktree row references a missing session,
   **WHEN** the new binary starts, **THEN** the row is treated as historical
   evidence and does not block the cutover.
@@ -365,6 +372,11 @@ remain the authorization boundary for physical cleanup.
   and no higher-precedence source carries its physical `worktree_id`, **WHEN**
   the new binary starts, **THEN** startup fails closed and the complete legacy
   schema and data remain unchanged.
+- **GIVEN** a surviving flat row, a deleted canonical row, and an active orphan
+  share one physical `worktree_id`, but source merging leaves only a deleted
+  normalized target, **WHEN** the new binary starts, **THEN** startup fails
+  closed and preserves the legacy schema rather than dropping the active
+  orphan evidence.
 - **GIVEN** `task_environments` already has the normalized schema but a stale
   `task_session_worktrees` table remains from an intermediate build, **WHEN**
   the new binary starts, **THEN** the cutover preserves normalized environment

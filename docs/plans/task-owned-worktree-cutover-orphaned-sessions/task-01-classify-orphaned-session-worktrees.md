@@ -13,8 +13,8 @@ spec: "../../specs/session-delete-resource-cleanup/spec.md"
 ## Acceptance
 
 - A missing-session row is ignored only when it is deleted history or its exact
-  non-empty physical worktree ID already has a non-deleted canonical or
-  surviving flat owner.
+  non-empty physical worktree ID already has a non-deleted normalized target
+  built from a canonical or surviving flat owner.
 - A recoverable orphan contributes no ownership or stale metadata, while an
   active orphan without a higher-precedence owner still fails closed with the
   current diagnostic and complete rollback.
@@ -81,9 +81,9 @@ the same conversation.
   the expected fail-closed behavior.
 - **Implementation:** missing-session rows are retained in a separate orphan
   inventory until surviving environments and canonical rows are known. Deleted
-  orphans and exact non-empty physical IDs represented by a surviving flat or
-  non-deleted canonical source contribute no ownership or metadata. All other
-  orphans retain the original missing-session conflict.
+  orphans and exact non-empty physical IDs represented by a non-deleted
+  normalized target contribute no ownership or metadata. All other orphans
+  retain the original missing-session conflict.
 - **GREEN:** `go test -tags fts5 ./internal/task/repository/sqlite -run
   'TestCutover.*Orphan.*' -count=1 -v` passed four SQLite top-level tests and
   three fail-closed subtests; the PostgreSQL test skipped because
@@ -106,3 +106,9 @@ the same conversation.
 - **Hygiene:** `gofmt` and `git diff --check` passed. No temporary reproduction
   artifacts remain. External side effects: none beyond the later authorized
   branch push and PR workflow.
+- **PR review remediation:** the raw-flat-plus-deleted-canonical regression
+  failed before the follow-up with a nil cutover error, proving an active orphan
+  could be suppressed without a persisted active owner. The classifier now
+  inspects non-deleted normalized targets. Empty worktree IDs and PostgreSQL
+  unique active orphans also have explicit fail-closed coverage. The focused
+  orphan and complete cutover Make gates passed after the change.

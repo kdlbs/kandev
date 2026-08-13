@@ -111,6 +111,18 @@ func TestCutover_ActiveOrphanedSessionWorktreeFailsClosed(t *testing.T) {
 		assertOrphanCutoverFailsClosed(t, db, seed.sessionID, "wt-orphan-unique")
 	})
 
+	t.Run("empty physical identity", func(t *testing.T) {
+		db := openLegacyDB(t)
+		now := time.Now().UTC().Truncate(time.Second)
+		seed := legacySeed{taskID: "task-orphan-empty", sessionID: "sess-orphan-empty"}
+		seedLegacyTask(t, db, seed, now)
+		seedLegacySessionWorktree(t, db, seed.sessionID, "", "repo-orphan-empty", "",
+			"/tasks/orphan-empty/repo", "feature/empty", "active", now)
+		deleteLegacySession(t, db, seed.sessionID)
+
+		assertOrphanCutoverFailsClosed(t, db, seed.sessionID, "")
+	})
+
 	t.Run("collapsed flat source", func(t *testing.T) {
 		db := openLegacyDB(t)
 		now := time.Now().UTC().Truncate(time.Second)
@@ -148,6 +160,29 @@ func TestCutover_ActiveOrphanedSessionWorktreeFailsClosed(t *testing.T) {
 		deleteLegacySession(t, db, seed.sessionID)
 
 		assertOrphanCutoverFailsClosed(t, db, seed.sessionID, "wt-orphan-deleted-owner")
+	})
+
+	t.Run("flat source absorbed by deleted canonical", func(t *testing.T) {
+		db := openLegacyDB(t)
+		now := time.Now().UTC().Truncate(time.Second)
+		seed := legacySeed{envID: "env-orphan-shadowed-flat", taskID: "task-orphan-shadowed-flat", repoID: "repo-orphan-shadowed-flat", sessionID: "sess-orphan-shadowed-flat"}
+		seedLegacyTask(t, db, seed, now)
+		seedLegacyFlatEnv(t, db, seed, "wt-orphan-shadowed-flat",
+			"/tasks/orphan-shadowed-flat/current", "feature/current", now)
+		addLegacyRepoLifecycleColumns(t, db)
+		seedLegacyEnvRepo(t, db, "env-repo-orphan-shadowed-flat", seed.envID, seed.repoID,
+			"wt-orphan-shadowed-flat", "/tasks/orphan-shadowed-flat/old", "feature/old", now)
+		if _, err := db.Exec(db.Rebind(`
+			UPDATE task_environment_repos
+			SET status = 'deleted', deleted_at = ?
+			WHERE id = 'env-repo-orphan-shadowed-flat'`), now); err != nil {
+			t.Fatalf("mark canonical repository row deleted: %v", err)
+		}
+		seedLegacySessionWorktree(t, db, seed.sessionID, "wt-orphan-shadowed-flat", seed.repoID, "",
+			"/tasks/orphan-shadowed-flat/session", "feature/session", "active", now)
+		deleteLegacySession(t, db, seed.sessionID)
+
+		assertOrphanCutoverFailsClosed(t, db, seed.sessionID, "wt-orphan-shadowed-flat")
 	})
 }
 

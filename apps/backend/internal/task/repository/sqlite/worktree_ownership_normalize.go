@@ -324,25 +324,20 @@ func (c *worktreeCutover) classifyOrphanedSessionWorktrees() {
 }
 
 // hasTaskOwnedSourceForWorktree reports whether an exact physical identity is
-// already represented by a non-deleted canonical row or a surviving flat
-// environment. Path, branch, and repository metadata cannot recover the task
-// relationship lost with the session.
+// represented by a non-deleted normalized target built from a canonical row
+// or surviving flat environment. Path, branch, and repository metadata cannot
+// recover the task relationship lost with the session.
 func (c *worktreeCutover) hasTaskOwnedSourceForWorktree(worktreeID string) bool {
 	if worktreeID == "" {
 		return false
 	}
-	for _, row := range c.envRepos {
-		if row.worktreeID != worktreeID || row.status == worktreeRepoStatusDeleted || row.deletedAt != nil {
-			continue
-		}
-		if _, ok := c.envs[row.envID]; ok {
-			return true
-		}
-	}
-	for _, env := range c.envs {
-		if env.worktreeID == worktreeID && c.taskEnvIDs[env.taskID] == env.id &&
-			!c.demotedFlatEnvironments[env.id] {
-			return true
+	for _, targets := range c.tasks {
+		for _, key := range targets.ordering {
+			target := targets.byKey[key]
+			if target.worktreeID == worktreeID && target.status != worktreeRepoStatusDeleted &&
+				target.deletedAt == nil {
+				return true
+			}
 		}
 	}
 	return false

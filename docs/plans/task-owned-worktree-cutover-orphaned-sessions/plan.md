@@ -47,17 +47,17 @@ classify each orphan with one narrow helper. Treat the row as superseded only
 when:
 
 - the row is legacy-deleted (`status = deleted` or `deleted_at` is set); or
-- the row has a non-empty `worktree_id` represented by a non-deleted canonical
-  `task_environment_repos` row; or
-- the row has a non-empty `worktree_id` represented by a surviving flat
-  `task_environments` row.
+- the row has a non-empty `worktree_id` represented by a non-deleted normalized
+  target already built from a canonical `task_environment_repos` row or
+  surviving flat `task_environments` row.
 
 The match is based on physical identity, not path, branch, repository, or a
 guessed task association, because the missing session removes the authoritative
 task link. A superseded orphan contributes no ownership, metadata, inventory,
 or demotion entry. An orphan not satisfying the rule adds the exact current
-missing-session conflict. Deleted canonical repository rows and flat rows from
-collapsed environments are not owners and must not suppress an active orphan.
+missing-session conflict. Deleted canonical repository rows, flat rows from
+collapsed environments, and raw flat rows absorbed into a deleted normalized
+target are not owners and must not suppress an active orphan.
 
 Keep transaction, snapshot, shadow-table validation, schema swap, rollback,
 replay, PostgreSQL locking, and filesystem/Git behavior unchanged. The shared
@@ -83,16 +83,18 @@ classification.
   **File:** the same migration test file.
   **How:** Seed a deleted orphan without its session and assert successful
   cutover without creating an owner from the orphan.
-- **What:** An active orphan with a unique physical ID, or one matching only a
-  deleted canonical repository row, remains fatal and transactional.
+- **What:** An active orphan with an empty or unique physical ID, one matching
+  only a deleted canonical repository row or collapsed flat row, or one whose
+  raw flat source is absorbed into a deleted normalized target remains fatal
+  and transactional.
   **File:** the same migration test file.
   **How:** Assert the missing-session diagnostic and that the legacy table and
   row survive rollback.
 - **What:** PostgreSQL applies the same shared classification.
   **File:**
   `apps/backend/internal/task/repository/sqlite/worktree_ownership_postgres_test.go`.
-  **How:** Add the smallest PostgreSQL fixture for a recoverable orphan and
-  retain existing fatal-conflict coverage.
+  **How:** Add the smallest PostgreSQL fixtures for one recoverable orphan and
+  one unique active orphan that must fail closed.
 - **What:** Existing precedence, inventory, rollback, replay, hybrid-schema,
   and contested-slot behavior remains unchanged.
   **File:** existing migration test files.
@@ -126,6 +128,10 @@ classification.
 - Public docs need no change: the existing operations guidance still correctly
   requires transactional rollback and backup recovery for conflicts that
   remain irreconcilable. The repair behavior is recorded in the internal spec.
+- PR review remediation added empty-ID and PostgreSQL fail-closed parity plus a
+  regression for a raw flat row absorbed into a deleted canonical target. The
+  new P1 regression failed before the classifier inspected normalized targets,
+  then the focused orphan and complete cutover gates passed after the repair.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -142,6 +148,9 @@ coverage share one persistence boundary.
   recovery requires an identical, non-empty `worktree_id`.
 - Treating a deleted canonical row as authoritative could hide the only active
   legacy owner. Only non-deleted canonical rows suppress active orphans.
+- Trusting a raw surviving flat row is insufficient when merge precedence has
+  left its physical identity on a deleted target. The classifier must inspect
+  the normalized target that will actually be persisted.
 - Trying to infer the missing session's task from repository or path data could
   silently assign ownership to the wrong task. Recoverable orphans contribute
   no ownership; a higher-precedence source must already own the identity.

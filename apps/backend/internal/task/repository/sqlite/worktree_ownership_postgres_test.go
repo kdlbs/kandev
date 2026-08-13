@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,6 +97,30 @@ func TestCutoverPostgres_OrphanedSessionWorktreeUsesFlatOwner(t *testing.T) {
 		env.Repos[0].WorktreePath != "/tasks/pg-orphan/current" ||
 		env.Repos[0].WorktreeBranch != "feature/current" {
 		t.Fatalf("normalized postgres repos = %+v", env.Repos)
+	}
+}
+
+func TestCutoverPostgres_ActiveOrphanedSessionWorktreeFailsClosed(t *testing.T) {
+	db := openLegacyPostgres(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{taskID: "task-pg-orphan-unique", sessionID: "sess-pg-orphan-unique"}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-pg-orphan-unique", "repo-pg-orphan-unique", "",
+		"/tasks/pg-orphan-unique/repo", "feature/unique", "active", now)
+	deleteLegacySession(t, db, seed.sessionID)
+
+	if _, err := NewWithDB(db, db, nil); err == nil ||
+		!strings.Contains(err.Error(), "references missing session "+seed.sessionID) {
+		t.Fatalf("postgres cutover error = %v, want missing-session conflict", err)
+	}
+	var tableCount int
+	if err := db.Get(&tableCount, `
+		SELECT COUNT(*) FROM information_schema.tables
+		WHERE table_name = 'task_session_worktrees' AND table_schema = current_schema()`); err != nil {
+		t.Fatalf("count legacy table: %v", err)
+	}
+	if tableCount != 1 {
+		t.Fatal("failed postgres cutover must leave the legacy table intact")
 	}
 }
 
