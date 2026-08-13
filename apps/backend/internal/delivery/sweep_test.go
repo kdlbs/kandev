@@ -263,6 +263,47 @@ func TestRunPass_EndToEnd(t *testing.T) {
 	}
 }
 
+// TestSelectDuePairs_ArchivedTaskRemainsEligible covers spec "Persistence
+// guarantees" / "Scenarios": archiving a task neither excludes it from
+// candidacy nor freezes it — no predicate anywhere reads
+// tasks.archived_at, so an archived task's pair is due under exactly the
+// same three conditions as any other.
+func TestSelectDuePairs_ArchivedTaskRemainsEligible(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-archived", "ws-1")
+	if _, err := db.Exec(db.Rebind(`UPDATE tasks SET archived_at = ? WHERE id = ?`),
+		time.Now().UTC(), "task-archived"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+
+	// No ledger row yet: unconditionally due, same as an unarchived pair.
+	due, _ := repo.SelectDuePairs(context.Background(),
+		[]delivery.CandidatePair{{TaskID: "task-archived", RepositoryID: "repo-1"}}, time.Now().UTC())
+	if len(due) != 1 {
+		t.Fatalf("due = %+v, want the archived task's pair selected", due)
+	}
+
+	if _, err := repo.Upsert(context.Background(), delivery.UpsertInput{
+		TaskID: "task-archived", RepositoryID: "repo-1", WorkspaceID: "ws-1",
+		Classification: delivery.Classification{Outcome: delivery.OutcomeUnknown, Basis: delivery.BasisNoObservations, Rank: 2},
+		EvaluatedAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	// A new session on the archived task's pair moves an input: still due,
+	// exactly like an unarchived pair.
+	seedTaskSession(t, db, "sess-archived", "task-archived", "repo-1")
+	seedGitSnapshot(t, db, "snap-archived", "sess-archived", "feature", "aaa", 3, time.Now().UTC())
+	due, _ = repo.SelectDuePairs(context.Background(),
+		[]delivery.CandidatePair{{TaskID: "task-archived", RepositoryID: "repo-1"}}, time.Now().UTC())
+	if len(due) != 1 {
+		t.Fatalf("due = %+v, want the archived task's pair re-selected on input movement", due)
+	}
+}
+
 func TestSweep_StartStopLifecycle(t *testing.T) {
 	repo, db := newTestRepo(t)
 	seedWorkspace(t, db, "ws-1")
