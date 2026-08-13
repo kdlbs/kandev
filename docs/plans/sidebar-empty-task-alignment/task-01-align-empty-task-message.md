@@ -63,28 +63,28 @@ Sequential. The RED geometry assertion, host-scoped class change, and desktop/mo
 Bootstrap a fresh worktree once if dependencies are absent:
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
+(cd apps && pnpm install --frozen-lockfile)
 ```
 
 Add the slot marker and geometry assertion, then run the desktop regression before the host override (RED):
 
 ```bash
-cd apps/web && pnpm e2e:run --project chromium tests/task/sidebar-scroll-preservation.spec.ts -- --grep "keeps the empty list transparent"
+(cd apps/web && pnpm e2e:run --project chromium tests/task/sidebar-scroll-preservation.spec.ts -- --grep "keeps the empty list transparent")
 ```
 
 Apply the minimal host override, rerun the same command (GREEN), then run mobile preservation coverage against the fresh build:
 
 ```bash
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-task-listing-display.spec.ts -- --grep "uses Kanban on a phone"
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-task-listing-display.spec.ts -- --grep "uses Kanban on a phone")
 ```
 
 Run targeted static checks:
 
 ```bash
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm exec eslint components/task/task-switcher.tsx components/app-sidebar/sections/tasks-section.tsx e2e/tests/task/sidebar-scroll-preservation.spec.ts e2e/tests/task/mobile-task-listing-display.spec.ts
-cd apps/web && pnpm exec prettier --check components/task/task-switcher.tsx components/app-sidebar/sections/tasks-section.tsx e2e/tests/task/sidebar-scroll-preservation.spec.ts e2e/tests/task/mobile-task-listing-display.spec.ts
-cd apps/web && pnpm run i18n:ratchet
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm exec eslint components/task/task-switcher.tsx components/app-sidebar/sections/tasks-section.tsx e2e/tests/task/sidebar-scroll-preservation.spec.ts e2e/tests/task/mobile-task-listing-display.spec.ts)
+(cd apps/web && pnpm exec prettier --check components/task/task-switcher.tsx components/app-sidebar/sections/tasks-section.tsx e2e/tests/task/sidebar-scroll-preservation.spec.ts e2e/tests/task/mobile-task-listing-display.spec.ts)
+(cd apps/web && pnpm run i18n:ratchet)
 git diff --check
 ```
 
