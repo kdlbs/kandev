@@ -176,7 +176,9 @@ func requestBranchIdentitySlug(req CreateRequest) string {
 // returned for surfacing on the resulting worktree record.
 func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateRequest) (baseRef, warning, detail string, err error) {
 	baseRef = req.BaseBranch
-	if req.PullBeforeWorktree {
+	if req.RemoteSyncHandled {
+		baseRef = m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, req.BaseBranch)
+	} else if req.PullBeforeWorktree {
 		baseRef = m.pullBaseBranch(ctx, req.RepositoryPath, req.BaseBranch, req.OnSyncProgress)
 	}
 
@@ -200,7 +202,9 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 	// remote-tracking ref (e.g. "main" -> "origin/main") which we must use
 	// for the existence check and downstream git operations.
 	resolvedFallback := fallback
-	if req.PullBeforeWorktree {
+	if req.RemoteSyncHandled {
+		resolvedFallback = m.preferRefreshedRemoteRef(ctx, req.RepositoryPath, fallback)
+	} else if req.PullBeforeWorktree {
 		resolvedFallback = m.pullBaseBranch(ctx, req.RepositoryPath, fallback, nil)
 	}
 	fallbackExists, fallbackErr := m.branchExists(ctx, req.RepositoryPath, resolvedFallback)
@@ -248,34 +252,45 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 		return m.createContributionInTaskDir(ctx, req, worktreePath, fallbackWarning, fallbackDetail)
 	}
 	if req.CheckoutBranch != "" {
-		// PRNumber != 0 means the caller wants the refs/pull/<N>/head ref;
-		// fork PR branches don't exist as plain refs locally or under
-		// origin/<branch>, so the existence probe must be skipped and the
-		// fetch path always runs.
-		//
-		// When PRNumber == 0 and the named branch is absent locally and on
-		// origin, the caller's intent is "create a new branch with this
-		// name" rather than "fetch this existing ref" — the historical
-		// fetch-then-check-out path errored ("not found locally or on
-		// remote") in that case and rolled back. We drop CheckoutBranch
-		// from the request copy and pass the desired name as the fallback
-		// (new) branch name so gitAddWorktree creates it from baseRef.
-		if req.PRNumber == 0 && !m.checkoutBranchExistsAnywhere(ctx, req.RepositoryPath, req.CheckoutBranch) {
-			m.logger.Info("checkout branch missing locally and on origin; creating new branch with this name",
-				zap.String("repository_path", req.RepositoryPath),
-				zap.String("requested_branch", req.CheckoutBranch),
-				zap.String("base_ref", baseRef))
-			branchName = req.CheckoutBranch
-			checkoutMode.CheckoutBranch = ""
-		} else {
-			fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch, req.PRNumber)
-			if err != nil {
-				return nil, err
+		if req.RemoteSyncHandled {
+			prepared, prepareErr := m.prepareCheckoutFromRefreshedOrigin(ctx, req.RepositoryPath, req.CheckoutBranch)
+			if prepareErr != nil {
+				return nil, prepareErr
 			}
-			if fetchResult.StartPoint != "" {
-				startPoint = fetchResult.StartPoint
+			if !prepared {
+				branchName = req.CheckoutBranch
+				checkoutMode.CheckoutBranch = ""
+			}
+		} else {
+			// PRNumber != 0 means the caller wants the refs/pull/<N>/head ref;
+			// fork PR branches don't exist as plain refs locally or under
+			// origin/<branch>, so the existence probe must be skipped and the
+			// fetch path always runs.
+			//
+			// When PRNumber == 0 and the named branch is absent locally and on
+			// origin, the caller's intent is "create a new branch with this
+			// name" rather than "fetch this existing ref" — the historical
+			// fetch-then-check-out path errored ("not found locally or on
+			// remote") in that case and rolled back. We drop CheckoutBranch
+			// from the request copy and pass the desired name as the fallback
+			// (new) branch name so gitAddWorktree creates it from baseRef.
+			if req.PRNumber == 0 && !m.checkoutBranchExistsAnywhere(ctx, req.RepositoryPath, req.CheckoutBranch) {
+				m.logger.Info("checkout branch missing locally and on origin; creating new branch with this name",
+					zap.String("repository_path", req.RepositoryPath),
+					zap.String("requested_branch", req.CheckoutBranch),
+					zap.String("base_ref", baseRef))
+				branchName = req.CheckoutBranch
+				checkoutMode.CheckoutBranch = ""
 			} else {
-				startPoint = req.CheckoutBranch
+				fetchResult, err = m.fetchBranchToLocal(ctx, req.RepositoryPath, req.CheckoutBranch, req.PRNumber)
+				if err != nil {
+					return nil, err
+				}
+				if fetchResult.StartPoint != "" {
+					startPoint = fetchResult.StartPoint
+				} else {
+					startPoint = req.CheckoutBranch
+				}
 			}
 		}
 	}

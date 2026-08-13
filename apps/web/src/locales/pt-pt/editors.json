@@ -85,5 +85,6 @@
   "switchToUnifiedView": "Mudar para a vista unificada",
   "toggleCode": "Alternar código",
   "toggleWordWrap": "Alternar a quebra de linha",
-  "underlineCmdU": "Sublinhado (Cmd+U)"
+  "underlineCmdU": "Sublinhado (Cmd+U)",
+  "failedToOpenEditor": "Falha ao abrir o editor"
 }

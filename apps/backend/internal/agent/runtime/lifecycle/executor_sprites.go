@@ -58,11 +58,7 @@ const (
 	// sprite (agentctl ~21 MB, credential files, skill files). Sized for slow
 	// home connections — a 21 MB push needs ~1.4 Mbit/s to fit in 2 min, which
 	// many residential uplinks can't sustain.
-	spriteUploadTimeout = 10 * time.Minute
-	// spritePrepareTimeout caps the prepare script run inside the sprite,
-	// which does git clones and npm/curl agent installs over the sprite's
-	// internet. Five+ agent installs commonly run past 2 minutes.
-	spritePrepareTimeout   = 10 * time.Minute
+	spriteUploadTimeout    = 10 * time.Minute
 	spriteHealthTimeout    = 15 * time.Second
 	spriteDestroyTimeout   = 30 * time.Second
 	spriteHealthRetryWait  = 500 * time.Millisecond
@@ -125,6 +121,7 @@ func (r *SpritesExecutor) ResumeRemoteInstance(_ context.Context, req *ExecutorC
 }
 
 func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	baseCtx := preparationContext(ctx)
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
 		return nil, err
 	}
@@ -151,53 +148,62 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 
 	// Step 0: Create or reconnect sprite. On reconnect-then-not-found we fall
 	// through to fresh provisioning under a new name on the same branch.
-	sprite, err := r.stepCreateSprite(ctx, client, spriteName, reconnect, report)
+	launchCtx, launchCancel := withLaunchPhaseTimeout(baseCtx)
+	defer launchCancel()
+	sprite, err := r.stepCreateSprite(launchCtx, client, spriteName, reconnect, report)
 	if err != nil {
 		if reconnect && errors.Is(err, spritesutil.ErrSpriteNotFound) {
 			oldName := spriteName
 			spriteName = r.fallbackToFreshSandbox(req, progressPlan, report, oldName)
 			reconnect = false
 			destroyOnFailure = true
-			sprite, err = r.stepCreateSprite(ctx, client, spriteName, false, report)
+			launchCancel()
+			launchCtx, launchCancel = withLaunchPhaseTimeout(baseCtx)
+			defer launchCancel()
+			sprite, err = r.stepCreateSprite(launchCtx, client, spriteName, false, report)
 		}
 		if err != nil {
-			r.cleanupOnFailure(ctx, sprite, req.InstanceID, destroyOnFailure)
+			r.cleanupOnFailure(baseCtx, sprite, req.InstanceID, destroyOnFailure)
 			return nil, err
 		}
 	}
-	if err := r.preflightGitHubCredentialBroker(ctx, sprite, req); err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID, destroyOnFailure)
+	if err := r.preflightGitHubCredentialBroker(launchCtx, sprite, req); err != nil {
+		r.cleanupOnFailure(baseCtx, sprite, req.InstanceID, destroyOnFailure)
 		return nil, err
 	}
+	launchCancel()
 
 	// Steps 1-3: Upload agentctl, credentials, prepare script
-	if err := r.stepSetupEnvironment(ctx, sprite, req, reconnect, report); err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID, destroyOnFailure)
+	if err := r.stepSetupEnvironment(baseCtx, sprite, req, reconnect, report); err != nil {
+		r.cleanupOnFailure(baseCtx, sprite, req.InstanceID, destroyOnFailure)
 		return nil, err
 	}
 
+	launchCtx, launchCancel = withLaunchPhaseTimeout(baseCtx)
+	defer launchCancel()
+
 	// Step 4: Wait for agentctl health
-	if err := r.stepWaitHealthy(ctx, sprite, report); err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID, destroyOnFailure)
+	if err := r.stepWaitHealthy(launchCtx, sprite, report); err != nil {
+		r.cleanupOnFailure(baseCtx, sprite, req.InstanceID, destroyOnFailure)
 		return nil, err
 	}
 
 	// Step 5: Create or reuse agent instance
-	instancePort, reusingExisting, err := r.stepEnsureAgentInstance(ctx, sprite, req, reconnect, report)
+	instancePort, reusingExisting, err := r.stepEnsureAgentInstance(launchCtx, sprite, req, reconnect, report)
 	if err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID, destroyOnFailure)
+		r.cleanupOnFailure(baseCtx, sprite, req.InstanceID, destroyOnFailure)
 		return nil, err
 	}
 
 	// Step 6: Network policy
 	if progressPlan.has(spriteStepApplyNetworkPolicy) {
-		r.stepApplyNetworkPolicy(ctx, client, spriteName, req, report)
+		r.stepApplyNetworkPolicy(launchCtx, client, spriteName, req, report)
 	}
 
 	// Port forwarding to the per-instance server
-	localPort, err := r.setupPortForwarding(ctx, sprite, spriteName, req.InstanceID, instancePort)
+	localPort, err := r.setupPortForwarding(launchCtx, sprite, spriteName, req.InstanceID, instancePort)
 	if err != nil {
-		r.cleanupOnFailure(ctx, sprite, req.InstanceID, destroyOnFailure)
+		r.cleanupOnFailure(baseCtx, sprite, req.InstanceID, destroyOnFailure)
 		return nil, err
 	}
 

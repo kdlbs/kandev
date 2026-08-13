@@ -48,12 +48,6 @@ export type ChatInputToolbarProps = {
   isUtilityConfigured?: boolean;
   /** Callback to open file picker for attaching files */
   onAttachFiles?: () => void;
-  /** Callback to insert a transcribed voice utterance into the editor. When
-   *  omitted, the voice button is hidden — keeps quick-chat / read-only
-   *  variants free of a button they can't wire. */
-  onVoiceTranscript?: (text: string) => void;
-  /** Optional auto-send hook fired after a voice transcript is inserted. */
-  onVoiceAutoSend?: () => void;
   /** Hide the sessions dropdown (for quick chat) */
   hideSessionsDropdown?: boolean;
   /** When true, only render the submit/cancel button — no other controls */
@@ -183,8 +177,8 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         onCancel={props.onCancel}
         onSubmit={props.onSubmit}
         submitShortcut={submitShortcut}
-        onVoiceTranscript={props.onVoiceTranscript}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        composerCapability={props.composerCapability}
+        composerSurface={props.composerSurface}
       />
     );
   }

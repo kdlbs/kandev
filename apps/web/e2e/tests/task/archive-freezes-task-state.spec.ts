@@ -9,8 +9,10 @@ import { test, expect } from "../../fixtures/test-base";
 // plain agent.cancel — silently resurrected the archived task's state,
 // which is the "archived task comes back with the wrong state after a
 // crash/restart" bug. This test reproduces the live (non-restart) trigger
-// deterministically: archive a task mid-turn, then cancel the turn via the
-// same WS action the chat toolbar's Cancel button sends.
+// deterministically: the E2E harness seeds the persisted RUNNING session
+// state, then the test archives the task and cancels the turn via the same WS
+// action the chat toolbar's Cancel button sends. Seeding the state avoids
+// coupling this regression to the mock executor's startup timing.
 test.describe("Archiving a task freezes its runtime state", () => {
   test("agent.cancel after archive does not resurrect task state to REVIEW", async ({
     testPage,
@@ -20,24 +22,21 @@ test.describe("Archiving a task freezes its runtime state", () => {
     test.setTimeout(60_000);
 
     const taskTitle = "Archive Freezes State";
-    const created = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      taskTitle,
-      seedData.agentProfileId,
-      {
-        description: 'e2e:delay(15000)\ne2e:message("still going")',
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
+    const created = await apiClient.createTask(seedData.workspaceId, taskTitle, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
     const taskId = created.id;
-    const sessionId = created.session_id;
-    expect(sessionId, "createTaskWithAgent should return a session_id").toBeTruthy();
+    const { session_id: sessionId } = await apiClient.seedTaskSession(taskId, {
+      state: "RUNNING",
+      agentProfileId: seedData.agentProfileId,
+    });
+    await apiClient.updateTaskState(taskId, "IN_PROGRESS");
 
-    // Wait for the agent to actually be mid-turn (task promoted to
-    // IN_PROGRESS) before archiving — this is the state we assert stays
-    // frozen for the rest of the test.
+    // Confirm the seeded task is in the exact state that an in-flight agent
+    // turn would have reached before archiving. This is the state we assert
+    // stays frozen for the rest of the test.
     await expect
       .poll(async () => (await apiClient.getTask(taskId)).state, {
         timeout: 20_000,

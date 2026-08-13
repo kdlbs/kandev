@@ -231,6 +231,8 @@ vi.mock("@/components/task-create-dialog-state", () => ({
 
 function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   return {
+    blockedBy: [],
+    setBlockedBy: () => undefined,
     taskName: "Task title",
     autopilot: false,
     setAutopilot: () => undefined,
@@ -287,6 +289,7 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     prInfoByUrl: {
       info: () => undefined,
       loading: () => false,
+      settled: () => true,
       error: () => undefined,
       ensure: () => undefined,
       clear: () => undefined,

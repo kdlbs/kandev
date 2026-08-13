@@ -18,11 +18,14 @@ vi.mock("@/lib/api/domains/azure-devops-api", () => ({
 }));
 
 import { useRemoteRepositories } from "./use-remote-repositories";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 const WORKSPACE_ID = "workspace-1";
+const PLUGIN_ID = "test-bitbucket-provider";
 
 afterEach(() => {
   cleanup();
+  pluginRegistry.unregisterPlugin(PLUGIN_ID);
   vi.resetAllMocks();
 });
 
@@ -38,7 +41,131 @@ function expectWorkspaceScopedGitHubRequest() {
   });
 }
 
-describe("useRemoteRepositories", () => {
+describe("useRemoteRepositories registered providers", () => {
+  it("isolates a provider URL matcher failure", async () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      matchesURL: () => {
+        throw new Error("matcher crashed");
+      },
+      listBranches: async () => [],
+      inspectURL: async () => null,
+      listRepositories: async () => [],
+    });
+    mocks.fetchAccessibleRepos.mockResolvedValue([]);
+    mocks.listUserProjects.mockResolvedValue({ projects: [] });
+    mocks.listAzureDevOpsProjects.mockResolvedValue({ projects: [] });
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(() => result.current.matchesURL?.("not-a-repository-url")).not.toThrow();
+    expect(result.current.matchesURL?.("not-a-repository-url")).toBe(false);
+  });
+});
+
+describe("useRemoteRepositories registered provider listings", () => {
+  it("lists registered provider repositories with their exact clone URL", async () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      matchesURL: () => false,
+      listBranches: async () => [],
+      inspectURL: async () => null,
+      listRepositories: async () => [
+        {
+          providerId: "bitbucket",
+          providerHost: "https://bitbucket.example.test/bitbucket",
+          ownerOrProject: "PLATFORM",
+          repositoryId: "web-42",
+          repositoryName: "web",
+          cloneUrl: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+          defaultBranch: "main",
+        },
+      ],
+    });
+    mocks.fetchAccessibleRepos.mockRejectedValue(new Error("GitHub not configured"));
+    rejectUnavailableProviders();
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.repos).toEqual([
+      expect.objectContaining({
+        provider: "bitbucket",
+        id: "web-42",
+        fullName: "PLATFORM/web",
+        url: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+        defaultBranch: "main",
+      }),
+    ]);
+    expect(result.current.availableProviders).toEqual(["bitbucket"]);
+  });
+
+  it("follows provider cursors and forwards server-side search", async () => {
+    const listRepositories = vi.fn(
+      async ({ cursor, query: _query }: { cursor?: string; query?: string }) =>
+        cursor === "page-2"
+          ? {
+              repositories: [
+                {
+                  providerId: "bitbucket",
+                  providerHost: "https://bitbucket.org",
+                  ownerOrProject: "acme",
+                  repositoryId: "two",
+                  repositoryName: "two",
+                  cloneUrl: "https://bitbucket.org/acme/two.git",
+                },
+              ],
+            }
+          : {
+              repositories: [
+                {
+                  providerId: "bitbucket",
+                  providerHost: "https://bitbucket.org",
+                  ownerOrProject: "acme",
+                  repositoryId: "one",
+                  repositoryName: "one",
+                  cloneUrl: "https://bitbucket.org/acme/one.git",
+                },
+              ],
+              nextCursor: "page-2",
+            },
+    );
+    pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      matchesURL: () => false,
+      listBranches: async () => [],
+      inspectURL: async () => null,
+      listRepositories,
+    });
+    mocks.fetchAccessibleRepos.mockRejectedValue(new Error("GitHub not configured"));
+    rejectUnavailableProviders();
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.repos).toHaveLength(2));
+    act(() => {
+      result.current.search("t");
+      result.current.search("tw");
+      result.current.search("two");
+    });
+    await waitFor(() =>
+      expect(listRepositories).toHaveBeenCalledWith(
+        expect.objectContaining({ query: "two", limit: 100 }),
+      ),
+    );
+    expect(listRepositories).toHaveBeenCalledWith(
+      expect.objectContaining({ cursor: "page-2", query: "two" }),
+    );
+    expect(listRepositories).not.toHaveBeenCalledWith(expect.objectContaining({ query: "t" }));
+    expect(listRepositories).not.toHaveBeenCalledWith(expect.objectContaining({ query: "tw" }));
+    expect(mocks.fetchAccessibleRepos).toHaveBeenCalledTimes(1);
+    expect(mocks.listUserProjects).toHaveBeenCalledTimes(1);
+    expect(mocks.listAzureDevOpsProjects).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("useRemoteRepositories provider results", () => {
   it("combines successful providers while tolerating a provider failure", async () => {
     mocks.fetchAccessibleRepos.mockResolvedValue([
       {
@@ -108,6 +235,25 @@ describe("useRemoteRepositories", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.availableProviders).toEqual(["github", "gitlab", "azure_devops"]);
+  });
+});
+
+describe("useRemoteRepositories workspace scope", () => {
+  it("does not invoke plugin providers without an active workspace", async () => {
+    const listRepositories = vi.fn().mockResolvedValue([]);
+    pluginRegistry.forPlugin(PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      matchesURL: () => false,
+      listBranches: async () => [],
+      inspectURL: async () => null,
+      listRepositories,
+    });
+
+    const { result } = renderHook(() => useRemoteRepositories(""));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(listRepositories).not.toHaveBeenCalled();
   });
 
   it("clears repositories immediately when the workspace changes", async () => {

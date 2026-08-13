@@ -23,6 +23,7 @@ describe("getGraph2DisplayState", () => {
     const { displayTasks, displaySteps } = getGraph2DisplayState(
       [makeTask("valid", "todo"), makeTask("orphan", "deleted-step")],
       steps,
+      "Needs Reassignment",
     );
 
     expect(displaySteps.map((step) => step.title)).toEqual(["Todo", "Done", "Needs Reassignment"]);
@@ -34,6 +35,7 @@ describe("getGraph2DisplayState", () => {
     const { displayTasks, displaySteps } = getGraph2DisplayState(
       [makeTask("valid", "todo"), makeTask("finished", "done")],
       steps,
+      "Needs Reassignment",
     );
 
     expect(displaySteps).toBe(steps);

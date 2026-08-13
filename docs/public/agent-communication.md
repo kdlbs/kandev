@@ -40,8 +40,12 @@ message_task_kandev(task_id="<full UUID>", prompt="<message text>")
 
 By default, the message goes to the task's primary session. Advanced callers can pass
 `session_id` to target a specific session that belongs to that task, including a sibling
-session on their own task. `spawn_session_kandev` returns `{task_id, session_id, state}`
-when an agent starts an additional session on an existing task; pass the `session_id` field to `message_task_kandev`.
+session on their own task. `spawn_session_kandev` returns `{task_id, session_id, state, agent_profile_id}`
+when an agent starts an additional session on an existing task; pass the `session_id` field to
+`message_task_kandev`. The returned `agent_profile_id` is the effective profile after workflow
+profile resolution. A pinned workflow-step profile wins first, followed by the workflow default
+on an unpinned step. Without a workflow launch profile, an explicit profile wins, and the existing
+inheritance rules apply when no profile is provided.
 
 Delivery behaviour depends on the target session's state at the moment of the call:
 
@@ -239,7 +243,7 @@ These tools complement cross-task communication for common coordination patterns
 | `list_task_sessions_kandev` | List a task's sessions to find the `session_id` for the two tools above |
 | `list_related_tasks_kandev` | Discover parent / child / sibling / blocker task IDs |
 | `create_task_kandev` | Delegate work to a new subtask; returns the new task's ID |
-| `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state}`; use the `session_id` field to message the new session directly |
+| `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state, agent_profile_id}`, where `agent_profile_id` is the effective profile after workflow resolution; use the `session_id` field to message the new session directly |
 | `move_task_kandev` | Hand off a task to the next workflow step with an optional prompt for the receiving agent |
 | `create_task_plan_kandev` | Record an agreed implementation plan (both tasks can create/update their own plans) |
 | `get_task_plan_kandev` | Read a task's plan; useful before messaging to share a structured proposal |

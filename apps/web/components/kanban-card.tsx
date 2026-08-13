@@ -8,6 +8,7 @@ import {
   buildKanbanCardMenuEntries,
   useKanbanCardMoveTargets,
 } from "@/components/kanban-card-menu-items";
+import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
@@ -17,6 +18,7 @@ import {
   type ExternalLinkProvider,
 } from "@/components/task/task-external-link-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
+import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
@@ -79,6 +81,12 @@ export interface Task {
   wipAdmitted?: boolean;
   queuedForStepId?: string;
   queuedForStepTitle?: string;
+  /** Derived dependency state — see TaskDependencyRef in the kanban slice. */
+  blocked?: boolean;
+  blockedReason?: string;
+  dependsOn?: TaskDependencyRef[];
+  blocks?: TaskDependencyRef[];
+  startWhenUnblocked?: boolean;
   queuedAt?: string;
   issueUrl?: string;
   issueNumber?: number;
@@ -284,6 +292,7 @@ function useKanbanCardMenus({
   | "onArchive"
   | "onMove"
 >) {
+  const pluginLinkActions = useTaskPluginLinkActions(task.id, task.repositories ?? []);
   // Plugins load asynchronously and can be disabled/uninstalled at runtime;
   // re-render on any registry change so a menu action a plugin registers
   // after this card already mounted still appears, and one whose plugin was
@@ -323,6 +332,7 @@ function useKanbanCardMenus({
         ? () => dialogs.setShowDetachConfirm(true)
         : undefined,
     ...buildLinkDialogHandlers(externalLinkAvailability, dialogs),
+    pluginLinkActions,
   };
 
   const pluginMenuContext = buildPluginMenuContext(task, workspaceId, presentation);

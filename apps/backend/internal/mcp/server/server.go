@@ -14,8 +14,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
+	"github.com/kandev/kandev/internal/mcp/toolschema"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -48,6 +50,8 @@ const (
 	// Kanban tools are excluded because office agents use CLI commands instead.
 	ModeOffice = "office"
 )
+
+const pluginToolArgumentsKey = "arguments"
 
 // MCP payload keys reused across tool registrations. Extracted so a future
 // wire-protocol rename touches every tool in one place AND so goconst
@@ -89,26 +93,30 @@ func normalizeMode(mode string) string {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
-	backend            BackendClient
-	sessionID          string
-	taskID             string
-	disableAskQuestion bool
-	mode               string // "task" (default), "task-title-pending", "config", or "office"
-	mcpProviders       []string
-	profile            mcpprofile.Context
-	mcpServer          *server.MCPServer
-	sseServer          *server.SSEServer
-	httpServer         *server.StreamableHTTPServer
-	logger             *logger.Logger
-	mcpLogger          *zap.Logger // optional file logger for MCP debug traces
-	mu                 sync.RWMutex
-	running            bool
-	attachmentMu       sync.RWMutex
-	attachmentAttempt  streams.MCPAttachmentAttempt
-	attachmentAttempts map[string]streams.MCPAttachmentAttempt
-	attachmentReporter func(streams.MCPAttachmentEvidence)
-	validatorMu        sync.RWMutex
-	toolValidators     map[string]toolArgumentValidator
+	backend             BackendClient
+	sessionID           string
+	taskID              string
+	disableAskQuestion  bool
+	mode                string // "task" (default), "task-title-pending", "config", or "office"
+	mcpProviders        []string
+	profile             mcpprofile.Context
+	mcpServer           *server.MCPServer
+	sseServer           *server.SSEServer
+	httpServer          *server.StreamableHTTPServer
+	logger              *logger.Logger
+	mcpLogger           *zap.Logger // optional file logger for MCP debug traces
+	mu                  sync.RWMutex
+	running             bool
+	attachmentMu        sync.RWMutex
+	attachmentAttempt   streams.MCPAttachmentAttempt
+	attachmentAttempts  map[string]streams.MCPAttachmentAttempt
+	attachmentReporter  func(streams.MCPAttachmentEvidence)
+	validatorMu         sync.RWMutex
+	toolValidators      map[string]toolArgumentValidator
+	pluginToolsUpdateMu sync.Mutex
+	pluginToolsMu       sync.Mutex
+	pluginTools         plugintools.Snapshot
+	pluginToolsReady    bool
 }
 
 // New creates a new MCP server for agentctl.
@@ -228,6 +236,9 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolsListObserved, len(result.Tools), "")
+	})
+	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
+		s.syncPluginTools(ctx)
 	})
 	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ *mcp.CallToolResult) {
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
@@ -405,18 +416,26 @@ func (s *Server) Close(ctx context.Context) error {
 
 // wrapHandler wraps a tool handler with debug logging for tracing MCP calls.
 func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return s.wrapHandlerWithArgumentLogging(toolName, handler, true)
+}
+
+func (s *Server) wrapSensitiveHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return s.wrapHandlerWithArgumentLogging(toolName, handler, false)
+}
+
+func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.ToolHandlerFunc, logArguments bool) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		start := time.Now()
-		args := req.GetArguments()
 
-		s.logger.Debug("MCP tool call",
-			zap.String("tool", toolName),
-			zap.Any("args", args))
+		fields := []zap.Field{zap.String("tool", toolName)}
+		if logArguments {
+			fields = append(fields, zap.Any("args", req.GetArguments()))
+		}
+		s.logger.Debug("MCP tool call", fields...)
 		if s.mcpLogger != nil {
-			s.mcpLogger.Debug("MCP tool call",
-				zap.String("tool", toolName),
-				zap.String("session_id", s.sessionID),
-				zap.Any("args", args))
+			mcpFields := append([]zap.Field(nil), fields...)
+			mcpFields = append(mcpFields, zap.String("session_id", s.sessionID))
+			s.mcpLogger.Debug("MCP tool call", mcpFields...)
 		}
 
 		validatedReq, validationErr := s.validateToolArguments(toolName, req)
@@ -443,16 +462,18 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 					zap.Error(err))
 			}
 		case result != nil && result.IsError:
-			s.logger.Debug("MCP tool returned error",
+			resultFields := []zap.Field{
 				zap.String("tool", toolName),
 				zap.Duration("duration", duration),
-				zap.Any("result", result.Content))
+			}
+			if logArguments {
+				resultFields = append(resultFields, zap.Any("result", result.Content))
+			}
+			s.logger.Debug("MCP tool returned error", resultFields...)
 			if s.mcpLogger != nil {
-				s.mcpLogger.Debug("MCP tool returned error",
-					zap.String("tool", toolName),
-					zap.String("session_id", s.sessionID),
-					zap.Duration("duration", duration),
-					zap.Any("result", result.Content))
+				mcpResultFields := append([]zap.Field(nil), resultFields...)
+				mcpResultFields = append(mcpResultFields, zap.String("session_id", s.sessionID))
+				s.mcpLogger.Debug("MCP tool returned error", mcpResultFields...)
 			}
 		default:
 			s.logger.Debug("MCP tool success",
@@ -569,6 +590,173 @@ func (s *Server) rebuildTools() {
 	s.mcpServer.SetTools(s.assembleTools()...)
 }
 
+// SetPluginTools validates and atomically replaces sideloaded tools. SetTools
+// emits one tools/list_changed notification to initialized MCP clients.
+func (s *Server) SetPluginTools(snapshot plugintools.Snapshot) error {
+	s.pluginToolsUpdateMu.Lock()
+	defer s.pluginToolsUpdateMu.Unlock()
+	if err := validatePluginToolSnapshot(snapshot); err != nil {
+		return err
+	}
+	normalized := plugintools.Normalize(snapshot)
+	s.pluginToolsMu.Lock()
+	if s.pluginToolsReady && normalized.Generation == s.pluginTools.Generation && normalized.Revision <= s.pluginTools.Revision {
+		s.pluginToolsMu.Unlock()
+		return nil
+	}
+	if s.pluginToolsReady && equivalentPluginToolCatalog(s.pluginTools, normalized) {
+		s.pluginTools = normalized
+		s.pluginToolsMu.Unlock()
+		return nil
+	}
+	s.pluginTools = normalized
+	s.pluginToolsReady = true
+	s.pluginToolsMu.Unlock()
+	s.mu.Lock()
+	s.rebuildTools()
+	s.mu.Unlock()
+	return nil
+}
+
+func equivalentPluginToolCatalog(left, right plugintools.Snapshot) bool {
+	left.Generation, right.Generation = "", ""
+	left.Revision, right.Revision = 0, 0
+	return plugintools.Equal(left, right)
+}
+
+func validatePluginToolSnapshot(snapshot plugintools.Snapshot) error {
+	if snapshot.Generation == "" {
+		return fmt.Errorf("plugin tool snapshot generation is required")
+	}
+	seen := make(map[string]struct{}, len(snapshot.Tools))
+	for i, definition := range snapshot.Tools {
+		name := fmt.Sprintf("plugin tool %d", i)
+		if definition.PluginID == "" || definition.LocalName == "" || definition.ExposedName == "" || definition.Description == "" {
+			return fmt.Errorf("%s has incomplete identity or description", name)
+		}
+		if expected := plugintools.ExposedName(definition.PluginID, definition.LocalName); definition.ExposedName != expected {
+			return fmt.Errorf("%s exposed name %q does not match %q", name, definition.ExposedName, expected)
+		}
+		if _, ok := seen[definition.ExposedName]; ok {
+			return fmt.Errorf("duplicate plugin tool exposed name %q", definition.ExposedName)
+		}
+		seen[definition.ExposedName] = struct{}{}
+		if err := validatePluginToolSurfaces(name, definition.Surfaces); err != nil {
+			return err
+		}
+		if err := validatePluginToolSchema(definition.ExposedName+"/input", definition.InputSchema); err != nil {
+			return fmt.Errorf("%s input schema: %w", name, err)
+		}
+		if len(definition.OutputSchema) > 0 {
+			if err := validatePluginToolSchema(definition.ExposedName+"/output", definition.OutputSchema); err != nil {
+				return fmt.Errorf("%s output schema: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validatePluginToolSurfaces(name string, surfaces []string) error {
+	if len(surfaces) == 0 {
+		return fmt.Errorf("%s has no surfaces", name)
+	}
+	seen := make(map[string]struct{}, len(surfaces))
+	for _, surface := range surfaces {
+		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice {
+			return fmt.Errorf("%s has unsupported surface %q", name, surface)
+		}
+		if _, ok := seen[surface]; ok {
+			return fmt.Errorf("%s duplicates surface %q", name, surface)
+		}
+		seen[surface] = struct{}{}
+	}
+	return nil
+}
+
+func validatePluginToolSchema(name string, raw json.RawMessage) error {
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return fmt.Errorf("decode schema: %w", err)
+	}
+	if _, err := toolschema.Compile(name, document); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Server) syncPluginTools(ctx context.Context) {
+	if s.backend == nil {
+		return
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	s.mu.RLock()
+	surface := string(s.profile.Surface)
+	s.mu.RUnlock()
+	var snapshot plugintools.Snapshot
+	if err := s.backend.RequestPayload(requestCtx, ws.ActionMCPListPluginTools, map[string]string{"surface": surface}, &snapshot); err != nil {
+		return
+	}
+	if err := s.SetPluginTools(snapshot); err != nil {
+		s.logger.Warn("ignoring invalid plugin tool catalog", zap.Error(err))
+	}
+}
+
+func (s *Server) registerPluginTools() {
+	s.pluginToolsMu.Lock()
+	ready := s.pluginToolsReady
+	snapshot := plugintools.Normalize(s.pluginTools)
+	s.pluginToolsMu.Unlock()
+	if !ready {
+		return
+	}
+	for _, definition := range snapshot.Tools {
+		if !pluginToolSupportsSurface(definition, string(s.profile.Surface)) {
+			continue
+		}
+		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
+		tool.RawOutputSchema = append(json.RawMessage(nil), definition.OutputSchema...)
+		tool.Annotations = mcp.ToolAnnotation{
+			ReadOnlyHint: &definition.ReadOnlyHint, DestructiveHint: &definition.DestructiveHint,
+			IdempotentHint: &definition.IdempotentHint, OpenWorldHint: &definition.OpenWorldHint,
+		}
+		d := definition
+		s.mcpServer.AddTool(tool, s.wrapSensitiveHandler(d.ExposedName, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			s.mu.RLock()
+			surface := string(s.profile.Surface)
+			s.mu.RUnlock()
+			payload := map[string]any{
+				"plugin_id": d.PluginID, "local_name": d.LocalName, pluginToolArgumentsKey: req.GetArguments(),
+				"invocation_id": fmt.Sprintf("mcp-%d", time.Now().UnixNano()), "surface": surface,
+			}
+			var result struct {
+				Text              string         `json:"text"`
+				StructuredContent map[string]any `json:"structured_content,omitempty"`
+				IsError           bool           `json:"is_error"`
+			}
+			if err := s.backend.RequestPayload(ctx, ws.ActionMCPInvokePluginTool, payload, &result); err != nil {
+				return nil, err
+			}
+			if result.IsError {
+				return mcp.NewToolResultError(result.Text), nil
+			}
+			if result.StructuredContent != nil {
+				return mcp.NewToolResultStructured(result.StructuredContent, result.Text), nil
+			}
+			return mcp.NewToolResultText(result.Text), nil
+		}))
+	}
+}
+
+func pluginToolSupportsSurface(definition plugintools.Definition, surface string) bool {
+	for _, allowed := range definition.Surfaces {
+		if allowed == surface {
+			return true
+		}
+	}
+	return false
+}
+
 func sameProviderSet(left, right []string) bool {
 	if len(left) != len(right) {
 		return false
@@ -637,6 +825,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
 		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
+		// Dependency edges are manageable wherever a task can be created.
+		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
 		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
@@ -667,6 +857,7 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
+	s.registerPluginTools()
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
 		zap.Int("count", len(s.mcpServer.ListTools())),
@@ -838,17 +1029,29 @@ If the child has no live execution, the call succeeds idempotently with status="
 func (s *Server) registerPRAutomationTools() {
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("get_task_pr_automation_kandev",
-			"Get the current task's GitHub PR automation settings, including lifecycle notification switches.",
+			"Get the current task's GitHub PR automation settings, including lifecycle notification switches. "+
+				"The five automation switches are scoped per linked PR; pr_options carries one entry per PR "+
+				"(repository_id, pr_number, and the five booleans). The top-level booleans are an aggregate "+
+				"that reports true only when every linked PR has that switch on and at least one PR is linked "+
+				"— use them to check whether a task-wide enable fully took, and use pr_options for anything "+
+				"PR-specific.",
 			json.RawMessage(`{"type":"object","properties":{}}`),
 		),
 		s.wrapHandler("get_task_pr_automation_kandev", s.getTaskPRAutomationHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_pr_automation_kandev",
-			mcp.WithDescription("Update this task's PR automation options (auto-fix, auto-merge, and lifecycle notifications)."),
+			mcp.WithDescription(
+				"Update this task's PR automation options (auto-fix, auto-merge, and lifecycle notifications). "+
+					"The five switches are scoped per linked PR: pass both repository_id and pr_number to target "+
+					"one linked PR, or omit both to apply the change to every PR currently linked to the task "+
+					"(unchanged default behavior). auto_fix_prompt_override applies task-wide regardless of PR identity.",
+			),
+			mcp.WithString("repository_id", mcp.Description("Target one linked PR's repository_id; must be paired with pr_number. Omit both to apply to every linked PR.")),
+			mcp.WithNumber("pr_number", mcp.Description("Target one linked PR's number; must be paired with repository_id. Omit both to apply to every linked PR.")),
 			mcp.WithBoolean("auto_fix_enabled", mcp.Description("Enable or disable auto-fix when CI checks fail")),
 			mcp.WithBoolean("auto_merge_enabled", mcp.Description("Enable or disable auto-merge when PR passes all checks")),
-			mcp.WithString("auto_fix_prompt_override", mcp.Description("Custom prompt for auto-fix (empty string clears the override)")),
+			mcp.WithString("auto_fix_prompt_override", mcp.Description("Custom prompt for auto-fix (empty string clears the override). Task-wide; not affected by repository_id/pr_number.")),
 			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
 			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked PR becomes merged")),
 			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked PR becomes closed without merge")),
@@ -896,8 +1099,8 @@ WHEN TO OMIT parent_id (top-level task):
 
 IMPORTANT:
 - Subtasks inherit task workspace, workflow, agent profile, executor, and materialized workspace from the parent by default. Pass workspace_id/workflow_id only when deliberately targeting a different task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. Pass workspace_mode='new_workspace' when the subtask needs its own materialized workspace/worktree.
-- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task inherits from the current/source task or parent before workflow and target-workspace defaults; workspace_default skips current/source and parent profiles, honors workflow profiles first, then uses the target workspace default.
-- Executor and executor-profile inheritance from the current/source task or parent is unchanged by either saved agent-profile policy.
+- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When no workflow profile wins and agent_profile_id is omitted, the saved user policy applies: current_task uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call. Without verified session context, it falls back to the current/source task or parent profile, then workflow and target-workspace defaults. workspace_default skips the creating session, current/source task, and parent profiles, honors workflow profiles first, then uses the target workspace default. An explicit agent_profile_id prevents creator-session runtime inheritance.
+- Creator-session runtime values are copied only when current_task selects that verified session profile. Executor and executor-profile inheritance from the current/source task or parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead
 - base_branch behaviour:
@@ -914,7 +1117,7 @@ IDEMPOTENCY (external_id):
 - deduplicated:true in the result means a task already held that identity and nothing new was created — do not report having created a task in that case.
 - deduplicated:true together with creation_complete:false means another create claimed the identity and had not finished when observed; it may still be running. Proceed with the returned task_id or escalate to a human — never release the identity and create again, which can produce a duplicate task and a duplicate agent.`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
-	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
+	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call, then falls back to the current/source or parent profile without verified session context. workspace_default skips those task profiles and the creating session, then uses workflow profiles before the target workspace default. Explicit profiles do not copy creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start."
 
 	if s.mode == ModeExternal {
 		toolDesc = `Create a new top-level task and auto-start an agent on it.
@@ -922,7 +1125,7 @@ IDEMPOTENCY (external_id):
 IMPORTANT:
 - Provide a repository via repository_url, repository_id, or local_path
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
-- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task inherits a parent profile before workflow and target-workspace defaults; workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no current/source task.
+- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task uses the parent task profile because external mode has no creating session or current/source task context, then checks workflow and target-workspace defaults. workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no creating session, so it never copies creator-session runtime values.
 - Executor and executor-profile inheritance from a parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - 'prompt' is the agent's initial prompt — be specific and detailed
@@ -934,7 +1137,7 @@ IDEMPOTENCY (external_id):
 - deduplicated:true in the result means a task already held that identity and nothing new was created — do not report having created a task in that case.
 - deduplicated:true together with creation_complete:false means another create claimed the identity and had not finished when observed; it may still be running. Proceed with the returned task_id or escalate to a human — never release the identity and create again, which can produce a duplicate task and a duplicate agent.`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
-		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
+		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the parent task profile because external mode has no creating session or current/source task context; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode never copies creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start."
 	}
 
 	s.mcpServer.AddTool(
@@ -956,8 +1159,57 @@ IDEMPOTENCY (external_id):
 			mcp.WithString("repository_url", mcp.Description("Repository URL, GitHub pull request URL, or GitLab merge request URL (for example 'https://github.com/owner/repo'). A contribution URL attaches the task to that existing contribution and prepares its source branch. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
 			mcp.WithString("external_id", mcp.Description("A stable identifier from your own system (issue key, webhook delivery ID, a UUID you generated). Creating a task twice with the same external_id in the same workspace returns the first task instead of making a duplicate — use it when a retry or restart could re-run this call. Replay the same arguments you sent the first time. This creates the task when nothing holds the identity yet — it is not a lookup.")),
+			mcp.WithArray("blocked_by",
+				mcp.Description(blockedByParamDesc),
+				mcp.Items(map[string]any{"type": "string"}),
+			),
+			mcp.WithBoolean("start_when_unblocked", mcp.Description(startWhenUnblockedParamDesc)),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
+	)
+}
+
+// Dependency parameter descriptions for create_task_kandev. Extracted as
+// constants because the same guidance has to appear on the two dependency tools
+// below and must not drift between them.
+const (
+	blockedByParamDesc = "Task IDs this task depends on: it will not start until every one of them completes SUCCESSFULLY. " +
+		"Use this — not parent_id — to express ordering. A subtask means \"part of\"; a dependency means \"not until\". " +
+		"Decomposing a plan into ordered phases is N sibling tasks chained with blocked_by, NOT N subtasks started at once. " +
+		"A predecessor that ends FAILED or CANCELLED halts the chain and needs human action; it will not retry itself."
+
+	startWhenUnblockedParamDesc = "Whether to start this task automatically once every task in blocked_by completes successfully. " +
+		"Defaults to true when blocked_by is non-empty, which is what chains ordered work: with blocked_by set, " +
+		"start_agent=true records this intent instead of launching now, so the whole chain does not start at once. " +
+		"Pass false to create the dependency edges with no automatic start at all."
+)
+
+// registerTaskDependencyTools registers add/remove for task dependency edges.
+// Mirrors the two HTTP routes one-to-one and shares the single edge validator
+// (self-edge, cross-workspace, cycle-with-path) in the task service. The read
+// side already exists as list_related_tasks_kandev.
+func (s *Server) registerTaskDependencyTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("add_task_dependency_kandev",
+			mcp.WithDescription(`Declare that a task is blocked by another task: it will not start until that one completes successfully.
+
+`+blockedByParamDesc+`
+
+task_id defaults to your CURRENT task. Rejected when the edge would create a cycle (the error names the cycle path), when both IDs are the same, or when the two tasks are in different workspaces. Returns the task's resulting depends_on list.`),
+			mcp.WithString(mcpKeyTaskID, mcp.Description("The blocked task. Defaults to your current task when omitted.")),
+			mcp.WithString("depends_on_task_id", mcp.Required(), mcp.Description("The task that must complete first (the predecessor).")),
+		),
+		s.wrapHandler("add_task_dependency_kandev", s.addTaskDependencyHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("remove_task_dependency_kandev",
+			mcp.WithDescription(`Remove a task dependency edge. Removing an edge that does not exist succeeds.
+
+Removing the last edge unblocks the task but does NOT start it: an automatic start is triggered by a dependency RESOLVING, not by the edge going away. Removing the edge means you are taking manual control.`),
+			mcp.WithString(mcpKeyTaskID, mcp.Description("The blocked task. Defaults to your current task when omitted.")),
+			mcp.WithString("depends_on_task_id", mcp.Required(), mcp.Description("The predecessor task to unlink.")),
+		),
+		s.wrapHandler("remove_task_dependency_kandev", s.removeTaskDependencyHandler()),
 	)
 }
 
@@ -974,9 +1226,11 @@ Unlike create_task_kandev this does NOT create a new task — the new session ru
 
 The spawned session knows it was spawned by you and can reply via message_task_kandev using your task_id + session_id. You can message it the same way using the session_id returned by this tool.
 
-Returns {task_id, session_id, state}.`),
+The returned agent_profile_id is the effective agent profile used by the new session. On a workflow step, the step's launch profile wins: a pinned step profile outranks the requested agent_profile_id, and an unpinned step uses the workflow default. Without a workflow launch profile, an explicit agent_profile_id wins; when omitted, the existing inheritance rules apply.
+
+Returns {task_id, session_id, state, agent_profile_id}.`),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The spawned session's initial prompt. This is the ONLY context the new agent receives — be specific and detailed.")),
-			mcp.WithString("agent_profile_id", mcp.Description("Agent profile for the new session. Omit to reuse your own session's agent profile.")),
+			mcp.WithString("agent_profile_id", mcp.Description("Requested agent profile for the new session. Omit to inherit your session's profile; a workflow launch profile may override it.")),
 			mcp.WithString("name", mcp.Description("Optional session name shown on the session tab (e.g. 'reviewer'). Helps the user tell concurrent sessions apart.")),
 			mcp.WithString("task_id", mcp.Description("Task to spawn the session on. Omit to use your current task.")),
 		),

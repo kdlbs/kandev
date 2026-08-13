@@ -50,7 +50,7 @@ export function SenderTaskBadge({ sender, size = "sm" }: SenderTaskBadgeProps) {
   const liveSessionName = useAppStore((state) =>
     sender.sessionId ? (state.taskSessions.items[sender.sessionId]?.name ?? null) : null,
   );
-  const fullTitle = liveTask?.title || sender.snapshotTitle || "(unknown task)";
+  const fullTitle = liveTask?.title || sender.snapshotTitle || t("task:unknownTaskFallback");
   const sessionName = liveSessionName ?? sender.sessionName ?? "";
   const truncated = sessionName
     ? `${truncateTitle(fullTitle)} · ${truncateTitle(sessionName)}`

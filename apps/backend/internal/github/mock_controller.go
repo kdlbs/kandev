@@ -571,6 +571,7 @@ func (c *MockController) addRepoFiles(ctx *gin.Context) {
 type associateTaskPRRequest struct {
 	TaskID                  string `json:"task_id"`
 	WorkspaceID             string `json:"workspace_id,omitempty"`
+	RepositoryID            string `json:"repository_id,omitempty"`
 	Owner                   string `json:"owner"`
 	Repo                    string `json:"repo"`
 	PRNumber                int    `json:"pr_number"`
@@ -630,6 +631,7 @@ func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR 
 	tp := &TaskPR{
 		TaskID:         req.TaskID,
 		WorkspaceID:    req.WorkspaceID,
+		RepositoryID:   req.RepositoryID,
 		Owner:          req.Owner,
 		Repo:           req.Repo,
 		PRNumber:       req.PRNumber,

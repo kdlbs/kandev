@@ -169,7 +169,7 @@ func runnerProjection(alias string) string {
 func (r *Repository) CreateTask(ctx context.Context, task *models.Task) error {
 	if task.WorkflowStepID != "" && task.QueuedForStepID == "" && !task.IsEphemeral {
 		task.WIPAdmitted = true
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		models.DropWIPDeferredLaunch(task)
 	}
 	return r.createTask(ctx, task, "", 0)
 }
@@ -202,7 +202,7 @@ func (r *Repository) CreateTaskWithWorkflowStepAdmission(
 		task.WIPAdmitted = !task.IsEphemeral
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		models.DropWIPDeferredLaunch(task)
 		return r.CreateTask(ctx, task)
 	}
 
@@ -248,7 +248,7 @@ func (r *Repository) applyAdmissionPlacement(
 		task.WIPAdmitted = true
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		models.DropWIPDeferredLaunch(task)
 	case feederStepID == "":
 		task.WorkflowStepID = targetStepID
 		task.WIPAdmitted = false
@@ -517,6 +517,14 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 // RemoveTaskMetadataKey removes one metadata key without replacing concurrent
 // task fields. It returns whether the key was present and removed.
 func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error) {
+	return r.removeTaskMetadataKeyWithExecutor(ctx, r.db, taskID, key)
+}
+
+func (r *Repository) removeTaskMetadataKeyWithExecutor(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	taskID, key string,
+) (bool, error) {
 	var query string
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query = `
@@ -533,7 +541,7 @@ func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key stri
 	if dialect.IsPostgres(r.db.DriverName()) {
 		path = key
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, time.Now().UTC(), taskID, path)
+	result, err := exec.ExecContext(ctx, r.db.Rebind(query), path, time.Now().UTC(), taskID, path)
 	if err != nil {
 		return false, err
 	}

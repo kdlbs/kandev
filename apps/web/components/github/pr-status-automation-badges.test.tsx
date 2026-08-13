@@ -23,6 +23,7 @@ function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAu
     using_default_prompt: true,
     updated_at: "2026-08-10T10:00:00Z",
     pr_states: [],
+    pr_options: [],
     ...overrides,
   };
 }
@@ -81,11 +82,37 @@ describe("AutomationFlagBadges", () => {
     );
   });
 
-  it("derives the same task-wide PR events for single and multiple PR chips", () => {
+  it("derives the same enabled PR events for single and multiple PR chips", () => {
     const options = makeOptions({
       prompt_on_review_requested: true,
       prompt_on_merged: true,
       prompt_on_closed: true,
+      pr_options: [
+        {
+          task_id: "task-1",
+          repository_id: "repo-1",
+          pr_number: 42,
+          auto_fix_enabled: false,
+          auto_merge_enabled: false,
+          prompt_on_review_requested: true,
+          prompt_on_merged: true,
+          prompt_on_closed: true,
+          created_at: "",
+          updated_at: "",
+        },
+        {
+          task_id: "task-1",
+          repository_id: "repo-1",
+          pr_number: 43,
+          auto_fix_enabled: false,
+          auto_merge_enabled: false,
+          prompt_on_review_requested: true,
+          prompt_on_merged: true,
+          prompt_on_closed: true,
+          created_at: "",
+          updated_at: "",
+        },
+      ],
     });
 
     const single = automationForPR(options, PR);

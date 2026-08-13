@@ -277,6 +277,25 @@ const (
 	StepTransitionTriggerManual       StepTransitionTrigger = "manual"
 	StepTransitionTriggerAutoComplete StepTransitionTrigger = "auto_complete"
 	StepTransitionTriggerApproval     StepTransitionTrigger = "approval"
+	// StepTransitionTriggerTurnStart identifies an automatic transition caused
+	// by the on_turn_start workflow event.
+	StepTransitionTriggerTurnStart StepTransitionTrigger = "on_turn_start"
+	// StepTransitionTriggerChildrenCompleted identifies an automatic transition
+	// caused by the on_children_completed workflow event.
+	StepTransitionTriggerChildrenCompleted StepTransitionTrigger = "on_children_completed"
+	StepTransitionTriggerTaskUpdate        StepTransitionTrigger = "task_update"
+	StepTransitionTriggerQueuePromotion    StepTransitionTrigger = "queue_promotion"
+)
+
+// StepTransitionActor identifies the source of a move. Human identity is
+// taken only from authenticated HTTP or WebSocket boundaries. Agent and
+// system moves do not inherit the owner's user identity.
+type StepTransitionActor string
+
+const (
+	StepTransitionActorHuman  StepTransitionActor = "human"
+	StepTransitionActorAgent  StepTransitionActor = "agent"
+	StepTransitionActorSystem StepTransitionActor = "system"
 )
 
 // SessionStepHistory represents an audit trail entry for session step transitions

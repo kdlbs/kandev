@@ -264,7 +264,7 @@ build-agentctl-darwin-amd64:
 build-mock-agent-linux:
 	@echo "Building mock-agent for linux/amd64..."
 	@$(MKDIR) $(BUILD_DIR)
-	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent-linux-amd64 ./cmd/mock-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent-linux-amd64 ./cmd/mock-agent
 
 
 ## Package the plugin-fixture SDK plugin (cmd/plugin-fixture) as a kandev

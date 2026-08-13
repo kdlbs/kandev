@@ -231,6 +231,90 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 	return tx.Commit()
 }
 
+// CreateTaskSessionWithInitialRuntimeSeed claims the task's launch-only
+// runtime seed while creating the session. The task lock / SQLite writer
+// transaction makes the session count, seed read, session insert, and seed
+// removal one serialized operation, so a concurrent launch or replacement
+// session cannot inherit the seed a second time.
+func (r *Repository) CreateTaskSessionWithInitialRuntimeSeed(ctx context.Context, session *models.TaskSession) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
+
+	initialRuntimeConfig, hasInitialRuntimeConfig, initialRuntimeConfigProfileID, hasInitialRuntimeSeedKey, err := r.loadInitialSessionRuntimeSeedTx(ctx, tx, session.TaskID)
+	if err != nil {
+		return err
+	}
+
+	var sessionCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`,
+	), session.TaskID).Scan(&sessionCount); err != nil {
+		return fmt.Errorf("check task sessions before initial runtime session: %w", err)
+	}
+	if sessionCount == 0 {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+		if hasInitialRuntimeConfig && initialRuntimeConfigProfileID == session.AgentProfileID {
+			session.Metadata[models.SessionMetaKeyRuntimeConfigOverrides] = initialRuntimeConfig
+		}
+	} else if models.IsOriginalTaskSession(session.Metadata) {
+		// PrepareSession performs a read before this transaction. If another
+		// launch won the race, do not persist the stale origin marker.
+		delete(session.Metadata, models.SessionMetaKeyOrigin)
+	}
+
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	if hasInitialRuntimeSeedKey {
+		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfig); err != nil {
+			return fmt.Errorf("consume initial runtime seed: %w", err)
+		}
+		if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, session.TaskID, models.MetaKeyInitialSessionRuntimeConfigProfileID); err != nil {
+			return fmt.Errorf("consume initial runtime seed profile: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) loadInitialSessionRuntimeSeedTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+) (models.SessionRuntimeConfig, bool, string, bool, error) {
+	var metadataJSON sql.NullString
+	err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT metadata FROM tasks WHERE id = ?`,
+	), taskID).Scan(&metadataJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.SessionRuntimeConfig{}, false, "", false, fmt.Errorf("task not found: %s", taskID)
+	}
+	if err != nil {
+		return models.SessionRuntimeConfig{}, false, "", false, fmt.Errorf("load task metadata for initial runtime seed: %w", err)
+	}
+
+	metadata := make(map[string]interface{})
+	raw := strings.TrimSpace(metadataJSON.String)
+	if metadataJSON.Valid && raw != "" && raw != "null" && raw != "{}" {
+		if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+			return models.SessionRuntimeConfig{}, false, "", false, fmt.Errorf("decode task metadata for initial runtime seed: %w", err)
+		}
+	}
+	seed, ok := models.LoadInitialSessionRuntimeConfig(metadata)
+	profileID := models.LoadInitialSessionRuntimeConfigProfileID(metadata)
+	_, hasSeedKey := metadata[models.MetaKeyInitialSessionRuntimeConfig]
+	return seed, ok, profileID, hasSeedKey, nil
+}
+
 // CreateOfficeTaskSession creates an Office session and atomically marks it as
 // the task's initial session when no earlier session exists. The task row lock
 // serializes callers across PostgreSQL connections; SQLite's single writer
@@ -1209,6 +1293,35 @@ func (r *Repository) SetSessionMetadataKeyIfAbsent(
 	return rows > 0, nil
 }
 
+// SetSessionMetadataKeyIfAbsentOrDifferentStep atomically writes a metadata
+// key when it is absent or its stored value has a different step_id. The
+// returned bool reports whether this call stored the value.
+func (r *Repository) SetSessionMetadataKeyIfAbsentOrDifferentStep(
+	ctx context.Context,
+	sessionID, key, stepID string,
+	value interface{},
+) (bool, error) {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	path := key
+	stepPath := key
+	if !dialect.IsPostgres(driver) {
+		path = "$." + key
+		stepPath = path + ".step_id"
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(setSessionMetadataKeyIfAbsentOrDifferentStepQuery(driver)),
+		path, string(valueJSON), now, sessionID, stepPath, stepID)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
 // SetSessionMetadataKeyIfAbsentIfState atomically claims a metadata key only
 // while the session remains in expectedState. It is used when a terminal
 // transition owns a one-time side effect that must not be emitted by a stale
@@ -1283,6 +1396,34 @@ func setSessionMetadataKeyIfAbsentQuery(driver string) string {
 			updated_at = ?
 		WHERE id = ?
 			AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NULL
+	`
+}
+
+func setSessionMetadataKeyIfAbsentOrDifferentStepQuery(driver string) string {
+	if dialect.IsPostgres(driver) {
+		base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
+		return `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(
+				` + base + `,
+				ARRAY[?]::text[],
+				?::jsonb,
+				true
+			)::text,
+				updated_at = ?
+			WHERE id = ?
+				AND jsonb_extract_path_text(` + base + `, ?, 'step_id') IS DISTINCT FROM ?
+		`
+	}
+	base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
+	return `
+		UPDATE task_sessions
+		SET metadata = json_set(` + base + `, ?, json(?)),
+			updated_at = ?
+		WHERE id = ?
+			AND (
+				json_extract(` + base + `, ?) IS NOT ?
+			)
 	`
 }
 
@@ -1390,24 +1531,27 @@ func (r *Repository) GetLastAgentMessage(ctx context.Context, sessionID string) 
 }
 
 // IncrementTaskSessionUsage adds the given deltas to the cumulative
-// tokens / cost columns on task_sessions. Used by the office cost
-// subscriber after a cost event lands so the per-session totals stay
-// in sync without re-summing office_cost_events. The model + DTO
+// tokens / cost columns on task_sessions, including cached input tokens
+// (tokens_cached_in mirrors office_cost_events.tokens_cached_in and is kept
+// separate from tokens_in because it is priced differently). Used by the
+// office cost subscriber after a cost event lands so the per-session totals
+// stay in sync without re-summing office_cost_events. The model + DTO
 // don't surface these columns yet (DB-only per the office-costs
 // wedge); the cost explorer follow-up will expose them.
 func (r *Repository) IncrementTaskSessionUsage(
-	ctx context.Context, sessionID string, tokensIn, tokensOut, costSubcents int64,
+	ctx context.Context, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
 ) error {
 	if sessionID == "" {
 		return nil
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
-		   SET tokens_in     = COALESCE(tokens_in, 0)     + ?,
-		       tokens_out    = COALESCE(tokens_out, 0)    + ?,
-		       cost_subcents = COALESCE(cost_subcents, 0) + ?
+		   SET tokens_in        = COALESCE(tokens_in, 0)        + ?,
+		       tokens_cached_in = COALESCE(tokens_cached_in, 0) + ?,
+		       tokens_out       = COALESCE(tokens_out, 0)       + ?,
+		       cost_subcents    = COALESCE(cost_subcents, 0)    + ?
 		 WHERE id = ?
-	`), tokensIn, tokensOut, costSubcents, sessionID)
+	`), tokensIn, tokensCachedIn, tokensOut, costSubcents, sessionID)
 	return err
 }
 

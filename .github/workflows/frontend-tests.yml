@@ -160,6 +160,9 @@ jobs:
       - name: Run typecheck
         run: pnpm --filter @kandev/web typecheck
 
+      - name: Verify standalone plugin SDK contract
+        run: pnpm --filter @kandev/plugin-sdk test && pnpm --filter @kandev/plugin-sdk typecheck
+
       # Unlike the eslint literal-string guard (scoped to already-migrated paths
       # via i18nGuardFiles), these five checks scan components/app/hooks/lib
       # repo-wide. Each one pins a class of i18n bug that fails silently at

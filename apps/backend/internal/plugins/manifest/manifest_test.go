@@ -91,6 +91,329 @@ func TestValidate_ValidManifestPasses(t *testing.T) {
 	}
 }
 
+func TestValidate_RejectsActionWithUnknownResourceScope(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - key: connection.get
+    resource_scope: user
+    max_body_bytes: 1024
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for an action with an unknown resource scope, got nil")
+	}
+}
+
+func TestValidate_RejectsDuplicateActionKeys(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - key: connection.get
+    resource_scope: workspace
+    max_body_bytes: 1024
+  - key: connection.get
+    resource_scope: workspace
+    max_body_bytes: 1024
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for duplicate action keys, got nil")
+	}
+}
+
+func TestParseActionUsesDocumentedScopeField(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - key: connection.get
+    scope: workspace
+    max_body_bytes: 1024
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error for documented action scope: %v", err)
+	}
+	if got := m.Actions[0].ResourceScope; got != "workspace" {
+		t.Fatalf("action scope = %q, want workspace", got)
+	}
+}
+
+func TestValidate_RejectsActionWithoutBodyLimit(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - key: connection.get
+    resource_scope: workspace
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for an unbounded action body, got nil")
+	}
+}
+
+func TestValidate_RejectsActionWithoutKey(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - resource_scope: workspace
+    max_body_bytes: 1024
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for action without a key, got nil")
+	}
+}
+
+func TestValidate_RejectsRouteUnsafeActionKey(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - key: pullrequests/link
+    scope: workspace
+    max_body_bytes: 1024
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "action key") {
+		t.Fatalf("Validate() error = %v, want route-safe action key rejection", err)
+	}
+}
+
+func TestValidate_RejectsDuplicateRepositoryProvider(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+repository_providers: [bitbucket, bitbucket]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for duplicate repository providers, got nil")
+	}
+}
+
+func TestValidate_RejectsRepositoryProvidersThatCollideAfterNormalization(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+repository_providers: [Bitbucket, bitbucket]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for case-insensitive duplicate repository providers, got nil")
+	}
+}
+
+func TestValidate_RejectsNonCanonicalRepositoryProviderID(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+repository_providers: [Bitbucket]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "lowercase") {
+		t.Fatalf("Validate() error = %v, want canonical lowercase provider rejection", err)
+	}
+}
+
+func TestValidate_RejectsRepositoryProviderWithSurroundingWhitespace(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+repository_providers: [" bitbucket "]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for repository provider with surrounding whitespace, got nil")
+	}
+}
+
+func TestValidate_RejectsDuplicateReferenceSource(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+reference_sources:
+  - source: bitbucket
+    provider: bitbucket
+    kind: pull_request
+    display_name: Bitbucket
+    kind_label: Pull request
+  - source: bitbucket
+    provider: bitbucket
+    kind: build
+    display_name: Bitbucket
+    kind_label: Build
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for duplicate reference sources, got nil")
+	}
+}
+
+func TestValidate_RejectsDuplicateReferenceProviderKind(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+reference_sources:
+  - source: bitbucket_pull_requests
+    provider: bitbucket
+    kind: pull_request
+    display_name: Bitbucket
+    kind_label: Pull request
+  - source: bitbucket_prs
+    provider: bitbucket
+    kind: pull_request
+    display_name: Bitbucket
+    kind_label: Pull request
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for duplicate reference provider/kind, got nil")
+	}
+}
+
+func TestValidate_RejectsReferenceIdentityThatMentionRegistryCannotNormalize(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+reference_sources:
+  - source: bitbucket_pull_requests
+    provider: Bitbucket
+    kind: pull_request
+    display_name: Bitbucket
+    kind_label: Pull request
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "lowercase") {
+		t.Fatalf("Validate() error = %v, want canonical reference identity rejection", err)
+	}
+}
+
+func TestValidate_RejectsWhitespaceOnlyReferenceLabel(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+reference_sources:
+  - source: bitbucket_pull_requests
+    provider: bitbucket
+    kind: pull_request
+    display_name: "   "
+    kind_label: Pull request
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "display_name") {
+		t.Fatalf("Validate() error = %v, want invalid reference label rejection", err)
+	}
+}
+
+func TestParse_AgentToolDeclarationIsRetained(t *testing.T) {
+	yaml := validManifestYAML + `
+agent_tools:
+  - name: add_tag
+    description: Add a tag to the current task.
+    surfaces: [kanban-task]
+    input_schema:
+      type: object
+      properties:
+        tag_id: {type: string}
+      required: [tag_id]
+`
+	m, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if len(m.AgentTools) != 1 {
+		t.Fatalf("AgentTools = %v, want one declaration", m.AgentTools)
+	}
+	tool := m.AgentTools[0]
+	if tool.Name != "add_tag" {
+		t.Fatalf("AgentTools[0].Name = %q, want add_tag", tool.Name)
+	}
+	if tool.Description != "Add a tag to the current task." {
+		t.Fatalf("AgentTools[0].Description = %q", tool.Description)
+	}
+	if len(tool.Surfaces) != 1 || tool.Surfaces[0] != AgentToolSurfaceKanban {
+		t.Fatalf("AgentTools[0].Surfaces = %v, want [%s]", tool.Surfaces, AgentToolSurfaceKanban)
+	}
+	if tool.InputSchema["type"] != "object" {
+		t.Fatalf("AgentTools[0].InputSchema.type = %v, want object", tool.InputSchema["type"])
+	}
+	properties, ok := tool.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("AgentTools[0].InputSchema.properties = %T, want map[string]any", tool.InputSchema["properties"])
+	}
+	tagID, ok := properties["tag_id"].(map[string]any)
+	if !ok || tagID["type"] != "string" {
+		t.Fatalf("AgentTools[0].InputSchema.properties.tag_id = %v, want string schema", properties["tag_id"])
+	}
+	required, ok := tool.InputSchema["required"].([]any)
+	if !ok || len(required) != 1 || required[0] != "tag_id" {
+		t.Fatalf("AgentTools[0].InputSchema.required = %v, want [tag_id]", tool.InputSchema["required"])
+	}
+}
+
+func TestValidate_AgentToolContract(t *testing.T) {
+	m := managedManifest(t)
+	readOnly := true
+	destructive := false
+	m.AgentTools = []AgentTool{{
+		Name:        "read_tag",
+		Description: "Read the current task tag.",
+		Surfaces:    []string{AgentToolSurfaceKanban},
+		InputSchema: map[string]any{"type": "object"},
+		Annotations: AgentToolAnnotations{
+			ReadOnlyHint: &readOnly, DestructiveHint: &destructive,
+		},
+	}}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+}
+
+func TestValidate_RejectsAgentToolsOnLegacyRemotePlugin(t *testing.T) {
+	m := validManifest(t)
+	m.AgentTools = []AgentTool{{
+		Name: "echo", Description: "Echo input.",
+		Surfaces:    []string{AgentToolSurfaceKanban},
+		InputSchema: map[string]any{"type": "object"},
+	}}
+	err := m.Validate()
+	if err == nil || !strings.Contains(err.Error(), "agent_tools require runtime.type binary") {
+		t.Fatalf("Validate() error = %v, want managed-runtime requirement", err)
+	}
+}
+
+func TestValidate_RejectsInvalidAgentTool(t *testing.T) {
+	m := validManifest(t)
+	m.AgentTools = []AgentTool{{
+		Name:        "Bad-Name",
+		Description: "",
+		Surfaces:    []string{"configuration"},
+		InputSchema: map[string]any{"type": "string"},
+	}}
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected agent tool errors, got nil")
+	}
+}
+
 // validManifest returns a freshly parsed copy of the valid fixture so each
 // test can mutate it independently without affecting others.
 func validManifest(t *testing.T) *Manifest {

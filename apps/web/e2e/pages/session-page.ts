@@ -82,6 +82,11 @@ export class SessionPage {
   async togglePortForwardingPreference(): Promise<void> {
     await this.addPanelButton().click();
     await expect(this.portForwardingMenuItem).toBeVisible();
+    // The menu item is rendered before the session's agentctl launcher is
+    // ready, but it is disabled until port forwarding can actually work.
+    // Waiting for enabled avoids force-clicking a no-op during that startup
+    // window, which otherwise leaves the top-bar control absent.
+    await expect(this.portForwardingMenuItem).toBeEnabled({ timeout: 30_000 });
     const enabling = (await this.portForwardingMenuItem.getAttribute("aria-checked")) !== "true";
     await this.portForwardingMenuItem.click({ force: true });
     if (enabling) {
@@ -705,17 +710,19 @@ export class SessionPage {
 
   /** Submitted review row scoped by its normalized GitHub author login. */
   prSubmittedReview(author: string): Locator {
-    return this.page.getByTestId(`pr-submitted-review-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(`change-request-submitted-review-${author.trim().toLowerCase()}`);
   }
 
   /** Pending reviewer row scoped by its normalized GitHub author login. */
   prPendingReviewer(author: string): Locator {
-    return this.page.getByTestId(`pr-pending-reviewer-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(`change-request-pending-reviewer-${author.trim().toLowerCase()}`);
   }
 
   /** Re-request action scoped by its normalized GitHub author login. */
   prReRequestReviewButton(author: string): Locator {
-    return this.page.getByTestId(`pr-rerequest-review-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(
+      `change-request-review-action-rerequest-review-${author.trim().toLowerCase()}`,
+    );
   }
 
   // --- PR CI accessors: desktop hover popover + chip + mobile chip drawer ---

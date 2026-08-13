@@ -90,7 +90,6 @@ type UpdateUserSettingsRequest struct {
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
-	VoiceMode                         *models.VoiceModeSettings
 	KanbanHiddenStepIDs               *map[string][]string
 }
 
@@ -193,9 +192,6 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	if err := applyUserPreferenceBlobs(settings, req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
-	}
-	if err := applyVoiceMode(settings, req.VoiceMode); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	settings.UpdatedAt = time.Now().UTC()
@@ -550,66 +546,6 @@ func applyChangesPanelLayout(settings *models.UserSettings, value *string) error
 	return nil
 }
 
-var (
-	validVoiceEngines = map[string]struct{}{
-		"auto":          {},
-		"webSpeech":     {},
-		"whisperWeb":    {},
-		"whisperServer": {},
-	}
-	validVoiceModes = map[string]struct{}{
-		"toggle": {},
-		"hold":   {},
-	}
-	validWhisperWebModels = map[string]struct{}{
-		"tiny":  {},
-		"base":  {},
-		"small": {},
-	}
-)
-
-// applyVoiceMode validates the inbound voice-mode settings and merges them
-// onto the user record. Each sub-field is validated independently so a
-// partial update (e.g. just `engine`) still works.
-//
-// `enabled` and `auto_send` are plain bools — every PATCH carries them. The
-// settings UI always sends the full VoiceMode object so partial updates that
-// would otherwise zero these are not a real concern.
-func applyVoiceMode(settings *models.UserSettings, value *models.VoiceModeSettings) error {
-	if value == nil {
-		return nil
-	}
-	current := settings.VoiceMode
-	if current.Engine == "" {
-		current.Engine = "auto"
-	}
-	if value.Engine != "" {
-		if _, ok := validVoiceEngines[value.Engine]; !ok {
-			return errors.New("voice_mode.engine must be 'auto', 'webSpeech', 'whisperWeb', or 'whisperServer'")
-		}
-		current.Engine = value.Engine
-	}
-	if value.Language != "" {
-		current.Language = strings.TrimSpace(value.Language)
-	}
-	if value.Mode != "" {
-		if _, ok := validVoiceModes[value.Mode]; !ok {
-			return errors.New("voice_mode.mode must be 'toggle' or 'hold'")
-		}
-		current.Mode = value.Mode
-	}
-	if value.WhisperWebModel != "" {
-		if _, ok := validWhisperWebModels[value.WhisperWebModel]; !ok {
-			return errors.New("voice_mode.whisper_web_model must be 'tiny', 'base', or 'small'")
-		}
-		current.WhisperWebModel = value.WhisperWebModel
-	}
-	current.AutoSend = value.AutoSend
-	current.Enabled = value.Enabled
-	settings.VoiceMode = current
-	return nil
-}
-
 // applyChatSubmitKey validates and applies the chat_submit_key setting.
 func (s *Service) applyChatSubmitKey(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.ChatSubmitKey == nil {
@@ -880,7 +816,6 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"app_status_bar_order":                     settings.AppStatusBarOrder,
-		"voice_mode":                               settings.VoiceMode,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
 		"revision":                                 settings.Revision,
 		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),

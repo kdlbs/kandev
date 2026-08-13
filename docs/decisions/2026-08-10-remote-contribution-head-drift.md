@@ -1,10 +1,15 @@
 # ADR-2026-08-10-remote-contribution-head-drift: Separate Current Contribution and Local Checkout Histories
 
-**Status:** accepted
+**Status:** accepted (remote-action policy superseded by 2026-08-12-local-first-contribution-replacement)
 **Date:** 2026-08-10
 **Area:** backend, frontend, protocol, GitHub, GitLab
 
 ## Context
+
+The local-first replacement policy in
+[ADR-2026-08-12](2026-08-12-local-first-contribution-replacement.md) supersedes this record's decision
+to block all remote actions after divergence. The history-classification and non-destructive detection
+rules remain active.
 
 A remote-contribution task starts from the provider-reported head SHA and tracks the contributor's
 source branch. After the task starts, the contributor can advance or rewrite that branch. The local

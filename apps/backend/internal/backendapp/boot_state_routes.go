@@ -517,7 +517,6 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		},
 		"appStatusBarEnabled":   settings.AppStatusBarEnabled,
 		"appStatusBarOrder":     mapAppStatusBarOrder(settings.AppStatusBarOrder),
-		"voiceMode":             mapVoiceMode(settings.VoiceMode),
 		"hiddenWorkflowStepIds": stringSliceMap(settings.KanbanHiddenStepIDs),
 		"loaded":                true,
 	}
@@ -614,7 +613,32 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"parentTaskId":                nullString(task.ParentID),
 		"updatedAt":                   task.UpdatedAt,
 		"createdAt":                   task.CreatedAt,
+		// Dependency projection. This mapper is a camelCase whitelist writing
+		// straight into the frontend store shape, so a new DTO field is invisible
+		// to the boot payload until it is listed here — the board badge and the
+		// dependency chip both read these on first paint.
+		"blocked":            task.Blocked,
+		"blockedReason":      nullString(task.BlockedReason),
+		"dependsOn":          dependencyRefStates(task.DependsOn),
+		"blocks":             dependencyRefStates(task.Blocks),
+		"startWhenUnblocked": task.StartWhenUnblocked,
 	}
+}
+
+// dependencyRefStates maps dependency edge entries into the store shape. Returns
+// an empty slice rather than nil so the client reads "no edges" instead of
+// "unknown" and does not keep a stale badge.
+func dependencyRefStates(refs []taskdto.TaskDependencyRefDTO) []map[string]any {
+	out := make([]map[string]any, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, map[string]any{
+			"id":      ref.ID,
+			"title":   ref.Title,
+			"state":   ref.State,
+			statusKey: ref.Status,
+		})
+	}
+	return out
 }
 
 // mapSidebarViews maps sidebar views to the SPA boot shape.
@@ -674,24 +698,12 @@ func mapTaskCreateLastUsed(value usermodels.TaskCreateLastUsed) map[string]any {
 	}
 	return map[string]any{
 		"repositoryId":           nullString(value.RepositoryID),
-		"branch":                 nullString(value.Branch),
+		branchFieldKey:           nullString(value.Branch),
 		"agentProfileId":         nullString(value.AgentProfileID),
 		"executorProfileId":      nullString(value.ExecutorProfileID),
 		"workflowIdsByWorkspace": workflowIDsByWorkspace,
 		"synced": value.RepositoryID != "" || value.Branch != "" || value.AgentProfileID != "" ||
 			value.ExecutorProfileID != "" || len(workflowIDsByWorkspace) > 0,
-	}
-}
-
-// mapVoiceMode maps the voice mode settings to the boot shape with defaults.
-func mapVoiceMode(value usermodels.VoiceModeSettings) map[string]any {
-	return map[string]any{
-		"enabled":         value.Enabled,
-		"engine":          defaultString(value.Engine, "auto"),
-		"language":        defaultString(value.Language, "auto"),
-		"mode":            defaultString(value.Mode, "toggle"),
-		"autoSend":        value.AutoSend,
-		"whisperWebModel": defaultString(value.WhisperWebModel, "base"),
 	}
 }
 

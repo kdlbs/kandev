@@ -22,7 +22,7 @@ export function PushSubmenu({
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger
-        className="cursor-pointer gap-3"
+        className="min-h-11 cursor-pointer gap-3"
         disabled={disabled}
         title={disabledReason}
       >
@@ -31,7 +31,7 @@ export function PushSubmenu({
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
         <DropdownMenuItem
-          className="cursor-pointer gap-3"
+          className="min-h-11 cursor-pointer gap-3"
           onClick={() => onPush(false)}
           disabled={disabled}
           title={disabledReason}
@@ -40,7 +40,7 @@ export function PushSubmenu({
           <span>{t("task:push")}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
-          className="cursor-pointer gap-3"
+          className="min-h-11 cursor-pointer gap-3"
           onClick={() => onPush(true)}
           disabled={disabled}
           title={disabledReason}

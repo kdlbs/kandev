@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -53,6 +54,8 @@ func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Mes
 	}
 	var req struct {
 		TaskID                  string  `json:"task_id"`
+		RepositoryID            *string `json:"repository_id"`
+		PRNumber                *int    `json:"pr_number"`
 		AutoFixEnabled          *bool   `json:"auto_fix_enabled"`
 		AutoMergeEnabled        *bool   `json:"auto_merge_enabled"`
 		AutoFixPromptOverride   *string `json:"auto_fix_prompt_override"`
@@ -67,6 +70,8 @@ func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 	patch := github.TaskCIOptionsPatch{
+		RepositoryID:            req.RepositoryID,
+		PRNumber:                req.PRNumber,
 		AutoFixEnabled:          req.AutoFixEnabled,
 		AutoMergeEnabled:        req.AutoMergeEnabled,
 		AutoFixPromptOverride:   req.AutoFixPromptOverride,
@@ -82,6 +87,9 @@ func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Mes
 	}
 	options, err := h.taskPRAutomation.UpdateTaskCIOptions(ctx, req.TaskID, patch)
 	if err != nil {
+		if errors.Is(err, github.ErrTaskPRNotLinked) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update PR automation options: "+err.Error(), nil)
 	}
 	if h.eventBus != nil {

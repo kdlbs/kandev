@@ -78,5 +78,15 @@
   "walkMeThroughTheseReviewChanges": "带我浏览这些审阅更改",
   "walkthrough": "导览",
   "walkthroughDiscarded": "导览已丢弃",
-  "wrapLongLines": "长行自动换行"
+  "wrapLongLines": "长行自动换行",
+  "changesDiscarded": "更改已丢弃",
+  "changesStillLoading": "更改仍在加载中",
+  "couldNotSendFinding": "无法发送发现项",
+  "couldNotUpdateFinding": "无法更新发现项",
+  "discardFailed": "丢弃失败",
+  "failedToRequestWalkthrough": "请求导览失败",
+  "findingQueuedForAgent": "发现项已加入代理队列",
+  "findingSentToAgent": "发现项已发送给代理",
+  "walkthroughRequestQueued": "导览请求已排队",
+  "walkthroughRequestSent": "导览请求已发送"
 }

@@ -338,7 +338,7 @@ func TestResolveRepositoryIDForSubpathMatchesSanitizedRepositoryName(t *testing.
 		SourceType:             "remote",
 		Provider:               "github",
 		ProviderOwner:          "kdlbs",
-		ProviderName:           "kandev",
+		ProviderName:           kandevName,
 		DefaultBranch:          "main",
 		WorktreeBranchPrefix:   "feature/",
 		WorktreeBranchTemplate: "feature/{title}-{suffix}",
@@ -681,14 +681,14 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 
 func TestBootTaskPendingActionExcludesStartingAndTerminalSessions(t *testing.T) {
 	sessions := []*models.TaskSession{
-		{ID: "starting", State: models.TaskSessionStateStarting},
+		{ID: startingStatus, State: models.TaskSessionStateStarting},
 		{ID: "completed", State: models.TaskSessionStateCompleted},
 		{ID: "failed", State: models.TaskSessionStateFailed},
 	}
 	actions := map[string]models.TaskPendingAction{
-		"starting":  models.TaskPendingActionPermission,
-		"completed": models.TaskPendingActionPermission,
-		"failed":    models.TaskPendingActionClarification,
+		startingStatus: models.TaskPendingActionPermission,
+		"completed":    models.TaskPendingActionPermission,
+		"failed":       models.TaskPendingActionClarification,
 	}
 
 	if got := bootTaskPendingActionPtr(sessions, actions); got != nil {
@@ -1963,6 +1963,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	eventBus := bus.NewMemoryEventBus(log)
 	userSvc := userservice.NewService(userRepo, eventBus, log)
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
+	t.Cleanup(func() { _ = workflowSvc.Close() })
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
 			Workspaces:       taskRepo,

@@ -91,6 +91,7 @@ type LaunchSessionResponse struct {
 	TaskID           string  `json:"task_id"`
 	SessionID        string  `json:"session_id,omitempty"`
 	AgentExecutionID string  `json:"agent_execution_id,omitempty"`
+	AgentProfileID   string  `json:"agent_profile_id,omitempty"`
 	State            string  `json:"state"`
 	WorktreePath     *string `json:"worktree_path,omitempty"`
 	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
@@ -415,6 +416,7 @@ func executionToLaunchResponse(taskID string, exec *executor.TaskExecution) *Lau
 		TaskID:           taskID,
 		SessionID:        exec.SessionID,
 		AgentExecutionID: exec.AgentExecutionID,
+		AgentProfileID:   exec.AgentProfileID,
 		State:            string(exec.SessionState),
 	}
 	if exec.WorktreePath != "" {

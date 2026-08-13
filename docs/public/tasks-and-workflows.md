@@ -106,12 +106,14 @@ tool. Config and Office sessions never receive the title tool.
 
 ### Choose the profile for tasks created by agents
 
-Open **Settings → General → Task Actions → Profile for Tasks Created by Agents** to choose which agent profile Kandev assigns when an agent calls a Kandev MCP tool that creates a task without choosing `agent_profile_id`. The profile determines the agent, model, and setup used when the new task starts:
+Open **Settings → General → Task Actions → Profile for Tasks Created by Agents** to choose which agent profile Kandev assigns when an agent calls `create_task_kandev` without choosing `agent_profile_id`. The preference covers new tasks and subtasks, and it also controls the effective model, mode, and dynamic options used by the first session:
 
-- **Current task profile** is useful when follow-up work needs the same model and agent setup as the task creating it. It preserves compatibility with existing behavior and is selected by default. Kandev first inherits the parent or calling task profile, then checks the workflow step or workflow default, and finally checks the target workspace's **Default Agent Profile**. This option can unintentionally reuse a more expensive profile.
-- **Workspace default profile** is useful when you want agent-created tasks to use your standard workspace model and cost policy. It skips the parent and calling task profiles. Kandev still uses the workflow step or workflow default first, then the **Default Agent Profile** from the workspace that will own the new task.
+- **Creating session profile** is useful when follow-up work needs the same live setup. For a session-bound task-mode call, Kandev uses the verified creating session's profile and its effective model, mode, and dynamic options, including changes made during that session. A workflow launch profile wins first. When no workflow profile wins, the creating session profile is used. This option can reuse a more expensive setup.
+- **Workspace default profile** is useful when you want agent-created tasks to follow a consistent workspace cost policy. It skips the creating session and source, parent, or current task profiles. Kandev uses the workflow launch profile first, then the **Default Agent Profile** from the workspace that will own the new task. It does not copy the creating session's model, mode, or dynamic options. If neither source supplies a profile, task creation fails.
 
-Select an option, then choose **Save changes**. The only affected Kandev MCP tool is `create_task_kandev`; the preference covers both new tasks and subtasks when the call omits `agent_profile_id`. It does not affect `spawn_session_kandev`, because that tool adds a session to the current task instead of creating a task. It also does not affect tasks you create in the UI. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. An explicit `agent_profile_id` in the tool call always overrides the saved preference. The one case where an explicit `agent_profile_id` does not run is a task that lands on a workflow step: the step's launch profile (its pinned profile, or the workflow default when unpinned) is what the agent starts with, and the created task records that profile. A task lands on a step whenever its workflow has steps, using the start step when `workflow_step_id` is omitted. If **Workspace default profile** is selected and neither the workflow nor the target workspace supplies a profile, task creation fails without creating the task, including when `start_agent=false`.
+Select an option, then choose **Save changes**. Workflow-selected profiles always win when the new task lands on a workflow step. Away from a workflow step, an explicit `agent_profile_id` wins and prevents creator-session runtime inheritance. The only affected Kandev MCP tool is `create_task_kandev`. `spawn_session_kandev` adds a session to the current task, so it does not use this preference. Tasks you create in the UI are not affected.
+
+External MCP calls have no verified creating session. With **Creating session profile**, those calls keep the compatibility fallback to the parent task when one exists, then workflow and target-workspace defaults. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. A resolved profile and runtime seed are stored even when `start_agent=false`, so a later manual start uses the same decision.
 
 ### Navigate long chat transcripts
 
@@ -225,6 +227,75 @@ preference applies in two situations:
 The preference only gates opening a task. Choosing **Start agent** (or a
 workflow step transition) always starts the agent as usual, and a failed or
 interrupted session still shows its recovery actions.
+
+## Task dependencies
+
+A task can declare that it **depends on** one or more other tasks. This is a
+peer relationship and is separate from the parent/child subtask hierarchy: a
+subtask says "B is part of A", a dependency says "B cannot start until A
+finishes". The two can be combined freely, including a dependency between a
+task and its own child.
+
+Dependencies form a graph, not just a line. A task can wait on several
+predecessors and can itself block several dependents. A link that would close a
+cycle is rejected when you try to create it, and the offending path is shown so
+you can see which link to drop.
+
+### Declare dependencies
+
+Dependencies are declared in the **New Task** dialog under **Depends on**, or
+by an agent over MCP. There is deliberately no editor in the open task: a
+dependency records how the work was planned, so the surfaces that display it
+stay read-only. To change one after the fact, use the MCP tools or delete and
+recreate the task.
+
+### What blocked means
+
+A task with at least one unfinished predecessor is **blocked**. Blocked tasks
+show a badge on their Kanban card and a dependency chip in the status row above
+the chat box, next to the pull request chip. The chip reports both directions,
+the tasks this one waits on and the tasks waiting on it, and each entry links
+to that task.
+
+While a task is blocked, no automated path starts it. That covers workflow
+**On Enter** auto-start, promotion out of a WIP queue, integration watchers,
+and dependency resolution itself. You can still press **Start agent**
+yourself; a manual start is an explicit override, not an error.
+
+### Chains that run themselves
+
+A task created with dependencies and an agent start request does not launch
+immediately. It records the start as an intent, and Kandev launches it once
+every predecessor has completed successfully. Setting that up along a path
+produces a chain:
+
+1. Create task A normally.
+2. Create task B with **Depends on** set to A.
+3. Create task C with **Depends on** set to B.
+
+Starting A is the only manual step. When A completes, B starts. When B
+completes, C starts. A is never restarted.
+
+Auto-start grants eligibility, never a bypass. If a task's dependencies have
+resolved but the target step is at its WIP limit, the task stays queued and
+launches when the queue promotes it, exactly as any other queued task would.
+
+### When a predecessor does not succeed
+
+Only successful completion resolves a dependency. A predecessor that ends in
+**Failed** or **Cancelled** leaves its dependents blocked, and the blocked
+reason names the failed task rather than reporting a generic wait. The chain
+stops there and waits for you. Kandev never retries a failed predecessor on its
+own and never quietly drops the link.
+
+Three things clear it, all of them deliberate: retry the predecessor until it
+succeeds, remove the link over MCP, or start the dependent manually.
+
+An **archived** predecessor is treated as unfinished, not as failed and not as
+resolved, so archiving a task does not release the work waiting on it.
+**Deleting** a task does remove its links in both directions, and any dependent
+that was waiting only on it becomes unblocked. That dependent is not started:
+deletion is not success.
 
 ## Find and organize tasks
 
@@ -407,9 +478,9 @@ Revision history is not an immutable record of every autosave. Consecutive write
 | One versioned task plan               | Available      | Available in Office-specific surfaces where enabled |
 | Multiple named task documents         | Not exposed    | In-progress Office capability                       |
 | Task label editor and label filters   | Not exposed    | In-progress Office capability                       |
-| Blocked-by / blocking property editor | Not exposed    | In-progress Office capability                       |
+| Blocked-by / blocking property editor | Set at task creation or over MCP; read-only afterwards | In-progress Office capability |
 
-Stored related-task data can include blocker relationships, but regular Kanban has no blocker editor or blocker filter. Use workflow gates, direct-child completion, and explicit messages for supported Kanban coordination. Do not treat Office's named documents, labels, or blocker UI as a stable public contract yet.
+Regular Kanban reads and enforces blocker relationships (see [Task dependencies](#task-dependencies)) but has no blocker filter and no in-place editor: dependencies are declared when the task is created or over MCP. Office additionally exposes named documents, labels, and its own blocker property editor. Do not treat those Office surfaces as a stable public contract yet.
 
 ## Archive, unarchive, and delete
 

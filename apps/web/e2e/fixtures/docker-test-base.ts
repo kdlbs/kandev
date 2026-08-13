@@ -7,7 +7,7 @@ import {
   buildE2EImage,
   E2E_IMAGE_TAG,
   hasDocker,
-  removeScopedKandevContainers,
+  waitForScopedKandevContainersRemoved,
 } from "./docker-probe";
 import { ApiClient } from "../helpers/api-client";
 import { makeGitEnv } from "../helpers/git-helper";
@@ -111,7 +111,7 @@ export const dockerTest = backendFixture.extend<
       } finally {
         // The backend owns containers created by the test task. Do not sweep
         // the daemon here: another E2E shard may be using it concurrently.
-        removeScopedKandevContainers();
+        await waitForScopedKandevContainersRemoved();
       }
     },
     { scope: "worker", timeout: 120_000 },
@@ -154,7 +154,7 @@ dockerTest.beforeEach(async ({ apiClient, seedData }) => {
   try {
     await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
   } finally {
-    removeScopedKandevContainers();
+    await waitForScopedKandevContainersRemoved();
   }
 });
 
@@ -162,7 +162,7 @@ dockerTest.afterEach(async ({ apiClient, seedData }) => {
   try {
     await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
   } finally {
-    removeScopedKandevContainers();
+    await waitForScopedKandevContainersRemoved();
   }
 });
 

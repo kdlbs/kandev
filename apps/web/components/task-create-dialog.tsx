@@ -3,7 +3,6 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
-import type { Task } from "@/lib/types/http";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
 import {
   isNativeSubmitDisabled,
@@ -16,15 +15,18 @@ import {
   WorkflowSection,
   DialogPromptSection,
 } from "@/components/task-create-dialog-form-body";
+import { CreateModeSelectors } from "@/components/task-create-dialog-create-mode-selectors";
+import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
 import {
   AgentSelector,
   ExecutorProfileSelector,
   InlineTaskName,
 } from "@/components/task-create-dialog-selectors";
-import { CreateModeSelectors } from "@/components/task-create-dialog-create-mode-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
-import type { TaskCreateDialogInitialValues } from "@/components/task-create-dialog-state";
-import type { DialogFormBodyProps } from "@/components/task-create-dialog-types";
+import type {
+  DialogFormBodyProps,
+  TaskCreateDialogProps,
+} from "@/components/task-create-dialog-types";
 import {
   buildDialogFooterProps,
   buildDialogFormBodyProps,
@@ -35,70 +37,7 @@ import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-creat
 import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
 import { useTaskCreateDialogSetup } from "@/components/task-create-dialog-setup";
 
-export interface TaskCreateDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  mode?: "create" | "edit" | "session";
-  workspaceId: string | null;
-  workflowId: string | null;
-  defaultStepId: string | null;
-  steps: Array<{
-    id: string;
-    title: string;
-    events?: {
-      on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
-      on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
-    };
-  }>;
-  editingTask?: {
-    id: string;
-    title: string;
-    description?: string;
-    workflowStepId: string;
-    state?: Task["state"];
-    repositoryId?: string;
-  } | null;
-  onSuccess?: (
-    task: Task,
-    mode: "create" | "edit",
-    meta?: { taskSessionId?: string | null; willNavigate?: boolean },
-  ) => void;
-  onCreateSession?: (data: {
-    prompt: string;
-    agentProfileId: string;
-    executorId: string;
-    attachments?: ReturnType<
-      typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
-    >;
-  }) => void;
-  initialValues?: TaskCreateDialogInitialValues;
-  taskId?: string | null;
-  parentTaskId?: string;
-  /**
-   * Pin specific form fields to their initial values (used by feature wrappers
-   * like Improve Kandev that fix the repo + branch + workflow). The current
-   * implementation just passes the locks through; the chip row's first repo
-   * is overwritten on each open. The flags are kept for forward compat with
-   * locking the editor UI itself in a future pass.
-   */
-  lockedFields?: { repository?: boolean; branch?: boolean; workflow?: boolean };
-  /** Optional submit hook used by Improve Kandev to wrap the description. */
-  transformDescriptionBeforeSubmit?: (description: string) => Promise<string> | string;
-  /** Optional override for the description placeholder. */
-  descriptionPlaceholder?: string;
-  /** Optional render slot above the description editor. */
-  aboveDescriptionSlot?: React.ReactNode;
-  /** Optional render slot inside the dialog (between body and footer). */
-  extraFormSlot?: React.ReactNode;
-  /** Optional render slot at the bottom of the dialog footer area. */
-  bottomSlot?: React.ReactNode;
-  /**
-   * When set, every submit button is disabled and the tooltip surfaces this
-   * exact reason (e.g. an async bootstrap step from a feature wrapper hasn't
-   * completed yet). Takes precedence over the usual missing-field reasons.
-   */
-  submitBlockedReason?: string | null;
-}
+export type { TaskCreateDialogProps } from "@/components/task-create-dialog-types";
 
 function CreateModeBody(props: DialogFormBodyProps) {
   const {
@@ -169,9 +108,16 @@ function CreateModeBody(props: DialogFormBodyProps) {
         aboveDescriptionSlot={props.aboveDescriptionSlot}
         extraFormSlot={props.extraFormSlot}
         autoFocusDescription={!isTaskStarted && !(showTaskName && taskNameAutoFocus)}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        onComposerSubmit={props.onComposerSubmit}
       />
       <CreateModeAgentSelectors {...props} />
+      {isCreateMode && !isTaskStarted && (
+        <TaskCreateDependencies
+          value={fs.blockedBy}
+          onChange={fs.setBlockedBy}
+          disabled={props.isCreatingSession}
+        />
+      )}
       {props.bottomSlot}
     </>
   );
@@ -210,7 +156,7 @@ function SessionModeBody(props: DialogFormBodyProps) {
         enhance={props.enhance}
         workspaceId={props.workspaceId}
         onJiraImport={props.onJiraImport}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        onComposerSubmit={props.onComposerSubmit}
       />
       <SessionSelectors
         agentProfileOptions={props.agentProfileOptions}
@@ -248,12 +194,12 @@ function DialogFormBody(props: DialogFormBodyProps) {
   );
 }
 
-// Synthetic submit event used by the voice auto-send path. Calling the form
+// Synthetic submit event used by a plugin composer action's submit. Calling the form
 // handler directly (instead of `form.requestSubmit()`) matches the chat
 // composer's pattern and avoids the Safari < 16 gap where `requestSubmit` is
 // missing on `HTMLFormElement`. `guardedHandleSubmit` only reads
 // `preventDefault` off the event, so a stubbed shape is sufficient.
-const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+const PROGRAMMATIC_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { t } = useTranslation("chat");
@@ -297,9 +243,9 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const nativeSubmitDisabled = isNativeSubmitDisabled(
     buildDialogFooterProps(setup, props, pendingAttachmentReason),
   );
-  const handleVoiceAutoSend = useCallback(() => {
+  const handleComposerSubmit = useCallback(() => {
     if (nativeSubmitDisabled) return false;
-    guardedHandleSubmit(VOICE_SUBMIT_EVENT);
+    guardedHandleSubmit(PROGRAMMATIC_SUBMIT_EVENT);
     return true;
   }, [guardedHandleSubmit, nativeSubmitDisabled]);
   return (
@@ -327,7 +273,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
           >
             <DialogFormBody
               {...buildDialogFormBodyProps(setup, props)}
-              onVoiceAutoSend={handleVoiceAutoSend}
+              onComposerSubmit={handleComposerSubmit}
             />
             <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
               <TaskCreateDialogFooter

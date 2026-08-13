@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/plugins/voice-extraction-host.md
 created: 2026-08-11
-status: building
+status: complete
 ---
 
 # Implementation Plan: Voice Plugin Host Prerequisites
@@ -113,7 +113,7 @@ Wave 2:
 
 Wave 3:
 
-- [ ] [Task 06: Document and verify extraction prerequisites](task-06-docs-e2e-verification.md) (depends on Tasks 03-05)
+- [x] [Task 06: Document and verify extraction prerequisites](task-06-docs-e2e-verification.md) (depends on Tasks 03-05)
 
 Tasks in the same wave are parallel-safe only where their owned files remain disjoint. Execution stays
 sequential unless the user explicitly authorizes subagents.

@@ -396,6 +396,10 @@ func (c *Controller) writeTaskCIOptionsError(ctx *gin.Context, err error, operat
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 		return
 	}
+	if errors.Is(err, ErrTaskPRNotLinked) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if writeGitHubOperationalAuthError(ctx, err) {
 		return
 	}
@@ -417,6 +421,18 @@ func parseTaskCIOptionsPatch(ctx *gin.Context) (TaskCIOptionsPatch, error) {
 	var patch TaskCIOptionsPatch
 	for key, value := range raw {
 		switch key {
+		case "repository_id":
+			var repositoryID string
+			if err := json.Unmarshal(value, &repositoryID); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+			patch.RepositoryID = &repositoryID
+		case "pr_number":
+			var prNumber int
+			if err := json.Unmarshal(value, &prNumber); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+			patch.PRNumber = &prNumber
 		case "auto_fix_enabled":
 			var enabled bool
 			if err := json.Unmarshal(value, &enabled); err != nil {

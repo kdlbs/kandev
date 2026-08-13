@@ -30,6 +30,7 @@ function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAu
     using_default_prompt: true,
     updated_at: "2026-06-18T10:00:00Z",
     pr_states: [],
+    pr_options: [],
     ...overrides,
   };
 }

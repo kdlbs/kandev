@@ -34,7 +34,10 @@ test.describe("Workflow settings", () => {
 
     // Should display workflow steps from the "simple" template
     for (const step of seedData.steps) {
-      await expect(card.getByText(step.name)).toBeVisible();
+      // Template data can contain the same step name more than once. The
+      // workflow card is the scope under test; any matching rendered step is
+      // sufficient and avoids a strict-mode race while the card hydrates.
+      await expect(card.getByText(step.name).first()).toBeVisible();
     }
   });
 

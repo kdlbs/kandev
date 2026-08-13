@@ -54,6 +54,7 @@ const (
 	ExecutorRunningStatusStopped  = "stopped"
 	ExecutorRunningStatusComplete = "completed"
 	ExecutorRunningStatusPrepared = "prepared"
+	createdAtField                = "created_at"
 )
 
 // ListMessagesOptions defines pagination options for listing messages
@@ -94,6 +95,12 @@ const (
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
 	MetaKeyDeferredLaunch    = "deferred_launch"
+	// DeferredLaunchStartWhenUnblockedKey marks a deferred launch intent as
+	// belonging to a task dependency chain rather than to WIP overflow. The
+	// record itself is identical; the flag lets dependency resolution recognise
+	// its own intents and keeps a WIP-only intent from being read as a chain
+	// step (and vice versa).
+	DeferredLaunchStartWhenUnblockedKey = "start_when_unblocked"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
 	// Centralised here so the set/read sites can't drift apart.
@@ -138,6 +145,14 @@ const (
 	MetaKeyParentQuestionChildID  = "child_task_id"
 	MetaKeyParentQuestionStatus   = "parent_question_status"
 	MetaKeyParentQuestionResponse = "parent_question_response"
+	// MetaKeyInitialSessionRuntimeConfig is a launch-only seed for the first
+	// session created for a task. PrepareSession consumes it into session
+	// runtime overrides and never leaves it in session metadata.
+	MetaKeyInitialSessionRuntimeConfig = "initial_session_runtime_config"
+	// MetaKeyInitialSessionRuntimeConfigProfileID identifies the agent profile
+	// that produced the launch-only runtime seed. A seed is valid only for this
+	// profile, even if task profile selection changes before the first launch.
+	MetaKeyInitialSessionRuntimeConfigProfileID = "initial_session_runtime_config_profile_id"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
@@ -238,6 +253,98 @@ type SessionRuntimeConfig struct {
 	Model         string            `json:"model,omitempty"`
 	Mode          string            `json:"mode,omitempty"`
 	ConfigOptions map[string]string `json:"config_options,omitempty"`
+}
+
+// LoadInitialSessionRuntimeConfig decodes the task launch seed from typed or
+// JSON-rehydrated task metadata.
+func LoadInitialSessionRuntimeConfig(metadata map[string]interface{}) (SessionRuntimeConfig, bool) {
+	return loadSessionRuntimeConfig(metadata, MetaKeyInitialSessionRuntimeConfig)
+}
+
+// LoadInitialSessionRuntimeConfigProfileID returns the profile that owns the
+// launch-only runtime seed. Older tasks did not store a separate owner, so
+// their resolved task profile remains a compatibility fallback.
+func LoadInitialSessionRuntimeConfigProfileID(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return ""
+	}
+	if profileID := StringFromAny(metadata[MetaKeyInitialSessionRuntimeConfigProfileID]); profileID != "" {
+		return profileID
+	}
+	return StringFromAny(metadata[MetaKeyAgentProfileID])
+}
+
+// LoadEffectiveSessionRuntimeConfig resolves the effective model, mode, and
+// dynamic options for a task session. The profile snapshot is the base, the
+// provider runtime state replaces it, the persisted session mode takes
+// precedence over provider mode, and explicit runtime overrides win last.
+func LoadEffectiveSessionRuntimeConfig(session *TaskSession) (SessionRuntimeConfig, bool) {
+	if session == nil {
+		return SessionRuntimeConfig{}, false
+	}
+	effective := runtimeConfigFromAgentProfileSnapshot(session.AgentProfileSnapshot)
+	if runtime, ok := LoadSessionRuntimeConfig(session.Metadata); ok {
+		mergeSessionRuntimeConfig(&effective, runtime)
+		if runtime.ConfigOptions != nil {
+			// Provider runtime options are a complete replacement for profile
+			// options. Explicit overrides below are the only later merge.
+			effective.ConfigOptions = maps.Clone(runtime.ConfigOptions)
+		}
+	}
+	if mode := StringFromAny(session.Metadata[SessionMetaKeySessionMode]); mode != "" {
+		effective.Mode = mode
+	}
+	if overrides, ok := LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
+		mergeSessionRuntimeConfig(&effective, overrides)
+	}
+	effective.ConfigOptions = cleanRuntimeConfigOptions(effective.ConfigOptions)
+	return effective, !effective.IsZero()
+}
+
+func runtimeConfigFromAgentProfileSnapshot(snapshot map[string]interface{}) SessionRuntimeConfig {
+	if snapshot == nil {
+		return SessionRuntimeConfig{}
+	}
+	config := SessionRuntimeConfig{
+		Model: StringFromAny(snapshot["model"]),
+		Mode:  StringFromAny(snapshot["mode"]),
+	}
+	config.ConfigOptions = stringMapFromAny(snapshot["config_options"])
+	if config.ConfigOptions == nil {
+		config.ConfigOptions = stringMapFromAny(snapshot["configOptions"])
+	}
+	return config
+}
+
+func mergeSessionRuntimeConfig(target *SessionRuntimeConfig, source SessionRuntimeConfig) {
+	if source.Model != "" {
+		target.Model = source.Model
+	}
+	if source.Mode != "" {
+		target.Mode = source.Mode
+	}
+	if len(source.ConfigOptions) == 0 {
+		return
+	}
+	if target.ConfigOptions == nil {
+		target.ConfigOptions = make(map[string]string, len(source.ConfigOptions))
+	}
+	for key, value := range source.ConfigOptions {
+		target.ConfigOptions[key] = value
+	}
+}
+
+func cleanRuntimeConfigOptions(options map[string]string) map[string]string {
+	if len(options) == 0 {
+		return nil
+	}
+	cleaned := maps.Clone(options)
+	delete(cleaned, "model")
+	delete(cleaned, "mode")
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
 }
 
 // SessionOriginalEffectiveConfiguration is the immutable configuration a task
@@ -432,6 +539,7 @@ func loadSessionRuntimeConfig(metadata map[string]interface{}, key string) (Sess
 	}
 	switch v := raw.(type) {
 	case SessionRuntimeConfig:
+		v.ConfigOptions = maps.Clone(v.ConfigOptions)
 		return v, !v.IsZero()
 	case map[string]string:
 		out := SessionRuntimeConfig{
@@ -652,6 +760,45 @@ type ChildCompletionRow struct {
 	WorkflowStepID       string       `json:"workflow_step_id" db:"workflow_step_id"`
 	TerminalWorkflowStep bool         `json:"terminal_workflow_step"` // computed by annotateTerminalChildSteps, not a DB column
 	UpdatedAt            time.Time    `json:"updated_at" db:"updated_at"`
+}
+
+// HasStartWhenUnblockedIntent reports whether a task's deferred launch intent
+// belongs to a dependency chain rather than to WIP overflow.
+//
+// The two share one record; DeferredLaunchStartWhenUnblockedKey is what tells
+// them apart. Defined here, next to the key, so the DTO layer, the task service
+// and the orchestrator cannot drift on what counts as a chain intent.
+func HasStartWhenUnblockedIntent(task *Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	raw, ok := task.Metadata[MetaKeyDeferredLaunch]
+	if !ok {
+		return false
+	}
+	launch, ok := raw.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	flag, ok := launch[DeferredLaunchStartWhenUnblockedKey].(bool)
+	return ok && flag
+}
+
+// DropWIPDeferredLaunch removes a deferred launch record that only existed
+// because the task was waiting on WIP capacity.
+//
+// Every WIP admission point calls this instead of deleting the key outright.
+// An admitted task has nothing left to wait for as far as WIP is concerned, so
+// its overflow record is stale. A start-when-unblocked intent is NOT stale in
+// that situation: it is waiting on a predecessor, not on capacity, and the two
+// share this one metadata record. Deleting it on admission silently unmakes
+// every dependency chain, because admission happens at create time for any task
+// entering a step with room.
+func DropWIPDeferredLaunch(task *Task) {
+	if task == nil || task.Metadata == nil || HasStartWhenUnblockedIntent(task) {
+		return
+	}
+	delete(task.Metadata, MetaKeyDeferredLaunch)
 }
 
 // IsTerminalTaskState reports whether a task state means no further child work
@@ -1157,7 +1304,7 @@ func (s *TaskSession) WorktreesAPI() []map[string]interface{} {
 			"worktree_id":   repo.WorktreeID,
 			"repository_id": repo.RepositoryID,
 			"position":      repo.Position,
-			"created_at":    repo.CreatedAt,
+			createdAtField:  repo.CreatedAt,
 		}
 		if repo.BranchSlug != "" {
 			entry["branch_slug"] = repo.BranchSlug
@@ -1204,6 +1351,7 @@ type Repository struct {
 	Provider               string                    `json:"provider"`
 	ProviderRepoID         string                    `json:"provider_repo_id"`
 	ProviderHost           string                    `json:"provider_host"`
+	ProviderScope          string                    `json:"provider_scope"`
 	ProviderOwner          string                    `json:"provider_owner"`
 	ProviderName           string                    `json:"provider_name"`
 	RemoteURL              string                    `json:"remote_url"`
@@ -1219,6 +1367,18 @@ type Repository struct {
 	CreatedAt              time.Time                 `json:"created_at"`
 	UpdatedAt              time.Time                 `json:"updated_at"`
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
+}
+
+// ProviderRepositoryIdentity is the durable provider lookup key. New plugin
+// providers supply Scope + RepositoryID; legacy built-ins use Host/Owner/Name.
+type ProviderRepositoryIdentity struct {
+	WorkspaceID  string
+	Provider     string
+	Scope        string
+	RepositoryID string
+	Host         string
+	Owner        string
+	Name         string
 }
 
 // RepositorySecretBinding maps an environment key to a secret reference. The
@@ -1506,7 +1666,7 @@ func (te *TaskEnvironment) ToAPI() map[string]interface{} {
 		"executor_profile_id": te.ExecutorProfileID,
 		"status":              string(te.Status),
 		"workspace_path":      te.WorkspacePath,
-		"created_at":          te.CreatedAt,
+		createdAtField:        te.CreatedAt,
 		"updated_at":          te.UpdatedAt,
 	}
 	// agent_execution_id is no longer carried on TaskEnvironment — see executors_running.
@@ -1539,7 +1699,7 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 		"task_environment_id": r.TaskEnvironmentID,
 		"repository_id":       r.RepositoryID,
 		"position":            r.Position,
-		"created_at":          r.CreatedAt,
+		createdAtField:        r.CreatedAt,
 		"updated_at":          r.UpdatedAt,
 	}
 	if r.WorktreeID != "" {

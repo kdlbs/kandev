@@ -11,6 +11,11 @@
   "archiveCount_other": "Àŕćĥĩvē {{count}}",
   "archiveTask": "Àŕćĥĩvē ţàśķ",
   "autoStart": "Àũţō-śţàŕţ",
+  "blockedByCount_one": "Ɓĺōćķēď ƀŷ {{count}}",
+  "blockedByCount_other": "Ɓĺōćķēď ƀŷ {{count}}",
+  "blockedByTasksTitle": "Ŵàĩţĩńĝ ōń: {{tasks}}",
+  "blockedFailed": "Ɓĺōćķēŕ ƒàĩĺēď",
+  "blockedPredecessorFailed": "À ţàśķ ţĥĩś ōńē ďēƥēńďś ōń ƒàĩĺēď: {{tasks}}",
   "boardNavigator": "Ɓōàŕď ńàvĩĝàţōŕ",
   "cannotMoveTasksFromDifferentWorkflows": "Ćàńńōţ ḿōvē ţàśķś ƒŕōḿ ďĩƒƒēŕēńţ ŵōŕķƒĺōŵś",
   "changesRequested": "Ćĥàńĝēś Ŕēqũēśţēď",
@@ -91,5 +96,6 @@
   "workflow": "Ŵōŕķƒĺōŵ",
   "workflowStepFallback": "ŵōŕķƒĺōŵ śţēƥ {{stepId}}",
   "columns": "Ćōĺũḿńś",
-  "columnsForWorkflow": "Ćōĺũḿńś ƒōŕ {{name}}"
+  "columnsForWorkflow": "Ćōĺũḿńś ƒōŕ {{name}}",
+  "needsReassignment": "Ńēēďś Ŕēàśśĩĝńḿēńţ"
 }

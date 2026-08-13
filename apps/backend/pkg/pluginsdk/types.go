@@ -99,6 +99,71 @@ type WebhookResponse struct {
 	Body    []byte
 }
 
+type AgentToolContext struct {
+	TaskID      string
+	SessionID   string
+	WorkspaceID string
+	Surface     string
+}
+
+type AgentToolRequest struct {
+	InvocationID string
+	Name         string
+	Arguments    map[string]any
+	Context      AgentToolContext
+}
+
+type AgentToolResult struct {
+	Text              string
+	StructuredContent map[string]any
+	IsError           bool
+}
+
+func (r *AgentToolRequest) toProto() (*pluginv1.AgentToolRequest, error) {
+	arguments, err := mapToStruct(r.Arguments)
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: agent tool arguments: %w", err)
+	}
+	return &pluginv1.AgentToolRequest{
+		InvocationId: r.InvocationID,
+		Name:         r.Name,
+		Arguments:    arguments,
+		Context: &pluginv1.AgentToolContext{
+			TaskId: r.Context.TaskID, SessionId: r.Context.SessionID,
+			WorkspaceId: r.Context.WorkspaceID, Surface: r.Context.Surface,
+		},
+	}, nil
+}
+
+func agentToolRequestFromProto(p *pluginv1.AgentToolRequest) (*AgentToolRequest, error) {
+	arguments, err := structToMap(p.GetArguments())
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: agent tool arguments: %w", err)
+	}
+	ctx := p.GetContext()
+	return &AgentToolRequest{
+		InvocationID: p.GetInvocationId(), Name: p.GetName(), Arguments: arguments,
+		Context: AgentToolContext{TaskID: ctx.GetTaskId(), SessionID: ctx.GetSessionId(),
+			WorkspaceID: ctx.GetWorkspaceId(), Surface: ctx.GetSurface()},
+	}, nil
+}
+
+func (r *AgentToolResult) toProto() (*pluginv1.AgentToolResponse, error) {
+	structured, err := mapToStruct(r.StructuredContent)
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: agent tool result: %w", err)
+	}
+	return &pluginv1.AgentToolResponse{Text: r.Text, StructuredContent: structured, IsError: r.IsError}, nil
+}
+
+func agentToolResultFromProto(p *pluginv1.AgentToolResponse) (*AgentToolResult, error) {
+	structured, err := structToMap(p.GetStructuredContent())
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: agent tool result: %w", err)
+	}
+	return &AgentToolResult{Text: p.GetText(), StructuredContent: structured, IsError: p.GetIsError()}, nil
+}
+
 func (r *WebhookResponse) toProto() *pluginv1.WebhookResponse {
 	return &pluginv1.WebhookResponse{
 		Status:  r.Status,
@@ -113,6 +178,310 @@ func webhookResponseFromProto(p *pluginv1.WebhookResponse) *WebhookResponse {
 		Headers: p.GetHeaders(),
 		Body:    p.GetBody(),
 	}
+}
+
+// VerifiedActionContext is derived by Kandev after authenticating and
+// authorizing an action request. Plugins must treat Body as untrusted input
+// and use this context for all authority decisions.
+type VerifiedActionContext struct {
+	ActorID      string
+	WorkspaceID  string
+	TaskID       string
+	RepositoryID string
+	SessionID    string
+	HeadBranch   string
+}
+
+func (c VerifiedActionContext) toProto() *pluginv1.VerifiedActionContext {
+	return &pluginv1.VerifiedActionContext{
+		ActorId:      c.ActorID,
+		WorkspaceId:  c.WorkspaceID,
+		TaskId:       c.TaskID,
+		RepositoryId: c.RepositoryID,
+		SessionId:    c.SessionID,
+		HeadBranch:   c.HeadBranch,
+	}
+}
+
+func verifiedActionContextFromProto(p *pluginv1.VerifiedActionContext) VerifiedActionContext {
+	if p == nil {
+		return VerifiedActionContext{}
+	}
+	return VerifiedActionContext{
+		ActorID:      p.GetActorId(),
+		WorkspaceID:  p.GetWorkspaceId(),
+		TaskID:       p.GetTaskId(),
+		RepositoryID: p.GetRepositoryId(),
+		SessionID:    p.GetSessionId(),
+		HeadBranch:   p.GetHeadBranch(),
+	}
+}
+
+// PluginActionRequest is the Go-native mirror of PluginActionRequest.
+type PluginActionRequest struct {
+	ActionKey string
+	Context   VerifiedActionContext
+	Body      []byte
+}
+
+func (r *PluginActionRequest) toProto() *pluginv1.PluginActionRequest {
+	return &pluginv1.PluginActionRequest{ActionKey: r.ActionKey, Context: r.Context.toProto(), Body: r.Body}
+}
+
+func pluginActionRequestFromProto(p *pluginv1.PluginActionRequest) *PluginActionRequest {
+	if p == nil {
+		return &PluginActionRequest{}
+	}
+	return &PluginActionRequest{ActionKey: p.GetActionKey(), Context: verifiedActionContextFromProto(p.GetContext()), Body: p.GetBody()}
+}
+
+// PluginActionResponse is the Go-native mirror of PluginActionResponse.
+// Kandev filters Headers before returning them to the browser.
+type PluginActionResponse struct {
+	Body    []byte
+	Headers map[string]string
+	// Status is a final HTTP status in [200, 599]. Zero means 200 for
+	// compatibility with plugins built before domain responses were added.
+	Status int
+}
+
+func (r *PluginActionResponse) toProto() *pluginv1.PluginActionResponse {
+	return &pluginv1.PluginActionResponse{Body: r.Body, Headers: r.Headers, Status: int32(r.Status)}
+}
+
+func pluginActionResponseFromProto(p *pluginv1.PluginActionResponse) *PluginActionResponse {
+	if p == nil {
+		return &PluginActionResponse{}
+	}
+	return &PluginActionResponse{Body: p.GetBody(), Headers: p.GetHeaders(), Status: int(p.GetStatus())}
+}
+
+// SearchEntityReferencesRequest is a host-verified workspace search request.
+type SearchEntityReferencesRequest struct {
+	Source      string
+	WorkspaceID string
+	Query       string
+	Limit       int32
+}
+
+func (r *SearchEntityReferencesRequest) toProto() *pluginv1.SearchEntityReferencesRequest {
+	return &pluginv1.SearchEntityReferencesRequest{Source: r.Source, WorkspaceId: r.WorkspaceID, Query: r.Query, Limit: r.Limit}
+}
+
+func searchEntityReferencesRequestFromProto(p *pluginv1.SearchEntityReferencesRequest) *SearchEntityReferencesRequest {
+	if p == nil {
+		return &SearchEntityReferencesRequest{}
+	}
+	return &SearchEntityReferencesRequest{Source: p.GetSource(), WorkspaceID: p.GetWorkspaceId(), Query: p.GetQuery(), Limit: p.GetLimit()}
+}
+
+// EntityReferenceCandidate is untrusted plugin search output. Kandev adds
+// manifest-owned descriptor identity before it reaches a composer result.
+type EntityReferenceCandidate struct {
+	ProviderLocalID string
+	Title           string
+	URL             string
+	Attributes      map[string]any
+}
+
+func (c EntityReferenceCandidate) toProto() (*pluginv1.EntityReferenceCandidate, error) {
+	attributes, err := mapToStruct(c.Attributes)
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: reference candidate attributes: %w", err)
+	}
+	return &pluginv1.EntityReferenceCandidate{ProviderLocalId: c.ProviderLocalID, Title: c.Title, Url: c.URL, Attributes: attributes}, nil
+}
+
+func entityReferenceCandidateFromProto(p *pluginv1.EntityReferenceCandidate) (EntityReferenceCandidate, error) {
+	if p == nil {
+		return EntityReferenceCandidate{}, nil
+	}
+	attributes, err := structToMap(p.GetAttributes())
+	if err != nil {
+		return EntityReferenceCandidate{}, fmt.Errorf("pluginsdk: reference candidate attributes: %w", err)
+	}
+	return EntityReferenceCandidate{ProviderLocalID: p.GetProviderLocalId(), Title: p.GetTitle(), URL: p.GetUrl(), Attributes: attributes}, nil
+}
+
+func entityReferenceCandidatesToProto(candidates []EntityReferenceCandidate) ([]*pluginv1.EntityReferenceCandidate, error) {
+	if candidates == nil {
+		return nil, nil
+	}
+	out := make([]*pluginv1.EntityReferenceCandidate, len(candidates))
+	for i, candidate := range candidates {
+		converted, err := candidate.toProto()
+		if err != nil {
+			return nil, err
+		}
+		out[i] = converted
+	}
+	return out, nil
+}
+
+func entityReferenceCandidatesFromProto(candidates []*pluginv1.EntityReferenceCandidate) ([]EntityReferenceCandidate, error) {
+	if candidates == nil {
+		return nil, nil
+	}
+	out := make([]EntityReferenceCandidate, len(candidates))
+	for i, candidate := range candidates {
+		converted, err := entityReferenceCandidateFromProto(candidate)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = converted
+	}
+	return out, nil
+}
+
+// SearchEntityReferencesResponse is the Go-native search response.
+type SearchEntityReferencesResponse struct{ Candidates []EntityReferenceCandidate }
+
+func (r *SearchEntityReferencesResponse) toProto() (*pluginv1.SearchEntityReferencesResponse, error) {
+	candidates, err := entityReferenceCandidatesToProto(r.Candidates)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.SearchEntityReferencesResponse{Candidates: candidates}, nil
+}
+
+func searchEntityReferencesResponseFromProto(p *pluginv1.SearchEntityReferencesResponse) (*SearchEntityReferencesResponse, error) {
+	if p == nil {
+		return &SearchEntityReferencesResponse{}, nil
+	}
+	candidates, err := entityReferenceCandidatesFromProto(p.GetCandidates())
+	if err != nil {
+		return nil, err
+	}
+	return &SearchEntityReferencesResponse{Candidates: candidates}, nil
+}
+
+// AuthorizeEntityReferenceRequest asks a live plugin to approve a canonical
+// reference for search or final message submission.
+type AuthorizeEntityReferenceRequest struct {
+	Source      string
+	WorkspaceID string
+	Purpose     string
+	Reference   map[string]any
+}
+
+func (r *AuthorizeEntityReferenceRequest) toProto() (*pluginv1.AuthorizeEntityReferenceRequest, error) {
+	reference, err := mapToStruct(r.Reference)
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: entity reference: %w", err)
+	}
+	return &pluginv1.AuthorizeEntityReferenceRequest{Source: r.Source, WorkspaceId: r.WorkspaceID, Purpose: r.Purpose, Reference: reference}, nil
+}
+
+func authorizeEntityReferenceRequestFromProto(p *pluginv1.AuthorizeEntityReferenceRequest) (*AuthorizeEntityReferenceRequest, error) {
+	if p == nil {
+		return &AuthorizeEntityReferenceRequest{}, nil
+	}
+	reference, err := structToMap(p.GetReference())
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: entity reference: %w", err)
+	}
+	return &AuthorizeEntityReferenceRequest{Source: p.GetSource(), WorkspaceID: p.GetWorkspaceId(), Purpose: p.GetPurpose(), Reference: reference}, nil
+}
+
+type AuthorizeEntityReferenceResponse struct {
+	Allowed bool
+	Reason  string
+}
+
+func (r *AuthorizeEntityReferenceResponse) toProto() *pluginv1.AuthorizeEntityReferenceResponse {
+	return &pluginv1.AuthorizeEntityReferenceResponse{Allowed: r.Allowed, Reason: r.Reason}
+}
+
+func authorizeEntityReferenceResponseFromProto(p *pluginv1.AuthorizeEntityReferenceResponse) *AuthorizeEntityReferenceResponse {
+	if p == nil {
+		return &AuthorizeEntityReferenceResponse{}
+	}
+	return &AuthorizeEntityReferenceResponse{Allowed: p.GetAllowed(), Reason: p.GetReason()}
+}
+
+// ResolveGitCredentialRequest contains exact host-verified lease scope.
+type ResolveGitCredentialRequest struct {
+	ProviderID   string
+	WorkspaceID  string
+	TaskID       string
+	SessionID    string
+	RepositoryID string
+	Host         string
+	Path         string
+}
+
+func (r *ResolveGitCredentialRequest) toProto() *pluginv1.ResolveGitCredentialRequest {
+	return &pluginv1.ResolveGitCredentialRequest{ProviderId: r.ProviderID, WorkspaceId: r.WorkspaceID, TaskId: r.TaskID, SessionId: r.SessionID, RepositoryId: r.RepositoryID, Host: r.Host, Path: r.Path}
+}
+
+func resolveGitCredentialRequestFromProto(p *pluginv1.ResolveGitCredentialRequest) *ResolveGitCredentialRequest {
+	if p == nil {
+		return &ResolveGitCredentialRequest{}
+	}
+	return &ResolveGitCredentialRequest{ProviderID: p.GetProviderId(), WorkspaceID: p.GetWorkspaceId(), TaskID: p.GetTaskId(), SessionID: p.GetSessionId(), RepositoryID: p.GetRepositoryId(), Host: p.GetHost(), Path: p.GetPath()}
+}
+
+// ResolveGitCredentialResponse is transient authentication material. Hosts
+// must not log or persist Secret.
+type ResolveGitCredentialResponse struct {
+	Username  string
+	Secret    string
+	ExpiresAt string
+}
+
+func (r *ResolveGitCredentialResponse) toProto() *pluginv1.ResolveGitCredentialResponse {
+	return &pluginv1.ResolveGitCredentialResponse{Username: r.Username, Secret: r.Secret, ExpiresAt: r.ExpiresAt}
+}
+
+func resolveGitCredentialResponseFromProto(p *pluginv1.ResolveGitCredentialResponse) *ResolveGitCredentialResponse {
+	if p == nil {
+		return &ResolveGitCredentialResponse{}
+	}
+	return &ResolveGitCredentialResponse{Username: p.GetUsername(), Secret: p.GetSecret(), ExpiresAt: p.GetExpiresAt()}
+}
+
+// GitCredentialBindingRequest contains the exact host-verified lease scope
+// for a non-secret credential revision lookup.
+type GitCredentialBindingRequest struct {
+	ProviderID   string
+	WorkspaceID  string
+	TaskID       string
+	SessionID    string
+	RepositoryID string
+	Host         string
+	Path         string
+}
+
+func (r *GitCredentialBindingRequest) toProto() *pluginv1.GitCredentialBindingRequest {
+	return &pluginv1.GitCredentialBindingRequest{
+		ProviderId: r.ProviderID, WorkspaceId: r.WorkspaceID, TaskId: r.TaskID, SessionId: r.SessionID,
+		RepositoryId: r.RepositoryID, Host: r.Host, Path: r.Path,
+	}
+}
+
+func gitCredentialBindingRequestFromProto(p *pluginv1.GitCredentialBindingRequest) *GitCredentialBindingRequest {
+	if p == nil {
+		return &GitCredentialBindingRequest{}
+	}
+	return &GitCredentialBindingRequest{
+		ProviderID: p.GetProviderId(), WorkspaceID: p.GetWorkspaceId(), TaskID: p.GetTaskId(), SessionID: p.GetSessionId(),
+		RepositoryID: p.GetRepositoryId(), Host: p.GetHost(), Path: p.GetPath(),
+	}
+}
+
+// GitCredentialBindingResponse returns an opaque, non-secret revision for a
+// credential scope. Hosts must treat an empty response as a revoked binding.
+type GitCredentialBindingResponse struct{ Binding string }
+
+func (r *GitCredentialBindingResponse) toProto() *pluginv1.GitCredentialBindingResponse {
+	return &pluginv1.GitCredentialBindingResponse{Binding: r.Binding}
+}
+
+func gitCredentialBindingResponseFromProto(p *pluginv1.GitCredentialBindingResponse) *GitCredentialBindingResponse {
+	if p == nil {
+		return &GitCredentialBindingResponse{}
+	}
+	return &GitCredentialBindingResponse{Binding: p.GetBinding()}
 }
 
 // StateEntry is the Go-native mirror of kandev.plugin.v1.StateEntry, as

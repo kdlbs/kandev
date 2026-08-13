@@ -319,6 +319,7 @@ func (r *Repository) initTaskSchema() error {
 		provider TEXT DEFAULT '',
 		provider_repo_id TEXT DEFAULT '',
 		provider_host TEXT DEFAULT '',
+		provider_scope TEXT DEFAULT '',
 		provider_owner TEXT DEFAULT '',
 		provider_name TEXT DEFAULT '',
 		remote_url TEXT DEFAULT '',
@@ -701,6 +702,7 @@ const sessionWorktreeSchemaDDL = `
 		task_environment_id TEXT DEFAULT '',
 		cost_subcents INTEGER NOT NULL DEFAULT 0,
 		tokens_in INTEGER NOT NULL DEFAULT 0,
+		tokens_cached_in BIGINT NOT NULL DEFAULT 0,
 		tokens_out INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);

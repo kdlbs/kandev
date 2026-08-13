@@ -24,7 +24,11 @@ func setupService(t *testing.T) *Service {
 		OutputPath: "stderr",
 	})
 	require.NoError(t, err)
-	return NewServiceMemory(log)
+	service := NewServiceMemory(log)
+	// Most legacy service tests exercise explicit FIFO mutation contracts and
+	// intentionally require separate compatible rows.
+	service.SetAutoMergeEnabled(false)
+	return service
 }
 
 func TestQueueMessage(t *testing.T) {
@@ -87,6 +91,7 @@ func TestLoweredQueueCapacityBlocksAdmissionsWithoutPruning(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
 	require.NoError(t, err)
 	svc := NewService(NewMemoryRepository(), 2, log)
+	svc.SetAutoMergeEnabled(false)
 	ctx := context.Background()
 
 	for _, content := range []string{"first", "second"} {
@@ -104,6 +109,7 @@ func TestRestoreMessageBypassesLoweredCapacity(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
 	require.NoError(t, err)
 	svc := NewService(NewMemoryRepository(), 2, log)
+	svc.SetAutoMergeEnabled(false)
 	ctx := context.Background()
 
 	_, err = svc.QueueMessage(ctx, "s", "t", "first", "", QueuedByUser, false, nil)
@@ -134,6 +140,7 @@ func TestRequeueMessageBypassesLoweredCapacity(t *testing.T) {
 			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
 			require.NoError(t, err)
 			svc := NewService(NewMemoryRepository(), 2, log)
+			svc.SetAutoMergeEnabled(false)
 			ctx := context.Background()
 
 			var first *QueuedMessage
