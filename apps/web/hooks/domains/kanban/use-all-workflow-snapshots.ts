@@ -7,7 +7,7 @@ import type { Task } from "@/lib/types/http";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
-import { pickNewerStatusSummary } from "@/lib/task-status-summary";
+import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 
 type KanbanTask = KanbanState["tasks"][number];
@@ -73,8 +73,10 @@ async function fetchAndWriteSnapshot(
           // This response was issued before it landed, so its status summary can
           // be older than a `task.status_summary.updated` delta already applied
           // to the cache. Taking it unconditionally regresses the row, and a
-          // settled task emits no further deltas to repair it.
-          mapped.statusSummary = pickNewerStatusSummary(
+          // settled task emits no further deltas to repair it. An equal revision
+          // still wins: the response re-stamps `queued_prompt_count` outside the
+          // revision (see pickFreshestStatusSummary).
+          mapped.statusSummary = pickFreshestStatusSummary(
             mapped.statusSummary,
             existing.statusSummary,
           );

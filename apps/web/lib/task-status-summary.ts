@@ -24,19 +24,30 @@ export function isNewerStatusSummary(
 }
 
 /**
- * Picks the newer of two readings of the same task's status summary.
+ * Picks the reading to keep when a cached task is rebuilt from an HTTP
+ * response. Rejects only a *strictly older* response.
  *
- * Used where a cached task is rebuilt from an HTTP response: taking the
- * response's summary unconditionally lets a slow response regress the cache to
+ * Taking the response unconditionally lets a slow response regress the cache to
  * an older revision. A settled task emits no further deltas, so that regression
  * is permanent until the next full hydrate — it surfaced as a task stuck behind
  * a "preparing" spinner in the sidebar after its turn had already finished.
+ *
+ * Equal revisions must still take the response, because not every field is
+ * covered by the revision: `buildTaskDTOsWithSessionInfo` re-stamps
+ * `queued_prompt_count` onto the loaded summary from a fresh queue read without
+ * incrementing it (the initial-load backstop for queue mutations the projector
+ * has not observed, e.g. after a restart). Preferring the cached copy at an
+ * equal revision would pin a stale queued badge until the next projector event.
+ * The revision-owned fields are identical at equal revisions, so taking the
+ * response cannot reintroduce the staleness above.
  */
-export function pickNewerStatusSummary(
+export function pickFreshestStatusSummary(
   next: TaskStatusSummary | null | undefined,
   current: TaskStatusSummary | null | undefined,
 ): TaskStatusSummary | null | undefined {
-  return isNewerStatusSummary(next, current) ? next : current;
+  if (!next) return current;
+  if (!current) return next;
+  return next.revision >= current.revision ? next : current;
 }
 
 /**

@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { isNewerStatusSummary, pickNewerStatusSummary } from "./task-status-summary";
+import { isNewerStatusSummary, pickFreshestStatusSummary } from "./task-status-summary";
 import type { TaskStatusSummary } from "./types/task-status-summary";
 
-function summary(revision: number): TaskStatusSummary {
-  return { revision } as TaskStatusSummary;
+function summary(revision: number, queuedPromptCount = 0): TaskStatusSummary {
+  return { revision, queued_prompt_count: queuedPromptCount } as TaskStatusSummary;
 }
 
 describe("isNewerStatusSummary", () => {
@@ -32,19 +32,27 @@ describe("isNewerStatusSummary", () => {
   });
 });
 
-describe("pickNewerStatusSummary", () => {
-  it("keeps the cached reading when the incoming one is older", () => {
+describe("pickFreshestStatusSummary", () => {
+  it("keeps the cached reading when the incoming one is strictly older", () => {
     const cached = summary(4);
-    expect(pickNewerStatusSummary(summary(1), cached)).toBe(cached);
+    expect(pickFreshestStatusSummary(summary(1), cached)).toBe(cached);
   });
 
   it("takes the incoming reading when it is newer", () => {
     const next = summary(9);
-    expect(pickNewerStatusSummary(next, summary(4))).toBe(next);
+    expect(pickFreshestStatusSummary(next, summary(4))).toBe(next);
   });
 
   it("keeps the cached reading when the incoming one is absent", () => {
     const cached = summary(4);
-    expect(pickNewerStatusSummary(undefined, cached)).toBe(cached);
+    expect(pickFreshestStatusSummary(undefined, cached)).toBe(cached);
+  });
+
+  it("takes an equal-revision response so a re-stamped queued count is not pinned", () => {
+    // buildTaskDTOsWithSessionInfo re-stamps queued_prompt_count from a fresh
+    // queue read without incrementing the revision, so an equal-revision
+    // response can still carry a newer count than the cache.
+    const next = summary(3, 5);
+    expect(pickFreshestStatusSummary(next, summary(3, 0))).toBe(next);
   });
 });
