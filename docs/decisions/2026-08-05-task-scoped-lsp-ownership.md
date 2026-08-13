@@ -57,6 +57,12 @@ attachments, or discovery can launch competing work. Reconciliation releases a r
 after the task host proves that runtime absent; inspection failures and error snapshots remain
 capacity-bearing unless their evidence proves process absence.
 
+The durable startup inventory is the capacity ledger's authority. If that inventory cannot be
+read, the controller records one sticky startup failure and every task-LSP operation fails closed
+with that error until backend restart; it never exposes an empty ledger as ready or launches work
+behind a speculative retry. Once inventory succeeds, all possibly-live generations are reserved
+before later per-runtime inspection errors can occur.
+
 Browsers attach through a task-and-language route after task-owner authorization. An attachment
 receives the initialized server capabilities and then exchanges feature requests and document
 notifications through the task-host multiplexer. Request IDs are namespaced by attachment and
@@ -117,6 +123,12 @@ another task's installer or process launch. Cancellation or failure before promo
 the reservation exactly once and considers the next queued entry. Controller shutdown removes
 owned promotion work still queued behind detached request commands and joins any promotion already
 running.
+
+Every fired recovery and ready-budget-reset timer claims controller-lifecycle ownership before
+performing store, task-host, or command-lane work and revalidates its timer epoch. Shutdown cancels
+the lifecycle while callback admission is locked, stops pending timers, and joins callbacks that
+already fired. Recovery commands keep the lifecycle context instead of detaching from it, so no
+timer callback can outlive a successful controller shutdown.
 
 Task stop, archive, and delete cancel recovery and stop every language namespace owned by that
 task. Cleanup of a borrowing task cannot terminate another task's host or language slots. When a

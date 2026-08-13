@@ -552,7 +552,7 @@ func storedLSPState(t *testing.T, store *memoryLSPStore, taskID, language string
 type reconcileRuntimes struct {
 	mu                 sync.Mutex
 	existing           map[string]TaskHost
-	ensured            map[string]*fakeLSPHost
+	ensured            map[string]TaskHost
 	existingErrors     map[string]error
 	ensureCalls        int
 	cleanupCalls       int
@@ -589,7 +589,7 @@ func (s *cleanupSnapshotStore) ListTaskLSPLanguages(
 
 func newReconcileRuntimes() *reconcileRuntimes {
 	return &reconcileRuntimes{
-		existing: make(map[string]TaskHost), ensured: make(map[string]*fakeLSPHost),
+		existing: make(map[string]TaskHost), ensured: make(map[string]TaskHost),
 		existingErrors: make(map[string]error), cleanupProved: true,
 	}
 }

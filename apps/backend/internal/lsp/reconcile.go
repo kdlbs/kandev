@@ -25,9 +25,16 @@ func (c *Controller) ReconcileAll(ctx context.Context) error {
 }
 
 func (c *Controller) reconcileAll(ctx context.Context) error {
+	_, _, err := c.reconcileAllWithInventory(ctx)
+	return err
+}
+
+func (c *Controller) reconcileAllWithInventory(
+	ctx context.Context,
+) ([]TaskLanguageState, bool, error) {
 	states, err := c.store.ListAllTaskLSPLanguages(ctx)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	sort.Slice(states, func(i, j int) bool {
 		if states[i].TaskID != states[j].TaskID {
@@ -60,7 +67,7 @@ func (c *Controller) reconcileAll(ctx context.Context) error {
 			reconcileErrors = append(reconcileErrors, startErr)
 		}
 	}
-	return errors.Join(reconcileErrors...)
+	return states, true, errors.Join(reconcileErrors...)
 }
 
 // ReconcileTask converges durable languages for one real task. It is an

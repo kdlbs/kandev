@@ -31,10 +31,11 @@ func (realScheduler) AfterFunc(delay time.Duration, callback func()) ScheduledTi
 }
 
 type recoveryState struct {
-	attempts   int
-	timer      ScheduledTimer
-	timerEpoch uint64
-	readyTimer ScheduledTimer
+	attempts        int
+	timer           ScheduledTimer
+	timerEpoch      uint64
+	readyTimer      ScheduledTimer
+	readyTimerEpoch uint64
 }
 
 type taskLanguageWatch struct {
@@ -54,22 +55,20 @@ func (c *Controller) StartReconciler(ctx context.Context) error {
 	c.lifecycleCtx = workerCtx
 	c.lifecycleCancel = cancel
 	c.startupReady = startupReady
+	c.startupComplete = false
+	c.startupErr = nil
 	c.lifecycleWG.Add(1)
 	c.lifecycleMu.Unlock()
-	defer close(startupReady)
 	go c.runSettingsWorker(workerCtx)
 
 	settingsErr := c.rememberCurrentTaskSettings(workerCtx)
-	reconcileErr := c.reconcileAll(workerCtx)
-	states, listErr := c.store.ListAllTaskLSPLanguages(workerCtx)
-	if listErr == nil {
-		for _, state := range states {
-			if phaseHasServer(state.Phase) && state.Generation > 0 {
-				c.ensureWatch(TaskLanguageKey{TaskID: state.TaskID, Language: state.Language})
-			}
-		}
+	states, inventoryReady, reconcileErr := c.reconcileAllWithInventory(workerCtx)
+	if inventoryReady {
+		c.completeStartup(states, nil)
+	} else {
+		c.completeStartup(nil, reconcileErr)
 	}
-	return errors.Join(settingsErr, reconcileErr, listErr)
+	return errors.Join(settingsErr, reconcileErr)
 }
 
 // waitForStartup prevents controls from observing an empty capacity ledger
@@ -79,13 +78,26 @@ func (c *Controller) StartReconciler(ctx context.Context) error {
 func (c *Controller) waitForStartup(ctx context.Context) error {
 	c.lifecycleMu.Lock()
 	ready := c.startupReady
+	lifecycleCtx := c.lifecycleCtx
+	running := c.lifecycleCancel != nil
 	c.lifecycleMu.Unlock()
 	if ready == nil {
 		return nil
 	}
+	if !running || lifecycleCtx == nil {
+		return context.Canceled
+	}
 	select {
 	case <-ready:
-		return nil
+		if lifecycleCtx.Err() != nil {
+			return context.Cause(lifecycleCtx)
+		}
+		c.lifecycleMu.Lock()
+		startupErr := c.startupErr
+		c.lifecycleMu.Unlock()
+		return startupErr
+	case <-lifecycleCtx.Done():
+		return context.Cause(lifecycleCtx)
 	case <-ctx.Done():
 		return context.Cause(ctx)
 	}
@@ -99,6 +111,7 @@ func (c *Controller) Close(ctx context.Context) error {
 		return nil
 	}
 	c.lifecycleCancel = nil
+	cancel()
 	for key, watch := range c.watches {
 		watch.cancel()
 		delete(c.watches, key)
@@ -114,7 +127,6 @@ func (c *Controller) Close(ctx context.Context) error {
 		delete(c.discoveryRetries, taskID)
 	}
 	c.lifecycleMu.Unlock()
-	cancel()
 
 	done := make(chan struct{})
 	go func() {
@@ -130,6 +142,33 @@ func (c *Controller) Close(ctx context.Context) error {
 	case <-ctx.Done():
 		return context.Cause(ctx)
 	}
+}
+
+func (c *Controller) completeStartup(states []TaskLanguageState, startupErr error) {
+	for _, state := range states {
+		if phaseHasServer(state.Phase) && state.Generation > 0 {
+			c.ensureWatch(TaskLanguageKey{TaskID: state.TaskID, Language: state.Language})
+		}
+	}
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.startupComplete || c.startupReady == nil || c.lifecycleCancel == nil ||
+		c.lifecycleCtx == nil || c.lifecycleCtx.Err() != nil {
+		return
+	}
+	c.startupErr = startupErr
+	c.startupComplete = true
+	close(c.startupReady)
+}
+
+func (c *Controller) beginLifecycleCallback() (context.Context, func(), bool) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.lifecycleCtx == nil || c.lifecycleCtx.Err() != nil || c.lifecycleCancel == nil {
+		return nil, nil, false
+	}
+	c.lifecycleWG.Add(1)
+	return c.lifecycleCtx, c.lifecycleWG.Done, true
 }
 
 func (c *Controller) ensureWatch(key TaskLanguageKey) {
@@ -295,18 +334,26 @@ func (c *Controller) scheduleRecovery(key TaskLanguageKey) {
 }
 
 func (c *Controller) runRecovery(key TaskLanguageKey, epoch uint64) {
+	ctx, done, ok := c.beginLifecycleCallback()
+	if !ok {
+		return
+	}
+	defer done()
+
 	c.lifecycleMu.Lock()
 	recovery := c.recoveries[key]
 	if recovery == nil || recovery.timer == nil || recovery.timerEpoch != epoch ||
-		c.lifecycleCtx == nil || c.lifecycleCtx.Err() != nil {
+		c.lifecycleCtx != ctx || ctx.Err() != nil {
 		c.lifecycleMu.Unlock()
 		return
 	}
 	recovery.timer = nil
-	ctx := c.lifecycleCtx
 	c.lifecycleMu.Unlock()
 
 	state, _, err := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		c.scheduleRecovery(key)
 		return
@@ -345,11 +392,10 @@ func (c *Controller) attemptRecovery(
 		}
 		return true
 	}
-	snapshot, err := c.commands.submit(
+	snapshot, err := c.commands.submitOwnedExclusive(
 		ctx,
 		key,
 		ActionReconcile,
-		"",
 		func(workCtx context.Context) (*LanguageSnapshot, error) {
 			return c.reconcileMissing(workCtx, *candidate)
 		},
@@ -402,17 +448,37 @@ func (c *Controller) scheduleReadyReset(key TaskLanguageKey, generation uint64) 
 	if scheduler == nil {
 		scheduler = realScheduler{}
 	}
-	lifecycleCtx := c.lifecycleCtx
+	recovery.readyTimerEpoch++
+	epoch := recovery.readyTimerEpoch
 	recovery.readyTimer = scheduler.AfterFunc(readyRecoveryReset, func() {
-		state, _, err := c.store.GetTaskLSPLanguage(lifecycleCtx, key.TaskID, key.Language)
-		c.lifecycleMu.Lock()
-		defer c.lifecycleMu.Unlock()
-		current := c.recoveries[key]
-		if err == nil && current != nil && state.Generation == generation && state.Phase == PhaseReady {
-			current.attempts = 0
-			current.readyTimer = nil
-		}
+		c.runReadyReset(key, generation, epoch)
 	})
+}
+
+func (c *Controller) runReadyReset(key TaskLanguageKey, generation, epoch uint64) {
+	ctx, done, ok := c.beginLifecycleCallback()
+	if !ok {
+		return
+	}
+	defer done()
+
+	c.lifecycleMu.Lock()
+	current := c.recoveries[key]
+	if current == nil || current.readyTimer == nil || current.readyTimerEpoch != epoch {
+		c.lifecycleMu.Unlock()
+		return
+	}
+	current.readyTimer = nil
+	c.lifecycleMu.Unlock()
+
+	state, _, err := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	current = c.recoveries[key]
+	if err == nil && current != nil && current.readyTimerEpoch == epoch &&
+		state.Generation == generation && state.Phase == PhaseReady {
+		current.attempts = 0
+	}
 }
 
 func (c *Controller) cancelRecovery(key TaskLanguageKey) {

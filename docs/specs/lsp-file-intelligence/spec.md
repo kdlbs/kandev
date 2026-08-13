@@ -315,11 +315,23 @@ monotonic generation. Lifecycle-owned work queued behind a detached request is r
 its reservation when controller shutdown cancels it; already-running lifecycle work remains joined.
 Retrying the same task-host command after a transport timeout is idempotent.
 
+Controller startup must read the full durable task/language inventory before task-LSP operations
+can pass their readiness gate. If that authoritative read fails, the gate returns the same sticky
+startup error for every operation until backend restart; Kandev must not admit work against an
+empty capacity ledger or start a background retry behind apparently usable controls. After a
+successful inventory read, every possibly-live generation is reserved before fallible runtime
+inspection begins.
+
 An unexpected process or task-host stream failure keeps the desired policy and attempts automatic
 recovery after 1, 5, and 30 seconds. A generation that remains ready for five minutes resets that
 budget. After three failed recoveries, the phase stays `error` with explicit Restart available;
 there is no unbounded crash loop. An initialize request that remains alive is not a crash and is
 never auto-restarted or timed out.
+
+Recovery and ready-budget-reset timer callbacks acquire controller-lifecycle ownership before any
+store or runtime access and validate their current timer epoch. Controller shutdown cancels
+callback admission, stops timers that have not fired, and joins callbacks already in flight;
+recovery command execution retains that owned lifecycle context.
 
 An explicit Start or Restart begins a new user-requested recovery epoch and therefore resets any
 exhausted automatic retry budget for that task/language. A delayed task-host watch snapshot cannot

@@ -144,6 +144,8 @@ type Controller struct {
 	lifecycleCtx     context.Context
 	lifecycleCancel  context.CancelFunc
 	startupReady     chan struct{}
+	startupComplete  bool
+	startupErr       error
 	lifecycleWG      sync.WaitGroup
 	watches          map[TaskLanguageKey]*taskLanguageWatch
 	recoveries       map[TaskLanguageKey]*recoveryState

@@ -30,6 +30,10 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
 - Capacity release reserves and promotes the next task asynchronously under controller lifecycle;
   Stop does not wait for another task's launch, canceled promotion cannot leak capacity, and Close
   removes queued owned promotion work while joining any promotion already running.
+- Startup inventory failure becomes a sticky fail-closed controller error; controls never observe
+  an empty capacity ledger as ready after durable inventory could not be read.
+- Recovery and ready-budget-reset callbacks acquire lifecycle ownership before I/O, validate their
+  timer generation, retain lifecycle context through command execution, and cannot outlive Close.
 
 ## TDD Evidence
 
@@ -57,6 +61,10 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   session and were drained ahead of lease membership.
 - Controller Close blocked behind a detached command before queued lifecycle-owned batches became
   cancellation-aware while running batches remained joined.
+- Startup inventory failure admitted a new server against an empty capacity ledger before the
+  readiness gate retained the authoritative error.
+- Fired recovery and ready-budget-reset timers outlived Controller Close before callback admission,
+  epoch validation, and owned recovery commands were joined to the controller lifecycle.
 
 ## Verification
 
@@ -80,13 +88,17 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
 - Both GitHub backend package-shard selections, 291 packages total, passed locally under `-race`.
 - The four focused frontend reconnect, task-subscription, and browser-lease files passed all 37
   tests; `pnpm run typecheck` and changed-file ESLint with zero warnings passed.
-- `pnpm run build:vite`, the public-docs validator (62 tests), i18n checks, and i18n ratchet passed.
+- `pnpm run build:vite`, the public-docs validator (60 tests), i18n checks, and i18n ratchet passed.
 - All 10 production Playwright task-lifecycle scenarios passed against rebuilt production artifacts,
   including same-task deduplication, reload reattachment, explicit restart/stop, task cleanup, and
   active-file-independent status.
 - The agentctl LSP package cross-compiled for Windows amd64. GitHub's native Windows containment
   check passed the selected-root junction and hostile-UNC tests after the test was updated to use a
   real pinned root handle.
+- The sticky startup-inventory failure and fired recovery/reset callback ownership regressions
+  passed 20 race-enabled repetitions; the complete `internal/lsp` race package passed once.
+- `go test -count=1 ./...` passed across the complete backend after the callback-ownership repair;
+  changed-code `golangci-lint` reported zero issues and the architecture linter passed.
 - Commit hooks passed architecture, formatting, changed-code Go/Web lint, i18n, public-copy, and
   Conventional Commit checks.
 - Independent review findings for root identity, browser lease recovery, workspace refresh ordering,

@@ -607,7 +607,7 @@ func TestReconcilerCloseJoinsWatchersAndStopsTimers(t *testing.T) {
 	}
 }
 
-func TestStoppedReadyTimerUsesCanceledLifecycleContext(t *testing.T) {
+func TestStoppedReadyTimerDoesNotRunAfterClose(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
 		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
@@ -622,20 +622,17 @@ func TestStoppedReadyTimerUsesCanceledLifecycleContext(t *testing.T) {
 	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
 	controller.scheduleReadyReset(key, 1)
 	timer := scheduler.next(t)
-	observed := make(chan error, 1)
-	store.getContextHook = func(ctx context.Context) { observed <- ctx.Err() }
+	observed := make(chan struct{}, 1)
+	store.getContextHook = func(context.Context) { observed <- struct{}{} }
 
 	if err := controller.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	timer.ForceFire()
 	select {
-	case err := <-observed:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("ready-reset context error = %v, want canceled", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("stopped ready timer callback did not complete")
+	case <-observed:
+		t.Fatal("stopped ready timer touched the store after controller close")
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 
