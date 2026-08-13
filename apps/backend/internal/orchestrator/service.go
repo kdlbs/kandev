@@ -930,13 +930,23 @@ func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.Rep
 // only the persisted local path; clone credentials remain private to the
 // orchestrator executor pipeline.
 type RepositoryHostCloner interface {
-	EnsureRepositoryCloned(context.Context, *models.Repository) (string, error)
+	EnsureRepositoryClonedForSession(
+		context.Context, string, string, *models.Repository,
+	) (string, error)
 }
 
 // EnsureRepositoryCloned delegates host cloning through the executor's
 // authenticated clone pipeline.
 func (s *Service) EnsureRepositoryCloned(ctx context.Context, repository *models.Repository) (string, error) {
 	return s.executor.EnsureRepositoryCloned(ctx, repository)
+}
+
+// EnsureRepositoryClonedForSession delegates host cloning with exact task and
+// session scope for plugin repository credentials.
+func (s *Service) EnsureRepositoryClonedForSession(
+	ctx context.Context, taskID, sessionID string, repository *models.Repository,
+) (string, error) {
+	return s.executor.EnsureRepositoryClonedForSession(ctx, taskID, sessionID, repository)
 }
 
 // SetGitHubCredentialBroker configures renewable workspace GitHub credentials

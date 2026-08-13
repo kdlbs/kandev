@@ -24,6 +24,7 @@ import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
+import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { PRMergedBanner } from "./chat/pr-archive-banners";
 import { type ChatInputContainerHandle } from "./chat/chat-input-container";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
@@ -182,6 +183,7 @@ export function PassthroughToolbar({
 
       <PassthroughStatusRow
         taskId={taskId}
+        sessionId={sessionId}
         nextStepName={planActions.proceedStepName}
         onProceed={planActions.proceed}
         isMoving={planActions.isMoving}
@@ -493,6 +495,7 @@ function CommentCard({
 
 type StatusRowProps = {
   taskId: string | null;
+  sessionId?: string | null;
   nextStepName: string | null;
   onProceed: () => void;
   isMoving: boolean;
@@ -507,6 +510,7 @@ type StatusRowProps = {
 
 function PassthroughStatusRow({
   taskId,
+  sessionId,
   nextStepName,
   onProceed,
   isMoving,
@@ -540,6 +544,7 @@ function PassthroughStatusRow({
         <PRStatusChip taskId={taskId} />
         <MRStatusChip taskId={taskId} />
         <AzureDevOpsTaskPullRequestChip taskId={taskId} />
+        <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
         {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
         {showProceed && nextStepName && (
           <Tooltip>

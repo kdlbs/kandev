@@ -54,6 +54,7 @@ const (
 	ExecutorRunningStatusStopped  = "stopped"
 	ExecutorRunningStatusComplete = "completed"
 	ExecutorRunningStatusPrepared = "prepared"
+	createdAtField                = "created_at"
 )
 
 // ListMessagesOptions defines pagination options for listing messages
@@ -1202,7 +1203,7 @@ func (s *TaskSession) WorktreesAPI() []map[string]interface{} {
 			"worktree_id":   repo.WorktreeID,
 			"repository_id": repo.RepositoryID,
 			"position":      repo.Position,
-			"created_at":    repo.CreatedAt,
+			createdAtField:  repo.CreatedAt,
 		}
 		if repo.BranchSlug != "" {
 			entry["branch_slug"] = repo.BranchSlug
@@ -1249,6 +1250,7 @@ type Repository struct {
 	Provider               string                    `json:"provider"`
 	ProviderRepoID         string                    `json:"provider_repo_id"`
 	ProviderHost           string                    `json:"provider_host"`
+	ProviderScope          string                    `json:"provider_scope"`
 	ProviderOwner          string                    `json:"provider_owner"`
 	ProviderName           string                    `json:"provider_name"`
 	RemoteURL              string                    `json:"remote_url"`
@@ -1264,6 +1266,18 @@ type Repository struct {
 	CreatedAt              time.Time                 `json:"created_at"`
 	UpdatedAt              time.Time                 `json:"updated_at"`
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
+}
+
+// ProviderRepositoryIdentity is the durable provider lookup key. New plugin
+// providers supply Scope + RepositoryID; legacy built-ins use Host/Owner/Name.
+type ProviderRepositoryIdentity struct {
+	WorkspaceID  string
+	Provider     string
+	Scope        string
+	RepositoryID string
+	Host         string
+	Owner        string
+	Name         string
 }
 
 // RepositorySecretBinding maps an environment key to a secret reference. The
@@ -1551,7 +1565,7 @@ func (te *TaskEnvironment) ToAPI() map[string]interface{} {
 		"executor_profile_id": te.ExecutorProfileID,
 		"status":              string(te.Status),
 		"workspace_path":      te.WorkspacePath,
-		"created_at":          te.CreatedAt,
+		createdAtField:        te.CreatedAt,
 		"updated_at":          te.UpdatedAt,
 	}
 	// agent_execution_id is no longer carried on TaskEnvironment — see executors_running.
@@ -1584,7 +1598,7 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 		"task_environment_id": r.TaskEnvironmentID,
 		"repository_id":       r.RepositoryID,
 		"position":            r.Position,
-		"created_at":          r.CreatedAt,
+		createdAtField:        r.CreatedAt,
 		"updated_at":          r.UpdatedAt,
 	}
 	if r.WorktreeID != "" {

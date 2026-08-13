@@ -54,6 +54,7 @@ type RepositoryDTO struct {
 	Provider               string                       `json:"provider"`
 	ProviderRepoID         string                       `json:"provider_repo_id"`
 	ProviderHost           string                       `json:"provider_host"`
+	ProviderScope          string                       `json:"provider_scope"`
 	ProviderOwner          string                       `json:"provider_owner"`
 	ProviderName           string                       `json:"provider_name"`
 	RemoteURL              string                       `json:"remote_url"`
@@ -609,6 +610,7 @@ func FromRepository(repository *models.Repository) RepositoryDTO {
 		Provider:               repository.Provider,
 		ProviderRepoID:         repository.ProviderRepoID,
 		ProviderHost:           repository.ProviderHost,
+		ProviderScope:          repository.ProviderScope,
 		ProviderOwner:          repository.ProviderOwner,
 		ProviderName:           repository.ProviderName,
 		RemoteURL:              repository.RemoteURL,

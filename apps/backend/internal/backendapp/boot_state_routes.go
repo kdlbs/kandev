@@ -698,7 +698,7 @@ func mapTaskCreateLastUsed(value usermodels.TaskCreateLastUsed) map[string]any {
 	}
 	return map[string]any{
 		"repositoryId":           nullString(value.RepositoryID),
-		"branch":                 nullString(value.Branch),
+		branchFieldKey:           nullString(value.Branch),
 		"agentProfileId":         nullString(value.AgentProfileID),
 		"executorProfileId":      nullString(value.ExecutorProfileID),
 		"workflowIdsByWorkspace": workflowIDsByWorkspace,

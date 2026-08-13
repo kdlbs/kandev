@@ -13,14 +13,6 @@ import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
 import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
 import ExternalMcpPage from "@/app/settings/external-mcp/page";
-import IntegrationsIndexPage from "@/app/settings/integrations/page";
-import { IntegrationsIndexPage as IntegrationsIndexPageClient } from "@/components/integrations/integrations-index-page";
-import IntegrationsGitHubPage from "@/app/settings/integrations/github/page";
-import IntegrationsAzureDevOpsPage from "@/app/settings/integrations/azure-devops/page";
-import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
-import IntegrationsJiraPage from "@/app/settings/integrations/jira/page";
-import IntegrationsLinearPage from "@/app/settings/integrations/linear/page";
-import IntegrationsSentryPage from "@/app/settings/integrations/sentry/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import UtilityAgentsSettingsPage from "@/app/settings/utility-agents/page";
@@ -107,6 +99,7 @@ import type { HydrationState } from "@/lib/state/store";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import type { LicenseEntry } from "@/lib/types/system";
+import { renderIntegrationSettingsRoute } from "./integration-settings-route";
 import {
   WorkspaceRepositoriesRoute,
   WorkspaceWorkflowsRoute,
@@ -299,6 +292,12 @@ function renderDynamicSettingsRoute(pathname: string) {
   const workspaceRoute = renderWorkspaceSettingsRoute(pathname);
   if (workspaceRoute) return workspaceRoute;
 
+  const integrationId = matchSingle(pathname, /^\/settings\/integrations\/([^/]+)$/);
+  if (integrationId && pluginRegistry.getIntegrationSetting(integrationId)) {
+    const section = pathname.split("/").slice(2).join("/");
+    return <ActiveWorkspaceSectionRedirect section={section} />;
+  }
+
   const pluginId = matchSingle(pathname, /^\/settings\/plugins\/([^/]+)$/);
   if (pluginId) {
     // A plugin-authored settings route registered at exactly this path
@@ -467,31 +466,6 @@ function ActiveWorkspaceSectionRedirect({ section }: { section: string }) {
       to={`${WORKSPACES_SETTINGS_HREF}/${encodeURIComponent(workspaceId)}/${section}`}
     />
   );
-}
-
-function renderIntegrationSettingsRoute(section: string | null, workspaceId?: string) {
-  switch (section) {
-    case null:
-      return workspaceId ? (
-        <IntegrationsIndexPageClient workspaceId={workspaceId} />
-      ) : (
-        <IntegrationsIndexPage />
-      );
-    case "azure-devops":
-      return <IntegrationsAzureDevOpsPage workspaceId={workspaceId} />;
-    case "github":
-      return <IntegrationsGitHubPage workspaceId={workspaceId} />;
-    case "gitlab":
-      return <IntegrationsGitLabPage workspaceId={workspaceId} />;
-    case "jira":
-      return <IntegrationsJiraPage workspaceId={workspaceId} />;
-    case "linear":
-      return <IntegrationsLinearPage workspaceId={workspaceId} />;
-    case "sentry":
-      return <IntegrationsSentryPage workspaceId={workspaceId} />;
-    default:
-      return null;
-  }
 }
 
 // Components rather than inline JSX so `t()` resolves at render — a t() call

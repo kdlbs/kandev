@@ -3,6 +3,7 @@ package plugins
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -164,4 +165,60 @@ func cloneRecord(rec *store.Record) *store.Record {
 		clone.LastErrorAt = &at
 	}
 	return &clone
+}
+
+// activeRepositoryProviderOwner returns the active plugin that owns provider,
+// excluding excludeID (used while validating an in-place upgrade).
+func (r *Registry) activeRepositoryProviderOwner(provider, excludeID string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for id, rec := range r.byID {
+		if id == excludeID || rec.Status != StatusActive {
+			continue
+		}
+		for _, declared := range rec.RepositoryProviders {
+			if strings.EqualFold(strings.TrimSpace(declared), strings.TrimSpace(provider)) {
+				return id, true
+			}
+		}
+	}
+	return "", false
+}
+
+// activeReferenceSourceOwner returns the active plugin that owns source,
+// excluding excludeID (used while validating an in-place upgrade).
+func (r *Registry) activeReferenceSourceOwner(source, excludeID string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for id, rec := range r.byID {
+		if id == excludeID || rec.Status != StatusActive {
+			continue
+		}
+		for _, declared := range rec.ReferenceSources {
+			if declared.Source == source {
+				return id, true
+			}
+		}
+	}
+	return "", false
+}
+
+// activeReferenceProviderKindOwner returns the active plugin that owns the
+// provider/kind pair, excluding excludeID (used while validating an in-place
+// upgrade). Mention routing authorizes by this pair, so source uniqueness on
+// its own cannot prevent ambiguous ownership.
+func (r *Registry) activeReferenceProviderKindOwner(provider, kind, excludeID string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for id, rec := range r.byID {
+		if id == excludeID || rec.Status != StatusActive {
+			continue
+		}
+		for _, declared := range rec.ReferenceSources {
+			if declared.Provider == provider && declared.Kind == kind {
+				return id, true
+			}
+		}
+	}
+	return "", false
 }

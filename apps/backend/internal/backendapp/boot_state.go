@@ -1034,7 +1034,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 				"sessionId":    session.ID,
 				"repositoryId": nullString(dto.RepositoryID),
 				"path":         nullString(dto.WorktreePath),
-				"branch":       nullString(dto.WorktreeBranch),
+				branchFieldKey: nullString(dto.WorktreeBranch),
 			}
 			worktreesBySession[session.ID] = []string{dto.WorktreeID}
 		}
@@ -1149,8 +1149,8 @@ func (b bootStateBuilder) addTaskDetailAgentsState(ctx context.Context, state ma
 	state["settingsAgents"] = map[string]any{"items": response.Agents}
 	state["settingsData"] = map[string]any{"agentsLoaded": true, "executorsLoaded": false}
 	state["agentProfiles"] = map[string]any{
-		"items":   agentProfileOptionStates(response.Agents),
-		"version": 0,
+		"items":         agentProfileOptionStates(response.Agents),
+		versionFieldKey: 0,
 	}
 }
 

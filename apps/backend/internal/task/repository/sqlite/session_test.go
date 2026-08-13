@@ -1676,7 +1676,7 @@ func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID strin
 
 func assertReapedSession(t *testing.T, repo *Repository, sessionID string, reapedAfter time.Time) {
 	t.Helper()
-	if got := sessionState(t, repo, sessionID); got != "CANCELLED" {
+	if got := sessionState(t, repo, sessionID); got != sessionStateCancelled {
 		t.Errorf("%s = %q, want CANCELLED", sessionID, got)
 	}
 	errorMessage, completedAt, updatedAt := sessionCancellationMetadata(t, repo, sessionID)

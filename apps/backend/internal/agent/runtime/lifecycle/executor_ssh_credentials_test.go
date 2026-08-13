@@ -18,7 +18,7 @@ func TestRemoteExecutorsIgnoreLegacyHostGHTokenSelection(t *testing.T) {
 		name    string
 		resolve func([]string) []string
 	}{
-		{name: "ssh", resolve: (&SSHExecutor{logger: newTestLogger()}).resolveGHToken},
+		{name: executorTypeSSH, resolve: (&SSHExecutor{logger: newTestLogger()}).resolveGHToken},
 		{name: "sprites", resolve: (&SpritesExecutor{logger: newTestLogger()}).resolveGHToken},
 	}
 	for _, tt := range tests {
@@ -41,7 +41,7 @@ func TestRemoteExecutorsResolveExplicitGitHubTokenSecret(t *testing.T) {
 		name    string
 		resolve func(context.Context, *ExecutorCreateRequest, remoteauth.Catalog)
 	}{
-		{name: "ssh", resolve: (&SSHExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets},
+		{name: executorTypeSSH, resolve: (&SSHExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets},
 		{name: "sprites", resolve: (&SpritesExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets},
 	}
 	for _, tt := range tests {

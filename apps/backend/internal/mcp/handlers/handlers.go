@@ -2168,7 +2168,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"task_id":              req.TaskID,
 			"reply_to_question_id": req.ReplyToQuestionID,
-			"status":               "already_answered",
+			stopTaskStatusKey:      "already_answered",
 		})
 	}
 
@@ -2217,7 +2217,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		if parentReply != nil {
 			if restoreErr := h.restoreParentQuestionPending(ctx, parentReply.message); restoreErr != nil {
 				h.logger.Error("failed to restore parent question after answer dispatch failure",
-					zap.String("question_id", parentReply.message.ID), zap.Error(restoreErr))
+					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
 			}
 		}
 		var qfErr *queueFullDispatchError
@@ -2229,9 +2229,9 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"task_id":    req.TaskID,
-		"session_id": result.sessionID,
-		"status":     result.status,
+		"task_id":         req.TaskID,
+		"session_id":      result.sessionID,
+		stopTaskStatusKey: result.status,
 	})
 }
 

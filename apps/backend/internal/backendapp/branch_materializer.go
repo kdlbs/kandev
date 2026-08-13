@@ -114,7 +114,7 @@ func (b *branchMaterializer) materializeUnfinalized(ctx context.Context, taskID,
 		zap.String("task_repository_id", taskRepositoryID),
 		zap.String("worktree_id", wt.ID),
 		zap.String("path", wt.Path),
-		zap.String("branch", wt.Branch))
+		zap.String(branchFieldKey, wt.Branch))
 	return &branchMaterialization{environment: env, session: session, worktree: wt, repositoryID: req.RepositoryID, slug: slug, taskID: taskID}, nil
 }
 

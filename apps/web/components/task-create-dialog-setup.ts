@@ -129,7 +129,15 @@ function useSubmitHandlersWiring({
   autoTitle,
   preserveQueuedLastUsedOnClose,
 }: SubmitWiringArgs) {
-  const { workspaceId, workflowId, editingTask, onSuccess, onCreateSession, onOpenChange } = props;
+  const {
+    workspaceId,
+    workflowId,
+    editingTask,
+    onSuccess,
+    onCreateSession,
+    onOpenChange,
+    createTask,
+  } = props;
   const { parentTaskId } = props;
   const taskId = props.taskId ?? null;
   return useTaskSubmitHandlers({
@@ -156,6 +164,7 @@ function useSubmitHandlersWiring({
     onSuccess,
     onCreateSession,
     onOpenChange,
+    createTask,
     preserveTaskCreateLastUsedOnClose: preserveQueuedLastUsedOnClose,
     taskId,
     parentTaskId,

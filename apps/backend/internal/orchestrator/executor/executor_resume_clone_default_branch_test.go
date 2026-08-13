@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -391,10 +392,16 @@ func TestApplyResumeRepoConfig_SelfHealsStaleProviderPath(t *testing.T) {
 // fakeRepoCloner returns a fixed local path for any clone request.
 type fakeRepoCloner struct{ returnPath string }
 
-func (f *fakeRepoCloner) EnsureWorkspaceClonedForProvider(
-	_ context.Context, _, _, _, _, _, _, _, _ string,
+func (f *fakeRepoCloner) EnsureWorkspaceClonedWithCredentialRequest(
+	_ context.Context, _ repoclone.GitCredentialRequest, _, _ string,
 ) (string, error) {
 	return f.returnPath, nil
+}
+
+func (f *fakeRepoCloner) RefreshWorkspaceRepositoryWithCredentialRequest(
+	context.Context, repoclone.GitCredentialRequest, string, string, string,
+) error {
+	return nil
 }
 
 func (f *fakeRepoCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }

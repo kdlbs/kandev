@@ -166,9 +166,9 @@ func executeMCPCommand(e *emitter, fullPrompt, line string) {
 	result, err := callMCPTool(server, toolName, args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mock-agent: MCP call %s/%s failed: %v\n", server, toolName, err)
-		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
+		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 	} else {
-		e.completeTool(toolID, map[string]any{"result": result})
+		e.completeTool(toolID, map[string]any{toolKeyResult: result})
 	}
 }
 
@@ -221,7 +221,7 @@ func executeSimulatedToolUse(e *emitter, line string) {
 // Format: e2e:tool_result("content")
 func executeSimulatedToolResult(e *emitter, line string) {
 	content := extractStringArg(line, "e2e:tool_result(")
-	e.completeTool(acp.ToolCallId(state.lastToolID), map[string]any{"result": content})
+	e.completeTool(acp.ToolCallId(state.lastToolID), map[string]any{toolKeyResult: content})
 }
 
 // executeSimulatedShellResult emits an execute-kind (shell) tool call for

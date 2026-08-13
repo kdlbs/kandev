@@ -33,6 +33,7 @@ type VcsChangeRequestDialogProps = {
   onBodyChange: (value: string) => void;
   draft: boolean;
   onDraftChange: (value: boolean) => void;
+  supportsDraft?: boolean;
   loading: boolean;
   branchPushed: boolean;
   onCreate: () => void;
@@ -84,16 +85,18 @@ export function VcsChangeRequestDialog(props: VcsChangeRequestDialogProps) {
             isUtilityConfigured={props.utilityConfigured}
             terminology={terms}
           />
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="vcs-pr-draft"
-              checked={props.draft}
-              onCheckedChange={(checked) => props.onDraftChange(checked === true)}
-            />
-            <Label htmlFor="vcs-pr-draft" className="text-sm cursor-pointer">
-              {t("integrations:createAsDraft")}
-            </Label>
-          </div>
+          {props.supportsDraft !== false ? (
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="vcs-pr-draft"
+                checked={props.draft}
+                onCheckedChange={(checked) => props.onDraftChange(checked === true)}
+              />
+              <Label htmlFor="vcs-pr-draft" className="text-sm cursor-pointer">
+                {t("integrations:createAsDraft")}
+              </Label>
+            </div>
+          ) : null}
         </div>
         <DialogFooter>
           <DialogClose asChild>

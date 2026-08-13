@@ -16,6 +16,8 @@ import { EXECUTORS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/execut
 import { WORKSPACE_INTEGRATIONS } from "@/lib/settings-discovery/catalog/integrations";
 import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
 import { detectedAgents, orderAgentsForDisplay } from "@/lib/settings/agent-display-order";
+import { resolvePluginIcon } from "@/lib/plugins/icons";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 import { isTreeSettingsMenuMode, type SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 import {
   buildAgentsBranch,
@@ -50,6 +52,7 @@ const MENU_ITEMS_BY_HREF: ReadonlyMap<string, SettingsMenuItem> = new Map(
  * so a branch never lists records its own row's badge disagrees with.
  */
 export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBranches {
+  const pluginRegistry = usePluginRegistry();
   const isTree = isTreeSettingsMenuMode(mode);
   const workspaces = useAppStore((s) => s.workspaces.items);
   const agents = useAppStore((s) => s.settingsAgents.items);
@@ -61,6 +64,11 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
   const agentDiscovery = useAppStore((s) => s.agentDiscovery.items);
   const discoveryLoaded = useAppStore((s) => s.agentDiscovery.loaded);
   const visibleIntegrations = useVisibleIntegrationSlugs();
+  const integrationContributions = pluginRegistry.getIntegrationSettings().map((integration) => ({
+    id: integration.id,
+    label: integration.label,
+    icon: resolvePluginIcon(integration.icon),
+  }));
   const { hideDisabled: hideDisabledAgentProfiles } = useHideDisabledAgentProfilesInNav();
 
   return useMemo(() => {
@@ -74,7 +82,12 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
     return {
       ...branchEntry(
         WORKSPACES_SETTINGS_HREF,
-        buildWorkspacesBranch(workspaces, activeWorkspaceId, visibleIntegrations),
+        buildWorkspacesBranch(
+          workspaces,
+          activeWorkspaceId,
+          visibleIntegrations,
+          integrationContributions,
+        ),
       ),
       ...branchEntry(
         AGENTS_SETTINGS_HREF,
@@ -91,6 +104,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
     agentDiscovery,
     discoveryLoaded,
     visibleIntegrations,
+    integrationContributions,
     hideDisabledAgentProfiles,
   ]);
 }

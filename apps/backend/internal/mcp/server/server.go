@@ -51,6 +51,8 @@ const (
 	ModeOffice = "office"
 )
 
+const pluginToolArgumentsKey = "arguments"
+
 // MCP payload keys reused across tool registrations. Extracted so a future
 // wire-protocol rename touches every tool in one place AND so goconst
 // doesn't flag the literals as repeated string occurrences.
@@ -724,7 +726,7 @@ func (s *Server) registerPluginTools() {
 			surface := string(s.profile.Surface)
 			s.mu.RUnlock()
 			payload := map[string]any{
-				"plugin_id": d.PluginID, "local_name": d.LocalName, "arguments": req.GetArguments(),
+				"plugin_id": d.PluginID, "local_name": d.LocalName, pluginToolArgumentsKey: req.GetArguments(),
 				"invocation_id": fmt.Sprintf("mcp-%d", time.Now().UnixNano()), "surface": surface,
 			}
 			var result struct {

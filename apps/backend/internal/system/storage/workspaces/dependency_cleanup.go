@@ -12,32 +12,45 @@ import (
 	"github.com/kandev/kandev/internal/system/storage"
 )
 
+const (
+	dependencyBowerComponents = "bower_components"
+	dependencyGradle          = ".gradle"
+	dependencyNodeModules     = "node_modules"
+	dependencyNox             = ".nox"
+	dependencyPnpmStore       = ".pnpm-store"
+	dependencyPods            = "Pods"
+	dependencyPyPackages      = "__pypackages__"
+	dependencyTox             = ".tox"
+	dependencyVenv            = "venv"
+	dependencyVirtualEnv      = ".venv"
+)
+
 var dependencyDirectoryAllowlist = []string{
-	"node_modules",
-	"bower_components",
-	".pnpm-store",
+	dependencyNodeModules,
+	dependencyBowerComponents,
+	dependencyPnpmStore,
 	".yarn/cache",
 	".yarn/unplugged",
-	".venv",
-	"venv",
-	".tox",
-	".nox",
-	"__pypackages__",
-	"Pods",
-	".gradle",
+	dependencyVirtualEnv,
+	dependencyVenv,
+	dependencyTox,
+	dependencyNox,
+	dependencyPyPackages,
+	dependencyPods,
+	dependencyGradle,
 }
 
 var dependencyDirectoryNames = map[string]struct{}{
-	"node_modules":     {},
-	"bower_components": {},
-	".pnpm-store":      {},
-	".venv":            {},
-	"venv":             {},
-	".tox":             {},
-	".nox":             {},
-	"__pypackages__":   {},
-	"Pods":             {},
-	".gradle":          {},
+	dependencyNodeModules:     {},
+	dependencyBowerComponents: {},
+	dependencyPnpmStore:       {},
+	dependencyVirtualEnv:      {},
+	dependencyVenv:            {},
+	dependencyTox:             {},
+	dependencyNox:             {},
+	dependencyPyPackages:      {},
+	dependencyPods:            {},
+	dependencyGradle:          {},
 }
 
 var dependencyTraversalExclusions = map[string]struct{}{

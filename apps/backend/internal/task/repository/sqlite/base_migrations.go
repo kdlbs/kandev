@@ -209,6 +209,7 @@ func (r *Repository) runMigrations() error {
 		ON repository_secret_bindings(repository_id)`)
 	r.migrate.Apply("repositories.remote_url", `ALTER TABLE repositories ADD COLUMN remote_url TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.provider_host", `ALTER TABLE repositories ADD COLUMN provider_host TEXT DEFAULT ''`)
+	r.migrate.Apply("repositories.provider_scope", `ALTER TABLE repositories ADD COLUMN provider_scope TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.provider_host.github_backfill", `
 		UPDATE repositories
 		SET provider_host = 'https://github.com'

@@ -2,9 +2,12 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   autoSelectBranch,
   buildCreateTaskPayload,
+  buildRepositoriesPayload,
+  findUnresolvedProviderRemote,
   shouldShowTaskTitleField,
   validateCreateInputs,
 } from "./task-create-dialog-helpers";
+import type { TaskRemoteRepoRow } from "./task-create-dialog-types";
 const STORAGE_KEYS = { LAST_BRANCH: "kandev.dialog.lastBranch" } as const;
 
 // The agent-bearing fields every buildCreateTaskPayload case needs but none of
@@ -142,6 +145,64 @@ describe("shouldShowTaskTitleField", () => {
       expect(shouldShowTaskTitleField(isCreateMode, isEditMode, isTaskStarted)).toBe(expected);
     },
   );
+});
+
+describe("buildRepositoriesPayload — inspected provider repository", () => {
+  it("sends the exact inspected clone URL and complete Data Center descriptor", () => {
+    const remoteRow = {
+      key: "remote-0",
+      url: "https://bitbucket.example.test/bitbucket/projects/PLATFORM/repos/web/pull-requests/42",
+      remoteUrl: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+      branch: "feature/dc",
+      source: "paste",
+      provider: "bitbucket",
+      providerHost: "https://bitbucket.example.test/bitbucket",
+      providerRepoId: "web-42",
+      providerOwner: "PLATFORM",
+      providerName: "web",
+      prNumber: 42,
+      prBaseBranch: "main",
+      prHeadBranch: "feature/dc",
+    } as unknown as TaskRemoteRepoRow;
+
+    const payload = buildRepositoriesPayload({
+      useRemote: true,
+      remoteRepos: [remoteRow],
+      repositories: [],
+      discoveredRepositories: [],
+    });
+
+    expect(payload).toEqual([
+      expect.objectContaining({
+        repository_id: "",
+        remote_url: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+        provider: "bitbucket",
+        provider_host: "https://bitbucket.example.test/bitbucket",
+        provider_repo_id: "web-42",
+        provider_owner: "PLATFORM",
+        provider_name: "web",
+        base_branch: "main",
+        checkout_branch: "feature/dc",
+        pr_number: 42,
+      }),
+    ]);
+    expect(payload[0]).not.toHaveProperty("github_url");
+  });
+});
+
+describe("findUnresolvedProviderRemote", () => {
+  it("blocks a plugin URL until inspection attaches provider identity", () => {
+    const row = {
+      key: "remote-0",
+      url: "https://bitbucket.example.test/projects/TEAM/repos/app",
+      branch: "",
+      source: "paste",
+    } as TaskRemoteRepoRow;
+    const matches = (url: string) => url.includes("bitbucket.example.test");
+
+    expect(findUnresolvedProviderRemote([row], matches)).toBe(row);
+    expect(findUnresolvedProviderRemote([{ ...row, provider: "bitbucket" }], matches)).toBeNull();
+  });
 });
 
 describe("auto-title creation helpers", () => {

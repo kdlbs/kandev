@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	orchexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/plugins"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -20,9 +21,9 @@ type pluginStarterService interface {
 
 // pluginsTaskStarterAdapter adapts the orchestrator to the plugins package's
 // taskStarter interface (Host data API CreateTask start_agent flag, ADR 0043
-// phase 2). It launches with empty agent/executor ids so the orchestrator
-// resolves the workflow-step / workspace defaults itself — the same
-// default-resolving launch path the office scheduler uses.
+// phase 2). Plugin-selected agent/executor profiles, prompt, and plan mode
+// flow to the orchestrator; empty workflow-step and executor IDs retain the
+// normal default-resolving launch path used by the office scheduler.
 //
 // StartTask returns immediately: the launch runs in a fire-and-forget goroutine
 // on a detached, time-bounded context (matching the MCP launchAutoStartTask
@@ -35,12 +36,14 @@ type pluginsTaskStarterAdapter struct {
 	log  *logger.Logger
 }
 
-func (a pluginsTaskStarterAdapter) StartTask(ctx context.Context, taskID string) error {
+func (a pluginsTaskStarterAdapter) StartTask(ctx context.Context, taskID string, launch plugins.TaskLaunchInput) error {
 	launchCtx := context.WithoutCancel(ctx)
 	go func() {
 		startCtx, cancel := context.WithTimeout(launchCtx, constants.AgentLaunchTimeout)
 		defer cancel()
-		if _, err := a.orch.StartTask(startCtx, taskID, "", "", "", "", "", "", false, false, nil); err != nil {
+		if _, err := a.orch.StartTask(
+			startCtx, taskID, launch.AgentProfileID, "", launch.ExecutorProfileID, "", launch.Prompt, "", launch.PlanMode, false, nil,
+		); err != nil {
 			a.log.Warn("plugins: best-effort start_agent failed", zap.String("task_id", taskID), zap.Error(err))
 		}
 	}()
