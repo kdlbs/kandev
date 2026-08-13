@@ -31,8 +31,8 @@ Run RED before changing production code, then rerun both commands after the
 GREEN implementation and final refactor:
 
 ```bash
-cd apps/web && pnpm e2e:run tests/chat/clarification.spec.ts -- --grep "shared context"
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-clarification.spec.ts -- --grep "shared context"
+(cd apps/web && pnpm e2e:run tests/chat/clarification.spec.ts -- --grep "shared context")
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-clarification.spec.ts -- --grep "shared context")
 ```
 
 Confirm each focused command discovers and runs one intended test. The managed
@@ -86,5 +86,8 @@ status. Do not introduce new UI copy or backend contract changes.
 - A disposable production-build capture test produced and visually validated
   desktop and phone screenshots for the PR; the capture test was removed after
   asset generation.
+- PR fixup addressed the valid review comments by scoping clarification
+  locators to the active chat and making the two task commands independent;
+  both focused E2E commands passed again against fresh production builds.
 - `pnpm run typecheck`, changed-file ESLint, `pnpm run i18n:ratchet`, and
   `git diff --check` passed.

@@ -107,6 +107,10 @@ e2e/tests/chat/mobile-clarification.spec.ts` — passed.
 - PR asset capture: a disposable production-build E2E captured and visually
   inspected the desktop and phone states; both screenshots were non-empty and
   compressed with `pngquant-bin` for PR media.
+- PR fixup: after the requested 15-minute review window, the active-chat page
+  object scope and independent task verification commands were corrected in
+  response to valid minor review comments. The focused desktop and mobile E2E
+  commands passed again against fresh production builds.
 
 ## Implementation Waves And Parallel Candidates
 

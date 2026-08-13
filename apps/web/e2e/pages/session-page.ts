@@ -463,7 +463,7 @@ export class SessionPage {
 
   /** Clarification overlay (visible when a clarification request is pending). */
   clarificationOverlay(): Locator {
-    return this.page.getByTestId("clarification-overlay");
+    return this.activeChat().getByTestId("clarification-overlay");
   }
 
   /** Shared context shown once above the active clarification question. */
