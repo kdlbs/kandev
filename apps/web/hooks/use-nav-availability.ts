@@ -84,11 +84,14 @@ export function useNavAvailability(): AvailabilityMap {
   const azureDevOpsConfigured = useAzureDevOpsAvailable(scopedWorkspaceId);
   const githubConfigured = getGitHubIntegrationStatus(status, loading).ready;
 
-  const { enabled: azureDevOpsEnabled } = useAzureDevOpsEnabled();
-  const { enabled: githubEnabled } = useGitHubEnabled();
-  const { enabled: gitlabEnabled } = useGitLabEnabled();
-  const { enabled: jiraEnabled } = useJiraEnabled();
-  const { enabled: linearEnabled } = useLinearEnabled();
+  // The toggles are per-workspace too, so they follow the same scoped id: a
+  // workspace that has GitHub turned off must not hide it from the nav while
+  // another workspace is active.
+  const { enabled: azureDevOpsEnabled } = useAzureDevOpsEnabled(scopedWorkspaceId);
+  const { enabled: githubEnabled } = useGitHubEnabled(scopedWorkspaceId);
+  const { enabled: gitlabEnabled } = useGitLabEnabled(scopedWorkspaceId);
+  const { enabled: jiraEnabled } = useJiraEnabled(scopedWorkspaceId);
+  const { enabled: linearEnabled } = useLinearEnabled(scopedWorkspaceId);
 
   const { hideDisabled } = useHideDisabledIntegrationsInNav();
   const visible = (configured: boolean, enabled: boolean) =>

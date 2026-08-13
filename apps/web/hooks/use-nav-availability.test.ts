@@ -170,6 +170,16 @@ describe("useNavAvailability", () => {
     expect(mocks.azureDevOpsAvailable).toHaveBeenCalledWith(mocks.workspaceId);
   });
 
+  it("reads each enable toggle for the active workspace, not install-wide", () => {
+    // The toggles are per workspace: a workspace with GitHub turned off must
+    // not hide it from the nav while another workspace is active.
+    renderHook(() => useNavAvailability());
+
+    for (const key of NAV_GATED_KEYS) {
+      expect(ENABLED_MOCK_BY_KEY[key]).toHaveBeenCalledWith(mocks.workspaceId);
+    }
+  });
+
   it("falls back to default workspace resolution for a stale active id", () => {
     mocks.state.workspaces.items = [{ id: "workspace-2" }];
 
@@ -178,6 +188,9 @@ describe("useNavAvailability", () => {
     expect(mocks.jiraAuthed).toHaveBeenCalledWith(null);
     expect(mocks.linearAuthed).toHaveBeenCalledWith(null);
     expect(mocks.azureDevOpsAvailable).toHaveBeenCalledWith(null);
+    for (const key of NAV_GATED_KEYS) {
+      expect(ENABLED_MOCK_BY_KEY[key]).toHaveBeenCalledWith(null);
+    }
   });
 
   describe.each(NAV_GATED_KEYS)("decoupling enabled from nav visibility for %s", (key) => {

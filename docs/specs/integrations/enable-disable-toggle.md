@@ -19,6 +19,12 @@ disabled-but-still-configured integration continues to clutter the left panel
 navigation. (Slack was retired from the core app to an external plugin after
 this spec was written and is out of scope.)
 
+"Because a workspace doesn't use it" was one of the reasons above, but the
+toggle first shipped install-wide: turning GitHub off for one workspace turned
+it off for every workspace, while the credentials it gates stay per workspace.
+That is corrected here, and the requirements below now describe the
+per-workspace toggle.
+
 ## What
 
 - Every integration (Azure DevOps, GitHub, GitLab, Jira, Linear, Sentry)
@@ -30,10 +36,17 @@ this spec was written and is out of scope.)
   integrations index page (`/settings/integrations` and its per-workspace
   equivalent), so a user can enable or disable any integration without
   opening its detail page.
-- Toggling the slider in either location SHALL keep both locations in sync
-  (same underlying per-integration enabled state, install-wide — not
-  per-workspace — consistent with the existing Jira/Linear/Sentry
-  toggle).
+- The enabled state SHALL be scoped to a workspace. Everything else about an
+  integration already is (credentials, health, and the settings page the
+  slider lives on, `/settings/workspaces/<id>/integrations/<slug>`), so
+  disabling an integration in one workspace MUST NOT disable it in any other.
+  Every surface that reads the toggle reads it for the workspace it is
+  showing: the sliders for the workspace whose settings page they are on, the
+  left-panel nav and its "hide disabled" filter for the active workspace, and
+  the Settings menu tree for each workspace it lists.
+- Toggling the slider in either location SHALL keep both locations in sync for
+  that workspace (same underlying per-integration, per-workspace enabled
+  state).
 - The enabled state for Azure DevOps, GitHub and GitLab is purely a
   presentation/navigation-visibility switch: it MUST NOT change whether their
   existing PR/work-item/board/MR features function. This mirrors that those
@@ -62,7 +75,7 @@ this spec was written and is out of scope.)
   left-panel nav visibility.
 - All new/changed toggles persist and sync the same way the existing
   Jira/Linear/Sentry "enabled" toggle does: a `localStorage`-backed,
-  install-wide boolean, synced across browser tabs, with a manual-save
+  per-workspace boolean, synced across browser tabs, with a manual-save
   affordance consistent with the rest of the Settings UI (`data-settings-dirty`
   + the shared save bar) where the control lives on a settings page.
 
@@ -74,13 +87,15 @@ in `hooks/domains/integrations/use-integration-enabled.ts`:
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `kandev:azure-devops:enabled:v1` | boolean | `true` | New. Mirrors `kandev:jira:enabled:v1`. |
-| `kandev:github:enabled:v1` | boolean | `true` | New. |
-| `kandev:gitlab:enabled:v1` | boolean | `true` | New. |
-| `kandev:integrations:hideDisabledInNav:v1` | boolean | `false` | New. Not per-integration; one flag for the whole nav-filtering behavior. |
+| `kandev:<slug>:enabled:v1:<workspaceId>` | boolean | `true` | One per (integration, workspace), for all six slugs. |
+| `kandev:integrations:hideDisabledInNav:v1` | boolean | `false` | Not per-integration and not per-workspace; one flag for the whole nav-filtering behavior. |
 
-Existing keys (`kandev:jira:enabled:v1`, `kandev:linear:enabled:v1`,
-`kandev:sentry:enabled:v1`) are unchanged.
+The unsuffixed `kandev:<slug>:enabled:v1` keys hold the value written while the
+toggle was install-wide. They are never written again, and are read as the
+default for a workspace that has never been toggled, so upgrading does not
+silently re-enable an integration a user had turned off. Pre-`v1` per-workspace
+keys (`kandev:<slug>:enabled:<workspaceId>`) keep folding into the unsuffixed
+key on first read, and the fold explicitly skips the new suffixed keys.
 
 ## API surface
 
@@ -89,13 +104,25 @@ No backend/HTTP/WS changes. This is entirely a frontend feature.
 Frontend primitives (new):
 
 - `hooks/domains/azure-devops/use-azure-devops-enabled.ts` — exports
-  `useAzureDevOpsEnabled()`, a one-line wrapper over
-  `useIntegrationEnabled(storageKey, legacyKeyPrefix, syncEvent)`, mirroring
-  `hooks/domains/jira/use-jira-enabled.ts`. No legacy key prefix existed
-  before, so the legacy-migration argument is inert (no prior keys to
+  `useAzureDevOpsEnabled(workspaceId?)`, a one-line wrapper over
+  `useIntegrationEnabled(storageKey, legacyKeyPrefix, syncEvent, workspaceId)`,
+  mirroring `hooks/domains/jira/use-jira-enabled.ts`. No legacy key prefix
+  existed before, so the legacy-migration argument is inert (no prior keys to
   migrate) but kept for signature symmetry.
 - `hooks/domains/github/use-github-enabled.ts` — same shape, for GitHub.
 - `hooks/domains/gitlab/use-gitlab-enabled.ts` — same shape, for GitLab.
+- `lib/integrations/integration-enabled-keys.ts` — the per-slug storage
+  key / legacy prefix / sync event catalog, so the naming scheme is declared
+  once and surfaces that must read several workspaces' toggles at a time have
+  something to read through.
+- `hooks/domains/integrations/use-integration-enabled.ts` also exports
+  `readIntegrationEnabled` (an unsubscribed read for one workspace) and
+  `useIntegrationEnabledReader` (the same read bound to a live subscription).
+  The Settings menu tree lists every workspace and rules of hooks forbid
+  calling `useXEnabled` per workspace, so it uses the reader.
+- `components/integrations/integration-enabled-control-props.ts` — the props
+  every slider takes. `workspaceId` is a required (though nullable) prop so a
+  render site that forgets to name its workspace fails to compile.
 - `hooks/domains/integrations/use-hide-disabled-integrations-in-nav.ts` —
   exports `useHideDisabledIntegrationsInNav()` returning
   `{ hideDisabled: boolean; setHideDisabled: (next: boolean) => void }`,
@@ -137,9 +164,9 @@ Modified:
 
 ## Permissions
 
-No change. The toggle is a per-browser-profile, install-wide UI preference
-with no authorization dimension (same as the existing Jira/Linear/Sentry
-toggle).
+No change. The toggle is a per-browser-profile UI preference with no
+authorization dimension; scoping it to a workspace is a scoping change, not an
+access-control one.
 
 ## Failure modes
 
@@ -162,7 +189,8 @@ toggle).
 
 ## Persistence guarantees
 
-State lives only in `localStorage`; it is not part of any backend restart or
+State lives only in `localStorage`, keyed by workspace id; it is not part of
+any backend restart or
 task-execution durability guarantee, matching the existing enabled-toggle
 convention. It survives a browser restart but not a `localStorage` clear, and
 is not synced across devices/browsers.
@@ -196,6 +224,16 @@ is not synced across devices/browsers.
   one of the six integration rows/cards shows its own enable/disable
   slider reflecting that integration's current stored state, and toggling a
   slider does not navigate to that integration's detail page.
+- **GIVEN** two workspaces and GitHub connected in both, **WHEN** the user
+  disables GitHub from workspace A's integrations page, **THEN** workspace B's
+  GitHub slider still reads "Enabled", and every surface gated on GitHub's
+  enabled state (nav filtering while "hide disabled" is on, the Settings menu
+  tree's per-workspace Integrations list) treats GitHub as enabled while B is
+  the workspace in view.
+- **GIVEN** a user who had disabled an integration while the toggle was
+  install-wide, **WHEN** they upgrade to the per-workspace toggle, **THEN**
+  every workspace still reads it as disabled until one of them toggles it,
+  after which only that workspace's value changes.
 - **GIVEN** the integrations index page and the Azure DevOps settings page
   open in two browser tabs, **WHEN** the user disables Azure DevOps on the
   index page in tab A, **THEN** tab B's Azure DevOps settings-page slider

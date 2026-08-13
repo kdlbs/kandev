@@ -3,14 +3,13 @@
 import { useMemo } from "react";
 
 import { useAppStore } from "@/components/state-provider";
-import { useAzureDevOpsEnabled } from "@/hooks/domains/azure-devops/use-azure-devops-enabled";
-import { useGitHubEnabled } from "@/hooks/domains/github/use-github-enabled";
-import { useGitLabEnabled } from "@/hooks/domains/gitlab/use-gitlab-enabled";
 import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav";
+import { useIntegrationEnabledReader } from "@/hooks/domains/integrations/use-integration-enabled";
 import { useHideDisabledAgentProfilesInNav } from "@/hooks/domains/settings/use-hide-disabled-agent-profiles-in-nav";
-import { useJiraEnabled } from "@/hooks/domains/jira/use-jira-enabled";
-import { useLinearEnabled } from "@/hooks/domains/linear/use-linear-enabled";
-import { useSentryEnabled } from "@/hooks/domains/sentry/use-sentry-enabled";
+import {
+  INTEGRATION_ENABLED_KEYS,
+  INTEGRATION_ENABLED_SYNC_EVENTS,
+} from "@/lib/integrations/integration-enabled-keys";
 import { AGENTS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import { EXECUTORS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/executors";
 import { WORKSPACE_INTEGRATIONS } from "@/lib/settings-discovery/catalog/integrations";
@@ -63,7 +62,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
   // order. Before the scan hydrates this is empty and the saved order stands.
   const agentDiscovery = useAppStore((s) => s.agentDiscovery.items);
   const discoveryLoaded = useAppStore((s) => s.agentDiscovery.loaded);
-  const visibleIntegrations = useVisibleIntegrationSlugs();
+  const visibleIntegrationsFor = useVisibleIntegrationSlugsFor();
   const integrationContributions = pluginRegistry.getIntegrationSettings().map((integration) => ({
     id: integration.id,
     label: integration.label,
@@ -85,7 +84,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
         buildWorkspacesBranch(
           workspaces,
           activeWorkspaceId,
-          visibleIntegrations,
+          visibleIntegrationsFor,
           integrationContributions,
         ),
       ),
@@ -103,15 +102,15 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
     executors,
     agentDiscovery,
     discoveryLoaded,
-    visibleIntegrations,
+    visibleIntegrationsFor,
     integrationContributions,
     hideDisabledAgentProfiles,
   ]);
 }
 
 /**
- * Which integrations the Integrations branches may list, or `undefined` for all
- * of them.
+ * Which integrations a workspace's Integrations branch may list, or `undefined`
+ * for all of them.
  *
  * The per-integration enable toggles gate **row visibility**, and only while
  * "Hide disabled integrations from left panel navigation" is on (off by
@@ -121,42 +120,28 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
  * `configured && (!hideDisabled || enabled)`: the tree lists an integration you
  * have never connected, the sidebar nav does not.
  *
- * Every toggle is a `localStorage`-backed `useSyncExternalStore` read, so this
- * costs no requests; returning `undefined` on the default path keeps the
- * builder from filtering at all.
+ * The branch lists every workspace, and the toggles are per workspace, so this
+ * resolves them per workspace rather than once — rules of hooks forbid calling
+ * `useXEnabled` in a loop, hence the subscribed reader over the key catalog.
+ * Every toggle is still a `localStorage` read, so this costs no requests;
+ * returning `undefined` on the default path keeps the builder from filtering at
+ * all.
  */
-function useVisibleIntegrationSlugs(): ReadonlySet<IntegrationSlug> | undefined {
-  const { enabled: azureDevOpsEnabled } = useAzureDevOpsEnabled();
-  const { enabled: githubEnabled } = useGitHubEnabled();
-  const { enabled: gitlabEnabled } = useGitLabEnabled();
-  const { enabled: jiraEnabled } = useJiraEnabled();
-  const { enabled: linearEnabled } = useLinearEnabled();
-  const { enabled: sentryEnabled } = useSentryEnabled();
+function useVisibleIntegrationSlugsFor(): (
+  workspaceId: string,
+) => ReadonlySet<IntegrationSlug> | undefined {
   const { hideDisabled } = useHideDisabledIntegrationsInNav();
+  const readEnabled = useIntegrationEnabledReader(INTEGRATION_ENABLED_SYNC_EVENTS);
 
   return useMemo(() => {
-    if (!hideDisabled) return undefined;
-    // A `Record` over the slug union rather than a list of spreads: a seventh
-    // integration then fails to compile here until it declares its toggle,
-    // instead of silently vanishing from the tree.
-    const enabled: Record<IntegrationSlug, boolean> = {
-      "azure-devops": azureDevOpsEnabled,
-      github: githubEnabled,
-      gitlab: gitlabEnabled,
-      jira: jiraEnabled,
-      linear: linearEnabled,
-      sentry: sentryEnabled,
-    };
-    return new Set(WORKSPACE_INTEGRATIONS.map(([slug]) => slug).filter((slug) => enabled[slug]));
-  }, [
-    hideDisabled,
-    azureDevOpsEnabled,
-    githubEnabled,
-    gitlabEnabled,
-    jiraEnabled,
-    linearEnabled,
-    sentryEnabled,
-  ]);
+    if (!hideDisabled) return () => undefined;
+    return (workspaceId: string) =>
+      new Set(
+        WORKSPACE_INTEGRATIONS.map(([slug]) => slug).filter((slug) =>
+          readEnabled(INTEGRATION_ENABLED_KEYS[slug].storageKey, workspaceId),
+        ),
+      );
+  }, [hideDisabled, readEnabled]);
 }
 
 /**
