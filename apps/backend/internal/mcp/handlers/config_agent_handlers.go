@@ -110,7 +110,6 @@ func (h *Handlers) handleDeleteAgentProfile(ctx context.Context, msg *ws.Message
 
 	profile, err := h.agentSettingsCtrl.DeleteProfile(ctx, profileID, false)
 	if err != nil {
-		h.logger.Error("failed to delete agent profile", zap.Error(err))
 		var inUseErr *agentsettingscontroller.ErrProfileInUseDetail
 		if errors.As(err, &inUseErr) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Cannot delete: profile is used by an active agent session", nil)
@@ -118,6 +117,10 @@ func (h *Handlers) handleDeleteAgentProfile(ctx context.Context, msg *ws.Message
 		if errors.Is(err, agentsettingscontroller.ErrAgentProfileNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Agent profile not found", nil)
 		}
+		// Only an unclassified failure is a server error. Deleting a profile
+		// that is gone, or one still in use, are client conditions, and the
+		// REST sibling likewise logs only in its 500 branch.
+		h.logger.Error("failed to delete agent profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete agent profile: "+err.Error(), nil)
 	}
 	h.publishAgentProfileEvent(ctx, events.AgentProfileDeleted, profile)
