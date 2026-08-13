@@ -878,6 +878,7 @@ func TestGetOrEnsureTaskHostForEnvironment(t *testing.T) {
 				},
 			},
 		})
+		backend.existingOnlyAbsent = true
 		for _, execution := range []*AgentExecution{
 			{ID: "session-exec-1", TaskID: "task-1", SessionID: "session-1", TaskEnvironmentID: "env-1"},
 			{ID: "session-exec-2", TaskID: "task-1", SessionID: "session-2", TaskEnvironmentID: "env-1"},
@@ -900,11 +901,14 @@ func TestGetOrEnsureTaskHostForEnvironment(t *testing.T) {
 		if !host.IsAgentctlReady() {
 			t.Fatal("task host returned before agentctl became ready")
 		}
-		if got := backend.createCount.Load(); got != 1 {
-			t.Fatalf("CreateInstance calls = %d, want 1", got)
+		if got := backend.createCount.Load(); got != 2 {
+			t.Fatalf("CreateInstance calls = %d, want absence probe plus one launch", got)
 		}
 		if backend.lastRequest == nil || !backend.lastRequest.IsTaskHost {
 			t.Fatalf("executor request = %#v, want dedicated task-host marker", backend.lastRequest)
+		}
+		if backend.lastRequest.RequireExistingInstance {
+			t.Fatalf("last executor request = %#v, want new task-host launch", backend.lastRequest)
 		}
 		if backend.lastRequest.AgentConfig != nil || backend.lastRequest.Protocol != "" ||
 			backend.lastRequest.AgentProfileID != "" || backend.lastRequest.OfficeAgentProfileID != "" {
@@ -927,8 +931,8 @@ func TestGetOrEnsureTaskHostForEnvironment(t *testing.T) {
 		if err != nil {
 			t.Fatalf("second GetOrEnsureTaskHostForEnvironment: %v", err)
 		}
-		if again.ID != host.ID || backend.createCount.Load() != 1 {
-			t.Fatalf("second host = %q with %d creates; want %q with 1", again.ID, backend.createCount.Load(), host.ID)
+		if again.ID != host.ID || backend.createCount.Load() != 2 {
+			t.Fatalf("second host = %q with %d executor calls; want %q with 2", again.ID, backend.createCount.Load(), host.ID)
 		}
 	})
 

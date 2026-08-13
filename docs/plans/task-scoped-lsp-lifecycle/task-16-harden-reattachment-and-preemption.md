@@ -68,6 +68,10 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
   regressions passed 20 race-enabled repetitions.
 - The deleted-launch-profile existing-only cleanup regression passed 20 race-enabled repetitions,
   and the production Playwright branch-split reproducer passed with its profile-deletion cleanup.
+- The exact-head backend shard exposed an older creation test that treated an existing-only probe as
+  a new launch. Its fixture now proves physical absence first, then verifies the real launch request;
+  both the launch and deleted-profile regressions passed 20 race-enabled repetitions and the full
+  lifecycle race package passed.
 - `go test -race -count=20 ./internal/task/service -run
   '^TestServiceTerminalMutationCancelsActiveTaskLSPAdmission$'` passed. The full task-service race
   package also exercised the changed path; one broad run exceeded the package timeout while waiting
