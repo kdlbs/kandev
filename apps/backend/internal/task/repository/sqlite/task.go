@@ -486,8 +486,6 @@ func (r *Repository) GetTask(ctx context.Context, id string) (*models.Task, erro
 // upsert/clear on workflow_step_participants inside the same tx as the
 // task UPDATE.
 func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
-	task.UpdatedAt = time.Now().UTC()
-
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
@@ -511,6 +509,15 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	if err != nil {
 		return err
 	}
+	// Stamped after the transactional read/lock above, not before BeginTx: on
+	// Postgres, readTaskStepInTx's FOR UPDATE blocks until this transaction's
+	// turn to touch the row, so the timestamp now reflects true serialization
+	// order. Stamping it earlier let two concurrent movers commit out of
+	// timestamp order relative to their actual commit order, which broke the
+	// (occurred_at, id) chain invariant under real concurrent load — SQLite's
+	// single-writer connection pool serializes callers regardless, so this
+	// was invisible until exercised against Postgres with real concurrency.
+	task.UpdatedAt = time.Now().UTC()
 
 	updateQuery := `
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
@@ -912,7 +919,6 @@ func detachTaskQuery(driver string) string {
 // UpdateTaskIfWorkflowStepHasCapacity updates a task inside the same write
 // transaction that checks a WIP-limited target step's current occupancy.
 func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID, excludeTaskID string, limit int) error {
-	task.UpdatedAt = time.Now().UTC()
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
@@ -947,6 +953,10 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	if err != nil {
 		return err
 	}
+	// See updateTaskTx's comment: stamped after the transactional lock, not
+	// before BeginTx, so occurred_at reflects true commit-serialization order
+	// under concurrent Postgres callers.
+	task.UpdatedAt = time.Now().UTC()
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
@@ -985,7 +995,6 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	destinationStepID string,
 	limit int,
 ) (bool, error) {
-	task.UpdatedAt = time.Now().UTC()
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
@@ -1035,6 +1044,10 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	if err != nil {
 		return false, err
 	}
+	// See updateTaskTx's comment: stamped after the transactional lock, not
+	// before BeginTx, so occurred_at reflects true commit-serialization order
+	// under concurrent Postgres callers.
+	task.UpdatedAt = time.Now().UTC()
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
@@ -2258,7 +2271,6 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	if task == nil {
 		return false, errors.New("restore task message rollback: task is nil")
 	}
-	updatedAt := time.Now().UTC()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -2269,6 +2281,10 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	if err != nil {
 		return false, err
 	}
+	// See updateTaskTx's comment: stamped after the transactional lock, not
+	// before BeginTx, so occurred_at reflects true commit-serialization order
+	// under concurrent Postgres callers.
+	updatedAt := time.Now().UTC()
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks
