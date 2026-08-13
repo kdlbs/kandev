@@ -112,6 +112,17 @@ vi.mock("@/lib/api/domains/auth-api", () => ({
   logout: mocks.logout,
 }));
 
+// Radix Tooltip's hover/focus-triggered visibility isn't modelled well by
+// jsdom; render both the trigger and its content unconditionally, matching
+// this repo's convention elsewhere (see agents-section.test.tsx) so tooltip
+// text is directly assertable without simulating hover or focus.
+vi.mock("@kandev/ui/tooltip", () => ({
+  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TooltipContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
 // Radix dropdown primitives rely on pointer/portal behaviour that jsdom
 // doesn't model well; render them as plain elements so clicks reach the
 // current-user chip's own logic (see app-sidebar-workspace-picker.test.tsx).
@@ -134,7 +145,7 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
   ),
 }));
 
-import { AppSidebarFooter } from "./app-sidebar-footer";
+import { AppSidebarFooter, MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "./app-sidebar-footer";
 
 function renderFooter(collapsed = false) {
   return render(
@@ -404,20 +415,28 @@ describe("AppSidebarFooter current-user chip", () => {
   });
 });
 
-function eightPluginDestinations(): FooterDestination[] {
-  return [
-    STATS_DESTINATION,
-    ...Array.from({ length: 8 }, (_, i) => ({
-      id: `plugin:acme-${i}:board`,
-      label: `Acme Board ${i}`,
-      icon: IconChartBar,
-      section: "insights",
-      href: `/plugins/acme-${i}`,
-      source: "plugin" as const,
-      pluginItemId: "board",
-    })),
-  ];
+function pluginDestination(i: number): FooterDestination {
+  return {
+    id: `plugin:acme-${i}:board`,
+    label: `Acme Board ${i}`,
+    icon: IconChartBar,
+    section: "insights",
+    href: `/plugins/acme-${i}`,
+    source: "plugin" as const,
+    pluginItemId: "board",
+  };
 }
+
+function pluginDestinations(count: number): FooterDestination[] {
+  return Array.from({ length: count }, (_, i) => pluginDestination(i));
+}
+
+function eightPluginDestinations(): FooterDestination[] {
+  return [STATS_DESTINATION, ...pluginDestinations(8)];
+}
+
+const OVERFLOW_TRIGGER_TEST_ID = "sidebar-plugin-overflow-button";
+const MORE_PLUGIN_ITEMS_LABEL = "More plugin items";
 
 describe("AppSidebarFooter plugin insights items", () => {
   beforeEach(resetFooterState);
@@ -448,28 +467,138 @@ describe("AppSidebarFooter plugin insights items", () => {
 
     expect(mocks.routerPush).toHaveBeenCalledWith("/plugins/acme");
   });
+});
 
-  it("renders every plugin insights destination with no cap, wrapping when expanded", () => {
+describe("AppSidebarFooter plugin footer capacity and overflow", () => {
+  beforeEach(resetFooterState);
+
+  afterEach(() => cleanup());
+
+  it("renders no overflow trigger when no plugin registers a sidebar-footer item (P = 0)", () => {
+    insightDestinations = [STATS_DESTINATION];
+
+    renderFooter();
+
+    expect(screen.queryByTestId(OVERFLOW_TRIGGER_TEST_ID)).toBeNull();
+  });
+
+  it("renders all plugin buttons inline with no trigger when P is at the budget", () => {
+    insightDestinations = [
+      STATS_DESTINATION,
+      ...pluginDestinations(MAX_INLINE_PLUGIN_FOOTER_ITEMS),
+    ];
+
+    renderFooter();
+
+    for (let i = 0; i < MAX_INLINE_PLUGIN_FOOTER_ITEMS; i++) {
+      expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
+    }
+    expect(screen.queryByTestId(OVERFLOW_TRIGGER_TEST_ID)).toBeNull();
+  });
+
+  it("partitions the first over-budget item into the overflow trigger's menu", () => {
+    insightDestinations = [
+      STATS_DESTINATION,
+      ...pluginDestinations(MAX_INLINE_PLUGIN_FOOTER_ITEMS + 1),
+    ];
+
+    renderFooter();
+
+    for (let i = 0; i < MAX_INLINE_PLUGIN_FOOTER_ITEMS; i++) {
+      expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
+    }
+    const trigger = screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID);
+    expect(trigger).not.toBeNull();
+
+    // The over-budget item's menu item shares its testid with what an inline
+    // button would use (see spec.md#Rendered-identity); open the menu before
+    // asserting presence, per spec.md#The-guarantee, rather than asserting
+    // absence beforehand.
+    const overIndex = MAX_INLINE_PLUGIN_FOOTER_ITEMS;
+    fireEvent.click(trigger);
+    const menuItem = screen.getByTestId(`sidebar-plugin:acme-${overIndex}:board-button`);
+    expect(menuItem.textContent).toContain(`Acme Board ${overIndex}`);
+
+    fireEvent.click(menuItem);
+    expect(mocks.routerPush).toHaveBeenCalledWith(`/plugins/acme-${overIndex}`);
+  });
+
+  it("labels the overflow trigger's accessible name and tooltip from the sidebar:morePluginItems key", () => {
+    insightDestinations = [
+      STATS_DESTINATION,
+      ...pluginDestinations(MAX_INLINE_PLUGIN_FOOTER_ITEMS + 1),
+    ];
+
+    renderFooter();
+
+    const trigger = screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID);
+    expect(trigger.getAttribute("aria-label")).toBe(MORE_PLUGIN_ITEMS_LABEL);
+    expect(screen.getByText(MORE_PLUGIN_ITEMS_LABEL)).not.toBeNull();
+  });
+
+  it("keeps the budget at 3 inline plus one trigger for 8 plugins, expanded, dropping none", () => {
     insightDestinations = eightPluginDestinations();
 
     renderFooter(false);
 
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < MAX_INLINE_PLUGIN_FOOTER_ITEMS; i++) {
+      expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
+    }
+    const trigger = screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID);
+    fireEvent.click(trigger);
+    for (let i = MAX_INLINE_PLUGIN_FOOTER_ITEMS; i < 8; i++) {
       expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
     }
     const container = screen.getByTestId("sidebar-settings-gear").parentElement;
     expect(container?.className).toContain("flex-wrap");
   });
 
-  it("renders every plugin insights destination with no cap when collapsed, in a non-wrapping column", () => {
+  it("keeps the same budget and trigger for 8 plugins when collapsed, in a non-wrapping column", () => {
     insightDestinations = eightPluginDestinations();
 
     renderFooter(true);
 
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < MAX_INLINE_PLUGIN_FOOTER_ITEMS; i++) {
       expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
     }
+    expect(screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID)).not.toBeNull();
     const container = screen.getByTestId("sidebar-settings-gear").parentElement;
     expect(container?.className).toContain("flex-col");
+  });
+
+  it("always renders stats inline, applying the budget to plugin entries alone", () => {
+    insightDestinations = eightPluginDestinations();
+
+    renderFooter();
+
+    expect(screen.getByRole("button", { name: "Stats" })).not.toBeNull();
+    for (let i = 0; i < MAX_INLINE_PLUGIN_FOOTER_ITEMS; i++) {
+      expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
+    }
+  });
+
+  it("partitions by current registration order, so a re-enabled plugin moves from inline to the overflow menu", () => {
+    // Simulates the post-re-enable order: p1 moved to the end of the plugin
+    // run (spec's Ordering + Capacity re-enable scenario). The footer only
+    // partitions whatever order it is given; producing that order is the
+    // registry's job, exercised elsewhere.
+    insightDestinations = [
+      STATS_DESTINATION,
+      { ...pluginDestination(2), id: "plugin:p2:board", label: "P2" },
+      { ...pluginDestination(3), id: "plugin:p3:board", label: "P3" },
+      { ...pluginDestination(4), id: "plugin:p4:board", label: "P4" },
+      { ...pluginDestination(1), id: "plugin:p1:board", label: "P1" },
+    ];
+
+    renderFooter();
+
+    expect(screen.getByTestId("sidebar-plugin:p2:board-button")).not.toBeNull();
+    expect(screen.getByTestId("sidebar-plugin:p3:board-button")).not.toBeNull();
+    expect(screen.getByTestId("sidebar-plugin:p4:board-button")).not.toBeNull();
+
+    // p1's menu item shares its testid with what an inline button would use
+    // (spec.md#Rendered-identity); open the menu before asserting presence.
+    fireEvent.click(screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID));
+    expect(screen.getByTestId("sidebar-plugin:p1:board-button")).not.toBeNull();
   });
 });

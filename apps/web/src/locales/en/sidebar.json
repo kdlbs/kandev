@@ -48,6 +48,7 @@
   "logOut": "Log out",
   "maxViews_one": "{{count}} max",
   "maxViews_other": "{{count}} max",
+  "morePluginItems": "More plugin items",
   "nestUnder": "Nest under {{title}}",
   "newKanbanWorkspace": "New kanban workspace",
   "newOfficeWorkspace": "New office workspace",
