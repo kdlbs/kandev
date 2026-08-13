@@ -437,20 +437,6 @@ func (e *Executor) issueGitCredentialScope(
 	}, nil
 }
 
-func appendUniqueGitHubCredentialScope(scopes *[]githubCredentialScope, scope githubCredentialScope) {
-	for _, existing := range *scopes {
-		if existing.RepositoryID == scope.RepositoryID &&
-			strings.EqualFold(existing.Host, scope.Host) &&
-			strings.EqualFold(existing.Owner, scope.Owner) &&
-			strings.EqualFold(existing.Repo, scope.Repo) &&
-			strings.EqualFold(existing.ProviderID, scope.ProviderID) &&
-			strings.EqualFold(existing.ParentProviderID, scope.ParentProviderID) {
-			return
-		}
-	}
-	*scopes = append(*scopes, scope)
-}
-
 func (e *Executor) issueGitHubContributionCredentialScope(
 	ctx context.Context,
 	req *LaunchAgentRequest,
