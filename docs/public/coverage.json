@@ -58,6 +58,10 @@
         "apps/backend/internal/mcp/handlers/stop_task.go",
         "apps/backend/internal/mcp/server/handlers.go",
         "apps/backend/internal/mcp/server/server.go",
+        "apps/backend/internal/mcp/server/dependency_handlers.go",
+        "apps/backend/internal/mcp/handlers/dependency_handlers.go",
+        "apps/backend/internal/task/service/service_dependencies.go",
+        "apps/backend/internal/orchestrator/event_handlers_dependencies.go",
         "apps/backend/internal/gateway/websocket/client.go"
       ],
       "tests": [
@@ -70,16 +74,20 @@
         "apps/backend/internal/mcp/server/sysprompt_sync_test.go",
         "apps/backend/internal/backendapp/mcp_stop_composition_test.go",
         "apps/backend/internal/integration/mcp_stop_task_test.go",
-        "apps/backend/internal/gateway/websocket/client_mcp_actions_test.go"
+        "apps/backend/internal/gateway/websocket/client_mcp_actions_test.go",
+        "apps/backend/internal/task/service/service_dependencies_test.go",
+        "apps/backend/internal/orchestrator/event_handlers_dependencies_test.go"
       ],
       "mcpTools": [
         "add_branch_to_task_kandev",
+        "add_task_dependency_kandev",
         "add_workspace_sources_kandev",
         "archive_task_kandev",
         "create_task_kandev",
         "delete_task_kandev",
         "list_tasks_kandev",
         "move_task_kandev",
+        "remove_task_dependency_kandev",
         "set_task_title_kandev",
         "step_complete_kandev",
         "stop_task_kandev",
