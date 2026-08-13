@@ -8,7 +8,11 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	dbutil "github.com/kandev/kandev/internal/db"
 )
 
@@ -143,6 +147,20 @@ func newSubagentMigrationTestRepo(t *testing.T) (*Repository, *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("initialize schema: %v", err)
 	}
+	// NewWithDB's own initSchema() already ran the one-time backfill once,
+	// against an empty database with no messages seeded yet, and claimed the
+	// two activation keys (AC-24) — correct for a genuinely fresh install,
+	// but not what this file's tests want: they seed subagent-shaped
+	// messages AFTER construction and then call repo.runMigrations() again,
+	// expecting THAT call to be the real (only) backfill run — mirroring a
+	// DB upgrade where historical messages predate this boot. Reset to
+	// "not yet activated" so every test in this file gets that semantics by
+	// default. See subagentContextBackfillActivated in base_migrations.go,
+	// which gates the backfill's full-table scan on these same two keys so
+	// it runs at most once per installation (AC-23a).
+	if _, err := db.Exec(`DELETE FROM kandev_meta WHERE key IN ('subagent_context_capture_since', 'subagent_context_backfill_through')`); err != nil {
+		t.Fatalf("reset subagent context activation keys: %v", err)
+	}
 	return repo, db
 }
 
@@ -203,6 +221,13 @@ func TestSubagentContextSchemaFreshAndReplay(t *testing.T) {
 // named must-not-get-wrong regression: 75% of real subagent invocations are
 // async_launched with no reported usage, and a DEFAULT 0 anywhere would
 // fabricate every one of them. (AC-7, AC-21)
+//
+// It also covers AC-21's per-column derivation for every text column the
+// backfill's SELECT list populates: subagent_type, description, agent_id,
+// child_session_id, and model are five adjacent same-typed columns in that
+// SELECT with no other test giving each a distinct, individually-asserted
+// value — a column-order mistake in the SELECT list (e.g. subagent_type and
+// description swapped) would otherwise pass every existing test untouched.
 func TestSubagentContextBackfillAsyncLaunchedStoresNullNotZero(t *testing.T) {
 	repo, _ := newSubagentMigrationTestRepo(t)
 	seedForMsgTest(t, repo, "task-async", "session-async", "turn-async")
@@ -212,10 +237,13 @@ func TestSubagentContextBackfillAsyncLaunchedStoresNullNotZero(t *testing.T) {
 	seedSubagentMessage(t, repo, "msg-async", "session-async", "task-async", "turn-async",
 		"tc-async", "", "complete",
 		map[string]interface{}{
-			"description":   "run tests",
-			"subagent_type": "test-runner",
-			"status":        "async_launched",
-			"is_async":      true,
+			"description":      "run the test suite",
+			"subagent_type":    "test-runner",
+			"agent_id":         "agent-xyz",
+			"child_session_id": "child-session-xyz",
+			"model":            "claude-async-model",
+			"status":           "async_launched",
+			"is_async":         true,
 		},
 		createdAt, updatedAt,
 	)
@@ -225,6 +253,27 @@ func TestSubagentContextBackfillAsyncLaunchedStoresNullNotZero(t *testing.T) {
 	}
 
 	row := getSubagentContextRow(t, repo, "session-async", "tc-async")
+	if row.taskID != "task-async" {
+		t.Errorf("task_id = %q, want task-async", row.taskID)
+	}
+	if !row.turnID.Valid || row.turnID.String != "turn-async" {
+		t.Errorf("turn_id = %v, want turn-async", row.turnID)
+	}
+	if !row.subagentType.Valid || row.subagentType.String != "test-runner" {
+		t.Errorf("subagent_type = %v, want test-runner", row.subagentType)
+	}
+	if !row.description.Valid || row.description.String != "run the test suite" {
+		t.Errorf("description = %v, want %q", row.description, "run the test suite")
+	}
+	if !row.agentID.Valid || row.agentID.String != "agent-xyz" {
+		t.Errorf("agent_id = %v, want agent-xyz", row.agentID)
+	}
+	if !row.childSessionID.Valid || row.childSessionID.String != "child-session-xyz" {
+		t.Errorf("child_session_id = %v, want child-session-xyz", row.childSessionID)
+	}
+	if !row.model.Valid || row.model.String != "claude-async-model" {
+		t.Errorf("model = %v, want claude-async-model", row.model)
+	}
 	if row.totalTokens.Valid {
 		t.Errorf("total_tokens = %v, want NULL", row.totalTokens)
 	}
@@ -368,8 +417,43 @@ func TestSubagentContextBackfillMalformedMetadataDoesNotAbort(t *testing.T) {
 	}
 }
 
+// TestSubagentContextBackfillNonTerminalSettledAtNull covers AC-23a's ELSE
+// branch: a message whose derived ACP tool_status is NOT one of the terminal
+// values must backfill with settled_at NULL, not a fabricated value from the
+// message's updated_at. Every other backfill fixture in this file uses a
+// terminal status, so nothing else exercises this branch — the spec notes 5
+// real rows are in exactly this "started" (non-terminal) state.
+func TestSubagentContextBackfillNonTerminalSettledAtNull(t *testing.T) {
+	repo, _ := newSubagentMigrationTestRepo(t)
+	seedForMsgTest(t, repo, "task-started", "session-started", "turn-started")
+	ts := time.Date(2026, 8, 5, 14, 30, 0, 0, time.UTC)
+
+	seedSubagentMessage(t, repo, "msg-started", "session-started", "task-started", "turn-started",
+		"tc-started", "", "started",
+		map[string]interface{}{"status": "started"},
+		ts, ts,
+	)
+
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("runMigrations: %v", err)
+	}
+
+	row := getSubagentContextRow(t, repo, "session-started", "tc-started")
+	if row.settledAt.Valid {
+		t.Errorf("settled_at = %v, want NULL (tool_status %q is not terminal)", row.settledAt, "started")
+	}
+	if !row.toolStatus.Valid || row.toolStatus.String != "started" {
+		t.Errorf("tool_status = %v, want started", row.toolStatus)
+	}
+}
+
 // TestSubagentContextBackfillLiveRowWins covers AC-22: a live write always
-// wins over a backfilled one, and a replay of the backfill is a true no-op.
+// wins over a backfilled one, a replay of the backfill is a true no-op, AND
+// the ON CONFLICT DO NOTHING clause that makes that possible does not abort
+// the rest of the single unbounded INSERT...SELECT (AC-23a) — a second,
+// unconflicted message in the same statement must still land. Without the
+// clause, SQLite's INSERT...SELECT aborts the WHOLE statement on the first
+// UNIQUE violation, silently dropping every other backfillable row too.
 func TestSubagentContextBackfillLiveRowWins(t *testing.T) {
 	repo, db := newSubagentMigrationTestRepo(t)
 	seedForMsgTest(t, repo, "task-live-wins", "session-live-wins", "turn-live-wins")
@@ -379,6 +463,11 @@ func TestSubagentContextBackfillLiveRowWins(t *testing.T) {
 		"tc-live-wins", "", "completed",
 		map[string]interface{}{"status": "completed", "model": "backfill-shape-model"},
 		ts, ts,
+	)
+	seedSubagentMessage(t, repo, "msg-live-wins-sibling", "session-live-wins", "task-live-wins", "turn-live-wins",
+		"tc-live-wins-sibling", "", "completed",
+		map[string]interface{}{"status": "completed", "model": "sibling-model"},
+		ts.Add(time.Minute), ts.Add(time.Minute),
 	)
 
 	liveObservedAt := ts.Add(time.Hour)
@@ -403,6 +492,14 @@ func TestSubagentContextBackfillLiveRowWins(t *testing.T) {
 	}
 	if count := countSubagentContextRows(t, repo, "session-live-wins", "tc-live-wins"); count != 1 {
 		t.Fatalf("row count = %d, want exactly 1", count)
+	}
+
+	sibling := getSubagentContextRow(t, repo, "session-live-wins", "tc-live-wins-sibling")
+	if sibling.source != "backfill" {
+		t.Errorf("sibling source = %q, want backfill (the UNIQUE violation on the OTHER row must not abort this insert)", sibling.source)
+	}
+	if !sibling.model.Valid || sibling.model.String != "sibling-model" {
+		t.Errorf("sibling model = %v, want sibling-model", sibling.model)
 	}
 }
 
@@ -462,15 +559,10 @@ func TestSubagentContextBackfillNestedParentToolCallID(t *testing.T) {
 
 // TestSubagentContextActivationKeysWrittenOnce covers AC-24: both kandev_meta
 // keys are written once, RFC3339-parseable (backfill_through may be empty),
-// and never overwritten on replay.
-//
-// initSchema() runs runMigrations() as one of its steps, so NewWithDB already
-// claims both keys once against the empty database created in this same
-// boot — correctly recording "no history to backfill" for a genuinely fresh
-// install. To exercise the "existing DB, historical messages predate this
-// boot" case AC-24 is actually written for, this test deletes the two
-// write-once rows (simulating that this is the database's first boot with
-// the new migration) before seeding messages and re-running.
+// and never overwritten on replay. newSubagentMigrationTestRepo already
+// resets both keys to "not yet activated" after construction (see its
+// comment), so the first runMigrations() call below is the real backfill run
+// this test exercises.
 func TestSubagentContextActivationKeysWrittenOnce(t *testing.T) {
 	repo, db := newSubagentMigrationTestRepo(t)
 	seedForMsgTest(t, repo, "task-activation", "session-activation", "turn-activation")
@@ -482,9 +574,6 @@ func TestSubagentContextActivationKeysWrittenOnce(t *testing.T) {
 	seedSubagentMessage(t, repo, "msg-activation-newest", "session-activation", "task-activation", "turn-activation",
 		"tc-activation-newest", "", "completed", map[string]interface{}{"status": "completed"}, newest, newest)
 
-	if _, err := db.Exec(`DELETE FROM kandev_meta WHERE key IN ('subagent_context_capture_since', 'subagent_context_backfill_through')`); err != nil {
-		t.Fatalf("reset activation keys to simulate first boot with data present: %v", err)
-	}
 	if err := repo.runMigrations(); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
@@ -539,5 +628,112 @@ func TestSubagentContextActivationBackfillThroughEmptyWithNoMessages(t *testing.
 	}
 	if backfillThrough != "" {
 		t.Fatalf("subagent_context_backfill_through = %q, want empty string", backfillThrough)
+	}
+}
+
+// TestSubagentContextBackfillDoesNotRescanOnceActivated covers AC-23a: the
+// backfill's full-table scan is "a real, accepted one-time cost ... taken
+// once", not a per-boot cost. Once subagent_context_capture_since is set, a
+// later runMigrations() call (a later boot) must skip the scan entirely —
+// proven here by deleting an already-backfilled row and confirming a second
+// runMigrations() call does not restore it. Under the pre-fix behaviour
+// (migrateSubagentContextBackfill ran its INSERT...SELECT unconditionally on
+// every call, relying only on ON CONFLICT DO NOTHING for row-level
+// idempotence) nothing would have stopped that second call from re-scanning
+// task_session_messages and re-inserting the deleted row, since deleting it
+// removes the only thing ON CONFLICT DO NOTHING keys off.
+func TestSubagentContextBackfillDoesNotRescanOnceActivated(t *testing.T) {
+	repo, db := newSubagentMigrationTestRepo(t)
+	seedForMsgTest(t, repo, "task-once", "session-once", "turn-once")
+	ts := time.Date(2026, 8, 5, 18, 0, 0, 0, time.UTC)
+
+	seedSubagentMessage(t, repo, "msg-once", "session-once", "task-once", "turn-once",
+		"tc-once", "", "completed",
+		map[string]interface{}{"status": "completed"},
+		ts, ts,
+	)
+
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("first runMigrations (the real, one-time backfill): %v", err)
+	}
+	if count := countSubagentContextRows(t, repo, "session-once", "tc-once"); count != 1 {
+		t.Fatalf("row count after first backfill = %d, want 1", count)
+	}
+
+	if _, err := db.Exec(db.Rebind(`DELETE FROM task_session_subagents WHERE task_session_id = ? AND tool_call_id = ?`),
+		"session-once", "tc-once"); err != nil {
+		t.Fatalf("delete backfilled row: %v", err)
+	}
+
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("second runMigrations (a later boot): %v", err)
+	}
+	if count := countSubagentContextRows(t, repo, "session-once", "tc-once"); count != 0 {
+		t.Fatalf("row count after second boot = %d, want 0 (backfill must not re-scan once activated)", count)
+	}
+}
+
+// TestSubagentContextBackfillStatementFailureLogsWarnWithMigrationName covers
+// AC-20: because MigrateLogger.Apply swallows a migration statement's error
+// (internal/db/migratelog.go), the only way a failure is observable is a WARN
+// log carrying the migration's name. Forces the backfill INSERT to fail (its
+// target table dropped out from under it) and asserts that WARN, using the
+// same zaptest/observer pattern as
+// TestCutover_RolledBackCutoverEmitsNoSuccessLog in
+// worktree_ownership_election_test.go.
+func TestSubagentContextBackfillStatementFailureLogsWarnWithMigrationName(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "subagent-context-migration-failure.db")
+	dbConn, err := dbutil.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS kandev_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("create kandev_meta: %v", err)
+	}
+
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	repo := &Repository{db: db, ro: db, log: log, migrate: dbutil.NewMigrateLogger(db, log)}
+	if err := repo.initSchema(); err != nil {
+		t.Fatalf("initSchema: %v", err)
+	}
+
+	seedForMsgTest(t, repo, "task-migfail", "session-migfail", "turn-migfail")
+	seedSubagentMessage(t, repo, "msg-migfail", "session-migfail", "task-migfail", "turn-migfail",
+		"tc-migfail", "", "completed",
+		map[string]interface{}{"status": "completed"},
+		time.Date(2026, 8, 5, 19, 0, 0, 0, time.UTC), time.Date(2026, 8, 5, 19, 0, 0, 0, time.UTC),
+	)
+
+	// Reset to "not yet activated" (see newSubagentMigrationTestRepo's
+	// comment) so the next runMigrations() call actually attempts the
+	// backfill instead of being skipped by subagentContextBackfillActivated,
+	// then drop its INSERT target so that attempt fails.
+	if _, err := db.Exec(`DELETE FROM kandev_meta WHERE key IN ('subagent_context_capture_since', 'subagent_context_backfill_through')`); err != nil {
+		t.Fatalf("reset activation keys: %v", err)
+	}
+	if _, err := db.Exec(`DROP TABLE task_session_subagents`); err != nil {
+		t.Fatalf("drop task_session_subagents: %v", err)
+	}
+
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("runMigrations must swallow the failure, not return it: %v", err)
+	}
+
+	entries := logs.FilterMessage("migration failed").All()
+	var found bool
+	for _, entry := range entries {
+		if entry.ContextMap()["name"] == "task_session_subagents.backfill" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("no WARN log carrying migration name %q found among %d entries", "task_session_subagents.backfill", len(entries))
 	}
 }

@@ -315,6 +315,11 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		s.logger.Warn("missing session_id for tool_call",
 			zap.String("task_id", payload.TaskID),
 			zap.String("tool_call_id", payload.Data.ToolCallID))
+		// A recognized subagent_task frame with no session id is exactly the
+		// AC-2 identity-skip case (skipped_no_identity++): this guard predates
+		// the subagent-context feature and exists to protect message
+		// creation, so it must not silently swallow that counter too.
+		s.recordSubagentContextFromFrame(ctx, payload, "")
 		return
 	}
 	if s.shouldDropCompletedExecutionStreamEvent(payload) {
@@ -527,6 +532,10 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		s.logger.Warn("missing session_id for tool_update",
 			zap.String("task_id", payload.TaskID),
 			zap.String("tool_call_id", payload.Data.ToolCallID))
+		// See the matching comment in handleToolCallEvent: this guard
+		// predates the subagent-context feature and must not silently
+		// swallow the AC-2 skipped_no_identity counter.
+		s.recordSubagentContextFromFrame(ctx, payload, "")
 		return
 	}
 	if s.shouldDropCompletedExecutionStreamEvent(payload) {

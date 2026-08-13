@@ -194,6 +194,58 @@ func TestHandleToolCallEventIgnoresNonSubagentKind(t *testing.T) {
 	require.Empty(t, recorder.all())
 }
 
+// TestHandleToolCallEventRecordsSkipCounterEvenWithEmptySessionID covers
+// AC-2: a subagent_task frame with an empty session id must still reach the
+// subagent-context identity gate (which increments skipped_no_identity) —
+// not be swallowed by the pre-existing "missing session_id" guard at the top
+// of handleToolCallEvent, which predates this feature and exists to protect
+// message creation, not subagent-context writer health.
+func TestHandleToolCallEventRecordsSkipCounterEvenWithEmptySessionID(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = newServiceBackedMessageCreator(repo)
+	recorder := &fakeSubagentContextRecorder{}
+	svc.subagentContexts = recorder
+
+	svc.handleToolCallEvent(ctx, newSubagentTaskToolCallPayload(
+		"task1", "", "tc-1", "", "pending", streams.NewSubagentTask("d", "p", "reviewer")))
+
+	requests := recorder.all()
+	require.Len(t, requests, 1, "an empty session id must still reach the identity gate so skipped_no_identity increments")
+	require.Empty(t, requests[0].TaskSessionID)
+}
+
+// TestHandleToolUpdateEventRecordsSkipCounterEvenWithEmptySessionID is the
+// tool_update-path counterpart of
+// TestHandleToolCallEventRecordsSkipCounterEvenWithEmptySessionID.
+func TestHandleToolUpdateEventRecordsSkipCounterEvenWithEmptySessionID(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = newServiceBackedMessageCreator(repo)
+	recorder := &fakeSubagentContextRecorder{}
+	svc.subagentContexts = recorder
+
+	svc.handleToolUpdateEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID: "task1", SessionID: "", ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: "tool_update", ToolCallID: "tc-1", ToolStatus: "in_progress",
+			Normalized: streams.NewSubagentTask("d", "p", "reviewer"),
+		},
+	})
+
+	requests := recorder.all()
+	require.Len(t, requests, 1, "an empty session id must still reach the identity gate so skipped_no_identity increments")
+	require.Empty(t, requests[0].TaskSessionID)
+}
+
 // TestHandleToolCallEventNilSubagentContextsRecorderIsSafe covers AC-27: a
 // nil recorder must not panic, and the message write still happens.
 func TestHandleToolCallEventNilSubagentContextsRecorderIsSafe(t *testing.T) {

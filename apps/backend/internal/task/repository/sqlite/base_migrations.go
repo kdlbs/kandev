@@ -359,7 +359,25 @@ func (r *Repository) runMigrations() error {
 // a failure here must never abort boot, only log. Apply takes no bind args,
 // so the capture-since timestamp is inlined via fmt.Sprintf rather than
 // passed as a query parameter.
+//
+// runMigrations() (and therefore this function) runs on every boot, not just
+// the first — it's one of initSchema()'s steps, and initSchema() runs on
+// every NewWithDB. The backfill INSERT...SELECT below, and its companion
+// MAX() query for subagent_context_backfill_through, both filter on
+// json_extract(metadata,'$.normalized.kind') with no supporting index
+// (ensureMessageMetadataIndexes only indexes tool_call_id and pending_id),
+// so each is a full scan of task_session_messages. AC-23a is explicit that
+// this scan is "a real, accepted one-time cost ... taken once" — ON CONFLICT
+// DO NOTHING makes the resulting rows idempotent, but does nothing to avoid
+// re-running the scan itself. subagentContextBackfillActivated is the guard
+// that makes it actually run once: a single indexed point lookup on
+// kandev_meta's primary key, skipping the whole function on every boot after
+// the first successful one.
 func (r *Repository) migrateSubagentContextBackfill() {
+	if r.subagentContextBackfillActivated() {
+		return
+	}
+
 	postgres := dialect.IsPostgres(r.db.DriverName())
 
 	meta := func(path string) string { return jsonKey(postgres, "m.metadata", path) }
@@ -423,6 +441,23 @@ func (r *Repository) migrateSubagentContextBackfill() {
 		), '')
 		ON CONFLICT(key) DO NOTHING
 	`)
+}
+
+// subagentContextBackfillActivated reports whether
+// migrateSubagentContextBackfill has already completed successfully on this
+// database, via a single indexed point lookup on kandev_meta's primary key.
+// A missing key — including "kandev_meta doesn't exist yet", which cannot
+// happen in production (persistence.Provide creates it before any repository
+// runs) but can happen in a test that constructs a Repository directly —
+// reports not-activated, so the backfill still gets its chance to run and
+// its own swallow-and-WARN failure contract (AC-20) is unchanged.
+func (r *Repository) subagentContextBackfillActivated() bool {
+	var value string
+	err := r.db.QueryRow(
+		r.db.Rebind(`SELECT value FROM kandev_meta WHERE key = ?`),
+		"subagent_context_capture_since",
+	).Scan(&value)
+	return err == nil
 }
 
 // clearRecoveredAgentErrors repairs sessions whose stored agent failure was
