@@ -2,12 +2,14 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -58,13 +60,38 @@ func isUsageEventUniqueViolation(err error) bool {
 // (redelivery of the same prompt-usage event) is reported as
 // ErrDuplicateUsageEvent rather than the raw driver error, so callers can
 // treat it as an idempotent no-op.
+//
+// Delegates to CreateCostEventTx using r.db as the executor; a caller that
+// needs this atomic with another write (e.g. the office cost subscriber's
+// session-usage rollup) should call the Tx variant directly with a shared
+// transaction instead.
 func (r *Repository) CreateCostEvent(ctx context.Context, event *models.CostEvent) error {
+	return r.CreateCostEventTx(ctx, nil, event)
+}
+
+// CreateCostEventTx is CreateCostEvent's transactional twin: executes
+// against tx when non-nil (falling back to r.db, the shared writer
+// connection, when tx is nil) so a caller can make this atomic with another
+// write in the same transaction — see BeginTx and
+// shared.SessionUsageWriterTx's doc comment for why (docs/specs/office/costs.md,
+// PR #2606 review).
+func (r *Repository) CreateCostEventTx(ctx context.Context, tx *sqlx.Tx, event *models.CostEvent) error {
 	if event.ID == "" {
 		event.ID = uuid.New().String()
 	}
 	event.CreatedAt = time.Now().UTC()
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	var exec interface {
+		ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+		Rebind(query string) string
+	}
+	if tx != nil {
+		exec = tx
+	} else {
+		exec = r.db
+	}
+
+	_, err := exec.ExecContext(ctx, exec.Rebind(`
 		INSERT INTO office_cost_events (
 			id, session_id, task_id, agent_profile_id, project_id,
 			model, provider, tokens_in, tokens_cached_in,

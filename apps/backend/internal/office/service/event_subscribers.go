@@ -540,12 +540,14 @@ func (s *Service) tryPostStartFallback(
 //
 // buildCostEvent (prompt_usage_cost.go) also records the cache read/write
 // split (NULL when Usage.Estimated — see its doc comment) and turn_id /
-// usage_event_id threaded from the publish site. After insert the session
-// totals (tokens_in / tokens_cached_in / tokens_out / cost_subcents) are
-// incremented on task_sessions, and any applicable budget policy is
-// evaluated. Estimated rows count toward budget totals at face value.
-// Every early return and the insert path record a writer-health metric
-// (cost_metrics.go) so a silently-stopped writer is observable.
+// usage_event_id threaded from the publish site. The ledger insert and the
+// task_sessions rollup increment (tokens_in / tokens_cached_in / tokens_out /
+// cost_subcents) are written atomically by recordCostEventAndRollup — see its
+// doc comment for why non-atomic writes here are a real defect, not a
+// theoretical one — and any applicable budget policy is evaluated afterward.
+// Estimated rows count toward budget totals at face value. Every early
+// return and the insert path record a writer-health metric (cost_metrics.go)
+// so a silently-stopped writer is observable.
 func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[PromptUsageData](event)
 	if err != nil {
@@ -566,7 +568,10 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 	provider := resolveProvider(*data)
 	costEvent := buildCostEvent(*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution)
 
-	if err := s.repo.CreateCostEvent(ctx, costEvent); err != nil {
+	if err := s.recordCostEventAndRollup(
+		ctx, costEvent, data.SessionID,
+		data.Usage.InputTokens, costEvent.TokensCachedIn, data.Usage.OutputTokens, resolution.costSubcents,
+	); err != nil {
 		if errors.Is(err, sqlite.ErrDuplicateUsageEvent) {
 			s.recordCostEventDropped(costDropReasonDuplicate, data.TaskID)
 			return nil
@@ -575,11 +580,6 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		return err
 	}
 	s.recordCostEventWritten(string(resolution.source), provider)
-
-	s.incrementSessionUsageTotals(
-		ctx, data.SessionID,
-		data.Usage.InputTokens, costEvent.TokensCachedIn, data.Usage.OutputTokens, resolution.costSubcents,
-	)
 
 	if fields.WorkspaceID != "" {
 		if err := s.CheckBudget(
@@ -590,6 +590,61 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		}
 	}
 	return nil
+}
+
+// recordCostEventAndRollup inserts costEvent and increments the
+// task_sessions rollup atomically when the wired sessionUsageWriter
+// supports it (shared.SessionUsageWriterTx) — every production wiring does
+// (backendapp's SetSessionUsageWriter(repos.Task)).
+//
+// Atomicity matters because of how this card's own usage_event_id
+// idempotency guard interacts with a partial failure: without a shared
+// transaction, a rollup-increment failure after a successful ledger insert
+// was logged and swallowed, and a later redelivery of the same completion
+// (see ErrDuplicateUsageEvent's doc comment for why redelivery is real, not
+// hypothetical) would hit the unique index and be dropped as a duplicate
+// before the rollup ever got a second chance — task_sessions permanently
+// behind office_cost_events with no recovery path (PR #2606 review). Wrapping
+// both writes in one transaction closes that: any failure, including the
+// rollup increment, rolls back the ledger insert too, so nothing is
+// committed and a redelivered completion with the same usage_event_id
+// retries the whole operation cleanly instead of colliding with a
+// half-landed row.
+//
+// Falls back to the pre-existing non-atomic two-step write when the wired
+// writer doesn't implement SessionUsageWriterTx (e.g. a simplified test
+// double that doesn't need transactional coupling, or sessionUsageWriter
+// left unset).
+func (s *Service) recordCostEventAndRollup(
+	ctx context.Context, costEvent *models.CostEvent, sessionID string,
+	tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
+) error {
+	txWriter, ok := s.sessionUsageWriter.(shared.SessionUsageWriterTx)
+	if !ok {
+		if err := s.repo.CreateCostEvent(ctx, costEvent); err != nil {
+			return err
+		}
+		s.incrementSessionUsageTotals(ctx, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents)
+		return nil
+	}
+
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.CreateCostEventTx(ctx, tx, costEvent); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := txWriter.IncrementTaskSessionUsageTx(
+		ctx, tx, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents,
+	); err != nil {
+		_ = tx.Rollback()
+		s.logger.Warn("increment task_session usage failed, rolled back cost event insert",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return err
+	}
+	return tx.Commit()
 }
 
 // resolveProvider derives the provider id for the cost row. AgentType

@@ -109,6 +109,17 @@ func (r *Repository) ExecRaw(ctx context.Context, query string, args ...interfac
 // package should keep using typed methods.
 func (r *Repository) ReaderDB() *sqlx.DB { return r.ro }
 
+// BeginTx starts a transaction on the shared writer connection. Exposed so
+// the office service layer can make CreateCostEventTx atomic with another
+// package's write (e.g. task.Repository.IncrementTaskSessionUsageTx via
+// shared.SessionUsageWriterTx) — safe because both repositories are
+// constructed from the same underlying *sqlx.DB (internal/backendapp/storage.go),
+// so a transaction begun here can execute statements against tables either
+// package owns.
+func (r *Repository) BeginTx(ctx context.Context) (*sqlx.Tx, error) {
+	return r.db.BeginTxx(ctx, nil)
+}
+
 // initSchema creates all office tables if they don't exist.
 func (r *Repository) initSchema() error {
 	if err := r.createCoreTables(); err != nil {
