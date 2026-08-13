@@ -42,10 +42,24 @@ ruleTester.run("no-unsanctioned-sleep", noUnsanctionedSleep, {
     { code: "test.setTimeout(60_000);" },
     { code: "e2eTest.setTimeout(120_000);" },
 
-    // --- The sanctioned forms. ---
-    { code: 'await dwell(page, 300, "library-timer", "Radix open delay publishes nothing");' },
-    { code: 'await dwell(500, "poll-interval", "backend health poll; no page exists yet");' },
-    { code: 'await injectLatency(800, "make the in-flight spinner observable");' },
+    // --- The sanctioned forms, which are only sanctioned when actually imported. ---
+    {
+      code: `import { dwell } from "../../helpers/causal-waits";
+        await dwell(page, 300, "library-timer", "Radix open delay publishes nothing");`,
+    },
+    {
+      code: `import { dwell } from "./causal-waits";
+        await dwell(500, "poll-interval", "backend health poll; no page exists yet");`,
+    },
+    {
+      code: `import { injectLatency } from "../helpers/causal-waits";
+        await injectLatency(800, "make the in-flight spinner observable");`,
+    },
+    // Aliased and namespace imports still resolve to the helper.
+    {
+      code: `import { dwell as sleep, injectLatency } from "../../helpers/causal-waits";
+        await injectLatency(10, "x");`,
+    },
 
     // --- Race guard: several resolution paths, timer is a fallback. ---
     // e2e/tests/auth/auth-lifecycle.spec.ts:218
@@ -172,6 +186,34 @@ ruleTester.run("no-unsanctioned-sleep", noUnsanctionedSleep, {
       code: "await page.waitForTimeout(100); await new Promise((r) => setTimeout(r, 100));",
       errors: [{ messageId: "waitForTimeout" }, { messageId: "promiseSleep" }],
     },
+    // A sanctioned wait that is not actually bound to the helper. Chunk 1 hit
+    // this for real: a patch anchored on an import line whose actual form was
+    // `{ type Page, expect }`, so the edit missed and the call site was left
+    // referencing an undefined identifier. `no-undef` is off repo-wide and
+    // nothing typechecks `e2e/`, so lint passed clean and it would have surfaced
+    // as `dwell is not defined` inside a retry path that only runs on slow
+    // shards. The token being allowed is not the same as the helper being there.
+    {
+      code: 'await dwell(page, 500, "unverified", "import silently did not apply");',
+      errors: [{ messageId: "unboundWait" }],
+    },
+    {
+      code: 'await injectLatency(200, "import silently did not apply");',
+      errors: [{ messageId: "unboundWait" }],
+    },
+    // Imported, but not from causal-waits: also not the sanctioned helper.
+    {
+      code: `import { dwell } from "./local-utils";
+        await dwell(500, "unverified", "wrong module");`,
+      errors: [{ messageId: "unboundWait" }],
+    },
+    // A locally defined look-alike is not the helper either.
+    {
+      code: `function dwell(ms) { return ms; }
+        await dwell(500, "unverified", "shadowed by a local");`,
+      errors: [{ messageId: "unboundWait" }],
+    },
+
     // A DURATION wait is still a duration wait inside `page.evaluate`.
     // `await page.evaluate(() => new Promise((r) => setTimeout(r, 500)))` blocks
     // the test for 500ms exactly like `page.waitForTimeout(500)` — the browser

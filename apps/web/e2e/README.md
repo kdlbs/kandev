@@ -431,6 +431,15 @@ unguards real sleeps.
 
 ### How this is enforced
 
+**The sanctioned forms are only sanctioned when they are actually imported.**
+`dwell` and `injectLatency` must resolve to a binding from
+`e2e/helpers/causal-waits`; a call to an unimported (or differently imported)
+identifier of that name is reported like a raw sleep. It is not pedantry: the
+repo turns `no-undef` off, nothing typechecks `e2e/`, and an import that
+silently fails to apply leaves a call site that lints clean and throws
+`dwell is not defined` at runtime, inside whichever retry path only executes on
+a loaded shard. That has already happened once.
+
 Two checks, deliberately scoped differently, because ~126 raw sleeps predate
 them and `pnpm lint` is `eslint --max-warnings 0` — a repo-wide rule at _any_
 severity would break every unrelated PR until the conversion finishes.

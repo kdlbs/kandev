@@ -127,6 +127,39 @@ export const e2eSleepGuardFiles = [
   "e2e/tests/preview/**/*.{ts,tsx}",
 ];
 
+/**
+ * The sanctioned waits. Calling one is only sanctioned if the identifier really
+ * IS that helper — see {@link resolveWaitBinding}.
+ */
+const SANCTIONED_WAITS = new Set(["dwell", "injectLatency"]);
+
+/** `…/causal-waits`, with or without an extension. */
+const CAUSAL_WAITS_MODULE = /(^|\/)causal-waits(\.[jt]s)?$/;
+
+/** The nearest binding for `name`, walking out through enclosing scopes. */
+function lookupVariable(scope, name) {
+  for (let current = scope; current; current = current.upper) {
+    const found = current.variables.find((variable) => variable.name === name);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Whether `variable` is really the helper from `causal-waits`.
+ *
+ * An unresolved identifier is a `ReferenceError` waiting for the machine slow
+ * enough to reach it, and a `dwell` imported from somewhere else is not the
+ * helper this rule promotes. Both answer `false`.
+ */
+function isCausalWaitsBinding(variable) {
+  if (!variable) return false;
+  return variable.defs.some(
+    (def) =>
+      def.type === "ImportBinding" && CAUSAL_WAITS_MODULE.test(String(def.parent.source.value)),
+  );
+}
+
 const WAIT_FOR_TIMEOUT = "waitForTimeout";
 const SET_TIMEOUT = "setTimeout";
 
@@ -239,6 +272,10 @@ export const noUnsanctionedSleep = {
         "Raw `waitForTimeout()` is not a sanctioned wait. Use `dwell(page, ms, category, reason)` " +
         "from `e2e/helpers/causal-waits.ts`, or better, wait on the cause with `waitForHttp` / " +
         "`watchWs`. See e2e/README.md.",
+      unboundWait:
+        "`{{name}}()` is not imported from `e2e/helpers/causal-waits`, so this is an " +
+        "undefined identifier that throws at runtime — on exactly the slow, loaded shards a " +
+        "wait is there to survive. Import it, or use a causal wait instead.",
       promiseSleep:
         "Hand-rolled promise sleep is not a sanctioned wait. Use `dwell(ms, category, reason)` " +
         "from `e2e/helpers/causal-waits.ts`, or `injectLatency(ms, reason)` inside a " +
@@ -248,6 +285,23 @@ export const noUnsanctionedSleep = {
   create(context) {
     return {
       CallExpression(node) {
+        // A sanctioned wait is only sanctioned if the identifier resolves to the
+        // real helper. `eslint.config.mjs` turns `no-undef` OFF repo-wide, and
+        // nothing typechecks `e2e/`, so an import that silently failed to apply
+        // leaves `dwell(...)` linting clean and throwing at runtime — inside
+        // whichever retry path only executes under load. Scope analysis catches
+        // this without any type information, which is how `no-undef` works.
+        if (node.callee.type === "Identifier" && SANCTIONED_WAITS.has(node.callee.name)) {
+          const variable = lookupVariable(context.sourceCode.getScope(node), node.callee.name);
+          if (!isCausalWaitsBinding(variable)) {
+            context.report({
+              node: node.callee,
+              messageId: "unboundWait",
+              data: { name: node.callee.name },
+            });
+          }
+          return;
+        }
         if (calleeMethodName(node.callee) !== WAIT_FOR_TIMEOUT) return;
         // Report at the METHOD token, not the whole call. A finding's line is
         // its node's start line, and the ratchet keeps only findings on lines

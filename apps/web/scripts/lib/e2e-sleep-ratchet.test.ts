@@ -178,6 +178,9 @@ describe("e2e sleep ratchet", () => {
       dir,
       SPEC,
       LEGACY_SPEC.replace(
+        'import { test } from "@playwright/test";',
+        'import { test } from "@playwright/test";\nimport { dwell, injectLatency } from "../../helpers/causal-waits";',
+      ).replace(
         ANCHOR,
         [
           '  await dwell(page, 300, "library-timer", "Radix open delay publishes nothing");',
