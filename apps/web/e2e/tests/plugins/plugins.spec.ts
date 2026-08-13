@@ -85,6 +85,16 @@ async function uploadPackage(page: Page, filePath: string) {
   await page.getByTestId("install-plugin-upload-submit").click();
 }
 
+async function waitForPluginBundleReady(page: Page): Promise<void> {
+  const navItem = page.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`);
+  await expect(navItem).toBeVisible({ timeout: 15_000 });
+  // The navigation item can be registered before the plugin bundle finishes
+  // evaluating. Visiting the plugin page makes the bundle's registration
+  // boundary explicit before a manifest keybinding is exercised.
+  await navItem.click();
+  await expect(page.locator("#hello-plugin-page")).toBeVisible({ timeout: 15_000 });
+}
+
 async function uninstallViaApi(apiClient: ApiClient) {
   await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
 }
@@ -465,12 +475,11 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await uploadPackage(testPage, PACKAGE_PATH);
     const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
     await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+    await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible({ timeout: 30_000 });
 
     await testPage.goto("/");
     await testPage.reload();
-    await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForPluginBundleReady(testPage);
 
     // --- manifest.yaml declares `ui.keybindings: [{ id: open-demo, default:
     // mod+shift+j }]`; bundle.js binds it to host.openModal(...). "mod"
@@ -504,12 +513,13 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await openInstallDialog(testPage);
     await uploadPackage(testPage, PACKAGE_PATH);
     await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+    await expect(
+      testPage.getByTestId(`plugin-row-${PLUGIN_ID}`).getByText("Active", { exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
 
     await testPage.goto("/");
     await testPage.reload();
-    await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForPluginBundleReady(testPage);
 
     await testPage.keyboard.press("ControlOrMeta+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");

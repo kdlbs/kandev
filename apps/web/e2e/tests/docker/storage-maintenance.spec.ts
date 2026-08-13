@@ -1,7 +1,11 @@
 import { execFileSync } from "node:child_process";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/docker-test-base";
-import { E2E_DOCKER_SCOPE, E2E_IMAGE_TAG } from "../../fixtures/docker-probe";
+import {
+  E2E_DOCKER_SCOPE,
+  E2E_IMAGE_TAG,
+  waitForScopedKandevContainersRemoved,
+} from "../../fixtures/docker-probe";
 import { dockerInspectExists, dockerRemove } from "../../helpers/docker";
 
 function createStoppedContainer(labels: string[]): string {
@@ -54,6 +58,13 @@ async function refreshStorageOverview(page: Page): Promise<void> {
 
 test.describe.serial("process-scoped container cleanup", () => {
   let previousTestContainer = "";
+
+  // Keep this boundary local to the serial regression too. The first test
+  // intentionally leaves a stopped container behind, and the next test must
+  // begin only after the process-scoped sweep has completed.
+  test.afterEach(async () => {
+    await waitForScopedKandevContainersRemoved(E2E_DOCKER_SCOPE, 60_000);
+  });
 
   test.afterAll(() => {
     if (previousTestContainer && dockerInspectExists(previousTestContainer)) {

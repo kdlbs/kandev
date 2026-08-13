@@ -94,4 +94,10 @@ export async function waitForScopedKandevContainersRemoved(
     await new Promise<void>((resolve) => setTimeout(resolve, 100));
   }
   removeScopedKandevContainers(scope);
+  const remaining = scopedKandevContainerIDs(scope);
+  if (remaining.length > 0) {
+    throw new Error(
+      `E2E cleanup left ${remaining.length} process-owned Docker container(s): ${remaining.join(", ")}`,
+    );
+  }
 }

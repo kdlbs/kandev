@@ -285,6 +285,7 @@ test.describe("Fresh-branch flow", () => {
     backend,
     seedData,
   }) => {
+    test.setTimeout(120_000);
     const setup = await setupLocalRepo(apiClient, backend.tmpDir, seedData.workspaceId, "clean");
     if (!setup) {
       test.skip(true, "No local executor available");
@@ -294,13 +295,19 @@ test.describe("Fresh-branch flow", () => {
       await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
       await testPage.getByTestId("fresh-branch-toggle").click();
       const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
-      await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
+      await expect(branchSelector).toBeEnabled({ timeout: 30_000 });
       // Pick the develop base branch so the new branch will fork from it.
       await branchSelector.click();
-      await testPage
-        .getByRole("option", { name: /develop/ })
-        .first()
-        .click();
+      const developOption = testPage.getByRole("option", { name: /develop/ }).first();
+      await expect(developOption).toBeVisible({ timeout: 30_000 });
+      await developOption.click();
+
+      // Selecting a branch updates the form asynchronously. Clicking while
+      // the profile/branch compatibility state is still settling is a
+      // no-op, which made this test time out waiting for a create request.
+      await expect(testPage.getByTestId("submit-start-agent")).toBeEnabled({
+        timeout: 30_000,
+      });
 
       // Submit and assert the discard modal never appears (clean tree).
       // Wait for the create-task request to fire so we know the submit path
