@@ -46,6 +46,12 @@ agentctl ports.
   **How:** Assert the generated startup output with injected address-discovery
   results and an enumeration-error case.
 
+## Documentation
+
+- Update `docs/public/cli.md` so the public CLI reference describes the optional
+  `network:` lines and keeps the network-exposure warning clear. This page is a
+  reference document.
+
 ## Verification Results
 
 - `cd apps/backend && go test -run TestLogStartupPrintsNetworkAddress ./internal/launcher` —
@@ -54,6 +60,8 @@ agentctl ports.
   passed, 4 tests.
 - `cd apps/backend && go test ./internal/launcher` — passed, 186 tests.
 - `rtk git diff --check` — passed.
+- `node --test scripts/validate-public-docs.test.mjs` — passed, 61 tests.
+- `node scripts/validate-public-docs.mjs` — passed, 41 published docs pages.
 
 ## Implementation Waves And Parallel Candidates
 

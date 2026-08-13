@@ -33,6 +33,7 @@ cd apps/backend && go test -run 'Test(ListHostNetworkAddresses|NetworkURLsForPor
 - `apps/backend/internal/launcher/network.go`
 - `apps/backend/internal/launcher/network_test.go`
 - `apps/backend/internal/launcher/start.go`
+- `docs/public/cli.md`
 
 ## Dependencies
 
@@ -65,5 +66,7 @@ platform-specific risk, and synchronize this task and `plan.md` status.
 - `cd apps/backend && go test ./internal/launcher` — passed, 186 tests.
 - `rtk git diff --check` — passed.
 - `gofmt -w apps/backend/internal/launcher/network.go apps/backend/internal/launcher/network_test.go apps/backend/internal/launcher/start.go` — completed successfully.
+- `node --test scripts/validate-public-docs.test.mjs` — passed, 61 tests.
+- `node scripts/validate-public-docs.mjs` — passed, 41 published docs pages.
 - Platform risk: none identified; Go uses the host interface APIs and the package tests pass on this Linux runner.
 - Cleanup: no temporary files, processes, or external runtime state created.
