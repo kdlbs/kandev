@@ -115,6 +115,9 @@ describe("getGitHubIntegrationStatus", () => {
   });
 });
 
+/** A workspace that is not the (stale) active one. */
+const SURVIVING_WORKSPACE_ID = "workspace-2";
+
 const NAV_GATED_KEYS: AvailabilityKey[] = ["azure-devops", "github", "gitlab", "jira", "linear"];
 
 const ENABLED_MOCK_BY_KEY = {
@@ -181,7 +184,7 @@ describe("useNavAvailability", () => {
   });
 
   it("falls back to default workspace resolution for a stale active id", () => {
-    mocks.state.workspaces.items = [{ id: "workspace-2" }];
+    mocks.state.workspaces.items = [{ id: SURVIVING_WORKSPACE_ID }];
 
     renderHook(() => useNavAvailability());
 
@@ -192,20 +195,20 @@ describe("useNavAvailability", () => {
     // the probes above answer for whichever workspace the backend resolved.
     // They follow the backend's tie-breaker (oldest workspace) instead.
     for (const key of NAV_GATED_KEYS) {
-      expect(ENABLED_MOCK_BY_KEY[key]).toHaveBeenCalledWith("workspace-2");
+      expect(ENABLED_MOCK_BY_KEY[key]).toHaveBeenCalledWith(SURVIVING_WORKSPACE_ID);
     }
   });
 
   it("reads the oldest workspace's toggles when the active id is stale", () => {
     mocks.state.workspaces.items = [
       { id: "workspace-3", created_at: "2026-02-01T00:00:00Z" },
-      { id: "workspace-2", created_at: "2026-01-01T00:00:00Z" },
+      { id: SURVIVING_WORKSPACE_ID, created_at: "2026-01-01T00:00:00Z" },
     ];
 
     renderHook(() => useNavAvailability());
 
     for (const key of NAV_GATED_KEYS) {
-      expect(ENABLED_MOCK_BY_KEY[key]).toHaveBeenCalledWith("workspace-2");
+      expect(ENABLED_MOCK_BY_KEY[key]).toHaveBeenCalledWith(SURVIVING_WORKSPACE_ID);
     }
   });
 
