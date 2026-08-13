@@ -11,6 +11,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/persistence"
 )
 
 // resetConfirmToken is the literal value the client must POST as
@@ -58,6 +60,23 @@ func (s *Service) runFactoryReset(_ context.Context) (map[string]interface{}, er
 	snapshotPath, err := s.createPreResetSnapshot()
 	if err != nil {
 		return nil, fmt.Errorf("pre-reset snapshot: %w", err)
+	}
+
+	// Delete the delivery-ledger and run-outcome activation keys BEFORE
+	// dropping any user table (docs/specs/task-delivery-ledger/spec.md,
+	// "Reset parity"). kandev_meta itself survives the drop loop below, so
+	// a stale activation key left behind would point at a boot instant
+	// before data that no longer exists — a post-reset task with no
+	// ledger row would then read as "observed as nothing" rather than
+	// "not observed". Ordering matters because the drop loop is not
+	// transactional: if key deletion fails, the reset fails here and no
+	// table is dropped, which is the fail-safe order — the alternative
+	// (drop first, delete keys second) can leave a present key pointing
+	// at data a later step just removed.
+	if err := persistence.DeleteKeys(s.pool.Writer(),
+		"telemetry.delivery_ledger.activated_at", "telemetry.run_outcome.activated_at",
+	); err != nil {
+		return nil, fmt.Errorf("delete activation keys: %w", err)
 	}
 
 	dropped, err := dropUserTables(s.pool.Writer())
