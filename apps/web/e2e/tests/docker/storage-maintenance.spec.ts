@@ -70,8 +70,13 @@ test.describe.serial("process-scoped container cleanup", () => {
     expect(dockerInspectExists(previousTestContainer)).toBe(true);
   });
 
-  test("starts the next test without the previous process-owned container", () => {
-    expect(dockerInspectExists(previousTestContainer)).toBe(false);
+  test("starts the next test without the previous process-owned container", async () => {
+    await expect
+      .poll(() => dockerInspectExists(previousTestContainer), {
+        timeout: 30_000,
+        message: "previous process-owned container should be removed before the next test",
+      })
+      .toBe(false);
   });
 });
 

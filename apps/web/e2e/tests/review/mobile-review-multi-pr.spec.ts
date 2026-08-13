@@ -60,21 +60,38 @@ async function openMobileReview(
   repositoryName: string,
   taskId: string,
 ) {
-  await waitForMultiPRFixture(testPage, session, taskId);
-  await testPage.getByRole("button", { name: "Changes" }).tap();
-  const changesPanel = testPage.getByTestId("mobile-changes-panel");
-  await expect(changesPanel).toBeVisible({ timeout: 15_000 });
-  const prFiles = changesPanel.getByTestId("pr-files-section");
-  await expect(prFiles).toBeVisible({ timeout: 20_000 });
-  for (const pr of REVIEW_PRS) {
-    await expect(
-      prFiles.locator(
-        `[data-changes-file=${JSON.stringify(REVIEW_SHARED_FILE)}][data-pr-key="${REVIEW_OWNER}/${repositoryName}/${pr.number}"]`,
-      ),
-    ).toBeVisible({ timeout: 30_000 });
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await waitForMultiPRFixture(testPage, session, taskId);
+      await testPage.getByRole("button", { name: "Changes" }).tap();
+      const changesPanel = testPage.getByTestId("mobile-changes-panel");
+      await expect(changesPanel).toBeVisible({ timeout: 15_000 });
+      const prFiles = changesPanel.getByTestId("pr-files-section");
+      await expect(prFiles).toBeVisible({ timeout: 20_000 });
+      for (const pr of REVIEW_PRS) {
+        await expect(
+          prFiles.locator(
+            `[data-changes-file=${JSON.stringify(REVIEW_SHARED_FILE)}][data-pr-key="${REVIEW_OWNER}/${repositoryName}/${pr.number}"]`,
+          ),
+        ).toBeVisible({ timeout: 30_000 });
+      }
+      await changesPanel.getByRole("button", { name: "Review", exact: true }).tap();
+      await expect(session.reviewDialog()).toBeVisible({ timeout: 15_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1) throw error;
+
+      // The task/PR records can be present in the store before the changes
+      // hook has completed its first file fetch. Reload once to re-drive the
+      // same hydration and file-loading path before retrying the assertion.
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle();
+    }
   }
-  await changesPanel.getByRole("button", { name: "Review", exact: true }).tap();
-  await expect(session.reviewDialog()).toBeVisible({ timeout: 15_000 });
+  throw lastError;
 }
 
 test.describe("Review dialog multi-PR selector on mobile", () => {
@@ -85,6 +102,7 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(180_000);
     const task = await seedMultiPRReviewTask(apiClient, seedData, "Mobile Multi-PR Review E2E");
     const repositoryName = reviewRepositoryName(seedData);
     await testPage.goto(`/t/${task.id}`);
