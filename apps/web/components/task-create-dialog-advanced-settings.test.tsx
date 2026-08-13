@@ -90,7 +90,9 @@ describe("TaskCreateAdvancedSettings", () => {
     const row = screen.getByTestId("task-create-dependency-setting-row");
     const selectorContainer = screen.getByTestId("task-create-dependency-selector-container");
     expect(grid.className).toContain("md:grid-cols-2");
-    expect(row.className).toContain("flex-col");
+    expect(row.className).toContain("items-center");
+    expect(row.className).toContain("gap-3");
+    expect(row.className).not.toContain("flex-col");
     expect(row.parentElement).toBe(grid);
     expect(selectorContainer.parentElement).toBe(row);
     const info = screen.getByTestId("task-create-dependency-setting-info");

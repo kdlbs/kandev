@@ -89,9 +89,9 @@ place for dependency selection and future less-common options.
   closed or expanded. The dependency command list remains the inner scroll
   owner while its picker is open.
 - The expanded content uses a responsive option grid. On desktop, each row can
-  contain two settings, and each setting keeps its label/help and selector in
-  the same column. On narrow screens, the grid collapses to one column and
-  must not introduce document-level horizontal overflow.
+  contain two settings, and each setting keeps its label/help to the left of its
+  selector in the same column. On narrow screens, the grid collapses to one
+  column and must not introduce document-level horizontal overflow.
 - State, selection logic, candidate filtering, and payload behavior are shared
   across desktop and mobile. Only the disclosure geometry and touch
   presentation are responsive.

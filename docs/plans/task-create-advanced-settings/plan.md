@@ -31,8 +31,8 @@ not change the backend, API client, persistence, or WebSocket contracts.
   styling, a very subtle text size, a direction indicator, `aria-expanded`,
   and a mobile hitbox of at least 44 CSS pixels.
 - Render the existing `TaskCreateDependencies` in a responsive option grid
-  with the localized `Depends on` label and contextual help above the selector
-  in the same column. Use two columns on desktop so future advanced options can
+  with the localized `Depends on` label and contextual help to the left of the
+  selector in the same column. Use two columns on desktop so future advanced options can
   share a row, and collapse to one column on narrow screens. Keep the content
   wrapper ready for future sibling controls without introducing a speculative
   registry or new state shape.

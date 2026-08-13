@@ -22,11 +22,12 @@ creation payload.
 - Desktop E2E keeps the existing selector checks for the `No dependency`
   default, labeled setting help, task icons, search, info help, multiple
   selection, clearing, and `blocked_by` persistence after creation. It also
-  verifies the two-column option grid keeps the label and selector in the same
-  column and makes the option narrower than the full desktop grid.
+  verifies the two-column option grid keeps the label to the left of the selector
+  on the same horizontal row and makes the option narrower than the full desktop grid.
 - Mobile E2E expands the section with touch input, verifies the disclosure hit
   box and setting help control are at least 44 CSS pixels, verifies the label
-  and selector remain in the same column, and retains picker containment, touch
+  and selector remain on the same horizontal row with the label to the selector's
+  left, and retains picker containment, touch
   selection, help readability, and no-horizontal-overflow checks.
 - The managed desktop and mobile runs pass against a fresh production build
   with no stale frontend artifacts.

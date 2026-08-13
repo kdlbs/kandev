@@ -26,7 +26,7 @@ selector semantics, and payload path.
   expanded content with the existing `No dependency` default, icon, picker,
   task rows, info help, and multi-selection behavior. The expanded content uses
   a two-column desktop option grid, with the localized `Depends on` label and
-  contextual help stacked above the selector in the same column. The grid
+  contextual help to the left of the selector in the same column. The grid
   collapses to one column on narrow screens.
 - Collapsing and reopening the section does not clear selected predecessor IDs.
 - Workflow visibility, workflow locking, agent/executor behavior, and the

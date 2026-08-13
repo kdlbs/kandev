@@ -92,8 +92,8 @@ test.describe("Task-create dependency selector", () => {
       expect(selectorContainerBox).not.toBeNull();
       expect(settingRowBox!.width).toBeLessThan(settingGridBox!.width * 0.75);
       expect(selectorContainerBox!.width).toBeLessThan(settingGridBox!.width * 0.75);
-      expect(Math.abs(selectorContainerBox!.x - settingLabelBox!.x)).toBeLessThanOrEqual(2);
-      expect(selectorContainerBox!.y).toBeGreaterThan(settingLabelBox!.y);
+      expect(selectorContainerBox!.x).toBeGreaterThan(settingLabelBox!.x + settingLabelBox!.width);
+      expect(Math.abs(selectorContainerBox!.y - settingLabelBox!.y)).toBeLessThanOrEqual(4);
       const settingInfo = advancedSettings.getByTestId("task-create-dependency-setting-info");
       await settingInfo.hover();
       await expect(testPage.locator('[data-slot="tooltip-content"]:visible').last()).toContainText(

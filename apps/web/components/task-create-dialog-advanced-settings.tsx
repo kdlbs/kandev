@@ -59,11 +59,11 @@ export function TaskCreateAdvancedSettings({
           data-testid="task-create-advanced-settings-grid"
         >
           <div
-            className="flex min-w-0 flex-col gap-1"
+            className="flex min-w-0 items-center gap-3"
             data-testid="task-create-dependency-setting-row"
           >
             <div
-              className="flex min-h-11 items-center gap-1 text-[11px] text-muted-foreground/70 md:min-h-6"
+              className="flex min-h-11 shrink-0 items-center gap-1 text-[11px] text-muted-foreground/70 md:min-h-6"
               data-testid="task-create-dependency-setting-label"
             >
               <span>{t("task:dependsOn")}</span>
@@ -85,7 +85,7 @@ export function TaskCreateAdvancedSettings({
                 </TooltipContent>
               </Tooltip>
             </div>
-            <div className="min-w-0" data-testid="task-create-dependency-selector-container">
+            <div className="min-w-0 flex-1" data-testid="task-create-dependency-selector-container">
               <TaskCreateDependencies
                 value={blockedBy}
                 onChange={onBlockedByChange}
