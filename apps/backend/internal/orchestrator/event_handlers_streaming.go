@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -349,6 +350,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		// the task to REVIEW) leaves session=RUNNING with task=REVIEW.
 		s.setSessionRunningForExecution(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID)
 	}
+	s.recordSubagentContextFromFrame(ctx, payload, s.getActiveTurnID(payload.SessionID))
 
 	ownership := toolOwnershipForeground
 	if payload.Data.ParentToolCallID != "" {
@@ -619,6 +621,7 @@ func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecyc
 			zap.String("tool_call_id", payload.Data.ToolCallID),
 			zap.Error(err))
 	}
+	s.recordSubagentContextFromFrame(ctx, payload, turnID)
 
 	// Terminal updates only wake an async turn that was established by prior
 	// substantive output. A standalone terminal reconciliation belongs to the
@@ -766,6 +769,42 @@ func isTerminalToolStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+// recordSubagentContextFromFrame persists a durable relational record of a
+// subagent (Task tool) invocation when this frame's normalized payload is a
+// recognized subagent_task. No-op when subagentContexts is unwired, when the
+// frame isn't a subagent_task, or when the normalizer hasn't yet attached the
+// typed payload (the initial tool_call for Claude/OpenCode carries none —
+// recognition happens on a later tool_call_update, see AC-1a). turnID is
+// whatever the call site already resolved; this helper never re-derives one.
+//
+// payload.SessionID is the Kandev task session id despite the
+// agentSessionID-shaped naming downstream: messageCreatorAdapter passes the
+// same value into CreateMessageRequest.TaskSessionID
+// (internal/backendapp/adapters.go:879).
+func (s *Service) recordSubagentContextFromFrame(ctx context.Context, payload *lifecycle.AgentStreamEventPayload, turnID string) {
+	if s.subagentContexts == nil || payload == nil || payload.Data == nil {
+		return
+	}
+	normalized := payload.Data.Normalized
+	if normalized == nil || normalized.Kind() != streams.ToolKindSubagentTask {
+		return
+	}
+	subagentTask := normalized.SubagentTask()
+	if subagentTask == nil {
+		return
+	}
+	s.subagentContexts.RecordSubagentContext(ctx, taskservice.RecordSubagentContextRequest{
+		TaskSessionID:    payload.SessionID,
+		TaskID:           payload.TaskID,
+		TurnID:           turnID,
+		ToolCallID:       payload.Data.ToolCallID,
+		ParentToolCallID: payload.Data.ParentToolCallID,
+		ToolStatus:       payload.Data.ToolStatus,
+		Payload:          subagentTask,
+		ObservedAt:       time.Now().UTC(),
+	})
 }
 
 func (s *Service) shouldDropCompletedExecutionStreamEvent(payload *lifecycle.AgentStreamEventPayload) bool {

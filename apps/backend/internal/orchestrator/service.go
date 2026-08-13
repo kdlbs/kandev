@@ -37,6 +37,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -109,6 +110,17 @@ type MessageCreator interface {
 	// InvalidateModelCache clears any cached model for a session, forcing the next
 	// message to re-read the model from the DB. Called after model switches.
 	InvalidateModelCache(sessionID string)
+}
+
+// SubagentContextRecorder persists a durable relational record of a subagent
+// (Task tool) invocation observed on a tool-call frame. It returns nothing —
+// a repository failure never fails the enclosing message write, turn, or
+// agent stream (AC-27 in
+// docs/specs/subagent-context-persistence/spec.md). Implemented by
+// taskservice.Service via an adapter; optional, so an installation that
+// never wires it behaves exactly as before.
+type SubagentContextRecorder interface {
+	RecordSubagentContext(ctx context.Context, req taskservice.RecordSubagentContextRequest)
 }
 
 // TurnService is an interface for managing session turns
@@ -357,6 +369,11 @@ type Service struct {
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
+
+	// subagentContexts optionally persists a relational record of subagent
+	// (Task tool) invocations recognized on the tool-call frame paths. Nil is
+	// safe: both call sites guard on it. See SetSubagentContextRecorder.
+	subagentContexts SubagentContextRecorder
 
 	// Turn service for managing session turns
 	turnService TurnService
@@ -899,6 +916,13 @@ func NewService(
 // If not set: Agent messages won't be saved to the database (events will still be published).
 func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
+}
+
+// SetSubagentContextRecorder wires the optional subagent-context writer.
+// If not set, subagent tool-call frames are recognized and rendered exactly
+// as before; only the durable relational record is skipped.
+func (s *Service) SetSubagentContextRecorder(r SubagentContextRecorder) {
+	s.subagentContexts = r
 }
 
 // SetAttachmentReader wires the backend attachment store into passthrough
