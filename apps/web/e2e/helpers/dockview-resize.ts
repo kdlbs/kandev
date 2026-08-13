@@ -60,21 +60,34 @@ export async function getDockviewContainerWidth(page: Page): Promise<number> {
 }
 
 /**
- * Wait for a `setViewportSize` to have reached dockview's layout, by watching
- * the container width move off the value it had before.
+ * Wait for a `setViewportSize` to have reached dockview's layout.
  *
- * Column widths are recomputed inside the same layout pass that resizes the
- * container, so this is the anchor a width assertion needs after a viewport
- * change: measured across five scenarios (auto shrink and grow, manual-width
- * shrink and grow, over-cap re-clamp), the container and the right column
- * reached their final widths **in the same frame** every time, 3-11ms after
- * the viewport call resolved. Nothing moved again in the following 2.5s.
+ * Two conditions, both required, evaluated together in one `page.evaluate` so
+ * they describe a single instant:
  *
- * That co-settling is what makes the container a valid proxy, and it is the
- * assumption to re-measure if column sizing ever moves behind a debounce.
- * Without it there is nothing else to wait for: a column whose width must
- * *not* change across the viewport change has no event of its own, and
- * polling its value would be satisfied instantly by the width it already has.
+ *  1. the container's CSS box has moved off the width it had before, and
+ *  2. dockview's own `api.width` agrees with that box.
+ *
+ * (1) alone is not enough, and the reason is subtle. The app syncs a container
+ * resize into `api.layout` from `setupContainerResizeSync`'s ResizeObserver;
+ * measured under load (12 saturated cores, 6x CDP CPU throttling, five
+ * scenarios: auto shrink and grow, manual-width shrink and grow, over-cap
+ * re-clamp), that sync is already complete at the first ResizeObserver
+ * delivery reporting the new box, right column included. But a poll does not
+ * observe via ResizeObserver: `getBoundingClientRect()` forces a synchronous
+ * reflow, so it can read the post-resize box in a task that runs *before* that
+ * delivery, and therefore before `api.layout`. Condition (2) closes that
+ * window by reading the value the sync actually produces.
+ *
+ * (2) alone would be the already-true trap: `api.width` matches the box before
+ * the viewport changes as well, so it is satisfied instantly. Only the pair is
+ * causal, which is why this is not simply a poll on the expected group width.
+ * That matters most for the callers asserting a width must **not** change
+ * across the resize: they have no event of their own, and polling the value
+ * they expect would pass against the width that was already there.
+ *
+ * A 1px tolerance absorbs fractional-vs-rounded differences between the two
+ * readings; it is far below any real column-width assertion's slack.
  */
 export async function waitForDockviewViewportResize(
   page: Page,
@@ -82,11 +95,26 @@ export async function waitForDockviewViewportResize(
   timeout = 5_000,
 ): Promise<void> {
   await expect
-    .poll(() => getDockviewContainerWidth(page), {
-      timeout,
-      message: `dockview container never resized away from ${previousContainerWidth}px`,
-    })
-    .not.toBe(previousContainerWidth);
+    .poll(
+      () =>
+        page.evaluate((previous) => {
+          const element = document.querySelector(".dv-dockview");
+          const api = (window as unknown as { __dockviewApi__?: { width: number } })
+            .__dockviewApi__;
+          if (!element) return "no dockview container";
+          if (!api) return "dockview api not exposed";
+          const css = Math.round(element.getBoundingClientRect().width);
+          if (css === previous) return `container still ${css}px`;
+          const layout = Math.round(api.width);
+          if (Math.abs(layout - css) > 1) return `container ${css}px but api.width ${layout}px`;
+          return "settled";
+        }, previousContainerWidth),
+      {
+        timeout,
+        message: `dockview never took the new viewport (was ${previousContainerWidth}px)`,
+      },
+    )
+    .toBe("settled");
 }
 
 /** Read the live pixel width of a dockview group by group ID. */
