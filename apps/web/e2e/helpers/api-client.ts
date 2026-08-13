@@ -2339,6 +2339,10 @@ export class ApiClient {
     await this.wsRequest("message.queue.cancel", { session_id: sessionId });
   }
 
+  async getQueueStatus(sessionId: string): Promise<{ count: number }> {
+    return this.wsRequest("message.queue.get", { session_id: sessionId });
+  }
+
   // --- Integration config seeding (real API, not mock) ---
 
   async setJiraConfig(payload: {
