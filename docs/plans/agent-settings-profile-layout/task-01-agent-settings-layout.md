@@ -30,9 +30,8 @@ cd apps/web && pnpm exec eslint app/settings/agents/page.tsx components/settings
 cd apps/web && pnpm run i18n:check
 ```
 
-The new card test path is conditional: if the implementation extends the
-existing component test instead of creating `installed-agent-card.test.tsx`,
-run the existing test path only and record the actual command in `## Results`.
+The focused card test covers both unconfigured setup-link branches, while the
+existing profile-section test keeps the profile-row regression coverage.
 
 ## Files likely touched
 
@@ -40,7 +39,7 @@ run the existing test path only and record the actual command in `## Results`.
 - `apps/web/components/settings/agents/agent-profiles-section.tsx`
 - `apps/web/components/settings/agents/agent-profiles-section.test.tsx`
 - `apps/web/components/settings/installed-agent-card.tsx`
-- `apps/web/components/settings/installed-agent-card.test.tsx` (if needed)
+- `apps/web/components/settings/installed-agent-card.test.tsx`
 
 ## Dependencies
 
@@ -68,7 +67,8 @@ task/plan status in the same conversation.
 ## Results
 
 - `cd apps && pnpm install --frozen-lockfile` passed.
-- `cd apps/web && pnpm test -- components/settings/agents/agent-profiles-section.test.tsx` passed (1 file, 5 tests).
+- `cd apps/web && pnpm test -- components/settings/agents/agent-profiles-section.test.tsx components/settings/installed-agent-card.test.tsx` passed (2 files, 7 tests), including both setup-link routes.
 - `cd apps/web && pnpm run typecheck` passed.
 - `cd apps/web && pnpm exec eslint app/settings/agents/page.tsx components/settings/agents/agent-profiles-section.tsx components/settings/installed-agent-card.tsx` passed.
 - `cd apps/web && pnpm run i18n:check` passed. It reported the repository's existing advisory catalog parity/unreferenced-key warnings; this change adds no locale keys.
+- Review follow-up added `apps/web/components/settings/installed-agent-card.test.tsx` to cover the no-record and saved-empty setup branches.

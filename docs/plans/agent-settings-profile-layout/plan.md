@@ -54,9 +54,7 @@ needed because the existing translated labels and routes are reused.
   profile rows have no count/action sub-header, and an unconfigured agent has
   only its setup action.
   **File:** `apps/web/components/settings/agents/agent-profiles-section.test.tsx`
-  and a new focused `apps/web/components/settings/installed-agent-card.test.tsx`
-  if the card behavior cannot be covered cleanly by the existing component
-  test.
+  and `apps/web/components/settings/installed-agent-card.test.tsx`.
   **How:** React Testing Library assertions against the rendered card/list,
   including the creation link target and absence of count/empty-state copy.
 - **What:** Existing profile-row duplicate/delete behavior remains intact.
@@ -105,10 +103,11 @@ needed because the existing translated labels and routes are reused.
 
 Passed.
 
-- Component regression coverage passed: `cd apps/web && pnpm test -- components/settings/agents/agent-profiles-section.test.tsx` (5 tests).
+- Component regression coverage passed: `cd apps/web && pnpm test -- components/settings/agents/agent-profiles-section.test.tsx components/settings/installed-agent-card.test.tsx` (7 tests).
 - Static checks passed: `cd apps/web && pnpm run typecheck`, the focused ESLint command from task 01, and `cd apps/web && pnpm run i18n:check` (with the repository's existing advisory catalog warnings).
 - Desktop managed E2E passed: `cd apps/web && pnpm e2e:run --project chromium tests/settings/agent-profile-layout.spec.ts` (2 tests).
 - Mobile managed E2E passed: `cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-agent-profile-layout.spec.ts` (1 test).
+- Review follow-up coverage passed for both setup routes: no saved agent uses the base setup route, while a saved agent with zero profiles uses `?mode=create`.
 
 ## Implementation Waves And Parallel Candidates
 
