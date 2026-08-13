@@ -546,7 +546,7 @@ function reverseCommitsByRepository(commits: PRCommitForMerge[]): PRCommitForMer
   const repositoryOrder: string[] = [];
   const commitsByRepository = new Map<string, PRCommitForMerge[]>();
   for (const commit of commits) {
-    const key = repositoryKey(commit.repository_name);
+    const key = `${commit.owner}/${commit.repo}`;
     const repositoryCommits = commitsByRepository.get(key);
     if (repositoryCommits) {
       repositoryCommits.push(commit);

@@ -285,6 +285,7 @@ describe("separateCommitHistories", () => {
 
 describe("repository-scoped provider history", () => {
   it("reverses provider history independently for each repository", () => {
+    const repositoryLabel = "shared-label";
     const provider = [
       {
         ...makePR("old-a", "old a"),
@@ -292,7 +293,7 @@ describe("repository-scoped provider history", () => {
         workspace_id: WORKSPACE_ID,
         owner: "acme",
         repo: "widget-a",
-        repository_name: "widget-a",
+        repository_name: repositoryLabel,
       },
       {
         ...makePR("old-b", "old b"),
@@ -300,7 +301,7 @@ describe("repository-scoped provider history", () => {
         workspace_id: WORKSPACE_ID,
         owner: "acme",
         repo: "widget-b",
-        repository_name: "widget-b",
+        repository_name: repositoryLabel,
       },
       {
         ...makePR("new-a", "new a"),
@@ -308,7 +309,7 @@ describe("repository-scoped provider history", () => {
         workspace_id: WORKSPACE_ID,
         owner: "acme",
         repo: "widget-a",
-        repository_name: "widget-a",
+        repository_name: repositoryLabel,
       },
       {
         ...makePR("new-b", "new b"),
@@ -316,7 +317,7 @@ describe("repository-scoped provider history", () => {
         workspace_id: WORKSPACE_ID,
         owner: "acme",
         repo: "widget-b",
-        repository_name: "widget-b",
+        repository_name: repositoryLabel,
       },
     ];
 

@@ -333,6 +333,7 @@ test.describe("Mobile changes panel", () => {
         },
       ],
     });
+    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 2254, 1);
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
       owner: "testorg",
@@ -344,7 +345,6 @@ test.describe("Mobile changes panel", () => {
       base_branch: "main",
       author_login: "mobile-remote-author",
     });
-    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 2254, 1);
 
     await testPage.reload();
     await session.waitForLoad();

@@ -523,6 +523,7 @@ test.describe("Git Changes Panel", () => {
         },
       ],
     });
+    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 2253, 1);
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
       owner: "testorg",
@@ -534,7 +535,6 @@ test.describe("Git Changes Panel", () => {
       base_branch: "main",
       author_login: "remote-author",
     });
-    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 2253, 1);
 
     await testPage.reload();
     await session.waitForLoad();
