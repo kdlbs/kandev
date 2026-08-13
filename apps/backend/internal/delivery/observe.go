@@ -161,24 +161,27 @@ func (r *Repository) RepositoryInfo(ctx context.Context, id string) (RepositoryI
 	return info, nil
 }
 
-// TaskInfo is the subset of a tasks row the evaluator needs.
+// TaskInfo is the subset of a tasks row the evaluator and sweep ordering
+// need.
 type TaskInfo struct {
 	WorkspaceID string
+	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
 
 func (r *Repository) TaskInfo(ctx context.Context, id string) (TaskInfo, error) {
 	var row struct {
 		WorkspaceID string    `db:"workspace_id"`
+		CreatedAt   time.Time `db:"created_at"`
 		UpdatedAt   time.Time `db:"updated_at"`
 	}
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT workspace_id, updated_at FROM tasks WHERE id = ?
+		SELECT workspace_id, created_at, updated_at FROM tasks WHERE id = ?
 	`), id).StructScan(&row)
 	if err != nil {
 		return TaskInfo{}, err
 	}
-	return TaskInfo{WorkspaceID: row.WorkspaceID, UpdatedAt: row.UpdatedAt}, nil
+	return TaskInfo{WorkspaceID: row.WorkspaceID, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
 }
 
 // SnapshotsForPair reads every task_session_git_snapshots row for the
