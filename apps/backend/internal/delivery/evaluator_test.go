@@ -82,6 +82,38 @@ func TestClassify_Rule2DirectCommit(t *testing.T) {
 	}
 }
 
+// TestClassify_Rule2DirectCommitRestrictedToPreconditionSatisfyingSession
+// covers R5-F5 (spec revision 5, Ordering § direct_commit ref): the
+// selectDefaultBranchCommitRef restriction to the session(s) satisfying
+// rule 2's own moving-head-on-default-branch predicate had no test —
+// its ancestry twin (SelectAncestryHead) was covered but this one was
+// not. s1 authored two distinct heads on the default branch (satisfies
+// the predicate); s2 sits idle on the default branch and contributes one
+// newer, never-moved inherited snapshot. Restricted selection must stay
+// within s1 and pick its newest head, not s2's newer inherited tip. This
+// already passes against the shipped implementation — recorded as a
+// regression guard for a real gap in test coverage, not a fix.
+func TestClassify_Rule2DirectCommitRestrictedToPreconditionSatisfyingSession(t *testing.T) {
+	in := delivery.PairInput{
+		DefaultBranch: "main",
+		Snapshots: []delivery.Snapshot{
+			{SessionID: "s1", Branch: "main", HeadCommit: "aaa", CreatedAt: at(0)},
+			{SessionID: "s1", Branch: "main", HeadCommit: "bbb", CreatedAt: at(1)},
+			{SessionID: "s2", Branch: "main", HeadCommit: "inherited-tip", CreatedAt: at(2)},
+		},
+	}
+	got := delivery.Classify(in)
+	if got.Outcome != delivery.OutcomeDirectCommit || got.Basis != delivery.BasisDefaultBranchCommit {
+		t.Fatalf("got %+v", got)
+	}
+	if got.Ref == nil || *got.Ref != "bbb" {
+		t.Fatalf("ref = %v, want bbb (s1's newest head, not s2's newer inherited tip)", got.Ref)
+	}
+	if !got.ReachedDefault || got.ReachedRef != "bbb" {
+		t.Fatalf("reached observation = %+v, want ReachedRef bbb", got)
+	}
+}
+
 func TestClassify_Rule3UnknownBranchCommitsUnmerged(t *testing.T) {
 	in := delivery.PairInput{
 		DefaultBranch: "main",

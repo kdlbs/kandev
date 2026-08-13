@@ -413,6 +413,40 @@ func TestUpsert_LastEvaluatedAtIsHighWaterNeverRewound(t *testing.T) {
 	}
 }
 
+// TestUpsert_ReachedDefaultWithEmptyRefStoresNull covers R6-F3: the
+// provider tables' URL columns (pr_url / mr_url / pull_request_url) are
+// TEXT NOT NULL with no DEFAULT, so a merged, non-detached row can carry
+// an empty string. computeDefaultBranchObservation propagates that
+// empty string as ReachedRef, and reached_default_ref is a write-once
+// column — persisting ” there instead of NULL would violate the
+// document-wide "NULL, not empty string" rule in spec "What" and "Data
+// model" the moment it is ever written, since the column can never be
+// overwritten afterwards.
+func TestUpsert_ReachedDefaultWithEmptyRefStoresNull(t *testing.T) {
+	repo, db, taskID, repoID, wsID := setupPair(t)
+	ctx := context.Background()
+	t0 := time.Now().UTC()
+
+	if _, err := repo.Upsert(ctx, delivery.UpsertInput{
+		TaskID: taskID, RepositoryID: repoID, WorkspaceID: wsID,
+		Classification: delivery.Classification{
+			Outcome: delivery.OutcomeUnknown, Basis: delivery.BasisReachedDefaultUnattributed, Rank: 6,
+			ReachedDefault: true, ReachedBasis: delivery.ReachedBasisProviderPRMerged, ReachedRef: "",
+		},
+		EvaluatedAt: t0,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	row := readLedgerRow(t, db, taskID, repoID)
+	if !row.ReachedAt.Valid {
+		t.Fatalf("reached_default_at not stored: %+v", row)
+	}
+	if row.ReachedRef.Valid {
+		t.Fatalf("reached_default_ref = %q, want NULL not empty string", row.ReachedRef.String)
+	}
+}
+
 func TestUpsert_WorkspaceIDRefreshedUnconditionallyEvenOnDemotion(t *testing.T) {
 	repo, db, taskID, repoID, wsID := setupPair(t)
 	ctx := context.Background()
