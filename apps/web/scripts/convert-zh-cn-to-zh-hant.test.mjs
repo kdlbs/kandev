@@ -64,7 +64,7 @@ describe("glossary coverage", () => {
   });
 });
 
-describe("convertMessage", () => {
+describe("convertMessage basics", () => {
   it("preserves placeholders and Trans tags", () => {
     const source = "删除 <1>{{count}}</1> 个任务";
     for (const locale of ["zh-tw", "zh-hk"]) {
@@ -125,7 +125,9 @@ describe("convertMessage", () => {
       }
     }
   });
+});
 
+describe("convertMessage regional vocabulary", () => {
   it("distinguishes AI agents from network proxies", () => {
     for (const locale of TARGET_LOCALES) {
       assert.equal(convertMessage("智能体配置和子智能体", locale), "代理程式設定檔和子代理程式");
