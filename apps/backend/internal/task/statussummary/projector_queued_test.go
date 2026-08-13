@@ -267,6 +267,49 @@ func TestProjectorQueueEventForMissingTaskIsNoop(t *testing.T) {
 	if len(store.rows) != 0 {
 		t.Fatalf("missing-task queue event wrote summaries: %d rows", len(store.rows))
 	}
+	// ensureState may insert a placeholder before resolve fails; drop it so
+	// deleted tasks do not retain projectionState for the process lifetime.
+	projector.mu.Lock()
+	_, retained := projector.state[taskID]
+	projector.mu.Unlock()
+	if retained {
+		t.Fatal("missing-task queue event retained projection state")
+	}
+}
+
+func TestProjectorQueueEventPropagatesTransientResolveFailure(t *testing.T) {
+	const taskID = "task-resolve-transient"
+	store := newProjectorTestStore()
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	projector := NewProjector(ProjectorConfig{
+		Store:    store,
+		EventBus: eventBus,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "", fmt.Errorf("database is locked")
+		},
+		CountQueuedPrompts: func(context.Context, string) (int, error) {
+			return 0, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 8, 1, 18, 0, 0, 0, time.UTC) },
+	})
+	if err := projector.Start(ctx); err != nil {
+		cancel()
+		eventBus.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		projector.Close()
+		eventBus.Close()
+	})
+
+	err := projector.handleEvent(ctx, bus.NewEvent(events.MessageQueueStatusChanged, "test", map[string]interface{}{
+		"task_id": taskID,
+	}))
+	if err == nil {
+		t.Fatal("expected transient resolve failure to propagate")
+	}
 }
 
 // failOnInsertStore rejects every write so a warm projector cannot recreate a
