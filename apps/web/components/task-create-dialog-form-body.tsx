@@ -376,8 +376,8 @@ export type DialogPromptSectionProps = {
    * description should pass `false` so the name field wins focus.
    */
   autoFocusDescription?: boolean;
-  /** Called after a non-empty voice transcript is inserted and auto-send is on. */
-  onVoiceAutoSend?: () => boolean | Promise<boolean>;
+  /** Submits the form for a plugin composer action that finished producing text. */
+  onComposerSubmit?: () => boolean | Promise<boolean>;
 };
 
 // importBindings collapses the optional Jira/Linear import callbacks into the
@@ -408,7 +408,7 @@ export function DialogPromptSection({
   descriptionPlaceholder,
   aboveDescriptionSlot,
   autoFocusDescription,
-  onVoiceAutoSend,
+  onComposerSubmit,
 }: DialogPromptSectionProps) {
   const importsEnabled = !isSessionMode && !isTaskStarted;
   const ws = workspaceId ?? null;
@@ -433,7 +433,7 @@ export function DialogPromptSection({
         isUtilityConfigured={enhance?.isConfigured}
         jiraImport={importBindings(importsEnabled, ws, onJiraImport)}
         linearImport={importBindings(importsEnabled, ws, onLinearImport)}
-        onVoiceAutoSend={onVoiceAutoSend}
+        onComposerSubmit={onComposerSubmit}
       />
       <PromptResultRecovery
         pendingResult={enhance?.pendingResult ?? null}

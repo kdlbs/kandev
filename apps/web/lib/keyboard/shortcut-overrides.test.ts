@@ -25,11 +25,10 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
     expect(ids).toContain("TOGGLE_PLAN_MODE");
     expect(ids).toContain("TASK_SWITCHER");
     expect(ids).toContain("TASK_SWITCHER_REVERSE");
-    expect(ids).toContain("VOICE_INPUT_TOGGLE");
     expect(ids).toContain("REVERSE_SEARCH");
     expect(ids).toContain("OPEN_TASK_PR");
     expect(ids).toContain("WORKSPACE_PICKER");
-    expect(ids).toHaveLength(17);
+    expect(ids).toHaveLength(16);
   });
 
   it("each entry has a label and default matching SHORTCUTS", () => {

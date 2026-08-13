@@ -83,7 +83,24 @@ func newTestService(t *testing.T, factory ClientFactory) (*Service, *Store, *fak
 		t.Fatalf("new store: %v", err)
 	}
 	secrets := newFakeSecretStore()
+	if factory == nil {
+		factory = offlineClientFactory()
+	}
 	return NewService(store, secrets, factory, logger.Default()), store, secrets
+}
+
+// offlineClientFactory is the stub every test must construct a Service with.
+//
+// NewService falls back to DefaultClientFactory when clientFn is nil, and
+// SetConfigForWorkspace probes auth on every credential change, so a nil
+// factory makes the suite issue real HTTPS requests to dev.azure.com. That
+// costs a network dependency on an unrelated third party and leaves a live
+// transport goroutine behind — which is what goleak_test.go now fails on, so
+// a reintroduction cannot pass silently.
+func offlineClientFactory() ClientFactory {
+	return func(*Config, string) Client {
+		return &fakeClient{result: &TestConnectionResult{OK: true}}
+	}
 }
 
 func TestOrganizationURLValidation(t *testing.T) {
@@ -150,7 +167,7 @@ func TestConfigWorkspaceIsolationAndReconstruction(t *testing.T) {
 			t.Fatalf("set %s: %v", tc.workspace, err)
 		}
 	}
-	reconstructed := NewService(store, secrets, nil, logger.Default())
+	reconstructed := NewService(store, secrets, offlineClientFactory(), logger.Default())
 	for _, tc := range []struct{ workspace, org, pat string }{
 		{"ws-a", "https://dev.azure.com/acme", "pat-a"},
 		{"ws-b", "https://dev.azure.com/other", "pat-b"},

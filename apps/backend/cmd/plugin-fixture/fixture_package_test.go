@@ -29,6 +29,8 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.True(t, m.HasEvent("task.created"))
 	require.True(t, m.Capabilities.State)
 	require.True(t, m.Capabilities.UserState)
+	require.Len(t, m.AgentTools, 1)
+	require.Equal(t, "test_echo", m.AgentTools[0].Name)
 
 	require.Len(t, m.Webhooks, 1)
 	require.Equal(t, "test-hook", m.Webhooks[0].Key)

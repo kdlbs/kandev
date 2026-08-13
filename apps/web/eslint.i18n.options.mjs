@@ -268,9 +268,8 @@ export const i18nGuardFiles = [
   // Settings → Preferences → Appearance, Keyboard Shortcuts and Task behavior.
   // The pages render from general-settings.tsx (already listed above); these
   // entries add the merged pages plus the per-setting cards those pages own.
-  // Shortcut *names* still come from `lib/keyboard/shortcut-overrides.ts`, a
-  // registry shared with the voice-mode settings section — deliberately not
-  // migrated here.
+  // Shortcut *names* still come from `lib/keyboard/shortcut-overrides.ts`,
+  // which is deliberately not migrated here.
   "components/settings/task-behavior-settings.tsx",
   "components/settings/terminal-editors-settings.tsx",
   "components/settings/anchored-prompt-bar-settings.tsx",
@@ -971,11 +970,11 @@ export const i18nGuardFiles = [
   "components/settings/repository-custom-scripts.tsx",
   "components/settings/repository-delete-dialog.tsx",
   "components/settings/unsaved-indicator.tsx",
-  // Settings → External MCP, Prompts, Voice Mode and Utility Agents, plus the
-  // two Changelog cards. Four small routes in one entry group because none of
-  // them owns enough copy to be worth its own migration, and they share the
-  // `settings` namespace: two of the four already had their page title there
-  // (`settings:voiceMode`, `settings:utilityAgents`) and the other two in
+  // Settings → External MCP, Prompts and Utility Agents, plus the two
+  // Changelog cards. Small routes in one entry group because none of them owns
+  // enough copy to be worth its own migration, and they share the `settings`
+  // namespace: one already had its page title there
+  // (`settings:utilityAgents`) and the others in
   // `common` (`common:externalMcp`, `common:prompts`), all of which are reused
   // rather than twinned — `SEGMENT_LABEL_KEYS` in `settings-layout-client.tsx`
   // renders the same words as the breadcrumb on these very routes.
@@ -988,9 +987,8 @@ export const i18nGuardFiles = [
   // identifiers an external agent calls. Two unit tests pin the keys to the
   // catalog, because nothing else can.
   //
-  // Three more shapes here held copy no lint rule could see, all now migrated:
-  // `buildEngineOptions` in `voice-mode-settings.tsx` (a plain builder
-  // returning label/description object literals), `noteForStatus` in
+  // Two more shapes here held copy no lint rule could see, both now migrated:
+  // `noteForStatus` in
   // `inference-agent-status.tsx` (a non-JSX switch over the probe status), and
   // the `placeholder = "Select a model"` parameter default in
   // `model-combobox.tsx`, which had to move into the component body — a
@@ -1013,8 +1011,8 @@ export const i18nGuardFiles = [
   //
   //   - `app/settings/prompts/page.tsx`
   //     are unreferenced. `SETTINGS_ROUTES` in `src/settings-routes.tsx` renders
-  //     `<PromptsSettings />` and `<VoiceModeSettings />` directly, so the SSR
-  //     prefetch in those pages never runs. `external-mcp` and `utility-agents`
+  //     `<PromptsSettings />` directly, so the SSR prefetch in that page never
+  //     runs. `external-mcp` and `utility-agents`
   //     go through their page, and are live.
   //   - `app/settings/changelog/page.tsx` is likewise unreferenced; the route
   //     table has its own `SettingsRedirect` to `/settings/system/updates`.
@@ -1052,17 +1050,12 @@ export const i18nGuardFiles = [
   //     whole of every generated snippet. All interpolated as values.
   //   - The `{{` prompt-template sigil and the `@name` chat mention token —
   //     both typed verbatim by the user, both interpolated.
-  //   - Wire values: the voice `engine` / `mode` / `whisper_web_model` unions
-  //     and the BCP-47 `language` tags, the `InferenceAgentStatus` probe
-  //     states, the `USE_DEFAULT` sentinel, and every agent/model id. Only
-  //     their labels are copy, and those travel as catalog keys.
-  //   - `~40 MB` / `~75 MB` / `~240 MB` in `WHISPER_MODELS`: download sizes in
-  //     binary units, not prose — the same call `storage-units.ts` made.
+  //   - Wire values: the `InferenceAgentStatus` probe states, the
+  //     `USE_DEFAULT` sentinel, and every agent/model id. Only their labels
+  //     are copy, and those travel as catalog keys.
   //   - Utility agent `name`, `description` and `prompt`, and custom prompt
   //     `name` / `content`. The builtins' text is authored by the backend and
   //     the rest is user data; a prompt body is also sent to the agent verbatim.
-  //   - `new Error("Voice settings require VoiceDraftProvider")`, a programming
-  //     error that can only fire in a broken render tree.
   //
   // Every key added here was audited against all 15 en catalogs for English that
   // already exists under another key. Twelve matched. Ten are the established
@@ -1091,12 +1084,12 @@ export const i18nGuardFiles = [
   // that key is named for the secrets dialog it belongs to; folding the prompts
   // dialog into it would leave a key whose name contradicts half its callers.
   //
-  // Still English and NOT ours: `CONFIGURABLE_SHORTCUTS.VOICE_INPUT_TOGGLE.label`
-  // ("Voice Input") from `lib/keyboard/shortcut-overrides.ts`, interpolated into
-  // the migrated `settings:voiceShortcutTitle` frame. It is the shared keyboard
-  // registry, owned by whoever migrates `lib/keyboard`; under the pseudo-locale
-  // it reads as an English word inside accented copy, which is the oracle's
-  // known weak spot rather than a miss here.
+  // Shortcut labels in `CONFIGURABLE_SHORTCUTS`
+  // (`lib/keyboard/shortcut-overrides.ts`) are still English and NOT ours:
+  // that is the shared keyboard registry, owned by whoever migrates
+  // `lib/keyboard`. Under the pseudo-locale they read as English words inside
+  // accented copy, which is the oracle's known weak spot rather than a miss
+  // here.
   "app/settings/external-mcp/**/*.{ts,tsx}",
   "app/settings/prompts/**/*.{ts,tsx}",
   "app/settings/utility-agents/**/*.{ts,tsx}",
@@ -1112,7 +1105,6 @@ export const i18nGuardFiles = [
   "components/settings/utility-agents-section.tsx",
   "components/settings/utility-dirty.ts",
   "components/settings/utility-sections.tsx",
-  "components/settings/voice-mode-settings.tsx",
   "lib/settings/external-mcp-tools.ts",
   // Configuration Chat. `ConfigChatProvider` mounts the FAB on EVERY /settings
   // route, so its `aria-label="Configuration Chat"` was the last text finding

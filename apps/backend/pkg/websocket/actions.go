@@ -406,6 +406,8 @@ const (
 	ActionMCPListTaskDocuments = "mcp.list_task_documents"
 	ActionMCPGetTaskDocument   = "mcp.get_task_document"
 	ActionMCPWriteTaskDocument = "mcp.write_task_document"
+	ActionMCPListPluginTools   = "mcp.list_plugin_tools"
+	ActionMCPInvokePluginTool  = "mcp.invoke_plugin_tool"
 
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"

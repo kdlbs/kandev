@@ -1,0 +1,338 @@
+package lifecycle
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agentruntime"
+)
+
+// statusProviderExecutor is an ExecutorBackend that also implements
+// RemoteStatusProvider, recording the instance the manager projected from the
+// execution so the projection itself can be asserted.
+type statusProviderExecutor struct {
+	MockExecutor
+	status   *RemoteStatus
+	err      error
+	observed []*ExecutorInstance
+}
+
+func (e *statusProviderExecutor) GetRemoteStatus(_ context.Context, instance *ExecutorInstance) (*RemoteStatus, error) {
+	e.observed = append(e.observed, instance)
+	return e.status, e.err
+}
+
+func newRemoteStatusManager(t *testing.T, provider ExecutorBackend) *Manager {
+	t.Helper()
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(provider)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	return mgr
+}
+
+// TestPollOneRemoteStatusProjectsExecutionIntoInstance pins the projection the
+// provider is handed: a status poll must carry the runtime identifiers the
+// backend needs to find the remote (container, sprite name in metadata), not
+// just the session ID.
+func TestPollOneRemoteStatusProjectsExecutionIntoInstance(t *testing.T) {
+	provider := &statusProviderExecutor{
+		MockExecutor: MockExecutor{name: executor.NameSprites},
+		status:       &RemoteStatus{State: "started"},
+	}
+	mgr := newRemoteStatusManager(t, provider)
+	execution := &AgentExecution{
+		ID:            "exec-1",
+		TaskID:        "task-1",
+		SessionID:     "session-1",
+		RuntimeName:   agentruntime.RuntimeSprites,
+		ContainerID:   "container-1",
+		ContainerIP:   "10.0.0.2",
+		WorkspacePath: "/workspace",
+	}
+	execution.setMetadataValue(MetadataKeySpriteName, "kandev-abc")
+
+	mgr.pollOneRemoteStatus(context.Background(), execution)
+
+	require.Len(t, provider.observed, 1)
+	instance := provider.observed[0]
+	require.Equal(t, "exec-1", instance.InstanceID)
+	require.Equal(t, "task-1", instance.TaskID)
+	require.Equal(t, "session-1", instance.SessionID)
+	require.Equal(t, agentruntime.RuntimeSprites, instance.RuntimeName)
+	require.Equal(t, "container-1", instance.ContainerID)
+	require.Equal(t, "10.0.0.2", instance.ContainerIP)
+	require.Equal(t, "/workspace", instance.WorkspacePath)
+	require.Equal(t, "kandev-abc", instance.Metadata[MetadataKeySpriteName],
+		"the remote's own name lives in metadata; without it the provider cannot find the sandbox")
+
+	status, ok := mgr.GetRemoteStatusBySession("session-1")
+	require.True(t, ok)
+	require.Equal(t, "started", status.State)
+	require.Equal(t, agentruntime.RuntimeSprites, status.RuntimeName,
+		"a provider that omits the runtime name gets the execution's filled in")
+	require.False(t, status.LastCheckedAt.IsZero(),
+		"an unstamped status is stamped so the UI can show staleness")
+}
+
+func TestPollOneRemoteStatusStoresProviderError(t *testing.T) {
+	provider := &statusProviderExecutor{
+		MockExecutor: MockExecutor{name: executor.NameSprites},
+		err:          errors.New("sprite unreachable"),
+	}
+	mgr := newRemoteStatusManager(t, provider)
+
+	mgr.pollOneRemoteStatus(context.Background(), &AgentExecution{
+		ID: "exec-1", SessionID: "session-1", RuntimeName: agentruntime.RuntimeSprites,
+	})
+
+	status, ok := mgr.GetRemoteStatusBySession("session-1")
+	require.True(t, ok, "a failed poll must still record a status so the UI can show degraded")
+	require.Equal(t, "sprite unreachable", status.ErrorMessage)
+	require.Equal(t, agentruntime.RuntimeSprites, status.RuntimeName)
+}
+
+func TestPollOneRemoteStatusSkipsUnsupportedExecutions(t *testing.T) {
+	provider := &statusProviderExecutor{
+		MockExecutor: MockExecutor{name: executor.NameSprites},
+		status:       &RemoteStatus{State: "started"},
+	}
+	mgr := newRemoteStatusManager(t, provider)
+	ctx := context.Background()
+
+	mgr.pollOneRemoteStatus(ctx, nil)
+	mgr.pollOneRemoteStatus(ctx, &AgentExecution{ID: "exec-1"}) // no session
+	mgr.pollOneRemoteStatus(ctx, &AgentExecution{
+		ID: "exec-2", SessionID: "session-2", RuntimeName: agentruntime.RuntimeDocker,
+	}) // runtime not registered
+
+	require.Empty(t, provider.observed)
+	_, ok := mgr.GetRemoteStatusBySession("session-2")
+	require.False(t, ok)
+}
+
+func TestPollOneRemoteStatusSkipsBackendWithoutStatusSupport(t *testing.T) {
+	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameStandalone})
+
+	mgr.pollOneRemoteStatus(context.Background(), &AgentExecution{
+		ID: "exec-1", SessionID: "session-1", RuntimeName: agentruntime.RuntimeStandalone,
+	})
+
+	_, ok := mgr.GetRemoteStatusBySession("session-1")
+	require.False(t, ok, "a local executor has no remote status to report")
+}
+
+func TestPollOneRemoteStatusIgnoresNilProviderResult(t *testing.T) {
+	provider := &statusProviderExecutor{MockExecutor: MockExecutor{name: executor.NameSprites}}
+	mgr := newRemoteStatusManager(t, provider)
+
+	mgr.pollOneRemoteStatus(context.Background(), &AgentExecution{
+		ID: "exec-1", SessionID: "session-1", RuntimeName: agentruntime.RuntimeSprites,
+	})
+
+	_, ok := mgr.GetRemoteStatusBySession("session-1")
+	require.False(t, ok, "a provider returning (nil, nil) must not create an empty cache entry")
+}
+
+func TestPollRemoteStatusesCoversEveryTrackedExecution(t *testing.T) {
+	provider := &statusProviderExecutor{
+		MockExecutor: MockExecutor{name: executor.NameSprites},
+		status:       &RemoteStatus{State: "started"},
+	}
+	mgr := newRemoteStatusManager(t, provider)
+	for _, id := range []string{"session-1", "session-2"} {
+		require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+			ID: "exec-" + id, SessionID: id, RuntimeName: agentruntime.RuntimeSprites,
+		}))
+	}
+
+	mgr.pollRemoteStatuses(context.Background())
+
+	require.Len(t, provider.observed, 2)
+	for _, id := range []string{"session-1", "session-2"} {
+		_, ok := mgr.GetRemoteStatusBySession(id)
+		require.True(t, ok, "session %s was not polled", id)
+	}
+}
+
+func TestGetRemoteStatusBySessionIDRefreshesTrackedExecution(t *testing.T) {
+	provider := &statusProviderExecutor{
+		MockExecutor: MockExecutor{name: executor.NameSprites},
+		status:       &RemoteStatus{State: "started", LastCheckedAt: time.Now().UTC()},
+	}
+	mgr := newRemoteStatusManager(t, provider)
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-1", SessionID: "session-1", RuntimeName: agentruntime.RuntimeSprites,
+	}))
+
+	status, ok := mgr.GetRemoteStatusBySessionID(context.Background(), "session-1")
+
+	require.True(t, ok)
+	require.Equal(t, "started", status.State)
+	require.Len(t, provider.observed, 1, "a tracked session is refreshed opportunistically on read")
+
+	_, ok = mgr.GetRemoteStatusBySessionID(context.Background(), "session-absent")
+	require.False(t, ok)
+	require.Len(t, provider.observed, 1, "an untracked session must not trigger a poll")
+}
+
+func TestGetRemoteStatusBySessionReturnsDefensiveCopy(t *testing.T) {
+	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameStandalone})
+	mgr.storeRemoteStatus("session-1", &RemoteStatus{State: "started"})
+
+	first, ok := mgr.GetRemoteStatusBySession("session-1")
+	require.True(t, ok)
+	first.State = "mutated-by-caller"
+
+	second, ok := mgr.GetRemoteStatusBySession("session-1")
+	require.True(t, ok)
+	require.Equal(t, "started", second.State, "the cache must hand out copies, not its own entry")
+}
+
+func TestStoreAndClearRemoteStatusIgnoreEmptyInputs(t *testing.T) {
+	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameStandalone})
+
+	mgr.storeRemoteStatus("", &RemoteStatus{State: "started"})
+	mgr.storeRemoteStatus("session-1", nil)
+	_, ok := mgr.GetRemoteStatusBySession("session-1")
+	require.False(t, ok)
+
+	mgr.storeRemoteStatus("session-1", &RemoteStatus{State: "started"})
+	mgr.clearRemoteStatus("")
+	_, ok = mgr.GetRemoteStatusBySession("session-1")
+	require.True(t, ok, "clearing an empty session ID must not wipe unrelated entries")
+
+	mgr.clearRemoteStatus("session-1")
+	_, ok = mgr.GetRemoteStatusBySession("session-1")
+	require.False(t, ok)
+}
+
+// TestPollRemoteStatusForRecordsPopulatesCacheBeforeResume pins the startup
+// path: sessions that have no in-memory execution yet still get their remote
+// status cached from the persisted executor records.
+func TestPollRemoteStatusForRecordsPopulatesCacheBeforeResume(t *testing.T) {
+	provider := &statusProviderExecutor{
+		MockExecutor: MockExecutor{name: executor.NameSprites},
+		status:       &RemoteStatus{State: "suspended"},
+	}
+	mgr := newRemoteStatusManager(t, provider)
+
+	mgr.PollRemoteStatusForRecords(context.Background(), []RemoteStatusPollRecord{
+		{SessionID: "", Runtime: agentruntime.RuntimeSprites},                 // skipped
+		{SessionID: "session-no-runtime"},                                     // skipped
+		{SessionID: "session-unregistered", Runtime: agentruntime.RuntimeSSH}, // skipped
+		{
+			SessionID:        "session-1",
+			Runtime:          agentruntime.RuntimeSprites,
+			AgentExecutionID: "exec-1",
+			ContainerID:      "container-1",
+			Metadata:         map[string]interface{}{MetadataKeySpriteName: "kandev-abc"},
+		},
+	})
+
+	require.Len(t, provider.observed, 1, "only the complete, registered record is polled")
+	require.Equal(t, "exec-1", provider.observed[0].InstanceID)
+	require.Equal(t, "container-1", provider.observed[0].ContainerID)
+	require.Equal(t, "kandev-abc", provider.observed[0].Metadata[MetadataKeySpriteName])
+
+	status, ok := mgr.GetRemoteStatusBySession("session-1")
+	require.True(t, ok)
+	require.Equal(t, "suspended", status.State)
+	require.Equal(t, agentruntime.RuntimeSprites, status.RuntimeName)
+	require.False(t, status.LastCheckedAt.IsZero())
+}
+
+func TestPollRemoteStatusForRecordsStoresProviderError(t *testing.T) {
+	provider := &statusProviderExecutor{
+		MockExecutor: MockExecutor{name: executor.NameSprites},
+		err:          errors.New("api token expired"),
+	}
+	mgr := newRemoteStatusManager(t, provider)
+
+	mgr.PollRemoteStatusForRecords(context.Background(), []RemoteStatusPollRecord{
+		{SessionID: "session-1", Runtime: agentruntime.RuntimeSprites},
+	})
+
+	status, ok := mgr.GetRemoteStatusBySession("session-1")
+	require.True(t, ok)
+	require.Equal(t, "api token expired", status.ErrorMessage)
+}
+
+func TestPollRemoteStatusForRecordsSkipsNilProviderResultAndNoRegistry(t *testing.T) {
+	provider := &statusProviderExecutor{MockExecutor: MockExecutor{name: executor.NameSprites}}
+	mgr := newRemoteStatusManager(t, provider)
+
+	mgr.PollRemoteStatusForRecords(context.Background(), []RemoteStatusPollRecord{
+		{SessionID: "session-1", Runtime: agentruntime.RuntimeSprites},
+	})
+	_, ok := mgr.GetRemoteStatusBySession("session-1")
+	require.False(t, ok)
+
+	bare := newTestManager(t)
+	bare.PollRemoteStatusForRecords(context.Background(), []RemoteStatusPollRecord{
+		{SessionID: "session-1", Runtime: agentruntime.RuntimeSprites},
+	})
+	_, ok = bare.GetRemoteStatusBySession("session-1")
+	require.False(t, ok, "without an executor registry there is nothing to poll")
+}
+
+// TestStopAgentClearsRemoteStatus pins that a stopped session does not keep
+// reporting a stale cloud status in the UI.
+func TestStopAgentClearsRemoteStatus(t *testing.T) {
+	provider := &statusProviderExecutor{
+		MockExecutor: MockExecutor{name: executor.NameSprites},
+		status:       &RemoteStatus{State: "started"},
+	}
+	mgr := newRemoteStatusManager(t, provider)
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-1", SessionID: "session-1", RuntimeName: agentruntime.RuntimeSprites,
+	}))
+	mgr.storeRemoteStatus("session-1", &RemoteStatus{State: "started"})
+
+	require.NoError(t, mgr.StopAgent(context.Background(), "exec-1", false))
+
+	_, ok := mgr.GetRemoteStatusBySession("session-1")
+	require.False(t, ok)
+}
+
+func TestManagerEnvironmentRequiresTypedDockerBackend(t *testing.T) {
+	ctx := context.Background()
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(&MockExecutor{name: executor.NameDocker})
+	registry.Register(&MockExecutor{name: executor.NameSprites})
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+
+	require.NoError(t, mgr.DestroyContainer(ctx, ""), "an empty container ID is a no-op")
+	require.ErrorContains(t, mgr.DestroyContainer(ctx, "container-1"), "docker backend has unexpected type")
+
+	status, err := mgr.GetContainerLiveStatus(ctx, "")
+	require.NoError(t, err)
+	require.Nil(t, status)
+	_, err = mgr.GetContainerLiveStatus(ctx, "container-1")
+	require.ErrorContains(t, err, "docker backend has unexpected type")
+
+	require.NoError(t, mgr.DestroySandbox(ctx, "", "exec-1"), "an empty sandbox ID is a no-op")
+	require.ErrorContains(t, mgr.DestroySandbox(ctx, "sandbox-1", "exec-1"),
+		"sprites backend has unexpected type")
+}
+
+func TestManagerEnvironmentReportsMissingBackends(t *testing.T) {
+	ctx := context.Background()
+	log := newTestRegistryLogger()
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, NewExecutorRegistry(log), nil, nil, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+
+	require.ErrorContains(t, mgr.DestroyContainer(ctx, "container-1"), "docker backend unavailable")
+	_, err := mgr.GetContainerLiveStatus(ctx, "container-1")
+	require.ErrorContains(t, err, "docker backend unavailable")
+	require.ErrorContains(t, mgr.DestroySandbox(ctx, "sandbox-1", "exec-1"), "sprites backend unavailable")
+}

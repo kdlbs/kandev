@@ -3,6 +3,9 @@ package pluginsdk
 import (
 	"context"
 	"sync"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Plugin is the interface a plugin author implements. It is delivered RPCs
@@ -17,6 +20,13 @@ type Plugin interface {
 	// HandleWebhook handles an inbound webhook relayed by kandev's
 	// POST /api/plugins/{id}/webhooks/{key} endpoint.
 	HandleWebhook(ctx context.Context, req *WebhookRequest) (*WebhookResponse, error)
+}
+
+// AgentToolPlugin is an optional extension implemented by plugins that
+// declare agent_tools in their manifest. Keeping it separate from Plugin
+// preserves source compatibility for existing plugins.
+type AgentToolPlugin interface {
+	InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResult, error)
 }
 
 // HostSetter is implemented by Plugin values that want Serve to inject the
@@ -58,6 +68,10 @@ func (*UnimplementedPlugin) OnEvent(context.Context, *Event) error {
 // webhook path has nothing sensible to serve.
 func (*UnimplementedPlugin) HandleWebhook(context.Context, *WebhookRequest) (*WebhookResponse, error) {
 	return &WebhookResponse{Status: 404}, nil
+}
+
+func (*UnimplementedPlugin) InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResult, error) {
+	return nil, status.Error(codes.Unimplemented, "agent tool invocation is not implemented")
 }
 
 // SetHost stores the Host injected by Serve. Call Host() from your

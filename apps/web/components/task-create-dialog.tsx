@@ -170,7 +170,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         aboveDescriptionSlot={props.aboveDescriptionSlot}
         extraFormSlot={props.extraFormSlot}
         autoFocusDescription={!isTaskStarted && !(showTaskName && taskNameAutoFocus)}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        onComposerSubmit={props.onComposerSubmit}
       />
       <CreateModeAgentSelectors {...props} />
       {isCreateMode && !isTaskStarted && (
@@ -218,7 +218,7 @@ function SessionModeBody(props: DialogFormBodyProps) {
         enhance={props.enhance}
         workspaceId={props.workspaceId}
         onJiraImport={props.onJiraImport}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        onComposerSubmit={props.onComposerSubmit}
       />
       <SessionSelectors
         agentProfileOptions={props.agentProfileOptions}
@@ -256,12 +256,12 @@ function DialogFormBody(props: DialogFormBodyProps) {
   );
 }
 
-// Synthetic submit event used by the voice auto-send path. Calling the form
+// Synthetic submit event used by a plugin composer action's submit. Calling the form
 // handler directly (instead of `form.requestSubmit()`) matches the chat
 // composer's pattern and avoids the Safari < 16 gap where `requestSubmit` is
 // missing on `HTMLFormElement`. `guardedHandleSubmit` only reads
 // `preventDefault` off the event, so a stubbed shape is sufficient.
-const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+const PROGRAMMATIC_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { t } = useTranslation("chat");
@@ -305,9 +305,9 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const nativeSubmitDisabled = isNativeSubmitDisabled(
     buildDialogFooterProps(setup, props, pendingAttachmentReason),
   );
-  const handleVoiceAutoSend = useCallback(() => {
+  const handleComposerSubmit = useCallback(() => {
     if (nativeSubmitDisabled) return false;
-    guardedHandleSubmit(VOICE_SUBMIT_EVENT);
+    guardedHandleSubmit(PROGRAMMATIC_SUBMIT_EVENT);
     return true;
   }, [guardedHandleSubmit, nativeSubmitDisabled]);
   return (
@@ -335,7 +335,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
           >
             <DialogFormBody
               {...buildDialogFormBodyProps(setup, props)}
-              onVoiceAutoSend={handleVoiceAutoSend}
+              onComposerSubmit={handleComposerSubmit}
             />
             <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
               <TaskCreateDialogFooter

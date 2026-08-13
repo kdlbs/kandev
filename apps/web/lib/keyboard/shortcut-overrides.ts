@@ -14,7 +14,6 @@ export type ConfigurableShortcutId =
   | "TOGGLE_PLAN_MODE"
   | "TASK_SWITCHER"
   | "TASK_SWITCHER_REVERSE"
-  | "VOICE_INPUT_TOGGLE"
   | "REVERSE_SEARCH"
   | "OPEN_TASK_PR"
   | "WORKSPACE_PICKER";
@@ -58,7 +57,6 @@ export const CONFIGURABLE_SHORTCUTS: Record<
     label: "Recent Task Switcher (Backward)",
     default: SHORTCUTS.TASK_SWITCHER_REVERSE,
   },
-  VOICE_INPUT_TOGGLE: { label: "Voice Input", default: SHORTCUTS.VOICE_INPUT_TOGGLE },
   REVERSE_SEARCH: { label: "Reverse Chat Search", default: SHORTCUTS.REVERSE_SEARCH },
   OPEN_TASK_PR: { label: "Open Task Pull Request", default: SHORTCUTS.OPEN_TASK_PR },
   WORKSPACE_PICKER: { label: "Open Workspace Picker", default: SHORTCUTS.WORKSPACE_PICKER },

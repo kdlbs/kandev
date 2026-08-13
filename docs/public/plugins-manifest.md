@@ -7,7 +7,7 @@ status: experimental
 # Plugin Manifest Reference
 
 `manifest.yaml` is the authoritative description of a plugin; identity,
-runtime executables, capabilities, webhooks, config schema, and
+runtime executables, capabilities, webhooks, agent tools, config schema, and
 optional UI bundle. Kandev parses and validates it **before any plugin code
 runs**. See [Authoring a plugin](plugins-authoring.md) for the build
 workflow and [Plugins](plugins.md) for install/operate.
@@ -88,6 +88,27 @@ config_schema:
       }
   required: ["bot_token", "default_channel", "utility_agent"]
 
+agent_tools:
+  - name: add_tag
+    description: Add an existing tag to the current task.
+    surfaces: [kanban-task]
+    input_schema:
+      type: object
+      properties:
+        tag_id: { type: string }
+      required: [tag_id]
+      additionalProperties: false
+    output_schema:
+      type: object
+      properties:
+        task_id: { type: string }
+      required: [task_id]
+      additionalProperties: false
+    annotations:
+      read_only_hint: false
+      destructive_hint: false
+      idempotent_hint: true
+
 ui: # optional native frontend plugin
   bundle: "/ui/bundle.js" # root-relative
   styles: ["/ui/plugin.css"] # optional, root-relative
@@ -95,6 +116,7 @@ ui: # optional native frontend plugin
     - id: "open-panel" # plugin-local: ^[a-z0-9][a-z0-9-]*$
       default: "mod+shift+j" # combo grammar, see field reference
       description: "Open the Acme panel"
+      allow_in_editor: false # optional; true lets it fire while typing
 ```
 
 ## Field reference
@@ -133,6 +155,12 @@ ui: # optional native frontend plugin
 | `webhooks[].max_body_bytes` | no | int | Request-body limit for this key. Defaults to 4 MiB. Public webhooks cannot exceed 4 MiB; authenticated webhooks can request up to 16 MiB. Plugins using this field should declare the first supporting `min_kandev_version`. |
 | `auth_providers[]` | no | object[] | Login buttons this plugin contributes to the pre-auth login screen (needs `capabilities.auth`). Each is `{ id, display_name, initiate }`, where `initiate` names one of the plugin's `webhooks[].key` values: the button navigates to that webhook, which 302-redirects to the IdP. Surfaced anonymously in the boot payload as `auth.ssoProviders`. |
 | `config_schema` | no | object | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** (`GET /api/plugins/{id}/config` and `PATCH /api/plugins/{id}`). See "Config schema validation and secret fields" below. |
+| `agent_tools` | no | object[] | Task-aware MCP tools implemented by the managed plugin's optional `AgentToolPlugin` SDK interface. Each declaration has a local `name`, `description`, `surfaces`, required `input_schema`, optional `output_schema`, and optional MCP annotation hints. At most 16 tools are allowed. |
+| `agent_tools[].name` | yes* | string | Plugin-local name matching `^[a-z0-9][a-z0-9_]{0,31}$`. Kandev derives the global MCP name; authors cannot choose it. |
+| `agent_tools[].surfaces` | yes* | string[] | One or both of `kanban-task` and `office-task`. Plugin tools are not exposed to `configuration` or `external` MCP surfaces. |
+| `agent_tools[].input_schema` | yes* | object | Compiled object-root JSON Schema, at most 64 KiB serialized. Kandev rejects unknown top-level arguments before invoking the plugin. |
+| `agent_tools[].output_schema` | no | object | Optional compiled object-root JSON Schema applied to structured plugin results. |
+| `agent_tools[].annotations` | no | object | MCP hints: `read_only_hint`, `destructive_hint`, `idempotent_hint`, and `open_world_hint`. Omitted values use conservative host defaults. |
 | `ui.bundle` | no | string | Root-relative path (must start with `/`, e.g. `/ui/bundle.js`) to the plugin's native UI ES module, served at `GET /api/plugins/{id}/bundle`. |
 | `ui.styles` | no | string[] | Root-relative CSS paths (each must start with `/`), served at `GET /api/plugins/{id}/ui/*` and injected as `<link>` tags on load. |
 | `ui.pages` | no | object[] | Optional declarative metadata accepted by the manifest model. The current frontend does not render these entries; a native bundle registers its supported routes/nav/slots at runtime, so most plugins omit `ui.pages`. |
@@ -144,6 +172,7 @@ ui: # optional native frontend plugin
 | `ui.keybindings[].id` | yes* | string | Stable, plugin-local slug (*required when a keybinding entry is present). Must match `^[a-z0-9][a-z0-9-]*$` and be unique within this plugin's own `ui.keybindings` list, not globally; the effective shortcut is namespaced `plugin:{pluginId}:{id}`. |
 | `ui.keybindings[].default` | yes* | string | Default combo string. `+`-separated tokens: zero or more modifiers from `mod`, `ctrl`, `cmd`, `meta`, `alt`, `option`, `shift` (`mod` = ⌘ on macOS, Ctrl elsewhere) plus exactly one non-modifier key. `shift` may not combine with a digit or symbol key; the browser reports the shifted glyph for those keys, so the combo could never match. |
 | `ui.keybindings[].description` | yes* | string | Non-empty, human-readable label shown in **Settings > Keyboard Shortcuts**. |
+| `ui.keybindings[].allow_in_editor` | no | boolean | Lets this binding fire while an `input`, `textarea` or contenteditable holds focus. Defaults to `false`, so a plugin cannot shadow ordinary typing. Only accepted on a combo carrying a `ctrl`/`cmd`/`mod`/`alt` modifier; `shift` alone does not count, since `shift+a` is just a capital A. Kandev re-applies that requirement to the *effective* combo, so a user override that drops the modifier reverts this binding to the default skip-while-typing behaviour rather than intercepting ordinary keystrokes. Declare it only when the binding exists to act on the focused field (dictation into the composer is the canonical case). |
 
 `ui.pages` is declarative manifest metadata only and is not currently rendered
 by the frontend. A native bundle's runtime nav items, icons, routes, named

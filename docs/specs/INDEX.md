@@ -46,7 +46,9 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins](plugins/spec.md) | draft |
 | [plugins — authoring experience](plugins/authoring-experience.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
-| [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | draft |
+| [plugins — agent tools](plugins/agent-tools.md) | draft |
+| [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | shipped |
+| [plugins — Voice Mode leaves core](plugins/voice-extraction.md) | shipped |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
@@ -193,7 +195,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
-| [voice-mode-task-behavior](ui/voice-mode-task-behavior.md) | shipped |
+| [voice-mode-task-behavior](ui/voice-mode-task-behavior.md) | archived |
 | [app-status-bar](ui/app-status-bar.md) | shipped |
 | [quick-terminal](quick-terminal/spec.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
@@ -262,6 +264,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
 | [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
 | [automations-pr-merged-trigger](automations-pr-merged-trigger/spec.md) | draft |
+| [automation-runs-delete-all-by-status](automation-runs-delete-all-by-status/spec.md) | draft |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
 | [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | implemented |
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
