@@ -216,6 +216,42 @@ func TestHandleToolCallEventNilSubagentContextsRecorderIsSafe(t *testing.T) {
 	require.Equal(t, 1, messages.toolCallWrites, "message write must proceed even without a subagent context recorder")
 }
 
+// TestHandleToolUpdateEventNilMessageCreatorStillRecordsSubagentContext covers
+// the reverse combination of TestHandleToolCallEventNilSubagentContextsRecorderIsSafe:
+// messageCreator nil, subagentContexts recorder set, on the tool_update path.
+// persistToolUpdateMessage must not let its message-persistence guard (nil is
+// a supported SetMessageCreator configuration) block subagent-context
+// recording, mirroring handleToolCallEvent's already-correct behavior for the
+// insert path.
+func TestHandleToolUpdateEventNilMessageCreatorStillRecordsSubagentContext(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = nil
+	seedActiveTurn(t, svc, repo, "task1", "session1", "turn1")
+	recorder := &fakeSubagentContextRecorder{}
+	svc.subagentContexts = recorder
+
+	updatePayload := streams.NewSubagentTask("review the diff", "prompt", "security-reviewer")
+	updatePayload.SubagentTask().Status = "completed"
+	require.NotPanics(t, func() {
+		svc.handleToolUpdateEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID: "task1", SessionID: "session1", ExecutionID: "exec-1",
+			Data: &lifecycle.AgentStreamEventData{
+				Type: "tool_update", ToolCallID: "tc-1", ToolStatus: "in_progress",
+				Normalized: updatePayload,
+			},
+		})
+	})
+
+	requests := recorder.all()
+	require.Len(t, requests, 1, "subagent context recording must not depend on messageCreator being wired")
+	require.Equal(t, "turn1", requests[0].TurnID)
+}
+
 // TestHandleToolCallEventRecordsNestedSubagent covers AC-6: a nested frame
 // (ParentToolCallID set) is recorded, not dropped.
 func TestHandleToolCallEventRecordsNestedSubagent(t *testing.T) {

@@ -566,10 +566,6 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 // Split out of handleToolUpdateEvent to keep that function within the
 // package's function-length limits; no behavior change.
 func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	if s.messageCreator == nil {
-		return
-	}
-
 	// Determine message type from normalized payload for fallback creation
 	msgType := toolKindToMessageType(payload.Data.Normalized)
 	status := payload.Data.ToolStatus
@@ -596,30 +592,34 @@ func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecyc
 	} else {
 		turnID = s.getActiveTurnID(payload.SessionID)
 	}
-	fallbackMsgType := msgType
-	if terminal && turnID == "" {
-		// A late terminal update can update its existing card, but must not
-		// create a message (and implicitly a turn) after the turn settled.
-		fallbackMsgType = ""
-	}
 
-	if err := s.messageCreator.UpdateToolCallMessage(
-		ctx,
-		payload.TaskID,
-		payload.Data.ToolCallID,
-		payload.Data.ParentToolCallID, // Pass parent for subagent nesting
-		status,
-		"", // result - no longer used, tool results in NormalizedPayload
-		payload.SessionID,
-		payload.Data.ToolTitle,  // Include title from update event
-		turnID,                  // Turn ID for fallback creation
-		fallbackMsgType,         // Empty for settled terminal reconciliations
-		payload.Data.Normalized, // Pass normalized tool data for message metadata
-	); err != nil {
-		s.logger.Warn("failed to update tool call message",
-			zap.String("task_id", payload.TaskID),
-			zap.String("tool_call_id", payload.Data.ToolCallID),
-			zap.Error(err))
+	// Message persistence is optional (see SetMessageCreator); turn-id
+	// resolution and subagent-context recording below must not depend on it.
+	if s.messageCreator != nil {
+		fallbackMsgType := msgType
+		if terminal && turnID == "" {
+			// A late terminal update can update its existing card, but must not
+			// create a message (and implicitly a turn) after the turn settled.
+			fallbackMsgType = ""
+		}
+		if err := s.messageCreator.UpdateToolCallMessage(
+			ctx,
+			payload.TaskID,
+			payload.Data.ToolCallID,
+			payload.Data.ParentToolCallID, // Pass parent for subagent nesting
+			status,
+			"", // result - no longer used, tool results in NormalizedPayload
+			payload.SessionID,
+			payload.Data.ToolTitle,  // Include title from update event
+			turnID,                  // Turn ID for fallback creation
+			fallbackMsgType,         // Empty for settled terminal reconciliations
+			payload.Data.Normalized, // Pass normalized tool data for message metadata
+		); err != nil {
+			s.logger.Warn("failed to update tool call message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("tool_call_id", payload.Data.ToolCallID),
+				zap.Error(err))
+		}
 	}
 	s.recordSubagentContextFromFrame(ctx, payload, turnID)
 
