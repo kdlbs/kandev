@@ -20,6 +20,7 @@ type HTTPGitFixture = {
 };
 
 export type HTTPGitFixtureOptions = {
+  onListening?: (port: number) => void;
   writeBackendGitConfig?: (file: string, content: string) => void;
   closeServer?: (server: Server) => Promise<void>;
 };
@@ -53,6 +54,7 @@ export async function startHTTPGitFixture(
   const server = createStaticGitServer(root);
   const port = await listen(server);
   try {
+    options.onListening?.(port);
     const fixtureOrigin = `http://${dockerBridgeGateway()}:${port}/`;
     const remoteURL = `https://gitlab.com/fixture/${name}.git`;
     execFileSync("git", ["remote", "set-url", "origin", remoteURL], { cwd: checkout });
