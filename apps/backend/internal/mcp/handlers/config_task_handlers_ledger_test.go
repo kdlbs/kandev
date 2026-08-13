@@ -6,6 +6,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/task/service"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -186,5 +189,72 @@ func TestHandleMoveTaskImmediateUsesSenderSessionNotTargetSession(t *testing.T) 
 	}
 	if last.actorID == nil || *last.actorID != "sess-mcp-caller" {
 		t.Fatalf("actor_id = %v, want sess-mcp-caller (the caller, not the target's own idle session sess-mcp-target-idle)", last.actorID)
+	}
+}
+
+// TestHandleCreateTaskGenesisRowAttributesToSourceSession pins the fix for a
+// real misattribution bug found in review: create_task_kandev's genesis
+// ledger row must attribute to the verified source_session_id — the agent
+// that actually called the tool — not fall back to human/system. The source
+// session is already validated against source_task_id before CreateTask is
+// reached (see resolveMCPCreatorSession), so this proves the attribution
+// wiring reaches the real production call path end-to-end.
+func TestHandleCreateTaskGenesisRowAttributesToSourceSession(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workspace := workspaces[0]
+	workflow, err := svc.CreateWorkflow(ctx, &service.CreateWorkflowRequest{
+		WorkspaceID: workspace.ID,
+		Name:        "Genesis attribution workflow",
+	})
+	require.NoError(t, err)
+	step := &workflowmodels.WorkflowStep{ID: "genesis-step", WorkflowID: workflow.ID, Name: "Start"}
+	svc.SetWorkflowStepGetter(&staticWorkflowStepGetter{steps: map[string]*workflowmodels.WorkflowStep{
+		step.ID: step,
+	}})
+
+	sourceResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:    workspace.ID,
+		WorkflowID:     workflow.ID,
+		WorkflowStepID: step.ID,
+		Title:          "Source task",
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:             "genesis-source-session",
+		TaskID:         sourceResult.Task.ID,
+		AgentProfileID: "genesis-session-profile",
+		State:          models.TaskSessionStateWaitingForInput,
+		IsPrimary:      true,
+	}))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id":    sourceResult.Task.ID,
+		"source_session_id": "genesis-source-session",
+		"workspace_id":      workspace.ID,
+		"workflow_id":       workflow.ID,
+		"workflow_step_id":  step.ID,
+		"title":             "Genesis attribution child",
+		"start_agent":       false,
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type, "payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+
+	rows := ledgerRowsForTask(t, repo, created.ID)
+	genesis := rows[0]
+	if genesis.actorKind != string(steptelemetry.ActorAgent) {
+		t.Fatalf("actor_kind = %q, want %q", genesis.actorKind, steptelemetry.ActorAgent)
+	}
+	if genesis.actorID == nil || *genesis.actorID != "genesis-source-session" {
+		t.Fatalf("actor_id = %v, want genesis-source-session", genesis.actorID)
 	}
 }

@@ -714,7 +714,21 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 	}
 
-	result, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
+	// The source session is the causal actor for this task's genesis ledger
+	// row — resolveMCPLaunchMetadataWithSource already validated it belongs
+	// to req.SourceTaskID above (resolveMCPCreatorSession errors out
+	// otherwise, so CreateTask is never reached with an unverified session
+	// here). Conditional: SourceSessionID is optional, so a caller that
+	// omits it falls back to the existing auth/user seam default.
+	createCtx := ctx
+	if req.SourceSessionID != "" {
+		createCtx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+			ActorKind: steptelemetry.ActorAgent,
+			ActorID:   req.SourceSessionID,
+			SessionID: req.SourceSessionID,
+		})
+	}
+	result, err := h.taskSvc.CreateTask(createCtx, &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
