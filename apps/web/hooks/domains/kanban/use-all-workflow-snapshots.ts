@@ -65,6 +65,15 @@ async function fetchAndWriteSnapshot(
         if (!mapped) return null;
         const existing = existingById.get(mapped.id);
         if (existing) {
+          // Multiple mounted surfaces can refresh the same workflow at once.
+          // A response that started before a live WS status update may finish
+          // afterwards, so do not let an older snapshot roll the status
+          // projection back to a lower revision.
+          const existingRevision = existing.statusSummary?.revision;
+          const mappedRevision = mapped.statusSummary?.revision;
+          if (existingRevision !== undefined && existingRevision > (mappedRevision ?? -1)) {
+            mapped.statusSummary = existing.statusSummary;
+          }
           mapped.primarySessionId = mapped.primarySessionId || existing.primarySessionId;
           mapped.primarySessionState = mapped.primarySessionState || existing.primarySessionState;
           // Autopilot is immutable after creation. Keep the cached value when
