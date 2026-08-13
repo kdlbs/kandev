@@ -354,7 +354,12 @@ test.describe("Sidebar layout — task timestamps and sorting", () => {
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
     });
-    await dwell(testPage, 50, "clock-separation", "same reason as the previous creation gap");
+    await dwell(
+      testPage,
+      50,
+      "clock-separation",
+      "this test asserts sidebar ordering by creation time, so consecutive creations need distinguishable created_at values; the thing being waited for is the clock, not an app event",
+    );
     await apiClient.createTask(seedData.workspaceId, "Sort Task Newest", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
