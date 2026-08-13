@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
-import { IconLoader2, IconLock, IconSettings } from "@tabler/icons-react";
+import { IconLoader2, IconLock, IconPlus, IconSettings } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { NotInstalledBadge } from "@/components/settings/record-badges";
 import { Button } from "@kandev/ui/button";
@@ -136,6 +136,7 @@ export function InstalledAgentCard({
   const { t } = useTranslation();
   const configured = Boolean(savedAgent && savedAgent.profiles.length > 0);
   const hasAgentRecord = Boolean(savedAgent);
+  const agentHref = `/settings/agents/${encodeURIComponent(agent.name)}`;
   const [loginOpen, setLoginOpen] = useState(false);
   const [shellOpen, setShellOpen] = useState(false);
   const authRequired = capabilityStatus === "auth_required";
@@ -153,7 +154,10 @@ export function InstalledAgentCard({
   return (
     <Card className="min-w-0 gap-0 py-0" data-testid={`agent-group-${agent.name}`}>
       {/* Header section: identity + agent-level actions. */}
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 px-3 py-2.5">
+      <div
+        className="flex min-w-0 flex-wrap items-start justify-between gap-3 px-3 py-2.5"
+        data-testid={`agent-card-header-${agent.name}`}
+      >
         <div className="min-w-0 flex-1">
           <InstalledAgentIdentity
             agent={agent}
@@ -177,13 +181,21 @@ export function InstalledAgentCard({
               onUpdate={onUpdate}
             />
           )}
-          {!hasAgentRecord && (
-            // Sized to match the runtime-update trigger it sits beside — a
-            // coarse-pointer target on a phone, 28px from `sm` up. The default
-            // `sm` size (24px) both mismatched that neighbour on desktop and
-            // left a sub-target-size tap area on touch.
-            <Button className="h-11 cursor-pointer sm:h-7" asChild>
-              <Link href={`/settings/agents/${encodeURIComponent(agent.name)}`}>
+          {configured ? (
+            <Button className="h-11 cursor-pointer md:h-7" asChild>
+              <Link href={`${agentHref}?mode=create`} data-testid={`new-profile-${agent.name}`}>
+                <IconPlus className="mr-2 h-4 w-4" />
+                {t("agents:newProfile")}
+              </Link>
+            </Button>
+          ) : (
+            // Keep the setup action for agents without a usable profile. A
+            // saved record needs create mode so its first profile is drafted.
+            <Button className="h-11 cursor-pointer md:h-7" asChild>
+              <Link
+                href={hasAgentRecord ? `${agentHref}?mode=create` : agentHref}
+                data-testid={`setup-profile-${agent.name}`}
+              >
                 <IconSettings className="mr-2 h-4 w-4" />
                 {t("agents:setupProfile")}
               </Link>

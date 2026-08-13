@@ -44,6 +44,7 @@ export interface Task {
   title: string;
   workflowStepId: string;
   state?: TaskState;
+  priority?: string | number;
   description?: string;
   position?: number;
   repositoryId?: string;
@@ -642,7 +643,6 @@ export function resolveTaskRepositoryChips(
   const byId = new Map(repositories.map((repo) => [repo.id, repo]));
   const seen = new Set<string>();
   const chips: RepositoryChip[] = [];
-
   const push = (id: string | undefined) => {
     if (!id || seen.has(id)) return;
     const repo = byId.get(toRepositoryId(id));
@@ -655,13 +655,8 @@ export function resolveTaskRepositoryChips(
       ...(repo.local_path ? { path: formatUserHomePath(repo.local_path) } : {}),
     });
   };
-
   push(task.repositoryId);
   const ordered = [...(task.repositories ?? [])].sort((a, b) => a.position - b.position);
   for (const link of ordered) push(link.repository_id);
   return chips;
-}
-
-export function resolveTaskRepositoryNames(task: Task, repositories: Repository[]): string[] {
-  return resolveTaskRepositoryChips(task, repositories).map((chip) => chip.label);
 }

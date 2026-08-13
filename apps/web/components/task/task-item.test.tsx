@@ -174,6 +174,21 @@ describe("TaskItem status icon", () => {
   });
 });
 
+describe("TaskItem queue status", () => {
+  it("shows WIP queue status without replacing the queued prompt badge", () => {
+    renderTaskItem({
+      queuedCount: 2,
+      wipQueue: { position: 2, total: 4, destinationTitle: "Review" },
+    });
+
+    expect(screen.getByTestId("sidebar-task-queued-count")).not.toBeNull();
+    const queueStatus = screen.getByTestId("sidebar-task-wip-queue");
+    expect(queueStatus.querySelector("svg")).not.toBeNull();
+    expect(queueStatus.textContent).toBe("");
+    expect(queueStatus.getAttribute("aria-label")).toBe("Position 2 of 4 in Review queue");
+  });
+});
+
 describe("TaskItem interrupted icon", () => {
   it("shows the red interrupted icon for a task marked interrupted after a restart", () => {
     renderTaskItem({

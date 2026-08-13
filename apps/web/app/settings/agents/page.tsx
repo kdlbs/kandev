@@ -77,27 +77,24 @@ function InstalledAgentsHeader({
         <h3 className="text-lg font-semibold">{t("agents:installedAgents")}</h3>
         <p className="text-sm text-muted-foreground">{t("agents:installedAgentsDescription")}</p>
       </div>
-      <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+      <div className="flex w-full flex-wrap gap-2 sm:w-auto" data-testid="installed-agents-actions">
         <Button
           variant="outline"
           size="sm"
           onClick={onOpenShell}
-          className="cursor-pointer"
+          className="h-11 cursor-pointer md:h-6"
           data-testid="open-host-shell"
         >
           <IconTerminal2 className="h-4 w-4 mr-2" />
           {t("agents:terminal")}
-        </Button>
-        <Button variant="outline" size="sm" onClick={onOpenTuiDialog} className="cursor-pointer">
-          <IconPlus className="h-4 w-4 mr-2" />
-          {t("agents:addTuiAgent")}
         </Button>
         <Button
           variant="outline"
           size="sm"
           onClick={onRescan}
           disabled={rescanning}
-          className="cursor-pointer"
+          className="h-11 cursor-pointer md:h-6"
+          data-testid="rescan-agents-button"
         >
           {rescanning ? (
             <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -105,6 +102,16 @@ function InstalledAgentsHeader({
             <IconRefresh className="h-4 w-4 mr-2" />
           )}
           {t("agents:rescan")}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onOpenTuiDialog}
+          className="h-11 cursor-pointer md:h-6"
+          data-testid="new-agent-button"
+        >
+          <IconPlus className="h-4 w-4 mr-2" />
+          {t("agents:addTuiAgent")}
         </Button>
       </div>
     </div>

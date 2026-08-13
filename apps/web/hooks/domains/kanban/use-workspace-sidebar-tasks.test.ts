@@ -7,7 +7,18 @@ type Snapshot = {
   workflowId: string;
   workflowName: string;
   steps: Array<{ id: string; title: string; color: string; position: number }>;
-  tasks: Array<{ id: string; workflowStepId: string; title: string; position: number }>;
+  tasks: Array<{
+    id: string;
+    workflowStepId: string;
+    title: string;
+    position: number;
+    queuedForStepId?: string;
+    wipAdmitted?: boolean;
+    priority?: string;
+    queuedAt?: string;
+    createdAt?: string;
+    isArchived?: boolean;
+  }>;
 };
 
 type MockState = {
@@ -48,16 +59,19 @@ function setMockState(patch: Partial<MockState>) {
   };
 }
 
+const defaultStepId = "step-1";
+const defaultStepColor = "bg-blue-500";
+
 function makeSnapshot(
   workflowId: string,
   workflowName: string,
   taskIds: string[],
-  stepId = "step-1",
+  stepId = defaultStepId,
 ): Snapshot {
   return {
     workflowId,
     workflowName,
-    steps: [{ id: stepId, title: "Step 1", color: "bg-blue-500", position: 0 }],
+    steps: [{ id: stepId, title: "Step 1", color: defaultStepColor, position: 0 }],
     tasks: taskIds.map((id, i) => ({ id, workflowStepId: stepId, title: id, position: i })),
   };
 }
@@ -156,14 +170,117 @@ describe("useWorkspaceSidebarTasks", () => {
       kanbanMulti: { snapshots: {}, isLoading: false },
       kanban: {
         workflowId: "wf-A",
-        tasks: [{ id: "t-a1", workflowStepId: "step-1", title: "A1", position: 0 }],
-        steps: [{ id: "step-1", title: "Step 1", color: "bg-blue-500", position: 0 }],
+        tasks: [{ id: "t-a1", workflowStepId: defaultStepId, title: "A1", position: 0 }],
+        steps: [{ id: defaultStepId, title: "Step 1", color: defaultStepColor, position: 0 }],
       },
     });
 
     const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
     expect(result.current.allTasks.map((t) => t.id)).toEqual(["t-a1"]);
     expect(result.current.allTasks[0]._workflowId).toBe("wf-A");
+  });
+});
+
+describe("useWorkspaceSidebarTasks WIP queue", () => {
+  beforeEach(() => {
+    mockState = {
+      kanbanMulti: { snapshots: {}, isLoading: false },
+      workflows: { items: [] },
+      kanban: { workflowId: null, tasks: [], steps: [] },
+    };
+  });
+
+  it("derives destination queue positions for sidebar consumers", () => {
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "Alpha" }] },
+      kanbanMulti: {
+        snapshots: {
+          "wf-A": {
+            workflowId: "wf-A",
+            workflowName: "Alpha",
+            steps: [{ id: defaultStepId, title: "Review", color: defaultStepColor, position: 0 }],
+            tasks: [
+              {
+                id: "queued-later",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
+                wipAdmitted: false,
+                priority: "low",
+                queuedAt: "2026-08-12T00:02:00Z",
+                title: "Later",
+                position: 4,
+              },
+              {
+                id: "queued-first",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
+                wipAdmitted: false,
+                priority: "high",
+                queuedAt: "2026-08-12T00:01:00Z",
+                title: "First",
+                position: 3,
+              },
+            ],
+          },
+        },
+        isLoading: false,
+      },
+    });
+
+    const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    expect(result.current.wipQueueByTaskId.get("queued-first")).toEqual({
+      position: 1,
+      total: 2,
+      destinationTitle: "Review",
+    });
+    expect(result.current.wipQueueByTaskId.get("queued-later")).toEqual({
+      position: 2,
+      total: 2,
+      destinationTitle: "Review",
+    });
+  });
+
+  it("excludes archived tasks from active queue positions", () => {
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "Alpha" }] },
+      kanbanMulti: {
+        snapshots: {
+          "wf-A": {
+            workflowId: "wf-A",
+            workflowName: "Alpha",
+            steps: [{ id: defaultStepId, title: "Review", color: defaultStepColor, position: 0 }],
+            tasks: [
+              {
+                id: "archived-queued",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
+                wipAdmitted: false,
+                isArchived: true,
+                position: 0,
+                title: "Archived",
+              },
+              {
+                id: "active-queued",
+                workflowStepId: defaultStepId,
+                queuedForStepId: defaultStepId,
+                wipAdmitted: false,
+                position: 1,
+                title: "Active",
+              },
+            ],
+          },
+        },
+        isLoading: false,
+      },
+    });
+
+    const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+    expect(result.current.wipQueueByTaskId.get("active-queued")).toEqual({
+      position: 1,
+      total: 1,
+      destinationTitle: "Review",
+    });
+    expect(result.current.wipQueueByTaskId.has("archived-queued")).toBe(false);
   });
 });
 

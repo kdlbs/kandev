@@ -90,6 +90,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-27-spa-failure-containment-and-deployment-recovery | [SPA Failure Containment and Deployment Recovery](2026-07-27-spa-failure-containment-and-deployment-recovery.md) | accepted | frontend | 2026-07-27 |
 | 2026-07-27-legacy-add-branch-live-rescan | [Preserve Live Rescan for Legacy Add Branch](2026-07-27-legacy-add-branch-live-rescan.md) | accepted | backend, protocol | 2026-07-27 |
 | 2026-07-28-visible-wip-overflow-queues | [Separate Visible Queueing From WIP Admission](2026-07-28-visible-wip-overflow-queues.md) | proposed | backend, frontend, protocol, workflow | 2026-07-28 |
+| 2026-08-12-queue-task-moves-at-wip-capacity | [Queue Task Moves at WIP Capacity](2026-08-12-queue-task-moves-at-wip-capacity.md) | accepted | backend, frontend, protocol, workflow | 2026-08-12 |
 | 2026-07-28-coarse-running-busy-signal | [Restore Coarse Running Prompt Admission](2026-07-28-coarse-running-busy-signal.md) | accepted | backend, frontend, protocol | 2026-07-28 |
 | 2026-07-29-agent-stall-user-controlled-recovery | [Keep Agent Stall Recovery User Controlled](2026-07-29-agent-stall-user-controlled-recovery.md) | accepted | backend, frontend, protocol | 2026-07-29 |
 | 2026-07-29-quarantine-retention-override | [Make Quarantine Retention Overridable but Visible](2026-07-29-quarantine-retention-override.md) | accepted | backend, frontend | 2026-07-29 |

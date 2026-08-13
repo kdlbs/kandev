@@ -95,6 +95,18 @@ const (
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
 	MetaKeyDeferredLaunch    = "deferred_launch"
+	// MetaKeyQueuedMoveExitPending identifies a queued manual move whose
+	// source-step on_exit side effect is not yet complete. Its value records the
+	// source step so recovery can resume the work after a restart.
+	MetaKeyQueuedMoveExitPending = "queued_move_exit_pending"
+	// MetaKeyQueuedMoveExitCompleted is durable evidence that the source-step
+	// on_exit side effect for a queued manual move finished. Promotion must not
+	// enter the destination until this marker exists.
+	MetaKeyQueuedMoveExitCompleted = "queued_move_exit_completed"
+	// MetaKeyQueuePromotionPending is a one-shot token for destination entry
+	// after queue promotion. It prevents duplicate task.queue_promoted events
+	// from repeating on_enter or auto-start behavior.
+	MetaKeyQueuePromotionPending = "queue_promotion_pending"
 	// DeferredLaunchStartWhenUnblockedKey marks a deferred launch intent as
 	// belonging to a task dependency chain rather than to WIP overflow. The
 	// record itself is identical; the flag lets dependency resolution recognise

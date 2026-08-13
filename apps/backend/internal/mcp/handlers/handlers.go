@@ -142,7 +142,8 @@ type SessionLauncher interface {
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) (*executor.TaskExecution, error)
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
-	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
+	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
+	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
 	GetMessageQueue() *messagequeue.Service
 	// QueueAndInterruptForPeerMessage atomically queues prompt for sessionID
 	// then interrupts the session's in-flight turn to dispatch it right
@@ -2860,12 +2861,29 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 			return taskMessageDispatchResult{}, err
 		}
-		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session, pinnedTarget)
+		session, turnStartResult, err := h.prepareSessionForTaskMessage(ctx, taskID, session, pinnedTarget)
 		if err != nil {
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 			return taskMessageDispatchResult{}, err
 		}
 		reviewRollback.captureSelectedSession(session)
+		if turnStartResult.Queued {
+			if err := h.sessionLauncher.QueueUserPrompt(
+				ctx,
+				taskID,
+				session.ID,
+				prompt,
+				"",
+				false,
+				nil,
+				metadata,
+				false,
+			); err != nil {
+				h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
+				return taskMessageDispatchResult{}, fmt.Errorf("failed to queue prompt until workflow promotion: %w", err)
+			}
+			return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID}, nil
+		}
 		result, err := h.dispatchPreparedTaskMessage(ctx, taskID, session, prompt, metadata)
 		if err != nil {
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
@@ -3020,9 +3038,10 @@ func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID str
 	return result, nil
 }
 
-func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, pinnedTarget bool) (*models.TaskSession, error) {
-	if err := h.sessionLauncher.ProcessOnTurnStart(ctx, taskID, session.ID); err != nil {
-		return nil, fmt.Errorf("failed to process on_turn_start for task message: %w", err)
+func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, pinnedTarget bool) (*models.TaskSession, orchestrator.ProcessOnTurnStartResult, error) {
+	turnStartResult, err := h.sessionLauncher.ProcessOnTurnStart(ctx, taskID, session.ID)
+	if err != nil {
+		return nil, orchestrator.ProcessOnTurnStartResult{}, fmt.Errorf("failed to process on_turn_start for task message: %w", err)
 	}
 	if pinnedTarget {
 		// The caller addressed this exact session — never reroute to the
@@ -3030,15 +3049,15 @@ func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID stri
 		// on_turn_start.
 		reloaded, err := h.taskSvc.GetTaskSession(ctx, session.ID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to reload pinned target session after on_turn_start: %w", err)
+			return nil, orchestrator.ProcessOnTurnStartResult{}, fmt.Errorf("failed to reload pinned target session after on_turn_start: %w", err)
 		}
-		return reloaded, nil
+		return reloaded, turnStartResult, nil
 	}
 	resolved, err := h.resolveSessionAfterTaskMessageTurnStart(ctx, taskID, session)
 	if err != nil {
-		return nil, err
+		return nil, orchestrator.ProcessOnTurnStartResult{}, err
 	}
-	return resolved, nil
+	return resolved, turnStartResult, nil
 }
 
 func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskID string) (taskMessageReviewRollback, error) {

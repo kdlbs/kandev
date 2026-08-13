@@ -412,6 +412,14 @@ type Service struct {
 	// onProcessOnEnterComplete is a package-test hook for synchronizing with
 	// applyEngineTransition's asynchronous processOnEnter goroutine.
 	onProcessOnEnterComplete func()
+	// queuedMoveExitStart and queuedMoveExitComplete are package-test hooks
+	// for the durable source-exit barrier.
+	onQueuedMoveExitStart             func()
+	onQueuedMoveExitComplete          func()
+	onTaskQueuePromotionEntryComplete func()
+	// queuedMoveLifecycleLocks serializes source-exit work per task. The
+	// completion marker remains durable so a restart can safely resume work.
+	queuedMoveLifecycleLocks sync.Map
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
@@ -1130,6 +1138,10 @@ func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromW
 	if s.eventBus == nil || task == nil {
 		return
 	}
+	queuePromotion := false
+	if task.Metadata != nil {
+		_, queuePromotion = task.Metadata[models.MetaKeyQueuePromotionPending]
+	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
 		"from_workflow_id":          fromWorkflowID,
@@ -1141,6 +1153,14 @@ func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromW
 		"task_description":          task.Description,
 		"parent_id":                 task.ParentID,
 		"assignee_agent_profile_id": task.AssigneeAgentProfileID,
+		"wip_admitted":              task.WIPAdmitted,
+		"queued_for_step_id":        task.QueuedForStepID,
+		"queue_promotion":           queuePromotion,
+	}
+	if task.QueuedAt != nil {
+		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
+	} else {
+		data["queued_at"] = nil
 	}
 	event := bus.NewEvent(events.TaskMoved, "orchestrator", data)
 	if err := s.eventBus.Publish(ctx, events.TaskMoved, event); err != nil {
@@ -1245,7 +1265,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted, s.stepHistoryRecorder)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted, s.publishTaskStateChanged, s.stepHistoryRecorder)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	s.workflowEngine = engine.New(store, callbacks, s.engineOptions...)
@@ -1658,6 +1678,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
+	s.reconcileTaskLifecycleTokens(ctx)
 	// Chains whose predecessor completed while the process was down: the
 	// dependencies_resolved event is in-memory and is not replayed, so without
 	// this sweep a chain stalls silently across a restart. Runs after the WIP
@@ -2520,6 +2541,44 @@ func (s *Service) GetStatus() *Status {
 // GetMessageQueue returns the message queue service
 func (s *Service) GetMessageQueue() *messagequeue.Service {
 	return s.messageQueue
+}
+
+// QueueUserPrompt persists a prompt that must wait for workflow WIP admission.
+// The user message row is already written by the WebSocket handler, so the
+// queue marker prevents the drain path from creating a duplicate row.
+func (s *Service) QueueUserPrompt(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	metadata map[string]interface{},
+	userMessageRecorded bool,
+) error {
+	if s.messageQueue == nil {
+		return errors.New("message queue is not configured")
+	}
+	queueMetadata := make(map[string]interface{}, len(metadata)+1)
+	for key, value := range metadata {
+		queueMetadata[key] = value
+	}
+	if userMessageRecorded {
+		queueMetadata[metaKeyUserMessageRecorded] = true
+	}
+	if _, err := s.messageQueue.QueueMessageWithMetadata(
+		ctx,
+		sessionID,
+		taskID,
+		prompt,
+		model,
+		messagequeue.QueuedByUser,
+		planMode,
+		toQueuedAttachments(attachments),
+		queueMetadata,
+	); err != nil {
+		return fmt.Errorf("queue user prompt: %w", err)
+	}
+	s.publishQueueStatusEvent(ctx, sessionID)
+	return nil
 }
 
 // GetEventBus returns the event bus
