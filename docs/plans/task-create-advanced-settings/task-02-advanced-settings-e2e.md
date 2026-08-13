@@ -20,11 +20,12 @@ creation payload.
   model, executor, and workflow controls, the dependency trigger is hidden
   until expansion, and the selector appears after expansion.
 - Desktop E2E keeps the existing selector checks for the `No dependency`
-  default, task icons, search, info help, multiple selection, clearing, and
-  `blocked_by` persistence after creation.
+  default, labeled setting help, task icons, search, info help, multiple
+  selection, clearing, and `blocked_by` persistence after creation.
 - Mobile E2E expands the section with touch input, verifies the disclosure hit
-  box is at least 44 CSS pixels, and retains picker containment, touch selection,
-  help readability, and no-horizontal-overflow checks.
+  box and setting help control are at least 44 CSS pixels, and retains picker
+  containment, touch selection, help readability, and no-horizontal-overflow
+  checks.
 - The managed desktop and mobile runs pass against a fresh production build
   with no stale frontend artifacts.
 

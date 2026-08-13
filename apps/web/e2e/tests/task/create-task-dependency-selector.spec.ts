@@ -73,6 +73,14 @@ test.describe("Task-create dependency selector", () => {
       ).toBe(true);
       await advancedTrigger.click();
       await expect(advancedTrigger).toHaveAttribute("aria-expanded", "true");
+      await expect(
+        advancedSettings.getByTestId("task-create-dependency-setting-label"),
+      ).toContainText("Depends on");
+      const settingInfo = advancedSettings.getByTestId("task-create-dependency-setting-info");
+      await settingInfo.hover();
+      await expect(testPage.locator('[data-slot="tooltip-content"]:visible').last()).toContainText(
+        "This task waits until every selected task completes successfully.",
+      );
 
       const dependency = dialog.getByTestId(DEPENDENCY_TRIGGER);
       await expect(dependency).toBeVisible();
@@ -84,7 +92,7 @@ test.describe("Task-create dependency selector", () => {
       const info = picker.getByTestId("task-create-dependency-info");
       await expect(info).toBeVisible();
       await info.hover();
-      await expect(testPage.getByRole("tooltip")).toContainText(
+      await expect(testPage.locator('[data-slot="tooltip-content"]:visible').last()).toContainText(
         "This task waits until every selected task completes successfully.",
       );
 

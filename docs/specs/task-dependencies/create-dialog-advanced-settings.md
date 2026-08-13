@@ -25,6 +25,8 @@ place for dependency selection and future less-common options.
   it reveals the existing dependency selector. The selector keeps its current
   `No dependency` default, task icon treatment, search, help action, and
   multiple-predecessor behavior.
+- Show the dependency selector with a muted `Depends on` label and a contextual
+  help control that explains the dependency wait and automatic-start behavior.
 - Keep the dependency selector's `blockedBy` state and disabled behavior
   unchanged. Collapsing the section must not clear a selected dependency, and
   reopening the section must show the same selector value.
@@ -56,6 +58,9 @@ place for dependency selection and future less-common options.
 - Activating the row with pointer, touch, Enter, or Space expands the content.
 - The dependency selector is visible inside the content with its existing
   full-width trigger and searchable picker behavior.
+- The selector is introduced by a localized `Depends on` label with an
+  accessible help control. Hovering or focusing the control explains the
+  dependency wait and automatic-start behavior.
 - The row exposes `aria-expanded="true"`, and the expanded content is connected
   to it through the normal collapsible relationship.
 - Closing the section preserves every selected predecessor. Reopening it
@@ -75,7 +80,7 @@ place for dependency selection and future less-common options.
   project's contained popover and command-list behavior.
 - The disclosure trigger has a mobile hitbox of at least 44 CSS pixels even
   though its label uses a subtle text size. The expanded dependency trigger and
-  task rows retain their existing touch-safe sizing.
+  dependency help control and task rows retain their existing touch-safe sizing.
 - The task-create form remains the outer scroll owner when the collapsible is
   closed or expanded. The dependency command list remains the inner scroll
   owner while its picker is open.

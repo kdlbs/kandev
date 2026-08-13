@@ -40,6 +40,17 @@ test.describe("Create task dependency selector on mobile", () => {
 
     await advancedTrigger.tap();
     await expect(advancedTrigger).toHaveAttribute("aria-expanded", "true");
+    const settingLabel = dialog.getByTestId("task-create-dependency-setting-label");
+    await expect(settingLabel).toContainText("Depends on");
+    const settingInfo = dialog.getByTestId("task-create-dependency-setting-info");
+    const settingInfoBox = await settingInfo.boundingBox();
+    expect(settingInfoBox).not.toBeNull();
+    expect(settingInfoBox!.height).toBeGreaterThanOrEqual(44);
+    expect(settingInfoBox!.width).toBeGreaterThanOrEqual(44);
+    await settingInfo.tap();
+    await expect(testPage.locator('[data-slot="tooltip-content"]:visible').last()).toContainText(
+      "This task waits until every selected task completes successfully.",
+    );
     const trigger = dialog.getByTestId("task-create-dependencies-trigger");
     const triggerBox = await trigger.boundingBox();
     expect(triggerBox).not.toBeNull();
@@ -60,7 +71,7 @@ test.describe("Create task dependency selector on mobile", () => {
     expect(infoBox!.height).toBeGreaterThanOrEqual(44);
     expect(infoBox!.width).toBeGreaterThanOrEqual(44);
     await info.tap();
-    await expect(testPage.getByRole("tooltip")).toContainText(
+    await expect(testPage.locator('[data-slot="tooltip-content"]:visible').last()).toContainText(
       "This task waits until every selected task completes successfully.",
     );
 

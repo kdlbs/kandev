@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { TaskCreateAdvancedSettings } from "./task-create-dialog-advanced-settings";
 
 afterEach(() => {
@@ -13,7 +14,13 @@ const DEPENDENCY_TRIGGER_TEST_ID = "task-create-dependencies-trigger";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => (key === "task:advancedSettings" ? "Advanced settings" : key),
+    t: (key: string) =>
+      ({
+        "task:advancedSettings": "Advanced settings",
+        "task:dependsOn": "Depends on",
+        "task:dependencyInfoLabel": "About task dependencies",
+        "task:dependencyInfo": "This task waits until every selected task completes successfully.",
+      })[key] ?? key,
   }),
 }));
 
@@ -39,13 +46,15 @@ function renderAdvancedSettings(
   overrides: Partial<React.ComponentProps<typeof TaskCreateAdvancedSettings>> = {},
 ) {
   return render(
-    <TaskCreateAdvancedSettings
-      isCreateMode
-      isTaskStarted={false}
-      blockedBy={[]}
-      onBlockedByChange={() => {}}
-      {...overrides}
-    />,
+    <TooltipProvider>
+      <TaskCreateAdvancedSettings
+        isCreateMode
+        isTaskStarted={false}
+        blockedBy={[]}
+        onBlockedByChange={() => {}}
+        {...overrides}
+      />
+    </TooltipProvider>,
   );
 }
 
@@ -69,16 +78,37 @@ describe("TaskCreateAdvancedSettings", () => {
     expect(screen.getByTestId(DEPENDENCY_TRIGGER_TEST_ID).getAttribute("hidden")).toBeNull();
   });
 
+  it("labels the dependency setting and provides contextual help", async () => {
+    renderAdvancedSettings();
+
+    fireEvent.click(screen.getByTestId(ADVANCED_SETTINGS_TRIGGER_TEST_ID));
+
+    expect(screen.getByTestId("task-create-dependency-setting-label").textContent).toContain(
+      "Depends on",
+    );
+    const info = screen.getByTestId("task-create-dependency-setting-info");
+    expect(info.getAttribute("aria-label")).toBe("About task dependencies");
+
+    fireEvent.focus(info);
+    await waitFor(() => {
+      expect(screen.getByRole("tooltip").textContent).toContain(
+        "This task waits until every selected task completes successfully.",
+      );
+    });
+  });
+
   it("preserves selected dependencies across collapse and reopen", () => {
     function Harness() {
       const [blockedBy, setBlockedBy] = useState<string[]>(["task-1"]);
       return (
-        <TaskCreateAdvancedSettings
-          isCreateMode
-          isTaskStarted={false}
-          blockedBy={blockedBy}
-          onBlockedByChange={setBlockedBy}
-        />
+        <TooltipProvider>
+          <TaskCreateAdvancedSettings
+            isCreateMode
+            isTaskStarted={false}
+            blockedBy={blockedBy}
+            onBlockedByChange={setBlockedBy}
+          />
+        </TooltipProvider>
       );
     }
 

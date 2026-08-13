@@ -24,7 +24,8 @@ selector semantics, and payload path.
   test identity, and a mobile hitbox of at least 44 CSS pixels.
 - The dependency selector is absent while collapsed and appears inside the
   expanded content with the existing `No dependency` default, icon, picker,
-  task rows, info help, and multi-selection behavior.
+  task rows, info help, and multi-selection behavior. The expanded selector has
+  a localized `Depends on` label with contextual help.
 - Collapsing and reopening the section does not clear selected predecessor IDs.
 - Workflow visibility, workflow locking, agent/executor behavior, and the
   existing `blockedBy` to `blocked_by` payload path remain unchanged.
@@ -98,8 +99,8 @@ and plan status before starting Task 02.
 
 - Added `TaskCreateAdvancedSettings` as an inline, collapsed disclosure below
   the model, executor, and workflow controls. It keeps the dependency selector
-  inside an extensible content region and preserves `blockedBy` state and
-  disabled behavior.
+  inside an extensible content region, labels the setting with contextual help,
+  and preserves `blockedBy` state and disabled behavior.
 - Kept workflow rendering independent and unchanged for its existing visibility,
   locking, and single-workflow rules.
 - Added localized English and pseudo-locale copy plus component coverage for

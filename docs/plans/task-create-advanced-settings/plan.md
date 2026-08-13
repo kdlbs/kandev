@@ -31,8 +31,9 @@ not change the backend, API client, persistence, or WebSocket contracts.
   styling, a very subtle text size, a direction indicator, `aria-expanded`,
   and a mobile hitbox of at least 44 CSS pixels.
 - Render the existing `TaskCreateDependencies` as the first child of the
-  advanced content. Keep the content wrapper ready for future sibling controls
-  without introducing a speculative registry or new state shape.
+  advanced content below a localized `Depends on` label with contextual help.
+  Keep the content wrapper ready for future sibling controls without introducing
+  a speculative registry or new state shape.
 - Preserve the dependency selector's `value`, `onChange`, and disabled props.
 
 ### Dialog placement
@@ -65,8 +66,8 @@ not change the backend, API client, persistence, or WebSocket contracts.
 
 - Add `apps/web/components/task-create-dialog-advanced-settings.test.tsx` for
   the default collapsed state, expanded state, semantic attributes, touch-safe
-  trigger class, dependency mounting, and state preservation across collapse
-  and reopen.
+  trigger class, dependency label/help, dependency mounting, and state
+  preservation across collapse and reopen.
 - Update
   `apps/web/components/task-create-dialog-form-body.test.tsx` to cover the
   workflow-only path and ensure the advanced dependency section does not remove
@@ -82,8 +83,8 @@ not change the backend, API client, persistence, or WebSocket contracts.
 - Extend `apps/web/e2e/tests/task/create-task-dependency-selector.spec.ts` to
   assert that the create dialog starts with a collapsed advanced row below the
   model, executor, and workflow controls, the dependency trigger is hidden
-  until expansion, and the existing selection and create-payload behavior
-  remains intact.
+  until expansion, the labeled setting help is available, and the existing
+  selection and create-payload behavior remains intact.
 - Extend `apps/web/e2e/tests/task/mobile-create-task-dependency-selector.spec.ts`
   to tap the advanced row before opening the dependency selector, check the
   row's touch box and expanded state, and retain picker containment, help,
