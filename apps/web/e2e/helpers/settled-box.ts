@@ -20,15 +20,20 @@ export async function settledBoundingBox(locator: Locator, timeout = 5_000): Pro
 
   let previous: string | null = null;
   let latest: BoundingBox | null = null;
+  let agreeingReads = 0;
 
+  // Three consecutive agreeing reads, not two. With two, both samples can land
+  // before an animated scroll has begun moving the element at all, in which
+  // case they agree on the pre-scroll position and this returns exactly the
+  // stale coordinates it exists to avoid.
   await expect
     .poll(
       async () => {
         latest = await locator.boundingBox();
         const current = latest ? `${Math.round(latest.x)},${Math.round(latest.y)}` : null;
-        const settled = current !== null && current === previous;
+        agreeingReads = current !== null && current === previous ? agreeingReads + 1 : 0;
         previous = current;
-        return settled;
+        return agreeingReads >= 2;
       },
       { timeout, message: "element position did not settle" },
     )

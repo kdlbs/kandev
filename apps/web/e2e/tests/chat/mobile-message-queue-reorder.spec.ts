@@ -123,14 +123,17 @@ async function touchDragTo(
   // target and the drop silently becomes a no-op.
   await expect.poll(announcedTarget, { timeout: 5_000 }).toContain(MOVED_OVER);
 
+  // The second move is a 2px nudge that re-dispatches DragMove against the
+  // same droppable, so it produces no NEW announcement to wait on: a second
+  // `toContain(MOVED_OVER)` here would be satisfied by the first move's
+  // announcement and assert nothing, and a `.not.toBe(previous)` would never
+  // become true. The wait above already proves the drag is live and measured,
+  // which is the precondition pointerup actually needs.
   await page.dispatchEvent("body", "pointermove", {
     ...down,
     clientX: end.x,
     clientY: end.y + 2,
   });
-  // The second move has resolved a target once an announcement is present for
-  // the new position; only then is the pointerup a meaningful drop.
-  await expect.poll(announcedTarget, { timeout: 5_000 }).toContain(MOVED_OVER);
 
   await page.dispatchEvent("body", "pointerup", {
     ...down,

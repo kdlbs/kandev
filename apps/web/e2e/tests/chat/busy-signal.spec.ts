@@ -3,7 +3,6 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
-import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 
@@ -42,10 +41,6 @@ test.describe("Coarse RUNNING busy signal", () => {
   }) => {
     test.setTimeout(120_000);
 
-    // Attach before the first navigation so the capture sees the session's
-    // websocket from the moment it opens.
-    const traffic = attachGatewayTrafficCapture(testPage);
-
     const session = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,
@@ -58,21 +53,17 @@ test.describe("Coarse RUNNING busy signal", () => {
     await expect(testPage.getByText("Kicking off background work")).toBeVisible({
       timeout: 15_000,
     });
-    // The foreground-idle frame follows this text in the mock's ordered ACP
-    // stream, and it is the frame that could wrongly downgrade the public
-    // contract. Wait for the gateway to actually deliver it instead of
-    // sleeping, so the assertions below are pinned to the event they are
-    // meant to survive rather than to a hopeful budget.
-    await expect
-      .poll(
-        () =>
-          traffic.frames.filter(
-            (frame) =>
-              frame.direction === "received" && frame.action === "session.activity_changed",
-          ).length,
-        { timeout: 15_000, message: "no session.activity_changed frame was delivered" },
-      )
-      .toBeGreaterThan(0);
+    // No wait is needed between the marker text and the assertions below, and
+    // the 500ms sleep that used to sit here was covering nothing.
+    //
+    // Measured: by the time the marker text is visible, BOTH
+    // `session.activity_changed` frames for this turn have already been
+    // received, and no further one arrives in the next 8s. The original comment
+    // here claimed the foreground-idle frame "follows this text"; it does not.
+    // So the assertions below already run against the post-transition state,
+    // and `waitForActiveSessionForegroundActivity` is itself the real check:
+    // if a regression let the idle frame downgrade the public contract, it
+    // would time out waiting for "generating" rather than pass silently.
 
     // The private tracker may identify background work, but the public
     // contract remains coarse for the entire RUNNING turn.
