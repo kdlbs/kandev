@@ -74,14 +74,7 @@ function buildImage(tag: string, dockerfile: string): void {
 function listScopedKandevContainers(scope: string, scanAll = false): string[] | null {
   const list = spawnSync(
     "docker",
-    [
-      "ps",
-      "-aq",
-      "--filter",
-      "label=kandev.managed=true",
-      "--filter",
-      `label=kandev.e2e.run=${scope}`,
-    ],
+    ["ps", "-aq", "--filter", `label=kandev.e2e.run=${scope}`, "--no-trunc"],
     { encoding: "utf8", timeout: 5_000 },
   );
   if (list.status !== 0) return null;
@@ -94,8 +87,8 @@ function listScopedKandevContainers(scope: string, scanAll = false): string[] | 
   // Docker can briefly return an empty label-filtered list while a just
   // stopped container is becoming visible to the daemon's index. On the
   // second and later empty polls, inspect the daemon's IDs and filter labels ourselves.
-  // This remains safe for concurrent shards because only exact managed/run
-  // label matches are returned to the scoped remover.
+  // This remains safe for concurrent shards because the fallback below only
+  // returns exact managed/run label matches to the scoped remover.
   const all = spawnSync("docker", ["ps", "-aq", "--no-trunc"], {
     encoding: "utf8",
     timeout: 5_000,
@@ -107,22 +100,23 @@ function listScopedKandevContainers(scope: string, scanAll = false): string[] | 
     .filter(Boolean);
   if (allIDs.length === 0) return [];
 
-  const inspected = spawnSync(
-    "docker",
-    [
-      "inspect",
-      "--format",
-      '{{.Id}}\t{{index .Config.Labels "kandev.managed"}}\t{{index .Config.Labels "kandev.e2e.run"}}',
-      ...allIDs,
-    ],
-    { encoding: "utf8", timeout: 5_000 },
-  );
-  if (inspected.status !== 0 && !inspected.stdout.trim()) return null;
-  return inspected.stdout
-    .split("\n")
-    .map((line) => line.trim().split("\t"))
-    .filter((parts) => parts[1] === "true" && parts[2] === scope)
-    .map(([id]) => id);
+  const matchingIDs: string[] = [];
+  for (const id of allIDs) {
+    const inspected = spawnSync(
+      "docker",
+      [
+        "inspect",
+        "--format",
+        '{{.Id}}\t{{index .Config.Labels "kandev.managed"}}\t{{index .Config.Labels "kandev.e2e.run"}}',
+        id,
+      ],
+      { encoding: "utf8", timeout: 1_000 },
+    );
+    if (inspected.status !== 0) continue;
+    const [fullID, managed, run] = inspected.stdout.trim().split("\t");
+    if (managed === "true" && run === scope) matchingIDs.push(fullID || id);
+  }
+  return matchingIDs;
 }
 
 function removeContainerIDs(ids: string[]): void {

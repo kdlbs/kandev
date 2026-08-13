@@ -34,9 +34,12 @@ async function waitForWorkspaceFile(
 
 async function openFileInPreview(page: Page, session: SessionPage, filename: string) {
   await session.clickTab("Files");
-  await expect(session.files).toBeVisible({ timeout: 10_000 });
+  await expect(session.files).toBeVisible({ timeout: 20_000 });
   const fileRow = session.files.getByText(filename);
-  await expect(fileRow).toBeVisible({ timeout: 30_000 });
+  // The file browser retries its agentctl tree load for up to 18s while a
+  // freshly prepared workspace becomes reachable. Let that bounded retry
+  // schedule finish before opening the file.
+  await expect(fileRow).toBeVisible({ timeout: 45_000 });
   await fileRow.click();
   // Retry click if preview tab didn't appear (executor may need a moment)
   const previewTab = page.getByTestId("preview-tab-file-editor");

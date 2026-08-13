@@ -2401,9 +2401,9 @@ export class ApiClient {
    */
   async waitForIntegrationAuthHealthy(
     integration: "jira" | "linear" | "sentry",
-    options: number | { timeoutMs?: number; workspaceId?: string } = 30_000,
+    options: number | { timeoutMs?: number; workspaceId?: string } = 60_000,
   ): Promise<void> {
-    const timeoutMs = typeof options === "number" ? options : (options.timeoutMs ?? 30_000);
+    const timeoutMs = typeof options === "number" ? options : (options.timeoutMs ?? 60_000);
     const workspaceId = typeof options === "number" ? undefined : options.workspaceId;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {

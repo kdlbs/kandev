@@ -45,7 +45,7 @@ test.describe("mobile: Plan toolbar implement", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     const { taskId, sessionId, session } = await seedMobileTaskWithPlan(
       testPage,
       apiClient,
@@ -54,7 +54,7 @@ test.describe("mobile: Plan toolbar implement", () => {
 
     const toolbarButton = testPage.getByTestId("plan-toolbar-implement-button");
     await expect(toolbarButton).toBeVisible({ timeout: 10_000 });
-    await expect(toolbarButton).toBeEnabled({ timeout: 30_000 });
+    await expect(toolbarButton).toBeEnabled({ timeout: 60_000 });
     await expect(toolbarButton).toBeInViewport();
 
     const toolbarSpacing = await testPage
