@@ -323,6 +323,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [automations-yaml-export](automations-yaml-export/spec.md) | building |
 | [task-launch-failure-recovery](task-launch-failure-recovery/spec.md) | draft |
 | [pr-walkthrough](pr-walkthrough/spec.md) | building |
+| [task-delivery-ledger](task-delivery-ledger/spec.md) | draft |
 
 ---
 
