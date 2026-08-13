@@ -123,6 +123,7 @@ test.describe("shell command output echo stripping", () => {
     apiClient,
     seedData,
   }, testInfo) => {
+    test.setTimeout(120_000);
     // Regression for a report that the workDir-resolved-path fix above
     // still leaked the echo: a command that itself carries an embedded
     // newline (a multi-line script or commit message passed as a single
@@ -135,6 +136,7 @@ test.describe("shell command output echo stripping", () => {
 
     const script = [
       `e2e:shell_result("${command.replace(/\n/g, "\\n")}", "${echoedOutput.replace(/\n/g, "\\n")}", "${cwd}")`,
+      "e2e:delay(100)",
       'e2e:message("done")',
     ].join("\n");
 
@@ -153,7 +155,7 @@ test.describe("shell command output echo stripping", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
 
     const chat = session.activeChat();
     const commandRow = chat.getByTestId("tool-execute-command").filter({ hasText: "echo start" });

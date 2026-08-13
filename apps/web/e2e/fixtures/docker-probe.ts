@@ -52,7 +52,7 @@ export function buildE2EImage(): void {
  * Remove only containers owned by this E2E process. Never use a daemon-wide
  * kandev.managed=true sweep: another shard can share the Docker daemon.
  */
-export function removeScopedKandevContainers(scope = E2E_DOCKER_SCOPE): void {
+function scopedKandevContainerIDs(scope: string): string[] {
   const list = spawnSync(
     "docker",
     [
@@ -65,11 +65,33 @@ export function removeScopedKandevContainers(scope = E2E_DOCKER_SCOPE): void {
     ],
     { encoding: "utf8" },
   );
-  if (list.status !== 0) return;
-  const ids = list.stdout
+  if (list.status !== 0) return [];
+  return list.stdout
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+export function removeScopedKandevContainers(scope = E2E_DOCKER_SCOPE): void {
+  const ids = scopedKandevContainerIDs(scope);
   if (ids.length === 0) return;
   spawnSync("docker", ["rm", "-f", ...ids], { stdio: "ignore" });
+}
+
+/**
+ * Re-drive scoped cleanup until Docker no longer reports an owned container.
+ * Docker cleanup can overlap the backend's task teardown under CI load, so a
+ * single best-effort rm is not a sufficient fixture boundary.
+ */
+export async function waitForScopedKandevContainersRemoved(
+  scope = E2E_DOCKER_SCOPE,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    removeScopedKandevContainers(scope);
+    if (scopedKandevContainerIDs(scope).length === 0) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  }
+  removeScopedKandevContainers(scope);
 }
