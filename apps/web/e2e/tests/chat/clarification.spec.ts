@@ -423,6 +423,10 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(context).toHaveText(
       "Picking the foundational stack: answer all three so we can move forward.",
     );
+    await expect(context).toHaveCSS("margin-top", "12px");
+    await expect(context).toHaveCSS("padding", "0px");
+    await expect(context).toHaveCSS("border-width", "0px");
+    await expect(context).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(
       session.clarificationQuestionCards().getByTestId("clarification-context"),
     ).toHaveCount(0);

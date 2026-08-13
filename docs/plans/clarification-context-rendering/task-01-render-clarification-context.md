@@ -14,6 +14,8 @@ spec: "../../specs/ui/clarification-context.md"
 
 - A non-empty `ask_user_question_kandev.context` value appears exactly once at
   the bundle level and remains visible while navigating between questions.
+- The context is normal text with top spacing and no border, padding, or filled
+  container.
 - Missing or whitespace-only context renders no empty region; existing answer,
   skip, and carousel behavior remains unchanged.
 - Desktop and `mobile-chrome` E2E coverage proves visibility, single rendering,
@@ -89,5 +91,8 @@ status. Do not introduce new UI copy or backend contract changes.
 - PR fixup addressed the valid review comments by scoping clarification
   locators to the active chat and making the two task commands independent;
   both focused E2E commands passed again against fresh production builds.
+- Visual refinement follow-up added 12px top spacing and removed the context
+  container's padding, border, and background; both focused E2E commands passed
+  again against fresh production builds.
 - `pnpm run typecheck`, changed-file ESLint, `pnpm run i18n:ratchet`, and
   `git diff --check` passed.

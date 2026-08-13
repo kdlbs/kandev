@@ -16,6 +16,8 @@ that depend on that background can therefore appear incomplete or confusing.
 
 - A pending clarification bundle with non-empty shared context displays that
   context once above the active question card.
+- Shared context uses normal text presentation with spacing above it. It has no
+  bordered, padded, or filled container.
 - Shared context remains visible while the operator moves between questions in
   a multi-question bundle.
 - Task chat, Quick Chat, and other surfaces that use the shared clarification

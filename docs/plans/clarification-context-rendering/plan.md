@@ -36,6 +36,8 @@ clarification message from `apps/backend/internal/backendapp/adapters.go`.
 - Trim only for the empty-value decision. Render non-empty content once at the
   bundle level, outside `ClarificationCard`, so carousel navigation cannot
   duplicate or remove it.
+- Present the context as normal text with top spacing and no bordered, padded,
+  or filled container.
 - Preserve authored line breaks and wrap long words inside the overlay. Add a
   stable `clarification-context` test ID.
 - Do not translate the value. It is agent-authored domain content, not UI copy.
@@ -111,6 +113,9 @@ e2e/tests/chat/mobile-clarification.spec.ts` — passed.
   object scope and independent task verification commands were corrected in
   response to valid minor review comments. The focused desktop and mobile E2E
   commands passed again against fresh production builds.
+- Visual refinement follow-up: the context now has 12px top spacing and normal
+  text presentation with no padding, border, or background. The updated desktop
+  and mobile focused tests passed against fresh production builds.
 
 ## Implementation Waves And Parallel Candidates
 

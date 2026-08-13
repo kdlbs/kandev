@@ -597,7 +597,7 @@ export function ClarificationInputOverlay({
       {sharedContext && (
         <div
           data-testid="clarification-context"
-          className="mx-4 mb-2 break-words rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground whitespace-pre-wrap"
+          className="mx-4 mt-3 mb-2 break-words whitespace-pre-wrap"
         >
           {sharedContext}
         </div>
