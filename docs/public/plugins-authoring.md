@@ -2122,6 +2122,9 @@ repackaging.
 - **Trusting webhook metadata:** `webhooks[].method` is informational. Public
   routes are not authenticated by Kandev, so validate method, signature, timestamp, replay
   protection, and body before side effects.
+- **Authenticated webhook access:** a valid Kandev session or PAT is all the
+  host checks. Any signed-in user reaches an authenticated webhook, so enforce
+  your own per-user or per-role rules when the endpoint needs them.
 - **Bundling React:** use host.React, host.jsx, and host.ui; a second React or
   Radix copy breaks shared contexts and portals.
 - **Shipping the wrong binary name:** every declared executable must be under

@@ -606,6 +606,8 @@ func flattenWebhookHeaders(h http.Header) map[string]string {
 	safe.Del("Authorization")
 	safe.Del("Cookie")
 	return flattenHeaders(safe)
+}
+
 // isKandevPATCredential reports whether an Authorization header value carries
 // a kandev_pat_* token, with or without a bearer scheme prefix. RFC 9110 makes
 // the auth scheme case-insensitive, so "bearer kandev_pat_..." has to be
