@@ -99,6 +99,47 @@ func TestApplySettingsReconcileReloadsPolicyInsideLanguageLane(t *testing.T) {
 	}
 }
 
+func TestReconcileAllReleasesCapacityForDeletedInventoryRow(t *testing.T) {
+	baseStore := newMemoryLSPStore()
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	seedLSPState(t, baseStore, TaskLanguageState{
+		TaskID: key.TaskID, Language: key.Language, Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+	})
+	store := &reconcileSnapshotStore{
+		Store: baseStore, allListBlockCall: 1,
+		allListBlocked: make(chan struct{}), allListRelease: make(chan struct{}),
+	}
+	capacity := NewCapacity(1)
+	capacity.Adopt(key, 1)
+	controller := NewController(ControllerConfig{
+		Tasks: &fakeControllerTasks{}, Store: store, Settings: &fakeLSPSettings{},
+		Runtimes: &fakeLSPRuntimes{}, Capacity: capacity,
+		Clock: func() time.Time { return time.Unix(200, 0).UTC() },
+	})
+
+	reconcileDone := make(chan error, 1)
+	go func() {
+		reconcileDone <- controller.ReconcileAll(context.Background())
+	}()
+	awaitReconcileSnapshot(t, store.allListBlocked)
+
+	// Task cleanup has proved the process absent and released the slot, then
+	// task deletion removes the durable row while reconciliation still owns a
+	// stale pre-cleanup inventory snapshot.
+	capacity.Release(key, 1)
+	baseStore.mu.Lock()
+	delete(baseStore.states, key)
+	baseStore.mu.Unlock()
+	close(store.allListRelease)
+	if err := <-reconcileDone; err != nil {
+		t.Fatalf("reconcile deleted inventory row: %v", err)
+	}
+	if active := capacity.Active(); active != 0 {
+		t.Fatalf("capacity after stale deleted-row adoption = %d, want 0", active)
+	}
+}
+
 type reconcileSnapshotStore struct {
 	Store
 	mu                sync.Mutex

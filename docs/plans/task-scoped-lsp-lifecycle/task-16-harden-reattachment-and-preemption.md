@@ -42,6 +42,8 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   pre-command Restart reattachment failure retains the old server's capacity reservation.
 - Task and settings reconciliation reload current durable policy inside the serialized language
   lane, so an inventory snapshot captured before an enable cannot stop the newly ready server.
+- A stale global inventory row removed by task cleanup releases only its exact adopted generation,
+  so delete cannot resurrect a phantom capacity occupant or erase newer generation evidence.
 
 ## TDD Evidence
 
@@ -82,6 +84,8 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   and became a phantom capacity occupant after backend restart.
 - Task and settings reconciliation stopped a newly enabled server when it entered the language lane
   with a Disabled snapshot captured before the user action completed.
+- Global reconciliation could re-adopt a pre-cleanup live generation after cleanup released it and
+  task deletion removed the row, permanently consuming capacity without a runtime.
 
 ## Verification
 
@@ -124,6 +128,8 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
   repetitions. PostgreSQL replay coverage now rewinds the live table to the pre-absence-evidence
   schema, verifies selective legacy backfill, replays idempotently, and verifies allocation clears
   the proof. Its focused race-enabled test passed against a disposable PostgreSQL 16 container.
+- The stale inventory/delete regression failed with one phantom active slot before the fix, then
+  passed 20 race-enabled repetitions with exact-generation release inside the language lane.
 - `go test -count=1 ./...` passed across the complete backend after the callback-ownership repair;
   changed-code `golangci-lint` reported zero issues and the architecture linter passed.
 - Commit hooks passed architecture, formatting, changed-code Go/Web lint, i18n, public-copy, and

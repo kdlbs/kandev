@@ -67,7 +67,9 @@ The durable startup inventory is the capacity ledger's authority. If that invent
 read, the controller records one sticky startup failure and every task-LSP operation fails closed
 with that error until backend restart; it never exposes an empty ledger as ready or launches work
 behind a speculative retry. Once inventory succeeds, all possibly-live generations are reserved
-before later per-runtime inspection errors can occur.
+before later per-runtime inspection errors can occur. When an inventory row disappears before its
+serialized reload, reconciliation releases only that row's exact adopted generation, preventing
+task cleanup or deletion from restoring a phantom capacity occupant while preserving newer proof.
 
 Startup watch registration uses the durable rows read after reconciliation, never the stale rows
 that preceded convergence. A watch failure can replace state only while the current durable phase
