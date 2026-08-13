@@ -181,6 +181,15 @@ func (s *Sweep) evaluatePair(ctx context.Context, pair CandidatePair) error {
 		recordEvaluationError()
 		return nil
 	}
+	// Re-check the freeze: SelectDuePairs enforced it at due-selection
+	// time, but the two reads are not in the same transaction, so a
+	// repository soft-deleted in the window between due-selection and
+	// this evaluation must still be honored here (Review round 1,
+	// finding #5) — otherwise the freeze promised under "Persistence
+	// guarantees" can be silently voided by an ordinary race.
+	if repoInfo.DeletedAt != nil {
+		return nil
+	}
 	taskInfo, err := s.repo.TaskInfo(ctx, pair.TaskID)
 	if err != nil {
 		recordEvaluationError()
@@ -195,7 +204,6 @@ func (s *Sweep) evaluatePair(ctx context.Context, pair CandidatePair) error {
 		Providers:     providers,
 		Ancestry:      ancestry,
 	})
-	recordEvaluation(classification.Outcome)
 
 	result, err := s.repo.Upsert(ctx, UpsertInput{
 		TaskID: pair.TaskID, RepositoryID: pair.RepositoryID, WorkspaceID: taskInfo.WorkspaceID,
@@ -205,6 +213,10 @@ func (s *Sweep) evaluatePair(ctx context.Context, pair CandidatePair) error {
 		recordWriteError()
 		return err
 	}
+	// recordEvaluation counts persisted evaluations only, per spec's
+	// "once per persisted evaluation" definition — it must run after a
+	// successful Upsert, not before (Review round 1, finding #2).
+	recordEvaluation(classification.Outcome)
 	if result.RowChanged {
 		recordRowWritten()
 	}
@@ -277,13 +289,21 @@ func (r *Repository) isDue(
 	if !hasRow {
 		return true
 	}
+	// Fail OPEN on a per-pair query error here, consistent with
+	// SelectDuePairs's own bulk-ledger-read fallback one level up
+	// (Review round 1, finding #3): these queries read the same input
+	// tables spec "Failure modes" names under "an input query fails",
+	// so a transient failure here must not silently exclude a pair with
+	// zero observability. Selecting it as due lets evaluatePair's own
+	// read of the same tables discover and count the failure via
+	// delivery_ledger_evaluation_errors_total.
 	taskInfo, err := r.TaskInfo(ctx, pair.TaskID)
 	if err != nil {
-		return false
+		return true
 	}
 	mostRecent, err := r.mostRecentInputObservation(ctx, pair.TaskID, pair.RepositoryID, repoInfo.UpdatedAt, taskInfo.UpdatedAt)
 	if err != nil {
-		return false
+		return true
 	}
 	if existing.LastEvaluatedAt.Before(mostRecent) {
 		return true

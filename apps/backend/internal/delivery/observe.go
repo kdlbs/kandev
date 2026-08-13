@@ -188,11 +188,16 @@ func (r *Repository) TaskInfo(ctx context.Context, id string) (TaskInfo, error) 
 // pair's sessions, joined through task_sessions.
 func (r *Repository) SnapshotsForPair(ctx context.Context, taskID, repositoryID string) ([]Snapshot, error) {
 	var rows []struct {
-		SessionID  string    `db:"session_id"`
-		Branch     string    `db:"branch"`
-		HeadCommit string    `db:"head_commit"`
-		Ahead      *int      `db:"ahead"`
-		CreatedAt  time.Time `db:"created_at"`
+		SessionID string `db:"session_id"`
+		Branch    string `db:"branch"`
+		// head_commit is TEXT DEFAULT '', not NOT NULL
+		// (base_schema.go), and spec "Classification" normalization
+		// explicitly anticipates a real NULL there — scan into
+		// sql.NullString rather than a bare string, or a literal NULL
+		// row fails the whole query (Review round 1, finding #6).
+		HeadCommit sql.NullString `db:"head_commit"`
+		Ahead      *int           `db:"ahead"`
+		CreatedAt  time.Time      `db:"created_at"`
 	}
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
 		SELECT g.session_id, g.branch, g.head_commit, g.ahead, g.created_at
@@ -206,7 +211,7 @@ func (r *Repository) SnapshotsForPair(ctx context.Context, taskID, repositoryID 
 	out := make([]Snapshot, len(rows))
 	for i, row := range rows {
 		out[i] = Snapshot{
-			SessionID: row.SessionID, Branch: row.Branch, HeadCommit: row.HeadCommit,
+			SessionID: row.SessionID, Branch: row.Branch, HeadCommit: row.HeadCommit.String,
 			Ahead: row.Ahead, CreatedAt: row.CreatedAt,
 		}
 	}

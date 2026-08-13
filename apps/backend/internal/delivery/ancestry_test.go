@@ -139,6 +139,28 @@ func TestAncestryChecker_NeitherRefResolvesIsAnError(t *testing.T) {
 	}
 }
 
+// TestAncestryChecker_FlagLikeCommitIsRejectedBeforeReachingGit covers
+// Review round 1, finding #7: task_session_git_snapshots.head_commit is
+// not format-validated anywhere upstream of this seam, and
+// apps/backend/internal/common/subproc/git_command.go documents that
+// callers are responsible for validating a value before it reaches a git
+// subprocess as raw argv. A commit value beginning with "-" previously
+// went straight to `git merge-base --is-ancestor <commit> <ref>` with no
+// `--` separator, so it could be parsed as a git option rather than a
+// revision. Check must now reject a non-SHA-shaped commit before it ever
+// reaches a git subprocess, rather than relying on git's own error
+// handling for the malformed value.
+func TestAncestryChecker_FlagLikeCommitIsRejectedBeforeReachingGit(t *testing.T) {
+	work, defaultBranch := newAncestryTestRepo(t)
+
+	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work}}
+	out := checker.Check(context.Background(), "repo-1", defaultBranch, "--all")
+
+	if !out.Errored || out.Positive {
+		t.Fatalf("out = %+v, want Errored=true (a flag-like commit must never reach the git subprocess)", out)
+	}
+}
+
 func TestAncestryChecker_CheckoutResolverErrorIsAnAncestryError(t *testing.T) {
 	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{err: errTestCheckout}}
 	out := checker.Check(context.Background(), "repo-1", "main", "HEAD")
