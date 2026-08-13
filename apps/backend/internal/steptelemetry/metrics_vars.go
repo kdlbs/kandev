@@ -10,7 +10,7 @@ import (
 // the precedent this mirrors). Counters only, keyed by trigger or by
 // presence, so a process restart never needs to reconstruct a gauge.
 var (
-	stepTransitionsTotal = expvar.NewMap("telemetry_step_transitions_total")
+	stepTransitionsTotal = expvar.NewMap("telemetry_step_transitions_inserted_total")
 	turnStampsTotal      = expvar.NewMap("telemetry_turn_stamps_total")
 )
 

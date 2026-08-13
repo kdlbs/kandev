@@ -109,8 +109,9 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	// Counted at INSERT time, not at commit: a later statement in the same
 	// caller-owned transaction failing after this point (rare — e.g. the
 	// runner sync in UpdateTask) rolls the row back but the counter still
-	// bumped. The counter is a health signal ("is the writer alive"), not a
-	// row-for-row audit trail; the ledger table itself is that audit trail.
+	// bumped. The counter (and its "_inserted_" name) is a health signal
+	// ("is the writer alive"), not a commit-confirmed row-for-row audit
+	// trail; the ledger table itself is that audit trail.
 	steptelemetry.RecordLedgerRow(r.log, attribution.Trigger)
 	return nil
 }

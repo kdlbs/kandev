@@ -28,10 +28,10 @@ func TestRecordLedgerRowBumpsCounterAndLogs(t *testing.T) {
 
 	after := stepTransitionsTotal.String()
 	if after == before {
-		t.Fatal("expvar counter telemetry_step_transitions_total did not change")
+		t.Fatal("expvar counter telemetry_step_transitions_inserted_total did not change")
 	}
 
-	entries := logs.FilterMessage(metricStepTransitionWritten).All()
+	entries := logs.FilterMessage(metricStepTransitionInserted).All()
 	if len(entries) != 1 {
 		t.Fatalf("log entries = %d, want 1", len(entries))
 	}

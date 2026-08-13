@@ -10,19 +10,20 @@ import (
 // log-aggregation rule can match on the event name without scanning free
 // text — the routing.metric.* precedent in internal/office/scheduler.
 const (
-	metricStepTransitionWritten = "telemetry.metric.step_transition_written"
-	metricTurnStamped           = "telemetry.metric.turn_stamped"
+	metricStepTransitionInserted = "telemetry.metric.step_transition_inserted"
+	metricTurnStamped            = "telemetry.metric.turn_stamped"
 )
 
 // RecordLedgerRow bumps the expvar counter for trigger AND emits a
-// telemetry.metric.step_transition_written log line. Called once per
-// successfully written task_step_transitions row.
+// telemetry.metric.step_transition_inserted log line. Called once the INSERT
+// succeeds, before the owning transaction commits — see the call site's
+// comment for why this is a liveness signal, not a commit-confirmed count.
 func RecordLedgerRow(log *logger.Logger, trigger Trigger) {
 	incStepTransition(trigger)
 	if log == nil {
 		return
 	}
-	log.Info(metricStepTransitionWritten, zap.String("trigger", string(trigger)))
+	log.Info(metricStepTransitionInserted, zap.String("trigger", string(trigger)))
 }
 
 // RecordTurnStamp bumps the expvar counter keyed by whether a turn carried
