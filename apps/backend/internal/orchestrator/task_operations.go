@@ -3044,10 +3044,44 @@ func (s *Service) captureCommitsForTrigger(ctx context.Context, sessionID, baseC
 			zap.String("trigger", string(trigger)))
 		return false
 	}
+	s.recordCommitCaptureFetchFailures(sessionID, trigger, logResult)
 	if logResult.Success && len(logResult.Commits) > 0 {
 		s.persistCommits(ctx, sessionID, trigger, logResult.Commits)
 	}
 	return true
+}
+
+// recordCommitCaptureFetchFailures makes a GetGitLog-level failure
+// observable instead of silently dropping it. logResult can fail two ways
+// that are otherwise indistinguishable from "nothing to capture this time":
+// a total result-level failure (logResult.Success == false, single-repo git
+// command failure or every repo failed in a multi-repo fan-out), or a
+// partial multi-repo failure (Success == true because at least one repo
+// succeeded, but PerRepoErrors names the ones that didn't). A multi-repo
+// total failure sets BOTH Success == false AND populates PerRepoErrors for
+// every repo (see agentctl/server/api/git.go's mergeGitLogResults), so this
+// records one failure per PerRepoErrors entry when present, and only falls
+// back to counting the top-level Success == false once when PerRepoErrors is
+// empty (the single-repo case) - never both, to avoid double-counting.
+func (s *Service) recordCommitCaptureFetchFailures(sessionID string, trigger commitCaptureTrigger, logResult *client.GitLogResult) {
+	if len(logResult.PerRepoErrors) > 0 {
+		for _, repoErr := range logResult.PerRepoErrors {
+			recordCommitCaptureFetchFailed(trigger)
+			s.logger.Warn("git log capture failed for repository",
+				zap.String("session_id", sessionID),
+				zap.String("trigger", string(trigger)),
+				zap.String("repository_name", repoErr.RepositoryName),
+				zap.String("error", repoErr.Error))
+		}
+		return
+	}
+	if !logResult.Success {
+		recordCommitCaptureFetchFailed(trigger)
+		s.logger.Warn("git log capture reported failure",
+			zap.String("session_id", sessionID),
+			zap.String("trigger", string(trigger)),
+			zap.String("error", logResult.Error))
+	}
 }
 
 // captureSessionCommitsSweep reconciles task_session_commits against

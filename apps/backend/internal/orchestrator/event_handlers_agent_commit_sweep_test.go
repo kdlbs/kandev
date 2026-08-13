@@ -324,3 +324,71 @@ func TestHandleAgentCompleted_CommitSweepRunsWhenSessionAlreadyTerminal(t *testi
 		t.Fatalf("GetGitLog calls = %d, want 1 (sweep must be attempted even when the terminal-state guard fires)", gitLogCalls)
 	}
 }
+
+// Regression: captureSessionCommitsSweep must not run while
+// handleAgentCompleted holds the per-session cancel-in-flight mutex
+// (acquireCancelInFlightGuard) - the same mutex ~20 other call sites across
+// internal/orchestrator/ need to serve a user's Stop/Cancel/Delete for this
+// session. GetGitLog is a real git shellout through agentctl that can take
+// up to the sweep's 10s bound (see
+// TestCaptureSessionCommitsSweep_BoundsGetGitLogWithTimeout); holding the
+// mutex for that long blocks those operations. This test blocks GetGitLog
+// mid-flight and asserts a concurrent caller can still acquire the same
+// per-session mutex immediately, rather than waiting behind the sweep.
+func TestHandleAgentCompleted_SweepDoesNotBlockCancelInFlightMutex(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-sweep-nolock", "s-sweep-nolock", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s-sweep-nolock")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.BaseCommitSHA = "base-sha"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set base commit: %v", err)
+	}
+
+	gitLogStarted := make(chan struct{})
+	releaseGitLog := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		getGitLogFunc: func(context.Context, string, string, int, string) (*client.GitLogResult, error) {
+			close(gitLogStarted)
+			<-releaseGitLog
+			return &client.GitLogResult{Success: true}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+			TaskID: "t-sweep-nolock", SessionID: "s-sweep-nolock", AgentExecutionID: "exec-1",
+		})
+	}()
+
+	select {
+	case <-gitLogStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("GetGitLog was never called")
+	}
+
+	lock, release := svc.acquireCancelInFlightGuard("s-sweep-nolock")
+	defer release()
+	acquired := make(chan struct{})
+	go func() {
+		lock.Lock()
+		close(acquired)
+	}()
+	select {
+	case <-acquired:
+		lock.Unlock()
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("acquireCancelInFlightGuard's mutex was held by the in-flight commit sweep - " +
+			"Stop/Cancel/Delete on this session would block for up to the sweep's full duration")
+	}
+
+	close(releaseGitLog)
+	<-done
+}

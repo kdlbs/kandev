@@ -783,7 +783,7 @@ func TestPluginHost_SessionsCodeStats_DelegatesToAnalyticsService(t *testing.T) 
 		t.Errorf("filter.Limit = %d, want 11 (requested 10 + 1 probe row)", d.codeStats.lastFilter.Limit)
 	}
 	if len(stats) != 1 || stats[0].SessionID != "session-1" ||
-		stats[0].LinesAddedCommitted == nil || *stats[0].LinesAddedCommitted != 10 {
+		!stats[0].CommittedLinesAvailable || stats[0].LinesAddedCommitted != 10 {
 		t.Fatalf("CodeStats() = %+v, want session-1 passed through unchanged", stats)
 	}
 	if info == nil || info.HasMore {

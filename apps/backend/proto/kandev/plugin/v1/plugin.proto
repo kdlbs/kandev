@@ -526,14 +526,21 @@ message ListSessionsResponse {
 // so plugins never touch task_session_commits / task_session_git_snapshots.
 message SessionCodeStats {
   string session_id = 1;
-  // Absent (not 0) for a session that predates commit-capture activation and
-  // has no observed commits — capture wasn't running yet, so a plugin must
-  // not treat absence as "zero lines changed". Uses `optional` for the same
-  // NULL-distinguishable-from-empty reason the timestamp fields above do.
-  optional int64 lines_added_committed = 2;    // SUM of commit insertions
-  optional int64 lines_deleted_committed = 3;  // SUM of commit deletions
+  int64 lines_added_committed = 2;     // SUM of commit insertions
+  int64 lines_deleted_committed = 3;   // SUM of commit deletions
   int64 lines_added_peak_pending = 4;  // peak uncommitted diff additions across snapshots
   int64 lines_deleted_peak_pending = 5;
+  // False (with lines_added_committed/lines_deleted_committed reading 0) for
+  // a session that predates commit-capture activation and has no observed
+  // commits — capture wasn't running yet, so a plugin must not treat that
+  // zero as "zero lines changed". Kept as a separate additive field, rather
+  // than making the existing fields 2/3 `optional`, because fields 2/3 are
+  // an already-shipped part of this DTO's public contract (see ADR 0043:
+  // "DTO fields are additive-only thereafter") — plugin authors read them as
+  // plain int64 in the generated Go SDK, and switching that Go field type to
+  // *int64 is a source-level break for anyone rebuilding against a new SDK,
+  // even though the wire-level `optional` change itself is protobuf-safe.
+  bool committed_lines_available = 6;
 }
 message ListSessionCodeStatsRequest {
   SessionFilter filter = 1;

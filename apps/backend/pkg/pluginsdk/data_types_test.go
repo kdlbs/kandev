@@ -7,7 +7,6 @@ import (
 )
 
 func strPtr(s string) *string { return &s }
-func int64Ptr(v int64) *int64 { return &v }
 
 func TestPageProtoRoundTrip(t *testing.T) {
 	p := Page{Limit: 25, Cursor: "cursor-1"}
@@ -249,32 +248,35 @@ func TestSessionFilterProtoRoundTrip(t *testing.T) {
 func TestSessionCodeStatsProtoRoundTrip(t *testing.T) {
 	stats := SessionCodeStats{
 		SessionID:               "session-1",
-		LinesAddedCommitted:     int64Ptr(120),
-		LinesDeletedCommitted:   int64Ptr(40),
+		LinesAddedCommitted:     120,
+		LinesDeletedCommitted:   40,
 		LinesAddedPeakPending:   15,
 		LinesDeletedPeakPending: 3,
+		CommittedLinesAvailable: true,
 	}
 	proto := stats.toProto()
 	require.Equal(t, stats, sessionCodeStatsFromProto(proto))
 }
 
-// A session that predates commit-capture activation reports nil, not 0, for
-// committed lines — the wire contract must round-trip that absence exactly,
-// not silently coerce it to a zero value.
-func TestSessionCodeStatsProtoRoundTrip_NilCommittedLines(t *testing.T) {
+// A session that predates commit-capture activation reports
+// CommittedLinesAvailable == false, not a real measurement, for committed
+// lines — the wire contract must round-trip that unavailability exactly,
+// not silently present it as a real zero-change session. LinesAddedCommitted/
+// LinesDeletedCommitted stay plain int64 (not pointers) because they are
+// already-shipped public SDK fields (ADR 0043's additive-only DTO contract);
+// see SessionCodeStats' doc comment.
+func TestSessionCodeStatsProtoRoundTrip_CommittedLinesUnavailable(t *testing.T) {
 	stats := SessionCodeStats{
 		SessionID:               "session-legacy",
-		LinesAddedCommitted:     nil,
-		LinesDeletedCommitted:   nil,
+		LinesAddedCommitted:     0,
+		LinesDeletedCommitted:   0,
 		LinesAddedPeakPending:   7,
 		LinesDeletedPeakPending: 1,
+		CommittedLinesAvailable: false,
 	}
 	proto := stats.toProto()
-	if proto.LinesAddedCommitted != nil {
-		t.Errorf("proto.LinesAddedCommitted = %v, want nil", proto.LinesAddedCommitted)
-	}
-	if proto.LinesDeletedCommitted != nil {
-		t.Errorf("proto.LinesDeletedCommitted = %v, want nil", proto.LinesDeletedCommitted)
+	if proto.GetCommittedLinesAvailable() {
+		t.Errorf("proto.CommittedLinesAvailable = true, want false")
 	}
 	require.Equal(t, stats, sessionCodeStatsFromProto(proto))
 }

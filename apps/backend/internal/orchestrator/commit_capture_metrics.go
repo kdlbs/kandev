@@ -17,6 +17,16 @@ var (
 	commitCaptureInserted  = expvar.NewMap("commit_capture_inserted")
 	commitCaptureDuplicate = expvar.NewMap("commit_capture_duplicate")
 	commitCaptureFailed    = expvar.NewMap("commit_capture_failed")
+
+	// commitCaptureFetchFailed counts GetGitLog-level failures - either a
+	// total result-level failure (Success == false) or an individual
+	// per-repo failure inside a multi-repo response's PerRepoErrors - broken
+	// down by trigger. These happen before any commit is even observed, so
+	// they are accounted separately from commitCaptureFailed (a known
+	// commit's DB-write failure, paired with commitCaptureObserved via the
+	// observed = inserted + duplicate + failed identity); folding fetch
+	// failures into that counter would break the identity.
+	commitCaptureFetchFailed = expvar.NewMap("commit_capture_fetch_failed")
 )
 
 // commitCaptureTrigger identifies which write path observed a commit.
@@ -42,4 +52,8 @@ func recordCommitCaptureDuplicate(trigger commitCaptureTrigger) {
 
 func recordCommitCaptureFailed(trigger commitCaptureTrigger) {
 	commitCaptureFailed.Add(string(trigger), 1)
+}
+
+func recordCommitCaptureFetchFailed(trigger commitCaptureTrigger) {
+	commitCaptureFetchFailed.Add(string(trigger), 1)
 }
