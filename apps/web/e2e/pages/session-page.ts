@@ -466,6 +466,11 @@ export class SessionPage {
     return this.page.getByTestId("clarification-overlay");
   }
 
+  /** Shared context shown once above the active clarification question. */
+  clarificationContext(): Locator {
+    return this.clarificationOverlay().getByTestId("clarification-context");
+  }
+
   /** A specific clarification option button by its text label. */
   clarificationOption(text: string): Locator {
     return this.clarificationOverlay()

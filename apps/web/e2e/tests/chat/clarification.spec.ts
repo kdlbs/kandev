@@ -85,6 +85,7 @@ test.describe("Clarification flow", () => {
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
     await expect(session.clarificationOverlay()).toContainText("Which database");
+    await expect(session.clarificationContext()).toHaveCount(0);
 
     // Single-question bundles still expose option click → instant resolve.
     await session.clarificationOption("PostgreSQL").click();
@@ -400,6 +401,47 @@ test.describe("Multi-question clarification carousel", () => {
     // Only one card is visible at a time (carousel UX, not stacked).
     await expect(session.clarificationQuestionCards()).toHaveCount(1);
     await expect(session.clarificationOverlay()).toContainText("Which database");
+  });
+
+  test("renders shared context once above the active question", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q shared context",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    const context = session.clarificationContext();
+    await expect(context).toHaveCount(1);
+    await expect(context).toHaveText(
+      "Picking the foundational stack: answer all three so we can move forward.",
+    );
+    await expect(
+      session.clarificationQuestionCards().getByTestId("clarification-context"),
+    ).toHaveCount(0);
+
+    const [contextBox, questionBox] = await Promise.all([
+      context.boundingBox(),
+      session.clarificationQuestionCards().boundingBox(),
+    ]);
+    if (!contextBox || !questionBox) {
+      throw new Error("expected shared context and question card to have bounding boxes");
+    }
+    expect(contextBox.y + contextBox.height).toBeLessThanOrEqual(questionBox.y + 1);
+
+    await session.clarificationStep(1).click();
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
+    await expect(context).toHaveCount(1);
+    await expect(context).toHaveText(
+      "Picking the foundational stack: answer all three so we can move forward.",
+    );
   });
 
   test("answering option auto-advances to next step and marks step as answered", async ({

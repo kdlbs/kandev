@@ -77,4 +77,50 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(session.chat).toContainText("second line");
     await expect(session.chat).not.toContainText("linesecond line");
   });
+
+  test("shows shared context once above the question on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Shared Context",
+      { scenario: "clarification-multi" },
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    const context = session.clarificationContext();
+    await expect(context).toHaveCount(1);
+    await expect(context).toHaveText(
+      "Picking the foundational stack: answer all three so we can move forward.",
+    );
+    await expect(
+      session.clarificationQuestionCards().getByTestId("clarification-context"),
+    ).toHaveCount(0);
+
+    const [contextBox, overlayBox] = await Promise.all([
+      context.boundingBox(),
+      session.clarificationOverlay().boundingBox(),
+    ]);
+    if (!contextBox || !overlayBox) {
+      throw new Error("expected mobile shared context and overlay to have bounding boxes");
+    }
+    expect(contextBox.x).toBeGreaterThanOrEqual(overlayBox.x - 1);
+    expect(contextBox.x + contextBox.width).toBeLessThanOrEqual(
+      overlayBox.x + overlayBox.width + 1,
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+
+    await session.clarificationStep(1).tap();
+    await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
+    await expect(context).toHaveCount(1);
+  });
 });
