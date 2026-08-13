@@ -6,6 +6,8 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceContent } from "@/lib/ws/workspace-files";
 
 const CONTENT_SEARCH_DEBOUNCE_MS = 250;
+const CONTENT_SEARCH_RETRY_ATTEMPTS = 3;
+const CONTENT_SEARCH_RETRY_DELAY_MS = 250;
 const CONTENT_SEARCH_LIMIT_PER_REPO = 50;
 const MAX_CONTENT_SEARCH_CODE_POINTS = 200;
 
@@ -19,6 +21,45 @@ type WorkspaceContentSearchOptions = {
   query: string;
   sessionId: string | null;
 };
+
+function contentSearchResultKey(result: WorkspaceContentSearchResult): string {
+  return [result.repository_name, result.path, result.line, result.column].join("\u0000");
+}
+
+async function searchWorkspaceContentWithRetries(
+  sessionId: string,
+  query: string,
+  isCancelled: () => boolean,
+): Promise<WorkspaceContentSearchResult[]> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error("websocket transport unavailable");
+
+  const results = new Map<string, WorkspaceContentSearchResult>();
+  let lastError: unknown;
+  for (let attempt = 0; attempt < CONTENT_SEARCH_RETRY_ATTEMPTS; attempt += 1) {
+    if (isCancelled()) return [];
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, CONTENT_SEARCH_RETRY_DELAY_MS));
+      if (isCancelled()) return [];
+    }
+    try {
+      const response = await searchWorkspaceContent(
+        client,
+        sessionId,
+        query,
+        CONTENT_SEARCH_LIMIT_PER_REPO,
+      );
+      for (const result of response.results ?? []) {
+        results.set(contentSearchResultKey(result), result);
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (results.size === 0 && lastError) throw lastError;
+  return [...results.values()];
+}
 
 export function useWorkspaceContentSearch({
   enabled,
@@ -61,25 +102,14 @@ export function useWorkspaceContentSearch({
     setIsSearching(true);
     setError(null);
     const timer = setTimeout(async () => {
-      const client = getWebSocketClient();
-      if (!client) {
-        if (!cancelled) {
-          setResults([]);
-          setError("transport-error");
-          setIsSearching(false);
-        }
-        return;
-      }
-
       try {
-        const response = await searchWorkspaceContent(
-          client,
+        const nextResults = await searchWorkspaceContentWithRetries(
           sessionId,
           normalizedQuery,
-          CONTENT_SEARCH_LIMIT_PER_REPO,
+          () => cancelled,
         );
         if (!cancelled) {
-          setResults(response.results ?? []);
+          setResults(nextResults);
           setError(null);
         }
       } catch {

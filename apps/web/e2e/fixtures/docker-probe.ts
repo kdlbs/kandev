@@ -14,6 +14,8 @@ export const E2E_ALPINE_IMAGE_TAG = "kandev-agent:e2e-alpine";
 /** Label value shared by resources created in this Playwright process. */
 export const E2E_DOCKER_SCOPE = `e2e-${process.pid}-${randomUUID().slice(0, 8)}`;
 const FAKE_LSP_SERVER = path.resolve(__dirname, "fake-lsp-server.mjs");
+const SCOPED_CONTAINER_CLEANUP_TIMEOUT_MS = 30_000;
+const SCOPED_CONTAINER_CLEANUP_POLL_MS = 250;
 
 const E2E_DOCKERFILE = `FROM node:22-slim
 RUN apt-get update \\
@@ -92,10 +94,44 @@ function scopedKandevContainerIDs(scope: string): string[] {
     .filter(Boolean);
 }
 
-export function removeScopedKandevContainers(scope = E2E_DOCKER_SCOPE): void {
-  const ids = scopedKandevContainerIDs(scope);
-  if (ids.length === 0) return;
-  spawnSync("docker", ["rm", "-f", ...ids], { stdio: "ignore" });
+export async function removeScopedKandevContainers(scope = E2E_DOCKER_SCOPE): Promise<void> {
+  const deadline = Date.now() + SCOPED_CONTAINER_CLEANUP_TIMEOUT_MS;
+  let emptyPolls = 0;
+  let lastIDs: string[] = [];
+
+  while (Date.now() < deadline) {
+    const list = spawnSync(
+      "docker",
+      [
+        "ps",
+        "-aq",
+        "--filter",
+        "label=kandev.managed=true",
+        "--filter",
+        `label=kandev.e2e.run=${scope}`,
+      ],
+      { encoding: "utf8" },
+    );
+    if (list.status === 0) {
+      lastIDs = list.stdout
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (lastIDs.length === 0) {
+        emptyPolls += 1;
+        if (emptyPolls >= 2) return;
+      } else {
+        emptyPolls = 0;
+        spawnSync("docker", ["rm", "-f", ...lastIDs], { stdio: "ignore" });
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, SCOPED_CONTAINER_CLEANUP_POLL_MS));
+  }
+
+  throw new Error(
+    `timed out removing process-scoped Kandev containers: ${lastIDs.join(", ") || "docker unavailable"}`,
+  );
 }
 
 /**
@@ -109,11 +145,11 @@ export async function waitForScopedKandevContainersRemoved(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    removeScopedKandevContainers(scope);
+    await removeScopedKandevContainers(scope);
     if (scopedKandevContainerIDs(scope).length === 0) return;
     await new Promise<void>((resolve) => setTimeout(resolve, 100));
   }
-  removeScopedKandevContainers(scope);
+  await removeScopedKandevContainers(scope);
   const remaining = scopedKandevContainerIDs(scope);
   if (remaining.length > 0) {
     throw new Error(

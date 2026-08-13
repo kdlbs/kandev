@@ -141,6 +141,17 @@ func (h *Handlers) handleAskParentQuestion(ctx context.Context, msg *ws.Message)
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to persist parent question: "+err.Error(), nil)
 	}
 
+	// Establish the child's durable pause before notifying the parent. Parent
+	// replies resume the child immediately, so delivering the question first
+	// lets an answer race the cancellation of the turn that asked it.
+	h.setSessionWaitingForInput(ctx, target.childTask.ID, target.childSession.ID)
+	if h.inputPauser != nil {
+		if _, pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), target.childSession.ID); pauseErr != nil {
+			h.logger.Warn("failed to pause autopilot child before parent question delivery",
+				zap.String("question_id", questionID), zap.String("session_id", target.childSession.ID), zap.Error(pauseErr))
+		}
+	}
+
 	parentPrompt := formatParentQuestionPrompt(questionID, target.parentTask, target.childTask, req.Questions, req.Context)
 	parentMetadata := map[string]interface{}{
 		models.MetaKeyParentQuestionID:       questionID,
@@ -154,18 +165,6 @@ func (h *Handlers) handleAskParentQuestion(ctx context.Context, msg *ws.Message)
 	if _, dispatchErr := h.dispatchTaskMessage(ctx, target.parentTask.ID, target.parentSession, parentPrompt, parentMetadata, false, false); dispatchErr != nil {
 		_ = h.taskSvc.DeleteMessage(ctx, question.ID)
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to send question to direct parent: "+dispatchErr.Error(), nil)
-	}
-
-	// Mark the child as waiting before asking the orchestrator to cancel the
-	// active turn. The pause is best effort because the durable message and
-	// parent delivery are already committed; a later lifecycle watchdog can
-	// still reconcile the session if the process exits during the race.
-	h.setSessionWaitingForInput(ctx, target.childTask.ID, target.childSession.ID)
-	if h.inputPauser != nil {
-		if _, pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), target.childSession.ID); pauseErr != nil {
-			h.logger.Warn("failed to pause autopilot child after parent question",
-				zap.String(parentQuestionIDKey, questionID), zap.String("session_id", target.childSession.ID), zap.Error(pauseErr))
-		}
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
