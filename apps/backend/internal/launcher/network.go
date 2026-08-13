@@ -20,6 +20,9 @@ func listHostNetworkAddresses() []string {
 
 	var addresses []net.Addr
 	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
 		addrs, err := networkInterfaceAddrsFn(iface)
 		if err != nil {
 			continue

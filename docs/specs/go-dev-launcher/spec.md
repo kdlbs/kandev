@@ -107,7 +107,7 @@ code, matching current behavior.
 ### Startup output advertises network addresses
 
 The startup banner for `dev`, `start`, and `run` prints the localhost backend URL and
-then one `network:` URL for each unique non-loopback host address on the machine. This
+then one `network:` URL for each unique non-loopback, non-link-local host address on the machine. This
 includes addresses from local-network and Tailscale interfaces so that a user running
 Kandev on a remote VM can identify an address to open from another machine.
 

@@ -19,7 +19,7 @@ func TestLogStartupPrintsNetworkAddress(t *testing.T) {
 		networkInterfaceAddrsFn = oldNetworkInterfaceAddrs
 	})
 	networkInterfacesFn = func() ([]net.Interface, error) {
-		return []net.Interface{{Name: "eth0"}, {Name: "tailscale0"}}, nil
+		return []net.Interface{{Name: "eth0", Flags: net.FlagUp}, {Name: "tailscale0", Flags: net.FlagUp}}, nil
 	}
 	networkInterfaceAddrsFn = func(iface net.Interface) ([]net.Addr, error) {
 		switch iface.Name {
@@ -65,6 +65,33 @@ func TestListHostNetworkAddressesFiltersAndOrders(t *testing.T) {
 	want := []string{"192.168.1.34", "100.94.173.104", "2001:db8::1"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("networkAddressesFromAddrs() = %v, want %v", got, want)
+	}
+}
+
+func TestListHostNetworkAddressesSkipsDownInterfaces(t *testing.T) {
+	oldNetworkInterfaces := networkInterfacesFn
+	oldNetworkInterfaceAddrs := networkInterfaceAddrsFn
+	t.Cleanup(func() {
+		networkInterfacesFn = oldNetworkInterfaces
+		networkInterfaceAddrsFn = oldNetworkInterfaceAddrs
+	})
+	networkInterfacesFn = func() ([]net.Interface, error) {
+		return []net.Interface{
+			{Name: "eth0", Flags: net.FlagUp},
+			{Name: "down0"},
+		}, nil
+	}
+	networkInterfaceAddrsFn = func(iface net.Interface) ([]net.Addr, error) {
+		if iface.Name == "down0" {
+			return []net.Addr{testNetworkAddr(t, "10.0.0.99/24")}, nil
+		}
+		return []net.Addr{testNetworkAddr(t, "192.168.1.34/22")}, nil
+	}
+
+	got := listHostNetworkAddresses()
+	want := []string{"192.168.1.34"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("listHostNetworkAddresses() = %v, want %v", got, want)
 	}
 }
 
@@ -141,7 +168,7 @@ func TestLogStartupSuppressesNetworkAddressesForLoopbackBind(t *testing.T) {
 	})
 	t.Setenv("KANDEV_SERVER_HOST", "127.0.0.1")
 	networkInterfacesFn = func() ([]net.Interface, error) {
-		return []net.Interface{{Name: "eth0"}}, nil
+		return []net.Interface{{Name: "eth0", Flags: net.FlagUp}}, nil
 	}
 	networkInterfaceAddrsFn = func(net.Interface) ([]net.Addr, error) {
 		return []net.Addr{testNetworkAddr(t, "192.168.1.34/22")}, nil
@@ -173,6 +200,10 @@ func captureLauncherStdout(t *testing.T, fn func()) string {
 	if err != nil {
 		t.Fatalf("os.Pipe() = %v", err)
 	}
+	t.Cleanup(func() {
+		_ = read.Close()
+		_ = write.Close()
+	})
 	oldStdout := os.Stdout
 	os.Stdout = write
 	defer func() { os.Stdout = oldStdout }()

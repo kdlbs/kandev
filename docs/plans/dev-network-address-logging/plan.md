@@ -22,8 +22,9 @@ agentctl ports.
 ### Host address discovery and startup banner
 
 - Add `apps/backend/internal/launcher/network.go` with best-effort enumeration of
-  non-loopback host addresses, deduplication, link-local filtering, IPv4-first
-  ordering, IPv6 URL formatting, and filtering against an explicit bind host.
+  active, non-loopback host addresses, deduplication, link-local filtering,
+  IPv4-first ordering, IPv6 URL formatting, and filtering against an explicit
+  bind host.
 - Update `apps/backend/internal/launcher/start.go` so `logStartup` prints the
   filtered network URLs for `portConfig.BackendPort` between the localhost URL and
   the existing MCP/DB/log-level lines.
@@ -45,6 +46,11 @@ agentctl ports.
   **File:** `apps/backend/internal/launcher/network_test.go`.
   **How:** Assert the generated startup output with injected address-discovery
   results and an enumeration-error case.
+- **What:** Down interfaces are not advertised, and explicit bind hosts only
+  advertise reachable interface addresses.
+  **File:** `apps/backend/internal/launcher/network_test.go`.
+  **How:** Use active/down interface fixtures and loopback, wildcard, and
+  specific-bind cases.
 
 ## Documentation
 
@@ -58,13 +64,16 @@ agentctl ports.
   failed before the fix with the expected missing `network:` assertion.
 - `cd apps/backend && go test -run 'Test(ListHostNetworkAddresses|NetworkURLsForPort|LogStartup)' ./internal/launcher` —
   passed, 4 tests.
-- `cd apps/backend && go test ./internal/launcher` — passed, 186 tests.
+- `cd apps/backend && go test ./internal/launcher` — passed, 196 tests.
 - `cd apps/backend && go test -run TestLogStartupSuppressesNetworkAddressesForLoopbackBind ./internal/launcher` —
   failed before the fix, then passed after bind-host filtering was added.
 - `cd apps/backend && go test -run 'Test(NetworkAddressesForBindHost|LogStartupSuppressesNetworkAddressesForLoopbackBind)' ./internal/launcher` — passed.
+- `cd apps/backend && go test -run TestListHostNetworkAddressesSkipsDownInterfaces ./internal/launcher` — passed.
 - `rtk git diff --check` — passed.
 - `node --test scripts/validate-public-docs.test.mjs` — passed, 61 tests.
 - `node scripts/validate-public-docs.mjs` — passed, 41 published docs pages.
+- Platform risk: native interface enumeration is covered by injected fixtures on this
+  Linux runner; non-Linux native enumeration remains unverified.
 
 ## Implementation Waves And Parallel Candidates
 
