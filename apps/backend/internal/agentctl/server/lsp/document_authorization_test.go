@@ -413,29 +413,68 @@ func TestDocumentWorkspaceRejectsUntrustedUNCBeforeResolution(t *testing.T) {
 	if goruntime.GOOS != windowsOS {
 		t.Skip("UNC path semantics require Windows")
 	}
-	resolveCalls := 0
-	workspace := newDocumentWorkspaceWithResolver(func(path string) (string, error) {
-		resolveCalls++
-		return filepath.Clean(path), nil
-	})
+	workspacePath := t.TempDir()
+	var access *recordingOSDocumentRootAccess
+	workspace := newDocumentWorkspaceWithRootAccess(
+		canonicalFilesystemPath,
+		func(path string) (documentRootAccess, error) {
+			root, err := os.OpenRoot(path)
+			if err != nil {
+				return nil, err
+			}
+			access = &recordingOSDocumentRootAccess{root: root}
+			return access, nil
+		},
+	)
 	t.Cleanup(workspace.Close)
-	workspacePath := `C:\workspace`
-	workspace.SetConfig(Config{
-		WorkDir:      workspacePath,
-		WorkspaceURI: WorkspaceFileURI(workspacePath),
-	})
-	if resolveCalls == 0 {
-		t.Fatal("trusted workspace roots were not resolved")
+	workspace.SetConfig(Config{WorkDir: workspacePath})
+	workspace.mu.RLock()
+	rootCount := len(workspace.roots)
+	workspace.mu.RUnlock()
+	if access == nil || rootCount != 1 {
+		t.Fatalf("pinned workspace roots = %d, want 1", rootCount)
 	}
-	resolveCalls = 0
+	identityOpenCalls := access.openCalls
 
 	_, err := workspace.CanonicalURI(`file://attacker.invalid/share/Secret.kt`)
 	if !errors.Is(err, errDocumentOutsideWorkspace) {
 		t.Fatalf("untrusted UNC error = %v, want %v", err, errDocumentOutsideWorkspace)
 	}
-	if resolveCalls != 0 {
-		t.Fatalf("untrusted UNC path reached filesystem resolver %d times", resolveCalls)
+	if access.lstatCalls != 0 || access.openCalls != identityOpenCalls {
+		t.Fatalf(
+			"untrusted UNC path reached pinned root: lstat=%d open=%d",
+			access.lstatCalls,
+			access.openCalls-identityOpenCalls,
+		)
 	}
+}
+
+type recordingOSDocumentRootAccess struct {
+	root       *os.Root
+	lstatCalls int
+	openCalls  int
+}
+
+func (a *recordingOSDocumentRootAccess) Stat(path string) (fs.FileInfo, error) {
+	return a.root.Stat(path)
+}
+
+func (a *recordingOSDocumentRootAccess) Lstat(path string) (fs.FileInfo, error) {
+	a.lstatCalls++
+	return a.root.Lstat(path)
+}
+
+func (a *recordingOSDocumentRootAccess) Readlink(path string) (string, error) {
+	return a.root.Readlink(path)
+}
+
+func (a *recordingOSDocumentRootAccess) Open(path string) (*os.File, error) {
+	a.openCalls++
+	return a.root.Open(path)
+}
+
+func (a *recordingOSDocumentRootAccess) Close() error {
+	return a.root.Close()
 }
 
 func TestDocumentWorkspaceRejectsInRootUNCReparseBeforeResolution(t *testing.T) {
