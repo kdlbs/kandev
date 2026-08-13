@@ -172,6 +172,15 @@ func (r *fakeUtilityRepo) DeleteAgent(_ context.Context, id string) error {
 		return sql.ErrNoRows
 	}
 	delete(r.agents, id)
+	// Drop the ordering entry too. putAgent only appends when the ID is absent
+	// from `agents`, so leaving a stale entry here would make a re-seeded ID
+	// appear twice in ListAgents.
+	for i, existing := range r.agentOrder {
+		if existing == id {
+			r.agentOrder = append(r.agentOrder[:i], r.agentOrder[i+1:]...)
+			break
+		}
+	}
 	return nil
 }
 

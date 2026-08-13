@@ -448,3 +448,36 @@ func TestListCallsEndpointClampsLimit(t *testing.T) {
 		requireUtilityError(t, brokenStatus, brokenRaw, http.StatusInternalServerError, "failed to list calls")
 	})
 }
+
+// TestListUtilityAgentsAfterDeleteAndReseed guards the fixture itself: the
+// in-memory store keeps a separate slice for list ordering, and a delete that
+// forgot to drop the ordering entry would make a re-created agent with the same
+// ID appear twice. Every list assertion in this file is written against that
+// ordering, so the bug would surface as a confusing failure somewhere unrelated
+// rather than here.
+func TestListUtilityAgentsAfterDeleteAndReseed(t *testing.T) {
+	f := newUtilityFixture(t, utilityFixtureOptions{})
+	seedUtilityAgent(f, &models.UtilityAgent{ID: "custom-1", Name: "First", Prompt: "P"})
+	seedUtilityAgent(f, &models.UtilityAgent{ID: "custom-2", Name: "Second", Prompt: "P"})
+
+	if status, raw := do(t, f, http.MethodDelete, "/api/v1/utility/agents/custom-1", ""); status != http.StatusOK {
+		t.Fatalf("delete = %d %s", status, raw)
+	}
+	seedUtilityAgent(f, &models.UtilityAgent{ID: "custom-1", Name: "Recreated", Prompt: "P"})
+
+	status, raw := do(t, f, http.MethodGet, "/api/v1/utility/agents", "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", status, raw)
+	}
+	var got dto.UtilityAgentsResponse
+	decodeInto(t, raw, &got)
+
+	names := make([]string, 0, len(got.Agents))
+	for _, a := range got.Agents {
+		names = append(names, a.Name)
+	}
+	// custom-1 was deleted, so it re-enters at the end of the ordering.
+	if !reflect.DeepEqual(names, []string{"Second", "Recreated"}) {
+		t.Fatalf("agents = %v, want [Second Recreated]", names)
+	}
+}
