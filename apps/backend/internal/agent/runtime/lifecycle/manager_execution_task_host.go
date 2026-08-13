@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -52,14 +53,16 @@ func (m *Manager) createTaskHostExecution(
 	if err != nil {
 		return nil, err
 	}
+	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
+	defer launchCancel()
 	if !requireExisting {
-		if err := resumeRemoteInstancePreflight(ctx, rt, request); err != nil {
+		if err := resumeRemoteInstancePreflight(launchCtx, rt, request); err != nil {
 			return nil, err
 		}
 	}
 	releaseCredentials := m.lockTaskEnvironmentCredentials(info.ExecutorType, info.TaskEnvironmentID)
 	defer releaseCredentials()
-	runtimeInstance, err := rt.CreateInstance(ctx, request)
+	runtimeInstance, err := rt.CreateInstance(launchCtx, request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
@@ -75,7 +78,7 @@ func (m *Manager) createTaskHostExecution(
 		}
 		return nil, fmt.Errorf("failed to register execution: %w", addErr)
 	}
-	return m.finishTaskHostExecution(ctx, taskID, info, rt, runtimeInstance, execution, requireExisting)
+	return m.finishTaskHostExecution(launchCtx, taskID, info, rt, runtimeInstance, execution, requireExisting)
 }
 
 func (m *Manager) prepareTaskHostCreateRequest(
@@ -182,7 +185,7 @@ func (m *Manager) finishTaskHostExecution(
 		rollbackErr := m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host has no control client")
 		return nil, errors.Join(fmt.Errorf("task-host execution has no agentctl client"), rollbackErr)
 	}
-	if err := execution.agentctl.WaitForReady(ctx, coalescedExecutionCreationTimeout); err != nil {
+	if err := execution.agentctl.WaitForReady(ctx, constants.AgentLaunchTimeout); err != nil {
 		rollbackErr := m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host did not become ready")
 		return nil, errors.Join(fmt.Errorf("task-host agentctl not ready: %w", err), rollbackErr)
 	}
