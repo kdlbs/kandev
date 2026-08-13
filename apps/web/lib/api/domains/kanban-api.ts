@@ -74,7 +74,9 @@ export async function createTask(
       default_branch?: string;
       github_url?: string;
       remote_url?: string;
-      provider?: "github" | "gitlab" | "azure_devops";
+      provider?: string;
+      provider_host?: string;
+      provider_scope?: string;
       provider_repo_id?: string;
       provider_owner?: string;
       provider_name?: string;

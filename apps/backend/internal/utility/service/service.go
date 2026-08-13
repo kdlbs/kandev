@@ -76,8 +76,8 @@ func (s *Service) ClearAgentProfileBindings(ctx context.Context, profileID strin
 
 // MigrateLegacyBindings upgrades old agent/model selections after profile
 // reconciliation. The operation is idempotent and leaves explicit bindings
-// untouched. An empty unconfigured built-in is also left untouched because an
-// older release could have erased the ID of a deleted explicit binding.
+// untouched. An empty unconfigured built-in is normalized to inherit because
+// no concrete override remains to preserve.
 func (s *Service) MigrateLegacyBindings(ctx context.Context) (int, error) {
 	if s.profileResolver == nil {
 		return 0, nil
@@ -88,9 +88,24 @@ func (s *Service) MigrateLegacyBindings(ctx context.Context) (int, error) {
 	}
 	updated := 0
 	for _, agent := range agents {
+		// Skip already-inherited rows and any row that still carries a concrete
+		// profile ID. The latter includes stale/unconfigured overrides whose
+		// original intent must remain available for explicit user repair.
 		if agent == nil || agent.AgentProfileID != "" ||
-			agent.ProfileBindingState == models.ProfileBindingInherit ||
-			agent.ProfileBindingState == models.ProfileBindingUnconfigured {
+			agent.ProfileBindingState == models.ProfileBindingInherit {
+			continue
+		}
+		if agent.ProfileBindingState == models.ProfileBindingUnconfigured {
+			if !agent.Builtin {
+				continue
+			}
+			changed, err := s.repo.NormalizeEmptyBuiltinBinding(ctx, agent.ID)
+			if err != nil {
+				return updated, err
+			}
+			if changed {
+				updated++
+			}
 			continue
 		}
 		profile, matchErr := s.profileResolver.MatchLegacy(ctx, agent.AgentID, agent.Model)

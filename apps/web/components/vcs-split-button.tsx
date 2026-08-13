@@ -17,6 +17,9 @@ import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feed
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import type { TaskPR } from "@/lib/types/github";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
+import { useAppStore } from "@/components/state-provider";
+import { useNormalizedTaskReviewsState } from "@/components/task/review-panel-provider";
+import type { ReviewItemSummary } from "@/lib/plugins/types";
 import {
   buildRemoteContributionResolutionTarget,
   useRemoteContributionResolution,
@@ -25,6 +28,24 @@ import {
 import { openExternalLink } from "@/lib/desktop/external-links";
 import { VcsSplitButtonContent } from "./vcs-split-button-parts";
 import { DEFAULT_BASE_BRANCH } from "./vcs-constants";
+
+export function hasOpenChangeRequest(
+  firstPartyState: string | null | undefined,
+  reviews: readonly ReviewItemSummary[],
+): boolean {
+  const isOpen = (state: string | undefined) =>
+    state ? ["open", "opened", "draft"].includes(state.toLowerCase()) : false;
+  return (
+    isOpen(firstPartyState ?? undefined) ||
+    reviews.some((review) => isOpen(review.taskStatus?.state ?? review.state))
+  );
+}
+
+function useHasOpenChangeRequest(firstPartyState: string | null | undefined): boolean {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const { reviews } = useNormalizedTaskReviewsState(activeTaskId);
+  return hasOpenChangeRequest(firstPartyState, reviews);
+}
 
 export function determinePrimaryAction(
   uncommittedFileCount: number,
@@ -254,6 +275,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
     confirmResolution,
     resolutionTarget,
   } = useVcsContributionState(sessionId);
+  const hasOpenPR = useHasOpenChangeRequest(selectedPR?.state);
   const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
   const repoDisplayName = useRepoDisplayName(sessionId);
 
@@ -264,13 +286,12 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const behindCount = git.behind;
   const pullCount = git.pullBehind;
   const isDisabled = git.isLoading || !sessionId;
-  const isGitLoading = git.isLoading;
   const showContributionResolution = relation.action === "diverged_replace";
   const primaryAction = determinePrimaryAction(
     uncommittedFileCount,
     aheadCount,
     behindCount,
-    selectedPR?.state === "open",
+    hasOpenPR,
   );
   const primaryButtonConfig = buildPrimaryButtonConfig({
     t,
@@ -292,7 +313,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
       primaryButtonConfig={primaryButtonConfig}
       primaryAction={primaryAction}
       isDisabled={isDisabled}
-      isGitLoading={isGitLoading}
+      isGitLoading={git.isLoading}
       baseBranch={baseBranch}
       hasUpstream={hasUpstream}
       behindCount={pullCount}

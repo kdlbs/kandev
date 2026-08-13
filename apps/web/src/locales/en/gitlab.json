@@ -347,5 +347,8 @@
   "mrChipAutoMerge": "Auto-merge",
   "mrChipDrawerTitle": "Merge request !{{mriid}}",
   "mrChipDrawerDescription": "Pipeline status, review status, and merge request actions.",
-  "mrChipDrawerClose": "Close merge request status"
+  "mrChipDrawerClose": "Close merge request status",
+  "gitlabRejectedAssociation": "GitLab rejected the association.",
+  "taskCreatedMrNotLinked": "Task created, but merge request was not linked",
+  "taskCreatedMrNotLinkedDescription": "Open the task and use Link GitLab merge request to retry. {{error}}"
 }

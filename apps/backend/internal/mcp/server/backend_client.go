@@ -207,7 +207,7 @@ func backendPayloadForLog(action string, payload interface{}) interface{} {
 	}
 	safe := make(map[string]any, len(values))
 	for key, value := range values {
-		if key != "arguments" {
+		if key != pluginToolArgumentsKey {
 			safe[key] = value
 		}
 	}

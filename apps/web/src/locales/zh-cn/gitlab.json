@@ -347,5 +347,8 @@
   "mrChipAutoMerge": "自动合并",
   "mrChipDrawerTitle": "合并请求 !{{mriid}}",
   "mrChipDrawerDescription": "流水线状态、审阅状态和合并请求操作。",
-  "mrChipDrawerClose": "关闭合并请求状态面板"
+  "mrChipDrawerClose": "关闭合并请求状态面板",
+  "gitlabRejectedAssociation": "GitLab 拒绝了关联。",
+  "taskCreatedMrNotLinked": "任务已创建，但未关联合并请求",
+  "taskCreatedMrNotLinkedDescription": "打开任务并使用“关联 GitLab 合并请求”重试。{{error}}"
 }

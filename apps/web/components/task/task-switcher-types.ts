@@ -28,6 +28,8 @@ export type TaskSwitcherItem = {
   workflowStepTitle?: string;
   repositoryPath?: string;
   repositories?: string[];
+  /** Persisted task-to-repository links used by host-owned plugin task actions. */
+  repositoryLinks?: Array<{ repository_id: string; position?: number }>;
   diffStats?: { additions: number; deletions: number };
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;

@@ -331,5 +331,8 @@
   "mrTooltipState": "Estado: {{state}}",
   "mrTooltipReview": "Revisão: {{state}}",
   "mrTooltipPipeline": "Pipeline: {{state}}",
-  "mrTooltipReadyToMerge": "Pronto para merge"
+  "mrTooltipReadyToMerge": "Pronto para merge",
+  "gitlabRejectedAssociation": "O GitLab rejeitou a associação.",
+  "taskCreatedMrNotLinked": "Tarefa criada, mas o merge request não foi associado",
+  "taskCreatedMrNotLinkedDescription": "Abra a tarefa e use Associar merge request do GitLab para tentar novamente. {{error}}"
 }

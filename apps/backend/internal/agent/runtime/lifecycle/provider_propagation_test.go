@@ -28,11 +28,11 @@ func TestAgentctlProviderMappingsPreserveProviderCapabilities(t *testing.T) {
 			ssh := buildSSHCreateInstanceRequest(req, "/workspace")
 
 			mapped := map[string][]string{
-				"standalone": standalone.McpProviders,
-				"container":  container.McpProviders,
-				"docker":     docker.McpProviders,
-				"sprites":    sprites.McpProviders,
-				"ssh":        ssh.McpProviders,
+				"standalone":    standalone.McpProviders,
+				"container":     container.McpProviders,
+				"docker":        docker.McpProviders,
+				"sprites":       sprites.McpProviders,
+				executorTypeSSH: ssh.McpProviders,
 			}
 			for backend, got := range mapped {
 				if !reflect.DeepEqual(got, providers) {

@@ -45,7 +45,7 @@ spec: ../../specs/ui/message-queue-merge.md
 - Plan sections: `Frontend`.
 - Patterns to mirror: `removeEntry` in `use-queue.ts`, the Edit/Remove ghost
   buttons in `queued-ghost-message.tsx`, `handleRemove`/`handleSave` in
-  `queued-ghost-list.tsx`, and the existing `queued-ghost-list.test.tsx` / 
+  `queued-ghost-list.tsx`, and the existing `queued-ghost-list.test.tsx` /
   `queued-ghost-message.test.tsx` harnesses.
 - Verify `IconArrowMerge` exists in the installed `@tabler/icons-react`
   (^3.36.1) before importing; otherwise use `IconArrowsJoin` or the closest

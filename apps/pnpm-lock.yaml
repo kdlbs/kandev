@@ -96,6 +96,12 @@ importers:
         specifier: ^8.0.16
         version: 8.0.16(@types/node@20.19.28)(esbuild@0.27.2)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0)
 
+  packages/plugin-sdk:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   packages/theme:
     dependencies:
       shadcn:
@@ -273,6 +279,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
+      '@kandev/plugin-sdk':
+        specifier: workspace:*
+        version: link:../packages/plugin-sdk
       '@kandev/theme':
         specifier: workspace:*
         version: link:../packages/theme

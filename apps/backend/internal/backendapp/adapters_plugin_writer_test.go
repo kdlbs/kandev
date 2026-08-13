@@ -12,12 +12,14 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 type fakePluginTaskWriteService struct {
 	lastCreate *taskservice.CreateTaskRequest
 	lastUpdate *taskservice.UpdateTaskRequest
 	lastID     string
+	deletedID  string
 }
 
 func (f *fakePluginTaskWriteService) CreateTask(_ context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error) {
@@ -30,6 +32,11 @@ func (f *fakePluginTaskWriteService) UpdateTask(_ context.Context, id string, re
 	f.lastID = id
 	f.lastUpdate = req
 	return &taskmodels.Task{ID: id}, nil
+}
+
+func (f *fakePluginTaskWriteService) DeleteTask(_ context.Context, id string) error {
+	f.deletedID = id
+	return nil
 }
 
 func TestPluginsTaskWriter_CreateMapsSourceToMetadata(t *testing.T) {
@@ -55,6 +62,44 @@ func TestPluginsTaskWriter_CreateWithoutSourceOmitsMetadata(t *testing.T) {
 	_, err := a.CreateTask(context.Background(), plugins.TaskCreateInput{WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "x"})
 	require.NoError(t, err)
 	require.Nil(t, svc.lastCreate.Metadata, "no source → no metadata map")
+}
+
+func TestPluginsTaskWriter_CreateMapsRichPluginTaskInput(t *testing.T) {
+	svc := &fakePluginTaskWriteService{}
+	a := pluginsTaskWriterAdapter{svc: svc}
+	base, checkout := "main", "pr-42"
+	pullRequest := int64(42)
+
+	_, err := a.CreateTask(context.Background(), plugins.TaskCreateInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate", Source: "plugin:acme", PlanMode: true,
+		Metadata: map[string]any{"source": "plugin:acme", "plugin:acme": map[string]any{"watch_id": "watch-1"}},
+		Repositories: []pluginsdk.PluginTaskRepository{{
+			Remote: &pluginsdk.RemoteRepositoryDescriptor{
+				ProviderID: "custom-provider", ProviderHost: "https://forge.example.test",
+				OwnerOrProject: "TEAM", ProviderRepositoryID: "repo-99", Name: "widgets",
+				CloneURL:      "https://forge.example.test/context/scm/TEAM/widgets.git",
+				DefaultBranch: &base, HeadBranch: &checkout, PullRequestNumber: &pullRequest,
+			},
+		}},
+	})
+	require.NoError(t, err)
+	require.True(t, svc.lastCreate.PlanMode)
+	require.Equal(t, "plugin:acme", svc.lastCreate.Metadata["source"])
+	require.Equal(t, map[string]any{"watch_id": "watch-1"}, svc.lastCreate.Metadata["plugin:acme"])
+	require.Len(t, svc.lastCreate.Repositories, 1)
+	got := svc.lastCreate.Repositories[0]
+	require.True(t, got.TrustedProviderDescriptor)
+	require.Equal(t, "custom-provider", got.Provider)
+	require.Equal(t, "https://forge.example.test", got.ProviderHost)
+	require.Equal(t, "https://forge.example.test/context/scm/TEAM/widgets.git", got.RemoteURL)
+	require.Equal(t, "pr-42", got.CheckoutBranch)
+	require.Equal(t, 42, got.PRNumber)
+}
+
+func TestPluginsTaskWriter_DeleteRoutesThroughTaskService(t *testing.T) {
+	svc := &fakePluginTaskWriteService{}
+	require.NoError(t, (pluginsTaskWriterAdapter{svc: svc}).DeleteTask(context.Background(), "task-1"))
+	require.Equal(t, "task-1", svc.deletedID)
 }
 
 func TestPluginsTaskWriter_UpdateMapsFieldMask(t *testing.T) {

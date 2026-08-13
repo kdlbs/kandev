@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -39,29 +40,39 @@ type WsActionFn = (
 
 function useWsAction(): WsActionFn {
   const { toast, updateToast } = useToast();
+  const { t } = useTranslation("task");
   return useCallback(
-    async (action, label, payload, timeout = 15000, feedback = "toast") => {
+    async (action, labelKey, payload, timeout = 15000, feedback = "toast") => {
       const client = getWebSocketClient();
       if (!client) return false;
       const toastId =
-        feedback === "toast" ? toast({ title: `${label}...`, variant: "loading" }) : null;
+        feedback === "toast"
+          ? toast({
+              title: t("task:sessionActionProgress", { action: t(labelKey) }),
+              variant: "loading",
+            })
+          : null;
       try {
         await client.request(action, payload, timeout);
         if (toastId) {
-          updateToast(toastId, { title: `${label} successful`, variant: "success" });
+          updateToast(toastId, {
+            title: t("task:sessionActionSuccessful", { action: t(labelKey) }),
+            variant: "success",
+          });
         }
         return true;
       } catch (error) {
-        const msg = error instanceof Error ? error.message : "Unknown error";
+        const msg = error instanceof Error ? error.message : t("common:unknownError");
+        const title = t("task:sessionActionFailed", { action: t(labelKey) });
         if (toastId) {
-          updateToast(toastId, { title: `${label} failed`, description: msg, variant: "error" });
+          updateToast(toastId, { title, description: msg, variant: "error" });
         } else {
-          toast({ title: `${label} failed`, description: msg, variant: "error" });
+          toast({ title, description: msg, variant: "error" });
         }
         return false;
       }
     },
-    [toast, updateToast],
+    [t, toast, updateToast],
   );
 }
 
@@ -78,12 +89,19 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
   const setPrimary = useCallback(
     () =>
       sessionId &&
-      wsAction("session.set_primary", "Set primary", { session_id: sessionId }, 15000, "inline"),
+      wsAction(
+        "session.set_primary",
+        "task:sessionActionSetPrimary",
+        { session_id: sessionId },
+        15000,
+        "inline",
+      ),
     [sessionId, wsAction],
   );
 
   const stop = useCallback(
-    () => sessionId && wsAction("session.stop", "Stopping session", { session_id: sessionId }),
+    () =>
+      sessionId && wsAction("session.stop", "task:sessionActionStop", { session_id: sessionId }),
     [sessionId, wsAction],
   );
 
@@ -93,7 +111,7 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
       taskId &&
       wsAction(
         "session.launch",
-        "Resuming session",
+        "task:sessionActionResume",
         { task_id: taskId, intent: "resume", session_id: sessionId },
         30000,
       ),
@@ -105,7 +123,7 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
       if (!sessionId || !taskId) return false;
       const ok = await wsAction(
         "session.delete",
-        "Deleting session",
+        "task:sessionActionDelete",
         { session_id: sessionId },
         15000,
         options.feedback,

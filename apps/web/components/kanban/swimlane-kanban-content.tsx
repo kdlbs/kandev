@@ -43,7 +43,7 @@ export const ORPHAN_STEP_ID = "__kandev_orphan__";
 
 export const ORPHAN_STEP: WorkflowStep = {
   id: ORPHAN_STEP_ID,
-  title: "Needs Reassignment",
+  title: "",
   color: "#f59e0b",
 };
 
@@ -234,12 +234,15 @@ function useOrphanDisplay(
   tasks: Task[],
   steps: WorkflowStep[],
 ): { displayTasks: Task[]; displaySteps: WorkflowStep[] } {
+  const { t } = useTranslation("kanban");
   return useMemo(() => {
     const stepIds = new Set(steps.map((s) => s.id));
     const { tasks: displayTasks, hasOrphans } = remapOrphanTasks(tasks, stepIds, ORPHAN_STEP_ID);
-    const displaySteps = hasOrphans ? [...steps, ORPHAN_STEP] : steps;
+    const displaySteps = hasOrphans
+      ? [...steps, { ...ORPHAN_STEP, title: t("kanban:needsReassignment") }]
+      : steps;
     return { displayTasks, displaySteps };
-  }, [tasks, steps]);
+  }, [tasks, steps, t]);
 }
 
 function useTasksByStep(tasks: Task[]) {

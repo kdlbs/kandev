@@ -76,7 +76,7 @@ func mergedPR() *github.TaskPR {
 		Owner:      "acme",
 		Repo:       "api",
 		PRNumber:   7,
-		PRURL:      "https://github.com/acme/api/pull/7",
+		PRURL:      exampleGitHubPRURL,
 		BaseBranch: "main",
 		State:      "merged",
 		MergedAt:   &ts,
@@ -121,11 +121,11 @@ func TestGitHubPRMergedSubscriberFiresHappyPath(t *testing.T) {
 			t.Fatalf("unmarshal trigger data: %v", err)
 		}
 		checks := map[string]string{
-			"task_id":     "t_abc123",
-			"repo":        "acme/api",
-			"pr_url":      "https://github.com/acme/api/pull/7",
-			"base_branch": "main",
-			"merged_at":   "2026-03-08T12:00:00Z",
+			"task_id":               "t_abc123",
+			automationRepoKey:       "acme/api",
+			"pr_url":                exampleGitHubPRURL,
+			automationBaseBranchKey: defaultBranchMain,
+			"merged_at":             "2026-03-08T12:00:00Z",
 		}
 		for k, wantV := range checks {
 			if got, ok := data[k]; !ok || got != wantV {

@@ -21,6 +21,7 @@ import { downloadFileContent } from "./use-file-operations";
 
 const SESSION_ID = "sess-1";
 const NESTED_PATH = "src/foo/bar.ts";
+const UNKNOWN_ERROR = "Unknown error";
 const FAKE_CLIENT = {} as unknown as Parameters<typeof downloadFileContent>[0];
 
 beforeEach(() => {
@@ -36,7 +37,7 @@ describe("downloadFileContent", () => {
       is_binary: false,
     });
 
-    const result = await downloadFileContent(FAKE_CLIENT, SESSION_ID, NESTED_PATH);
+    const result = await downloadFileContent(FAKE_CLIENT, SESSION_ID, NESTED_PATH, UNKNOWN_ERROR);
 
     expect(result).toEqual({ ok: true });
     expect(requestFileContentMock).toHaveBeenCalledWith(FAKE_CLIENT, SESSION_ID, NESTED_PATH);
@@ -54,7 +55,7 @@ describe("downloadFileContent", () => {
       is_binary: true,
     });
 
-    await downloadFileContent(FAKE_CLIENT, SESSION_ID, "assets/logo.png");
+    await downloadFileContent(FAKE_CLIENT, SESSION_ID, "assets/logo.png", UNKNOWN_ERROR);
 
     expect(triggerFileDownloadMock).toHaveBeenCalledWith({
       fileName: "assets/logo.png",
@@ -70,7 +71,7 @@ describe("downloadFileContent", () => {
       error: "Permission denied",
     });
 
-    const result = await downloadFileContent(FAKE_CLIENT, SESSION_ID, "src/foo.ts");
+    const result = await downloadFileContent(FAKE_CLIENT, SESSION_ID, "src/foo.ts", UNKNOWN_ERROR);
 
     expect(result).toEqual({ ok: false, error: "Permission denied" });
     expect(triggerFileDownloadMock).not.toHaveBeenCalled();
@@ -79,7 +80,7 @@ describe("downloadFileContent", () => {
   it("returns {ok: false} when the request throws", async () => {
     requestFileContentMock.mockRejectedValueOnce(new Error("boom"));
 
-    const result = await downloadFileContent(FAKE_CLIENT, SESSION_ID, "src/foo.ts");
+    const result = await downloadFileContent(FAKE_CLIENT, SESSION_ID, "src/foo.ts", UNKNOWN_ERROR);
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("boom");

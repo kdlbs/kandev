@@ -122,7 +122,7 @@ function useFormResetEffects({
     if (!open) return;
     stateDebug("discovery-reset", {
       workspace_id: workspaceId ?? "-",
-      github_url: initialValues?.githubUrl ?? "-",
+      remote_url: initialValues?.remoteUrl ?? initialValues?.githubUrl ?? "-",
       seeded_remote_branch: initialValues?.checkoutBranch ?? initialValues?.branch ?? "-",
     });
     resetDiscoveryState(resetters, initialValues);
@@ -203,33 +203,67 @@ function resetTaskForm(
   resetters.setAutopilot(false);
 }
 
-/** Resets repository discovery state */
-function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInitialValues) {
-  const ghUrl = iv?.githubUrl ?? "";
-  resetters.setDiscoveredRepositories([]);
-  resetters.setDiscoverReposLoaded(false);
-  resetters.setUseRemote(Boolean(ghUrl));
+function firstDefined<T>(...values: Array<T | undefined>): T | undefined {
+  return values.find((value) => value !== undefined);
+}
+
+function definedOr<T>(fallback: T, ...values: Array<T | undefined>): T {
+  return firstDefined(...values) ?? fallback;
+}
+
+function remoteRepositoryFullName(
+  inspection: TaskCreateDialogInitialValues["remoteRepository"],
+): string | undefined {
+  return inspection ? `${inspection.ownerOrProject}/${inspection.repositoryName}` : undefined;
+}
+
+function seededRemoteRepositories(iv?: TaskCreateDialogInitialValues): TaskRemoteRepoRow[] {
+  const initial: Partial<TaskCreateDialogInitialValues> = iv ?? {};
+  const inspection = initial.remoteRepository;
+  const repository: Partial<NonNullable<TaskCreateDialogInitialValues["remoteRepository"]>> =
+    inspection ?? {};
+  const remoteUrl = definedOr("", initial.remoteUrl, initial.githubUrl, repository.cloneUrl);
+  if (!remoteUrl) return [];
   // Seed remoteRepos with a single paste row when the dialog opens with a
   // pre-filled URL (Quick-task launcher path). When `checkoutBranch` is set
   // (PR launch flow), seed the row's branch with it so the chip pill shows
   // the PR head immediately. Otherwise start empty — the seed effect creates
   // an empty row on mode toggle.
-  if (ghUrl) {
-    const seededBranch = iv?.checkoutBranch ?? iv?.branch ?? "";
-    resetters.setRemoteRepos([
-      {
-        key: "remote-0",
-        url: ghUrl,
-        branch: seededBranch,
-        source: "paste",
-        prNumber: iv?.prNumber,
-        prBaseBranch: iv?.prBaseBranch,
-        prHeadBranch: iv?.checkoutBranch,
-      },
-    ]);
-  } else {
-    resetters.setRemoteRepos([]);
-  }
+  const seededBranch = definedOr(
+    "",
+    initial.checkoutBranch,
+    initial.branch,
+    repository.headBranch,
+    repository.defaultBranch,
+  );
+  return [
+    {
+      key: "remote-0",
+      url: remoteUrl,
+      branch: seededBranch,
+      source: "paste",
+      prNumber: firstDefined(initial.prNumber, repository.pullRequest?.number),
+      prBaseBranch: firstDefined(initial.prBaseBranch, repository.baseBranch),
+      prHeadBranch: firstDefined(initial.checkoutBranch, repository.headBranch),
+      remoteUrl: repository.cloneUrl,
+      provider: repository.providerId,
+      providerHost: repository.providerHost,
+      providerScope: repository.providerScope,
+      providerRepoId: repository.repositoryId,
+      providerOwner: repository.ownerOrProject,
+      providerName: repository.repositoryName,
+      fullName: remoteRepositoryFullName(inspection),
+    },
+  ];
+}
+
+/** Resets repository discovery state. */
+function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInitialValues) {
+  const remoteRepositories = seededRemoteRepositories(iv);
+  resetters.setDiscoveredRepositories([]);
+  resetters.setDiscoverReposLoaded(false);
+  resetters.setUseRemote(remoteRepositories.length > 0);
+  resetters.setRemoteRepos(remoteRepositories);
   resetters.setGitHubUrlError(null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");

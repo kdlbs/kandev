@@ -106,5 +106,7 @@
   "viewLabel": "视图：{{name}}",
   "whatsNew": "新功能",
   "work": "工作",
-  "workspaceFallback": "工作区"
+  "workspaceFallback": "工作区",
+  "taskPreferences": "侧边栏任务偏好设置",
+  "views": "侧边栏视图"
 }

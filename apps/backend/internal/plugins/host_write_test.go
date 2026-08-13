@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -81,6 +82,249 @@ func TestPluginHost_Tasks_CreateSucceedsAndStampsSource(t *testing.T) {
 	}
 	if d.starter.calls != 0 {
 		t.Fatalf("start_agent not requested but starter called %d times", d.starter.calls)
+	}
+}
+
+func TestPluginHost_Tasks_CreateRejectsReservedSourceMetadata(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+
+	_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Investigate",
+		Metadata:    map[string]any{taskSourceMetadataKey: "plugin:someone-else"},
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Create() error = %v, want InvalidArgument for source overwrite", err)
+	}
+	if d.taskWriter.createCalls != 0 {
+		t.Fatal("task writer called despite reserved source metadata")
+	}
+}
+
+func TestPluginHost_Tasks_CreateRejectsUndeclaredRemoteProvider(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+
+	_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Investigate",
+		Repositories: []pluginsdk.PluginTaskRepository{{
+			Remote: &pluginsdk.RemoteRepositoryDescriptor{
+				ProviderID:           "bitbucket",
+				ProviderHost:         "https://bitbucket.example.test",
+				OwnerOrProject:       "PROJ",
+				ProviderRepositoryID: "99",
+				Name:                 "widgets",
+				CloneURL:             "https://bitbucket.example.test/scm/PROJ/widgets.git",
+			},
+		}},
+	})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("Create() error = %v, want PermissionDenied for undeclared provider", err)
+	}
+	if d.taskWriter.createCalls != 0 {
+		t.Fatal("task writer called for an undeclared repository provider")
+	}
+}
+
+func TestPluginHost_Tasks_CreateRejectsCredentialBearingCloneURL(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.host.repositoryProviders = []string{"bitbucket"}
+
+	_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate",
+		Repositories: []pluginsdk.PluginTaskRepository{{
+			Remote: &pluginsdk.RemoteRepositoryDescriptor{
+				ProviderID: "bitbucket", ProviderHost: "https://bitbucket.example.test",
+				OwnerOrProject: "PROJ", ProviderRepositoryID: "99", Name: "widgets",
+				CloneURL: "https://token@bitbucket.example.test/scm/PROJ/widgets.git",
+			},
+		}},
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Create() error = %v, want InvalidArgument for credential-bearing clone URL", err)
+	}
+	if d.taskWriter.createCalls != 0 {
+		t.Fatal("task writer called for credential-bearing clone URL")
+	}
+}
+
+func TestPluginHost_Tasks_CreateRejectsCloneURLOnDifferentProviderOrigin(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.host.repositoryProviders = []string{"bitbucket"}
+
+	_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate",
+		Repositories: []pluginsdk.PluginTaskRepository{{
+			Remote: &pluginsdk.RemoteRepositoryDescriptor{
+				ProviderID: "bitbucket", ProviderHost: "https://bitbucket.example.test",
+				OwnerOrProject: "PROJ", ProviderRepositoryID: "99", Name: "widgets",
+				CloneURL: "https://attacker.example/PROJ/widgets.git",
+			},
+		}},
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Create() error = %v, want InvalidArgument for mismatched provider origin", err)
+	}
+	if d.taskWriter.createCalls != 0 {
+		t.Fatal("task writer called for a clone URL on another provider origin")
+	}
+}
+
+func TestPluginHost_Tasks_CreateRejectsNonHTTPSManagedCloneURL(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.host.repositoryProviders = []string{"bitbucket"}
+
+	_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate",
+		Repositories: []pluginsdk.PluginTaskRepository{{
+			Remote: &pluginsdk.RemoteRepositoryDescriptor{
+				ProviderID: "bitbucket", ProviderHost: "https://bitbucket.example.test",
+				OwnerOrProject: "PROJ", ProviderRepositoryID: "99", Name: "widgets",
+				CloneURL: "ssh://git@bitbucket.example.test/PROJ/widgets.git",
+			},
+		}},
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Create() error = %v, want InvalidArgument for non-HTTPS managed clone URL", err)
+	}
+	if d.taskWriter.createCalls != 0 {
+		t.Fatal("task writer called for a clone URL the HTTPS credential broker cannot scope")
+	}
+}
+
+func TestPluginHost_Tasks_CreateMapsOwnedRemoteDescriptorAndLaunch(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.host.repositoryProviders = []string{"bitbucket"}
+	d.taskWriter.created = &taskmodels.Task{ID: "task-9", WorkspaceID: "ws-1", WorkflowID: "wf-1"}
+	d.profiles.resp = &agentsettingsdto.ListAgentsResponse{Agents: []agentsettingsdto.AgentDTO{{
+		ID: "agent-1", Profiles: []agentsettingsdto.AgentProfileDTO{{ID: "agent-1"}},
+	}}}
+	d.tasks.executorProfiles = []*taskmodels.ExecutorProfile{{ID: "executor-profile-1"}}
+	base, checkout, prompt, planMode, agentProfileID, executorProfileID := "main", "feature/pr-42", "Fix failing pipeline", "replace", "agent-1", "executor-profile-1"
+	pullRequest := int64(42)
+
+	_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate PR", StartAgent: true,
+		Metadata: map[string]any{"watch_id": "watch-1"},
+		Repositories: []pluginsdk.PluginTaskRepository{{
+			Remote: &pluginsdk.RemoteRepositoryDescriptor{
+				ProviderID: "bitbucket", ProviderHost: "https://bitbucket.example.test",
+				OwnerOrProject: "PROJ", ProviderRepositoryID: "99", Name: "widgets",
+				CloneURL:   "https://bitbucket.example.test/bitbucket/scm/PROJ/widgets.git",
+				BaseBranch: &base, HeadBranch: &checkout, PullRequestNumber: &pullRequest,
+			},
+		}},
+		Launch: &pluginsdk.PluginTaskLaunchOptions{
+			AgentProfileID: &agentProfileID, ExecutorProfileID: &executorProfileID, Prompt: &prompt, PlanMode: &planMode,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() unexpected error: %v", err)
+	}
+	if len(d.taskWriter.lastCreate.Repositories) != 1 || d.taskWriter.lastCreate.Repositories[0].Remote == nil ||
+		d.taskWriter.lastCreate.Repositories[0].Remote.CloneURL != "https://bitbucket.example.test/bitbucket/scm/PROJ/widgets.git" {
+		t.Fatalf("remote descriptor = %+v, want exact credential-free clone URL", d.taskWriter.lastCreate.Repositories)
+	}
+	if d.taskWriter.lastCreate.Metadata[taskSourceMetadataKey] != "plugin:p1" {
+		t.Fatalf("source = %#v, want plugin:p1", d.taskWriter.lastCreate.Metadata[taskSourceMetadataKey])
+	}
+	if metadata, ok := d.taskWriter.lastCreate.Metadata["plugin:p1"].(map[string]any); !ok || metadata["watch_id"] != "watch-1" {
+		t.Fatalf("namespaced metadata = %#v, want watch id", d.taskWriter.lastCreate.Metadata["plugin:p1"])
+	}
+	if !d.taskWriter.lastCreate.PlanMode || d.starter.lastLaunch.AgentProfileID != "agent-1" ||
+		d.starter.lastLaunch.ExecutorProfileID != "executor-profile-1" || d.starter.lastLaunch.Prompt != prompt || !d.starter.lastLaunch.PlanMode {
+		t.Fatalf("launch mapping = %+v task plan mode=%v", d.starter.lastLaunch, d.taskWriter.lastCreate.PlanMode)
+	}
+}
+
+func TestPluginHost_Tasks_CreateRejectsUnknownLaunchProfiles(t *testing.T) {
+	t.Run("agent", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+		d.taskWriter.created = &taskmodels.Task{ID: "task-9"}
+		id := "missing-agent-profile"
+
+		_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+			WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate", StartAgent: true,
+			Launch: &pluginsdk.PluginTaskLaunchOptions{AgentProfileID: &id},
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("Create() error = %v, want InvalidArgument for an unknown agent profile", err)
+		}
+		if d.taskWriter.createCalls != 0 {
+			t.Fatal("task writer called for unknown agent profile")
+		}
+	})
+
+	t.Run("executor", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+		d.taskWriter.created = &taskmodels.Task{ID: "task-9"}
+		id := "missing-executor-profile"
+
+		_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+			WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate", StartAgent: true,
+			Launch: &pluginsdk.PluginTaskLaunchOptions{ExecutorProfileID: &id},
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("Create() error = %v, want InvalidArgument for an unknown executor profile", err)
+		}
+		if d.taskWriter.createCalls != 0 {
+			t.Fatal("task writer called for unknown executor profile")
+		}
+	})
+}
+
+func TestPluginHost_PluginOwnedTaskTreeRejectsUserOwnedRoot(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.tasks.tasksByID = map[string]*taskmodels.Task{
+		"user-task": {ID: "user-task", WorkspaceID: "ws-1", Metadata: map[string]any{taskSourceMetadataKey: "manual"}},
+	}
+
+	_, err := d.host.PluginOwnedTaskTrees().Preview(context.Background(), "user-task")
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("Preview() error = %v, want PermissionDenied for user-owned task", err)
+	}
+}
+
+func TestPluginHost_PluginOwnedTaskTreeDeleteIsIdempotentAfterRootDeletion(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.tasks.tasksByID = map[string]*taskmodels.Task{}
+
+	deleted, err := d.host.PluginOwnedTaskTrees().Delete(context.Background(), "already-deleted")
+
+	if err != nil {
+		t.Fatalf("Delete() unexpected error for an absent root: %v", err)
+	}
+	if len(deleted) != 0 || len(d.taskWriter.deletedIDs) != 0 {
+		t.Fatalf("Delete() = %v, writer deleted=%v, want idempotent no-op", deleted, d.taskWriter.deletedIDs)
+	}
+}
+
+func TestPluginHost_PluginOwnedTaskTreeRejectsDeleteWithAdoptedDescendants(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	root := &taskmodels.Task{ID: "root", WorkspaceID: "ws-1", Metadata: map[string]any{taskSourceMetadataKey: "plugin:p1"}}
+	ownedChild := &taskmodels.Task{ID: "owned-child", WorkspaceID: "ws-1", ParentID: "root", Metadata: map[string]any{taskSourceMetadataKey: "plugin:p1"}}
+	adoptedChild := &taskmodels.Task{ID: "adopted-child", WorkspaceID: "ws-1", ParentID: "root", Metadata: map[string]any{taskSourceMetadataKey: "manual"}}
+	ownedGrandchild := &taskmodels.Task{ID: "owned-grandchild", WorkspaceID: "ws-1", ParentID: "adopted-child", Metadata: map[string]any{taskSourceMetadataKey: "plugin:p1"}}
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"root": root}
+	d.tasks.tasksByWorkspace = map[string][]*taskmodels.Task{
+		"ws-1": {root, ownedChild, adoptedChild, ownedGrandchild},
+	}
+
+	preview, err := d.host.PluginOwnedTaskTrees().Preview(context.Background(), "root")
+	if err != nil {
+		t.Fatalf("Preview() unexpected error: %v", err)
+	}
+	if len(preview) != 2 || preview[0].ID != "root" || preview[1].ID != "owned-child" {
+		t.Fatalf("Preview() = %+v, want only contiguous plugin-owned tree", preview)
+	}
+	deleted, err := d.host.PluginOwnedTaskTrees().Delete(context.Background(), "root")
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("Delete() error = %v, want FailedPrecondition", err)
+	}
+	if len(deleted) != 0 || len(d.taskWriter.deletedIDs) != 0 {
+		t.Fatalf("Delete() mutated mixed-ownership tree: result=%v deleted=%v", deleted, d.taskWriter.deletedIDs)
 	}
 }
 

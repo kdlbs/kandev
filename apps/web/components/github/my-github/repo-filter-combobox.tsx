@@ -1,11 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
-
-const ALL_REPOS = "__all__";
+import { IntegrationRepositoryFilter } from "@/components/integrations/integration-repository-filter";
 
 type RepoFilterComboboxProps = {
   repoFilter: string;
@@ -18,13 +14,6 @@ type RepoFilterComboboxProps = {
   className?: string;
 };
 
-function buildRepoFilterOptions(repoOptions: string[]): ComboboxOption[] {
-  return [
-    { value: ALL_REPOS, label: t("github:allRepos"), keywords: ["all", "repositories", "repos"] },
-    ...repoOptions.map((repo) => ({ value: repo, label: repo, keywords: [repo] })),
-  ];
-}
-
 export function RepoFilterCombobox({
   repoFilter,
   onRepoFilterChange,
@@ -36,19 +25,13 @@ export function RepoFilterCombobox({
   className,
 }: RepoFilterComboboxProps) {
   const { t } = useTranslation();
-  const options = useMemo(() => buildRepoFilterOptions(repoOptions), [repoOptions]);
-
   return (
-    <Combobox
-      value={repoFilter || ALL_REPOS}
-      onValueChange={(value) => {
-        // Combobox signals reselecting the active option with an empty value.
-        if (!value) return;
-        onRepoFilterChange(value === ALL_REPOS ? "" : value);
-      }}
-      options={options}
+    <IntegrationRepositoryFilter
+      value={repoFilter}
+      onValueChange={onRepoFilterChange}
+      options={repoOptions.map((repo) => ({ value: repo, label: repo, keywords: [repo] }))}
       ariaLabel={ariaLabel}
-      placeholder={t("github:allRepos")}
+      allLabel={t("github:allRepos")}
       searchPlaceholder={t("github:filterRepositories")}
       emptyMessage={t("github:noRepositoriesFound")}
       triggerClassName={triggerClassName}

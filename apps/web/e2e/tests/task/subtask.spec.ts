@@ -24,9 +24,50 @@ type TaskWithRepos = {
 type SessionInfo = {
   id: string;
   agent_profile_id: string;
+  executor_id?: string;
   executor_profile_id: string;
   state: string;
+  metadata?: Record<string, unknown>;
 };
+
+type RuntimeConfig = {
+  model?: string;
+  mode?: string;
+  config_options?: Record<string, string>;
+};
+
+function runtimeConfigFromMetadata(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): RuntimeConfig {
+  return (metadata?.[key] as RuntimeConfig | undefined) ?? {};
+}
+
+function firstRuntimeValue(...values: Array<string | undefined>): string | undefined {
+  return values.find((value) => value);
+}
+
+function effectiveRuntimeConfig(session: SessionInfo): RuntimeConfig {
+  const snapshot = runtimeConfigFromMetadata(session.metadata, "agent_profile_snapshot");
+  const runtime = runtimeConfigFromMetadata(session.metadata, "runtime_config");
+  const overrides = runtimeConfigFromMetadata(session.metadata, "runtime_config_overrides");
+  const configOptions = {
+    ...(runtime.config_options ?? snapshot.config_options ?? {}),
+    ...(overrides.config_options ?? {}),
+  };
+  delete configOptions.model;
+  delete configOptions.mode;
+  return {
+    model: firstRuntimeValue(overrides.model, runtime.model, snapshot.model),
+    mode: firstRuntimeValue(
+      session.metadata?.session_mode as string | undefined,
+      overrides.mode,
+      runtime.mode,
+      snapshot.mode,
+    ),
+    config_options: configOptions,
+  };
+}
 
 async function selectRepositoryFromChip(repoChip: Locator, option: Locator, name: string) {
   await expect(async () => {
@@ -971,6 +1012,134 @@ test.describe("Subtask dialog feature parity", () => {
  * agent_profile_id AND executor_profile_id.
  */
 test.describe("Subtask inheritance", () => {
+  test("a changed second session creates top-level and subtask tasks with its runtime", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
+    expect(agent).toBeTruthy();
+    const creatorProfile = await apiClient.createAgentProfile(
+      agent!.id,
+      "Creator Session Runtime E2E",
+      {
+        model: "mock-fast",
+        mode: "default",
+        config_options: { effort: "medium", profile_only: "stale" },
+      },
+    );
+    const executor = await apiClient.createExecutor("Creator Runtime Executor E2E", "local_pc");
+    const executorProfile = await apiClient.createExecutorProfile(
+      executor.id,
+      "Creator Runtime Executor Profile E2E",
+    );
+    const subtaskTitle = `Creator runtime subtask ${Date.now()}`;
+    const topLevelTitle = `Creator runtime top-level ${Date.now()}`;
+
+    try {
+      const parentTask = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Creator Runtime Parent E2E",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          executor_profile_id: executorProfile.id,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      await testPage.goto(`/t/${parentTask.id}`);
+      await new SessionPage(testPage).waitForLoad();
+
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(parentTask.id);
+            return DONE_STATES.includes(sessions[0]?.state ?? "");
+          },
+          {
+            timeout: 30_000,
+            message: "Parent session should finish before the second session starts",
+          },
+        )
+        .toBe(true);
+
+      const firstSession = (await apiClient.listTaskSessions(parentTask.id)).sessions[0];
+      expect(firstSession?.agent_profile_id).toBe(seedData.agentProfileId);
+      const second = await apiClient.launchSession({
+        task_id: parentTask.id,
+        agent_profile_id: creatorProfile.id,
+        executor_id: firstSession?.executor_id,
+        executor_profile_id: firstSession?.executor_profile_id,
+        prompt: "/e2e:simple-message",
+      });
+
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(parentTask.id);
+            return sessions.find((session) => session.id === second.session_id)?.state ?? "";
+          },
+          { timeout: 45_000, message: "Creator session should finish before runtime changes" },
+        )
+        .toBe("WAITING_FOR_INPUT");
+
+      await apiClient.setSessionModel(second.session_id, "mock-smart");
+      await apiClient.setSessionMode(second.session_id, "plan-mock");
+      await apiClient.setSessionConfigOption(second.session_id, "effort", "max");
+
+      const script = [
+        `e2e:mcp:kandev:create_task_kandev({"parent_id":"self","title":"${subtaskTitle}","description":"creator runtime subtask"})`,
+        `e2e:mcp:kandev:create_task_kandev({"workspace_id":"${seedData.workspaceId}","workflow_id":"${seedData.workflowId}","title":"${topLevelTitle}","description":"creator runtime top-level","repository_id":"${seedData.repositoryId}"})`,
+        'e2e:message("Done.")',
+      ].join("\n");
+      await apiClient.addUserMessage(parentTask.id, second.session_id, script);
+
+      let subtask: { id: string } | undefined;
+      let topLevel: { id: string } | undefined;
+      await expect
+        .poll(
+          async () => {
+            const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+            subtask = tasks.find((task) => task.title === subtaskTitle);
+            topLevel = tasks.find((task) => task.title === topLevelTitle);
+            return Boolean(subtask && topLevel);
+          },
+          { timeout: 60_000, message: "Both MCP-created task shapes should exist" },
+        )
+        .toBe(true);
+
+      for (const task of [subtask!, topLevel!]) {
+        await expect
+          .poll(
+            async () => {
+              const { sessions } = await apiClient.listTaskSessions(task.id);
+              return sessions[0]?.agent_profile_id ?? "";
+            },
+            { timeout: 45_000, message: `Task ${task.id} should start with the creator profile` },
+          )
+          .toBe(creatorProfile.id);
+
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const createdSession = sessions[0] as SessionInfo;
+        expect(effectiveRuntimeConfig(createdSession)).toEqual({
+          model: "mock-smart",
+          mode: "plan-mock",
+          config_options: { effort: "max" },
+        });
+      }
+
+      const { sessions: subtaskSessions } = await apiClient.listTaskSessions(subtask!.id);
+      expect(subtaskSessions[0]?.executor_profile_id).toBe(executorProfile.id);
+    } finally {
+      await apiClient.deleteAgentProfile(creatorProfile.id, true);
+    }
+  });
+
   test("MCP-created subtask inherits agent profile and executor profile", async ({
     testPage,
     apiClient,

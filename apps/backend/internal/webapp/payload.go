@@ -29,6 +29,11 @@ type ActivePluginPayload struct {
 	Name      string   `json:"name"`
 	BundleURL string   `json:"bundleUrl"`
 	StyleURLs []string `json:"styleUrls,omitempty"`
+	// RepositoryProviderIDs is nil only for legacy manifests that omit
+	// repository_providers. A non-nil empty slice is an explicit declaration
+	// that must reach the browser as [] so the plugin registry can deny every
+	// undeclared provider claim.
+	RepositoryProviderIDs *[]string `json:"repositoryProviderIds,omitempty"`
 }
 
 // RuntimeConfig contains browser-facing runtime endpoints for the SPA.

@@ -10,6 +10,111 @@ import { test, expect } from "../../fixtures/test-base";
  * interactions (open the page, inspect sections, open the create dialog).
  */
 test.describe("Utility Agents settings page", () => {
+  test("repairs an unavailable action with the default", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const agentId = "builtin-commit-message";
+    const { agents } = await apiClient.listAgents();
+    const profile = agents
+      .flatMap((agent) => agent.profiles ?? [])
+      .find((candidate) => candidate.id === seedData.agentProfileId);
+    if (!profile) throw new Error(`seed profile ${seedData.agentProfileId} was not found`);
+    const profileLabel = `${profile.agentDisplayName} • ${profile.name}`;
+    const baselineResponse = await apiClient.rawRequest("GET", `/api/v1/utility/agents/${agentId}`);
+    expect(baselineResponse.ok).toBe(true);
+    const baseline = await baselineResponse.json();
+
+    await testPage.route("**/api/v1/user/settings", (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          settings: { default_utility_agent_profile_id: seedData.agentProfileId },
+        }),
+      });
+    });
+    await testPage.route("**/api/v1/utility/agents", (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          agents: [
+            {
+              ...baseline,
+              agent_profile_id: "",
+              profile_binding_state: "unconfigured",
+              enabled: false,
+            },
+          ],
+        }),
+      });
+    });
+
+    try {
+      await testPage.goto("/settings/utility-agents");
+      await expect(
+        testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
+      ).toBeVisible({ timeout: 15_000 });
+
+      const row = testPage.getByTestId(`utility-action-row-${agentId}`);
+      const picker = row.getByTestId(`utility-profile-picker-action-${agentId}`);
+      await expect(
+        row.getByText("This profile is unavailable. Select an enabled inference profile.", {
+          exact: true,
+        }),
+      ).toBeVisible();
+
+      await picker.click();
+      const listbox = testPage.getByRole("listbox");
+      await listbox.locator('[data-value="__USE_DEFAULT__"]').click();
+
+      const floatingSave = testPage.getByTestId("settings-floating-save");
+      await expect(floatingSave).toBeVisible();
+      await floatingSave.getByRole("button", { name: "Save changes" }).click();
+      await expect(floatingSave).not.toBeVisible({ timeout: 10_000 });
+
+      await testPage.unroute("**/api/v1/utility/agents");
+      await testPage.reload();
+      await expect(picker).toContainText(profileLabel, { timeout: 15_000 });
+      await expect(
+        row.getByText("This profile is unavailable. Select an enabled inference profile.", {
+          exact: true,
+        }),
+      ).toHaveCount(0);
+      await prCapture.screenshot("utility-action-inherits-default-desktop", {
+        caption: "The repaired utility action inherits the selected default profile.",
+      });
+
+      const persistedResponse = await apiClient.rawRequest(
+        "GET",
+        `/api/v1/utility/agents/${agentId}`,
+      );
+      expect(persistedResponse.ok).toBe(true);
+      const persisted = await persistedResponse.json();
+      expect(persisted).toMatchObject({
+        agent_profile_id: "",
+        profile_binding_state: "inherit",
+        enabled: true,
+      });
+    } finally {
+      const restoreResponse = await apiClient.rawRequest(
+        "PATCH",
+        `/api/v1/utility/agents/${agentId}`,
+        {
+          agent_profile_id: baseline.agent_profile_id,
+          profile_binding_state: baseline.profile_binding_state,
+          enabled: baseline.enabled,
+        },
+      );
+      expect(restoreResponse.ok).toBe(true);
+    }
+  });
+
   test("renders the default for an inherited built-in action", async ({
     testPage,
     apiClient,
