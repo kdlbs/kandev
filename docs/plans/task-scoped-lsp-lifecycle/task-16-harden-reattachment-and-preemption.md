@@ -35,7 +35,8 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
 - Recovery and ready-budget-reset callbacks acquire lifecycle ownership before I/O, validate their
   timer generation, retain lifecycle context through command execution, cannot outlive Close, and
   retain a recovery signal that arrives while an attempt is still completing. New crash evidence
-  invalidates a fired ready-budget reset before it can commit stale Ready evidence.
+  invalidates a fired ready-budget reset before it can commit stale Ready evidence; fired resets and
+  watch-loss persistence/scheduling share the owned per-language command lane.
 - Startup registers watches from post-reconcile rows, and watch loss cannot overwrite a current
   non-server phase.
 - Concurrent or retried Close calls share one lifecycle completion signal; recovery, ready-reset,
@@ -101,6 +102,9 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   bounded retry.
 - A fired five-minute ready reset could read Ready, then let a crash consume the next backoff, then
   overwrite the retry attempt count with zero from its stale read.
+- In the inverse split ordering, crash state could persist before the stale reset committed while
+  recovery scheduling ran afterward, producing a one-second retry from an unreset budget; watch-loss
+  state updates could bypass the language lane in the same way.
 
 ## Verification
 
@@ -159,10 +163,13 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
 - The fired-ready-reset/crash regression failed with a 30-second timer paired to an impossible zero
   attempt count, then passed 100 race-enabled repetitions together with ready-reset cancellation,
   epoch replacement, and normal five-minute budget-reset coverage.
-- The dependent backend race run passed LSP, agentctl LSP, gateway, task service, and SQLite. Its
-  unrelated lifecycle package hit the existing SSH fake-server session-open timeout once; that
-  isolated test immediately passed three race-enabled repetitions, and the preceding exact-head
-  GitHub backend suite was green.
+- The inverse error-persist/reset/schedule ordering and watch-loss lane regressions failed before
+  ready-reset and watch-loss work joined the owned language lane, then passed 100 race-enabled
+  repetitions with the broader recovery and controller-close suite.
+- The dependent backend race run passed LSP (including 20 complete-package repetitions), agentctl
+  LSP, gateway, lifecycle, task service, and SQLite. An earlier unrelated lifecycle run hit the
+  existing SSH fake-server session-open timeout once; that isolated test immediately passed three
+  race-enabled repetitions, and the final exact-head local rerun passed.
 - `go test -count=1 ./...` passed across the complete backend after the callback-ownership repair;
   changed-code `golangci-lint` reported zero issues and the architecture linter passed.
 - Commit hooks passed architecture, formatting, changed-code Go/Web lint, i18n, public-copy, and

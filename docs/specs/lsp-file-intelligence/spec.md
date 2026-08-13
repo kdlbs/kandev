@@ -362,7 +362,9 @@ an attempt is still marked running is coalesced and retained for the next bounde
 the language command lane before callback bookkeeping completes cannot strand a keep-warm language
 in `error` or `off` without its remaining retry. New crash evidence invalidates a ready-budget reset
 even when its timer callback has already fired; a stale Ready read cannot reset attempts after the
-new recovery has consumed its backoff.
+new recovery has consumed its backoff. Fired ready-reset work and watch-loss state plus recovery
+scheduling use the same owned per-language command lane as runtime observations and controls, so a
+durable crash and its backoff cannot be split around a concurrent budget reset.
 
 Concurrent and retried controller shutdown calls wait for the same lifecycle-generation join. If
 one caller times out, a later caller must continue waiting rather than report success early. Timer

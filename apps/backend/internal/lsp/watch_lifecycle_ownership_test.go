@@ -363,6 +363,146 @@ func TestCrashInvalidatesFiredReadyBudgetReset(t *testing.T) {
 	}
 }
 
+func TestReadyBudgetResetSerializesWithCrashObservation(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+		LastInitiator: InitiatorAutomatic,
+	})
+	scheduler := newFakeScheduler()
+	controller := newReconcileControllerWithScheduler(store, newReconcileRuntimes(), scheduler)
+	blockingStore := &afterReadBlockingStore{
+		Store: store, blockNext: true,
+		entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	blockingSettings := &blockingSettingsProvider{
+		SettingsProvider: &fakeLSPSettings{}, blockNext: true,
+		entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	controller.store = blockingStore
+	controller.settings = blockingSettings
+	installTestLifecycle(controller)
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	controller.lifecycleMu.Lock()
+	controller.recoveries[key] = &recoveryState{attempts: 2}
+	controller.lifecycleMu.Unlock()
+	controller.scheduleReadyReset(key, 1)
+	readyReset := scheduler.next(t)
+	fireDone := make(chan struct{})
+	go func() {
+		readyReset.Fire()
+		close(fireDone)
+	}()
+	<-blockingStore.entered
+
+	observeDone := make(chan error, 1)
+	go func() {
+		_, err := controller.commands.submitExclusive(
+			context.Background(), key, ActionReconcile,
+			func(workCtx context.Context) (*LanguageSnapshot, error) {
+				return nil, controller.observeRuntimeSnapshot(workCtx, key, RuntimeSnapshot{
+					Language: "go", Generation: 1, Phase: PhaseError,
+					ErrorCode: errorCodeProcessExited,
+				})
+			},
+		)
+		observeDone <- err
+	}()
+	select {
+	case <-blockingSettings.entered:
+		close(blockingStore.release)
+		<-fireDone
+		close(blockingSettings.release)
+		<-observeDone
+		t.Fatal("crash observation entered while the ready reset still owned the language lane")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(blockingStore.release)
+	<-fireDone
+	select {
+	case <-blockingSettings.entered:
+	case <-time.After(time.Second):
+		t.Fatal("queued crash observation did not enter after the ready reset completed")
+	}
+	close(blockingSettings.release)
+	if err := <-observeDone; err != nil {
+		t.Fatal(err)
+	}
+	recoveryTimer := scheduler.next(t)
+	controller.lifecycleMu.Lock()
+	attempts := controller.recoveries[key].attempts
+	controller.lifecycleMu.Unlock()
+	if recoveryTimer.delay != time.Second || attempts != 1 {
+		t.Fatalf("serialized post-reset crash: delay=%s attempts=%d; want 1s and 1",
+			recoveryTimer.delay, attempts)
+	}
+}
+
+func TestWatchLossSerializesStateAndRecoveryWithLanguageLane(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+		LastInitiator: InitiatorAutomatic,
+	})
+	host := &immediateWatchFailureHost{
+		fakeLSPHost: newFakeLSPHost(), called: make(chan struct{}),
+	}
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	scheduler := newFakeScheduler()
+	controller := newReconcileControllerWithScheduler(store, runtimes, scheduler)
+	installTestLifecycle(controller)
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	blockEntered := make(chan struct{})
+	blockRelease := make(chan struct{})
+	blockDone := make(chan error, 1)
+	go func() {
+		_, err := controller.commands.submitExclusive(
+			context.Background(), key, ActionReconcile,
+			func(context.Context) (*LanguageSnapshot, error) {
+				close(blockEntered)
+				<-blockRelease
+				return nil, nil
+			},
+		)
+		blockDone <- err
+	}()
+	<-blockEntered
+	controller.ensureWatch(key)
+	<-host.called
+
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if state := storedLSPState(t, store, key.TaskID, key.Language); state.Phase != PhaseReady {
+			close(blockRelease)
+			<-blockDone
+			waitForWatchRemoval(t, controller, key)
+			t.Fatalf("watch loss bypassed the language lane: %#v", state)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(blockRelease)
+	if err := <-blockDone; err != nil {
+		t.Fatal(err)
+	}
+	timer := scheduler.next(t)
+	waitForWatchRemoval(t, controller, key)
+	state := storedLSPState(t, store, key.TaskID, key.Language)
+	if state.Phase != PhaseError || state.ErrorCode != errorCodeTaskHostWatchLost {
+		t.Fatalf("serialized watch loss state = %#v", state)
+	}
+	if timer.delay != time.Second {
+		t.Fatalf("watch loss recovery delay = %s, want 1s", timer.delay)
+	}
+}
+
 func TestCloseRetryWaitsForOriginalLifecycleJoin(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
@@ -538,6 +678,20 @@ type silentWatchLSPHost struct {
 	*fakeLSPHost
 }
 
+type immediateWatchFailureHost struct {
+	*fakeLSPHost
+	called chan struct{}
+}
+
+func (h *immediateWatchFailureHost) WatchTaskLSP(
+	context.Context,
+	string,
+	func(RuntimeSnapshot) error,
+) error {
+	close(h.called)
+	return errors.New("watch failed")
+}
+
 func (h *silentWatchLSPHost) WatchTaskLSP(
 	ctx context.Context,
 	_ string,
@@ -603,6 +757,29 @@ type afterReadBlockingStore struct {
 	blockNext bool
 	entered   chan struct{}
 	release   chan struct{}
+}
+
+type blockingSettingsProvider struct {
+	SettingsProvider
+	mu        sync.Mutex
+	blockNext bool
+	entered   chan struct{}
+	release   chan struct{}
+}
+
+func (p *blockingSettingsProvider) TaskLSPSettings(
+	ctx context.Context,
+	taskID string,
+) (TaskSettings, error) {
+	p.mu.Lock()
+	block := p.blockNext
+	p.blockNext = false
+	p.mu.Unlock()
+	if block {
+		close(p.entered)
+		<-p.release
+	}
+	return p.SettingsProvider.TaskLSPSettings(ctx, taskID)
 }
 
 func (s *afterReadBlockingStore) GetTaskLSPLanguage(

@@ -236,7 +236,7 @@ func TestWatchFailureStopsReconnectLoopAndSchedulesRecovery(t *testing.T) {
 		t.Fatalf("watch recovery delay = %s", timer.delay)
 	}
 	state := storedLSPState(t, store, "task-1", "go")
-	if state.Phase != PhaseError || state.ErrorCode != "task_host_watch_lost" {
+	if state.Phase != PhaseError || state.ErrorCode != errorCodeTaskHostWatchLost {
 		t.Fatalf("watch failure state = %#v", state)
 	}
 }
