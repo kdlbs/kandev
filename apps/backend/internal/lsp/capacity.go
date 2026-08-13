@@ -93,6 +93,12 @@ func (c *Capacity) Admit(key TaskLanguageKey, generation uint64, acceptedAt time
 func (c *Capacity) Adopt(key TaskLanguageKey, generation uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// A newer accepted generation in the queue proves this older generation
+	// already surrendered its slot. Stale durable inventory must not erase that
+	// queue entry and resurrect the retired generation as active.
+	if queued, ok := c.queued[key]; ok && queued.Generation > generation {
+		return
+	}
 	activeBefore, queuedBefore := len(c.active), len(c.queued)
 	delete(c.queued, key)
 	if current, ok := c.active[key]; !ok || generation >= current {

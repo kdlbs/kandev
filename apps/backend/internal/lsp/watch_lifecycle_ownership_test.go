@@ -180,6 +180,68 @@ func TestCloseJoinsFiredRecoveryRead(t *testing.T) {
 	<-fireDone
 }
 
+func TestFiredRecoveryDoesNotStopNewerExplicitStart(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyDisabled,
+		DetectionState: DetectionComplete, Phase: PhaseOff, Generation: 1,
+		ProcessAbsentGeneration: 1, LastInitiator: InitiatorUser,
+	})
+	host := &silentWatchLSPHost{fakeLSPHost: newFakeLSPHost()}
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	runtimes.ensured["env-task-1"] = host
+	runtimes.blockEnvironment = "env-task-1"
+	runtimes.existingEntered = make(chan struct{})
+	runtimes.existingRelease = make(chan struct{})
+	scheduler := newFakeScheduler()
+	controller := newReconcileControllerWithScheduler(store, runtimes, scheduler)
+	installTestLifecycle(controller)
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	controller.scheduleRecovery(key)
+	timer := scheduler.next(t)
+	recoveryDone := make(chan struct{})
+	go func() {
+		timer.Fire()
+		close(recoveryDone)
+	}()
+	<-runtimes.existingEntered
+
+	type startResult struct {
+		snapshot *LanguageSnapshot
+		err      error
+	}
+	startDone := make(chan startResult, 1)
+	go func() {
+		snapshot, err := controller.Start(context.Background(), key.TaskID, key.Language, Origin{
+			Initiator: InitiatorUser, Reason: "user_start",
+		})
+		startDone <- startResult{snapshot: snapshot, err: err}
+	}()
+	var started startResult
+	startCompletedBeforeRecovery := !commandQueuedWithin(controller, key, time.Second)
+	if startCompletedBeforeRecovery {
+		started = <-startDone
+	}
+	close(runtimes.existingRelease)
+	if !startCompletedBeforeRecovery {
+		started = <-startDone
+	}
+	<-recoveryDone
+	if started.err != nil || started.snapshot == nil || started.snapshot.Phase != PhaseReady ||
+		started.snapshot.Generation != 2 {
+		t.Fatalf("explicit start = %#v, %v", started.snapshot, started.err)
+	}
+
+	state := storedLSPState(t, store, key.TaskID, key.Language)
+	if state.Phase != PhaseReady || state.Generation != 2 || host.stopCalls != 0 {
+		t.Fatalf("state after fired recovery = %#v, stop calls=%d; want generation 2 ready",
+			state, host.stopCalls)
+	}
+}
+
 func TestCloseJoinsFiredReadyReset(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
@@ -388,6 +450,19 @@ type blockingRecoveryHost struct {
 	entered  chan struct{}
 	release  chan struct{}
 	returned chan struct{}
+}
+
+type silentWatchLSPHost struct {
+	*fakeLSPHost
+}
+
+func (h *silentWatchLSPHost) WatchTaskLSP(
+	ctx context.Context,
+	_ string,
+	_ func(RuntimeSnapshot) error,
+) error {
+	<-ctx.Done()
+	return context.Cause(ctx)
 }
 
 func newBlockingRecoveryHost() *blockingRecoveryHost {

@@ -148,7 +148,10 @@ and obscure the actual task-level work that is still running.
   its reservation exactly once and advances the queue. Startup reserves every persisted generation
   that may still own a process before fallible runtime inspection; inspection frees it only after
   authoritative absence, while a confirmed stop releases the matching durable/runtime identity. A
-  transient recovery error therefore cannot make admission exceed the configured cap.
+  transient recovery error therefore cannot make admission exceed the configured cap. A newer
+  accepted queued generation for the same task/language is authoritative over an older startup
+  inventory generation; stale adoption cannot erase that queue entry, resurrect the retired
+  generation, or bypass the cap.
 - Binary discovery, managed installation, and execution retain existing task-host trust
   boundaries. Kandev never executes a server from a repository or relative `PATH` entry. Managed
   npm/release binaries live under the task host's `~/.kandev/lsp-servers`; `gopls` uses the task
@@ -311,6 +314,10 @@ one transition is active coalesce. Non-terminal different commands linearize in 
 Automatic task and settings reconciliation reloads the durable language row inside that same lane
 before deciding effective policy or touching a runtime, so a queued stale snapshot cannot stop a
 server enabled by a newer accepted user action.
+Fired recovery callbacks also enter the lane before revalidating their recovery epoch, reloading
+state, inspecting or recovering the task host, and deciding whether to relaunch. A canceled callback
+therefore becomes a no-op, while an explicit control accepted after an in-flight recovery remains
+the final transition and cannot be stopped by recovery's stale policy snapshot.
 Explicit Stop, Disabled policy, and terminal task cleanup interrupt an accepted Start/install so
 shutdown never waits indefinitely behind startup; the terminal transition is the final desired
 state and process-tree proof. A restart first proves the old generation stopped, then admits one new
@@ -326,7 +333,8 @@ successful inventory read, every possibly-live generation is reserved before fal
 inspection begins. If cleanup marks that captured generation absent or deletion removes its row
 after the inventory snapshot, the serialized reload releases only the exact stale or proven-absent
 generation before runtime admission; it cannot resurrect a phantom slot or release a newer live
-generation.
+generation. If the serialized ledger already contains a newer queued generation for the same key,
+the stale inventory generation cannot replace or remove it.
 
 Capacity uses durable generation-scoped process-presence evidence rather than inferring ownership
 from the current display error. Proven absence survives later task-host, watch, and reconciliation
@@ -567,6 +575,9 @@ task-environment cleanup merely because a browser remains connected.
 - **GIVEN** startup cannot inspect a persisted generation that may still be alive, **WHEN** another
   task requests Start, **THEN** the ambiguous generation keeps its capacity reservation until
   authoritative absence or a confirmed stop prevents over-admission.
+- **GIVEN** startup captured generation 1 before it surrendered capacity and generation 2 queued,
+  **WHEN** stale inventory adoption resumes, **THEN** generation 2 remains queued, the retired
+  generation is not made active, and no server starts above the configured cap.
 - **GIVEN** an SSH, Sprites, Remote Docker, unknown, or missing environment, **WHEN** Start is
   requested, **THEN** status is unsupported and no capacity, execution, installer, or process is
   acquired.

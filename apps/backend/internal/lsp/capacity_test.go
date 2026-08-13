@@ -99,6 +99,28 @@ func TestCapacityAdoptsAlreadyRunningServersAboveConfiguredLimit(t *testing.T) {
 	}
 }
 
+func TestCapacityStaleAdoptionPreservesNewerQueuedGeneration(t *testing.T) {
+	capacity := NewCapacity(1)
+	active := TaskLanguageKey{TaskID: "active", Language: "go"}
+	queued := TaskLanguageKey{TaskID: "queued", Language: "kotlin"}
+	if !capacity.Admit(active, 1, time.Unix(1, 0)) {
+		t.Fatal("active server was not admitted")
+	}
+	if capacity.Admit(queued, 2, time.Unix(2, 0)) {
+		t.Fatal("newer generation was not queued")
+	}
+
+	capacity.Adopt(queued, 1)
+
+	if capacity.Active() != 1 || capacity.Queued() != 1 {
+		t.Fatalf("stale adoption active=%d queued=%d, want active=1 queued=1",
+			capacity.Active(), capacity.Queued())
+	}
+	if next := capacity.Release(active, 1); next == nil || next.Key != queued || next.Generation != 2 {
+		t.Fatalf("preserved queued generation = %#v, want %s generation 2", next, queued.TaskID)
+	}
+}
+
 func TestCapacityReleaseDoesNotPromoteWhileAdoptionStillFillsLimit(t *testing.T) {
 	capacity := NewCapacity(1)
 	first := TaskLanguageKey{TaskID: "task-1", Language: "go"}

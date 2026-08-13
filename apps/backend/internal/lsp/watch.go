@@ -34,6 +34,7 @@ type recoveryState struct {
 	attempts        int
 	timer           ScheduledTimer
 	timerEpoch      uint64
+	runningEpoch    uint64
 	readyTimer      ScheduledTimer
 	readyTimerEpoch uint64
 }
@@ -349,6 +350,10 @@ func (c *Controller) observeRuntimeSnapshot(
 func (c *Controller) scheduleRecovery(key TaskLanguageKey) {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
+	c.scheduleRecoveryLocked(key)
+}
+
+func (c *Controller) scheduleRecoveryLocked(key TaskLanguageKey) {
 	if c.lifecycleCtx == nil || c.lifecycleCtx.Err() != nil {
 		return
 	}
@@ -361,7 +366,8 @@ func (c *Controller) scheduleRecovery(key TaskLanguageKey) {
 		recovery.readyTimer.Stop()
 		recovery.readyTimer = nil
 	}
-	if recovery.timer != nil || recovery.attempts >= len(recoveryBackoffs) {
+	if recovery.timer != nil || recovery.runningEpoch != 0 ||
+		recovery.attempts >= len(recoveryBackoffs) {
 		return
 	}
 	delay := recoveryBackoffs[recovery.attempts]
@@ -373,6 +379,24 @@ func (c *Controller) scheduleRecovery(key TaskLanguageKey) {
 	recovery.timerEpoch++
 	epoch := recovery.timerEpoch
 	recovery.timer = scheduler.AfterFunc(delay, func() { c.runRecovery(key, recovery, epoch) })
+}
+
+func (c *Controller) finishRecoveryAttempt(
+	key TaskLanguageKey,
+	expected *recoveryState,
+	epoch uint64,
+	retry bool,
+) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	current := c.recoveries[key]
+	if current != expected || current.timerEpoch != epoch || current.runningEpoch != epoch {
+		return
+	}
+	current.runningEpoch = 0
+	if retry {
+		c.scheduleRecoveryLocked(key)
+	}
 }
 
 func (c *Controller) runRecovery(
@@ -394,20 +418,48 @@ func (c *Controller) runRecovery(
 		return
 	}
 	recovery.timer = nil
+	recovery.runningEpoch = epoch
 	c.lifecycleMu.Unlock()
 
-	state, _, err := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
-	if ctx.Err() != nil {
+	attempted := false
+	converged := false
+	_, commandErr := c.commands.submitOwnedExclusive(
+		ctx,
+		key,
+		ActionReconcile,
+		func(workCtx context.Context) (*LanguageSnapshot, error) {
+			if !c.recoveryCallbackIsCurrent(key, expected, epoch) {
+				return nil, nil
+			}
+			attempted = true
+			state, _, err := c.store.GetTaskLSPLanguage(
+				workCtx, key.TaskID, key.Language,
+			)
+			if err != nil {
+				return nil, err
+			}
+			converged = c.attemptRecovery(workCtx, key, *state)
+			return nil, nil
+		},
+	)
+	if !attempted {
+		c.finishRecoveryAttempt(key, expected, epoch, false)
 		return
 	}
-	if err != nil {
-		c.scheduleRecovery(key)
-		return
-	}
-	if c.attemptRecovery(ctx, key, *state) {
-		return
-	}
-	c.scheduleRecovery(key)
+	c.finishRecoveryAttempt(key, expected, epoch, commandErr != nil || !converged)
+}
+
+func (c *Controller) recoveryCallbackIsCurrent(
+	key TaskLanguageKey,
+	expected *recoveryState,
+	epoch uint64,
+) bool {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	current := c.recoveries[key]
+	return current == expected && current.timerEpoch == epoch && current.runningEpoch == epoch &&
+		current.timer == nil &&
+		c.lifecycleCtx != nil && c.lifecycleCtx.Err() == nil
 }
 
 func (c *Controller) attemptRecovery(
@@ -438,14 +490,7 @@ func (c *Controller) attemptRecovery(
 		}
 		return true
 	}
-	snapshot, err := c.commands.submitOwnedExclusive(
-		ctx,
-		key,
-		ActionReconcile,
-		func(workCtx context.Context) (*LanguageSnapshot, error) {
-			return c.reconcileMissing(workCtx, *candidate)
-		},
-	)
+	snapshot, err := c.reconcileMissing(ctx, *candidate)
 	if err != nil || snapshot == nil {
 		return false
 	}

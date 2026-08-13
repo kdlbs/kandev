@@ -90,6 +90,10 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   task deletion removed the row, permanently consuming capacity without a runtime.
 - The same ghost survived while the cleanup-written Off row still existed because terminal
   admission rejection returned before missing-row compensation could run.
+- Stale startup inventory could erase a newer accepted queue entry for the same task/language,
+  reactivate the retired generation, and let reconciliation launch above the configured cap.
+- A fired recovery inspected state and the task host outside the language lane; after explicit Start
+  reached generation 2 Ready, that stale Disabled snapshot stopped generation 2 back to Off.
 
 ## Verification
 
@@ -136,6 +140,12 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
   passed 20 race-enabled repetitions with exact-generation release inside the language lane.
 - Its durable-Off/admission-blocked variant also failed with one phantom slot before compensation
   moved ahead of admission inspection, then passed 20 race-enabled repetitions.
+- The stale-inventory/newer-queue unit and controller regressions failed with the legitimate queue
+  removed, two active slots at a limit of one, and one unauthorized launch before adoption became
+  generation ordered; both passed 20 race-enabled repetitions after the fix.
+- The fired-recovery/explicit-Start regression failed with generation 2 stopped by stale recovery,
+  then passed 20 race-enabled repetitions with recovery epoch validation, state reload, inspection,
+  host recovery, and relaunch held inside one controller-owned language command.
 - `go test -count=1 ./...` passed across the complete backend after the callback-ownership repair;
   changed-code `golangci-lint` reported zero issues and the architecture linter passed.
 - Commit hooks passed architecture, formatting, changed-code Go/Web lint, i18n, public-copy, and

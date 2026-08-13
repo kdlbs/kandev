@@ -71,11 +71,19 @@ before later per-runtime inspection errors can occur. When cleanup records gener
 absence or an inventory row disappears before its serialized reload, reconciliation releases only
 the exact stale or proven-absent generation before runtime admission. Task cleanup or deletion
 therefore cannot restore a phantom capacity occupant, while newer live evidence remains protected.
+A newer accepted queued generation is also authoritative over an older startup inventory generation
+for the same task/language: stale adoption cannot delete the queue entry, reactivate the retired
+generation, or admit a server above the configured limit.
 
 Startup watch registration uses the durable rows read after reconciliation, never the stale rows
 that preceded convergence. A watch failure can replace state only while the current durable phase
 still represents a server-bearing generation; `off`, `queued`, `waiting_for_task`, and
 `unsupported` remain authoritative without a task-host watch.
+
+A fired recovery owns the `(task_id, language)` command lane for its complete epoch revalidation,
+durable-state reload, runtime inspection or task-host recovery, and optional relaunch. Canceling its
+recovery identity before lane entry makes it a no-op; an explicit command ordered after lane entry
+remains final rather than being stopped by stale recovery intent.
 
 Browsers attach through a task-and-language route after task-owner authorization. An attachment
 receives the initialized server capabilities and then exchanges feature requests and document

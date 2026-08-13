@@ -182,6 +182,66 @@ func TestReconcileAllReleasesStaleCapacityWhenCurrentRowProvesAbsence(t *testing
 	}
 }
 
+func TestReconcileAllDoesNotReplaceNewerQueuedGenerationWithStaleInventory(t *testing.T) {
+	baseStore := newMemoryLSPStore()
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	blocker := TaskLanguageKey{TaskID: "blocker", Language: "kotlin"}
+	seedLSPState(t, baseStore, TaskLanguageState{
+		TaskID: key.TaskID, Language: key.Language, Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+	})
+	store := &reconcileSnapshotStore{
+		Store: baseStore, allListBlockCall: 1,
+		allListBlocked: make(chan struct{}), allListRelease: make(chan struct{}),
+	}
+	capacity := NewCapacity(1)
+	capacity.Adopt(key, 1)
+	host := newFakeLSPHost()
+	controller := NewController(ControllerConfig{
+		Tasks: &fakeControllerTasks{}, Store: store, Settings: &fakeLSPSettings{},
+		Runtimes: &fakeLSPRuntimes{host: host}, Capacity: capacity,
+		Clock: func() time.Time { return time.Unix(200, 0).UTC() },
+	})
+
+	reconcileDone := make(chan error, 1)
+	go func() {
+		reconcileDone <- controller.ReconcileAll(context.Background())
+	}()
+	awaitReconcileSnapshot(t, store.allListBlocked)
+
+	// Generation 1 is proved gone. Another server takes the slot before a new
+	// generation 2 request is accepted into the queue.
+	capacity.Release(key, 1)
+	if !capacity.Admit(blocker, 1, time.Unix(201, 0).UTC()) {
+		t.Fatal("capacity blocker was not admitted")
+	}
+	if capacity.Admit(key, 2, time.Unix(202, 0).UTC()) {
+		t.Fatal("newer task generation was not queued")
+	}
+	baseStore.mu.Lock()
+	current := baseStore.states[key]
+	current.Phase = PhaseQueued
+	current.Generation = 2
+	baseStore.states[key] = current
+	baseStore.mu.Unlock()
+
+	close(store.allListRelease)
+	if err := <-reconcileDone; err != nil {
+		t.Fatalf("reconcile stale inventory: %v", err)
+	}
+	if host.startCalls != 0 {
+		t.Fatalf("stale inventory bypassed capacity and launched %d server(s)", host.startCalls)
+	}
+	if capacity.Active() != 1 || capacity.Queued() != 1 {
+		t.Fatalf("capacity after stale inventory active=%d queued=%d, want active=1 queued=1",
+			capacity.Active(), capacity.Queued())
+	}
+	state := storedLSPState(t, baseStore, key.TaskID, key.Language)
+	if state.Phase != PhaseQueued {
+		t.Fatalf("newer generation phase = %q, want %q", state.Phase, PhaseQueued)
+	}
+}
+
 type reconcileSnapshotStore struct {
 	Store
 	mu                sync.Mutex

@@ -32,16 +32,23 @@ func TestRecoveryUsesOneFiveThirtySecondBackoffAndThenStops(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
 
-	for _, want := range []time.Duration{time.Second, 5 * time.Second, 30 * time.Second} {
+	for index, want := range []time.Duration{time.Second, 5 * time.Second, 30 * time.Second} {
 		timer := scheduler.next(t)
 		if timer.delay != want {
 			t.Fatalf("recovery delay = %s, want %s", timer.delay, want)
 		}
 		timer.Fire()
+		if host.startCalls != index+2 {
+			state := storedLSPState(t, store, "task-1", "kotlin")
+			t.Fatalf("start calls after %s = %d, state=%#v, timer stopped=%t",
+				want, host.startCalls, state, timer.Stopped())
+		}
 	}
 	scheduler.assertNoActiveTimers(t)
 	if host.startCalls != 4 {
-		t.Fatalf("start calls = %d, want startup attempt plus three recoveries", host.startCalls)
+		state := storedLSPState(t, store, "task-1", "kotlin")
+		t.Fatalf("start calls = %d, state=%#v, want startup attempt plus three recoveries",
+			host.startCalls, state)
 	}
 	state := storedLSPState(t, store, "task-1", "kotlin")
 	if state.Phase != PhaseError {
