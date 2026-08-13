@@ -342,7 +342,87 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 
+	r.migrateSubagentContextBackfill()
+
 	return nil
+}
+
+// migrateSubagentContextBackfill recovers task_session_subagents history from
+// existing task_session_messages rows whose metadata.normalized.kind is
+// "subagent_task" (AC-21), and publishes the two write-once kandev_meta
+// activation keys that let a consumer distinguish "zero fan-out" from
+// "unmeasured, before capture began" (AC-24, AC-25). See
+// docs/specs/subagent-context-persistence/spec.md § Backfill.
+//
+// All three statements go through r.migrate.Apply, whose swallow-plus-WARN
+// contract (internal/db/migratelog.go:33) is what AC-20 is written against —
+// a failure here must never abort boot, only log. Apply takes no bind args,
+// so the capture-since timestamp is inlined via fmt.Sprintf rather than
+// passed as a query parameter.
+func (r *Repository) migrateSubagentContextBackfill() {
+	postgres := dialect.IsPostgres(r.db.DriverName())
+
+	meta := func(path string) string { return jsonKey(postgres, "m.metadata", path) }
+	nullable := func(expr string) string { return "NULLIF(" + expr + ", '')" }
+	subagentText := func(field string) string { return nullable(meta("normalized.subagent_task." + field)) }
+	subagentInt := func(field string) string { return jsonInt(postgres, "m.metadata", "normalized.subagent_task", field) }
+
+	toolCallID := meta("tool_call_id")
+	toolStatusRaw := meta("status")
+	terminal := "(" + toolStatusRaw + " IN ('complete','completed','success','error','failed','cancelled'))"
+	predicate := `
+			` + meta("normalized.kind") + ` = 'subagent_task'
+			AND m.task_id IS NOT NULL AND m.task_id != ''
+			AND ` + toolCallID + ` IS NOT NULL AND ` + toolCallID + ` != ''`
+
+	r.migrate.Apply("task_session_subagents.backfill", `
+		INSERT INTO task_session_subagents (
+			id, task_session_id, task_id, turn_id, tool_call_id, parent_tool_call_id,
+			subagent_type, description, agent_id, child_session_id, model,
+			agent_status, tool_status, is_async, total_tokens, tool_use_count,
+			duration_ms, source, observed_at, settled_at, updated_at
+		)
+		SELECT
+			m.id,
+			m.task_session_id,
+			m.task_id,
+			NULLIF(m.turn_id, ''),
+			`+toolCallID+`,
+			`+nullable(meta("parent_tool_call_id"))+`,
+			`+subagentText("subagent_type")+`,
+			`+subagentText("description")+`,
+			`+subagentText("agent_id")+`,
+			`+subagentText("child_session_id")+`,
+			`+subagentText("model")+`,
+			`+subagentText("status")+`,
+			`+nullable(toolStatusRaw)+`,
+			`+jsonBoolToInt(postgres, "m.metadata", "normalized.subagent_task", "is_async")+`,
+			`+subagentInt("total_tokens")+`,
+			`+subagentInt("tool_use_count")+`,
+			`+subagentInt("duration_ms")+`,
+			'backfill',
+			m.created_at,
+			(CASE WHEN `+terminal+` THEN m.updated_at ELSE NULL END),
+			m.updated_at
+		FROM task_session_messages m
+		WHERE`+predicate+`
+		ON CONFLICT (task_session_id, tool_call_id) DO NOTHING
+	`)
+
+	r.migrate.Apply("kandev_meta.subagent_context_capture_since", fmt.Sprintf(
+		`INSERT INTO kandev_meta (key, value) VALUES ('subagent_context_capture_since', '%s') ON CONFLICT(key) DO NOTHING`,
+		time.Now().UTC().Format(time.RFC3339),
+	))
+
+	r.migrate.Apply("kandev_meta.subagent_context_backfill_through", `
+		INSERT INTO kandev_meta (key, value)
+		SELECT 'subagent_context_backfill_through', COALESCE((
+			SELECT `+rfc3339Timestamp(postgres, "MAX(m.created_at)")+`
+			FROM task_session_messages m
+			WHERE`+predicate+`
+		), '')
+		ON CONFLICT(key) DO NOTHING
+	`)
 }
 
 // clearRecoveredAgentErrors repairs sessions whose stored agent failure was
@@ -446,6 +526,58 @@ func jsonRemoveKey(postgres bool, column, key string) string {
 		return "(" + base + " - '" + key + "')::text"
 	}
 	return "json_remove(" + base + ", '$." + key + "')"
+}
+
+// jsonKey extracts a text value at a JSON path from a TEXT-typed JSON column.
+// key may itself be dot-separated ("normalized.kind") to reach a field nested
+// several levels deep — jsonInt and jsonBoolToInt build on this by folding
+// their parent/key pair into one such path before extracting.
+func jsonKey(postgres bool, column, key string) string {
+	base := jsonColumn(postgres, column)
+	segments := strings.Join(strings.Split(key, "."), ",")
+	if postgres {
+		return "(" + base + " #>> '{" + segments + "}')"
+	}
+	return "json_extract(" + base + ", '$." + strings.ReplaceAll(segments, ",", ".") + "')"
+}
+
+// jsonInt extracts a nested numeric field and normalizes it the way every
+// unreported-or-invalid metric in this table normalizes: NULL, never a
+// fabricated 0 for "not reported" and never a negative count (AC-7, AC-9,
+// AC-23). Postgres casts to BIGINT, SQLite to INTEGER.
+func jsonInt(postgres bool, column, parent, key string) string {
+	extracted := jsonKey(postgres, column, parent+"."+key)
+	castType := "INTEGER"
+	if postgres {
+		castType = "BIGINT"
+	}
+	cast := "CAST(NULLIF(" + extracted + ", '') AS " + castType + ")"
+	return "(CASE WHEN " + cast + " < 0 THEN NULL ELSE " + cast + " END)"
+}
+
+// jsonBoolToInt normalizes is_async's dialect-inconsistent boolean spelling —
+// Postgres's #>> text extraction yields 'true'/'false', SQLite's json_extract
+// on a JSON boolean yields '1'/'0' — into the single 1/0 the column stores.
+// An absent or false field yields 0, matching the column's own DEFAULT 0.
+func jsonBoolToInt(postgres bool, column, parent, key string) string {
+	extracted := jsonKey(postgres, column, parent+"."+key)
+	// SQLite's json_extract returns a JSON boolean as the storage-class
+	// INTEGER 1/0, not the text '1'/'0' — comparing that INTEGER against a
+	// TEXT literal via IN never matches (SQLite orders INTEGER < TEXT by
+	// storage class), so the extracted value must be cast to TEXT first.
+	return "(CASE WHEN CAST(" + extracted + " AS TEXT) IN ('1', 'true') THEN 1 ELSE 0 END)"
+}
+
+// rfc3339Timestamp renders a timestamp expression (a column or an aggregate
+// like MAX(m.created_at)) as an RFC3339 UTC string. Every timestamp this
+// repository writes is already a UTC wall-clock instant with no zone suffix
+// (see the spec's Column-level normalization rules), so both dialects only
+// need to reformat, never convert zones.
+func rfc3339Timestamp(postgres bool, expression string) string {
+	if postgres {
+		return `to_char(` + expression + `, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`
+	}
+	return `strftime('%Y-%m-%dT%H:%M:%SZ', ` + expression + `)`
 }
 
 // ensureImproveKandevWorkflowTemplateUniqueness removes the broad index from
