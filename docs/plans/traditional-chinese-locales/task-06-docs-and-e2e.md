@@ -68,4 +68,8 @@ Sequential (final gate).
 
 ## Results
 
-Pending.
+- Glossary documentation now records the reviewed regional software terms and
+  the final override/validation contract.
+- Managed host E2E rebuilt backend and Vite production assets, then passed all
+  5 language-switch scenarios, including `zh-tw` and `zh-hk` reload
+  persistence.

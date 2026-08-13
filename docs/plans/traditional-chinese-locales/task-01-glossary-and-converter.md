@@ -72,4 +72,11 @@ cd apps/web && node scripts/convert-zh-cn-to-zh-hant.mjs --locale all --namespac
 
 ## Results
 
-Pending.
+- Converter now performs one OpenCC pass followed by one compiled glossary
+  pass. Source, base-Traditional, and target forms are matched so surrounding
+  text cannot bypass a product term, while longer target phrases remain
+  idempotent.
+- Reviewed per-key overrides are applied last. Unknown override keys and
+  residual Simplified or malformed output fail before a catalog is written.
+- `node --test scripts/convert-zh-cn-to-zh-hant.test.mjs`: 19 passed.
+- Full dry-run: 15,878 web messages, 0 web/backend residual warnings.

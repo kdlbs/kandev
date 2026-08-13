@@ -62,4 +62,6 @@ disjoint trees; otherwise sequential after shared converter flags stabilize.
 
 ## Results
 
-Pending.
+- Regenerated both 34-key backend catalogs through the same glossary and
+  override-aware converter; residual warning count is zero.
+- `go test ./internal/i18n/... ./internal/webapp/ -count=1` passed.

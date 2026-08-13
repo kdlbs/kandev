@@ -68,4 +68,8 @@ cd apps/backend && go test ./internal/i18n/... ./internal/webapp/ -count=1
 
 ## Results
 
-Pending.
+- Focused i18n/runtime Vitest suite: 5 files, 84 tests passed.
+- Runtime catalog assertions now verify both reviewed local terminology and
+  the Taiwan/Hong Kong pull-request wording difference.
+- Backend locale negotiation and shell tests passed via
+  `go test ./internal/i18n/... ./internal/webapp/ -count=1`.

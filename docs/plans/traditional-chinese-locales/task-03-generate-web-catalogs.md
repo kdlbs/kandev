@@ -67,4 +67,9 @@ task 01 alone for generation, but verification that loads locales needs task 02.
 
 ## Results
 
-Pending.
+- Regenerated all 30 namespaces for each of `zh-tw` and `zh-hk` from the
+  current `zh-cn` source with the reviewed glossary and override layer.
+- `i18n:parity` confirms both Traditional catalogs match the `zh-cn` coverage:
+  each has the same 11 keys missing from `en` as the source catalog.
+- `i18n:check` passed; its 139 real-locale parity findings remain advisory
+  baseline gaps across `pt-pt` and the three Chinese catalogs.

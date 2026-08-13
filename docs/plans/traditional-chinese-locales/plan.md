@@ -74,16 +74,16 @@ then full catalog materialization, then switcher/docs/E2E polish.
 
 ## Tests
 
-| What | File | How |
-|---|---|---|
-| Supported + normalize + labels | `apps/web/lib/i18n/index.test.ts` | Expect both locales in `SUPPORTED_LOCALES`, labels, `selectableLocales` |
-| Date locale mapping | `apps/web/lib/i18n/date-locale.test.ts` | `zh-tw` → zh-TW, `zh-hk` → zh-HK |
-| Intl formatting | `apps/web/lib/i18n/formats.test.ts` | activate each locale; number/date path uses tag |
-| Catalog load | `apps/web/lib/i18n/lazy-catalogs.test.ts` / `index.test.ts` | resolve a known key (e.g. `settings:displayLanguage`) |
-| Glossary-critical terms | new `apps/web/scripts/zh-hant-glossary.test.ts` or `.mjs` test | sample keys differ TW vs HK where glossary requires |
-| Backend Supported/FromRequest | `apps/backend/internal/i18n/i18n_test.go` | cookie + Accept-Language |
-| Shell lang attribute | `apps/backend/internal/webapp/shell_test.go` | `lang="zh-tw"` / `zh-hk` |
-| Conversion script integrity | unit test next to script | placeholders and brands preserved on fixture strings |
+| What                           | File                                                           | How                                                                     |
+| ------------------------------ | -------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Supported + normalize + labels | `apps/web/lib/i18n/index.test.ts`                              | Expect both locales in `SUPPORTED_LOCALES`, labels, `selectableLocales` |
+| Date locale mapping            | `apps/web/lib/i18n/date-locale.test.ts`                        | `zh-tw` → zh-TW, `zh-hk` → zh-HK                                        |
+| Intl formatting                | `apps/web/lib/i18n/formats.test.ts`                            | activate each locale; number/date path uses tag                         |
+| Catalog load                   | `apps/web/lib/i18n/lazy-catalogs.test.ts` / `index.test.ts`    | resolve a known key (e.g. `settings:displayLanguage`)                   |
+| Glossary-critical terms        | new `apps/web/scripts/zh-hant-glossary.test.ts` or `.mjs` test | sample keys differ TW vs HK where glossary requires                     |
+| Backend Supported/FromRequest  | `apps/backend/internal/i18n/i18n_test.go`                      | cookie + Accept-Language                                                |
+| Shell lang attribute           | `apps/backend/internal/webapp/shell_test.go`                   | `lang="zh-tw"` / `zh-hk`                                                |
+| Conversion script integrity    | unit test next to script                                       | placeholders and brands preserved on fixture strings                    |
 
 ---
 
@@ -101,13 +101,17 @@ then full catalog materialization, then switcher/docs/E2E polish.
 
 ## Verification Results
 
-- `node --test scripts/convert-zh-cn-to-zh-hant.test.mjs` — 9 pass
-- `pnpm run i18n:parity` — zh-tw / zh-hk missing TOTAL = 0
-- `pnpm run i18n:check` — pass (advisory real-locale gaps only for pre-existing pt-pt)
-- `pnpm exec vitest run lib/i18n/*.test.ts lib/agent-runtime-update.test.ts` — 83 pass
+- `node --test scripts/convert-zh-cn-to-zh-hant.test.mjs` — 19 passed
+- Full converter dry-run — 15,878 web messages; web/backend residual warnings = 0
+- `pnpm run i18n:parity` — pass; zh-cn / zh-tw / zh-hk share 11 current en-gap keys
+- `pnpm run i18n:check` — pass with 139 advisory baseline parity findings
+- Focused i18n/runtime Vitest — 5 files, 84 tests passed
+- `pnpm run typecheck` — pass
+- Focused ESLint for changed source/tests — pass; full lint retains one
+  pre-existing `formats.test.ts` duplicate-string warning
+- Prettier check for changed source, catalogs, and docs — pass
 - `go test ./internal/i18n/... ./internal/webapp/ -count=1` — pass
-- E2E `tests/i18n/language-switch.spec.ts` — 5 pass (en, zh-cn, zh-tw, zh-hk, pseudo)
-
+- Managed production-build E2E `tests/i18n/language-switch.spec.ts` — 5 passed
 
 ---
 

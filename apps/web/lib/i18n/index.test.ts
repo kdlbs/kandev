@@ -56,14 +56,7 @@ describe("locale predicates", () => {
 
   it("exposes en as the default and lists every shipped locale", () => {
     expect(DEFAULT_LOCALE).toBe("en");
-    expect([...SUPPORTED_LOCALES]).toEqual([
-      "en",
-      "pt-pt",
-      "zh-cn",
-      "zh-tw",
-      "zh-hk",
-      "pseudo",
-    ]);
+    expect([...SUPPORTED_LOCALES]).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "pseudo"]);
   });
 
   // Only the `isProd` half of the contract. `selectableLocales` also requires
@@ -71,14 +64,7 @@ describe("locale predicates", () => {
   // is fixed to `true` for the whole vitest run (config resolves in serve mode).
   // `bundling.test.ts` covers the decision that produces it, in both directions.
   it("hides the pseudo locale from production builds", () => {
-    expect(selectableLocales(false)).toEqual([
-      "en",
-      "pt-pt",
-      "zh-cn",
-      "zh-tw",
-      "zh-hk",
-      "pseudo",
-    ]);
+    expect(selectableLocales(false)).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "pseudo"]);
     expect(selectableLocales(true)).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk"]);
   });
 
@@ -191,5 +177,15 @@ describe("activateLocale", () => {
     expect(i18n.hasResourceBundle(ZH_HK_LOCALE, "settings")).toBe(true);
     expect(i18n.getResource(ZH_HK_LOCALE, "settings", "displayLanguage")).toBe("顯示語言");
     expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("顯示語言");
+  });
+
+  it("resolves reviewed product vocabulary for each Traditional Chinese region", async () => {
+    await activateLocale(ZH_TW_LOCALE);
+    expect(i18n.t("settings:addEditor")).toBe("新增編輯器");
+    expect(i18n.t("task:pullRequest")).toBe("提取要求");
+
+    await activateLocale(ZH_HK_LOCALE);
+    expect(i18n.t("settings:addEditor")).toBe("新增編輯器");
+    expect(i18n.t("task:pullRequest")).toBe("拉取要求");
   });
 });

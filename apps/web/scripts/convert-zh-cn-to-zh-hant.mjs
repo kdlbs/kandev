@@ -20,10 +20,12 @@ import {
   residualSimplifiedInCatalog,
 } from "./lib/zh-hant-convert.mjs";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
+const MODULE_PATH = fileURLToPath(import.meta.url);
+const HERE = path.dirname(MODULE_PATH);
 const WEB_LOCALES = path.resolve(HERE, "..", "src", "locales");
 const BACKEND_LOCALES = path.resolve(HERE, "..", "..", "backend", "internal", "i18n", "locales");
 const SOURCE_LOCALE = "zh-cn";
+const OVERRIDES_PATH = path.join(HERE, "lib", "zh-hant-overrides.json");
 
 function parseArgs(argv) {
   const args = {
@@ -70,17 +72,24 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
 }
 
-function convertWeb({ locales, namespace, write }) {
-  const sourceDir = path.join(WEB_LOCALES, SOURCE_LOCALE);
+export function convertWeb({
+  locales,
+  namespace,
+  write,
+  sourceDir = path.join(WEB_LOCALES, SOURCE_LOCALE),
+  targetRoot = WEB_LOCALES,
+  overrides = {},
+}) {
   const namespaces = listNamespaces(sourceDir, namespace);
   let totalKeys = 0;
   let residual = 0;
+  const outputs = [];
 
   for (const locale of locales) {
     for (const ns of namespaces) {
       const sourcePath = path.join(sourceDir, `${ns}.json`);
       const messages = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
-      const converted = convertCatalog(messages, locale);
+      const converted = convertCatalog(messages, locale, overrides[locale]?.[ns]);
       const hits = residualSimplifiedInCatalog(converted);
       totalKeys += Object.keys(converted).length;
       residual += hits.length;
@@ -89,10 +98,18 @@ function convertWeb({ locales, namespace, write }) {
           `[warn] ${locale}/${ns}: ${hits.length} key(s) still look simplified (e.g. ${hits.slice(0, 3).join(", ")})`,
         );
       }
-      if (write) {
-        writeJson(path.join(WEB_LOCALES, locale, `${ns}.json`), converted);
-      }
+      outputs.push({ locale, namespace: ns, converted });
     }
+  }
+  if (write && residual > 0) {
+    throw new Error(`catalog integrity check failed; refusing to write ${residual} web message(s)`);
+  }
+  if (write) {
+    for (const { locale, namespace: ns, converted } of outputs) {
+      writeJson(path.join(targetRoot, locale, `${ns}.json`), converted);
+    }
+  }
+  for (const locale of locales) {
     console.log(
       `${write ? "wrote" : "would write"} web ${locale}: ${namespaces.length} namespace(s)`,
     );
@@ -100,25 +117,41 @@ function convertWeb({ locales, namespace, write }) {
   return { totalKeys, residual };
 }
 
-function convertBackend({ locales, write }) {
-  const sourcePath = path.join(BACKEND_LOCALES, `${SOURCE_LOCALE}.json`);
+export function convertBackend({
+  locales,
+  write,
+  sourcePath = path.join(BACKEND_LOCALES, `${SOURCE_LOCALE}.json`),
+  targetRoot = BACKEND_LOCALES,
+  overrides = {},
+}) {
   if (!fs.existsSync(sourcePath)) {
     throw new Error(`missing backend source catalog: ${sourcePath}`);
   }
   const messages = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
   let residual = 0;
+  const outputs = [];
   for (const locale of locales) {
-    const converted = convertCatalog(messages, locale);
+    const converted = convertCatalog(messages, locale, overrides[locale]);
     const hits = residualSimplifiedInCatalog(converted);
     residual += hits.length;
     if (hits.length > 0) {
       console.warn(`[warn] backend ${locale}: residual simplified in ${hits.join(", ")}`);
     }
-    if (write) {
-      writeJson(path.join(BACKEND_LOCALES, `${locale}.json`), converted);
+    outputs.push({ locale, converted });
+  }
+  if (write && residual > 0) {
+    throw new Error(
+      `catalog integrity check failed; refusing to write ${residual} backend message(s)`,
+    );
+  }
+  if (write) {
+    for (const { locale, converted } of outputs) {
+      writeJson(path.join(targetRoot, `${locale}.json`), converted);
     }
+  }
+  for (const locale of locales) {
     console.log(
-      `${write ? "wrote" : "would write"} backend ${locale}: ${Object.keys(converted).length} key(s)`,
+      `${write ? "wrote" : "would write"} backend ${locale}: ${Object.keys(messages).length} key(s)`,
     );
   }
   return { residual };
@@ -137,12 +170,22 @@ function main() {
   }
 
   loadGlossary();
+  const reviewedOverrides = JSON.parse(fs.readFileSync(OVERRIDES_PATH, "utf8"));
   const locales = resolveLocales(args.locale);
-  const web = convertWeb({ locales, namespace: args.namespace, write: args.write });
+  const web = convertWeb({
+    locales,
+    namespace: args.namespace,
+    write: args.write,
+    overrides: reviewedOverrides.web,
+  });
   let backendResidual = 0;
   if (args.backend || args.write) {
     // Always convert backend when writing full catalogs so FE/BE stay in sync.
-    const backend = convertBackend({ locales, write: args.write });
+    const backend = convertBackend({
+      locales,
+      write: args.write,
+      overrides: reviewedOverrides.backend,
+    });
     backendResidual = backend.residual;
   }
 
@@ -154,4 +197,6 @@ function main() {
   }
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === MODULE_PATH) {
+  main();
+}

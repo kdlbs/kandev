@@ -63,4 +63,20 @@ Sequential (shared catalog edits; review judgment).
 
 ## Results
 
-Pending.
+- Reviewed both regions across `common`, `sidebar`, `settings`, `task`,
+  `tasks`, `auth`, `github`, `workspaces`, and `system` using targeted term
+  scans plus representative copy inspection.
+- Fixed glossary expansion (`工作流程程`), mainland-oriented software terms,
+  and contextual OpenCC misses. Examples include `設定檔`, `新增`, `訊息`,
+  `佇列`, `控制項`, `執行`, `程式碼`, plus Taiwan-specific `清單`, `檢視`,
+  `螢幕`, and `意見回饋`.
+- Added a reviewed per-key correction for the data-directory help text where a
+  global token rule would be unsafe.
+- Critical malformed/mainland marker scan is empty. The nine reviewed
+  namespaces retain 891 TW/HK value differences.
+- Residual risk: production E2E proves switching and persistence, but a final
+  native-speaker visual pass on dense layouts remains a release acceptance
+  step rather than an automated guarantee.
+- Follow-up UI terminology review replaced opaque component calques such as
+  `手风琴树`, `持久树`, `菜单形态`, `面包屑`, and `状态抽屉` with labels that
+  describe their visible behavior.
