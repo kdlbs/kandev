@@ -399,6 +399,19 @@ func (s *Service) resolveRepositoryLocalPath(ctx context.Context, repoID string)
 	return resolved, nil
 }
 
+// ResolveRepositoryLocalPath is the exported form of
+// resolveRepositoryLocalPath. It is the narrow, read-only,
+// single-method checkout-resolution port docs/specs/task-delivery-ledger/
+// spec.md, "Which checkout" describes: repository ID in, a validated
+// absolute checkout path or error out, with no sentinel empty path on
+// rejection. internal/delivery's ancestry check depends on this method
+// through a local interface rather than importing this package, so it
+// inherits the existing canonicalization and containment checks instead
+// of duplicating them.
+func (s *Service) ResolveRepositoryLocalPath(ctx context.Context, repoID string) (string, error) {
+	return s.resolveRepositoryLocalPath(ctx, repoID)
+}
+
 // RepositoryCurrentBranch returns the current branch for a saved repository,
 // resolving its exact path grant by repository ID.
 func (s *Service) RepositoryCurrentBranch(ctx context.Context, repoID string) (string, error) {

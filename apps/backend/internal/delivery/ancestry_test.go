@@ -1,0 +1,151 @@
+package delivery_test
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/kandev/kandev/internal/delivery"
+)
+
+// fakeCheckoutResolver satisfies delivery.CheckoutResolver for tests
+// without pulling in task/service.
+type fakeCheckoutResolver struct {
+	path string
+	err  error
+}
+
+func (f fakeCheckoutResolver) ResolveRepositoryLocalPath(_ context.Context, _ string) (string, error) {
+	return f.path, f.err
+}
+
+// runGit runs a git command in dir for test repo setup, failing the test
+// on error. This is test fixture setup, not the production seam under
+// test (which goes through delivery.AncestryChecker).
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out.String())
+	}
+	return strings.TrimSpace(out.String())
+}
+
+// newAncestryTestRepo creates a bare "origin" plus a working checkout with
+// a remote-tracking branch, so refs/remotes/origin/<default_branch>
+// resolves the way a real clone would.
+func newAncestryTestRepo(t *testing.T) (checkoutPath, defaultBranch string) {
+	t.Helper()
+	origin := t.TempDir()
+	runGit(t, origin, "init", "--bare", "-b", "main")
+
+	work := t.TempDir()
+	runGit(t, work, "init", "-b", "main")
+	runGit(t, work, "config", "user.email", "test@example.com")
+	runGit(t, work, "config", "user.name", "test")
+	runGit(t, work, "remote", "add", "origin", origin)
+	writeFile(t, work, "README.md", "hello")
+	runGit(t, work, "add", "README.md")
+	runGit(t, work, "commit", "-m", "initial")
+	runGit(t, work, "push", "origin", "main")
+	runGit(t, work, "fetch", "origin")
+
+	return work, "main"
+}
+
+func writeFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+func TestAncestryChecker_PositiveResult(t *testing.T) {
+	work, defaultBranch := newAncestryTestRepo(t)
+	head := runGit(t, work, "rev-parse", "HEAD")
+
+	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work}}
+	out := checker.Check(context.Background(), "repo-1", defaultBranch, head)
+
+	if !out.Attempted || out.Errored {
+		t.Fatalf("out = %+v, want Attempted, not Errored", out)
+	}
+	if !out.Positive {
+		t.Fatal("HEAD of the default branch must be an ancestor of itself")
+	}
+}
+
+func TestAncestryChecker_NegativeResultIsNotAnError(t *testing.T) {
+	work, defaultBranch := newAncestryTestRepo(t)
+	runGit(t, work, "checkout", "-b", "feature")
+	writeFile(t, work, "feature.txt", "wip")
+	runGit(t, work, "add", "feature.txt")
+	runGit(t, work, "commit", "-m", "feature work")
+	featureHead := runGit(t, work, "rev-parse", "HEAD")
+
+	// Advance main independently so the feature commit is not an ancestor.
+	runGit(t, work, "checkout", defaultBranch)
+	writeFile(t, work, "main.txt", "unrelated")
+	runGit(t, work, "add", "main.txt")
+	runGit(t, work, "commit", "-m", "unrelated main commit")
+	runGit(t, work, "push", "origin", defaultBranch)
+	runGit(t, work, "fetch", "origin")
+
+	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work}}
+	out := checker.Check(context.Background(), "repo-1", defaultBranch, featureHead)
+
+	if out.Errored {
+		t.Fatalf("a negative ancestry result must not be an error: %+v", out)
+	}
+	if out.Positive {
+		t.Fatal("an unmerged feature commit must not be an ancestor of main")
+	}
+}
+
+func TestAncestryChecker_LocalBranchFallbackWhenRemoteTrackingRefMissing(t *testing.T) {
+	work, defaultBranch := newAncestryTestRepo(t)
+	// Simulate a repository with no remote-tracking ref at all (never
+	// fetched, or a purely local checkout).
+	runGit(t, work, "update-ref", "-d", "refs/remotes/origin/"+defaultBranch)
+	head := runGit(t, work, "rev-parse", "HEAD")
+
+	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work}}
+	out := checker.Check(context.Background(), "repo-1", defaultBranch, head)
+
+	if out.Errored {
+		t.Fatalf("expected the local branch fallback to succeed, got errored: %+v", out)
+	}
+	if !out.Positive {
+		t.Fatal("HEAD must be an ancestor of its own local default branch")
+	}
+}
+
+func TestAncestryChecker_NeitherRefResolvesIsAnError(t *testing.T) {
+	work, _ := newAncestryTestRepo(t)
+	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work}}
+	out := checker.Check(context.Background(), "repo-1", "does-not-exist", "HEAD")
+
+	if !out.Errored || out.Positive {
+		t.Fatalf("out = %+v, want Errored=true", out)
+	}
+}
+
+func TestAncestryChecker_CheckoutResolverErrorIsAnAncestryError(t *testing.T) {
+	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{err: errTestCheckout}}
+	out := checker.Check(context.Background(), "repo-1", "main", "HEAD")
+
+	if !out.Errored || out.Positive {
+		t.Fatalf("out = %+v, want Errored=true (no readable local checkout)", out)
+	}
+}
+
+var errTestCheckout = errors.New("repository local path is empty")
