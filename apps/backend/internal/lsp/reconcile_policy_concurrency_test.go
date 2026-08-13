@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -137,6 +138,47 @@ func TestReconcileAllReleasesCapacityForDeletedInventoryRow(t *testing.T) {
 	}
 	if active := capacity.Active(); active != 0 {
 		t.Fatalf("capacity after stale deleted-row adoption = %d, want 0", active)
+	}
+}
+
+func TestReconcileAllReleasesStaleCapacityWhenCurrentRowProvesAbsence(t *testing.T) {
+	baseStore := newMemoryLSPStore()
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	seedLSPState(t, baseStore, TaskLanguageState{
+		TaskID: key.TaskID, Language: key.Language, Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+	})
+	store := &reconcileSnapshotStore{
+		Store: baseStore, allListBlockCall: 1,
+		allListBlocked: make(chan struct{}), allListRelease: make(chan struct{}),
+	}
+	capacity := NewCapacity(1)
+	capacity.Adopt(key, 1)
+	controller := NewController(ControllerConfig{
+		Tasks: &fakeControllerTasks{admissionErr: errors.New("terminal mutation in progress")},
+		Store: store, Settings: &fakeLSPSettings{}, Runtimes: &fakeLSPRuntimes{},
+		Capacity: capacity, Clock: func() time.Time { return time.Unix(200, 0).UTC() },
+	})
+
+	reconcileDone := make(chan error, 1)
+	go func() {
+		reconcileDone <- controller.ReconcileAll(context.Background())
+	}()
+	awaitReconcileSnapshot(t, store.allListBlocked)
+
+	capacity.Release(key, 1)
+	baseStore.mu.Lock()
+	current := baseStore.states[key]
+	current.Phase = PhaseOff
+	current.ProcessAbsentGeneration = current.Generation
+	baseStore.states[key] = current
+	baseStore.mu.Unlock()
+	close(store.allListRelease)
+	if err := <-reconcileDone; err == nil {
+		t.Fatal("reconcile during terminal mutation unexpectedly succeeded")
+	}
+	if active := capacity.Active(); active != 0 {
+		t.Fatalf("capacity after durable process-absence proof = %d, want 0", active)
 	}
 }
 

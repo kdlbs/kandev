@@ -44,6 +44,8 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   lane, so an inventory snapshot captured before an enable cannot stop the newly ready server.
 - A stale global inventory row removed by task cleanup releases only its exact adopted generation,
   so delete cannot resurrect a phantom capacity occupant or erase newer generation evidence.
+- The same compensation runs before task admission when cleanup has already persisted durable
+  process-absence evidence but terminal deletion still owns the admission writer.
 
 ## TDD Evidence
 
@@ -86,6 +88,8 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   with a Disabled snapshot captured before the user action completed.
 - Global reconciliation could re-adopt a pre-cleanup live generation after cleanup released it and
   task deletion removed the row, permanently consuming capacity without a runtime.
+- The same ghost survived while the cleanup-written Off row still existed because terminal
+  admission rejection returned before missing-row compensation could run.
 
 ## Verification
 
@@ -130,6 +134,8 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
   the proof. Its focused race-enabled test passed against a disposable PostgreSQL 16 container.
 - The stale inventory/delete regression failed with one phantom active slot before the fix, then
   passed 20 race-enabled repetitions with exact-generation release inside the language lane.
+- Its durable-Off/admission-blocked variant also failed with one phantom slot before compensation
+  moved ahead of admission inspection, then passed 20 race-enabled repetitions.
 - `go test -count=1 ./...` passed across the complete backend after the callback-ownership repair;
   changed-code `golangci-lint` reported zero issues and the architecture linter passed.
 - Commit hooks passed architecture, formatting, changed-code Go/Web lint, i18n, public-copy, and

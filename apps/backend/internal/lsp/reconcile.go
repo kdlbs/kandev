@@ -51,11 +51,7 @@ func (c *Controller) reconcileAllWithInventory(
 		_, commandErr := c.commands.submitOwnedExclusive(
 			ctx, key, ActionReconcile,
 			func(workCtx context.Context) (*LanguageSnapshot, error) {
-				snapshot, found, reconcileErr := c.reconcileCurrentState(workCtx, key, true)
-				if reconcileErr == nil && !found && stateMayHaveProcess(listed) {
-					c.releaseCapacity(workCtx, key, listed.Generation)
-				}
-				return snapshot, reconcileErr
+				return c.reconcileInventoryState(workCtx, listed, true)
 			},
 		)
 		if commandErr != nil {
@@ -104,8 +100,7 @@ func (c *Controller) ReconcileTask(ctx context.Context, taskID string) error {
 		key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
 		_, commandErr := c.commands.submit(ctx, key, ActionReconcile, "",
 			func(workCtx context.Context) (*LanguageSnapshot, error) {
-				snapshot, _, reconcileErr := c.reconcileCurrentState(workCtx, key, true)
-				return snapshot, reconcileErr
+				return c.reconcileCurrentState(workCtx, key, true)
 			})
 		if commandErr != nil {
 			reconcileErrors = append(reconcileErrors, commandErr)
@@ -118,17 +113,50 @@ func (c *Controller) reconcileCurrentState(
 	ctx context.Context,
 	key TaskLanguageKey,
 	scheduleFailure bool,
-) (*LanguageSnapshot, bool, error) {
+) (*LanguageSnapshot, error) {
 	state, found, err := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
 	if err != nil || !found {
-		return nil, found, err
+		return nil, err
 	}
-	candidate, err := c.inspectReconcileState(ctx, *state, scheduleFailure)
+	return c.reconcileLoadedState(ctx, *state, scheduleFailure)
+}
+
+func (c *Controller) reconcileInventoryState(
+	ctx context.Context,
+	listed TaskLanguageState,
+	scheduleFailure bool,
+) (*LanguageSnapshot, error) {
+	key := TaskLanguageKey{TaskID: listed.TaskID, Language: listed.Language}
+	state, found, err := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		if stateMayHaveProcess(listed) {
+			c.releaseCapacity(ctx, key, listed.Generation)
+		}
+		return nil, nil
+	}
+	if stateMayHaveProcess(listed) && stateProvesProcessAbsence(*state) {
+		c.releaseCapacity(ctx, key, listed.Generation)
+		if state.Generation != listed.Generation {
+			c.releaseCapacity(ctx, key, state.Generation)
+		}
+	}
+	return c.reconcileLoadedState(ctx, *state, scheduleFailure)
+}
+
+func (c *Controller) reconcileLoadedState(
+	ctx context.Context,
+	state TaskLanguageState,
+	scheduleFailure bool,
+) (*LanguageSnapshot, error) {
+	candidate, err := c.inspectReconcileState(ctx, state, scheduleFailure)
 	if err != nil || candidate == nil {
-		return nil, true, err
+		return nil, err
 	}
 	snapshot, err := c.reconcileMissing(ctx, *candidate)
-	return snapshot, true, err
+	return snapshot, err
 }
 
 func (c *Controller) inspectReconcileState(
@@ -653,13 +681,20 @@ func runtimeFailureProvesNoProcess(snapshot *RuntimeSnapshot, generation uint64)
 }
 
 func stateMayHaveProcess(state TaskLanguageState) bool {
-	if state.Generation > 0 && state.ProcessAbsentGeneration == state.Generation {
+	if stateProvesProcessAbsence(state) {
 		return false
 	}
 	if !phaseHasServer(state.Phase) {
 		return false
 	}
-	return !runtimeFailureProvesNoProcess(&RuntimeSnapshot{
+	return true
+}
+
+func stateProvesProcessAbsence(state TaskLanguageState) bool {
+	if state.Generation > 0 && state.ProcessAbsentGeneration == state.Generation {
+		return true
+	}
+	return runtimeFailureProvesNoProcess(&RuntimeSnapshot{
 		Generation: state.Generation,
 		Phase:      state.Phase,
 		ErrorCode:  state.ErrorCode,

@@ -323,9 +323,10 @@ can pass their readiness gate. If that authoritative read fails, the gate return
 startup error for every operation until backend restart; Kandev must not admit work against an
 empty capacity ledger or start a background retry behind apparently usable controls. After a
 successful inventory read, every possibly-live generation is reserved before fallible runtime
-inspection begins. If cleanup or deletion removes a row after that inventory snapshot, the
-serialized reload releases only the exact generation adopted from the stale row; it cannot
-resurrect a phantom slot or release a newer generation.
+inspection begins. If cleanup marks that captured generation absent or deletion removes its row
+after the inventory snapshot, the serialized reload releases only the exact stale or proven-absent
+generation before runtime admission; it cannot resurrect a phantom slot or release a newer live
+generation.
 
 Capacity uses durable generation-scoped process-presence evidence rather than inferring ownership
 from the current display error. Proven absence survives later task-host, watch, and reconciliation
