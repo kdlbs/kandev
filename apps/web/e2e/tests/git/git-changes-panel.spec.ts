@@ -1321,6 +1321,20 @@ test.describe("Git Changes Panel", () => {
     await expect(session.changes.getByText("Add first line")).toBeVisible({ timeout: 10_000 });
     await expect(session.changes.getByText("Add second line")).toBeVisible({ timeout: 10_000 });
 
+    // The poll below proves a "diff-viewer" panel exists after the click, which
+    // only implicates the click if none existed before it. Nothing in this test
+    // opens one earlier, so this reads as already-true today — it is here so
+    // that stops being an unstated assumption if the surrounding test ever
+    // reuses a session or restores a saved layout.
+    const diffViewerOpen = () =>
+      testPage.evaluate(() => {
+        type Api = { getPanel: (id: string) => unknown };
+        return Boolean(
+          (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__?.getPanel("diff-viewer"),
+        );
+      });
+    expect(await diffViewerOpen(), "no cumulative diff panel before clicking Diff").toBe(false);
+
     // Click the "Diff" button in the header to open the cumulative diff view
     await session.changes.getByRole("button", { name: "Diff" }).click();
 
@@ -1332,15 +1346,10 @@ test.describe("Git Changes Panel", () => {
     // dockview panel with id "diff-viewer" -- it is not the Review dialog, as a
     // first attempt at this assertion assumed and a run disproved.
     await expect
-      .poll(
-        () =>
-          testPage.evaluate(() => {
-            type Api = { getPanel: (id: string) => unknown };
-            const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
-            return Boolean(api?.getPanel("diff-viewer"));
-          }),
-        { timeout: 15_000, message: "the Diff button never opened the cumulative diff panel" },
-      )
+      .poll(diffViewerOpen, {
+        timeout: 15_000,
+        message: "the Diff button never opened the cumulative diff panel",
+      })
       .toBe(true);
 
     await expect(session.changes.getByText("Add first line")).toBeVisible({ timeout: 5_000 });

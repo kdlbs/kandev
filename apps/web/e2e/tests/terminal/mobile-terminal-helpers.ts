@@ -47,7 +47,15 @@ async function remountTerminalPanel(testPage: Page): Promise<void> {
     // fall through to `switchToTerminalPanel`, which finds the panel already
     // visible and returns without remounting anything -- turning the retry that
     // exists to rescue a dead shell WS into a no-op.
-    await expect(testPage.getByTestId("terminal-panel")).toBeHidden({ timeout: 5_000 });
+    //
+    // Counted rather than asserted visible/hidden: `terminal-panel` is not
+    // guaranteed to be a single node (dockview mounts one per terminal panel,
+    // and the mobile layout mounts its own), so a state assertion on the bare
+    // locator would be a strict-mode violation the moment a second one exists,
+    // and would pass on a stale hidden one while a live panel remained mounted.
+    // Zero of them is what "unmounted" means here, and `toHaveCount` says that
+    // without having to resolve which instance is the active one.
+    await expect(testPage.getByTestId("terminal-panel")).toHaveCount(0, { timeout: 5_000 });
   }
   await switchToTerminalPanel(testPage);
 }
