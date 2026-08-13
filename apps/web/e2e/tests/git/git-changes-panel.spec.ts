@@ -534,6 +534,7 @@ test.describe("Git Changes Panel", () => {
       base_branch: "main",
       author_login: "remote-author",
     });
+    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 2253, 1);
 
     await testPage.reload();
     await session.waitForLoad();
@@ -559,6 +560,7 @@ test.describe("Git Changes Panel", () => {
       "data-commit-provenance",
       "pushed",
     );
+    await expect(testPage.getByTestId("header-remote-contribution-warning")).toHaveCount(0);
     const commitMessages = await commitsList
       .locator('[data-testid^="commit-row-"]')
       .allTextContents();
@@ -1731,6 +1733,9 @@ test.describe("Git Changes Panel", () => {
       localSection.locator('[data-commit-provenance="local_checkout"]').first(),
     ).toHaveAttribute("title", "Local checkout commit");
     await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
+    await expect(providerSection.locator('[data-testid^="commit-row-"]').first()).toContainText(
+      "Rewritten provider commit 15",
+    );
 
     // A rewritten provider history must not label the preserved checkout as
     // six unpushed commits, and reading the panel must not mutate the checkout.

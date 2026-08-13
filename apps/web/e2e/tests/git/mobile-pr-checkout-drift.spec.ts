@@ -150,6 +150,9 @@ test.describe("Mobile rewritten contribution history", () => {
       base_branch: "main",
       author_login: "mobile-remote-contributor",
     });
+    // The first provider-history request fails. The resource must retry it
+    // without dropping the local checkout history from the final panel.
+    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 902, 1);
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -182,6 +185,9 @@ test.describe("Mobile rewritten contribution history", () => {
       localSection.locator('[data-commit-provenance="local_checkout"]').first(),
     ).toHaveAttribute("title", "Local checkout commit");
     await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
+    await expect(providerSection.locator('[data-testid^="commit-row-"]').first()).toContainText(
+      "Mobile rewritten provider commit 15",
+    );
     await expect(providerSection.locator(".tabler-icon-arrow-up")).toHaveCount(0);
     await expect(localSection.locator(".tabler-icon-arrow-up")).toHaveCount(0);
 

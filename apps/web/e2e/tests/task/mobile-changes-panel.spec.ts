@@ -258,6 +258,7 @@ test.describe("Mobile changes panel", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     const checkoutBranch = "main";
     const task = await apiClient.createTaskWithAgent(
@@ -271,6 +272,16 @@ test.describe("Mobile changes panel", () => {
         repositories: [{ repository_id: seedData.repositoryId, checkout_branch: checkoutBranch }],
       },
     );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.createFile("mobile-pr-shared-marker.ts", "shared provider checkout commit");
+    git.stageFile("mobile-pr-shared-marker.ts");
+    const sharedSha = git.commit("Shared provider checkout commit");
 
     const remoteSha = "e".repeat(40);
     const remoteMessage = "Mobile force-pushed commit";
@@ -286,9 +297,16 @@ test.describe("Mobile changes panel", () => {
         author_login: "mobile-remote-author",
         repo_owner: "testorg",
         repo_name: "testrepo",
+        head_sha: remoteSha,
       },
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 2254, [
+      {
+        sha: sharedSha,
+        message: "Shared provider checkout commit",
+        author_login: "mobile-remote-author",
+        author_date: "2026-08-03T12:00:00Z",
+      },
       {
         sha: remoteSha,
         message: remoteMessage,
@@ -326,9 +344,9 @@ test.describe("Mobile changes panel", () => {
       base_branch: "main",
       author_login: "mobile-remote-author",
     });
+    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 2254, 1);
 
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
+    await testPage.reload();
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
     await openMobileChangesPanel(testPage);
@@ -336,6 +354,13 @@ test.describe("Mobile changes panel", () => {
 
     const row = testPage.getByTestId(`commit-row-${remoteSha.slice(0, 7)}`);
     await expect(row).toBeVisible({ timeout: 20_000 });
+    const sharedRow = testPage.getByTestId(`commit-row-${sharedSha.slice(0, 7)}`);
+    await expect(sharedRow).toBeVisible({ timeout: 20_000 });
+    await expect(sharedRow.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "pushed",
+    );
+    await expect(testPage.getByTestId("header-remote-contribution-warning")).toHaveCount(0);
     await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
     await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
     await row.tap();

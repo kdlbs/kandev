@@ -542,6 +542,22 @@ function mapCurrentPRCommit(commit: PRCommitForMerge): MergedCommit | null {
   };
 }
 
+function reverseCommitsByRepository(commits: PRCommitForMerge[]): PRCommitForMerge[] {
+  const repositoryOrder: string[] = [];
+  const commitsByRepository = new Map<string, PRCommitForMerge[]>();
+  for (const commit of commits) {
+    const key = repositoryKey(commit.repository_name);
+    const repositoryCommits = commitsByRepository.get(key);
+    if (repositoryCommits) {
+      repositoryCommits.push(commit);
+      continue;
+    }
+    commitsByRepository.set(key, [commit]);
+    repositoryOrder.push(key);
+  }
+  return repositoryOrder.flatMap((key) => [...(commitsByRepository.get(key) ?? [])].reverse());
+}
+
 /**
  * Keeps provider and checkout rows independent after a proven history drift.
  * No SHA, message, or metadata matching occurs in this mode.
@@ -558,7 +574,7 @@ export function separateCommitHistories(
   prCommits: PRCommitForMerge[],
 ): { providerCommits: MergedCommit[]; localCommits: MergedCommit[] } {
   return {
-    providerCommits: prCommits.flatMap((commit) => {
+    providerCommits: reverseCommitsByRepository(prCommits).flatMap((commit) => {
       const mapped = mapCurrentPRCommit(commit);
       return mapped ? [mapped] : [];
     }),

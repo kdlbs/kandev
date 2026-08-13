@@ -43,8 +43,10 @@ fixture transitions and semantic assertions.
 
 1. Add the desktop assertions and confirm that the warning, order, or provenance test fails.
 2. Add the mobile assertions and confirm the provenance test fails.
-3. Complete any missing product behavior in Task 01 or Task 02 files.
-4. Run each focused spec with `--retries=0`.
+3. Add a one-request provider commit failure before navigation and verify the automatic retry keeps
+   checkout history visible, removes the warning, and adds the provider-only commit.
+4. Complete any missing product behavior in Task 01 or Task 02 files.
+5. Run each focused spec with `--retries=0`.
 
 Do not use arbitrary sleeps. Poll the semantic Changes state. Confirm that Playwright discovers the
 expected tests in each owning project.
@@ -73,8 +75,8 @@ Sequential. Run after the shared behavior is complete.
 
 ## Risks
 
-- Reset failure fixtures immediately after the intended request so later assertions do not inherit
-  the failure.
+- Use one-shot failure fixtures so the intended retry is deterministic and later assertions do not
+  inherit a queued failure.
 - Assert semantic provenance attributes and labels. Do not depend only on generated CSS strings.
 - Keep the mobile test in `mobile-chrome`. The default project excludes mobile specs.
 
@@ -86,10 +88,22 @@ conversation.
 
 ## Results
 
-- Desktop command passed 21 tests with Chromium:
+- The desktop divergence scenario asserts `Rewritten provider commit 15` is the first provider row,
+  proving newest-first provider history.
+- The mobile divergence scenario asserts `Mobile rewritten provider commit 15` is the first provider
+  row and exercises the same ordering contract on `mobile-chrome`.
+- A one-shot mock provider failure followed by the existing automatic retry now covers the original
+  failure-and-retry workflow. The desktop PR-only scenario and two mobile scenarios all keep local
+  history visible, show the provider-only commit after retry, and finish without the provider warning.
+- The desktop command passed 21 tests with Chromium before the review remediation:
   `cd apps/web && pnpm e2e:run tests/git/git-changes-panel.spec.ts -- --retries=0`
+- The review-remediation desktop retry scenario passed 1 test with Chromium:
+  `cd apps/web && pnpm e2e:run tests/git/git-changes-panel.spec.ts -- --grep "PR-only commit uses GitHub details when local history is stale" --retries=0`
 - Mobile command passed 1 test with `mobile-chrome`:
   `cd apps/web && pnpm e2e:run --project mobile-chrome tests/git/mobile-pr-checkout-drift.spec.ts -- --retries=0`
+- The review-remediation mobile retry scenarios passed 1 test each with `mobile-chrome`:
+  `cd apps/web && pnpm e2e:run --project mobile-chrome tests/git/mobile-pr-checkout-drift.spec.ts -- --retries=0`
+  `cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-changes-panel.spec.ts -- --grep "PR-only commit opens the remote commit sheet when local history is stale" --retries=0`
 - The fixtures cover preserved local history, provider-only history order and provenance, shared
   commits, confirmed divergence, provider-ahead actions, and mobile zero-overflow/touch behavior.
 - Fresh desktop and Pixel 5 screenshots were captured, inspected, compressed, and mapped in

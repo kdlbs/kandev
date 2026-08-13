@@ -229,8 +229,8 @@ describe("separateCommitHistories", () => {
     const result = separateCommitHistories(local, provider);
 
     expect(result.providerCommits.map((commit) => commit.commit_sha)).toEqual([
-      "new1111",
       "new3333",
+      "new1111",
     ]);
     expect(result.localCommits.map((commit) => commit.commit_sha)).toEqual(["old1111", "old2222"]);
     expect(result.providerCommits.every((commit) => commit.presentation === "current_pr")).toBe(
@@ -241,6 +241,7 @@ describe("separateCommitHistories", () => {
     );
     expect(result.localCommits.every((commit) => commit.pushed === false)).toBe(true);
   });
+
   it("does not create a PR-only target without complete provenance", () => {
     const pr = {
       ...makePR(SHARED_SHA, "remote"),
@@ -279,5 +280,53 @@ describe("separateCommitHistories", () => {
       repository_name: WIDGET_REPO,
       detailTarget: { source: "github", repo: WIDGET_REPO },
     });
+  });
+});
+
+describe("repository-scoped provider history", () => {
+  it("reverses provider history independently for each repository", () => {
+    const provider = [
+      {
+        ...makePR("old-a", "old a"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-a",
+        repository_name: "widget-a",
+      },
+      {
+        ...makePR("old-b", "old b"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-b",
+        repository_name: "widget-b",
+      },
+      {
+        ...makePR("new-a", "new a"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-a",
+        repository_name: "widget-a",
+      },
+      {
+        ...makePR("new-b", "new b"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-b",
+        repository_name: "widget-b",
+      },
+    ];
+
+    const result = separateCommitHistories([], provider);
+
+    expect(result.providerCommits.map((commit) => commit.commit_sha)).toEqual([
+      "new-a",
+      "old-a",
+      "new-b",
+      "old-b",
+    ]);
   });
 });
