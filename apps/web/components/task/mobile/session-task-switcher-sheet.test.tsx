@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
     workspaces: { activeId: "workspace-1" },
     repositories: { itemsByWorkspaceId: {} },
     taskPRs: { byTaskId: {} },
+    taskMRs: { byWorkspaceId: {} },
+    workspaces: { activeId: null },
     comments: { byTaskId: {} },
   },
 }));
