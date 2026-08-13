@@ -6,6 +6,7 @@ import { ApiError } from "@/lib/api/client";
 import { createTask as createTaskREST } from "@/lib/api";
 import type { useToast } from "@/components/toast-provider";
 import type { TaskCreateSubmit } from "@/components/task-create-dialog-types";
+import { t } from "@/lib/i18n";
 
 type CreateTaskParams = Parameters<typeof createTaskREST>[0];
 type CreateTaskResponse = Awaited<ReturnType<typeof createTaskREST>>;
@@ -84,8 +85,8 @@ export function useFreshBranchConsent({
       return await promptForList(status.dirty_files);
     } catch (error) {
       toast({
-        title: "Failed to check local repository status",
-        description: error instanceof Error ? error.message : "Request failed",
+        title: t("task:failedToCheckRepositoryStatus"),
+        description: error instanceof Error ? error.message : t("common:requestFailed"),
         variant: "error",
       });
       return null;

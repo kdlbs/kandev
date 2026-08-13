@@ -12,6 +12,7 @@
  */
 import type { PluginRecord } from "@/lib/types/plugins";
 import type { KeyboardShortcut } from "./constants";
+import { t } from "@/lib/i18n";
 import { parseCombo } from "./parse-combo";
 import {
   CONFIGURABLE_SHORTCUTS,
@@ -49,7 +50,7 @@ export function coreShortcutEntries(): ShortcutEntry[] {
   return (Object.keys(CONFIGURABLE_SHORTCUTS) as ConfigurableShortcutId[]).map((id) => ({
     source: "core",
     id,
-    label: CONFIGURABLE_SHORTCUTS[id].label,
+    label: t(CONFIGURABLE_SHORTCUTS[id].labelKey),
     default: CONFIGURABLE_SHORTCUTS[id].default,
   }));
 }

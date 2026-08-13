@@ -692,5 +692,21 @@
   "visualEditorUnavailable": "可视化编辑器不可用",
   "vsCodeRemoteSsh": "VS Code Remote SSH",
   "whenEnabledInstallYourProjectS": "启用后，会通过仓库设置脚本安装项目依赖（例如运行 <2>{{command}}</2>），以避免缺少类型错误。",
-  "externalMcpToolListTaskSessions": "按最近启动的顺序列出任务的所有代理会话，以便其他工具通过 ID 定位会话。"
+  "externalMcpToolListTaskSessions": "按最近启动的顺序列出任务的所有代理会话，以便其他工具通过 ID 定位会话。",
+  "shortcutBottomTerminal": "切换底部终端",
+  "shortcutCommandPanel": "命令面板",
+  "shortcutCommandPanelAlt": "命令面板（备用）",
+  "shortcutFileSearch": "文件搜索",
+  "shortcutFocusChatInput": "聚焦聊天输入框",
+  "shortcutFocusCliChatInput": "聚焦 CLI 聊天输入框",
+  "shortcutNewTask": "新建任务",
+  "shortcutOpenTaskPullRequest": "打开任务拉取请求",
+  "shortcutOpenWorkspacePicker": "打开工作区选择器",
+  "shortcutQuickChat": "快速聊天",
+  "shortcutRecentTaskSwitcher": "最近任务切换器",
+  "shortcutRecentTaskSwitcherBackward": "最近任务切换器（向后）",
+  "shortcutReverseChatSearch": "反向聊天搜索",
+  "shortcutTaskContentSearch": "搜索任务内容",
+  "shortcutTogglePlanMode": "切换计划模式",
+  "shortcutToggleSidebar": "切换侧边栏"
 }

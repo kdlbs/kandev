@@ -294,7 +294,7 @@ export function KeyboardShortcutsCard({
             <ShortcutRecorder
               key={id}
               shortcutId={id}
-              label={CONFIGURABLE_SHORTCUTS[id].label}
+              label={t(CONFIGURABLE_SHORTCUTS[id].labelKey)}
               defaultShortcut={CONFIGURABLE_SHORTCUTS[id].default}
               current={shortcuts[id]}
               onChange={handleChange}

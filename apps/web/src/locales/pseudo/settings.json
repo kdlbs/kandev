@@ -692,5 +692,21 @@
   "visualEditorUnavailable": "Vĩśũàĺ ēďĩţōŕ ũńàvàĩĺàƀĺē",
   "vsCodeRemoteSsh": "VŚ Ćōďē Ŕēḿōţē ŚŚĤ",
   "whenEnabledInstallYourProjectS": "Ŵĥēń ēńàƀĺēď, ĩńśţàĺĺ ŷōũŕ ƥŕōĵēćţ'ś ďēƥēńďēńćĩēś (ē.ĝ. <2>{{command}}</2> vĩà ŕēƥōśĩţōŕŷ śēţũƥ śćŕĩƥţś) ţō àvōĩď ḿĩśśĩńĝ ţŷƥē ēŕŕōŕś.",
-  "externalMcpToolListTaskSessions": "Ĺĩśţ ēvēŕŷ àĝēńţ śēśśĩōń ōń à ţàśķ, ńēŵēśţ ƒĩŕśţ, śō àńōţĥēŕ ţōōĺ ćàń àďďŕēśś ōńē ƀŷ ĨĎ."
+  "externalMcpToolListTaskSessions": "Ĺĩśţ ēvēŕŷ àĝēńţ śēśśĩōń ōń à ţàśķ, ńēŵēśţ ƒĩŕśţ, śō àńōţĥēŕ ţōōĺ ćàń àďďŕēśś ōńē ƀŷ ĨĎ.",
+  "shortcutBottomTerminal": "Ţōĝĝĺē Ɓōţţōḿ Ţēŕḿĩńàĺ",
+  "shortcutCommandPanel": "Ćōḿḿàńď Ƥàńēĺ",
+  "shortcutCommandPanelAlt": "Ćōḿḿàńď Ƥàńēĺ (Àĺţ)",
+  "shortcutFileSearch": "Ƒĩĺē Śēàŕćĥ",
+  "shortcutFocusChatInput": "Ƒōćũś Ćĥàţ Ĩńƥũţ",
+  "shortcutFocusCliChatInput": "Ƒōćũś ĆĹĨ Ćĥàţ Ĩńƥũţ",
+  "shortcutNewTask": "Ńēŵ Ţàśķ",
+  "shortcutOpenTaskPullRequest": "Ōƥēń Ţàśķ Ƥũĺĺ Ŕēqũēśţ",
+  "shortcutOpenWorkspacePicker": "Ōƥēń Ŵōŕķśƥàćē Ƥĩćķēŕ",
+  "shortcutQuickChat": "Qũĩćķ Ćĥàţ",
+  "shortcutRecentTaskSwitcher": "Ŕēćēńţ Ţàśķ Śŵĩţćĥēŕ",
+  "shortcutRecentTaskSwitcherBackward": "Ŕēćēńţ Ţàśķ Śŵĩţćĥēŕ (Ɓàćķŵàŕď)",
+  "shortcutReverseChatSearch": "Ŕēvēŕśē Ćĥàţ Śēàŕćĥ",
+  "shortcutTaskContentSearch": "Śēàŕćĥ Ţàśķ Ćōńţēńţś",
+  "shortcutTogglePlanMode": "Ţōĝĝĺē Ƥĺàń Ḿōďē",
+  "shortcutToggleSidebar": "Ţōĝĝĺē Śĩďēƀàŕ"
 }

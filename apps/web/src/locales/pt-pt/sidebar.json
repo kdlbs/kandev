@@ -104,5 +104,7 @@
   "viewLabel": "Vista: {{name}}",
   "whatsNew": "Novidades",
   "work": "Trabalho",
-  "workspaceFallback": "Área de trabalho"
+  "workspaceFallback": "Área de trabalho",
+  "taskPreferences": "Preferências de tarefas da barra lateral",
+  "views": "Vistas da barra lateral"
 }

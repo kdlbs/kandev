@@ -78,5 +78,15 @@
   "walkMeThroughTheseReviewChanges": "Explicar passo a passo estas alterações da revisão",
   "walkthrough": "Passo a passo",
   "walkthroughDiscarded": "Passo a passo descartado",
-  "wrapLongLines": "Quebrar as linhas longas"
+  "wrapLongLines": "Quebrar as linhas longas",
+  "changesDiscarded": "Alterações descartadas",
+  "changesStillLoading": "As alterações ainda estão a carregar",
+  "couldNotSendFinding": "Não foi possível enviar a constatação",
+  "couldNotUpdateFinding": "Não foi possível atualizar a constatação",
+  "discardFailed": "Falha ao descartar",
+  "failedToRequestWalkthrough": "Falha ao solicitar o passo a passo",
+  "findingQueuedForAgent": "Constatação adicionada à fila do agente",
+  "findingSentToAgent": "Constatação enviada ao agente",
+  "walkthroughRequestQueued": "Pedido de passo a passo em fila",
+  "walkthroughRequestSent": "Pedido de passo a passo enviado"
 }

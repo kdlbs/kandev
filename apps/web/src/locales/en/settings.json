@@ -692,5 +692,21 @@
   "visualEditorUnavailable": "Visual editor unavailable",
   "vsCodeRemoteSsh": "VS Code Remote SSH",
   "whenEnabledInstallYourProjectS": "When enabled, install your project's dependencies (e.g. <2>{{command}}</2> via repository setup scripts) to avoid missing type errors.",
-  "externalMcpToolListTaskSessions": "List every agent session on a task, newest first, so another tool can address one by ID."
+  "externalMcpToolListTaskSessions": "List every agent session on a task, newest first, so another tool can address one by ID.",
+  "shortcutBottomTerminal": "Toggle Bottom Terminal",
+  "shortcutCommandPanel": "Command Panel",
+  "shortcutCommandPanelAlt": "Command Panel (Alt)",
+  "shortcutFileSearch": "File Search",
+  "shortcutFocusChatInput": "Focus Chat Input",
+  "shortcutFocusCliChatInput": "Focus CLI Chat Input",
+  "shortcutNewTask": "New Task",
+  "shortcutOpenTaskPullRequest": "Open Task Pull Request",
+  "shortcutOpenWorkspacePicker": "Open Workspace Picker",
+  "shortcutQuickChat": "Quick Chat",
+  "shortcutRecentTaskSwitcher": "Recent Task Switcher",
+  "shortcutRecentTaskSwitcherBackward": "Recent Task Switcher (Backward)",
+  "shortcutReverseChatSearch": "Reverse Chat Search",
+  "shortcutTaskContentSearch": "Search Task Contents",
+  "shortcutTogglePlanMode": "Toggle Plan Mode",
+  "shortcutToggleSidebar": "Toggle Sidebar"
 }

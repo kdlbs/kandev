@@ -676,5 +676,21 @@
   "viewAvailableSettings": "Ver as definições disponíveis",
   "visualEditorUnavailable": "Editor visual indisponível",
   "vsCodeRemoteSsh": "VS Code Remote SSH",
-  "whenEnabledInstallYourProjectS": "Quando está ativado, instale as dependências do seu projeto (por exemplo, <2>{{command}}</2> através dos scripts de configuração do repositório) para evitar erros de tipos por falta de dependências."
+  "whenEnabledInstallYourProjectS": "Quando está ativado, instale as dependências do seu projeto (por exemplo, <2>{{command}}</2> através dos scripts de configuração do repositório) para evitar erros de tipos por falta de dependências.",
+  "shortcutBottomTerminal": "Alternar terminal inferior",
+  "shortcutCommandPanel": "Painel de comandos",
+  "shortcutCommandPanelAlt": "Painel de comandos (alternativo)",
+  "shortcutFileSearch": "Pesquisa de ficheiros",
+  "shortcutFocusChatInput": "Focar entrada do chat",
+  "shortcutFocusCliChatInput": "Focar entrada do chat CLI",
+  "shortcutNewTask": "Nova tarefa",
+  "shortcutOpenTaskPullRequest": "Abrir pull request da tarefa",
+  "shortcutOpenWorkspacePicker": "Abrir seletor de áreas de trabalho",
+  "shortcutQuickChat": "Chat rápido",
+  "shortcutRecentTaskSwitcher": "Seletor de tarefas recentes",
+  "shortcutRecentTaskSwitcherBackward": "Seletor de tarefas recentes (para trás)",
+  "shortcutReverseChatSearch": "Pesquisa inversa no chat",
+  "shortcutTaskContentSearch": "Pesquisar conteúdo da tarefa",
+  "shortcutTogglePlanMode": "Alternar modo de plano",
+  "shortcutToggleSidebar": "Alternar barra lateral"
 }

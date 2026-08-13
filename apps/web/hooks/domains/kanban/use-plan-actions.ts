@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -21,6 +22,7 @@ const AUTO_TRANSITION_ACTIONS = ["move_to_next", "move_to_previous", "move_to_st
 
 export function useNextWorkflowStep(taskId: string | null) {
   const { toast } = useToast();
+  const { t } = useTranslation("task");
   const workflowId = useAppStore((s) => s.kanban.workflowId);
   const steps = useAppStore((s) => s.kanban.steps);
   const taskStepId = useAppStore((s) => {
@@ -83,11 +85,11 @@ export function useNextWorkflowStep(taskId: string | null) {
       return true;
     } catch (err) {
       console.error("Failed to proceed to next step:", err);
-      toast({ description: "Failed to proceed to next step", variant: "error" });
+      toast({ description: t("task:failedToProceedToNextStep"), variant: "error" });
       setMoveFromSessionId(null);
       return false;
     }
-  }, [taskId, workflowId, nextStep, activeSessionId, toast]);
+  }, [taskId, workflowId, nextStep, activeSessionId, t, toast]);
 
   const proceedStepName = nextStep && !currentStepAutoTransitions ? nextStep.title : null;
 
@@ -158,6 +160,7 @@ function useImplementPlan(
 ) {
   const setTaskPlan = useAppStore((s) => s.setTaskPlan);
   const { toast } = useToast();
+  const { t } = useTranslation("task");
   return useCallback(async (): Promise<boolean> => {
     if (!resolvedSessionId || !taskId) return false;
 
@@ -209,7 +212,7 @@ function useImplementPlan(
       return true;
     } catch (err) {
       console.error("Failed to start implementation:", err);
-      toast({ description: "Failed to start implementing the plan", variant: "error" });
+      toast({ description: t("task:failedToStartImplementingPlan"), variant: "error" });
       return false;
     }
   }, [
@@ -220,6 +223,7 @@ function useImplementPlan(
     clearPlanModeAfterSend,
     handlePlanModeChange,
     toast,
+    t,
   ]);
 }
 
