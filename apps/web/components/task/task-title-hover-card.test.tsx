@@ -14,6 +14,7 @@ const FIRST_SUBTASK_TITLE = "First subtask";
 function makeTask(overrides: Partial<KanbanState["tasks"][number]>): KanbanState["tasks"][number] {
   return {
     id: "id",
+    workflowId: "wf-1",
     workflowStepId: "step-1",
     title: "Task",
     position: 0,

@@ -347,7 +347,7 @@ function TaskItemContent({
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         {taskId ? (
-          <TaskTitleHoverCard taskId={taskId} title={title}>
+          <TaskTitleHoverCard taskId={taskId} title={title} side="right" align="start">
             <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
           </TaskTitleHoverCard>
         ) : (

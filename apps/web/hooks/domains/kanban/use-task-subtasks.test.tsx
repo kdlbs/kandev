@@ -7,6 +7,7 @@ import { useTaskSubtasks } from "./use-task-subtasks";
 function makeTask(overrides: Partial<KanbanState["tasks"][number]>): KanbanState["tasks"][number] {
   return {
     id: "id",
+    workflowId: "wf-1",
     workflowStepId: "step-1",
     title: "Task",
     position: 0,

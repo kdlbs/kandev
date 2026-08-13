@@ -51,10 +51,14 @@ export function TaskTitleHoverCard({
   taskId,
   title,
   children,
+  side = "bottom",
+  align = "start",
 }: {
   taskId: string;
   title: string;
   children: ReactNode;
+  side?: "top" | "right" | "bottom" | "left";
+  align?: "start" | "center" | "end";
 }) {
   const { isFinePointer } = useResponsiveBreakpoint();
 
@@ -64,8 +68,8 @@ export function TaskTitleHoverCard({
     <HoverCard openDelay={200} closeDelay={100}>
       <HoverCardTrigger asChild>{children}</HoverCardTrigger>
       <HoverCardContent
-        side="bottom"
-        align="start"
+        side={side}
+        align={align}
         data-testid="task-title-hover-card"
         className="w-80 max-w-[calc(100vw-1rem)] max-h-80 overflow-y-auto p-3"
       >
