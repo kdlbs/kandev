@@ -16,9 +16,8 @@ place for dependency selection and future less-common options.
 
 ## What
 
-- Add a compact, collapsed `Advanced settings` disclosure to the create-task
-  form below the existing workspace or worktree selector context, at the
-  current dependency area.
+- Add a compact, collapsed `Advanced settings` disclosure to the bottom of the
+  create-task form, below the model, executor, and workflow selector controls.
 - Render the disclosure label in muted, very small text with a subtle chevron.
   The whole row remains a semantic button so the small visual label does not
   reduce the interaction target.
@@ -44,7 +43,8 @@ place for dependency selection and future less-common options.
 
 ### Collapsed state
 
-- The row is visible below the workspace or worktree selector context.
+- The row is visible at the bottom of the create-task settings, below the model,
+  executor, and workflow selector controls.
 - The row shows the localized `Advanced settings` label in a muted, subtle
   size and a direction indicator.
 - The dependency trigger and its `No dependency` text are not visible while
@@ -92,7 +92,7 @@ place for dependency selection and future less-common options.
   trigger is not visible.
 - **GIVEN** the collapsed advanced-settings row, **WHEN** the user activates it,
   **THEN** the row reports expanded and the dependency selector appears below
-  the workspace or worktree selector context.
+  the model, executor, and workflow selector controls.
 - **GIVEN** the expanded selector with no predecessors, **THEN** its trigger
   shows the existing `No dependency` label and dependency icon.
 - **GIVEN** a selected predecessor, **WHEN** the user collapses and reopens the

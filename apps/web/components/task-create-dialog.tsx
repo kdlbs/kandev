@@ -86,13 +86,6 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onRefreshRepositories={onRefreshRepositories}
         repositoriesRefreshing={repositoriesRefreshing}
       />
-      <TaskCreateAdvancedSettings
-        isCreateMode={isCreateMode}
-        isTaskStarted={isTaskStarted}
-        blockedBy={fs.blockedBy}
-        onBlockedByChange={fs.setBlockedBy}
-        dependenciesDisabled={props.isCreatingSession}
-      />
       {showTaskName && (
         <InlineTaskName
           value={fs.taskName}
@@ -189,6 +182,13 @@ function DialogFormBody(props: DialogFormBodyProps) {
         onWorkflowChange={props.onWorkflowChange}
         agentProfiles={props.agentProfiles}
         workflowLocked={props.workflowLocked}
+      />
+      <TaskCreateAdvancedSettings
+        isCreateMode={isCreateMode}
+        isTaskStarted={isTaskStarted}
+        blockedBy={props.fs.blockedBy}
+        onBlockedByChange={props.fs.setBlockedBy}
+        dependenciesDisabled={props.isCreatingSession}
       />
     </div>
   );

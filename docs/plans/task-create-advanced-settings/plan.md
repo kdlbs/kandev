@@ -37,10 +37,9 @@ not change the backend, API client, persistence, or WebSocket contracts.
 
 ### Dialog placement
 
-- Update `apps/web/components/task-create-dialog-form-body.tsx` and
-  `apps/web/components/task-create-dialog.tsx` so the advanced section occupies
-  the current dependency presentation area below the workspace or worktree
-  selector context.
+- Update `apps/web/components/task-create-dialog.tsx` so the advanced section
+  renders at the bottom of the create-task form, below the model, executor, and
+  workflow selector controls.
 - Keep `renderWorkflowSection` and all workflow visibility, locking, and
   single-workflow override behavior unchanged. Refactor the old paired
   workflow/dependency wrapper into a workflow-only render path if needed, then
@@ -81,10 +80,10 @@ not change the backend, API client, persistence, or WebSocket contracts.
 ## E2E tests
 
 - Extend `apps/web/e2e/tests/task/create-task-dependency-selector.spec.ts` to
-  assert that the create dialog starts with a collapsed advanced row, the
-  dependency trigger is hidden until expansion, the selector appears after
-  expansion, and the existing selection and create-payload behavior remains
-  intact.
+  assert that the create dialog starts with a collapsed advanced row below the
+  model, executor, and workflow controls, the dependency trigger is hidden
+  until expansion, and the existing selection and create-payload behavior
+  remains intact.
 - Extend `apps/web/e2e/tests/task/mobile-create-task-dependency-selector.spec.ts`
   to tap the advanced row before opening the dependency selector, check the
   row's touch box and expanded state, and retain picker containment, help,

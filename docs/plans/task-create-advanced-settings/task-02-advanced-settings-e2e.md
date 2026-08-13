@@ -16,9 +16,9 @@ creation payload.
 
 ## Acceptance
 
-- Desktop E2E proves the advanced row is collapsed on first render, the
-  dependency trigger is hidden until expansion, and the selector appears after
-  expansion.
+- Desktop E2E proves the advanced row is collapsed on first render below the
+  model, executor, and workflow controls, the dependency trigger is hidden
+  until expansion, and the selector appears after expansion.
 - Desktop E2E keeps the existing selector checks for the `No dependency`
   default, task icons, search, info help, multiple selection, clearing, and
   `blocked_by` persistence after creation.

@@ -17,8 +17,9 @@ selector semantics, and payload path.
 ## Acceptance
 
 - A create-mode, unstarted task dialog shows a localized, muted, very small
-  `Advanced settings` trigger below the workspace or worktree selector
-  context, and the trigger is collapsed by default.
+  `Advanced settings` trigger at the bottom of the form, below the model,
+  executor, and workflow selector controls, and the trigger is collapsed by
+  default.
 - The trigger is a semantic collapsible control with `aria-expanded`, a stable
   test identity, and a mobile hitbox of at least 44 CSS pixels.
 - The dependency selector is absent while collapsed and appears inside the
@@ -96,9 +97,9 @@ and plan status before starting Task 02.
 ## Results
 
 - Added `TaskCreateAdvancedSettings` as an inline, collapsed disclosure below
-  the repository/workspace context. It keeps the dependency selector inside an
-  extensible content region and preserves `blockedBy` state and disabled
-  behavior.
+  the model, executor, and workflow controls. It keeps the dependency selector
+  inside an extensible content region and preserves `blockedBy` state and
+  disabled behavior.
 - Kept workflow rendering independent and unchanged for its existing visibility,
   locking, and single-workflow rules.
 - Added localized English and pseudo-locale copy plus component coverage for

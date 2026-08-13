@@ -50,14 +50,27 @@ test.describe("Task-create dependency selector", () => {
       await expect(advancedTrigger).toBeVisible();
       await expect(advancedTrigger).toHaveAttribute("aria-expanded", "false");
       await expect(dialog.getByTestId(DEPENDENCY_TRIGGER)).toHaveCount(0);
-      expect(
-        await advancedSettings.evaluate((element) =>
-          element.previousElementSibling?.getAttribute("data-testid"),
-        ),
-      ).toBe("repo-chips-row");
-
+      await expect(dialog.getByTestId("agent-profile-selector")).toBeVisible();
+      await expect(dialog.getByTestId("executor-profile-selector")).toBeVisible();
       const workflowSelector = dialog.getByTestId("workflow-selector-trigger");
       await expect(workflowSelector).toBeVisible();
+      expect(
+        await advancedSettings.evaluate((element) => {
+          const dialogRoot = element.closest('[data-testid="create-task-dialog"]');
+          if (!dialogRoot) return false;
+          return [
+            "agent-profile-selector",
+            "executor-profile-selector",
+            "workflow-selector-trigger",
+          ].every((testId) => {
+            const control = dialogRoot.querySelector(`[data-testid="${testId}"]`);
+            return (
+              control !== null &&
+              Boolean(control.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)
+            );
+          });
+        }),
+      ).toBe(true);
       await advancedTrigger.click();
       await expect(advancedTrigger).toHaveAttribute("aria-expanded", "true");
 
