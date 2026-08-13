@@ -110,6 +110,7 @@ type MockClient struct {
 	checks            map[checkKey][]CheckRun
 	files             map[prKey][]PRFile
 	commits           map[prKey][]PRCommitInfo
+	prCommitsFailures map[prKey]int
 	commitDetails     map[commitDetailKey]PRCommitDetail
 	submittedReviews  []submittedReview
 	requestedReviews  []requestedReviewers
@@ -159,6 +160,7 @@ func NewMockClient() *MockClient {
 		checks:            make(map[checkKey][]CheckRun),
 		files:             make(map[prKey][]PRFile),
 		commits:           make(map[prKey][]PRCommitInfo),
+		prCommitsFailures: make(map[prKey]int),
 		commitDetails:     make(map[commitDetailKey]PRCommitDetail),
 		mergeMethods:      make(map[repoKey]RepoMergeMethods),
 		repositoryDetails: make(map[repoKey]*GitHubRepository),
@@ -521,9 +523,14 @@ func (m *MockClient) ListPRFiles(_ context.Context, owner, repo string, number i
 }
 
 func (m *MockClient) ListPRCommits(_ context.Context, owner, repo string, number int) ([]PRCommitInfo, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.commits[prKey{owner, repo, number}], nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := prKey{owner, repo, number}
+	if remaining := m.prCommitsFailures[k]; remaining > 0 {
+		m.prCommitsFailures[k] = remaining - 1
+		return nil, fmt.Errorf("mock: PR commits unavailable for %s/%s#%d", owner, repo, number)
+	}
+	return m.commits[k], nil
 }
 
 func (m *MockClient) GetPRCommitDetail(_ context.Context, owner, repo, sha string) (PRCommitDetail, error) {
@@ -952,6 +959,18 @@ func (m *MockClient) AddPRCommits(owner, repo string, number int, commits []PRCo
 	m.commits[k] = append(m.commits[k], commits...)
 }
 
+// SetPRCommitsFailures queues a number of failed ListPRCommits responses for a PR.
+func (m *MockClient) SetPRCommitsFailures(owner, repo string, number, failures int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := prKey{owner, repo, number}
+	if failures <= 0 {
+		delete(m.prCommitsFailures, k)
+		return
+	}
+	m.prCommitsFailures[k] = failures
+}
+
 // AddPRCommitDetail seeds an individual GitHub commit response.
 func (m *MockClient) AddPRCommitDetail(owner, repo, sha string, detail PRCommitDetail) {
 	m.mu.Lock()
@@ -982,6 +1001,7 @@ func (m *MockClient) Reset() {
 	m.checks = make(map[checkKey][]CheckRun)
 	m.files = make(map[prKey][]PRFile)
 	m.commits = make(map[prKey][]PRCommitInfo)
+	m.prCommitsFailures = make(map[prKey]int)
 	m.commitDetails = make(map[commitDetailKey]PRCommitDetail)
 	m.submittedReviews = nil
 	m.requestedReviews = nil

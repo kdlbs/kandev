@@ -152,6 +152,10 @@ git diff --check
   provider-history body warning, and keeps remote actions fail-closed.
 - Task 03 passed the desktop Git Changes spec with 21 tests and the mobile rewritten-contribution spec
   with 1 test. Both surfaces expose the same provenance labels without horizontal overflow.
+- Review remediation adds repository-scoped newest-first assertions for commit 15 and deterministic
+  desktop/mobile browser coverage for one provider failure followed by automatic reconciliation. The
+  focused remediation scenarios passed 1 desktop test and 2 mobile tests; the helper unit file passed
+  10 tests and the mock-provider backend tests passed 2 tests.
 - Final focused tests passed 59 tests across 6 files. Typecheck, lint, i18n checks, i18n ratchet, and
   `git diff --check` passed.
 - PR fixup hardened unavailable-evidence action gates, repository-scoped ordering, single-repository

@@ -35,6 +35,27 @@ func serveMockJSON(t *testing.T, router *gin.Engine, method, path, body string) 
 	return response
 }
 
+func TestMockControllerSequencesPRCommitFailureThenSuccess(t *testing.T) {
+	router, svc, _ := setupWorkspaceAuthMockController(t)
+	response := serveMockJSON(t, router, http.MethodPut,
+		"/api/v1/github/mock/pr-commits-failures",
+		`{"owner":"owner","repo":"repo","number":7,"failures":1}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("configure PR commit failure: %d %s", response.Code, response.Body.String())
+	}
+
+	mock, ok := svc.client.(*MockClient)
+	if !ok {
+		t.Fatalf("service client has type %T, want *MockClient", svc.client)
+	}
+	if _, err := mock.ListPRCommits(context.Background(), "owner", "repo", 7); err == nil {
+		t.Fatal("expected the configured request to fail")
+	}
+	if _, err := mock.ListPRCommits(context.Background(), "owner", "repo", 7); err != nil {
+		t.Fatalf("expected the next request to succeed: %v", err)
+	}
+}
+
 func TestMockControllerWorkspaceConnectionsResolveIsolatedPrincipals(t *testing.T) {
 	router, svc, _ := setupWorkspaceAuthMockController(t)
 	registration := serveMockJSON(t, router, http.MethodPut,

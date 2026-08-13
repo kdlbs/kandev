@@ -1473,6 +1473,20 @@ export class ApiClient {
     });
   }
 
+  async mockGitHubSetPRCommitsFailures(
+    owner: string,
+    repo: string,
+    number: number,
+    failures: number,
+  ): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/pr-commits-failures", {
+      owner,
+      repo,
+      number,
+      failures,
+    });
+  }
+
   async mockGitHubAddPRCommitDetail(
     owner: string,
     repo: string,

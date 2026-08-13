@@ -50,6 +50,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/checks", c.addCheckRuns)
 	api.POST("/files", c.addPRFiles)
 	api.POST("/commits", c.addPRCommits)
+	api.PUT("/pr-commits-failures", c.setPRCommitsFailures)
 	api.POST("/commit-details", c.addPRCommitDetail)
 	api.POST("/branches", c.addBranches)
 	api.POST("/repo-files", c.addRepoFiles)
@@ -499,6 +500,22 @@ func (c *MockController) addPRCommits(ctx *gin.Context) {
 	}
 	c.mock.AddPRCommits(req.Owner, req.Repo, req.Number, req.Commits)
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Commits)})
+}
+
+func (c *MockController) setPRCommitsFailures(ctx *gin.Context) {
+	var req struct {
+		Owner    string `json:"owner"`
+		Repo     string `json:"repo"`
+		Number   int    `json:"number"`
+		Failures int    `json:"failures"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Owner) == "" ||
+		strings.TrimSpace(req.Repo) == "" || req.Number <= 0 || req.Failures < 0 {
+		respondInvalidPayload(ctx)
+		return
+	}
+	c.mock.SetPRCommitsFailures(req.Owner, req.Repo, req.Number, req.Failures)
+	ctx.JSON(http.StatusOK, gin.H{"failures": req.Failures})
 }
 
 func (c *MockController) addPRCommitDetail(ctx *gin.Context) {
