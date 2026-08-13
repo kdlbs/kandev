@@ -12,14 +12,14 @@ test.describe("Sidebar office gating", () => {
     await testPage.goto("/office");
     await expect(sidebar.getByText("Projects", { exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(sidebar.getByText("Agents", { exact: true })).toBeVisible();
-    await expect(sidebar.getByRole("link", { name: "Inbox" })).toBeVisible();
+    await expect(sidebar.getByRole("link", { name: "Inbox", exact: true })).toBeVisible();
 
     // Regular workspace home: the office sections are gone.
     await testPage.goto("/");
     await expect(sidebar).toBeVisible();
     await expect(sidebar.getByText("Projects", { exact: true })).toHaveCount(0);
     await expect(sidebar.getByText("Agents", { exact: true })).toHaveCount(0);
-    await expect(sidebar.getByRole("link", { name: "Inbox" })).toHaveCount(0);
+    await expect(sidebar.getByRole("link", { name: "Inbox", exact: true })).toHaveCount(0);
   });
 
   test("New Task opens the Office dialog only inside Office, Kanban dialog otherwise", async ({
