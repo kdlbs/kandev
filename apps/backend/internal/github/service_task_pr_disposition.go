@@ -55,7 +55,16 @@ func (s *Service) SetTaskPRDisposition(
 	if dispositionUnchanged(tp, disposition, normalizedURL) {
 		return tp, nil
 	}
+	return s.writeTaskPRDisposition(ctx, associationID, disposition, normalizedURL)
+}
 
+// writeTaskPRDisposition persists a validated, changed disposition write,
+// re-reads the row, and publishes the update event. Split out of
+// SetTaskPRDisposition to keep that function's complexity within the repo's
+// lint limits.
+func (s *Service) writeTaskPRDisposition(
+	ctx context.Context, associationID string, disposition, normalizedURL *string,
+) (*TaskPR, error) {
 	var recordedAt *time.Time
 	action := "clear"
 	if disposition != nil {
@@ -71,6 +80,9 @@ func (s *Service) SetTaskPRDisposition(
 	updated, err := s.store.GetTaskPRByID(ctx, associationID)
 	if err != nil {
 		return nil, err
+	}
+	if updated == nil {
+		return nil, ErrTaskPRNotFound
 	}
 	if s.eventBus != nil {
 		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", updated)

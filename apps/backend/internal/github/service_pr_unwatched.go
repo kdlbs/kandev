@@ -100,43 +100,64 @@ func (s *Service) syncUnwatchedTaskPRGroup(ctx context.Context, workspaceID stri
 	}
 	live := s.fetchUnwatchedTaskPRs(ctx, resolved, group)
 	for _, tp := range group {
-		pr := live[prStatusCacheKey(tp.Owner, tp.Repo, tp.PRNumber)]
-		if pr == nil {
+		status := live[prStatusCacheKey(tp.Owner, tp.Repo, tp.PRNumber)]
+		if status == nil || status.PR == nil {
 			continue
 		}
-		if syncErr := s.reconcileTaskPRLifecycle(ctx, tp, pr); syncErr != nil {
+		if syncErr := s.reconcileTaskPRLifecycle(ctx, tp, status); syncErr != nil {
 			s.logger.Debug("unwatched task PR reconcile failed",
 				zap.String("task_id", tp.TaskID), zap.Int("pr_number", tp.PRNumber), zap.Error(syncErr))
 		}
 	}
 }
 
-// reconcileTaskPRLifecycle writes only the fields that describe where the PR
-// sits in its lifecycle, then publishes the same update event SyncTaskPR does
-// so every client converges.
+// reconcileTaskPRLifecycle writes the fields that describe where the PR sits
+// in its lifecycle, plus the five outcome-attribution fields (AC-36/AC-37
+// require merged_by_login / is_draft to be non-NULL on a row this path can
+// take terminal, so they cannot be left for a populating sync that may never
+// come — a PR nobody watches gets no other writer). It reuses
+// resolveTaskPROutcomeFields, the same populated/preserve logic SyncTaskPR
+// uses, on the *PRStatus fetchUnwatchedTaskPRs already builds from data this
+// path was fetching anyway. It then publishes the same update event
+// SyncTaskPR does so every client converges.
 //
-// Everything else on the row is left alone on purpose. The aggregates
-// (checks_state, checks_total/passing, review_state, review counts, unresolved
-// threads, mergeable_state) are owned by the watch-driven sync, which fetches
-// the reviews and check runs needed to compute them. Writing them from here
-// would mean either re-fetching all of that for a PR nobody is working on, or
-// — worse — persisting a less-informed answer over a better one: the per-PR
-// REST status sets ChecksPopulated/ReviewCountsPopulated with zeroed counts
-// when it has nothing to count, which SyncTaskPR then faithfully stores.
-func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, pr *PR) error {
+// Aggregates (checks_state, checks_total/passing, review_state, review
+// counts, unresolved threads, mergeable_state) stay untouched on purpose:
+// they are owned by the watch-driven sync, which fetches the reviews and
+// check runs needed to compute them. Writing them from here would mean
+// either re-fetching all of that for a PR nobody is working on, or — worse —
+// persisting a less-informed answer over a better one: the per-PR REST
+// status sets ChecksPopulated/ReviewCountsPopulated with zeroed counts when
+// it has nothing to count, which SyncTaskPR then faithfully stores.
+func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, status *PRStatus) error {
+	pr := status.PR
+	isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt :=
+		resolveTaskPROutcomeFields(tp, status)
+
 	changed := tp.State != pr.State ||
 		!timeEqual(tp.MergedAt, pr.MergedAt) ||
-		!timeEqual(tp.ClosedAt, pr.ClosedAt)
+		!timeEqual(tp.ClosedAt, pr.ClosedAt) ||
+		!boolPtrEqual(tp.IsDraft, isDraft) ||
+		!intPtrEqual(tp.ChangedFiles, changedFiles) ||
+		!stringPtrEqual(tp.MergedByLogin, mergedByLogin) ||
+		!stringPtrEqual(tp.ClosedByLogin, closedByLogin) ||
+		!timeEqual(tp.AutoMergeObservedAt, autoMergeObservedAt)
 
 	tp.State = pr.State
 	tp.MergedAt = pr.MergedAt
 	tp.ClosedAt = pr.ClosedAt
+	tp.IsDraft = isDraft
+	tp.ChangedFiles = changedFiles
+	tp.MergedByLogin = mergedByLogin
+	tp.ClosedByLogin = closedByLogin
+	tp.AutoMergeObservedAt = autoMergeObservedAt
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
 
 	if err := s.store.UpdateTaskPR(ctx, tp); err != nil {
 		return fmt.Errorf("update task PR: %w", err)
 	}
+	incTaskPROutcomeSync(status.OutcomeFieldsPopulated)
 	if changed && s.eventBus != nil {
 		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
 		if err := s.eventBus.Publish(ctx, events.GitHubTaskPRUpdated, event); err != nil {
@@ -149,11 +170,13 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, pr *
 // fetchUnwatchedTaskPRs prefers the batched GraphQL query — one call for the
 // whole group — and falls back to per-PR reads when the client can't speak
 // GraphQL (NoopClient) or the batch itself fails. Same batched-then-per-item
-// shape as runBatchedOrPerWatchSync. Returns the live PRs keyed by
-// prStatusCacheKey.
+// shape as runBatchedOrPerWatchSync. Returns the live statuses keyed by
+// prStatusCacheKey, carrying the outcome-field population flags each path
+// already computed rather than the bare PR (AC-08/AC-10/AC-14 apply here
+// exactly as they do to the watch-driven batched query).
 func (s *Service) fetchUnwatchedTaskPRs(
 	ctx context.Context, resolved *resolvedServiceClient, group []*TaskPR,
-) map[string]*PR {
+) map[string]*PRStatus {
 	refs := make([]graphQLPRRef, 0, len(group))
 	for _, tp := range group {
 		// The repo is in the 10-min negative cache; probing it would only
@@ -169,7 +192,7 @@ func (s *Service) fetchUnwatchedTaskPRs(
 	if exec, execErr := graphQLExecutorFor(resolved.Client); execErr == nil {
 		out, err := s.batchedUnwatchedFetch(ctx, exec, resolved.CacheScope, refs)
 		if err == nil {
-			return prsFromStatuses(out)
+			return out
 		}
 		s.logger.Debug("batched unwatched task PR query failed; falling back per PR", zap.Error(err))
 	}
@@ -222,23 +245,16 @@ func batchedRefsKey(refs []graphQLPRRef) string {
 	return strings.Join(parts, "|")
 }
 
-func prsFromStatuses(statuses map[string]*PRStatus) map[string]*PR {
-	out := make(map[string]*PR, len(statuses))
-	for key, status := range statuses {
-		if status != nil && status.PR != nil {
-			out[key] = status.PR
-		}
-	}
-	return out
-}
-
 // fetchUnwatchedTaskPRsPerPR reads one PR at a time. GetPR is deliberate: the
 // full status helper also lists reviews and check runs (three calls per PR) to
-// compute aggregates this path does not write.
+// compute aggregates this path does not write. GetPR is still a full
+// single-pull-request fetch, so is_draft/changed_files/merged_by_login are
+// real observations here too (AC-10); ClosureAttributionPopulated stays
+// false since neither REST nor the gh CLI can see the closing actor (AC-15).
 func (s *Service) fetchUnwatchedTaskPRsPerPR(
 	ctx context.Context, resolved *resolvedServiceClient, refs []graphQLPRRef,
-) map[string]*PR {
-	out := make(map[string]*PR, len(refs))
+) map[string]*PRStatus {
+	out := make(map[string]*PRStatus, len(refs))
 	for _, ref := range refs {
 		pr, err := resolved.Client.GetPR(ctx, ref.Owner, ref.Repo, ref.Number)
 		if err != nil {
@@ -248,7 +264,10 @@ func (s *Service) fetchUnwatchedTaskPRsPerPR(
 			continue
 		}
 		if pr != nil {
-			out[prStatusCacheKey(ref.Owner, ref.Repo, ref.Number)] = pr
+			out[prStatusCacheKey(ref.Owner, ref.Repo, ref.Number)] = &PRStatus{
+				PR:                     pr,
+				OutcomeFieldsPopulated: true,
+			}
 		}
 	}
 	return out

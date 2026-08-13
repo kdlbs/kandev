@@ -412,6 +412,52 @@ func TestTriggerPRSyncAll_UnwatchedReconcilePreservesAggregates(t *testing.T) {
 	}
 }
 
+// TestTriggerPRSyncAll_UnwatchedReconcileWritesOutcomeAttribution is the
+// regression for AC-36: a PR that merges with no active watch is reconciled
+// only through syncUnwatchedTaskPRGroup, never through SyncTaskPR. Before
+// this fix, reconcileTaskPRLifecycle discarded the already-fetched draft
+// status and merger identity, so the row went terminal with
+// merged_by_login/is_draft still NULL — merged_at >= activation with a NULL
+// merged_by_login is exactly the writer-fault state AC-36 forbids.
+func TestTriggerPRSyncAll_UnwatchedReconcileWritesOutcomeAttribution(t *testing.T) {
+	_, svc, mockClient, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+	seedUnwatchedTaskPR(t, store, "task-1", 1293, "feature/first")
+
+	mergedAt := time.Now().UTC().Add(-10 * time.Minute)
+	mockClient.AddPR(&PR{
+		Number: 1293, Title: "Left behind", State: prStateMerged,
+		HTMLURL:    "https://github.com/owner/repo/pull/1293",
+		HeadBranch: "feature/first", BaseBranch: "main",
+		RepoOwner: "owner", RepoName: "repo",
+		CreatedAt: mergedAt.Add(-2 * time.Hour), UpdatedAt: mergedAt, MergedAt: &mergedAt,
+		Draft: false, ChangedFiles: 4, MergedByLogin: "carlosflorencio",
+	})
+
+	if _, err := svc.TriggerPRSyncAll(ctx, "task-1"); err != nil {
+		t.Fatalf("TriggerPRSyncAll: %v", err)
+	}
+
+	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-1", "repo-1", 1293)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskPRByRepoAndNumber: err=%v row=%v", err, got)
+	}
+	if got.State != prStateMerged || got.MergedAt == nil {
+		t.Fatalf("state=%q merged_at=%v, want merged with a timestamp", got.State, got.MergedAt)
+	}
+	if got.MergedByLogin == nil || *got.MergedByLogin != "carlosflorencio" {
+		t.Errorf("merged_by_login = %v, want %q (AC-36 requires non-NULL once merged_at is set)",
+			got.MergedByLogin, "carlosflorencio")
+	}
+	if got.IsDraft == nil || *got.IsDraft != false {
+		t.Errorf("is_draft = %v, want false observed, not NULL", got.IsDraft)
+	}
+	if got.ChangedFiles == nil || *got.ChangedFiles != 4 {
+		t.Errorf("changed_files = %v, want 4 observed, not NULL", got.ChangedFiles)
+	}
+}
+
 func TestUnwatchedTaskPRs_Selection(t *testing.T) {
 	now := time.Now().UTC()
 	stale := now.Add(-1 * time.Hour)

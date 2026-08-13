@@ -299,7 +299,10 @@ func (s *Service) ensurePRWatch(
 // callers MUST pass it — empty causes ReplaceTaskPR to wipe the entire task's
 // PR rows (legacy "delete all" branch), which is what older code relied on.
 func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *PR) (*TaskPR, error) {
-	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, false)
+	// pr here comes from branch-search discovery (poller.detectPRForWatch) or
+	// a batched status result of unknown populated-ness — never assert
+	// outcomeFieldsPopulated for this wrapper's callers (AC-11).
+	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, false, false)
 }
 
 func (s *Service) AssociatePRWithTaskForWorkspace(
@@ -308,11 +311,17 @@ func (s *Service) AssociatePRWithTaskForWorkspace(
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
-	return s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, false)
+	return s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, false, false)
 }
 
+// associatePRWithTask creates the task-PR association. outcomeFieldsPopulated
+// tells it whether pr came from a full single-PR fetch (AC-10) — only the
+// direct GetPR-based callers in this file set it true; the two public
+// wrappers above always pass false, preserving their existing callers'
+// behavior exactly, because a branch-search or batched-status pr may not
+// carry real observations for these fields (AC-11).
 func (s *Service) associatePRWithTask(
-	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR, restoreDetached bool,
+	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR, restoreDetached, outcomeFieldsPopulated bool,
 ) (*TaskPR, error) {
 	// Multi-branch: scope the "already-current" short-circuit by exact
 	// pr_number too. A task can hold multiple PR rows per (task, repo) on
@@ -359,6 +368,17 @@ func (s *Service) associatePRWithTask(
 		CreatedAt:    pr.CreatedAt,
 		MergedAt:     pr.MergedAt,
 		ClosedAt:     pr.ClosedAt,
+	}
+	if outcomeFieldsPopulated {
+		// A freshly-created row has no prior stored value to preserve, so
+		// resolveTaskPROutcomeFields' populated branch always applies here;
+		// reusing it (rather than duplicating its nil-vs-empty-string
+		// handling) keeps this path from drifting out of sync with
+		// SyncTaskPR. Guards a row linked already-terminal — e.g. the
+		// "+Task" URL flow on an already-merged PR — from shipping with
+		// merged_at set but merged_by_login NULL, which AC-36 forbids.
+		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, _, _ =
+			resolveTaskPROutcomeFields(tp, &PRStatus{PR: pr, OutcomeFieldsPopulated: true})
 	}
 	// ReplaceTaskPR upserts the row matching (task, repository, pr_number).
 	// Multi-branch tasks may already hold sibling rows for the SAME
@@ -408,7 +428,7 @@ func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, reposito
 	if err != nil {
 		return nil, fmt.Errorf("fetch PR: %w", err)
 	}
-	tp, err := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true)
+	tp, err := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true)
 	if err != nil {
 		return nil, fmt.Errorf("associate PR with task: %w", err)
 	}
@@ -433,7 +453,7 @@ func (s *Service) AssociateExistingPRByURLForWorkspace(
 	if err != nil {
 		return nil, fmt.Errorf("fetch PR: %w", err)
 	}
-	tp, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true)
+	tp, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true)
 	if err != nil {
 		return nil, fmt.Errorf("associate PR with task: %w", err)
 	}
@@ -473,7 +493,7 @@ func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, repos
 	}
 
 	// Associate PR with task (persists + publishes WS event)
-	if _, assocErr := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true); assocErr != nil {
+	if _, assocErr := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true, true); assocErr != nil {
 		s.logger.Error("failed to associate PR with task after creation",
 			zap.String("task_id", taskID), zap.Error(assocErr))
 	}
@@ -505,7 +525,7 @@ func (s *Service) AssociatePRByURLForWorkspace(
 	); err != nil {
 		return fmt.Errorf("create PR watch: %w", err)
 	}
-	if _, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true); err != nil {
+	if _, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true, true); err != nil {
 		return fmt.Errorf("associate PR with task: %w", err)
 	}
 	return nil
