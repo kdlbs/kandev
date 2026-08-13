@@ -69,7 +69,7 @@ That premise was unenforced: nothing in the manifest schema or the plugin SDK
 required a plugin to authenticate its own webhook. See
 `2026-08-12-plugin-webhook-auth-gate.md` for the fix — plugin webhooks now
 require a real caller identity by default; a manifest opts a specific webhook
-out via `webhooks[].public: true`.
+out via `webhooks[].access: public`.
 
 ## Consequences
 

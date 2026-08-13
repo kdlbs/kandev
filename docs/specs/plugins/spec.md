@@ -313,7 +313,7 @@ This remains kandev's one plugin-facing **HTTP** endpoint (external systems like
 or Jira cannot speak gRPC). Kandev enforces an auth gate before anything else: a caller
 with no request identity (session/PAT, or the synthetic identity injected while auth is
 disabled) is rejected with 401 unless the manifest declares `webhooks[].key: <key>`
-with `public: true` (see [Plugin manifest reference](../../public/plugins-manifest.md)).
+with `access: public` (see [Plugin manifest reference](../../public/plugins-manifest.md)).
 An anonymous caller sees 401 for an unknown plugin ID, an undeclared key, and a
 declared-non-public key alike, so a caller with no identity cannot enumerate installed
 plugins. Once the gate passes, kandev validates the plugin is active and the webhook
@@ -807,7 +807,7 @@ complete.
   calls the Slack API, then returns `EventAck{}`.
 
 - **GIVEN** a Jira sync plugin with a registered `jira-webhooks` webhook declaring
-  `public: true` (Jira's callback carries no kandev session or PAT), **WHEN**
+  `access: public` (Jira's callback carries no kandev session or PAT), **WHEN**
   Jira POSTs a webhook to
   `https://kandev.example.com/api/plugins/kandev-plugin-jira/webhooks/jira-webhooks`,
   **THEN** kandev converts the HTTP request into a `WebhookRequest` and calls the
@@ -974,12 +974,11 @@ complete.
 - **Mandatory package signing.** `checksums.txt.sig` verification is supported when
   present, but signing is optional in v1 — an unsigned package installs with a warning
   rather than being rejected. Requiring signatures is future work.
-- **Agent tools.** Plugins do not contribute tools to agents. An earlier
-  `tools[]` manifest section with an `InvokeTool` RPC was built during the
-  initial buildout but never wired into agent tool sets, and has been removed —
-  it duplicated MCP, kandev's established mechanism for exposing tools to
-  agents (`internal/mcp/`). If plugins ever contribute agent tools, they should
-  feed through the MCP surface rather than a parallel invocation path.
+- **Agent tools in the base v1 runtime.** The original parallel `tools[]` plus
+  `InvokeTool` path remains removed. Plugin-contributed agent tools are a
+  separate extension specified in [Plugin-Contributed Agent Tools](agent-tools.md)
+  and feed through Kandev's existing MCP surface rather than a second discovery
+  or invocation protocol.
 - **Hot reload.** Upgrading a plugin requires a new install (new version directory);
   there is no in-place manifest or binary swap on a running process.
 - **Multi-instance plugins.** Each plugin ID maps to exactly one supervised subprocess.

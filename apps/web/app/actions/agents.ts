@@ -144,6 +144,20 @@ export async function updateAgentProfileAction(
   return normalizeAgentProfile(raw);
 }
 
+/**
+ * Duplicate a profile: the backend copies the source's full configuration
+ * into a new row named "<source> copy" and returns the new profile. The
+ * existing `agent.profile.created` WS notification also picks the copy up in
+ * every open settings surface.
+ */
+export async function duplicateAgentProfileAction(id: string): Promise<AgentProfile> {
+  const raw = await agentSettingsRequest<unknown>(
+    `${apiBaseUrl}/api/v1/agent-profiles/${id}/duplicate`,
+    { method: "POST" },
+  );
+  return normalizeAgentProfile(raw);
+}
+
 import type {
   ActiveSessionInfo,
   AutomationReference,

@@ -6,7 +6,6 @@ import {
   parseLspStatusLocation,
   parseStartupPage,
   parseSystemMetricsDisplay,
-  parseVoiceMode,
 } from "./user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
@@ -493,6 +492,24 @@ describe("todo list panel setting", () => {
     expect(fallback.showTodoListPanel).toBe(false);
     expect(enabled.showTodoListPanel).toBe(true);
   });
+
+  it("defaults the not-empty sub-option to false and preserves an explicit true", () => {
+    const fallback = mapUserSettingsResponse(null) as {
+      showTodoListPanelOnlyWhenNotEmpty?: boolean;
+    };
+    const enabled = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        show_todo_list_panel_only_when_not_empty: true,
+        updated_at: UPDATED_AT,
+      } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
+    }) as { showTodoListPanelOnlyWhenNotEmpty?: boolean };
+
+    expect(fallback.showTodoListPanelOnlyWhenNotEmpty).toBe(false);
+    expect(enabled.showTodoListPanelOnlyWhenNotEmpty).toBe(true);
+  });
 });
 
 describe("parseChangesPanelLayout", () => {
@@ -511,77 +528,32 @@ describe("parseChangesPanelLayout", () => {
   });
 });
 
-describe("parseVoiceMode", () => {
-  it("maps every field from the snake_case wire payload", () => {
+describe("prevent auto-start on open preference", () => {
+  it("defaults the missing preference to false", () => {
+    expect(buildCoreFields({}).preventAutoStartAgentOnOpen).toBe(false);
+    expect(mapUserSettingsResponse(null).preventAutoStartAgentOnOpen).toBe(false);
+  });
+
+  it("preserves an explicit enabled preference", () => {
     expect(
-      parseVoiceMode({
-        enabled: false,
-        engine: "whisperWeb",
-        language: "pt-PT",
-        mode: "hold",
-        auto_send: true,
-        whisper_web_model: "small",
-      }),
-    ).toEqual({
-      enabled: false,
-      engine: "whisperWeb",
-      language: "pt-PT",
-      mode: "hold",
-      autoSend: true,
-      whisperWebModel: "small",
-    });
+      buildCoreFields({ prevent_auto_start_agent_on_open: true }).preventAutoStartAgentOnOpen,
+    ).toBe(true);
+    expect(
+      mapUserSettingsResponse({
+        settings: {
+          user_id: DEFAULT_USER_ID,
+          workspace_id: toWorkspaceId(""),
+          repository_ids: [],
+          prevent_auto_start_agent_on_open: true,
+          updated_at: UPDATED_AT,
+        },
+      }).preventAutoStartAgentOnOpen,
+    ).toBe(true);
   });
 
-  it("returns the defaults when the payload is undefined", () => {
-    expect(parseVoiceMode(undefined)).toEqual({
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    });
-  });
-
-  it("defaults enabled to true when the wire payload omits the field (old rows)", () => {
-    const result = parseVoiceMode({
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      auto_send: false,
-      whisper_web_model: "base",
-    } as unknown as Parameters<typeof parseVoiceMode>[0]);
-    expect(result.enabled).toBe(true);
-  });
-
-  it("fills in defaults for missing string fields and coerces auto_send to false", () => {
-    const result = parseVoiceMode({
-      engine: "" as unknown as "auto",
-      language: "",
-      mode: "" as unknown as "toggle",
-      whisper_web_model: "" as unknown as "base",
-    } as unknown as Parameters<typeof parseVoiceMode>[0]);
-    expect(result).toEqual({
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    });
-  });
-});
-
-describe("mapUserSettingsResponse voice mode", () => {
-  it("defaults the whole voiceMode object when response is null", () => {
-    const result = mapUserSettingsResponse(null);
-    expect(result.voiceMode).toEqual({
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    });
+  it("preserves an explicit disabled preference", () => {
+    expect(
+      buildCoreFields({ prevent_auto_start_agent_on_open: false }).preventAutoStartAgentOnOpen,
+    ).toBe(false);
   });
 });

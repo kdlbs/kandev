@@ -545,6 +545,38 @@ func TestScanUserSettingsTodoListPanelDefault(t *testing.T) {
 	}
 }
 
+func TestScanUserSettingsTodoListPanelOnlyWhenNotEmptyDefault(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan defaults: %v", err)
+	}
+	if settings.ShowTodoListPanelOnlyWhenNotEmpty {
+		t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = true, want false (default)")
+	}
+
+	settings, err = scanUserSettings(
+		settingsScanner{raw: `{"show_todo_list_panel_only_when_not_empty":true}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan stored preference: %v", err)
+	}
+	if !settings.ShowTodoListPanelOnlyWhenNotEmpty {
+		t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = false, want true (stored)")
+	}
+
+	settings, err = scanUserSettings(
+		settingsScanner{raw: `{"show_todo_list_panel_only_when_not_empty":false}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan explicit false: %v", err)
+	}
+	if settings.ShowTodoListPanelOnlyWhenNotEmpty {
+		t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = true, want false (explicit)")
+	}
+}
+
 func TestTodoListPanelSettingRoundTripThroughMarshalAndScan(t *testing.T) {
 	raw, err := marshalUserSettingsPayload(&models.UserSettings{ShowTodoListPanel: true})
 	if err != nil {
@@ -556,6 +588,22 @@ func TestTodoListPanelSettingRoundTripThroughMarshalAndScan(t *testing.T) {
 	}
 	if !settings.ShowTodoListPanel {
 		t.Fatal("ShowTodoListPanel = false, want true (round-tripped)")
+	}
+}
+
+func TestTodoListPanelOnlyWhenNotEmptyRoundTripThroughMarshalAndScan(t *testing.T) {
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{
+		ShowTodoListPanelOnlyWhenNotEmpty: true,
+	})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	settings, err := scanUserSettings(settingsScanner{raw: string(raw)}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan settings: %v", err)
+	}
+	if !settings.ShowTodoListPanelOnlyWhenNotEmpty {
+		t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = false, want true (round-tripped)")
 	}
 }
 

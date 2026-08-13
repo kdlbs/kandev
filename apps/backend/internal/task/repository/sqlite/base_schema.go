@@ -701,6 +701,7 @@ const sessionWorktreeSchemaDDL = `
 		task_environment_id TEXT DEFAULT '',
 		cost_subcents INTEGER NOT NULL DEFAULT 0,
 		tokens_in INTEGER NOT NULL DEFAULT 0,
+		tokens_cached_in BIGINT NOT NULL DEFAULT 0,
 		tokens_out INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);

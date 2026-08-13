@@ -151,6 +151,8 @@ func (h *GitHandlers) notifyGitOperationFailed(sessionID, operation string, resu
 func (h *GitHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorktreePull, h.wsPull)
 	d.RegisterFunc(ws.ActionWorktreePush, h.wsPush)
+	d.RegisterFunc(ws.ActionWorktreeReplaceContribution, h.wsReplaceContribution)
+	d.RegisterFunc(ws.ActionWorktreeUseContribution, h.wsUseContribution)
 	d.RegisterFunc(ws.ActionWorktreeRebase, h.wsRebase)
 	d.RegisterFunc(ws.ActionWorktreeMerge, h.wsMerge)
 	d.RegisterFunc(ws.ActionWorktreeAbort, h.wsAbort)
@@ -182,6 +184,14 @@ type GitPushRequest struct {
 	Force       bool   `json:"force"`
 	SetUpstream bool   `json:"set_upstream"`
 	Repo        string `json:"repo,omitempty"`
+}
+
+// GitContributionRequest carries the provider-head lease for a managed
+// contribution operation. Repo scopes one destructive action to one checkout.
+type GitContributionRequest struct {
+	SessionID          string `json:"session_id"`
+	ExpectedRemoteHead string `json:"expected_remote_head"`
+	Repo               string `json:"repo,omitempty"`
 }
 
 // GitRebaseRequest for worktree.rebase action.
@@ -331,6 +341,42 @@ func (h *GitHandlers) wsPush(ctx context.Context, msg *ws.Message) (*ws.Message,
 	}
 
 	h.notifyGitOperationFailed(req.SessionID, "push", result)
+	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+func (h *GitHandlers) wsReplaceContribution(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return h.wsContribution(ctx, msg, "replace_remote_contribution", func(agentClient *client.Client, expectedHead, repo string) (*client.GitOperationResult, error) {
+		return agentClient.GitReplaceRemoteContribution(ctx, expectedHead, repo)
+	})
+}
+
+func (h *GitHandlers) wsUseContribution(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return h.wsContribution(ctx, msg, "use_remote_contribution", func(agentClient *client.Client, expectedHead, repo string) (*client.GitOperationResult, error) {
+		return agentClient.GitUseRemoteContribution(ctx, expectedHead, repo)
+	})
+}
+
+func (h *GitHandlers) wsContribution(ctx context.Context, msg *ws.Message, operation string, action func(*client.Client, string, string) (*client.GitOperationResult, error)) (*ws.Message, error) {
+	var req GitContributionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return nil, fmt.Errorf("invalid payload: %w", err)
+	}
+	if req.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if req.ExpectedRemoteHead == "" {
+		return nil, fmt.Errorf("expected_remote_head is required")
+	}
+
+	agentClient, err := h.getAgentCtlClient(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := action(agentClient, req.ExpectedRemoteHead, req.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("%s failed: %w", operation, err)
+	}
+	h.notifyGitOperationFailed(req.SessionID, operation, result)
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 

@@ -108,7 +108,7 @@ An external NATS URL moves event traffic across the configured network and can e
 | `docker.defaultNetwork` | `KANDEV_DOCKER_DEFAULTNETWORK` | `kandev-network` | Accepted compatibility field; not wired into current executor networking. |
 | `docker.volumeBasePath` | `KANDEV_DOCKER_VOLUMEBASEPATH` | `/var/lib/kandev/volumes` on Unix; `%LOCALAPPDATA%\kandev\volumes` on Windows | Accepted compatibility field; not wired into current executor volume placement. |
 
-The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon—it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](./docker.md) and [Executors](./executors.md).
+The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon; it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](./docker.md) and [Executors](./executors.md).
 
 ### Core agent service
 
@@ -119,14 +119,13 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
-### Authentication, Office, Plugins, voice, and feature flags
+### Authentication, Office, Plugins, and feature flags
 
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
 | `auth.jwtSecret` | `KANDEV_AUTH_JWTSECRET` | generated value | Accepted and validated compatibility configuration; the current main HTTP product path does not use it as an authentication boundary. |
 | `auth.tokenDuration` | `KANDEV_AUTH_TOKENDURATION` | `3600` | Must be positive, but is not consumed by the current main HTTP product path. |
 | `office.jwtSigningKey` | `KANDEV_OFFICE_JWTSIGNINGKEY` | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts. |
-| `voice.openAIApiKey` | `KANDEV_VOICE_OPENAI_API_KEY` | empty | Server-side transcription fallback when browser speech recognition is unavailable. Empty disables the fallback and its endpoint returns unavailable. |
 | `features.office` | `KANDEV_FEATURES_OFFICE` | `false` in production | Experimental Office UI, routes, services, and automation. |
 | `features.auth` | `KANDEV_FEATURES_AUTH` | `false` in production | Opt-in authentication and per-user workspaces. The first visitor after enabling completes setup and becomes the admin. |
 | `features.claude_background_prompt_handoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | `false` | High-risk experiment that lets Claude Code accept a new prompt after its foreground yields while adapter-attested background work remains active. Other providers keep the coarse busy gate. |
@@ -134,7 +133,9 @@ The launcher starts `agentctl`, performs a one-time nonce handshake, and supplie
 
 Do not infer security from `auth.jwtSecret`: setting it currently does not turn the local server into an authenticated public service. Office's JWT key has a narrower, active purpose. Store both active secrets and third-party API keys in your deployment secret manager; never commit them in `config.yaml`.
 
-The voice fallback sends audio to the configured OpenAI transcription service and incurs that provider's network, data-handling, and billing behavior. Browser-native speech recognition has its own browser/vendor behavior and does not use this server key.
+`voice.openAIApiKey` / `KANDEV_VOICE_OPENAI_API_KEY` was removed. Voice Mode is now the
+[Voice Mode plugin](https://github.com/kdlbs/kandev-plugin-voice), and its transcription key lives
+in that plugin's own settings. Kandev ignores the old key and no longer serves `/api/v1/transcribe`.
 
 ### Logging
 
@@ -286,9 +287,6 @@ debug:
 office:
   jwtSigningKey: ""
 
-voice:
-  openAIApiKey: ""
-
 features:
   office: false
   auth: false
@@ -388,7 +386,7 @@ Startup validation currently enforces:
 - logging level/format; and
 - positive `repositoryDiscovery.maxDepth`.
 
-Other fields can pass configuration validation and still fail later—for example an unreachable NATS/PostgreSQL/Docker endpoint, unwritable log path, nonsensical timeout, or incompatible pool sizes. A field appearing in the schema does not prove its subsystem is available.
+Other fields can pass configuration validation and still fail later, for example an unreachable NATS/PostgreSQL/Docker endpoint, unwritable log path, nonsensical timeout, or incompatible pool sizes. A field appearing in the schema does not prove its subsystem is available.
 
 If a value appears ignored:
 
@@ -400,4 +398,4 @@ If a value appears ignored:
 
 Use `kandev --verbose` to surface startup errors. Do not use `--debug` merely to diagnose a YAML typo on an exposed machine; verbose logs are usually sufficient.
 
-Variables used only to assemble/test the runtime—such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces—are internal implementation contracts, not supported deployment configuration. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](./cli.md); end users should still let the installer set it.
+Variables used only to assemble/test the runtime: such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces, are internal implementation contracts, not supported deployment configuration. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](./cli.md); end users should still let the installer set it.

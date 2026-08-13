@@ -5,6 +5,17 @@ import { useOptionalAppStore } from "@/components/state-provider";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
+import type {
+  PluginComposerCapability,
+  PluginComposerSurface,
+  PluginPresentation,
+} from "@/lib/plugins/types";
+
+const UNAVAILABLE_COMPOSER: PluginComposerCapability = {
+  insertText: () => ({ status: "unavailable" }),
+  focus: () => ({ status: "unavailable" }),
+  submit: async () => ({ status: "unavailable" }),
+};
 
 /**
  * Props forwarded to every plugin component registered for the
@@ -27,6 +38,12 @@ export type ChatInputActionsSlotProps = {
   activeSessionId: string | null;
   /** Every kandev session id on the task (includes `activeSessionId`). */
   sessionIds: string[];
+  surface: PluginComposerSurface;
+  presentation: PluginPresentation;
+  disabled: boolean;
+  submittable: boolean;
+  disabledReason?: string;
+  composer: PluginComposerCapability;
 };
 
 const EMPTY_SESSIONS: TaskSession[] = [];
@@ -42,6 +59,12 @@ export function ChatInputPluginActions(props: {
   sessionId: string | null;
   taskId: string | null;
   taskTitle?: string;
+  surface?: "task-chat" | "quick-chat";
+  presentation?: PluginPresentation;
+  disabled?: boolean;
+  submittable?: boolean;
+  disabledReason?: string;
+  composer?: PluginComposerCapability;
 }) {
   const { sessionId, taskId, taskTitle } = props;
   // itemsByTaskId holds a stable per-task array reference (updated only when
@@ -60,8 +83,19 @@ export function ChatInputPluginActions(props: {
     // The active session may not yet be in the store list (freshly prepared);
     // make sure the plugin always receives it.
     if (sessionId && !sessionIds.includes(sessionId)) sessionIds.unshift(sessionId);
-    return { taskId, taskTitle, activeSessionId: sessionId, sessionIds };
-  }, [taskSessions, sessionId, taskId, taskTitle]);
+    return {
+      taskId,
+      taskTitle,
+      activeSessionId: sessionId,
+      sessionIds,
+      surface: props.surface ?? (taskId ? "task-chat" : "quick-chat"),
+      presentation: props.presentation ?? "desktop",
+      disabled: props.disabled ?? false,
+      submittable: props.submittable ?? false,
+      disabledReason: props.disabledReason,
+      composer: props.composer ?? UNAVAILABLE_COMPOSER,
+    };
+  }, [taskSessions, sessionId, taskId, taskTitle, props]);
 
   return <PluginSlot name="chat-input-actions" slotProps={slotProps} />;
 }

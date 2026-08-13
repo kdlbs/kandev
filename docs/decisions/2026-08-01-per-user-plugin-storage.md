@@ -17,7 +17,7 @@ unauthenticated `/api/plugins/:id/webhooks/:key` proxy, explicitly bypassed in
 **Amendment (2026-08-12):** that allowlist entry was removed — see
 `2026-08-12-plugin-webhook-auth-gate.md` — so the webhook proxy is
 authenticated by default too, unless its manifest entry opts out with
-`webhooks[].public: true`. This does not change the rest of this ADR's
+`webhooks[].access: public`. This does not change the rest of this ADR's
 reasoning: what motivated `host.storage` was the *browser session's own
 user identity* being reachable at all from a plugin's frontend bundle, which
 the webhook proxy still does not provide (it relays a request, not a

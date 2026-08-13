@@ -68,7 +68,7 @@ Multiple policies can apply to the same scope (e.g. monthly + total).
 
 ### `TaskSession` additions
 
-`cost_subcents`, `tokens_in`, `tokens_out` incrementally updated as cost events arrive, providing quick per-session totals without scanning `office_cost_events`.
+`cost_subcents`, `tokens_in`, `tokens_out`, `tokens_cached_in` incrementally updated as cost events arrive, providing quick per-session totals without scanning `office_cost_events`. `tokens_cached_in` is DB-only today (no model/DTO/API/web reader) — it exists so the rollup reconciles column-for-column against the ledger; a future cost-explorer surface will expose it.
 
 ### Per-agent budget
 
@@ -187,7 +187,7 @@ There is no per-field permission model. Conformance tests should assert that cos
 
 - `office_cost_events` rows (full history, never trimmed). Disk-runner rows keyed by `(session_id, provider_event_id)` survive re-ingestion without duplicating; the wire-side `estimated=true` rows for codex are deleted once the matching aggregate row lands.
 - `office_budget_policies` rows.
-- `TaskSession.cost_subcents` / `tokens_in` / `tokens_out` running totals, kept in sync with `office_cost_events` so per-session totals are correct without a re-scan.
+- `TaskSession.cost_subcents` / `tokens_in` / `tokens_out` / `tokens_cached_in` running totals, kept in sync with `office_cost_events` so per-session totals are correct without a re-scan.
 - Per-agent `budget_monthly_cents` stored on the agent instance row.
 - Per-model pricing overrides stored in workspace settings.
 - The on-disk `models.dev` cache at `<data-dir>/cache/models-dev.json`. Recovery on next boot: the in-memory pricing map is empty until first query; queries fall back to the on-disk file when the background refresh has not yet completed.

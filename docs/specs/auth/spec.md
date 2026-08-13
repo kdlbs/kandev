@@ -88,7 +88,7 @@ the local single-user install with a login screen it never asked for.
   plugin registry, so it structurally defers GET/POST requests for the path; `plugins.Controller`
   enforces the actual gate: a webhook requires a real caller identity
   (session/PAT, or the synthetic identity while auth is disabled) unless its
-  manifest declares `webhooks[].public: true`. An anonymous caller sees 401
+  manifest declares `webhooks[].access: public`. An anonymous caller sees 401
   for an unknown plugin ID, an undeclared key, and a declared-non-public key
   alike, so a caller with no identity cannot enumerate installed plugins.
 - **Session challenges are distinct from provider authentication failures.**

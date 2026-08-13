@@ -39,15 +39,15 @@ elsewhere, ruling out simply dropping plugin webhooks from the allowlist:
 
 ## Decision
 
-`manifest.Webhook` gains a `public bool` field (`webhooks[].public`, default
-`false`). `internal/auth/httpmw` no longer allowlists plugin webhooks
+`manifest.Webhook` uses its `access` field (`webhooks[].access`), which defaults to
+`authenticated`. `internal/auth/httpmw` no longer allowlists plugin webhooks
 unconditionally: it structurally defers GET/POST `/api/plugins/<id>/webhooks/<key>`
 (`isPluginWebhookPath`, replacing an over-matching `strings.Contains` check)
 because the middleware has no access to the plugin registry to decide policy
 per-webhook. `internal/plugins.Controller.webhook` is the one place holding
 the manifest, so it enforces the actual gate
 (`webhookCallerAuthorized`): a webhook whose manifest entry declares
-`public: true` is relayed to anyone; anything else requires a real request
+`access: public` is relayed to anyone; anything else requires a real request
 identity — a resolved session/PAT, or the synthetic identity
 `httpmw.Middleware` injects while authentication is disabled. Identity
 *presence* is a complete proxy for "authenticated or auth is off," so the
@@ -60,7 +60,7 @@ required"}` — never a 404 — so an anonymous caller cannot use response-code
 differences to enumerate installed plugins.
 
 `SSOProviders()` gains a matching skip: a provider whose `initiate` webhook
-is declared but not `public` is omitted from the login screen rather than
+is not declared `access: public` is omitted from the login screen rather than
 surfaced as a button that immediately 401s (a visitor clicking a login
 button has no session or PAT to present). This is a clean skip, not a
 manifest validation error — the same tolerance `SSOProviders()` already had
@@ -78,7 +78,7 @@ non-Kandev cookie or non-PAT bearer still relays unchanged, so a `public`
 webhook can still verify a provider's own token.
 
 This is a hard cutover, not an `api_version`-gated grandfather clause: every
-existing webhook declaration with no `public` flag now requires auth
+existing webhook declaration with no `access: public` declaration now requires auth
 immediately. Blast radius is bounded — authentication is off by default, and
 an auth-enabled install always has a setup-wizard local admin, so SSO is
 additive rather than the only way in.
@@ -90,7 +90,7 @@ additive rather than the only way in.
   instead of a blanket, unverifiable claim covering every plugin webhook.
 - Production plugins taking third-party callbacks (`kandev-plugin-slack`,
   `kandev-plugin-github-status`, `kandev-plugin-google-oidc`) need a manifest
-  update adding `public: true` to their callback/initiate webhook keys before
+  update adding `access: public` to their callback/initiate webhook keys before
   they work again on an auth-enabled install; `kandev-plugin-notes`' `enhance`
   webhook is deliberately left unflagged, since it is only ever called from
   the logged-in Kandev UI.
@@ -105,10 +105,10 @@ additive rather than the only way in.
   construction: under deferral, the middleware passes the path through either
   way, so it can no longer prove the auth policy on its own. The real pin is
   `internal/plugins/handlers_webhook_auth_test.go`.
-- A `public: true` webhook is exactly as exposed as every plugin webhook was
+- A `access: public` webhook is exactly as exposed as every plugin webhook was
   before this change — the flag makes that exposure explicit and reviewable,
   it does not remove it. Kandev can only enforce that *a* caller identity is
-  present; it cannot verify a `public: true` webhook actually authenticates
+  present; it cannot verify a `access: public` webhook actually authenticates
   its own callers. No host-side rate limiting is added by this change.
 - This amends `2026-07-24-opt-in-authentication.md` (point 6, the public
   allowlist), `0050-plugin-external-auth-capability.md` (the "already on the

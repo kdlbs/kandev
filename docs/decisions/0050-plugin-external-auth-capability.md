@@ -20,7 +20,7 @@ delivered as an out-of-tree plugin rather than baked into the host.
 The plugin capability model (ADR 0043) is a set of capability-gated `Host` gRPC
 RPCs the plugin *calls*, plus host→plugin events and a proxied inbound webhook
 (`/api/plugins/{id}/webhooks/{key}`, reachable by an anonymous visitor when its
-manifest entry declares `webhooks[].public: true` — see the 2026-08-12
+manifest entry declares `webhooks[].access: public` — see the 2026-08-12
 amendment below). None of these can establish an authenticated browser
 session.
 
@@ -92,7 +92,7 @@ handing the raw session token to the plugin is strictly weaker.
 exposure where every plugin webhook, including ones with no external
 authentication of their own, was reachable anonymously by default. The
 `initiate` webhook this ADR depends on (and the IdP callback key it
-redirects to) must now declare `webhooks[].public: true` in the manifest, or
+redirects to) must now declare `webhooks[].access: public` in the manifest, or
 `SSOProviders()` silently omits that provider from the login screen rather
 than surface a button that 401s. Existing SSO plugin manifests (e.g.
 `kandev-plugin-google-oidc`) need that flag added before their login button

@@ -8,31 +8,144 @@ import (
 	promptcfg "github.com/kandev/kandev/config/prompts"
 )
 
+// errTaskPRIdentityIncomplete signals a patch that set exactly one of
+// repository_id/pr_number instead of both or neither.
+var errTaskPRIdentityIncomplete = fmt.Errorf("%w: repository_id and pr_number must both be set", ErrTaskPRNotLinked)
+
 // GetTaskCIOptionsResponse returns task CI automation options plus effective prompt text.
 func (s *Service) GetTaskCIOptionsResponse(ctx context.Context, taskID string) (*TaskCIOptionsResponse, error) {
 	if s.store == nil {
 		return nil, errStoreUnavailable
 	}
+	workspaceID, err := s.resolveAuthorizedTaskWorkspace(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
 	opts, err := s.store.GetTaskCIOptions(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
-	return s.buildTaskCIOptionsResponse(ctx, opts)
+	response, err := s.buildTaskCIOptionsResponse(ctx, opts)
+	if response != nil {
+		response.WorkspaceID = workspaceID
+	}
+	return response, err
 }
 
-// UpdateTaskCIOptions updates task CI automation options and returns the response shape.
+// UpdateTaskCIOptions updates task CI automation options and returns the
+// response shape. patch.RepositoryID/PRNumber optionally target one linked
+// PR for the five automation switches; omitted identity fans the switches
+// out to every PR currently linked to the task (unchanged behavior for
+// existing MCP callers). AutoFixPromptOverride and ReviewReviewerLogin are
+// always applied task-level regardless of PR identity.
 func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch TaskCIOptionsPatch) (*TaskCIOptionsResponse, error) {
 	if s.store == nil {
 		return nil, errStoreUnavailable
 	}
-	if err := s.populateReviewReviewer(ctx, taskID, &patch); err != nil {
-		return nil, err
-	}
-	opts, err := s.store.UpdateTaskCIOptions(ctx, taskID, patch)
+	workspaceID, err := s.resolveAuthorizedTaskWorkspace(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
-	return s.buildTaskCIOptionsResponse(ctx, opts)
+	if (patch.RepositoryID == nil) != (patch.PRNumber == nil) {
+		return nil, errTaskPRIdentityIncomplete
+	}
+	prPatch := patch.PRAutomationPatch()
+	var targets []*TaskPR
+	if patch.RepositoryID != nil || prPatch.HasAny() {
+		targets, err = s.resolveTaskPRAutomationTargets(ctx, taskID, patch.RepositoryID, patch.PRNumber)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := s.populateReviewReviewer(ctx, taskID, &patch); err != nil {
+		return nil, err
+	}
+	reviewerChanged, err := s.taskPRReviewerChanged(ctx, taskID, patch.ReviewReviewerLogin)
+	if err != nil {
+		return nil, err
+	}
+	var opts *TaskCIOptions
+	if prPatch.HasAny() {
+		opts, err = s.store.UpdateTaskCIOptionsWithPRAutomation(
+			ctx, taskID, patch, targets, prPatch, reviewerChanged,
+		)
+	} else {
+		opts, err = s.store.UpdateTaskCIOptions(ctx, taskID, patch)
+	}
+	if err != nil {
+		return nil, err
+	}
+	response, err := s.buildTaskCIOptionsResponse(ctx, opts)
+	if response != nil {
+		response.WorkspaceID = workspaceID
+	}
+	return response, err
+}
+
+// resolveAuthorizedTaskWorkspace resolves ownership through the task service
+// before any user-facing CI-option read or mutation. Unit tests and legacy
+// auth-disabled embeddings without a task store retain their unscoped path;
+// an installed authorizer without the resolver fails closed.
+func (s *Service) resolveAuthorizedTaskWorkspace(ctx context.Context, taskID string) (string, error) {
+	taskStore := s.getTaskIssueStore()
+	if taskStore == nil {
+		if s.workspaceAuthorizer != nil {
+			return "", errStoreUnavailable
+		}
+		return "", nil
+	}
+	task, err := taskStore.GetTask(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	if task == nil {
+		return "", ErrTaskNotFound
+	}
+	workspaceID := strings.TrimSpace(task.WorkspaceID)
+	if workspaceID == "" {
+		return "", ErrGitHubWorkspaceRequired
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return "", err
+	}
+	return workspaceID, nil
+}
+
+// taskPRReviewerChanged compares the newly resolved task-level reviewer
+// login (if the patch is setting one) against the value already stored, so
+// callers can re-baseline review-request checkpoints precisely when the
+// connected account actually changed.
+func (s *Service) taskPRReviewerChanged(ctx context.Context, taskID string, newLogin *string) (bool, error) {
+	if newLogin == nil {
+		return false, nil
+	}
+	previous, err := s.store.GetTaskCIOptions(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	return !strings.EqualFold(previous.ReviewReviewerLogin, strings.TrimSpace(*newLogin)), nil
+}
+
+// resolveTaskPRAutomationTargets resolves which linked PR(s) a patch
+// applies to. Nil identity fans out to every linked PR (AC7); a named
+// identity that isn't currently linked is rejected with ErrTaskPRNotLinked
+// (AC8) rather than silently creating an orphan automation row.
+func (s *Service) resolveTaskPRAutomationTargets(
+	ctx context.Context, taskID string, repositoryID *string, prNumber *int,
+) ([]*TaskPR, error) {
+	prs, err := s.store.ListTaskPRsByTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if repositoryID == nil && prNumber == nil {
+		return prs, nil
+	}
+	for _, pr := range prs {
+		if pr.RepositoryID == *repositoryID && pr.PRNumber == *prNumber {
+			return []*TaskPR{pr}, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: repository_id=%s pr_number=%d", ErrTaskPRNotLinked, *repositoryID, *prNumber)
 }
 
 func (s *Service) populateReviewReviewer(
@@ -43,21 +156,56 @@ func (s *Service) populateReviewReviewer(
 	if patch.PromptOnReviewRequested == nil {
 		return nil
 	}
-	if !*patch.PromptOnReviewRequested {
-		empty := ""
-		patch.ReviewReviewerLogin = &empty
+	if *patch.PromptOnReviewRequested {
+		resolved, err := s.resolveTaskPRAutomationClient(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		login, err := resolved.Client.GetAuthenticatedUser(ctx)
+		if err != nil {
+			return fmt.Errorf("resolve authenticated reviewer: %w", err)
+		}
+		patch.ReviewReviewerLogin = &login
 		return nil
 	}
-	resolved, err := s.resolveTaskPRAutomationClient(ctx, taskID)
+	// Disabling review-request on the target PR(s) only blanks the shared
+	// task-level reviewer login when no other linked PR still depends on
+	// it — otherwise this would silently break that PR's automation.
+	stillNeeded, err := s.anyOtherPRHasReviewRequestEnabled(ctx, taskID, patch.RepositoryID, patch.PRNumber)
 	if err != nil {
 		return err
 	}
-	login, err := resolved.Client.GetAuthenticatedUser(ctx)
-	if err != nil {
-		return fmt.Errorf("resolve authenticated reviewer: %w", err)
+	if stillNeeded {
+		return nil
 	}
-	patch.ReviewReviewerLogin = &login
+	empty := ""
+	patch.ReviewReviewerLogin = &empty
 	return nil
+}
+
+func (s *Service) anyOtherPRHasReviewRequestEnabled(
+	ctx context.Context, taskID string, excludeRepositoryID *string, excludePRNumber *int,
+) (bool, error) {
+	fanOut := excludeRepositoryID == nil && excludePRNumber == nil
+	options, err := s.taskPRAutomationOptionsList(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	for _, opt := range options {
+		if !opt.PromptOnReviewRequested {
+			continue
+		}
+		if fanOut {
+			// The fan-out disable targets every linked PR, so nothing
+			// survives with the switch on regardless of stored state.
+			continue
+		}
+		if opt.RepositoryID == *excludeRepositoryID && opt.PRNumber == *excludePRNumber {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // GetTaskCIPRState returns per-PR CI automation state, or nil.
@@ -135,12 +283,20 @@ func (s *Service) IsReviewRequestedForLogin(
 	return false, nil
 }
 
+// HasEnabledTaskPRAgentPrompts reports whether any PR linked to the task has
+// a lifecycle prompt switch enabled. Checks the per-PR table, not the legacy
+// task row, so a task with mixed per-PR configuration is still detected.
 func (s *Service) HasEnabledTaskPRAgentPrompts(ctx context.Context, taskID string) (bool, error) {
-	opts, err := s.store.GetTaskCIOptions(ctx, taskID)
+	options, err := s.taskPRAutomationOptionsList(ctx, taskID)
 	if err != nil {
 		return false, err
 	}
-	return opts.PromptOnReviewRequested || opts.PromptOnMerged || opts.PromptOnClosed, nil
+	for _, opt := range options {
+		if opt.PromptOnReviewRequested || opt.PromptOnMerged || opt.PromptOnClosed {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) SetTaskPRReviewRequestState(
@@ -229,7 +385,7 @@ func (s *Service) RecordTaskPRLifecyclePrompt(ctx context.Context, prompt TaskPR
 func (s *Service) ShouldHoldTerminalPRWatch(
 	ctx context.Context, taskID, repositoryID string, prNumber int, state string,
 ) (bool, error) {
-	opts, err := s.store.GetTaskCIOptions(ctx, taskID)
+	opts, err := s.store.GetTaskPRAutomationOptions(ctx, taskID, repositoryID, prNumber)
 	if err != nil {
 		return false, err
 	}
@@ -250,28 +406,143 @@ func (s *Service) buildTaskCIOptionsResponse(ctx context.Context, opts *TaskCIOp
 	if err != nil {
 		return nil, err
 	}
+	prOptions, err := s.taskPRAutomationOptionsList(ctx, opts.TaskID)
+	if err != nil {
+		return nil, err
+	}
 	effectivePrompt, usingDefault := s.effectiveCIAutoFixPrompt(ctx, opts)
 	reviewPrompt := effectiveTaskPRPrompt("pr-review-requested")
 	mergedPrompt := effectiveTaskPRPrompt("pr-merged-final")
 	closedPrompt := effectiveTaskPRPrompt("pr-closed-final")
+	aggregate := aggregateTaskPRAutomationOptions(prOptions)
 	return &TaskCIOptionsResponse{
 		TaskID:                  opts.TaskID,
-		AutoFixEnabled:          opts.AutoFixEnabled,
-		AutoMergeEnabled:        opts.AutoMergeEnabled,
+		AutoFixEnabled:          aggregate.autoFixEnabled,
+		AutoMergeEnabled:        aggregate.autoMergeEnabled,
 		AutoFixPromptOverride:   opts.AutoFixPromptOverride,
 		AutoFixMaxRounds:        TaskCIAutoFixMaxRounds,
 		EffectiveAutoFixPrompt:  effectivePrompt,
 		UsingDefaultPrompt:      usingDefault,
-		PromptOnReviewRequested: opts.PromptOnReviewRequested,
-		PromptOnMerged:          opts.PromptOnMerged,
-		PromptOnClosed:          opts.PromptOnClosed,
+		PromptOnReviewRequested: aggregate.promptOnReviewRequested,
+		PromptOnMerged:          aggregate.promptOnMerged,
+		PromptOnClosed:          aggregate.promptOnClosed,
 		ReviewReviewerLogin:     opts.ReviewReviewerLogin,
 		EffectiveReviewPrompt:   reviewPrompt,
 		EffectiveMergedPrompt:   mergedPrompt,
 		EffectiveClosedPrompt:   closedPrompt,
 		UpdatedAt:               opts.UpdatedAt,
 		PRStates:                prStates,
+		PROptions:               prOptions,
 	}, nil
+}
+
+// taskPRAutomationOptionsList returns one entry per PR currently linked to
+// the task (AC5), synthesizing all-off defaults for a linked PR that has no
+// stored row yet — mirroring the placeholder pattern in taskCIPRStates.
+func (s *Service) taskPRAutomationOptionsList(ctx context.Context, taskID string) ([]*TaskPRAutomationOptions, error) {
+	stored, err := s.store.ListTaskPRAutomationOptions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	prs, err := s.store.ListTaskPRsByTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	allPRs, err := s.store.ListTaskPRsByTaskIncludingDetached(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	merged := mergeTaskPRRows(stored, prs,
+		func(opt *TaskPRAutomationOptions) string { return taskCIPRStateKey(opt.RepositoryID, opt.PRNumber) },
+		func(pr *TaskPR) *TaskPRAutomationOptions {
+			return &TaskPRAutomationOptions{TaskID: taskID, RepositoryID: pr.RepositoryID, PRNumber: pr.PRNumber}
+		},
+	)
+	active := make(map[string]struct{}, len(prs))
+	for _, pr := range prs {
+		active[taskCIPRStateKey(pr.RepositoryID, pr.PRNumber)] = struct{}{}
+	}
+	detached := make(map[string]struct{})
+	for _, pr := range allPRs {
+		if pr.DetachedAt != nil {
+			detached[taskCIPRStateKey(pr.RepositoryID, pr.PRNumber)] = struct{}{}
+		}
+	}
+	filtered := make([]*TaskPRAutomationOptions, 0, len(prs))
+	for _, option := range merged {
+		key := taskCIPRStateKey(option.RepositoryID, option.PRNumber)
+		if _, ok := detached[key]; ok {
+			continue
+		}
+		if _, ok := active[key]; ok {
+			filtered = append(filtered, option)
+			continue
+		}
+		// Keep legacy/single-repo option rows that predate a durable TaskPR
+		// association. Only a matching detached association is excluded.
+		if _, known := detached[key]; !known {
+			filtered = append(filtered, option)
+		}
+	}
+	return filtered, nil
+}
+
+// mergeTaskPRRows overlays stored per-PR rows onto every PR currently linked
+// to the task, synthesizing a default row (via makeDefault) for a linked PR
+// with no stored row yet, and keeping any stored row for a PR no longer
+// linked (e.g. detached) at the end. Task CI state keeps those historical rows
+// for diagnostics, while task automation options filters them before exposing
+// aggregates or lifecycle eligibility. Shared by taskCIPRStates and
+// taskPRAutomationOptionsList, which differ only in row type.
+func mergeTaskPRRows[T any](stored []T, prs []*TaskPR, keyOf func(T) string, makeDefault func(*TaskPR) T) []T {
+	byKey := make(map[string]T, len(stored))
+	for _, row := range stored {
+		byKey[keyOf(row)] = row
+	}
+	out := make([]T, 0, max(len(prs), len(stored)))
+	seen := make(map[string]struct{}, len(prs))
+	for _, pr := range prs {
+		key := taskCIPRStateKey(pr.RepositoryID, pr.PRNumber)
+		if row, ok := byKey[key]; ok {
+			out = append(out, row)
+		} else {
+			out = append(out, makeDefault(pr))
+		}
+		seen[key] = struct{}{}
+	}
+	for _, row := range stored {
+		if _, ok := seen[keyOf(row)]; !ok {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+type taskPRAutomationAggregate struct {
+	autoFixEnabled, autoMergeEnabled                        bool
+	promptOnReviewRequested, promptOnMerged, promptOnClosed bool
+}
+
+// aggregateTaskPRAutomationOptions reports a switch as "enabled" only when
+// every linked PR has it on and at least one PR is linked — the top-level
+// booleans answer "did my task-wide enable take", kept for MCP/API read
+// compatibility (R3). Prefer PROptions for anything PR-specific.
+func aggregateTaskPRAutomationOptions(options []*TaskPRAutomationOptions) taskPRAutomationAggregate {
+	if len(options) == 0 {
+		return taskPRAutomationAggregate{}
+	}
+	agg := taskPRAutomationAggregate{
+		autoFixEnabled: true, autoMergeEnabled: true,
+		promptOnReviewRequested: true, promptOnMerged: true, promptOnClosed: true,
+	}
+	for _, opt := range options {
+		agg.autoFixEnabled = agg.autoFixEnabled && opt.AutoFixEnabled
+		agg.autoMergeEnabled = agg.autoMergeEnabled && opt.AutoMergeEnabled
+		agg.promptOnReviewRequested = agg.promptOnReviewRequested && opt.PromptOnReviewRequested
+		agg.promptOnMerged = agg.promptOnMerged && opt.PromptOnMerged
+		agg.promptOnClosed = agg.promptOnClosed && opt.PromptOnClosed
+	}
+	return agg
 }
 
 func effectiveTaskPRPrompt(name string) string {
@@ -297,36 +568,18 @@ func (s *Service) taskCIPRStates(ctx context.Context, taskID string) ([]*TaskCIP
 	if err != nil {
 		return nil, err
 	}
-	byKey := make(map[string]*TaskCIPRAutomationState, len(stored))
-	for _, state := range stored {
-		byKey[taskCIPRStateKey(state.RepositoryID, state.PRNumber)] = state
-	}
 	prs, err := s.store.ListTaskPRsByTask(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*TaskCIPRAutomationState, 0, max(len(prs), len(stored)))
-	seen := make(map[string]struct{}, len(prs))
-	for _, pr := range prs {
-		key := taskCIPRStateKey(pr.RepositoryID, pr.PRNumber)
-		if state, ok := byKey[key]; ok {
-			out = append(out, state)
-		} else {
-			out = append(out, &TaskCIPRAutomationState{
-				TaskID:       taskID,
-				RepositoryID: pr.RepositoryID,
-				PRNumber:     pr.PRNumber,
-			})
-		}
-		seen[key] = struct{}{}
-	}
-	for _, state := range stored {
-		key := taskCIPRStateKey(state.RepositoryID, state.PRNumber)
-		if _, ok := seen[key]; !ok {
-			out = append(out, state)
-		}
-	}
-	return out, nil
+	return mergeTaskPRRows(stored, prs,
+		func(state *TaskCIPRAutomationState) string {
+			return taskCIPRStateKey(state.RepositoryID, state.PRNumber)
+		},
+		func(pr *TaskPR) *TaskCIPRAutomationState {
+			return &TaskCIPRAutomationState{TaskID: taskID, RepositoryID: pr.RepositoryID, PRNumber: pr.PRNumber}
+		},
+	), nil
 }
 
 func taskCIPRStateKey(repositoryID string, prNumber int) string {

@@ -643,8 +643,12 @@ export class SessionPage {
    * Hovers to reveal the menu trigger, opens it, clicks "Archive",
    * and confirms the archive dialog.
    */
-  async archiveTaskInSidebar(title: string): Promise<void> {
+  async archiveTaskInSidebar(title: string, options: { cascade?: boolean } = {}): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Archive");
+    if (options.cascade) {
+      const cascadeCheckbox = this.page.getByTestId("archive-cascade-checkbox");
+      await cascadeCheckbox.click();
+    }
     // Confirm the archive dialog
     const confirmButton = this.page
       .getByRole("alertdialog")

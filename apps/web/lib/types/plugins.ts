@@ -20,11 +20,11 @@ export interface PluginWebhook {
   key: string;
   description?: string;
   method?: string;
-  /** True when the host relays anonymous requests to this webhook without
-   * requiring a caller identity (session or PAT). Defaults to false: the
-   * host requires a real caller identity before relaying to the plugin
-   * subprocess. See docs/public/plugins-manifest.md. */
-  public?: boolean;
+  /** Defaults to "authenticated", requiring a caller identity (session or
+   * PAT). "public" opts into anonymous delivery for a handler that verifies
+   * its own third-party caller. See docs/public/plugins-manifest.md. */
+  access?: "public" | "authenticated";
+  max_body_bytes?: number;
 }
 
 export interface PluginUIPage {
@@ -45,6 +45,12 @@ export interface PluginKeybinding {
   id: string;
   default: string;
   description: string;
+  /**
+   * Lets this binding fire while an input, textarea or contenteditable has
+   * focus. Off by default so a plugin cannot shadow ordinary typing; the
+   * backend only accepts it on a combo carrying a ctrl/cmd/mod/alt modifier.
+   */
+  allow_in_editor?: boolean;
 }
 
 export interface PluginUISection {

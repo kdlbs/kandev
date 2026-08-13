@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -164,6 +165,7 @@ func (h *Handlers) deferMoveTask(
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
 		Position:       req.Position,
+		Actor:          string(wfmodels.StepTransitionActorAgent),
 	})
 	return ws.NewResponse(msg.ID, msg.Action,
 		h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position))
@@ -197,7 +199,8 @@ func (h *Handlers) applyMoveTaskImmediate(
 		queuedSessionID = session.ID
 	}
 
-	result, err := h.taskSvc.MoveTask(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position)
+	result, err := h.taskSvc.MoveTaskWithOptions(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position,
+		service.MoveTaskOptions{StepHistoryActor: wfmodels.StepTransitionActorAgent})
 	if err != nil {
 		// Roll back the queued prompt — without this, the next turn would
 		// deliver a "You were moved to this step…" message for a transition

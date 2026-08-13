@@ -36,19 +36,34 @@ function mkRun(overrides: Partial<AutomationRun> = {}): AutomationRun {
   };
 }
 
-function setup(runs: AutomationRun[]) {
+type RunsSectionHook = {
+  runs: AutomationRun[];
+  loading: boolean;
+  deleting: boolean;
+  refresh: () => void;
+  deleteRun: (id: string) => void;
+  deleteAllRuns: (runIds?: string[]) => void;
+};
+
+function setup(
+  runs: AutomationRun[],
+  overrides: Partial<RunsSectionHook> = {},
+): ReturnType<typeof render> {
   mockUseAutomationRuns.mockReturnValue({
     runs,
     loading: false,
+    deleting: false,
     refresh: vi.fn(),
     deleteRun: vi.fn(),
     deleteAllRuns: vi.fn(),
+    ...overrides,
   });
-  render(<RunsSection automationId="auto-1" workspaceId="ws-1" />);
+  const view = render(<RunsSection automationId="auto-1" workspaceId="ws-1" />);
   // The runs table only renders once the "Recent Runs" disclosure is expanded.
   // The heading is count-aware ("Recent Run (1)" / "Recent Runs (2)"), so the
   // matcher must tolerate both forms rather than pinning the plural.
   fireEvent.click(screen.getByText(/Recent Runs?\s*\(/));
+  return view;
 }
 
 describe("RunsSection status badges", () => {
@@ -148,6 +163,118 @@ describe("RunsSection run log", () => {
 
     expect(screen.queryByTestId("run-filter-failed")).toBeNull();
     expect(screen.getByTestId("run-filter-succeeded")).toBeTruthy();
+  });
+});
+
+const DELETE_ALL_BTN = "delete-all-runs";
+const DELETE_ALL_CONFIRM = "delete-all-runs-confirm";
+const FILTER_SKIPPED = "run-filter-skipped";
+
+describe("RunsSection delete-all scope", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("renders delete-all in the rightmost table header cell, not beside the heading", () => {
+    setup([mkRun({ id: "run-solo", status: "skipped" })]);
+
+    const button = screen.getByTestId(DELETE_ALL_BTN);
+    const headerRow = button.closest("thead")?.querySelector("tr");
+    expect(headerRow).toBeTruthy();
+    const cells = headerRow!.querySelectorAll("th");
+    // Last header cell holds the control, aligned with the per-row delete
+    // buttons in the same column.
+    expect(cells[cells.length - 1].querySelector(`[data-testid="${DELETE_ALL_BTN}"]`)).toBeTruthy();
+    // It no longer lives in the section header beside Refresh.
+    expect(screen.getByTestId(DELETE_ALL_BTN).closest("thead")).toBeTruthy();
+    // Unfiltered: the accessible name matches the full scope.
+    expect(screen.getByTestId(DELETE_ALL_BTN).getAttribute("title")).toBe("Delete all runs");
+  });
+
+  it("deletes only the runs in the active status view", () => {
+    const deleteAllRuns = vi.fn();
+    setup(
+      [
+        mkRun({ id: "run-pass", status: "succeeded" }),
+        mkRun({ id: "run-skip-1", status: "skipped" }),
+        mkRun({ id: "run-skip-2", status: "skipped" }),
+      ],
+      { deleteAllRuns },
+    );
+
+    fireEvent.click(screen.getByTestId(FILTER_SKIPPED));
+    fireEvent.click(screen.getByTestId(DELETE_ALL_BTN));
+    fireEvent.click(screen.getByTestId(DELETE_ALL_CONFIRM));
+
+    expect(deleteAllRuns).toHaveBeenCalledWith(["run-skip-1", "run-skip-2"]);
+  });
+
+  it("deletes every run from the All view with no id scope", () => {
+    const deleteAllRuns = vi.fn();
+    setup(
+      [mkRun({ id: "run-a", status: "succeeded" }), mkRun({ id: "run-b", status: "skipped" })],
+      { deleteAllRuns },
+    );
+
+    fireEvent.click(screen.getByTestId(DELETE_ALL_BTN));
+    fireEvent.click(screen.getByTestId(DELETE_ALL_CONFIRM));
+
+    expect(deleteAllRuns).toHaveBeenCalledWith();
+  });
+
+  it("hides delete-all when the active filter's runs are gone", () => {
+    const { rerender } = setup([
+      mkRun({ id: "run-temp", status: "skipped" }),
+      mkRun({ id: "run-stay", status: "succeeded" }),
+    ]);
+
+    fireEvent.click(screen.getByTestId(FILTER_SKIPPED));
+    expect(screen.getByTestId(DELETE_ALL_BTN)).toBeTruthy();
+
+    // The runs refresh and the skipped one disappears server-side while the
+    // filter is still active — the empty view must not offer delete-all.
+    mockUseAutomationRuns.mockReturnValue({
+      runs: [mkRun({ id: "run-stay", status: "succeeded" })],
+      loading: false,
+      refresh: vi.fn(),
+      deleteRun: vi.fn(),
+      deleteAllRuns: vi.fn(),
+    });
+    rerender(<RunsSection automationId="auto-1" workspaceId="ws-1" />);
+
+    expect(screen.queryByTestId(DELETE_ALL_BTN)).toBeNull();
+  });
+
+  it("disables the delete controls while a delete is in flight", () => {
+    setup(
+      [mkRun({ id: "run-a", status: "succeeded" }), mkRun({ id: "run-b", status: "skipped" })],
+      { deleting: true },
+    );
+
+    expect((screen.getByTestId(DELETE_ALL_BTN) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getAllByTestId("delete-run")[0] as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("names the active status in the confirmation dialog", () => {
+    setup([
+      mkRun({ id: "run-stay", status: "succeeded" }),
+      mkRun({ id: "run-filtered", status: "skipped" }),
+    ]);
+
+    fireEvent.click(screen.getByTestId(FILTER_SKIPPED));
+    fireEvent.click(screen.getByTestId(DELETE_ALL_BTN));
+
+    // The button's accessible name names the active status, matching the
+    // dialog copy.
+    expect(screen.getByTestId(DELETE_ALL_BTN).getAttribute("title")).toBe(
+      "Delete all Skipped runs",
+    );
+    expect(
+      screen.getByText(
+        "This will permanently remove the Skipped runs shown in this view and their associated tasks. This cannot be undone.",
+      ),
+    ).toBeTruthy();
   });
 });
 

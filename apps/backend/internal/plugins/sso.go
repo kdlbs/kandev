@@ -1,5 +1,7 @@
 package plugins
 
+import "github.com/kandev/kandev/internal/plugins/manifest"
+
 // SSOProvider is a login option surfaced on the pre-auth login screen,
 // contributed by an active auth-capable plugin's manifest auth_providers.
 // InitiateURL is the plugin webhook the login button navigates to, which
@@ -14,7 +16,7 @@ type SSOProvider struct {
 // auth-capable plugin that declares auth_providers. A provider whose Initiate
 // does not match one of the plugin's declared webhook keys is skipped (its
 // button would 404), mirroring the webhook handler's own key check. A
-// provider whose Initiate webhook is not declared `public: true` is also
+// provider whose Initiate webhook is not declared `access: public` is also
 // skipped: the login button is the visitor's very first request, with no
 // session or PAT to present, so a non-public initiate webhook would 401 the
 // moment it's clicked. This is a clean skip rather than a manifest
@@ -28,7 +30,7 @@ func (s *Service) SSOProviders() []SSOProvider {
 		}
 		for _, p := range rec.AuthProviders {
 			wh, declared := lookupWebhook(rec, p.Initiate)
-			if p.ID == "" || p.Initiate == "" || !declared || !wh.Public {
+			if p.ID == "" || p.Initiate == "" || !declared || wh.EffectiveAccess() != manifest.WebhookAccessPublic {
 				continue
 			}
 			out = append(out, SSOProvider{

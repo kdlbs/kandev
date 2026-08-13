@@ -10,6 +10,7 @@ option go_package = "github.com/kandev/kandev/proto/kandev/plugin/v1;pluginv1";
 service Plugin {
   rpc DeliverEvent(Event) returns (EventAck);
   rpc HandleWebhook(WebhookRequest) returns (WebhookResponse);
+  rpc InvokeAgentTool(AgentToolRequest) returns (AgentToolResponse);
 }
 
 // Implemented by KANDEV (served back over the go-plugin broker).
@@ -110,6 +111,24 @@ message Event {
   google.protobuf.Struct payload = 5; // marshaled bus event.Data
 }
 message EventAck {}
+
+message AgentToolRequest {
+  string invocation_id = 1;
+  string name = 2;
+  google.protobuf.Struct arguments = 3;
+  AgentToolContext context = 4;
+}
+message AgentToolContext {
+  string task_id = 1;
+  string session_id = 2;
+  string workspace_id = 3;
+  string surface = 4;
+}
+message AgentToolResponse {
+  string text = 1;
+  google.protobuf.Struct structured_content = 2;
+  bool is_error = 3;
+}
 
 message WebhookRequest {
   string webhook_key = 1;

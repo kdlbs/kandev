@@ -220,8 +220,9 @@ locale is active, and never updates on a switch — and the pseudo-locale cannot
 see it, because the text _is_ translated, just frozen. Store the key and resolve
 at render, or make the value a component. `check-module-scope-t.mjs` enforces it.
 
-UI punctuation: avoid Unicode em dash (U+2014) in user-facing copy and locale values.
-`pnpm run i18n:check` enforces periods, colons, commas, semicolons, and parentheses.
+UI punctuation: avoid Unicode em dash (U+2014) in user-facing copy, locale values,
+published documentation. `pnpm run i18n:check` and the `public-copy-em-dash` hook
+enforce periods, colons, commas, semicolons, and parentheses across those sources.
 
 `pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
 **error**), but **only on the `i18nGuardFiles` allowlist** in

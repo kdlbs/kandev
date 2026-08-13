@@ -154,5 +154,5 @@ type PricingLookup interface {
 // task_sessions when a cost event lands. Implemented by the task repo.
 type SessionUsageWriter interface {
 	IncrementTaskSessionUsage(ctx context.Context, sessionID string,
-		tokensIn, tokensOut, costSubcents int64) error
+		tokensIn, tokensCachedIn, tokensOut, costSubcents int64) error
 }

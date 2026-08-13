@@ -500,10 +500,10 @@ export type DialogFormBodyProps = {
   /** When true, hides the workflow picker so the enforced workflow can't be swapped. */
   workflowLocked?: boolean;
   /**
-   * Called by the voice-input button after a non-empty transcript is inserted
-   * into the description when the user has voice auto-send enabled. The dialog
+   * Called by a plugin composer action after it inserted text into the
+   * description and wants the form submitted the native way. The dialog
    * routes this to a programmatic form submit so dictation can create the task
    * hands-free.
    */
-  onVoiceAutoSend?: () => void;
+  onComposerSubmit?: () => boolean | Promise<boolean>;
 };

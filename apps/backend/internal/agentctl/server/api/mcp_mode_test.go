@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 )
 
@@ -107,5 +108,35 @@ func TestHandleSetMcpProviders_NormalizesAndPreservesMode(t *testing.T) {
 	}
 	if got, want := body.Providers, []string{"gitlab"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("providers = %v, want %v", got, want)
+	}
+}
+
+func TestHandleSetPluginToolsReplacesLiveCatalog(t *testing.T) {
+	s := newTestServerWithMCP(t)
+	definition := plugintools.Definition{
+		PluginID: "echo", LocalName: "echo", ExposedName: plugintools.ExposedName("echo", "echo"),
+		Description: "Echo", Surfaces: []string{plugintools.SurfaceKanban},
+		InputSchema: []byte(`{"type":"object"}`),
+	}
+	body, err := json.Marshal(plugintools.Snapshot{Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/mcp/plugin-tools", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	s.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Generation string `json:"generation"`
+		Revision   uint64 `json:"revision"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Generation != "g" || response.Revision != 1 {
+		t.Fatalf("response = %#v", response)
 	}
 }

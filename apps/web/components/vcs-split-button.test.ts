@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { t } from "@/lib/i18n";
+import { determinePrimaryAction } from "./vcs-split-button";
 
 /**
  * The VCS tooltips used to build their plural by hand:
@@ -39,6 +40,16 @@ describe("vcs split-button count-bearing copy", () => {
   it("keeps the divergence aria-labels count-invariant, as the shipped English was", () => {
     expect(t("integrations:commitsAheadAriaLabel", { value: 1 })).toBe("1 commits ahead");
     expect(t("integrations:commitsBehindAriaLabel", { value: 2 })).toBe("2 commits behind");
+  });
+});
+
+describe("vcs split-button remote action semantics", () => {
+  it("uses the upstream-relative count for a linked PR push", () => {
+    expect(determinePrimaryAction(0, 1, 7, true)).toBe("push");
+  });
+
+  it("does not select Push when divergence policy removes unsafe push evidence", () => {
+    expect(determinePrimaryAction(0, 0, 7, true)).toBe("rebase");
   });
 });
 

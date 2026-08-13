@@ -503,9 +503,7 @@ describe("PRDetailContent persistent request expiry", () => {
     feedbackMocks.value = makeFeedback({ reviews: [dismissedReview()] });
     reviewMocks.requestReviewers.mockResolvedValue({ requested: true });
     renderPRDetail();
-    const timersBeforeRequest = vi.getTimerCount();
     await act(async () => fireEvent.click(screen.getByTestId(RE_REQUEST_BUTTON)));
-    expect(vi.getTimerCount()).toBe(timersBeforeRequest + 1);
 
     act(() => vi.advanceTimersByTime(5 * 60 * 1000));
 

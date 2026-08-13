@@ -28,6 +28,33 @@ capabilities:
   secrets: true
   user_state: true
 
+agent_tools:
+  - name: test_echo
+    description: Echoes test input and invocation context for plugin MCP tests
+    surfaces: [kanban-task, office-task]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [value]
+      properties:
+        value:
+          type: string
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [value, task_id, surface]
+      properties:
+        value:
+          type: string
+        task_id:
+          type: string
+        surface:
+          type: string
+    annotations:
+      read_only_hint: true
+      destructive_hint: false
+      idempotent_hint: true
+
 webhooks:
   - key: "test-hook"
     description: "Records inbound webhooks for e2e polling"
@@ -35,7 +62,7 @@ webhooks:
   - key: "public-hook"
     description: "Public counterpart of test-hook for exercising the anonymous auth-gate opt-in"
     method: "POST"
-    public: true
+    access: public
 
 ui:
   bundle: "/ui/bundle.js"

@@ -6,18 +6,13 @@ import {
 } from "@/lib/tasks/tasks-list-options";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
-import {
-  DEFAULT_VOICE_MODE_STATE,
-  type UserSettingsState,
-  type VoiceModeState,
-} from "@/lib/state/slices/settings/types";
+import { type UserSettingsState } from "@/lib/state/slices/settings/types";
 import type { SidebarTaskPrefsApi, UserSettings, UserSettingsResponse } from "@/lib/types/http";
 import type {
   LspStatusLocation,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http-user-settings";
-import type { VoiceModeSettings } from "@/lib/types/http-voice";
 
 export type UserSettingsData = Omit<Partial<UserSettings>, "workspace_id"> & {
   workspace_id?: string;
@@ -41,6 +36,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
+    preventAutoStartAgentOnOpen: false,
     unreadDivider: false,
     agentGeneratedTaskTitles: true,
     mcpTaskAgentProfileDefault: "current_task",
@@ -49,6 +45,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     showScrollToStart: false,
     showTranscriptAutoScrollControl: false,
     showTodoListPanel: false,
+    showTodoListPanelOnlyWhenNotEmpty: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
@@ -83,7 +80,6 @@ export function createDefaultUserSettings(): UserSettingsState {
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
-    voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
     hiddenWorkflowStepIds: {},
     loaded: false,
   };
@@ -125,25 +121,6 @@ export function parseAppStatusBarOrder(value: UserSettingsData["app_status_bar_o
   };
 }
 
-/**
- * Maps the backend's snake_case VoiceMode payload into the camelCase shape
- * the store and UI use. Missing or partial payloads fall back to the defaults
- * so an old user row (written before VoiceMode existed) doesn't surface as
- * an empty string the radio groups can't render. `enabled` defaults to true
- * for users who haven't toggled it — voice mode is opt-out, not opt-in.
- */
-export function parseVoiceMode(value: VoiceModeSettings | undefined): VoiceModeState {
-  if (!value) return { ...DEFAULT_VOICE_MODE_STATE };
-  return {
-    enabled: typeof value.enabled === "boolean" ? value.enabled : true,
-    engine: value.engine || DEFAULT_VOICE_MODE_STATE.engine,
-    language: value.language || DEFAULT_VOICE_MODE_STATE.language,
-    mode: value.mode || DEFAULT_VOICE_MODE_STATE.mode,
-    autoSend: typeof value.auto_send === "boolean" ? value.auto_send : false,
-    whisperWebModel: value.whisper_web_model || DEFAULT_VOICE_MODE_STATE.whisperWebModel,
-  };
-}
-
 function buildTerminalFields(s: UserSettingsData, current: UserSettingsState) {
   return {
     terminalLinkBehavior:
@@ -160,12 +137,6 @@ function buildTerminalFields(s: UserSettingsData, current: UserSettingsState) {
       s.changes_panel_layout === undefined
         ? current.changesPanelLayout
         : parseChangesPanelLayout(s.changes_panel_layout),
-  };
-}
-
-function buildVoiceModeFields(s: UserSettingsData, current: UserSettingsState) {
-  return {
-    voiceMode: s.voice_mode === undefined ? current.voiceMode : parseVoiceMode(s.voice_mode),
   };
 }
 
@@ -248,6 +219,8 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
     chatSubmitKey: s.chat_submit_key ?? current.chatSubmitKey,
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? current.reviewAutoMarkOnScroll,
     confirmTaskArchive: s.confirm_task_archive ?? current.confirmTaskArchive,
+    preventAutoStartAgentOnOpen:
+      s.prevent_auto_start_agent_on_open ?? current.preventAutoStartAgentOnOpen,
     unreadDivider: s.unread_divider ?? current.unreadDivider,
     agentGeneratedTaskTitles: s.agent_generated_task_titles ?? current.agentGeneratedTaskTitles,
     mcpTaskAgentProfileDefault: mapDefined(
@@ -256,18 +229,25 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
       parseMCPTaskAgentProfileDefault,
     ),
     startupPage: mapDefined(s.startup_page, current.startupPage, parseStartupPage),
+    keyboardShortcuts: s.keyboard_shortcuts ?? current.keyboardShortcuts,
+  };
+}
+
+function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) {
+  return {
     showAnchoredPromptBar: s.show_anchored_prompt_bar ?? current.showAnchoredPromptBar,
     showScrollToLastPrompt: s.show_scroll_to_last_prompt ?? current.showScrollToLastPrompt,
     showScrollToStart: s.show_scroll_to_start ?? current.showScrollToStart,
     showTranscriptAutoScrollControl:
       s.show_transcript_auto_scroll_control ?? current.showTranscriptAutoScrollControl,
     showTodoListPanel: s.show_todo_list_panel ?? current.showTodoListPanel,
+    showTodoListPanelOnlyWhenNotEmpty:
+      s.show_todo_list_panel_only_when_not_empty ?? current.showTodoListPanelOnlyWhenNotEmpty,
     showReleaseNotification: s.show_release_notification ?? current.showReleaseNotification,
     releaseNotesLastSeenVersion: mapNullableString(
       s.release_notes_last_seen_version,
       current.releaseNotesLastSeenVersion,
     ),
-    keyboardShortcuts: s.keyboard_shortcuts ?? current.keyboardShortcuts,
   };
 }
 
@@ -279,6 +259,7 @@ export function buildCoreFields(
     revision: s.revision ?? current.revision,
     ...buildIdentityFields(s, current),
     ...buildBehaviorFields(s, current),
+    ...buildAppearanceFields(s, current),
     savedLayouts: s.saved_layouts ?? current.savedLayouts,
     sidebarViews: mapDefined(s.sidebar_views, current.sidebarViews, (views) =>
       views.map(fromApiSidebarView),
@@ -328,7 +309,6 @@ export function buildCoreFields(
     hiddenWorkflowStepIds: s.kanban_hidden_step_ids ?? current.hiddenWorkflowStepIds,
     ...buildTerminalFields(s, current),
     ...buildSystemMetricsDisplayFields(s, current),
-    ...buildVoiceModeFields(s, current),
   };
 }
 

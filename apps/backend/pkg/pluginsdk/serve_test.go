@@ -6,7 +6,10 @@ import (
 	"time"
 
 	hcplugin "github.com/hashicorp/go-plugin"
+	pluginv1 "github.com/kandev/kandev/proto/kandev/plugin/v1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // fakeAuthorPlugin is a minimal author-facing Plugin used to exercise the
@@ -25,6 +28,28 @@ func (p *fakeAuthorPlugin) OnEvent(_ context.Context, e *Event) error {
 
 func (p *fakeAuthorPlugin) HandleWebhook(_ context.Context, req *WebhookRequest) (*WebhookResponse, error) {
 	return &WebhookResponse{Status: 200, Body: append([]byte("got:"), req.Body...)}, nil
+}
+
+func (p *fakeAuthorPlugin) InvokeAgentTool(_ context.Context, req *AgentToolRequest) (*AgentToolResult, error) {
+	return &AgentToolResult{
+		Text: "called:" + req.Context.TaskID,
+		StructuredContent: map[string]any{
+			"name": req.Name, "value": req.Arguments["value"],
+		},
+	}, nil
+}
+
+type nilAgentToolPlugin struct{ UnimplementedPlugin }
+
+func (*nilAgentToolPlugin) InvokeAgentTool(context.Context, *AgentToolRequest) (*AgentToolResult, error) {
+	return nil, nil
+}
+
+func TestGRPCPluginServerRejectsNilAgentToolResult(t *testing.T) {
+	server := &grpcPluginServer{impl: &nilAgentToolPlugin{}}
+	_, err := server.InvokeAgentTool(context.Background(), &pluginv1.AgentToolRequest{Name: "echo"})
+	require.Error(t, err)
+	require.Equal(t, codes.Internal, status.Code(err))
 }
 
 // TestServe_EndToEnd exercises the same GRPCPlugin wiring Serve() (plugin
@@ -78,6 +103,16 @@ func TestServe_EndToEnd(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int32(200), resp.Status)
 		require.Equal(t, []byte("got:hi"), resp.Body)
+	})
+
+	t.Run("InvokeAgentTool", func(t *testing.T) {
+		resp, err := remote.InvokeAgentTool(context.Background(), &AgentToolRequest{
+			InvocationID: "inv-1", Name: "echo", Arguments: map[string]any{"value": "ok"},
+			Context: AgentToolContext{TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-1", Surface: "kanban-task"},
+		})
+		require.NoError(t, err)
+		require.Equal(t, "called:task-1", resp.Text)
+		require.Equal(t, "echo", resp.StructuredContent["name"])
 	})
 
 	t.Run("HostBrokerRoundTrip", func(t *testing.T) {

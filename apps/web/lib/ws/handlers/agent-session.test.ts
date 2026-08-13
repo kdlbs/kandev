@@ -19,6 +19,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
       activeSessionId: null,
       pinnedSessionId: null,
       lastSessionByTaskId: {},
+      resumeSkippedSessionIds: {},
     },
     taskSessions: { items: {} },
     taskSessionsByTask: { itemsByTaskId: {} },
@@ -28,6 +29,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setActiveSession: vi.fn(),
     setActiveSessionAuto: vi.fn(),
     setSessionAgentctlStatus: vi.fn(),
+    setResumeSkipped: vi.fn(),
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
     clearContextWindow: vi.fn(),
@@ -1478,5 +1480,31 @@ describe("session activity explicit-null contract", () => {
 
     expect(store.getState().taskSessions.items["s-1"].foreground_activity).toBe("background");
     expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+  });
+});
+
+describe("session.state_changed resume-skipped clearing", () => {
+  let store: ReturnType<typeof makeStore>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let handler: (msg: any) => void;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "WAITING_FOR_INPUT" } },
+      },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+  });
+
+  it("clears the resume-skipped marker on a RUNNING transition", () => {
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "RUNNING" }));
+    expect(store.getState().setResumeSkipped).toHaveBeenCalledWith("s-1", false);
+  });
+
+  it("does NOT clear the marker on a STARTING transition (failed resumes keep the retry button)", () => {
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "STARTING" }));
+    expect(store.getState().setResumeSkipped).not.toHaveBeenCalled();
   });
 });

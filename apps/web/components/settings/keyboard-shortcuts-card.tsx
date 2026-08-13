@@ -35,7 +35,7 @@ type ShortcutRecorderProps = {
   current: KeyboardShortcut;
   onChange: (id: string, shortcut: KeyboardShortcut) => void;
   onReset: (id: string) => void;
-  // Optional: callers that don't support an explicit "unbind" (e.g. the voice
+  // Optional: callers that don't support an explicit "unbind" (e.g. a single-row
   // settings recorder) omit this, and the Clear button is hidden for them.
   onClear?: (id: string) => void;
   isDirty?: boolean;

@@ -232,7 +232,7 @@ request. Do not silently substitute a directory in the Kandev monorepo.
 7. Webhook routes require a real Kandev caller identity by default. Follow
    `docs/public/plugins-authoring.md` for the current body-size and route
    limits. Kandev rejects undeclared keys and, unless the manifest declares
-   `webhooks[].public: true`, rejects anonymous callers with 401 before your
+   `webhooks[].access: public`, rejects anonymous callers with 401 before your
    handler runs. Only mark a webhook `public` when it is genuinely third-party
    ingress (a provider callback, an SSO initiate/callback pair) that your own
    handler authenticates — Kandev does not enforce the manifest's informational

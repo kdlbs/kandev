@@ -5,7 +5,10 @@ import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { Task } from "@/lib/types/http";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
-import { TaskCreateDialogFooter } from "@/components/task-create-dialog-footer";
+import {
+  isNativeSubmitDisabled,
+  TaskCreateDialogFooter,
+} from "@/components/task-create-dialog-footer";
 import { DiscardLocalChangesDialog } from "@/components/discard-local-changes-dialog";
 import { DialogHeaderContent } from "@/components/task-create-dialog-header";
 import {
@@ -166,7 +169,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         aboveDescriptionSlot={props.aboveDescriptionSlot}
         extraFormSlot={props.extraFormSlot}
         autoFocusDescription={!isTaskStarted && !(showTaskName && taskNameAutoFocus)}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        onComposerSubmit={props.onComposerSubmit}
       />
       <CreateModeAgentSelectors {...props} />
       {props.bottomSlot}
@@ -207,7 +210,7 @@ function SessionModeBody(props: DialogFormBodyProps) {
         enhance={props.enhance}
         workspaceId={props.workspaceId}
         onJiraImport={props.onJiraImport}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        onComposerSubmit={props.onComposerSubmit}
       />
       <SessionSelectors
         agentProfileOptions={props.agentProfileOptions}
@@ -245,12 +248,12 @@ function DialogFormBody(props: DialogFormBodyProps) {
   );
 }
 
-// Synthetic submit event used by the voice auto-send path. Calling the form
+// Synthetic submit event used by a plugin composer action's submit. Calling the form
 // handler directly (instead of `form.requestSubmit()`) matches the chat
 // composer's pattern and avoids the Safari < 16 gap where `requestSubmit` is
 // missing on `HTMLFormElement`. `guardedHandleSubmit` only reads
 // `preventDefault` off the event, so a stubbed shape is sufficient.
-const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+const PROGRAMMATIC_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { t } = useTranslation("chat");
@@ -286,14 +289,19 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
     }
     resetQueuedLastUsedOnClose();
   }, [props.open, resetQueuedLastUsedOnClose]);
-  // Voice auto-send invokes the same submit handler as the in-form Submit
-  // button. Every existing validation gate (missing title/repo/branch/agent,
-  // `submitBlockedReason`, in-flight create) still applies because they live
-  // inside `handleSubmit` itself, so a dictation with incomplete fields
-  // silently no-ops rather than creating a malformed task.
-  const handleVoiceAutoSend = useCallback(() => {
-    guardedHandleSubmit(VOICE_SUBMIT_EVENT);
-  }, [guardedHandleSubmit]);
+  // Programmatic submissions use the native control's preflight before
+  // entering the same guarded submit handler as the form button.
+  const pendingAttachmentReason = setup.fs.hasPendingAttachmentUploads
+    ? t("chat:attachmentUploadPendingSubmit")
+    : null;
+  const nativeSubmitDisabled = isNativeSubmitDisabled(
+    buildDialogFooterProps(setup, props, pendingAttachmentReason),
+  );
+  const handleComposerSubmit = useCallback(() => {
+    if (nativeSubmitDisabled) return false;
+    guardedHandleSubmit(PROGRAMMATIC_SUBMIT_EVENT);
+    return true;
+  }, [guardedHandleSubmit, nativeSubmitDisabled]);
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
@@ -319,17 +327,11 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
           >
             <DialogFormBody
               {...buildDialogFormBodyProps(setup, props)}
-              onVoiceAutoSend={handleVoiceAutoSend}
+              onComposerSubmit={handleComposerSubmit}
             />
             <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
               <TaskCreateDialogFooter
-                {...buildDialogFooterProps(
-                  setup,
-                  props,
-                  setup.fs.hasPendingAttachmentUploads
-                    ? t("chat:attachmentUploadPendingSubmit")
-                    : null,
-                )}
+                {...buildDialogFooterProps(setup, props, pendingAttachmentReason)}
               />
             </DialogFooter>
           </form>

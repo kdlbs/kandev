@@ -2,8 +2,9 @@
 // authentication. It runs after CORS on every request (see
 // backendapp.buildHTTPServer) and implements the allowlist policy from
 // docs/specs/auth: identity injection in disabled mode, credential resolution
-// (session cookie, then PAT bearer), self-authenticating webhook passthrough,
-// the office agent-JWT deferral, and SPA-shell availability for the login page.
+// (session cookie, then PAT bearer), self-authenticating callback and webhook
+// passthrough, the office agent-JWT deferral, and SPA-shell availability for
+// the login page.
 //
 // CSRF note: cross-origin browser requests are already rejected by
 // backendapp.corsMiddleware (httpmw.AllowedOrigin) before this middleware
@@ -83,7 +84,7 @@ func BearerToken(r *http.Request) string {
 // pre-session bootstrap, a credential-issuing endpoint, or a
 // self-authenticating webhook (own secret/HMAC validated by its handler).
 // Plugin webhooks are NOT in this allowlist — whether a given plugin webhook
-// is anonymous-callable depends on its manifest (webhooks[].public), which
+// is anonymous-callable depends on its manifest (webhooks[].access), which
 // only plugins.Controller.webhook can read; see isPluginWebhookPath below.
 func isPublicPath(method, path string) bool {
 	switch path {
@@ -116,6 +117,13 @@ func isPublicPath(method, path string) bool {
 	case strings.HasPrefix(path, "/api/v1/office/channels/") && strings.HasSuffix(path, "/inbound"):
 		// HMAC-SHA256 / provider token verified by the channel handler.
 		return true
+	case strings.HasPrefix(path, "/api/v1/github/app/registrations/") &&
+		(strings.HasSuffix(path, "/manifest/callback") ||
+			strings.HasSuffix(path, "/install/callback") ||
+			strings.HasSuffix(path, "/personal/callback")):
+		// GitHub redirects through a public hostname that cannot carry the
+		// Kandev session cookie. The handlers validate expiring, single-use state.
+		return method == http.MethodGet
 	case strings.HasPrefix(path, "/api/v1/github/app/registrations/") && strings.HasSuffix(path, "/webhook"):
 		// GitHub App webhook delivery; HMAC (X-Hub-Signature-256) verified by
 		// the handler, not request identity.
@@ -147,7 +155,7 @@ func isDeferredPath(c *gin.Context, path string) bool {
 		return true
 	case isPluginWebhookRelayMethod(c.Request.Method) && isPluginWebhookPath(path):
 		// Whether this specific webhook is anonymous-callable depends on the
-		// plugin's manifest (webhooks[].public), which only
+		// plugin's manifest (webhooks[].access), which only
 		// plugins.Controller.webhook can read — it enforces the auth gate
 		// itself (webhookCallerAuthorized), mirroring the /mcp precedent above.
 		return true

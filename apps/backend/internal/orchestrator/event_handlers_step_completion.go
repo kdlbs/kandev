@@ -5,9 +5,11 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // subscribeStepCompletionEvents wires the ADR 0015 out-of-band subscriber
@@ -56,6 +58,81 @@ func (s *Service) clearPendingStepSignalByID(ctx context.Context, sessionID stri
 	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, nil); err != nil {
 		s.logger.Debug("clearPendingStepSignal: failed to persist nil bag entry",
 			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+// recordAutoStepTransition writes the ADR 0015 audit row for an
+// orchestrator-driven (non-manual) step transition — shared by the engine
+// path (applyEngineTransition, covering on_turn_complete, on_turn_start,
+// and on_children_completed) and the legacy on_turn_complete/on_turn_start
+// path (executeStepTransition), so the two funnels cannot drift apart.
+// The trigger is preserved so on_turn_start and on_children_completed are not
+// reported as completion events. Older rows keep auto_complete for turn
+// completion and remain readable.
+// Nil-safe: no recorder wired, or no session to record against, is a
+// no-op. Runtime writes use the workflow service's bounded worker. Failures
+// are logged and swallowed because this contract is best-effort telemetry.
+func (s *Service) recordAutoStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, signal *models.PendingStepCompletionSignal, triggers ...wfmodels.StepTransitionTrigger) {
+	if s.stepHistoryRecorder == nil || sessionID == "" {
+		return
+	}
+	var metadata map[string]interface{}
+	if signal != nil {
+		metadata = map[string]interface{}{
+			"signal_source":  signal.Source,
+			"signal_summary": signal.Summary,
+		}
+	}
+	trigger := wfmodels.StepTransitionTriggerAutoComplete
+	if len(triggers) > 0 && triggers[0] != "" {
+		trigger = triggers[0]
+	}
+	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+		asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, trigger, nil, metadata)
+		return
+	}
+	// Test doubles can remain synchronous. Production workflow service uses the
+	// queue branch above.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
+	defer cancel()
+	if err := s.stepHistoryRecorder.CreateStepTransition(
+		writeCtx, sessionID, fromStepID, toStepID, trigger, nil, metadata,
+	); err != nil {
+		s.logger.Warn("failed to record auto step transition",
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID),
+			zap.Error(err))
+	}
+}
+
+// recordManualStepTransition writes the ADR 0015 audit row for an
+// agent-initiated move_task_kandev call that could not apply inline because
+// the calling session was still RUNNING/STARTING (applyPendingMove, deferred
+// via messagequeue.PendingMove). This is the agent half of
+// StepTransitionTriggerManual — the user/HTTP half is recorded by
+// task/service.MoveTaskWithOptions. Nil-safe and failure-swallowing, same as
+// recordAutoStepTransition.
+func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, actors ...wfmodels.StepTransitionActor) {
+	if s.stepHistoryRecorder == nil || sessionID == "" {
+		return
+	}
+	// Test doubles can remain synchronous. Production workflow service uses the
+	// queue branch below.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
+	defer cancel()
+	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+		asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil)
+		return
+	}
+	if err := s.stepHistoryRecorder.CreateStepTransition(
+		writeCtx, sessionID, fromStepID, toStepID, wfmodels.StepTransitionTriggerManual, nil, nil,
+	); err != nil {
+		s.logger.Warn("failed to record manual step transition",
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID),
+			zap.Error(err))
 	}
 }
 

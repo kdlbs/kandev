@@ -73,4 +73,21 @@ describe("CommitRow", () => {
     fireEvent.click(screen.getByTestId("commit-row-remote1"));
     expect(onOpenCommitDetail).toHaveBeenCalledWith(commit.detailTarget);
   });
+
+  it("announces diverged row provenance without showing an unpushed marker", () => {
+    const localCheckoutCommit: CommitItem = {
+      ...remoteCommit(),
+      commit_sha: "local123456",
+      commit_message: "Superseded checkout commit",
+      pushed: false,
+      presentation: "local_checkout",
+      detailTarget: { source: "local", sha: "local123456" },
+    };
+
+    render(<CommitRow commit={localCheckoutCommit} isLatest />);
+
+    expect(screen.getByTitle("Local checkout commit")).toBeTruthy();
+    expect(screen.getByText("Local checkout commit")).toBeTruthy();
+    expect(screen.queryByTitle("Local commit (not yet pushed)")).toBeNull();
+  });
 });

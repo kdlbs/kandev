@@ -1209,6 +1209,35 @@ func (r *Repository) SetSessionMetadataKeyIfAbsent(
 	return rows > 0, nil
 }
 
+// SetSessionMetadataKeyIfAbsentOrDifferentStep atomically writes a metadata
+// key when it is absent or its stored value has a different step_id. The
+// returned bool reports whether this call stored the value.
+func (r *Repository) SetSessionMetadataKeyIfAbsentOrDifferentStep(
+	ctx context.Context,
+	sessionID, key, stepID string,
+	value interface{},
+) (bool, error) {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	path := key
+	stepPath := key
+	if !dialect.IsPostgres(driver) {
+		path = "$." + key
+		stepPath = path + ".step_id"
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(setSessionMetadataKeyIfAbsentOrDifferentStepQuery(driver)),
+		path, string(valueJSON), now, sessionID, stepPath, stepID)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
 // SetSessionMetadataKeyIfAbsentIfState atomically claims a metadata key only
 // while the session remains in expectedState. It is used when a terminal
 // transition owns a one-time side effect that must not be emitted by a stale
@@ -1283,6 +1312,34 @@ func setSessionMetadataKeyIfAbsentQuery(driver string) string {
 			updated_at = ?
 		WHERE id = ?
 			AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NULL
+	`
+}
+
+func setSessionMetadataKeyIfAbsentOrDifferentStepQuery(driver string) string {
+	if dialect.IsPostgres(driver) {
+		base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
+		return `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(
+				` + base + `,
+				ARRAY[?]::text[],
+				?::jsonb,
+				true
+			)::text,
+				updated_at = ?
+			WHERE id = ?
+				AND jsonb_extract_path_text(` + base + `, ?, 'step_id') IS DISTINCT FROM ?
+		`
+	}
+	base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
+	return `
+		UPDATE task_sessions
+		SET metadata = json_set(` + base + `, ?, json(?)),
+			updated_at = ?
+		WHERE id = ?
+			AND (
+				json_extract(` + base + `, ?) IS NOT ?
+			)
 	`
 }
 
@@ -1390,24 +1447,27 @@ func (r *Repository) GetLastAgentMessage(ctx context.Context, sessionID string) 
 }
 
 // IncrementTaskSessionUsage adds the given deltas to the cumulative
-// tokens / cost columns on task_sessions. Used by the office cost
-// subscriber after a cost event lands so the per-session totals stay
-// in sync without re-summing office_cost_events. The model + DTO
+// tokens / cost columns on task_sessions, including cached input tokens
+// (tokens_cached_in mirrors office_cost_events.tokens_cached_in and is kept
+// separate from tokens_in because it is priced differently). Used by the
+// office cost subscriber after a cost event lands so the per-session totals
+// stay in sync without re-summing office_cost_events. The model + DTO
 // don't surface these columns yet (DB-only per the office-costs
 // wedge); the cost explorer follow-up will expose them.
 func (r *Repository) IncrementTaskSessionUsage(
-	ctx context.Context, sessionID string, tokensIn, tokensOut, costSubcents int64,
+	ctx context.Context, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
 ) error {
 	if sessionID == "" {
 		return nil
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
-		   SET tokens_in     = COALESCE(tokens_in, 0)     + ?,
-		       tokens_out    = COALESCE(tokens_out, 0)    + ?,
-		       cost_subcents = COALESCE(cost_subcents, 0) + ?
+		   SET tokens_in        = COALESCE(tokens_in, 0)        + ?,
+		       tokens_cached_in = COALESCE(tokens_cached_in, 0) + ?,
+		       tokens_out       = COALESCE(tokens_out, 0)       + ?,
+		       cost_subcents    = COALESCE(cost_subcents, 0)    + ?
 		 WHERE id = ?
-	`), tokensIn, tokensOut, costSubcents, sessionID)
+	`), tokensIn, tokensCachedIn, tokensOut, costSubcents, sessionID)
 	return err
 }
 

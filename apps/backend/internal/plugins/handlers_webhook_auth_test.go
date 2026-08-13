@@ -37,6 +37,10 @@ import (
 func installedWebhookPlugin(t *testing.T, svc *Service, id, key string, public bool) {
 	t.Helper()
 	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	access := "authenticated"
+	if public {
+		access = "public"
+	}
 	manifestYAML := fmt.Sprintf(`
 id: %s
 api_version: 1
@@ -45,12 +49,12 @@ display_name: Test Plugin
 webhooks:
   - key: %s
     method: POST
-    public: %v
+    access: %s
 runtime:
   type: binary
   executables:
     %s: server/plugin
-`, id, key, public, platformKey)
+`, id, key, access, platformKey)
 	var buf bytes.Buffer
 	files := map[string][]byte{
 		"manifest.yaml": []byte(manifestYAML),
@@ -73,7 +77,7 @@ runtime:
 func reachedRelay(code int) bool { return code == http.StatusServiceUnavailable }
 
 // TestWebhookAuthGate_AnonymousNonPublicBlocked pins AC1: an anonymous
-// caller against a webhook without public: true gets 401 with
+// caller against a webhook without access: public gets 401 with
 // WWW-Authenticate: Bearer, and never reaches the relay.
 func TestWebhookAuthGate_AnonymousNonPublicBlocked(t *testing.T) {
 	router, svc := newTestRouter(t)
@@ -92,7 +96,7 @@ func TestWebhookAuthGate_AnonymousNonPublicBlocked(t *testing.T) {
 }
 
 // TestWebhookAuthGate_AnonymousPublicReachesRelay pins AC2: an anonymous
-// caller against a webhook declaring public: true passes the gate and
+// caller against a webhook declaring access: public passes the gate and
 // reaches the relay (503 "not running", not 401 "authentication required").
 func TestWebhookAuthGate_AnonymousPublicReachesRelay(t *testing.T) {
 	router, svc := newTestRouter(t)

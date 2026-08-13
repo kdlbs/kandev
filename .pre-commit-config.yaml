@@ -68,3 +68,13 @@ repos:
         language: system
         files: ^apps/web/(components|app|hooks|lib|src)/.*\.tsx?$|^apps/web/eslint\.i18n\.options\.mjs$
         pass_filenames: false
+
+  # Public copy hooks
+  - repo: local
+    hooks:
+      - id: public-copy-em-dash
+        name: Public copy em-dash guard
+        entry: node apps/web/scripts/check-no-em-dash-ui.mjs
+        language: system
+        pass_filenames: false
+        always_run: true

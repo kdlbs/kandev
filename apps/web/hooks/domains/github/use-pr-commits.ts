@@ -7,6 +7,8 @@ import type { PRCommitInfo } from "@/lib/types/github";
 
 type PRCommitsState = {
   commits: PRCommitInfo[];
+  providerHead: string | null;
+  providerCommitsComplete: boolean;
   loading: boolean;
   error: string | null;
 };
@@ -15,6 +17,8 @@ export type KeyedPRCommitsState = PRCommitsState & { sourceKey: string };
 const INITIAL_STATE: KeyedPRCommitsState = {
   sourceKey: "",
   commits: [],
+  providerHead: null,
+  providerCommitsComplete: false,
   loading: false,
   error: null,
 };
@@ -24,9 +28,21 @@ export function resolvePRCommitsView(
   requestedKey: string,
 ): PRCommitsState {
   if (state.sourceKey === requestedKey) {
-    return { commits: state.commits, loading: state.loading, error: state.error };
+    return {
+      commits: state.commits,
+      providerHead: state.providerHead,
+      providerCommitsComplete: state.providerCommitsComplete,
+      loading: state.loading,
+      error: state.error,
+    };
   }
-  return { commits: [], loading: requestedKey !== "", error: null };
+  return {
+    commits: [],
+    providerHead: null,
+    providerCommitsComplete: false,
+    loading: requestedKey !== "",
+    error: null,
+  };
 }
 
 type PRCommitsRequest = {
@@ -40,28 +56,60 @@ type PRCommitsRequest = {
 async function fetchPRCommits(
   { workspaceId, owner, repo, prNumber, sourceKey }: PRCommitsRequest,
   setState: (s: KeyedPRCommitsState) => void,
-) {
+): Promise<PRCommitsState> {
   const client = getWebSocketClient();
-  setState({ sourceKey, commits: [], loading: true, error: null });
+  setState({
+    sourceKey,
+    commits: [],
+    providerHead: null,
+    providerCommitsComplete: false,
+    loading: true,
+    error: null,
+  });
   if (!client) {
-    setState({ sourceKey, commits: [], loading: false, error: null });
-    return;
+    const next = {
+      sourceKey,
+      commits: [],
+      providerHead: null,
+      providerCommitsComplete: false,
+      loading: false,
+      error: null,
+    } satisfies KeyedPRCommitsState;
+    setState(next);
+    return next;
   }
   try {
-    const response = await client.request<{ commits?: PRCommitInfo[] }>("github.pr_commits.get", {
+    const response = await client.request<{
+      commits?: PRCommitInfo[];
+      head_sha?: string;
+      complete?: boolean;
+    }>("github.pr_commits.get", {
       workspace_id: workspaceId,
       owner,
       repo,
       number: prNumber,
     });
-    setState({ sourceKey, commits: response?.commits ?? [], loading: false, error: null });
+    const next = {
+      sourceKey,
+      commits: response?.commits ?? [],
+      providerHead: response?.head_sha ?? null,
+      providerCommitsComplete: response?.complete === true,
+      loading: false,
+      error: null,
+    } satisfies KeyedPRCommitsState;
+    setState(next);
+    return next;
   } catch (err) {
-    setState({
+    const next = {
       sourceKey,
       commits: [],
+      providerHead: null,
+      providerCommitsComplete: false,
       loading: false,
       error: err instanceof Error ? err.message : "Failed to fetch PR commits",
-    });
+    } satisfies KeyedPRCommitsState;
+    setState(next);
+    return next;
   }
 }
 
@@ -84,10 +132,10 @@ export function usePRCommits(
   const paramsKeyRef = useRef<string>("");
   const requestIdRef = useRef(0);
 
-  const refresh = useCallback(() => {
-    if (!workspaceId || !owner || !repo || !prNumber) return;
+  const refresh = useCallback(async () => {
+    if (!workspaceId || !owner || !repo || !prNumber) return null;
     const requestId = ++requestIdRef.current;
-    void fetchPRCommits({ workspaceId, owner, repo, prNumber, sourceKey }, (next) => {
+    return fetchPRCommits({ workspaceId, owner, repo, prNumber, sourceKey }, (next) => {
       if (requestId !== requestIdRef.current) return;
       setState(next);
     });

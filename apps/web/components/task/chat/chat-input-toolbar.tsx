@@ -10,6 +10,7 @@ import { shouldUseCompactTaskChrome } from "@/hooks/use-compact-task-chrome";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import type { PluginComposerCapability } from "@/lib/plugins/types";
 
 export type ChatInputToolbarProps = {
   planModeEnabled: boolean;
@@ -47,12 +48,6 @@ export type ChatInputToolbarProps = {
   isUtilityConfigured?: boolean;
   /** Callback to open file picker for attaching files */
   onAttachFiles?: () => void;
-  /** Callback to insert a transcribed voice utterance into the editor. When
-   *  omitted, the voice button is hidden — keeps quick-chat / read-only
-   *  variants free of a button they can't wire. */
-  onVoiceTranscript?: (text: string) => void;
-  /** Optional auto-send hook fired after a voice transcript is inserted. */
-  onVoiceAutoSend?: () => void;
   /** Hide the sessions dropdown (for quick chat) */
   hideSessionsDropdown?: boolean;
   /** When true, only render the submit/cancel button — no other controls */
@@ -61,6 +56,8 @@ export type ChatInputToolbarProps = {
   hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
+  composerCapability?: PluginComposerCapability;
+  composerSurface?: "task-chat" | "quick-chat";
 };
 
 function MinimalToolbar({
@@ -180,8 +177,8 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         onCancel={props.onCancel}
         onSubmit={props.onSubmit}
         submitShortcut={submitShortcut}
-        onVoiceTranscript={props.onVoiceTranscript}
-        onVoiceAutoSend={props.onVoiceAutoSend}
+        composerCapability={props.composerCapability}
+        composerSurface={props.composerSurface}
       />
     );
   }

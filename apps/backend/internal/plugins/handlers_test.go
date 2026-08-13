@@ -19,7 +19,6 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/plugins/state"
@@ -61,23 +60,6 @@ func newTestRouter(t *testing.T) (*gin.Engine, *Service) {
 
 func doRequest(router *gin.Engine, method, path string, body string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	return rec
-}
-
-// doAuthedRequest is doRequest with a real (non-synthetic) request identity
-// attached to the request context, standing in for what httpmw.Middleware
-// would set from a resolved session/PAT. authn.FromGin falls back to reading
-// the request context when the gin-context key is unset, so this is enough
-// for handlers that gate on authn.FromGin without wiring the full auth
-// middleware into these lookup/size/availability-focused tests.
-func doAuthedRequest(router *gin.Engine, method, path string, body string, headers map[string]string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "user_1", Role: authn.RoleMember}))
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -405,9 +387,36 @@ runtime:
 	return &buf
 }
 
+func authenticatedWebhookPackage(t *testing.T, id, key string, maxBodyBytes int64) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: "1.0.0"
+display_name: Test Plugin
+webhooks:
+  - key: %s
+    access: authenticated
+    max_body_bytes: %d
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+`, id, key, maxBodyBytes, platformKey)
+	var buf bytes.Buffer
+	if err := pkgtartest.WritePackage(&buf, map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
+}
+
 func TestWebhookHandlerUnknownPluginReturns404(t *testing.T) {
 	router, _ := newTestRouter(t)
-	rec := doAuthedRequest(router, http.MethodPost, "/api/plugins/missing/webhooks/key1", "{}", nil)
+	rec := doRequest(router, http.MethodPost, "/api/plugins/missing/webhooks/key1", "{}", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
 	}
@@ -423,7 +432,7 @@ func TestWebhookHandlerUndeclaredKeyReturns404(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	rec := doAuthedRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/undeclared-key", "{}", nil)
+	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/undeclared-key", "{}", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
 	}
@@ -438,10 +447,53 @@ func TestWebhookHandlerOversizedBodyReturns413(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	oversized := strings.Repeat("a", maxWebhookBodyBytes+1)
-	rec := doAuthedRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", oversized, nil)
+	oversized := strings.Repeat("a", int(maxWebhookBodyBytes+1))
+	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", oversized, nil)
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuthenticatedWebhookRejectsAnonymousRequest(t *testing.T) {
+	router, svc := newTestRouter(t)
+	if _, err := svc.Install(t.Context(), authenticatedWebhookPackage(t, "kandev-plugin-voice", "transcribe", 16<<20)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-voice/webhooks/transcribe", "audio", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestReadCappedWebhookBodyUsesDeclaredLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader("12345"))
+	_, err := readCappedWebhookBody(ctx, 4)
+	if err == nil || rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("error = %v, status = %d, want size error and 413", err, rec.Code)
+	}
+}
+
+func TestWebhookRelayHeadersStripHostCredentials(t *testing.T) {
+	headers := http.Header{
+		"Authorization": []string{"Bearer kandev_pat_secret"},
+		"Cookie":        []string{"kandev_session=secret"},
+		"Content-Type":  []string{"audio/webm"},
+		"X-Plugin-Key":  []string{"plugin-secret"},
+	}
+
+	got := flattenHeaders(headers, "kandev_session")
+
+	if _, ok := got["Authorization"]; ok {
+		t.Fatal("Authorization header was forwarded to plugin")
+	}
+	if _, ok := got["Cookie"]; ok {
+		t.Fatal("Cookie header was forwarded to plugin")
+	}
+	if got["Content-Type"] != "audio/webm" || got["X-Plugin-Key"] != "plugin-secret" {
+		t.Fatalf("relay-safe headers = %#v", got)
 	}
 }
 
@@ -454,7 +506,7 @@ func TestWebhookHandlerNotRunningReturns503(t *testing.T) {
 		t.Fatalf("Disable: %v", err)
 	}
 
-	rec := doAuthedRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", "{}", nil)
+	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", "{}", nil)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503, body=%s", rec.Code, rec.Body.String())
 	}
