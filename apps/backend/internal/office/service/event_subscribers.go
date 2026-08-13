@@ -522,8 +522,8 @@ func (s *Service) tryPostStartFallback(
 }
 
 // handlePromptUsage records a cost event from a session/prompt usage
-// update. Cost resolution follows the three-layer order from
-// docs/specs/office-costs/spec.md, and CostSource on the row records which
+// update. Cost resolution follows the two-layer order from
+// docs/specs/office/costs.md, and CostSource on the row records which
 // layer actually produced the dollar amount (see resolveCostForUsage in
 // prompt_usage_cost.go — distinct from Estimated, a token-synthesis flag):
 //
@@ -535,7 +535,8 @@ func (s *Service) tryPostStartFallback(
 //     (default / sonnet / haiku) with no real-name mapping.
 //  2. models.dev (Layer B) — when tokens are reported but no cost,
 //     normalize the model id and look up pricing. On miss the row
-//     records cost_subcents=0 with estimated=true and cost_source=unpriced.
+//     records cost_subcents=0 with cost_source=unpriced; Estimated tracks
+//     data.Usage.Estimated verbatim on this path, not hardcoded true.
 //
 // buildCostEvent (prompt_usage_cost.go) also records the cache read/write
 // split (NULL when Usage.Estimated — see its doc comment) and turn_id /

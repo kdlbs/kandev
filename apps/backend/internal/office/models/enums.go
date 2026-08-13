@@ -135,7 +135,7 @@ func (s BudgetScopeType) Valid() bool {
 // before this field existed — never inferred.
 type CostSource string
 
-// Cost-source values. See docs/kandev/TODOS.md P1.
+// Cost-source values. See docs/specs/office/costs.md.
 const (
 	// CostSourceProviderReported means the CLI forwarded an authoritative
 	// USD amount (claude-acp's usage_update.cost.amount); no rates apply.

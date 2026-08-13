@@ -11,7 +11,7 @@ import (
 )
 
 // costContractVersion is the in-band activation point for the cache-split /
-// cost-provenance / turn-attribution columns (docs/kandev/TODOS.md P1).
+// cost-provenance / turn-attribution columns (docs/specs/office/costs.md).
 // The Rill cost extract has no schema versioning of its own, so a row
 // written under a prior contract is distinguished by comparing
 // cost_contract_version, not by a date an analyst has to be told out of
@@ -89,7 +89,7 @@ func (s *Service) resolveCostForUsage(ctx context.Context, data PromptUsageData)
 // one atomic snapshot when s.pricingLookup satisfies
 // shared.PricingLookupWithVersion, so a concurrent background refresh can
 // never pair one catalogue's rates with a different catalogue's version
-// identifier on the stored row (docs/kandev/TODOS.md P1). Falls back to two
+// identifier on the stored row (docs/specs/office/costs.md). Falls back to two
 // separate calls — accepting that narrower race — only for a PricingLookup
 // implementation (e.g. a test double) that doesn't support the atomic form;
 // CatalogVersion is optional there too, so a non-implementer simply reports

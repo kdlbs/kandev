@@ -302,7 +302,7 @@ var ValidProjectStatuses = map[ProjectStatus]bool{
 // occupancy-growth synthesis (Estimated=true). NULL is never backfilled to
 // 0; TokensCachedIn keeps its original read+write sum semantics on every
 // row so existing consumers of that column are unaffected. See
-// docs/kandev/TODOS.md P1.
+// docs/specs/office/costs.md.
 type CostEvent struct {
 	ID                        string      `json:"id" db:"id"`
 	SessionID                 string      `json:"session_id" db:"session_id"`

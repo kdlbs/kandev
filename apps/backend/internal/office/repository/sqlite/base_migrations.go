@@ -40,7 +40,7 @@ func (r *Repository) runMigrations() {
 
 // migrateCostEventContract adds the cache read/write split, turn
 // attribution, and cost-provenance columns to office_cost_events for
-// databases created before this contract (docs/kandev/TODOS.md P1). Every
+// databases created before this contract (docs/specs/office/costs.md). Every
 // ALTER is nullable with no DEFAULT: a legacy row must read NULL, never 0,
 // because a merged tokens_cached_in cannot be decomposed and an unversioned
 // "0" would be indistinguishable from "no cache activity". Keep this column

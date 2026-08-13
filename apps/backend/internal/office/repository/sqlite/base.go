@@ -267,7 +267,7 @@ func (r *Repository) createCostTables() error {
 	// columns must stay byte-identical to — see base_migrations.go). NULL
 	// means "not recorded" (legacy row, or an adapter with no per-turn usage
 	// frame); 0 would silently claim zero cache activity. See
-	// docs/kandev/TODOS.md P1.
+	// docs/specs/office/costs.md.
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_cost_events (
 		id TEXT PRIMARY KEY,
