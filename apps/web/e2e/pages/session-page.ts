@@ -689,7 +689,7 @@ export class SessionPage {
   }
 
   stepperStep(name: string): Locator {
-    return this.page.getByTestId(`workflow-step-${name}`);
+    return this.page.locator(`[data-testid="workflow-step-${name}"][aria-current="step"]`);
   }
 
   /** PR button in the topbar (visible only when a PR is associated). */

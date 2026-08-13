@@ -16,6 +16,7 @@ export const E2E_DOCKER_SCOPE = `e2e-${process.pid}-${randomUUID().slice(0, 8)}`
 const FAKE_LSP_SERVER = path.resolve(__dirname, "fake-lsp-server.mjs");
 const SCOPED_CONTAINER_CLEANUP_TIMEOUT_MS = 30_000;
 const SCOPED_CONTAINER_CLEANUP_POLL_MS = 250;
+const SCOPED_CONTAINER_CLEANUP_EMPTY_POLLS = 8;
 
 const E2E_DOCKERFILE = `FROM node:22-slim
 RUN apt-get update \\
@@ -92,7 +93,7 @@ function listScopedKandevContainers(scope: string, scanAll = false): string[] | 
 
   // Docker can briefly return an empty label-filtered list while a just
   // stopped container is becoming visible to the daemon's index. On the
-  // second empty poll, inspect the daemon's IDs and filter labels ourselves.
+  // second and later empty polls, inspect the daemon's IDs and filter labels ourselves.
   // This remains safe for concurrent shards because only exact managed/run
   // label matches are returned to the scoped remover.
   const all = spawnSync("docker", ["ps", "-aq", "--no-trunc"], {
@@ -188,7 +189,10 @@ export async function removeScopedKandevContainers(scope = E2E_DOCKER_SCOPE): Pr
 
       if (lastIDs.length === 0 && pendingIDs.size === 0) {
         emptyPolls += 1;
-        if (emptyPolls >= 2) return;
+        // Docker's label index can lag behind a stopped container by more than
+        // one poll under CI load. Require a stable empty window before the
+        // next test starts so a newly visible scoped container is not leaked.
+        if (emptyPolls >= SCOPED_CONTAINER_CLEANUP_EMPTY_POLLS) return;
       } else {
         emptyPolls = 0;
       }
