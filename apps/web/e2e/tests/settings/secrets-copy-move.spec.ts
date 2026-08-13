@@ -46,6 +46,30 @@ async function submitCopyMove(
   await expect(dialog).toBeHidden();
 }
 
+async function waitForWorkspaceSecret(
+  apiClient: {
+    listSecrets: (options: {
+      scope: "workspace";
+      workspaceId: string;
+    }) => Promise<Array<{ name: string }>>;
+  },
+  workspaceId: string,
+  name: string,
+) {
+  // The transfer request and the settings list are separate reads. Wait for
+  // the persisted row before navigating so the destination page cannot fetch
+  // the workspace list during the short write-to-read window.
+  await expect
+    .poll(
+      async () => {
+        const secrets = await apiClient.listSecrets({ scope: "workspace", workspaceId });
+        return secrets.some((secret) => secret.name === name);
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+}
+
 test.describe("secrets-copy-move", () => {
   test("copies a global secret to a workspace with the default suffixed name", async ({
     testPage,
@@ -62,6 +86,7 @@ test.describe("secrets-copy-move", () => {
 
     // The source stays on the Global page; the copy appears in the workspace.
     await expect(testPage.getByText(sourceName, { exact: true })).toBeVisible();
+    await waitForWorkspaceSecret(apiClient, seedData.workspaceId, copiedName);
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/secrets`);
     await expect(testPage.getByText(copiedName, { exact: true })).toBeVisible();
     await expect(testPage.locator("body")).not.toContainText(GLOBAL_VALUE);
