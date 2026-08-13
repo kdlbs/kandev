@@ -481,3 +481,15 @@ type PlanRepository interface {
 	// otherwise a new revision is appended with revision_number computed inside the tx.
 	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string) error
 }
+
+// SubagentContextRepository persists the durable, queryable record of a
+// subagent (Task tool) invocation. See
+// docs/specs/subagent-context-persistence/spec.md.
+type SubagentContextRepository interface {
+	// UpsertSubagentContext inserts or merges one subagent invocation row,
+	// keyed on (task_session_id, tool_call_id). A single atomic statement —
+	// no read-then-write.
+	UpsertSubagentContext(ctx context.Context, sc *models.SubagentContext) error
+	ListSubagentContextsBySession(ctx context.Context, sessionID string) ([]*models.SubagentContext, error)
+	ListSubagentContextsByTurn(ctx context.Context, turnID string) ([]*models.SubagentContext, error)
+}
