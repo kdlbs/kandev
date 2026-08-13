@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
-	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -625,18 +624,6 @@ func assertWorkingWorkspaceConfig(t *testing.T, store *Store, secrets *configTes
 	}
 	if gotToken := secrets.values[SecretKeyForWorkspace(workspaceID)]; gotToken != wantToken {
 		t.Fatalf("preserved secret = %q, want %q", gotToken, wantToken)
-	}
-}
-
-// TestMainScrubsAmbientGitLabEnvironment guards the TestMain hermeticity
-// scrub in goleak_test.go. If that scrub is ever removed, this fails loudly
-// instead of letting the parent shell's KANDEV_GITLAB_HOST / GITLAB_HOST /
-// GITLAB_TOKEN silently re-arm host-trust test failures.
-func TestMainScrubsAmbientGitLabEnvironment(t *testing.T) {
-	for _, name := range []string{envKandevGitLabHost, envGitLabHost, secretNameToken} {
-		if got := os.Getenv(name); got != "" {
-			t.Fatalf("%s = %q, want empty — TestMain scrub missing or removed", name, got)
-		}
 	}
 }
 

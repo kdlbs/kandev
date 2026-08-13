@@ -333,12 +333,12 @@ exit 8
 
 // TestMainScrubsAmbientGitLabEnvironment guards the TestMain hermeticity
 // scrub in testmain_test.go. If that scrub is ever removed, this fails
-// loudly instead of letting the parent shell's KANDEV_GITLAB_HOST /
-// GITLAB_TOKEN silently re-arm GitLab host-trust test failures.
+// loudly instead of letting the parent shell's GitLab host/token variables
+// silently re-arm GitLab host-trust test failures.
 func TestMainScrubsAmbientGitLabEnvironment(t *testing.T) {
-	for _, name := range []string{gitLabHostEnv, gitLabTokenEnv} {
-		if got := os.Getenv(name); got != "" {
-			t.Fatalf("%s = %q, want empty — TestMain scrub missing or removed", name, got)
+	for _, name := range []string{gitLabHostEnv, legacyGitLabHostEnv, gitLabTokenEnv} {
+		if _, ok := os.LookupEnv(name); ok {
+			t.Fatalf("%s is set during tests; TestMain must clear it", name)
 		}
 	}
 }
