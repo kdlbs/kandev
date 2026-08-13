@@ -356,6 +356,39 @@ describe("dwell", () => {
     expect(fake.waitedMs).toEqual([]);
   });
 
+  it("waits on a real timer when no page is in scope", async () => {
+    const started = Date.now();
+    await dwell(40, "poll-interval", "backend health poll; no page exists yet");
+    expect(Date.now() - started).toBeGreaterThanOrEqual(35);
+  });
+
+  // The two forms are told apart by the type of argument 1, so every argument
+  // shifts by one. Pin that the page-less form reads category and reason from
+  // the right slots rather than treating the category as the reason.
+  it("reads category and reason from the shifted slots in the page-less form", () => {
+    expect(() => dwell(40, "poll-interval", "   ")).toThrow(
+      "dwell: a reason is required, and must say why no event exists to wait on",
+    );
+    expect(() =>
+      // @ts-expect-error -- exercising the runtime guard on the page-less form.
+      dwell(40, "not-a-category", "a perfectly good reason"),
+    ).toThrow('dwell: unknown category "not-a-category"');
+  });
+
+  it("reports a missing reason as a missing reason, not a TypeError", () => {
+    const { page } = fakePage();
+    expect(() =>
+      // @ts-expect-error -- a JS caller can omit the 4th argument entirely.
+      dwell(page, 40, "library-timer"),
+    ).toThrow("dwell: a reason is required, and must say why no event exists to wait on");
+  });
+
+  it("still delegates to the page when one is given, so the wait dies with it", async () => {
+    const { page, fake } = fakePage();
+    await dwell(page, 250, "browser-chrome", "native dialog dismissal is not observable");
+    expect(fake.waitedMs).toEqual([250]);
+  });
+
   // Chunk 4's ratchet reports the category mix off this list, and chunk 1's
   // migrated sites are typed against it. Pin the exact set and its order so a
   // rename or silent drop is a failing test here rather than a quietly wrong

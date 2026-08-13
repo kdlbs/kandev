@@ -328,6 +328,17 @@ export type DwellCategory = (typeof DWELL_CATEGORIES)[number];
  * await dwell(page, 300, "library-timer", "Radix open delay publishes no event");
  * ```
  *
+ * Backend fixtures, the API client's retry loops, docker probing and the office
+ * routing helpers have no `Page` at all, so there is a page-less form under the
+ * same name -- one greppable token either way:
+ *
+ * ```ts
+ * await dwell(500, "poll-interval", "backend health poll; no page exists yet");
+ * ```
+ *
+ * Pass the page whenever one is in scope: the wait then dies with the page
+ * rather than hanging past it. The page-less form is a plain timer.
+ *
  * ## Choosing the category
  *
  * Several can look applicable at once, so categorize by *what makes the delay
@@ -354,12 +365,26 @@ export type DwellCategory = (typeof DWELL_CATEGORIES)[number];
  * Deliberately has no options and no defaults. All of its value is in the name
  * being greppable, and the category and reason being mandatory.
  */
+export function dwell(ms: number, category: DwellCategory, reason: string): Promise<void>;
 export function dwell(
   page: Page,
   ms: number,
   category: DwellCategory,
   reason: string,
+): Promise<void>;
+export function dwell(
+  pageOrMs: Page | number,
+  msOrCategory: number | DwellCategory,
+  categoryOrReason: DwellCategory | string,
+  maybeReason?: string,
 ): Promise<void> {
+  // A Page is never a number, so the first argument discriminates the two forms.
+  const pageless = typeof pageOrMs === "number";
+  const page = pageless ? null : pageOrMs;
+  const ms = pageless ? pageOrMs : (msOrCategory as number);
+  const category = (pageless ? msOrCategory : categoryOrReason) as DwellCategory;
+  const reason = pageless ? (categoryOrReason as string) : maybeReason;
+
   // Checked at runtime, not just by the type. `apps/web/tsconfig.json` excludes
   // `e2e`, and Playwright and vitest both strip types without checking them, so
   // nothing in CI would catch a typo'd category on the strength of the union
@@ -369,8 +394,11 @@ export function dwell(
       `dwell: unknown category "${category}", expected one of ${DWELL_CATEGORIES.join(", ")}`,
     );
   }
-  if (reason.trim() === "") {
+  if (typeof reason !== "string" || reason.trim() === "") {
     throw new Error("dwell: a reason is required, and must say why no event exists to wait on");
   }
-  return page.waitForTimeout(ms);
+
+  // With a page, delegate: the wait then dies with the page instead of hanging
+  // past it. Without one, a plain timer is all there is.
+  return page ? page.waitForTimeout(ms) : new Promise((resolve) => setTimeout(resolve, ms));
 }

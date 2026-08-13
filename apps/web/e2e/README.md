@@ -295,6 +295,19 @@ await dwell(page, 300, "negative-assertion", "asserting the tooltip never opens"
 await dwell(page, 300, "library-timer", "Radix open delay publishes no event");
 ```
 
+Backend fixtures, the API client's retry loops, docker probing and the office
+routing helpers have no `Page` in scope at all. They use the **page-less form**,
+same name, one greppable token either way:
+
+```ts
+await dwell(500, "poll-interval", "backend health poll; no page exists yet");
+```
+
+The two forms are told apart by the type of the first argument, since a `Page`
+is never a number. **Pass the page whenever one is in scope** — the wait then
+delegates to `page.waitForTimeout` and dies with the page instead of hanging
+past it. The page-less form is a plain timer with nothing to cancel it.
+
 Raw `page.waitForTimeout()` and hand-rolled promise sleeps are not sanctioned.
 They are indistinguishable, at a glance and to a grep, from someone who could
 not find the right event and reached for a number instead. `dwell` is greppable
