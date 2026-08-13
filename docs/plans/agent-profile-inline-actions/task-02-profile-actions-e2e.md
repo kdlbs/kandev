@@ -22,9 +22,9 @@ spec: "../../specs/agents/settings-profile-layout.md"
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run --project chromium tests/settings/agent-profile-duplicate.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-agent-profile-duplicate.spec.ts
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm e2e:run --project chromium tests/settings/agent-profile-duplicate.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-agent-profile-duplicate.spec.ts)
 ```
 
 The managed runner must rebuild the production Vite assets before the tests.

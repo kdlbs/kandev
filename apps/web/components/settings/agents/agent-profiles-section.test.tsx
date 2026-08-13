@@ -125,13 +125,15 @@ function renderRows() {
 function confirmDeleteFor(name: string) {
   const row = screen.getByLabelText(name).closest(PROFILE_ROW_SELECTOR);
   if (!row) throw new Error(`no row for ${name}`);
-  const profileId = name === "Alpha" ? "p-1" : "p-2";
+  const profileId = AGENT.profiles.find((p) => p.name === name)?.id;
+  if (!profileId) throw new Error(`no profile id for ${name}`);
   fireEvent.click(row.querySelector(`[data-testid="delete-profile-${profileId}"]`)!);
   fireEvent.click(row.querySelector('[data-testid="confirm-delete"]')!);
 }
 
 describe("ProfileRow deletion", () => {
   beforeEach(() => {
+    mocks.responsive.isFullDesktop = false;
     storeState = {
       settingsAgents: { items: [{ ...AGENT, profiles: [...AGENT.profiles] }] },
       agentProfiles: { items: [{ id: "p-1" }, { id: "p-2" }] },
@@ -248,8 +250,8 @@ describe("ProfileRow responsive actions", () => {
     mocks.deleteAgentProfileAction.mockResolvedValue({ status: "ok" });
     render(<ProfileRow agent={AGENT} profile={AGENT.profiles[0]} />);
 
-    const row = screen.getByLabelText("Alpha").closest('[data-testid="agent-profile-row"]');
-    if (!row) throw new Error("no row for Alpha");
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
     fireEvent.click(row.querySelector('[data-testid="duplicate-profile-inline-p-1"]')!);
     fireEvent.click(row.querySelector('[data-testid="delete-profile-inline-p-1"]')!);
     fireEvent.click(row.querySelector('[data-testid="confirm-delete"]')!);

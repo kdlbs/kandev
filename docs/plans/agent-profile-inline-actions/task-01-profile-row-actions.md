@@ -22,11 +22,11 @@ spec: "../../specs/agents/settings-profile-layout.md"
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm test -- components/settings/agents/agent-profiles-section.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm exec eslint components/settings/agents/agent-profiles-section.tsx components/settings/agents/agent-profiles-section.test.tsx
-cd apps/web && pnpm run i18n:check
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm test -- components/settings/agents/agent-profiles-section.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm exec eslint components/settings/agents/agent-profiles-section.tsx components/settings/agents/agent-profiles-section.test.tsx)
+(cd apps/web && pnpm run i18n:check)
 ```
 
 ## Files likely touched

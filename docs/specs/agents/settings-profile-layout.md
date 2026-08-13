@@ -82,8 +82,8 @@ to associate with the agent it changes.
 
 ## Out of scope
 
-- Changing the profile editor, profile-row actions, agent discovery, agent
-  installation, or the backend/API contracts.
+- Changing the profile editor, agent discovery, agent installation, or the
+  backend/API contracts.
 - Changing the duplicate or delete operation, confirmation flow, profile link,
   or store synchronization behavior.
 - Renaming the existing translated **New profile**, **Setup profile**, refresh,
