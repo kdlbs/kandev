@@ -53,9 +53,18 @@ describe("sleep ratchet wiring", () => {
   it("does not pass --base on pull_request in CI", () => {
     const workflow = read(".github/workflows/frontend-tests.yml");
     const step = workflow.slice(workflow.indexOf("Run E2E sleep ratchet"));
-    const pullRequestBranch = step.slice(0, step.indexOf("BASE_SHA="));
-    expect(pullRequestBranch).toContain(`node scripts/${RATCHET_SCRIPT}\n`);
-    expect(pullRequestBranch).not.toContain("--base");
+    // Match the pull_request branch structurally rather than slicing at the
+    // first `BASE_SHA=` literal: a future YAML comment mentioning that name
+    // would move the slice boundary and quietly shrink what is asserted
+    // (review finding). This is strictly tighter than the slice was — it pins
+    // the invocation, its bare form, and the early exit, in order.
+    expect(step).toMatch(
+      new RegExp(
+        `if \\[\\[ "\\$\\{\\{ github.event_name \\}\\}" == "pull_request" \\]\\];? then\\n` +
+          `\\s+node scripts/${RATCHET_SCRIPT}\\n` +
+          `\\s+exit 0\\n`,
+      ),
+    );
   });
 
   /**
@@ -111,13 +120,13 @@ describe("sleep ratchet wiring", () => {
   it("keeps every seeded guard directory", () => {
     const config = read("apps/web/eslint-rules/no-unsanctioned-sleep.mjs");
     for (const dir of [
-      "e2e/scripts/**/*.ts",
-      "e2e/tests/cli-mode/**/*.ts",
-      "e2e/tests/docker/**/*.ts",
-      "e2e/tests/github/**/*.ts",
-      "e2e/tests/i18n/**/*.ts",
-      "e2e/tests/kanban/**/*.ts",
-      "e2e/tests/preview/**/*.ts",
+      "e2e/scripts/**/*.{ts,tsx}",
+      "e2e/tests/cli-mode/**/*.{ts,tsx}",
+      "e2e/tests/docker/**/*.{ts,tsx}",
+      "e2e/tests/github/**/*.{ts,tsx}",
+      "e2e/tests/i18n/**/*.{ts,tsx}",
+      "e2e/tests/kanban/**/*.{ts,tsx}",
+      "e2e/tests/preview/**/*.{ts,tsx}",
     ]) {
       expect(config).toContain(`"${dir}"`);
     }

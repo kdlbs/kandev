@@ -49,9 +49,15 @@ export function isE2eCandidate(repoPath) {
  * file is judged whole — demanding a full migration for a plain `git mv`.
  */
 export function changedPaths(base, filter, cwd) {
-  return git(["diff", "--name-only", "--find-renames", `--diff-filter=${filter}`, base], { cwd })
-    .split("\n")
-    .map((line) => line.trim());
+  return (
+    git(["diff", "--name-only", "--find-renames", `--diff-filter=${filter}`, base], { cwd })
+      .split("\n")
+      .map((line) => line.trim())
+      // `"".split("\n")` is `[""]`, so a no-match diff would otherwise yield one
+      // empty "path". Both predicates reject it, but this function is exported and
+      // its next caller should not have to know that.
+      .filter(Boolean)
+  );
 }
 
 /**

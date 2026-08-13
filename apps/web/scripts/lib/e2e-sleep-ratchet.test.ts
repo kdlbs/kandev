@@ -222,6 +222,53 @@ describe("e2e sleep ratchet — file selection", () => {
     expect(violations).toEqual([]);
   });
 
+  /**
+   * `.tsx` is selected by `isE2eCandidate`, so the eslint config must match it
+   * too. It did not: the file was linted against no config at all, and
+   * `warnIgnored: false` suppressed the only signal that would have shown it, so
+   * the gate PASSED on a file full of sleeps. Found in review; this is the
+   * regression test, and it fails against a `files: ["**\/*.ts"]` config.
+   */
+  it("FAILS on a sleep in a .tsx file, which the selector also picks up", async () => {
+    const dir = repoWithLegacySleep();
+    write(dir, "apps/web/e2e/fixtures/probe-component.tsx", LEGACY_SPEC);
+    stage(dir);
+
+    const { added, violations } = await run(dir);
+    expect(added).toEqual(["apps/web/e2e/fixtures/probe-component.tsx"]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ line: 5, whole: true, messageId: "waitForTimeout" });
+  });
+
+  /**
+   * The finding must land on the changed line. Reporting the whole
+   * `CallExpression` put it on the receiver, so converting `.click(…)` to
+   * `.waitForTimeout(…)` in a wrapped chain left the finding on an UNCHANGED
+   * line and the ratchet dropped it. Found in review.
+   */
+  it("FAILS when only the method line of a wrapped call changes", async () => {
+    const dir = repoWithLegacySleep();
+    const wrapped = [
+      'import { test } from "@playwright/test";',
+      "",
+      'test("wrapped", async ({ page }) => {',
+      "  await page",
+      '    .click("#a");',
+      "});",
+      "",
+    ].join("\n");
+    write(dir, SPEC, wrapped);
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-q", "-m", "wrapped chain"]);
+    git(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    // Only line 5 changes; line 4 (`await page`) is untouched.
+    write(dir, SPEC, wrapped.replace('    .click("#a");', "    .waitForTimeout(500);"));
+
+    const { violations } = await run(dir);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ line: 5, whole: false, messageId: "waitForTimeout" });
+  });
+
   /** Non-e2e changes are none of this gate's business. */
   it("ignores changes outside apps/web/e2e", async () => {
     const dir = repoWithLegacySleep();

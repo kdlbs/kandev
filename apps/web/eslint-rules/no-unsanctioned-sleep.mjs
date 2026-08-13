@@ -44,6 +44,10 @@
  *   precisely the intent to cancel, which means another path resolves first.
  * - *First argument resolves the promise* keeps the diagnostic honest: it makes
  *   the finding "this is a sleep" rather than merely "this has the right shape".
+ *   "Resolves the promise" includes bound references — `resolve.bind(null)` is
+ *   still `resolve`, and recursively so, since a form that laundered a sleep
+ *   past the rule would be worth more to a determined author than to an honest
+ *   one.
  *
  * The same three clauses dissolve the `requestAnimationFrame(() =>
  * setTimeout(resolve, 0))` frame-yield in `toggle-sidebar-shortcut.spec.ts`
@@ -65,7 +69,7 @@
  *
  * Everywhere else the gate is `scripts/check-new-e2e-sleeps.mjs`, which judges
  * only the lines a change added. Once the conversion reaches zero the guard list
- * collapses to `e2e/**\/*.ts` and the ratchet becomes belt-and-braces.
+ * collapses to `e2e/**\/*.{ts,tsx}` and the ratchet becomes belt-and-braces.
  */
 
 /**
@@ -106,21 +110,21 @@ export const SLEEP_EXEMPT_FILES = [
  * The conversion effort is working through the directories that are *not* here
  * (`tests/{auth,chat,layout,office,session,settings,ssh,system,task,terminal,
  * workflow,…}`); each should be appended as it reaches zero. When the list would
- * cover all of `e2e/`, replace it with a plain `["e2e/**\/*.ts"]` — that is the
+ * cover all of `e2e/`, replace it with a plain `["e2e/**\/*.{ts,tsx}"]` — that is the
  * graduation, and at that point the diff-scanning ratchet becomes a second line
  * of defence rather than the only one.
  */
 export const e2eSleepGuardFiles = [
   // Shard planning, flake and timing reports. Tooling rather than specs, and not
   // in any conversion chunk's path.
-  "e2e/scripts/**/*.ts",
+  "e2e/scripts/**/*.{ts,tsx}",
   // Test directories measured at zero raw sleeps.
-  "e2e/tests/cli-mode/**/*.ts",
-  "e2e/tests/docker/**/*.ts",
-  "e2e/tests/github/**/*.ts",
-  "e2e/tests/i18n/**/*.ts",
-  "e2e/tests/kanban/**/*.ts",
-  "e2e/tests/preview/**/*.ts",
+  "e2e/tests/cli-mode/**/*.{ts,tsx}",
+  "e2e/tests/docker/**/*.{ts,tsx}",
+  "e2e/tests/github/**/*.{ts,tsx}",
+  "e2e/tests/i18n/**/*.{ts,tsx}",
+  "e2e/tests/kanban/**/*.{ts,tsx}",
+  "e2e/tests/preview/**/*.{ts,tsx}",
 ];
 
 const WAIT_FOR_TIMEOUT = "waitForTimeout";
@@ -168,10 +172,24 @@ function soleBodyExpression(node) {
   return only.type === "ExpressionStatement" ? only.expression : null;
 }
 
+/** Whether `node` is `X.bind(...)`, returning `X`; otherwise `null`. */
+function boundTarget(node) {
+  if (node.type !== "CallExpression") return null;
+  const { callee } = node;
+  if (callee.type !== "MemberExpression" || callee.computed) return null;
+  if (callee.property.type !== "Identifier" || callee.property.name !== "bind") return null;
+  return callee.object;
+}
+
 /** Whether `node` is a call to `resolve`, or a function whose body only calls it. */
 function resolvesPromise(node, resolveName) {
   if (!node) return false;
   if (node.type === "Identifier") return node.name === resolveName;
+  // A bound reference to `resolve` is still `resolve`:
+  // `setTimeout(resolve.bind(null), ms)` sleeps exactly like `setTimeout(resolve, ms)`.
+  // Recursive, so `resolve.bind(a).bind(b)` does not launder it either.
+  const bound = boundTarget(node);
+  if (bound) return resolvesPromise(bound, resolveName);
   if (node.type !== "ArrowFunctionExpression" && node.type !== "FunctionExpression") return false;
 
   const body = soleBodyExpression(node);
@@ -230,9 +248,20 @@ export const noUnsanctionedSleep = {
   create(context) {
     return {
       CallExpression(node) {
-        if (calleeMethodName(node.callee) === WAIT_FOR_TIMEOUT) {
-          context.report({ node, messageId: "waitForTimeout" });
-        }
+        if (calleeMethodName(node.callee) !== WAIT_FOR_TIMEOUT) return;
+        // Report at the METHOD token, not the whole call. A finding's line is
+        // its node's start line, and the ratchet keeps only findings on lines
+        // the change added. For a wrapped call —
+        //
+        //   page
+        //     .waitForTimeout(500);
+        //
+        // — the CallExpression starts at `page`, so changing `.click(…)` to
+        // `.waitForTimeout(…)` would attribute the finding to an UNCHANGED line
+        // and the ratchet would silently drop it. The method token is on the
+        // line that actually changed.
+        const target = node.callee.type === "MemberExpression" ? node.callee.property : node.callee;
+        context.report({ node: target, messageId: "waitForTimeout" });
       },
       NewExpression(node) {
         const sleep = promiseSleepCall(node);

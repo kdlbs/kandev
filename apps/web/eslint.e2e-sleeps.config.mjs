@@ -26,7 +26,12 @@ import { e2eSleepPlugin, SLEEP_EXEMPT_FILES } from "./eslint-rules/no-unsanction
  */
 export default defineConfig([
   {
-    files: ["**/*.ts"],
+    // BOTH extensions. `isE2eCandidate` selects `.tsx` too, so a config matching
+    // only `.ts` left a selected file matching no config at all — and
+    // `warnIgnored: false` in the ratchet suppressed the one signal that would
+    // have shown it, so the gate passed silently. Keep this in step with the
+    // selector.
+    files: ["**/*.ts", "**/*.tsx"],
     ignores: [...SLEEP_EXEMPT_FILES, "node_modules/**", "dist/**"],
     languageOptions: { parser: tseslint.parser },
     plugins: { "e2e-sleeps": e2eSleepPlugin },
