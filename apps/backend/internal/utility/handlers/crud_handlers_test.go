@@ -415,8 +415,8 @@ func TestListCallsEndpointClampsLimit(t *testing.T) {
 			if status != http.StatusOK {
 				t.Fatalf("status = %d, body = %s", status, raw)
 			}
-			if f.repo.lastListCallsLimit != tc.wantLimit {
-				t.Fatalf("store limit = %d, want %d", f.repo.lastListCallsLimit, tc.wantLimit)
+			if got := f.repo.listCallsLimit(); got != tc.wantLimit {
+				t.Fatalf("store limit = %d, want %d", got, tc.wantLimit)
 			}
 		})
 	}

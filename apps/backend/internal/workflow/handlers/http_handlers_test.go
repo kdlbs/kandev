@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,13 +47,21 @@ func (p *fakeWorkflowProvider) ListWorkflows(
 	return out, nil
 }
 
+// GetWorkflow mirrors the production provider's error shape deliberately: the
+// task repository reports a missing workflow as a formatted
+// `workflow not found: <id>` error, not a sentinel (see
+// internal/task/repository/sqlite/workflow.go). Nothing between there and the
+// handler classifies it — the workflow service wraps it as
+// `failed to get workflow: %w` and httpExportWorkflow answers 500 for any
+// error — so returning a sentinel here would make the fake diverge from the
+// only behaviour production can produce.
 func (p *fakeWorkflowProvider) GetWorkflow(_ context.Context, id string) (*taskmodels.Workflow, error) {
 	for _, wf := range p.workflows {
 		if wf.ID == id {
 			return wf, nil
 		}
 	}
-	return nil, errors.New("workflow not found")
+	return nil, fmt.Errorf("workflow not found: %s", id)
 }
 
 func (p *fakeWorkflowProvider) CreateWorkflow(

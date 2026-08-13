@@ -45,10 +45,22 @@ func newFakeUtilityRepo() *fakeUtilityRepo {
 	}
 }
 
-// failWith makes the named repository method return err.
+// failWith makes the named repository method return err. Guarded by the same
+// mutex as every other field: the concurrent-refresh test drives 50 requests at
+// once, so a future test that injects a failure mid-flight must not race.
 func (r *fakeUtilityRepo) failWith(method string, err error) *fakeUtilityRepo {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.errs[method] = err
 	return r
+}
+
+// fail returns the injected error for a method, if any. Callers must not hold
+// r.mu.
+func (r *fakeUtilityRepo) fail(method string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.errs[method]
 }
 
 // putAgent seeds an agent row, preserving insertion order for ListAgents.
@@ -69,6 +81,13 @@ func (r *fakeUtilityRepo) call(id string) *models.UtilityAgentCall {
 	return r.calls[id]
 }
 
+// listCallsLimit returns the limit the handler last resolved.
+func (r *fakeUtilityRepo) listCallsLimit() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastListCallsLimit
+}
+
 // callCount returns how many call records were created.
 func (r *fakeUtilityRepo) callCount() int {
 	r.mu.Lock()
@@ -77,7 +96,7 @@ func (r *fakeUtilityRepo) callCount() int {
 }
 
 func (r *fakeUtilityRepo) ListAgents(context.Context) ([]*models.UtilityAgent, error) {
-	if err := r.errs["ListAgents"]; err != nil {
+	if err := r.fail("ListAgents"); err != nil {
 		return nil, err
 	}
 	r.mu.Lock()
@@ -92,7 +111,7 @@ func (r *fakeUtilityRepo) ListAgents(context.Context) ([]*models.UtilityAgent, e
 }
 
 func (r *fakeUtilityRepo) GetAgentByID(_ context.Context, id string) (*models.UtilityAgent, error) {
-	if err := r.errs["GetAgentByID"]; err != nil {
+	if err := r.fail("GetAgentByID"); err != nil {
 		return nil, err
 	}
 	r.mu.Lock()
@@ -115,7 +134,7 @@ func (r *fakeUtilityRepo) GetAgentByName(_ context.Context, name string) (*model
 }
 
 func (r *fakeUtilityRepo) CreateAgent(_ context.Context, agent *models.UtilityAgent) error {
-	if err := r.errs["CreateAgent"]; err != nil {
+	if err := r.fail("CreateAgent"); err != nil {
 		return err
 	}
 	r.mu.Lock()
@@ -131,7 +150,7 @@ func (r *fakeUtilityRepo) CreateAgent(_ context.Context, agent *models.UtilityAg
 }
 
 func (r *fakeUtilityRepo) UpdateAgent(_ context.Context, agent *models.UtilityAgent) error {
-	if err := r.errs["UpdateAgent"]; err != nil {
+	if err := r.fail("UpdateAgent"); err != nil {
 		return err
 	}
 	agent.UpdatedAt = time.Now().UTC()
@@ -144,7 +163,7 @@ func (r *fakeUtilityRepo) NormalizeEmptyBuiltinBinding(context.Context, string) 
 }
 
 func (r *fakeUtilityRepo) DeleteAgent(_ context.Context, id string) error {
-	if err := r.errs["DeleteAgent"]; err != nil {
+	if err := r.fail("DeleteAgent"); err != nil {
 		return err
 	}
 	r.mu.Lock()
@@ -158,13 +177,11 @@ func (r *fakeUtilityRepo) DeleteAgent(_ context.Context, id string) error {
 
 func (r *fakeUtilityRepo) ListCalls(_ context.Context, utilityID string, limit int) ([]*models.UtilityAgentCall, error) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.lastListCallsLimit = limit
-	r.mu.Unlock()
 	if err := r.errs["ListCalls"]; err != nil {
 		return nil, err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	out := make([]*models.UtilityAgentCall, 0, len(r.callOrder))
 	for _, id := range r.callOrder {
 		if c, ok := r.calls[id]; ok && c.UtilityID == utilityID {
@@ -188,7 +205,7 @@ func (r *fakeUtilityRepo) GetCallByID(_ context.Context, id string) (*models.Uti
 }
 
 func (r *fakeUtilityRepo) CreateCall(_ context.Context, call *models.UtilityAgentCall) error {
-	if err := r.errs["CreateCall"]; err != nil {
+	if err := r.fail("CreateCall"); err != nil {
 		return err
 	}
 	r.mu.Lock()
