@@ -796,4 +796,49 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     // Moves, does not add: the same item never also renders in the rail.
     await expect(testPage.getByTestId("plugin-nav-item-e2e-insights-tools")).toHaveCount(0);
   });
+
+  test("routes the over-budget sidebar-footer item through the overflow menu, hidden until opened", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    // The fixture registers 4 sidebar-footer items (e2e-insights-tools,
+    // -2, -3, -4) — one over the desktop footer's inline budget of 3 — so
+    // this single install drives the real overflow trigger/menu with the
+    // actual Radix DropdownMenu (spec.md#Capacity-and-overflow,
+    // spec.md#The-guarantee). Unit coverage in app-sidebar-footer.test.tsx
+    // mocks DropdownMenu as a pass-through, so it cannot prove the real
+    // component opens on click or hides its content while closed; this is
+    // the test that does.
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+
+    for (const id of ["e2e-insights-tools", "e2e-insights-tools-2", "e2e-insights-tools-3"]) {
+      await expect(testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:${id}-button`)).toBeVisible({
+        timeout: 15_000,
+      });
+    }
+
+    const overBudgetTestId = `sidebar-plugin:${PLUGIN_ID}:e2e-insights-tools-4-button`;
+    const overflowTrigger = testPage.getByTestId("sidebar-plugin-overflow-button");
+    await expect(overflowTrigger).toBeVisible();
+
+    // Closed-menu guarantee: the over-budget item's button carries the same
+    // testid an inline button would use (spec.md#Rendered-identity), so it
+    // must be entirely absent from the DOM while the menu is closed, not
+    // merely hidden — a real DropdownMenu unmounts its content when closed.
+    await expect(testPage.getByTestId(overBudgetTestId)).toHaveCount(0);
+
+    await overflowTrigger.click();
+
+    const menuItem = testPage.getByTestId(overBudgetTestId);
+    await expect(menuItem).toBeVisible();
+    await expect(menuItem).toHaveText("E2E Overflow Item 4");
+    await menuItem.click();
+    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
+  });
 });

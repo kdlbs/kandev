@@ -508,6 +508,10 @@ describe("AppSidebarFooter plugin footer capacity and overflow", () => {
 
     renderFooter();
 
+    // The manifest button set is exactly stats (spec.md:789's first clause) —
+    // without this, a component rendering nothing at all would still pass
+    // the two absence checks below.
+    expect(screen.getByRole("button", { name: "Stats" })).not.toBeNull();
     expect(screen.queryByTestId(OVERFLOW_TRIGGER_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(overflowMenuTestIds.content)).toBeNull();
   });
@@ -549,9 +553,14 @@ describe("AppSidebarFooter plugin footer capacity and overflow", () => {
     expect(trigger).not.toBeNull();
 
     // The over-budget item's menu item shares its testid with what an inline
-    // button would use (see spec.md#Rendered-identity); open the menu before
-    // asserting presence, per spec.md#The-guarantee, rather than asserting
-    // absence beforehand.
+    // button would use (see spec.md#Rendered-identity), so the click below
+    // mirrors the real interaction. Note this file's `DropdownMenuContent`
+    // mock (top of file) renders its content unconditionally regardless of
+    // open/closed state, so this click does not itself prove the real Radix
+    // menu opens on click or hides its content while closed — that guarantee
+    // (spec.md#The-guarantee) is covered by
+    // e2e/tests/plugins/plugins.spec.ts's over-budget overflow test, which
+    // exercises the real component.
     const overIndex = MAX_INLINE_PLUGIN_FOOTER_ITEMS;
     fireEvent.click(trigger);
     // Scoped to the menu's own content, not just present anywhere in the
@@ -647,8 +656,10 @@ describe("AppSidebarFooter plugin footer capacity at scale", () => {
   it("partitions by current registration order, so a re-enabled plugin moves from inline to the overflow menu", () => {
     // Simulates the post-re-enable order: p1 moved to the end of the plugin
     // run (spec's Ordering + Capacity re-enable scenario). The footer only
-    // partitions whatever order it is given; producing that order is the
-    // registry's job, exercised elsewhere.
+    // partitions whatever order it is given; this test asserts that
+    // partition, not that the registry actually reorders on re-enable —
+    // `registry.test.ts` covers re-enable ordering for slot components, not
+    // nav items, so that mechanism itself has no direct nav-item test.
     insightDestinations = [
       STATS_DESTINATION,
       { ...pluginDestination(2), id: "plugin:p2:board", label: "P2" },
@@ -671,7 +682,9 @@ describe("AppSidebarFooter plugin footer capacity at scale", () => {
     expect(within(menu).queryByTestId("sidebar-plugin:p4:board-button")).toBeNull();
 
     // p1's menu item shares its testid with what an inline button would use
-    // (spec.md#Rendered-identity); open the menu before asserting presence.
+    // (spec.md#Rendered-identity); this click mirrors the real interaction,
+    // but — as noted above — the `DropdownMenuContent` mock does not model
+    // open/closed state, so it does not itself prove the real menu opens.
     fireEvent.click(screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID));
     expect(within(menu).getByTestId("sidebar-plugin:p1:board-button")).not.toBeNull();
   });

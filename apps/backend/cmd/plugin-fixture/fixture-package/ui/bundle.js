@@ -500,6 +500,35 @@
         path: "/plugins/e2e-hello",
         section: "sidebar-footer",
       });
+      // Three more sidebar-footer items so this one plugin install alone
+      // produces P = 4 (budget MAX_INLINE_PLUGIN_FOOTER_ITEMS = 3, plus one
+      // over-budget item) — enough to drive the desktop footer's overflow
+      // trigger and menu with the real Radix DropdownMenu in a browser (see
+      // plugins.spec.ts's overflow test). The budget counts destinations,
+      // not distinct plugins, so one plugin registering 4 items exercises
+      // the same partition as 4 plugins registering 1 each. Labeled
+      // "E2E Overflow Item N" rather than a numbered suffix of the first
+      // item's own label ("E2E Insights Tools") so Playwright's default
+      // substring name matching can't accidentally match more than one of
+      // these from an existing test written against the first item's label.
+      registry.registerNavItem({
+        id: "e2e-insights-tools-2",
+        label: "E2E Overflow Item 2",
+        path: "/plugins/e2e-hello",
+        section: "sidebar-footer",
+      });
+      registry.registerNavItem({
+        id: "e2e-insights-tools-3",
+        label: "E2E Overflow Item 3",
+        path: "/plugins/e2e-hello",
+        section: "sidebar-footer",
+      });
+      registry.registerNavItem({
+        id: "e2e-insights-tools-4",
+        label: "E2E Overflow Item 4",
+        path: "/plugins/e2e-hello",
+        section: "sidebar-footer",
+      });
       registry.registerRoute("/plugins/e2e-hello", PluginPage);
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);
