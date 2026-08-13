@@ -62,6 +62,8 @@ describe("WorkflowSection", () => {
 
 function makeFs(): DialogFormState {
   return {
+    blockedBy: [],
+    setBlockedBy: () => undefined,
     taskName: "",
     autopilot: false,
     setAutopilot: () => {},

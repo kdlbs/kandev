@@ -41,7 +41,7 @@ test.describe("Jira settings", () => {
     await expect(settings.saveButton).toHaveCount(0);
     // The post-save probe runs async; await it before reloading so the new
     // banner state is in the DB by the time the page re-fetches the config.
-    await apiClient.waitForIntegrationAuthHealthy("jira");
+    await apiClient.waitForIntegrationAuthHealthy("jira", { timeoutMs: 60_000 });
 
     await testPage.reload();
     await settings.siteInput.waitFor();

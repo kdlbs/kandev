@@ -107,5 +107,7 @@
   "viewLabel": "View: {{name}}",
   "whatsNew": "What's new",
   "work": "Work",
-  "workspaceFallback": "Workspace"
+  "workspaceFallback": "Workspace",
+  "taskPreferences": "Sidebar task preferences",
+  "views": "Sidebar views"
 }

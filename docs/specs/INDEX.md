@@ -40,6 +40,7 @@ Product-wide capabilities that are not tied to a single feature area.
 |---|---|
 | [agent-runtime-availability](platform/agent-runtime-availability.md) | draft |
 | [background-work-liveness](platform/background-work-liveness.md) | shipped |
+| [setup-launch-timeout](platform/setup-launch-timeout.md) | approved |
 | [task-sleep-inhibition](platform/task-sleep-inhibition.md) | building |
 | [i18n](platform/i18n.md) | building |
 | [mid-turn-steering](platform/mid-turn-steering.md) | shipped |
@@ -78,6 +79,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [subtask-detachment](tasks/subtask-detachment.md) | shipped |
 | [subtask-reparenting-drag-drop](tasks/subtask-reparenting-drag-drop.md) | building |
 | [subtask-completion-trigger](tasks/subtask-completion-trigger.md) | draft |
+| [task-dependencies](task-dependencies/spec.md) | draft |
 | [subtree-controls](tasks/subtree-controls.md) | shipped |
 | [blocked-task-escalation](tasks/blocked-task-escalation.md) | draft |
 | [runtime-cleanup](tasks/runtime-cleanup.md) | draft |

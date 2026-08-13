@@ -155,6 +155,17 @@ remove every active quarantine entry, discarding restore windows for entries tha
 deleted. Safety-validation or deletion failures may leave entries visible and retryable. This
 override bypasses only the retention timestamp; path, ownership, state, and filesystem safety
 checks still apply.
+
+Kandev keeps at most one restorable Go-cache generation for each original cache path. If that
+generation is still active when the replacement cache exceeds its limit, the next rotation is
+deferred. The maintenance run succeeds and reports `active_quarantine`; both the live cache and
+the retained generation stay unchanged.
+
+If a Go-cache quarantine payload is already missing, **Delete**, **Clear eligible**, or **Force
+clear all** can close its durable entry without changing the live replacement cache. The purge
+reports zero deleted bytes for that entry. **Restore** remains unavailable because Kandev cannot
+prove which cache generation is currently live.
+
 If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
 one of the quarantine actions when you want cleanup.
 

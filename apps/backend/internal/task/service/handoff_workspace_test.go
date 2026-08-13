@@ -207,6 +207,38 @@ func (f *fakeBlockerRepo) ListTasksBlockedBy(_ context.Context, blockerTaskID st
 	return ids, nil
 }
 
+func (f *fakeBlockerRepo) ListBlockersForTasks(_ context.Context, taskIDs []string) (map[string][]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	want := make(map[string]struct{}, len(taskIDs))
+	for _, id := range taskIDs {
+		want[id] = struct{}{}
+	}
+	out := map[string][]string{}
+	for _, b := range f.blockers {
+		if _, ok := want[b.TaskID]; ok {
+			out[b.TaskID] = append(out[b.TaskID], b.BlockerTaskID)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeBlockerRepo) ListDependentsForTasks(_ context.Context, blockerTaskIDs []string) (map[string][]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	want := make(map[string]struct{}, len(blockerTaskIDs))
+	for _, id := range blockerTaskIDs {
+		want[id] = struct{}{}
+	}
+	out := map[string][]string{}
+	for _, b := range f.blockers {
+		if _, ok := want[b.BlockerTaskID]; ok {
+			out[b.BlockerTaskID] = append(out[b.BlockerTaskID], b.TaskID)
+		}
+	}
+	return out, nil
+}
+
 // fakeTaskRepo provides the minimal TaskRepository surface AttachWorkspacePolicy
 // uses. It supports GetTask + ListChildren so sibling lookup works.
 type fakeTaskRepo struct {

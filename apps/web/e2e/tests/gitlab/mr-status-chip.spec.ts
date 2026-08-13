@@ -69,6 +69,12 @@ async function openTask(
 ) {
   await testPage.goto(`/t/${taskId}`);
   await session.waitForLoad();
+  // The shell hydrates the workspace MR map once per document. A link created
+  // immediately before navigation can miss that first snapshot even though
+  // the task details already show the association. Reload once so the chip
+  // observes the same persisted link as the rest of the task page.
+  await testPage.reload();
+  await session.waitForLoad();
 }
 
 test.describe("GitLab MR status chip", () => {

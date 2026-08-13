@@ -18,6 +18,50 @@ function queueFields(
   };
 }
 
+/**
+ * Dependency fields are derived server-side and re-sent whole on every
+ * task.updated, so an absent list means "no edges", not "unchanged" — falling
+ * back to the existing value would leave a stale badge after the last edge is
+ * removed. Only fall back when the payload omits the field entirely (a partial
+ * update that never touched dependencies).
+ */
+const DEPENDENCY_PAYLOAD_KEYS = [
+  "blocked",
+  "blocked_reason",
+  "blockedReason",
+  "depends_on",
+  "dependsOn",
+  "blocks",
+  "start_when_unblocked",
+  "startWhenUnblocked",
+] as const;
+
+function touchesDependencies(task: KanbanUpdateTask): boolean {
+  return DEPENDENCY_PAYLOAD_KEYS.some((key) => key in task);
+}
+
+function dependencyFields(
+  task: KanbanUpdateTask,
+  existing: KanbanTask | undefined,
+): Pick<KanbanTask, "blocked" | "blockedReason" | "dependsOn" | "blocks" | "startWhenUnblocked"> {
+  if (!touchesDependencies(task)) {
+    return {
+      blocked: existing?.blocked,
+      blockedReason: existing?.blockedReason,
+      dependsOn: existing?.dependsOn,
+      blocks: existing?.blocks,
+      startWhenUnblocked: existing?.startWhenUnblocked,
+    };
+  }
+  return {
+    blocked: task.blocked ?? false,
+    blockedReason: task.blocked_reason ?? task.blockedReason,
+    dependsOn: task.depends_on ?? task.dependsOn ?? [],
+    blocks: task.blocks ?? [],
+    startWhenUnblocked: task.start_when_unblocked ?? task.startWhenUnblocked ?? false,
+  };
+}
+
 type KanbanUpdateTask = {
   id: string;
   workflowStepId: string;
@@ -34,6 +78,14 @@ type KanbanUpdateTask = {
   wipAdmitted?: boolean;
   queuedForStepId?: string;
   queuedAt?: string;
+  blocked?: boolean;
+  blocked_reason?: string;
+  blockedReason?: string;
+  depends_on?: KanbanTask["dependsOn"];
+  dependsOn?: KanbanTask["dependsOn"];
+  blocks?: KanbanTask["blocks"];
+  start_when_unblocked?: boolean;
+  startWhenUnblocked?: boolean;
 };
 
 export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
@@ -83,6 +135,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               interrupted: existing?.interrupted,
               foregroundActivity: existing?.foregroundActivity,
               ...queueFields(task, existing),
+              ...dependencyFields(task, existing),
             };
           });
 

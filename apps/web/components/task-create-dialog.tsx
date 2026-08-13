@@ -15,12 +15,13 @@ import {
   WorkflowSection,
   DialogPromptSection,
 } from "@/components/task-create-dialog-form-body";
+import { CreateModeSelectors } from "@/components/task-create-dialog-create-mode-selectors";
+import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
 import {
   AgentSelector,
   ExecutorProfileSelector,
   InlineTaskName,
 } from "@/components/task-create-dialog-selectors";
-import { CreateModeSelectors } from "@/components/task-create-dialog-create-mode-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import type {
   DialogFormBodyProps,
@@ -110,6 +111,13 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onComposerSubmit={props.onComposerSubmit}
       />
       <CreateModeAgentSelectors {...props} />
+      {isCreateMode && !isTaskStarted && (
+        <TaskCreateDependencies
+          value={fs.blockedBy}
+          onChange={fs.setBlockedBy}
+          disabled={props.isCreatingSession}
+        />
+      )}
       {props.bottomSlot}
     </>
   );

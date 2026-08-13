@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
+import type { TaskListingView } from "@/lib/task-listing/view-preference";
 import { linkToTaskOverview } from "@/lib/links";
 import type { WorkflowsState } from "@/lib/state/slices";
 import { selectWorkflowSwimlanes } from "@/lib/kanban/workflow-swimlanes";
@@ -31,7 +32,7 @@ function baseSettingsPayload(settings: UserSettingsFields): UserSettingsFields {
   };
 }
 
-function taskListingViewFor(mode: string): "kanban" | "pipeline" | "list" {
+function taskListingViewFor(mode: string): TaskListingView {
   if (mode === "graph2" || mode === "pipeline") return "pipeline";
   if (mode === "list") return "list";
   return "kanban";

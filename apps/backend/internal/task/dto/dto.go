@@ -189,6 +189,22 @@ type TaskDTO struct {
 	// metadata key at DTO conversion time (see FromTaskWithSessionInfo).
 	Interrupted bool `json:"interrupted,omitempty"`
 
+	// Dependency projection. Derived on every read from task_blockers plus each
+	// related task's own state — never persisted, because a stale copy would be
+	// read by the auto-start gate. Stamped by EnrichTaskDependencies.
+	Blocked bool `json:"blocked,omitempty"`
+	// BlockedReason is "pending", "failed", or "unknown"; omitted when the task
+	// is not blocked.
+	BlockedReason string `json:"blocked_reason,omitempty"`
+	// DependsOn lists direct predecessors, DependsOn/Blocks are not transitive.
+	DependsOn []TaskDependencyRefDTO `json:"depends_on,omitempty"`
+	// Blocks lists direct dependents so the dependency chip can render both
+	// directions without a second round trip.
+	Blocks []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	// StartWhenUnblocked reports that a launch intent is waiting on dependency
+	// resolution. Read-only here; set through the create request or the picker.
+	StartWhenUnblocked bool `json:"start_when_unblocked,omitempty"`
+
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
 	Origin                 string `json:"origin,omitempty"`

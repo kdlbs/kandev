@@ -20,6 +20,7 @@ import type {
   AzureDevOpsWorkItem,
 } from "@/lib/types/azure-devops";
 import { useTranslation } from "react-i18next";
+import { azureActionDisplayCopy } from "./azure-devops-workspace-defaults";
 
 function EmptyResult({ loading, error }: { loading: boolean; error: string | null }) {
   const { t } = useTranslation();
@@ -74,14 +75,21 @@ function TaskActionsMenu<T extends { id: number }>({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {actions.map((action) => (
-          <DropdownMenuItem key={action.id} onSelect={() => onSelect(item, action)}>
-            <span className="flex flex-col">
-              <span>{action.label}</span>
-              {action.hint && <span className="text-xs text-muted-foreground">{action.hint}</span>}
-            </span>
-          </DropdownMenuItem>
-        ))}
+        {actions.map((action) => {
+          const copy = azureActionDisplayCopy(
+            itemKind === "workItem" ? "work_item" : "pull_request",
+            action,
+            t,
+          );
+          return (
+            <DropdownMenuItem key={action.id} onSelect={() => onSelect(item, action)}>
+              <span className="flex flex-col">
+                <span>{copy.label}</span>
+                {copy.hint && <span className="text-xs text-muted-foreground">{copy.hint}</span>}
+              </span>
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );

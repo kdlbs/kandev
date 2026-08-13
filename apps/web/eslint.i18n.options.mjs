@@ -221,6 +221,9 @@ export const noLiteralStringOptions = {
  * the completeness check. See docs/i18n.md.
  */
 export const i18nGuardFiles = [
+  // Task dependencies (added with the feature, per the same-PR rule).
+  "components/task/task-dependency-chip.tsx",
+  "components/task-create-dialog-dependencies.tsx",
   // The i18n runtime itself.
   "lib/i18n/**/*.{ts,tsx}",
   // Settings → Preferences — Appearance, Notifications, Terminal & Editors and
@@ -1901,4 +1904,32 @@ export const i18nGuardFiles = [
   // comment deferred the `label`/`keywords` to "the components/task migration".
   // Both are palette copy and belong with the rest of it.
   "components/task/recent-task-switcher-hooks.ts",
+  // Second-audit gaps hidden in hook toasts, configuration objects, synthetic
+  // display records, and developer QA page chrome rather than JSX text.
+  "app/demo/agent-messages/page.tsx",
+  "app/demo/messages/page.tsx",
+  "components/azure-devops/azure-devops-mode-tabs.tsx",
+  "components/azure-devops/azure-devops-scope-bar.tsx",
+  "components/azure-devops/azure-devops-task-pull-request-chip.tsx",
+  "components/gitlab/my-gitlab/quick-task-launcher.tsx",
+  "components/shared/mermaid-error-toast.tsx",
+  "components/task/task-pr-shortcut.tsx",
+  "components/task-create-dialog-effects.ts",
+  "components/task-create-dialog-fresh-branch-consent.ts",
+  "components/task-create-dialog-submit.tsx",
+  "hooks/domains/kanban/use-implement-fresh.ts",
+  "hooks/domains/kanban/use-plan-actions.ts",
+  "hooks/domains/review/use-finding-actions.ts",
+  "hooks/domains/review/use-send-finding-to-agent.ts",
+  "hooks/domains/session/use-commit-diff.ts",
+  "hooks/domains/session/use-request-changes-walkthrough.ts",
+  "hooks/domains/session/use-session-actions.ts",
+  "hooks/domains/session/use-task-plan.ts",
+  "hooks/use-file-editors.ts",
+  "hooks/use-file-operations.ts",
+  "hooks/use-nest-task.ts",
+  "hooks/use-open-session-in-editor.ts",
+  "hooks/use-sidebar-views-sync.ts",
+  "hooks/use-task-workflow-move.ts",
+  "lib/keyboard/shortcut-overrides.ts",
 ];

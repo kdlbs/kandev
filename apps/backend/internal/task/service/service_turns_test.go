@@ -142,6 +142,61 @@ func TestBuildTurnRuntimeConfigSnapshotFallsBackToSelectorModel(t *testing.T) {
 	}
 }
 
+func TestBuildTurnRuntimeConfigSnapshotUsesSessionModeOverRuntimeMode(t *testing.T) {
+	snapshot := buildTurnRuntimeConfigSnapshot(&models.TaskSession{
+		AgentProfileSnapshot: map[string]interface{}{
+			"model": "profile-model",
+			"mode":  "profile-mode",
+			"config_options": map[string]string{
+				"reasoning_effort": "medium",
+			},
+		},
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{
+				Model: "runtime-model",
+				Mode:  "runtime-mode",
+				ConfigOptions: map[string]string{
+					"reasoning_effort":   "high",
+					"collaboration_mode": "default",
+				},
+			},
+			models.SessionMetaKeySessionMode: "acceptEdits",
+			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{
+				ConfigOptions: map[string]string{"reasoning_effort": "low"},
+			},
+		},
+	})
+
+	if snapshot.Model != "runtime-model" || snapshot.Mode != "acceptEdits" {
+		t.Fatalf("snapshot model/mode = %q/%q", snapshot.Model, snapshot.Mode)
+	}
+	options := make(map[string]string, len(snapshot.ConfigOptions))
+	for _, option := range snapshot.ConfigOptions {
+		options[option.ID] = option.Value
+	}
+	require.Equal(t, "low", options["reasoning_effort"])
+	require.Equal(t, "default", options["collaboration_mode"])
+}
+
+func TestStringConfigOptionsCompatibility(t *testing.T) {
+	typed := stringConfigOptions(map[string]string{"effort": "high"})
+	if typed["effort"] != "high" {
+		t.Fatalf("typed options = %#v", typed)
+	}
+
+	loose := stringConfigOptions(map[string]interface{}{"effort": "low", "ignored": 42})
+	if loose["effort"] != "low" {
+		t.Fatalf("loose options = %#v", loose)
+	}
+	if _, ok := loose["ignored"]; ok {
+		t.Fatalf("loose options retained non-string value: %#v", loose)
+	}
+
+	if got := stringConfigOptions(nil); got != nil {
+		t.Fatalf("nil options = %#v, want nil", got)
+	}
+}
+
 func (nilTaskSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
 	return nil, nil
 }

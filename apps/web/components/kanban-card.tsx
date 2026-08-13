@@ -18,6 +18,7 @@ import {
   type ExternalLinkProvider,
 } from "@/components/task/task-external-link-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
+import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
@@ -81,6 +82,12 @@ export interface Task {
   wipAdmitted?: boolean;
   queuedForStepId?: string;
   queuedForStepTitle?: string;
+  /** Derived dependency state — see TaskDependencyRef in the kanban slice. */
+  blocked?: boolean;
+  blockedReason?: string;
+  dependsOn?: TaskDependencyRef[];
+  blocks?: TaskDependencyRef[];
+  startWhenUnblocked?: boolean;
   queuedAt?: string;
   issueUrl?: string;
   issueNumber?: number;
@@ -636,7 +643,6 @@ export function resolveTaskRepositoryChips(
   const byId = new Map(repositories.map((repo) => [repo.id, repo]));
   const seen = new Set<string>();
   const chips: RepositoryChip[] = [];
-
   const push = (id: string | undefined) => {
     if (!id || seen.has(id)) return;
     const repo = byId.get(toRepositoryId(id));
@@ -649,13 +655,8 @@ export function resolveTaskRepositoryChips(
       ...(repo.local_path ? { path: formatUserHomePath(repo.local_path) } : {}),
     });
   };
-
   push(task.repositoryId);
   const ordered = [...(task.repositories ?? [])].sort((a, b) => a.position - b.position);
   for (const link of ordered) push(link.repository_id);
   return chips;
-}
-
-export function resolveTaskRepositoryNames(task: Task, repositories: Repository[]): string[] {
-  return resolveTaskRepositoryChips(task, repositories).map((chip) => chip.label);
 }

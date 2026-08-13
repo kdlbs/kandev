@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -613,7 +614,17 @@ func (s *Service) buildTask(req *CreateTaskRequest, workflowStepID string) *mode
 		if metadata == nil {
 			metadata = make(map[string]interface{})
 		}
-		metadata[models.MetaKeyDeferredLaunch] = req.DeferredLaunch
+		launch := req.DeferredLaunch
+		if ResolveStartWhenUnblocked(req) {
+			// Mark the intent as a dependency-chain step. The record is the same
+			// one WIP overflow persists — reused so "launch exactly once" and
+			// restart survival are inherited — and the flag is what lets
+			// dependency resolution recognise its own intents.
+			launch = make(map[string]interface{}, len(req.DeferredLaunch)+1)
+			maps.Copy(launch, req.DeferredLaunch)
+			launch[models.DeferredLaunchStartWhenUnblockedKey] = true
+		}
+		metadata[models.MetaKeyDeferredLaunch] = launch
 	}
 	if wsPath := strings.TrimSpace(req.WorkspacePath); wsPath != "" {
 		if metadata == nil {
@@ -2068,6 +2079,11 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 				zap.String("task_id", id), zap.Error(err))
 		}
 	}
+	// Remove dependency edges in both directions. task_blockers predates the
+	// tasks foreign key so nothing cascades, and a left-over edge would keep a
+	// dependent blocked forever on a task that no longer exists. Dependents are
+	// refreshed but deliberately not started: deletion is not success.
+	s.deleteDependencyEdgesForTask(context.WithoutCancel(ctx), id)
 
 	// 5. Publish event (sync, fast) - frontend removes task immediately
 	var extra map[string]interface{}

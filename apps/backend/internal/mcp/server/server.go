@@ -825,6 +825,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
 		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
+		// Dependency edges are manageable wherever a task can be created.
+		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
 		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
@@ -1097,8 +1099,8 @@ WHEN TO OMIT parent_id (top-level task):
 
 IMPORTANT:
 - Subtasks inherit task workspace, workflow, agent profile, executor, and materialized workspace from the parent by default. Pass workspace_id/workflow_id only when deliberately targeting a different task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. Pass workspace_mode='new_workspace' when the subtask needs its own materialized workspace/worktree.
-- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task inherits from the current/source task or parent before workflow and target-workspace defaults; workspace_default skips current/source and parent profiles, honors workflow profiles first, then uses the target workspace default.
-- Executor and executor-profile inheritance from the current/source task or parent is unchanged by either saved agent-profile policy.
+- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When no workflow profile wins and agent_profile_id is omitted, the saved user policy applies: current_task uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call. Without verified session context, it falls back to the current/source task or parent profile, then workflow and target-workspace defaults. workspace_default skips the creating session, current/source task, and parent profiles, honors workflow profiles first, then uses the target workspace default. An explicit agent_profile_id prevents creator-session runtime inheritance.
+- Creator-session runtime values are copied only when current_task selects that verified session profile. Executor and executor-profile inheritance from the current/source task or parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead
 - base_branch behaviour:
@@ -1115,7 +1117,7 @@ IDEMPOTENCY (external_id):
 - deduplicated:true in the result means a task already held that identity and nothing new was created — do not report having created a task in that case.
 - deduplicated:true together with creation_complete:false means another create claimed the identity and had not finished when observed; it may still be running. Proceed with the returned task_id or escalate to a human — never release the identity and create again, which can produce a duplicate task and a duplicate agent.`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
-	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
+	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call, then falls back to the current/source or parent profile without verified session context. workspace_default skips those task profiles and the creating session, then uses workflow profiles before the target workspace default. Explicit profiles do not copy creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start."
 
 	if s.mode == ModeExternal {
 		toolDesc = `Create a new top-level task and auto-start an agent on it.
@@ -1123,7 +1125,7 @@ IDEMPOTENCY (external_id):
 IMPORTANT:
 - Provide a repository via repository_url, repository_id, or local_path
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
-- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task inherits a parent profile before workflow and target-workspace defaults; workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no current/source task.
+- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task uses the parent task profile because external mode has no creating session or current/source task context, then checks workflow and target-workspace defaults. workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no creating session, so it never copies creator-session runtime values.
 - Executor and executor-profile inheritance from a parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - 'prompt' is the agent's initial prompt — be specific and detailed
@@ -1135,7 +1137,7 @@ IDEMPOTENCY (external_id):
 - deduplicated:true in the result means a task already held that identity and nothing new was created — do not report having created a task in that case.
 - deduplicated:true together with creation_complete:false means another create claimed the identity and had not finished when observed; it may still be running. Proceed with the returned task_id or escalate to a human — never release the identity and create again, which can produce a duplicate task and a duplicate agent.`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
-		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
+		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the parent task profile because external mode has no creating session or current/source task context; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode never copies creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start."
 	}
 
 	s.mcpServer.AddTool(
@@ -1157,8 +1159,57 @@ IDEMPOTENCY (external_id):
 			mcp.WithString("repository_url", mcp.Description("Repository URL, GitHub pull request URL, or GitLab merge request URL (for example 'https://github.com/owner/repo'). A contribution URL attaches the task to that existing contribution and prepares its source branch. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
 			mcp.WithString("external_id", mcp.Description("A stable identifier from your own system (issue key, webhook delivery ID, a UUID you generated). Creating a task twice with the same external_id in the same workspace returns the first task instead of making a duplicate — use it when a retry or restart could re-run this call. Replay the same arguments you sent the first time. This creates the task when nothing holds the identity yet — it is not a lookup.")),
+			mcp.WithArray("blocked_by",
+				mcp.Description(blockedByParamDesc),
+				mcp.Items(map[string]any{"type": "string"}),
+			),
+			mcp.WithBoolean("start_when_unblocked", mcp.Description(startWhenUnblockedParamDesc)),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
+	)
+}
+
+// Dependency parameter descriptions for create_task_kandev. Extracted as
+// constants because the same guidance has to appear on the two dependency tools
+// below and must not drift between them.
+const (
+	blockedByParamDesc = "Task IDs this task depends on: it will not start until every one of them completes SUCCESSFULLY. " +
+		"Use this — not parent_id — to express ordering. A subtask means \"part of\"; a dependency means \"not until\". " +
+		"Decomposing a plan into ordered phases is N sibling tasks chained with blocked_by, NOT N subtasks started at once. " +
+		"A predecessor that ends FAILED or CANCELLED halts the chain and needs human action; it will not retry itself."
+
+	startWhenUnblockedParamDesc = "Whether to start this task automatically once every task in blocked_by completes successfully. " +
+		"Defaults to true when blocked_by is non-empty, which is what chains ordered work: with blocked_by set, " +
+		"start_agent=true records this intent instead of launching now, so the whole chain does not start at once. " +
+		"Pass false to create the dependency edges with no automatic start at all."
+)
+
+// registerTaskDependencyTools registers add/remove for task dependency edges.
+// Mirrors the two HTTP routes one-to-one and shares the single edge validator
+// (self-edge, cross-workspace, cycle-with-path) in the task service. The read
+// side already exists as list_related_tasks_kandev.
+func (s *Server) registerTaskDependencyTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("add_task_dependency_kandev",
+			mcp.WithDescription(`Declare that a task is blocked by another task: it will not start until that one completes successfully.
+
+`+blockedByParamDesc+`
+
+task_id defaults to your CURRENT task. Rejected when the edge would create a cycle (the error names the cycle path), when both IDs are the same, or when the two tasks are in different workspaces. Returns the task's resulting depends_on list.`),
+			mcp.WithString(mcpKeyTaskID, mcp.Description("The blocked task. Defaults to your current task when omitted.")),
+			mcp.WithString("depends_on_task_id", mcp.Required(), mcp.Description("The task that must complete first (the predecessor).")),
+		),
+		s.wrapHandler("add_task_dependency_kandev", s.addTaskDependencyHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("remove_task_dependency_kandev",
+			mcp.WithDescription(`Remove a task dependency edge. Removing an edge that does not exist succeeds.
+
+Removing the last edge unblocks the task but does NOT start it: an automatic start is triggered by a dependency RESOLVING, not by the edge going away. Removing the edge means you are taking manual control.`),
+			mcp.WithString(mcpKeyTaskID, mcp.Description("The blocked task. Defaults to your current task when omitted.")),
+			mcp.WithString("depends_on_task_id", mcp.Required(), mcp.Description("The predecessor task to unlink.")),
+		),
+		s.wrapHandler("remove_task_dependency_kandev", s.removeTaskDependencyHandler()),
 	)
 }
 

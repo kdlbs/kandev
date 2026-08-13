@@ -187,6 +187,39 @@ Task tools use normal client discovery. When `step_complete_kandev` is required 
 
 `create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
 
+### Task dependencies over MCP
+
+`create_task_kandev` accepts `blocked_by`, a list of task IDs the new task must
+wait on. Two further tools manage links on an existing task:
+
+- `add_task_dependency_kandev` with `depends_on_task_id`, and an optional
+  `task_id`.
+- `remove_task_dependency_kandev` with the same arguments. Removing a link that
+  is not there succeeds.
+
+In a task-bound session, `task_id` defaults to the agent's own task and may only
+name that task; use `depends_on_task_id` for the other end. The link is
+authorized against both tasks, and a link that would close a cycle is rejected
+with the offending path.
+
+**Use a dependency for ordering, a subtask for decomposition.** Reaching for
+`parent_id` to express "do this one first" gets neither the start gate nor the
+chain: children run whenever they are started, and a parent's completion signal
+fires when all children reach any terminal state, including failure.
+
+An agent decomposing a plan into ordered steps should create each step with
+`blocked_by` pointing at the previous one and leave `start_agent` at its
+default. A create that declares dependencies does not launch immediately: the
+requested start is recorded and fires once every predecessor has completed
+successfully, so three chained creates produce a chain rather than three agents
+in the same repository at once. Pass `start_when_unblocked: false` to create the
+links with no launch intent at all. With no `blocked_by`, `start_when_unblocked`
+records nothing and the task starts or does not start purely per `start_agent`.
+
+Only success resolves a link. A predecessor that fails or is cancelled leaves
+its dependents blocked with a reason naming it, and Kandev does not retry it or
+drop the link on its own.
+
 ### Autopilot tasks and MCP profiles
 
 Task creation accepts one optional boolean:

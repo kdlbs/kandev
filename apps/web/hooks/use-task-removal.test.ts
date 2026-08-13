@@ -632,6 +632,7 @@ describe("useTaskRemoval — cascade no-candidate transition", () => {
         excludedTaskIds: initialRemoval.excludedTaskIds,
       } as never);
 
+      expect(store.getRecorded().kanbanMulti.snapshots["wf-1"].tasks).toEqual([]);
       expect(location.hrefSetter).toHaveBeenCalledWith(OVERVIEW_URL);
     } finally {
       location.restore();

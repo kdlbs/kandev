@@ -510,7 +510,7 @@ func (s *Service) MoveTaskWithOptions(
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
 		if !opts.PreserveDeferredLaunch {
-			delete(task.Metadata, models.MetaKeyDeferredLaunch)
+			models.DropWIPDeferredLaunch(task)
 		}
 	}
 	task.UpdatedAt = time.Now().UTC()

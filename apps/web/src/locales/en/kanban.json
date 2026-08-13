@@ -11,6 +11,11 @@
   "archiveCount_other": "Archive {{count}}",
   "archiveTask": "Archive task",
   "autoStart": "Auto-start",
+  "blockedByCount_one": "Blocked by {{count}}",
+  "blockedByCount_other": "Blocked by {{count}}",
+  "blockedByTasksTitle": "Waiting on: {{tasks}}",
+  "blockedFailed": "Blocker failed",
+  "blockedPredecessorFailed": "A task this one depends on failed: {{tasks}}",
   "boardNavigator": "Board navigator",
   "cannotMoveTasksFromDifferentWorkflows": "Cannot move tasks from different workflows",
   "changesRequested": "Changes Requested",
@@ -94,5 +99,6 @@
   "workflow": "Workflow",
   "workflowStepFallback": "workflow step {{stepId}}",
   "columns": "Columns",
-  "columnsForWorkflow": "Columns for {{name}}"
+  "columnsForWorkflow": "Columns for {{name}}",
+  "needsReassignment": "Needs Reassignment"
 }

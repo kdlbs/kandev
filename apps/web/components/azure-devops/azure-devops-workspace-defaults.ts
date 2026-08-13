@@ -24,6 +24,8 @@
  */
 import type { AzureDevOpsActionPreset, AzureDevOpsQueryPreset } from "@/lib/types/azure-devops";
 
+type Translate = (key: string) => string;
+
 const WIQL_START = "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project";
 const WIQL_ORDER = " ORDER BY [System.ChangedDate] DESC";
 
@@ -139,3 +141,68 @@ export const DEFAULT_AZURE_PULL_REQUEST_ACTIONS: AzureDevOpsActionPreset[] = [
     promptTemplate: "Investigate and fix CI failures for the Azure DevOps pull request at {{url}}.",
   },
 ];
+
+const QUERY_LABEL_KEYS: Record<string, string> = {
+  "work_item:recent": "azuredevops:defaultQueryRecentlyUpdated",
+  "work_item:assigned": "azuredevops:defaultQueryAssignedToMe",
+  "work_item:active": "azuredevops:defaultQueryActive",
+  "work_item:created": "azuredevops:defaultQueryCreatedByMe",
+  "pull_request:review-requested": "azuredevops:defaultQueryReviewRequested",
+  "pull_request:active": "azuredevops:defaultQueryOpen",
+  "pull_request:completed": "azuredevops:defaultQueryCompleted",
+  "pull_request:created": "azuredevops:defaultQueryCreatedByMe",
+};
+
+const ACTION_COPY_KEYS: Record<string, { labelKey: string; hintKey: string }> = {
+  "work_item:implement": {
+    labelKey: "azuredevops:defaultActionImplement",
+    hintKey: "azuredevops:defaultActionImplementHint",
+  },
+  "work_item:investigate": {
+    labelKey: "azuredevops:defaultActionInvestigate",
+    hintKey: "azuredevops:defaultActionInvestigateHint",
+  },
+  "work_item:reproduce": {
+    labelKey: "azuredevops:defaultActionReproduce",
+    hintKey: "azuredevops:defaultActionReproduceHint",
+  },
+  "pull_request:review": {
+    labelKey: "azuredevops:defaultActionReview",
+    hintKey: "azuredevops:defaultActionReviewHint",
+  },
+  "pull_request:address-feedback": {
+    labelKey: "azuredevops:defaultActionAddressFeedback",
+    hintKey: "azuredevops:defaultActionAddressFeedbackHint",
+  },
+  "pull_request:fix-ci": {
+    labelKey: "azuredevops:defaultActionFixCi",
+    hintKey: "azuredevops:defaultActionFixCiHint",
+  },
+};
+
+export function azureQueryDisplayLabel(
+  kind: "work_item" | "pull_request",
+  preset: AzureDevOpsQueryPreset,
+  t: Translate,
+): string {
+  const defaults =
+    kind === "work_item" ? DEFAULT_AZURE_WORK_ITEM_QUERIES : DEFAULT_AZURE_PULL_REQUEST_QUERIES;
+  const baseline = defaults.find((candidate) => candidate.id === preset.id);
+  const key = QUERY_LABEL_KEYS[`${kind}:${preset.id}`];
+  return key && baseline?.label === preset.label ? t(key) : preset.label;
+}
+
+export function azureActionDisplayCopy(
+  kind: "work_item" | "pull_request",
+  action: AzureDevOpsActionPreset,
+  t: Translate,
+): { label: string; hint: string } {
+  const defaults =
+    kind === "work_item" ? DEFAULT_AZURE_WORK_ITEM_ACTIONS : DEFAULT_AZURE_PULL_REQUEST_ACTIONS;
+  const baseline = defaults.find((candidate) => candidate.id === action.id);
+  const keys = ACTION_COPY_KEYS[`${kind}:${action.id}`];
+  if (!keys || baseline?.label !== action.label || baseline.hint !== action.hint) {
+    return { label: action.label, hint: action.hint };
+  }
+  return { label: t(keys.labelKey), hint: t(keys.hintKey) };
+}

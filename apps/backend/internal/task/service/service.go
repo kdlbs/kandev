@@ -312,11 +312,15 @@ type Service struct {
 	remoteBranchLister          RemoteBranchLister
 	repoCloneLocation           RepoCloneLocation
 	blockers                    BlockerRepository
-	comments                    CommentRepository
-	secretStore                 secrets.SecretStore
-	workspaceSecretDeleter      WorkspaceSecretDeleter
-	baseBranchPusher            AgentBaseBranchPusher
-	runtimeOverridesMu          sync.Mutex
+	// dependencyEdgeMu serializes validate-then-insert for dependency edges so
+	// two concurrent adds cannot each pass a cycle walk that predates the
+	// other's insert and commit a cycle between them.
+	dependencyEdgeMu       sync.Mutex
+	comments               CommentRepository
+	secretStore            secrets.SecretStore
+	workspaceSecretDeleter WorkspaceSecretDeleter
+	baseBranchPusher       AgentBaseBranchPusher
+	runtimeOverridesMu     sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 

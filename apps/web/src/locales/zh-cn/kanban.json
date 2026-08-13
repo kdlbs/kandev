@@ -94,5 +94,6 @@
   "workflow": "工作流",
   "workflowStepFallback": "工作流步骤 {{stepId}}",
   "columns": "列",
-  "columnsForWorkflow": "{{name}} 的列"
+  "columnsForWorkflow": "{{name}} 的列",
+  "needsReassignment": "需要重新分配"
 }

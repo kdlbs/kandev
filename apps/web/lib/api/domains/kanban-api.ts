@@ -101,6 +101,13 @@ export async function createTask(
       delivery_mode?: "prompt" | "path";
     }>;
     parent_id?: string;
+    /**
+     * Task IDs this task depends on. With these set, an agent-start request is
+     * recorded as a start-when-unblocked intent rather than launching now.
+     */
+    blocked_by?: string[];
+    /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
+    start_when_unblocked?: boolean;
     workspace_path?: string;
     priority?: string;
     project_id?: string;
