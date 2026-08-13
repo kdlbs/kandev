@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildSubmitMessage,
-  resolveStatusRowTaskId,
-  shouldRenderChatStatusBar,
-} from "./chat-input-area";
+import { buildSubmitMessage } from "./chat-input-area";
+import { resolveStatusRowTaskId, shouldRenderChatStatusBar } from "./chat-status-bar";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 
 const messageComment: AgentMessageComment = {
