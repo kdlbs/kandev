@@ -72,6 +72,10 @@ test.describe("Session resume — task state stability", () => {
         0,
       );
       polls++;
+      // deliberate-sleep(poll-interval): sampling interval for the fixed probe
+      // window above, not a settle. The assertion is that the task never
+      // flickers into Running, so the loop must keep sampling across the whole
+      // window; the polls >= 50 check below guards against it degenerating.
       await testPage.waitForTimeout(100);
     }
     // Ensure we actually polled meaningfully across the window.

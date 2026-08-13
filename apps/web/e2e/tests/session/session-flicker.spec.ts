@@ -5,6 +5,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { waitForStableActiveSession } from "../../helpers/session-store";
 
 /**
  * Regression: opening / switching to a second agent session in a task that
@@ -150,7 +151,7 @@ test.describe("Session flicker", () => {
     );
 
     await session.sessionTabBySessionId(session1Id).click();
-    await testPage.waitForTimeout(300);
+    await waitForStableActiveSession(testPage, session1Id);
 
     // Observe every change of the active session over the settle window.
     await testPage.evaluate(() => {
@@ -171,6 +172,10 @@ test.describe("Session flicker", () => {
     });
 
     await session.sessionTabBySessionId(session2Id).click();
+    // deliberate-sleep(negative-assertion): this is the observation window the
+    // test exists for. It asserts the ABSENCE of sustained oscillation after a
+    // deliberate switch, so it must sample real elapsed time rather than wait
+    // for any single event.
     await testPage.waitForTimeout(2_500);
 
     const activeLog = await testPage.evaluate(
@@ -199,7 +204,7 @@ test.describe("Session flicker", () => {
     );
 
     await session.sessionTabBySessionId(session1Id).click();
-    await testPage.waitForTimeout(300);
+    await waitForStableActiveSession(testPage, session1Id);
 
     // Simulate the backend launch race: session #2 ends up with a DIFFERENT
     // task_environment_id than session #1. Keep re-forcing it so trailing WS
@@ -225,15 +230,33 @@ test.describe("Session flicker", () => {
         if (p.id.startsWith("session:")) removals.push(p.id);
       });
     }, session2Id);
-    await testPage.waitForTimeout(100);
+    // The diverge interval above fires every 30ms; wait for its first write to
+    // land in the store rather than assuming one tick has happened.
+    await testPage.waitForFunction(
+      (sid2) =>
+        (
+          window as unknown as {
+            __KANDEV_E2E_STORE__?: {
+              getState: () => { environmentIdBySessionId: Record<string, string> };
+            };
+          }
+        ).__KANDEV_E2E_STORE__?.getState().environmentIdBySessionId[sid2] ===
+        "diverged-env-for-session-2",
+      session2Id,
+      { timeout: 5_000 },
+    );
 
     // Switch to session #2 (now on a diverged env) and back — this is what used
     // to strip the sibling tab and tear the chat down.
     await session.sessionTabBySessionId(session2Id).click();
-    await testPage.waitForTimeout(800);
+    await waitForStableActiveSession(testPage, session2Id);
     await session.sessionTabBySessionId(session1Id).click();
-    await testPage.waitForTimeout(800);
+    await waitForStableActiveSession(testPage, session1Id);
     await session.sessionTabBySessionId(session2Id).click();
+    // deliberate-sleep(negative-assertion): final observation window. The
+    // assertions below are that neither tab was stripped and no session panel
+    // was torn down, which only means something after giving the regression
+    // real time to occur.
     await testPage.waitForTimeout(1_500);
 
     // Both tabs must remain present throughout, and the active session's chat

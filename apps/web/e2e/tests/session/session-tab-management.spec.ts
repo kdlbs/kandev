@@ -5,6 +5,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -187,6 +188,9 @@ test.describe("Session tab management — close behavior", () => {
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
 
     // …and stays gone — useAutoSessionTab must not recreate it.
+    // deliberate-sleep(negative-assertion): the regression is a tab being
+    // recreated after removal. There is no event for a recreation that must
+    // never happen, so the check needs real elapsed time to be meaningful.
     await testPage.waitForTimeout(800);
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
@@ -290,6 +294,9 @@ test.describe("Session tab management — close behavior", () => {
     // that the remaining session tab is present (and the deleted one didn't come
     // back), so gate on the surviving session tab instead.
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 15_000 });
+    // deliberate-sleep(negative-assertion): the deleted tab must not come back
+    // after a task round-trip. Nothing is rendered to wait for when the
+    // expected outcome is "no tab ever appears".
     await testPage.waitForTimeout(800);
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
   });
@@ -344,6 +351,8 @@ test.describe("Session tab management — close behavior", () => {
     await expect(session.sessionTabBySessionId(sessionB1Id)).toBeVisible({ timeout: 10_000 });
 
     // …and neither of task A's session tabs should have followed us in.
+    // deliberate-sleep(negative-assertion): asserts tabs from another task
+    // never leak in, which has no arrival event to wait on.
     await testPage.waitForTimeout(800);
     await expect(session.sessionTabBySessionId(sessionA1Id)).not.toBeVisible();
     await expect(session.sessionTabBySessionId(sessionA2Id)).not.toBeVisible();
@@ -364,6 +373,10 @@ test.describe("Session tab management — primary session persistence", () => {
     seedData,
   }) => {
     test.setTimeout(150_000);
+
+    // Attach before the first navigation so the capture sees the websocket from
+    // the moment it opens.
+    const traffic = attachGatewayTrafficCapture(testPage);
 
     const { task, session, session1Id, session2Id } = await createTaskWithTwoSessions(
       testPage,
@@ -398,10 +411,22 @@ test.describe("Session tab management — primary session persistence", () => {
     // Trigger kanban.update by moving the task to a non-start step.
     const otherStep = seedData.steps.find((s) => s.id !== seedData.startStepId);
     if (!otherStep) throw new Error("Workflow needs at least 2 steps to trigger kanban.update");
+    const kanbanFramesBeforeMove = traffic.frames.filter(
+      (frame) => frame.direction === "received" && frame.action?.startsWith("kanban."),
+    ).length;
     await apiClient.moveTask(task.id, seedData.workflowId, otherStep.id);
 
-    // Give the WS broadcast time to land.
-    await testPage.waitForTimeout(500);
+    // The kanban.update broadcast is what could wrongly move the star, so wait
+    // for the gateway to actually deliver it instead of budgeting for it.
+    await expect
+      .poll(
+        () =>
+          traffic.frames.filter(
+            (frame) => frame.direction === "received" && frame.action?.startsWith("kanban."),
+          ).length,
+        { timeout: 15_000, message: "no kanban.* frame was delivered after moveTask" },
+      )
+      .toBeGreaterThan(kanbanFramesBeforeMove);
 
     // Star must still be on session #2 (would jump back to #1 before the kanban.ts fix).
     await expect(starInTab(session, session2Id)).toBeVisible({ timeout: 5_000 });
