@@ -70,7 +70,7 @@ function buildImage(tag: string, dockerfile: string): void {
   }
 }
 
-function listScopedKandevContainers(scope: string): string[] | null {
+function listScopedKandevContainers(scope: string, scanAll = false): string[] | null {
   const list = spawnSync(
     "docker",
     [
@@ -81,22 +81,61 @@ function listScopedKandevContainers(scope: string): string[] | null {
       "--filter",
       `label=kandev.e2e.run=${scope}`,
     ],
-    { encoding: "utf8" },
+    { encoding: "utf8", timeout: 5_000 },
   );
   if (list.status !== 0) return null;
-  return list.stdout
+  const ids = list.stdout
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
+  if (ids.length > 0 || !scanAll) return ids;
+
+  // Docker can briefly return an empty label-filtered list while a just
+  // stopped container is becoming visible to the daemon's index. On the
+  // second empty poll, inspect the daemon's IDs and filter labels ourselves.
+  // This remains safe for concurrent shards because only exact managed/run
+  // label matches are returned to the scoped remover.
+  const all = spawnSync("docker", ["ps", "-aq", "--no-trunc"], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  if (all.status !== 0) return null;
+  const allIDs = all.stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (allIDs.length === 0) return [];
+
+  const inspected = spawnSync(
+    "docker",
+    [
+      "inspect",
+      "--format",
+      '{{.Id}}\t{{index .Config.Labels "kandev.managed"}}\t{{index .Config.Labels "kandev.e2e.run"}}',
+      ...allIDs,
+    ],
+    { encoding: "utf8", timeout: 5_000 },
+  );
+  if (inspected.status !== 0 && !inspected.stdout.trim()) return null;
+  return inspected.stdout
+    .split("\n")
+    .map((line) => line.trim().split("\t"))
+    .filter((parts) => parts[1] === "true" && parts[2] === scope)
+    .map(([id]) => id);
 }
 
 function removeContainerIDs(ids: string[]): void {
-  if (ids.length > 0) spawnSync("docker", ["rm", "-f", ...ids], { stdio: "ignore" });
+  for (const id of ids) {
+    spawnSync("docker", ["rm", "-f", id], { stdio: "ignore", timeout: 5_000 });
+  }
 }
 
 function discardMissingContainerIDs(pendingIDs: Set<string>): void {
   for (const id of pendingIDs) {
-    const inspected = spawnSync("docker", ["inspect", id], { stdio: "ignore" });
+    const inspected = spawnSync("docker", ["inspect", id], {
+      stdio: "ignore",
+      timeout: 5_000,
+    });
     if (inspected.status !== 0) pendingIDs.delete(id);
   }
 }
@@ -132,7 +171,10 @@ export async function removeScopedKandevContainers(scope = E2E_DOCKER_SCOPE): Pr
   const pendingIDs = new Set<string>();
 
   while (Date.now() < deadline) {
-    const currentIDs = listScopedKandevContainers(scope);
+    let currentIDs = listScopedKandevContainers(scope);
+    if (currentIDs?.length === 0 && emptyPolls >= 1) {
+      currentIDs = listScopedKandevContainers(scope, true);
+    }
     if (currentIDs) {
       lastIDs = currentIDs;
       for (const id of lastIDs) pendingIDs.add(id);

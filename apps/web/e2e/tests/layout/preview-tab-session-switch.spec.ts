@@ -80,6 +80,19 @@ function tabWrapperByText(page: Page, text: string) {
   return page.locator(".dv-tab", { has: page.locator(".dv-default-tab", { hasText: text }) });
 }
 
+function publishSeedCommit(git: GitHelper, remoteURL: string) {
+  // Task workspaces are created from the repository's configured origin. A
+  // commit that only exists in the fixture's checkout can therefore be
+  // absent from the task file tree under CI load.
+  const remotes = git.exec("git remote").split(/\r?\n/);
+  if (remotes.includes("origin")) {
+    git.exec(`git remote set-url origin "${remoteURL}"`);
+  } else {
+    git.exec(`git remote add origin "${remoteURL}"`);
+  }
+  git.exec("git push origin HEAD:main");
+}
+
 test.describe("Preview tab survives session switch", () => {
   test("preview tab persists after switching tasks and back", async ({
     testPage,
@@ -103,6 +116,7 @@ test.describe("Preview tab survives session switch", () => {
     git.createFile(FILE_A, "// alpha content");
     git.stageAll();
     git.commit("seed alpha");
+    publishSeedCommit(git, seedData.repositoryRemoteURL);
 
     // Create Task A and wait for it to complete
     const taskA = await apiClient.createTaskWithAgent(
@@ -207,6 +221,7 @@ test.describe("Preview tab survives session switch", () => {
     git.createFile(FILE_PROMOTED, "// promoted content");
     git.stageAll();
     git.commit("seed promoted");
+    publishSeedCommit(git, seedData.repositoryRemoteURL);
 
     const taskA = await seedFinishedTask(apiClient, seedData, "Promote Round-Trip A");
     const taskB = await seedFinishedTask(apiClient, seedData, "Promote Round-Trip B");
@@ -261,6 +276,7 @@ test.describe("Preview tab survives session switch", () => {
     git.createFile(FILE_ACTIVE, "// active content");
     git.stageAll();
     git.commit("seed active");
+    publishSeedCommit(git, seedData.repositoryRemoteURL);
 
     const taskA = await seedFinishedTask(apiClient, seedData, "Active Tab Round-Trip A");
     const taskB = await seedFinishedTask(apiClient, seedData, "Active Tab Round-Trip B");
@@ -313,6 +329,7 @@ test.describe("Preview tab survives session switch", () => {
     git.createFile(FILE_REFRESH, "// refresh content");
     git.stageAll();
     git.commit("seed refresh");
+    publishSeedCommit(git, seedData.repositoryRemoteURL);
 
     await seedFinishedTask(apiClient, seedData, "Refresh Active Tab Task");
 
