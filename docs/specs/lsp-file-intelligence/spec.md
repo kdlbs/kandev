@@ -308,6 +308,9 @@ continue serving its previous workspace scope while clearly requiring an explain
 
 The controller serializes commands per `(task_id, language)`. Concurrent duplicate commands while
 one transition is active coalesce. Non-terminal different commands linearize in accepted order.
+Automatic task and settings reconciliation reloads the durable language row inside that same lane
+before deciding effective policy or touching a runtime, so a queued stale snapshot cannot stop a
+server enabled by a newer accepted user action.
 Explicit Stop, Disabled policy, and terminal task cleanup interrupt an accepted Start/install so
 shutdown never waits indefinitely behind startup; the terminal transition is the final desired
 state and process-tree proof. A restart first proves the old generation stopped, then admits one new
@@ -481,6 +484,9 @@ task-environment cleanup merely because a browser remains connected.
 - **GIVEN** concurrent Start, Stop, and Restart calls for one task/language, **WHEN** the controller
   accepts them, **THEN** snapshots expose monotonic revisions, duplicate commands coalesce, the
   final policy matches acceptance order, and at most one process exists.
+- **GIVEN** task or settings reconciliation captured Disabled before the user enabled a language,
+  **WHEN** the enable completes before reconciliation enters that language lane, **THEN**
+  reconciliation reloads Keep warm and leaves the newly ready generation running.
 
 ### Status and progress
 

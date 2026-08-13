@@ -15,16 +15,6 @@ func TestPostgresTaskLSPSchemaReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initialize postgres schema: %v", err)
 	}
-	if _, err := db.Exec(`DROP TABLE task_lsp_languages`); err != nil {
-		t.Fatalf("drop task LSP table to simulate legacy schema: %v", err)
-	}
-	if err := repo.runMigrations(); err != nil {
-		t.Fatalf("replay postgres migrations: %v", err)
-	}
-	if err := repo.runMigrations(); err != nil {
-		t.Fatalf("replay postgres migrations twice: %v", err)
-	}
-
 	ctx := context.Background()
 	now := time.Now().UTC()
 	if _, err := db.Exec(db.Rebind(`
@@ -33,24 +23,57 @@ func TestPostgresTaskLSPSchemaReplay(t *testing.T) {
 	`), "task-lsp-postgres", "workspace-lsp-postgres", "Postgres LSP", now, now); err != nil {
 		t.Fatalf("seed postgres task: %v", err)
 	}
-	state := lsp.DefaultTaskLanguageState("task-lsp-postgres", "kotlin")
-	state.Policy = lsp.PolicyKeepWarm
-	state.Detected = true
-	state.DetectionState = lsp.DetectionComplete
-	state.Generation = 3
-	state.ProcessAbsentGeneration = 3
-	state.LastTransitionAt = now
-	stored, err := repo.CompareAndUpdateTaskLSPLanguage(ctx, state, 0)
-	if err != nil {
-		t.Fatalf("insert postgres task LSP state: %v", err)
+	if _, err := db.Exec(`
+		ALTER TABLE task_lsp_languages DROP COLUMN process_absent_generation
+	`); err != nil {
+		t.Fatalf("rewind task LSP table to legacy schema: %v", err)
 	}
-	if stored.Revision != 1 || stored.ProcessAbsentGeneration != stored.Generation {
-		t.Fatalf("postgres task LSP state = %#v", stored)
+	legacyRows := []struct {
+		language   string
+		phase      lsp.Phase
+		generation uint64
+		errorCode  string
+		wantAbsent uint64
+	}{
+		{language: "go", phase: lsp.PhaseOff, generation: 3, wantAbsent: 3},
+		{language: "kotlin", phase: lsp.PhaseError, generation: 4,
+			errorCode: "process_start_failed", wantAbsent: 4},
+		{language: "python", phase: lsp.PhaseError, generation: 5,
+			errorCode: "task_host_unreachable", wantAbsent: 0},
+		{language: "rust", phase: lsp.PhaseReady, generation: 6, wantAbsent: 0},
+	}
+	for _, row := range legacyRows {
+		if _, err := db.Exec(db.Rebind(`
+			INSERT INTO task_lsp_languages (
+				task_id, language, phase, generation, revision, last_transition_at,
+				error_code, created_at, updated_at
+			) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+		`), "task-lsp-postgres", row.language, row.phase, row.generation,
+			now, row.errorCode, now, now); err != nil {
+			t.Fatalf("seed legacy postgres row %s: %v", row.language, err)
+		}
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay postgres migrations: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay postgres migrations twice: %v", err)
+	}
+
+	for _, row := range legacyRows {
+		stored, found, err := repo.GetTaskLSPLanguage(ctx, "task-lsp-postgres", row.language)
+		if err != nil || !found {
+			t.Fatalf("read migrated postgres row %s: found=%v err=%v", row.language, found, err)
+		}
+		if stored.ProcessAbsentGeneration != row.wantAbsent {
+			t.Fatalf("migrated postgres row %s absence = %d, want %d",
+				row.language, stored.ProcessAbsentGeneration, row.wantAbsent)
+		}
 	}
 	allocated, err := repo.AllocateTaskLSPGeneration(
 		ctx,
-		state.TaskID,
-		state.Language,
+		"task-lsp-postgres",
+		"go",
 		lsp.ActionStart,
 		lsp.InitiatorUser,
 		"user_start",
@@ -63,10 +86,10 @@ func TestPostgresTaskLSPSchemaReplay(t *testing.T) {
 		t.Fatalf("postgres task LSP allocation = %#v", allocated)
 	}
 
-	if _, err := db.Exec(db.Rebind(`DELETE FROM tasks WHERE id = ?`), state.TaskID); err != nil {
+	if _, err := db.Exec(db.Rebind(`DELETE FROM tasks WHERE id = ?`), "task-lsp-postgres"); err != nil {
 		t.Fatalf("delete postgres task: %v", err)
 	}
-	if _, found, err := repo.GetTaskLSPLanguage(ctx, state.TaskID, state.Language); err != nil || found {
+	if _, found, err := repo.GetTaskLSPLanguage(ctx, "task-lsp-postgres", "go"); err != nil || found {
 		t.Fatalf("postgres cascade result: found=%v err=%v", found, err)
 	}
 }

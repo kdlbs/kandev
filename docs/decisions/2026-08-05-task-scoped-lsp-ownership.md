@@ -165,7 +165,9 @@ Explicit Stop, Disabled policy, and terminal task cleanup are interrupting task-
 they cancel an accepted Start/install before waiting for its language lane or task admission lock.
 Terminal task mutation publishes exclusive writer intent before cancellation so no new runtime
 reader can slip between cancellation and cleanup admission. Cleanup then remains the final
-process-tree proof. Non-terminal commands retain ordered per-language serialization.
+process-tree proof. Non-terminal commands retain ordered per-language serialization. Automatic
+task and settings reconciliation reloads current durable policy only after entering that language
+lane, preventing an earlier inventory snapshot from reversing a newer accepted user transition.
 
 Browser connection generations do not own attachment intent. The frontend manager retains a stable
 task/language/session lease registry and rebuilds a replacement transport from every live lease, so

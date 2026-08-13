@@ -45,21 +45,17 @@ func (c *Controller) reconcileAllWithInventory(
 			c.capacity.Adopt(TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}, state.Generation)
 		}
 	}
-	missing := make([]reconcileCandidate, 0)
 	var reconcileErrors []error
-	for _, state := range states {
-		candidate, inspectErr := c.inspectReconcileState(ctx, state, true)
-		if inspectErr != nil {
-			reconcileErrors = append(reconcileErrors, inspectErr)
-			continue
-		}
-		if candidate != nil {
-			missing = append(missing, *candidate)
-		}
-	}
-	for _, candidate := range missing {
-		if _, startErr := c.reconcileMissing(ctx, candidate); startErr != nil {
-			reconcileErrors = append(reconcileErrors, startErr)
+	for _, listed := range states {
+		key := TaskLanguageKey{TaskID: listed.TaskID, Language: listed.Language}
+		_, commandErr := c.commands.submitOwnedExclusive(
+			ctx, key, ActionReconcile,
+			func(workCtx context.Context) (*LanguageSnapshot, error) {
+				return c.reconcileCurrentState(workCtx, key, true)
+			},
+		)
+		if commandErr != nil {
+			reconcileErrors = append(reconcileErrors, commandErr)
 		}
 	}
 	reconcileErr := errors.Join(reconcileErrors...)
@@ -104,17 +100,29 @@ func (c *Controller) ReconcileTask(ctx context.Context, taskID string) error {
 		key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
 		_, commandErr := c.commands.submit(ctx, key, ActionReconcile, "",
 			func(workCtx context.Context) (*LanguageSnapshot, error) {
-				candidate, inspectErr := c.inspectReconcileState(workCtx, state, true)
-				if inspectErr != nil || candidate == nil {
-					return nil, inspectErr
-				}
-				return c.reconcileMissing(workCtx, *candidate)
+				return c.reconcileCurrentState(workCtx, key, true)
 			})
 		if commandErr != nil {
 			reconcileErrors = append(reconcileErrors, commandErr)
 		}
 	}
 	return errors.Join(discoveryErr, errors.Join(reconcileErrors...))
+}
+
+func (c *Controller) reconcileCurrentState(
+	ctx context.Context,
+	key TaskLanguageKey,
+	scheduleFailure bool,
+) (*LanguageSnapshot, error) {
+	state, found, err := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
+	if err != nil || !found {
+		return nil, err
+	}
+	candidate, err := c.inspectReconcileState(ctx, *state, scheduleFailure)
+	if err != nil || candidate == nil {
+		return nil, err
+	}
+	return c.reconcileMissing(ctx, *candidate)
 }
 
 func (c *Controller) inspectReconcileState(
