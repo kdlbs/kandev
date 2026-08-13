@@ -6,7 +6,10 @@ package sqlite
 
 import (
 	"context"
+	"sync"
 	"testing"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
@@ -60,5 +63,66 @@ func TestPostgresLedgerWriterGenesisMoveAttachDetach(t *testing.T) {
 	last := rows[len(rows)-1]
 	if last.toWorkflowStepID == nil || *last.toWorkflowStepID != "step-c" {
 		t.Fatalf("final to_workflow_step_id = %v, want step-c", last.toWorkflowStepID)
+	}
+}
+
+// TestPostgresLedgerWriterConcurrentMovesProduceIntactChain is the Postgres
+// counterpart of TestChainConcurrentMovesProduceTwoRowsWithIntactChain
+// (step_transitions_chain_test.go), barrier-controlled rather than relying on
+// goroutine-scheduling luck to exercise readTaskStepInTx's real Postgres
+// "FOR UPDATE" lock contention: both movers block on the same gate so they
+// race into the lock as close to simultaneously as genuinely concurrent
+// callers would. This is the scenario that caught a real bug during this
+// PR's review — occurred_at was stamped before the transactional lock, so
+// two racing movers could commit in one order but record timestamps in the
+// other, breaking the (occurred_at, id) chain invariant only under real
+// concurrent Postgres connections (SQLite's single-writer pool serializes
+// regardless, which is why no SQLite test could have caught it).
+func TestPostgresLedgerWriterConcurrentMovesProduceIntactChain(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := steptelemetry.WithAttribution(context.Background(), steptelemetry.Attribution{
+		Trigger: steptelemetry.TriggerManualMove, ActorKind: steptelemetry.ActorHuman, ActorID: "user-pg-concurrent",
+	})
+
+	task := &models.Task{ID: "task-pg-concurrent", WorkspaceID: "ws-pg-concurrent", WorkflowID: "wf-pg-concurrent", WorkflowStepID: "step-a", Title: "PG Concurrent Task", Priority: "medium"}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	var start sync.WaitGroup
+	start.Add(1)
+	var g errgroup.Group
+	g.Go(func() error {
+		start.Wait()
+		moved := *task
+		moved.WorkflowStepID = "step-b"
+		return repo.UpdateTask(ctx, &moved)
+	})
+	g.Go(func() error {
+		start.Wait()
+		moved := *task
+		moved.WorkflowStepID = "step-c"
+		return repo.UpdateTask(ctx, &moved)
+	})
+	start.Done()
+	if err := g.Wait(); err != nil {
+		t.Fatalf("concurrent UpdateTask: %v", err)
+	}
+
+	rows := assertChainIntact(t, repo, task.ID)
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want 3 (genesis + 2 concurrent moves)", len(rows))
+	}
+
+	final, err := repo.GetTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if final.WorkflowStepID != "step-b" && final.WorkflowStepID != "step-c" {
+		t.Fatalf("final workflow_step_id = %q, want step-b or step-c (last committed writer wins)", final.WorkflowStepID)
 	}
 }
