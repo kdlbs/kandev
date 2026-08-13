@@ -458,13 +458,23 @@ test.describe("Git Changes Panel", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    const session = await openTaskSession(testPage, "Git PR-only Detail Test");
 
     const remoteSha = "d".repeat(40);
     const remoteMessage = "Force-pushed remote commit";
-    const checkoutBranch = execSync("git branch --show-current", {
-      cwd: path.join(backend.tmpDir, "repos", "e2e-repo"),
-      encoding: "utf8",
-    }).trim();
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+    git.createFile("pr-shared-marker.ts", "shared provider checkout commit");
+    git.stageFile("pr-shared-marker.ts");
+    const sharedSha = git.commit("Shared provider checkout commit");
+    const checkoutBranch = git.exec("git branch --show-current").trim();
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("remote-author");
     await apiClient.mockGitHubAddPRs([
@@ -477,9 +487,16 @@ test.describe("Git Changes Panel", () => {
         author_login: "remote-author",
         repo_owner: "testorg",
         repo_name: "testrepo",
+        head_sha: remoteSha,
       },
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 2253, [
+      {
+        sha: sharedSha,
+        message: "Shared provider checkout commit",
+        author_login: "remote-author",
+        author_date: "2026-08-03T12:00:00Z",
+      },
       {
         sha: remoteSha,
         message: remoteMessage,
@@ -518,14 +535,36 @@ test.describe("Git Changes Panel", () => {
       author_login: "remote-author",
     });
 
-    const session = await openTaskSession(testPage, "Git PR-only Detail Test");
+    await testPage.reload();
+    await session.waitForLoad();
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 20_000 });
     await session.expandCommitsSection();
+    const commitsList = testPage.getByTestId("commits-list");
 
     const row = testPage.getByTestId(`commit-row-${remoteSha.slice(0, 7)}`);
     await expect(row).toBeVisible({ timeout: 20_000 });
+    await expect(row.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "current_pr",
+    );
+    await expect(row.getByTestId("commit-provenance")).toHaveAttribute(
+      "title",
+      "Current PR commit",
+    );
+    const sharedRow = testPage.getByTestId(`commit-row-${sharedSha.slice(0, 7)}`);
+    await expect(sharedRow).toBeVisible({ timeout: 20_000 });
+    await expect(sharedRow.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "pushed",
+    );
+    const commitMessages = await commitsList
+      .locator('[data-testid^="commit-row-"]')
+      .allTextContents();
+    expect(commitMessages.findIndex((message) => message.includes(remoteMessage))).toBeLessThan(
+      commitMessages.findIndex((message) => message.includes("Shared provider checkout commit")),
+    );
     await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
     await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
     await row.hover();
@@ -1676,6 +1715,14 @@ test.describe("Git Changes Panel", () => {
     ).toHaveAttribute("aria-expanded", "false");
     await expect(localSection.locator('[data-testid^="commit-row-"]')).toHaveCount(6);
     await providerSection.getByTestId("current-pr-commits-section-collapse-toggle").click();
+    await expect(providerSection.locator('[data-commit-provenance="current_pr"]')).toHaveCount(15);
+    await expect(localSection.locator('[data-commit-provenance="local_checkout"]')).toHaveCount(6);
+    await expect(
+      providerSection.locator('[data-commit-provenance="current_pr"]').first(),
+    ).toHaveAttribute("title", "Current PR commit");
+    await expect(
+      localSection.locator('[data-commit-provenance="local_checkout"]').first(),
+    ).toHaveAttribute("title", "Local checkout commit");
     await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
 
     // A rewritten provider history must not label the preserved checkout as
@@ -1814,7 +1861,12 @@ test.describe("Git Changes Panel", () => {
 
     const changes = testPage.getByTestId("changes-panel");
     await expect(changes.getByTestId("commits-section")).toBeVisible({ timeout: 30_000 });
-    await expect(changes.getByText("Current PR commit")).toBeVisible();
+    const currentPRRow = changes.getByTestId(`commit-row-${currentHead.slice(0, 7)}`);
+    await expect(currentPRRow).toBeVisible();
+    await expect(currentPRRow.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "pushed",
+    );
     await expect(changes.getByText("Rewritten provider commit 15")).toHaveCount(0);
     await expect(changes.getByTestId("header-remote-contribution-warning")).toHaveCount(0);
     await expect(changes.getByTestId("remote-contribution-drift-status")).toHaveCount(0);

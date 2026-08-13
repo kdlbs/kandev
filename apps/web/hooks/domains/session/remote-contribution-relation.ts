@@ -51,6 +51,23 @@ export type RemoteContributionActionPolicy = {
   disabledReason: "provider_evidence_unavailable" | null;
 };
 
+export type RemoteContributionActionReasonKey =
+  | "task:providerAheadPushDisabled"
+  | "task:providerAheadPullRequiresUpstream"
+  | "task:divergedActionsUnavailable";
+
+export function remoteContributionActionReasonKey(
+  relation: RemoteContributionRelation,
+  action: "push" | "pull",
+): RemoteContributionActionReasonKey | null {
+  if (relation.action === "provider_ahead_pull") {
+    if (action === "push") return "task:providerAheadPushDisabled";
+    if (!relation.canPull) return "task:providerAheadPullRequiresUpstream";
+  }
+  if (relation.action === "diverged_replace") return "task:divergedActionsUnavailable";
+  return null;
+}
+
 /**
  * Safety gates shared by desktop and mobile Git controls. A provider-ahead
  * checkout may pull, but must not push over the provider's newer history.
@@ -64,7 +81,7 @@ export function remoteContributionActionPolicy(
   return {
     action: relation.action,
     pushDisabled: diverged || relation.action === "provider_ahead_pull",
-    pullDisabled: diverged,
+    pullDisabled: diverged || (relation.action === "provider_ahead_pull" && !relation.canPull),
     replaceDisabled: !relation.canReplaceRemote,
     useDisabled: !relation.canUseRemote,
     disabledReason: unavailable ? "provider_evidence_unavailable" : null,
@@ -140,8 +157,7 @@ export function classifyRemoteContribution(
     !input.providerCommitsComplete ||
     input.providerCommits.length === 0 ||
     !providerHead ||
-    !input.localHead ||
-    !input.upstreamHead;
+    !input.localHead;
   if (evidenceUnavailable) {
     return result("unknown", providerHead, fallback);
   }
@@ -154,8 +170,12 @@ export function classifyRemoteContribution(
     return result("provider_ahead", providerHead, {
       ...fallback,
       canPush: false,
-      canPull: true,
+      canPull: input.hasUpstream,
     });
+  }
+
+  if (!input.upstreamHead) {
+    return result("unknown", providerHead, fallback);
   }
 
   if (input.upstreamHead === providerHead && input.remoteAhead > 0 && input.remoteBehind === 0) {

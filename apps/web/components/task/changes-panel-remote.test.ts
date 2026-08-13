@@ -23,6 +23,41 @@ function makePR(sha: string, message = "msg") {
 }
 
 describe("mergeCommits source provenance", () => {
+  it("places provider-only commits newest first before shared history", () => {
+    const local = [makeLocal(SHARED_SHA, "shared")];
+    const provider = [
+      {
+        ...makePR("old1111", "old provider"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: WIDGET_REPO,
+      },
+      {
+        ...makePR(SHARED_SHA, "shared provider"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: WIDGET_REPO,
+      },
+      {
+        ...makePR("new9999", "new provider"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: WIDGET_REPO,
+      },
+    ];
+
+    const result = mergeCommits(local, provider);
+
+    expect(result.map((commit) => commit.commit_sha)).toEqual(["new9999", SHARED_SHA, "old1111"]);
+    expect(result[0]).toMatchObject({ presentation: "current_pr", pushed: true });
+    expect(result[1]).toMatchObject({ commit_message: "shared" });
+    expect(result[1].presentation).toBeUndefined();
+    expect(result[2]).toMatchObject({ presentation: "current_pr", pushed: true });
+  });
+
   it("marks PR-only commits as remote with explicitly unavailable stats", () => {
     const pr = {
       ...makePR(SHARED_SHA, "external fix"),
@@ -66,7 +101,9 @@ describe("mergeCommits source provenance", () => {
       },
     ]);
   });
+});
 
+describe("mergeCommits repository identity", () => {
   it("does not deduplicate equal SHAs from different repositories", () => {
     const local = [{ ...makeLocal(SHARED_SHA, "local"), repository_name: "widget-a" }];
     const pr = {
@@ -155,9 +192,6 @@ describe("separateCommitHistories", () => {
     );
     expect(result.localCommits.every((commit) => commit.pushed === false)).toBe(true);
   });
-});
-
-describe("mergeCommits repository identity", () => {
   it("does not create a PR-only target without complete provenance", () => {
     const pr = {
       ...makePR(SHARED_SHA, "remote"),

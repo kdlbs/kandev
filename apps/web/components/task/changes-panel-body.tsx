@@ -58,8 +58,6 @@ type TimelineProps = Pick<
   | "relation"
   | "resolution"
   | "resolutionTarget"
-  | "providerCommitsLoading"
-  | "providerCommitsError"
   | "providerPRNumber"
   | "pushDisabled"
   | "pullDisabled"
@@ -246,18 +244,8 @@ function CommitHistorySections({
   );
 }
 
-function EmptyChangesPanel({ providerCommitsError }: { providerCommitsError: string | null }) {
+function EmptyChangesPanel() {
   const { t } = useTranslation();
-  if (providerCommitsError) {
-    return (
-      <div
-        className="flex items-center justify-center h-full px-3 text-center text-muted-foreground text-xs"
-        data-testid="provider-history-error"
-      >
-        {t("task:providerHistoryUnavailable")}
-      </div>
-    );
-  }
   return (
     <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
       {t("task:yourChangedFilesWillAppearHere")}
@@ -266,9 +254,8 @@ function EmptyChangesPanel({ providerCommitsError }: { providerCommitsError: str
 }
 
 function ChangesPanelTimeline(props: TimelineProps) {
-  const { t } = useTranslation();
   if (!props.hasAnything) {
-    return <EmptyChangesPanel providerCommitsError={props.providerCommitsError} />;
+    return <EmptyChangesPanel />;
   }
 
   const isDiverged = props.relation.presentation === "separate";
@@ -315,15 +302,6 @@ function ChangesPanelTimeline(props: TimelineProps) {
             onOpenDiff={props.onOpenDiffFile}
             repoDisplayName={props.repoDisplayName}
           />
-        </div>
-      )}
-
-      {props.providerCommitsError && (
-        <div
-          className="mx-1 mb-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-2 py-1.5 text-xs text-yellow-700 dark:text-yellow-300"
-          data-testid="provider-history-error"
-        >
-          {t("task:providerHistoryUnavailable")}
         </div>
       )}
 

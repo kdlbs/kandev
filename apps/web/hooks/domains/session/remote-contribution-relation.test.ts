@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyRemoteContribution,
+  remoteContributionActionReasonKey,
   remoteContributionActionPolicy,
   type RemoteContributionRelationInput,
 } from "./remote-contribution-relation";
@@ -54,6 +55,16 @@ const classificationCases = [
       remoteBehind: 1,
     },
     expected: { kind: "provider_ahead", canPush: false, canPull: true },
+  },
+  {
+    name: "provider ahead without a configured upstream",
+    overrides: {
+      providerCommits: [{ sha: PROVIDER_BASE }, { sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
+      upstreamHead: null,
+      hasUpstream: false,
+      baseAhead: 0,
+    },
+    expected: { kind: "provider_ahead", canPush: false, canPull: false },
   },
   {
     name: "rewritten provider history",
@@ -225,6 +236,50 @@ describe("remoteContributionActionPolicy", () => {
       useDisabled: true,
       disabledReason: null,
     });
+  });
+
+  it("does not offer Pull for provider-ahead without an upstream", () => {
+    const relation = classifyRemoteContribution(
+      input({
+        providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
+        upstreamHead: null,
+        hasUpstream: false,
+      }),
+    );
+
+    expect(remoteContributionActionPolicy(relation)).toMatchObject({
+      action: "provider_ahead_pull",
+      pushDisabled: true,
+      pullDisabled: true,
+    });
+  });
+
+  it("returns action-specific disabled reason keys", () => {
+    const providerAhead = classifyRemoteContribution(
+      input({
+        providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
+        upstreamHead: null,
+        hasUpstream: false,
+      }),
+    );
+    const diverged = classifyRemoteContribution(
+      input({
+        providerCommits: [{ sha: REWRITTEN_HEAD }],
+        upstreamHead: REWRITTEN_HEAD,
+        remoteAhead: 1,
+        remoteBehind: 1,
+      }),
+    );
+
+    expect(remoteContributionActionReasonKey(providerAhead, "push")).toBe(
+      "task:providerAheadPushDisabled",
+    );
+    expect(remoteContributionActionReasonKey(providerAhead, "pull")).toBe(
+      "task:providerAheadPullRequiresUpstream",
+    );
+    expect(remoteContributionActionReasonKey(diverged, "pull")).toBe(
+      "task:divergedActionsUnavailable",
+    );
   });
 
   it("keeps normal push behavior for local-ahead history", () => {

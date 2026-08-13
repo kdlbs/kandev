@@ -87,6 +87,8 @@ type SingleRepoVcsButtonProps = {
   aheadCount: number;
   pushDisabled: boolean;
   pullDisabled: boolean;
+  pushDisabledReason?: string;
+  pullDisabledReason?: string;
   showContributionResolution: boolean;
   replaceDisabled: boolean;
   useDisabled: boolean;
@@ -115,6 +117,8 @@ function SingleRepoVcsButton({
   aheadCount,
   pushDisabled,
   pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
   showContributionResolution,
   replaceDisabled,
   useDisabled,
@@ -180,6 +184,8 @@ function SingleRepoVcsButton({
           aheadCount={aheadCount}
           pushDisabled={pushDisabled}
           pullDisabled={pullDisabled}
+          pushDisabledReason={pushDisabledReason}
+          pullDisabledReason={pullDisabledReason}
           showContributionResolution={showContributionResolution}
           replaceDisabled={replaceDisabled}
           useDisabled={useDisabled}
@@ -222,6 +228,8 @@ type VcsSplitButtonContentProps = {
   aheadCount: number;
   pushDisabled: boolean;
   pullDisabled: boolean;
+  pushDisabledReason?: string;
+  pullDisabledReason?: string;
   showContributionResolution: boolean;
   replaceDisabled: boolean;
   useDisabled: boolean;
@@ -273,6 +281,8 @@ function MultiRepoVcsContent({
   perRepoStatus,
   pushDisabled,
   pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
   showContributionResolution,
   replaceDisabled,
   useDisabled,
@@ -294,6 +304,8 @@ function MultiRepoVcsContent({
   | "perRepoStatus"
   | "pushDisabled"
   | "pullDisabled"
+  | "pushDisabledReason"
+  | "pullDisabledReason"
   | "showContributionResolution"
   | "replaceDisabled"
   | "useDisabled"
@@ -328,6 +340,8 @@ function MultiRepoVcsContent({
         perRepoStatus={perRepoStatus}
         pushDisabled={pushDisabled}
         pullDisabled={pullDisabled}
+        pushDisabledReason={pushDisabledReason}
+        pullDisabledReason={pullDisabledReason}
         showContributionResolution={showContributionResolution}
         replaceDisabled={replaceDisabled}
         useDisabled={useDisabled}
@@ -357,6 +371,8 @@ export function VcsSplitButtonContent({
   aheadCount,
   pushDisabled,
   pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
   showContributionResolution,
   replaceDisabled,
   useDisabled,
@@ -385,6 +401,8 @@ export function VcsSplitButtonContent({
         perRepoStatus={perRepoStatus}
         pushDisabled={pushDisabled}
         pullDisabled={pullDisabled}
+        pushDisabledReason={pushDisabledReason}
+        pullDisabledReason={pullDisabledReason}
         showContributionResolution={showContributionResolution}
         replaceDisabled={replaceDisabled}
         useDisabled={useDisabled}
@@ -412,6 +430,8 @@ export function VcsSplitButtonContent({
         aheadCount={aheadCount}
         pushDisabled={pushDisabled}
         pullDisabled={pullDisabled}
+        pushDisabledReason={pushDisabledReason}
+        pullDisabledReason={pullDisabledReason}
         showContributionResolution={showContributionResolution}
         replaceDisabled={replaceDisabled}
         useDisabled={useDisabled}

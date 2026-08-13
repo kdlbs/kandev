@@ -177,16 +177,23 @@ function CommitRowActions({
 function CommitStatusMarker({ commit }: { commit: CommitItem }) {
   const { t } = useTranslation();
   let label: string;
+  let provenance: "current_pr" | "local_checkout" | "pushed" | "unpushed";
   let marker = <IconGitCommit aria-hidden="true" className="h-3.5 w-3.5 text-muted-foreground" />;
 
   if (commit.presentation === "current_pr") {
     label = t("task:currentPRCommit");
+    provenance = "current_pr";
+    marker = <IconGitCommit aria-hidden="true" className="h-3.5 w-3.5 text-violet-500" />;
   } else if (commit.presentation === "local_checkout") {
     label = t("task:localCheckoutCommit");
+    provenance = "local_checkout";
+    marker = <IconGitCommit aria-hidden="true" className="h-3.5 w-3.5 text-amber-500" />;
   } else if (commit.pushed === true) {
     label = t("task:pushedToRemote");
+    provenance = "pushed";
   } else {
     label = t("task:localCommitNotYetPushed");
+    provenance = "unpushed";
     marker = <IconArrowUp aria-hidden="true" className="h-3.5 w-3.5 text-emerald-500" />;
   }
 
@@ -202,7 +209,12 @@ function CommitStatusMarker({ commit }: { commit: CommitItem }) {
   }
 
   return (
-    <span className="shrink-0" title={label}>
+    <span
+      className="shrink-0"
+      title={label}
+      data-testid="commit-provenance"
+      data-commit-provenance={provenance}
+    >
       <span className="sr-only">{accessibleLabel}</span>
       {marker}
     </span>
