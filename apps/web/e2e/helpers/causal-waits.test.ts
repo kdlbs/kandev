@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Page, Response } from "@playwright/test";
-import { waitForHttp, watchWs } from "./causal-waits";
+import { dwell, waitForHttp, watchWs } from "./causal-waits";
 
 // ---------------------------------------------------------------------------
 // Doubles for the slivers of the Playwright API these primitives touch.
@@ -59,6 +59,13 @@ class FakePage {
         reject(new Error("Timeout exceeded while waiting for event"));
       }, options.timeout);
     });
+  }
+
+  waitedMs: number[] = [];
+
+  waitForTimeout(ms: number): Promise<void> {
+    this.waitedMs.push(ms);
+    return Promise.resolve();
   }
 
   /** Simulate an HTTP response reaching the page. */
@@ -314,5 +321,25 @@ describe("watchWs().waitForResponse", () => {
       payload: { ok: true },
     });
     await expect(pending).resolves.toMatchObject({ id: "req-2" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dwell
+// ---------------------------------------------------------------------------
+
+describe("dwell", () => {
+  it("waits for exactly the requested wall-clock delay", async () => {
+    const { page, fake } = fakePage();
+    await dwell(page, 300, "Radix open delay publishes nothing observable");
+    expect(fake.waitedMs).toEqual([300]);
+  });
+
+  it("rejects an empty reason, so the argument cannot be silenced", () => {
+    const { page, fake } = fakePage();
+    expect(() => dwell(page, 300, "   ")).toThrow(
+      "dwell: a reason is required, and must say why no event exists to wait on",
+    );
+    expect(fake.waitedMs).toEqual([]);
   });
 });

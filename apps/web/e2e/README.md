@@ -285,6 +285,39 @@ Converted examples to copy from: `tests/task/create-task-new-local-repository.sp
 (HTTP), `tests/task/mobile-plan-toolbar-implement.spec.ts` (both WS waits), and
 `tests/office/comment-run-status.spec.ts` (HTTP with a body predicate).
 
+### `dwell` — the only sanctioned wall-clock wait
+
+Some delays genuinely cannot be replaced by an event. For those, and **only**
+for those, use `dwell(page, ms, reason)`:
+
+```ts
+await dwell(page, 300, "Radix open delay; asserting the tooltip never opens, so there is no event");
+```
+
+Raw `page.waitForTimeout()` and hand-rolled promise sleeps are not sanctioned.
+They are indistinguishable, at a glance and to a grep, from someone who could
+not find the right event and reached for a number instead. `dwell` is greppable
+by name, its reason is mandatory rather than optional, and it can be counted.
+
+Exactly two situations qualify:
+
+1. **Negative assertions** — "the tooltip must never open", "the list must not
+   scroll". There is no event for a non-event, so the only way to give the
+   regression room to happen is to outlast the window in which it would. This
+   category is permanent, not debt.
+2. **Timers that publish nothing observable** — a Radix open delay, a
+   smooth-scroll window, a `setTimeout` inside a component, a polling interval,
+   dnd-kit sensor arming that needs React to commit a pointerdown first.
+
+The `reason` must say **why no event exists**, not what the code is doing.
+"Radix opens after 300ms and publishes nothing" is a reason; "wait for the
+tooltip" is not — that is a `waitForHttp` or `watchWs` wait you have not found
+yet. Reaching for `dwell` to avoid looking is the misuse this helper exists to
+make visible, and an empty reason throws rather than passing silently.
+
+`dwell` takes no options and has no defaults, on purpose. All of its value is
+in the name and the required reason; keep it that way.
+
 ## Adding a new spec
 
 1. Pick a directory under `tests/` (or create one for a new feature).

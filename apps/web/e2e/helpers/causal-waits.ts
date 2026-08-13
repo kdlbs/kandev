@@ -286,3 +286,45 @@ function armWsWait(
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Wall clock
+// ---------------------------------------------------------------------------
+
+/**
+ * Wait on the wall clock, on purpose, with a reason.
+ *
+ * This is the **only** sanctioned way to sleep in a spec. Raw
+ * `page.waitForTimeout()` and hand-rolled promise sleeps are not: they are
+ * indistinguishable, at a glance and to a grep, from someone who could not
+ * find the right event and reached for a number instead.
+ *
+ * There are exactly two situations where no event can replace a delay:
+ *
+ * 1. **Negative assertions.** "The tooltip must never open", "the list must
+ *    not scroll." There is no event for a non-event, so the only way to give
+ *    the regression room to happen is to outlast the window in which it would.
+ * 2. **Timers that publish nothing observable.** A Radix open delay, a
+ *    smooth-scroll window, a `setTimeout` inside a component, a polling
+ *    interval, dnd-kit sensor arming that needs React to commit a pointerdown
+ *    first.
+ *
+ * `reason` is required and must say *why no event exists*, not what the code
+ * is doing. "Radix opens after 300ms and publishes nothing" is a reason;
+ * "wait for the tooltip" is not — that one is a {@link waitForHttp} or a
+ * {@link watchWs} wait that has not been found yet, and reaching for `dwell`
+ * to avoid looking is the misuse this helper exists to make visible.
+ *
+ * ```ts
+ * await dwell(page, 300, "Radix open delay; asserting the tooltip never opens, so there is no event");
+ * ```
+ *
+ * Deliberately has no options and no defaults. All of its value is in the
+ * name being greppable and the reason being mandatory.
+ */
+export function dwell(page: Page, ms: number, reason: string): Promise<void> {
+  if (reason.trim() === "") {
+    throw new Error("dwell: a reason is required, and must say why no event exists to wait on");
+  }
+  return page.waitForTimeout(ms);
+}
