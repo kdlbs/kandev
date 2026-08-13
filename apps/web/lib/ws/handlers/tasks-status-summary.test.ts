@@ -142,8 +142,7 @@ describe("task.status_summary.updated archived cache", () => {
       }),
     );
 
-    const archived =
-      store.getState().sidebarArchivedTasks.itemsByWorkspaceId["workspace-1"]?.[0];
+    const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId["workspace-1"]?.[0];
     expect(archived?.statusSummary).toMatchObject({ revision: 6 });
     expect(archived?.statusSummary?.queued_prompt_count).toBeUndefined();
   });

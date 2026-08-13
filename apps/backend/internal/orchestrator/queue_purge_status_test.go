@@ -48,11 +48,7 @@ func TestArchiveTaskPublishesQueueStatusWithTaskID(t *testing.T) {
 	if err := repo.ArchiveTask(ctx, "task-archive-queue"); err != nil {
 		t.Fatalf("ArchiveTask: %v", err)
 	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for saw.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	// MemoryEventBus.Publish is synchronous, so the subscriber already ran.
 	if saw.Load() == 0 {
 		t.Fatal("expected message.queue.status_changed with task_id after archive purge")
 	}
@@ -113,14 +109,10 @@ func TestDeleteSessionCancelsQueuedPromptsAndPublishesStatus(t *testing.T) {
 	if got, err := svc.messageQueue.CountPendingByTask(ctx, "task-session-queue"); err != nil || got != 1 {
 		t.Fatalf("pending after delete = %d err=%v, want 1 (kept session only)", got, err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for saw.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	// MemoryEventBus.Publish is synchronous, so the subscriber already ran.
 	if saw.Load() == 0 {
 		t.Fatal("expected message.queue.status_changed with task_id after session delete")
 	}
-
 }
 
 
@@ -164,11 +156,7 @@ func TestQueueStatusNotifyUsesDetachedContext(t *testing.T) {
 	if err := repo.ArchiveTask(ctx, "task-notify-detach"); err != nil {
 		t.Fatalf("ArchiveTask: %v", err)
 	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for saw.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	// MemoryEventBus.Publish is synchronous, so the subscriber already ran.
 	if saw.Load() == 0 {
 		t.Fatal("expected message.queue.status_changed when notify publish uses cancelled ctx")
 	}
