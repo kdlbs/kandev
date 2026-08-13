@@ -31,11 +31,14 @@ test.describe("Agent profile duplicate", () => {
       await expect(row.getByTestId(`profile-actions-inline-${profile.id}`)).toBeVisible();
       await expect(row.getByTestId(`profile-actions-menu-${profile.id}`)).toHaveCount(0);
       const duplicate = row.getByTestId(`duplicate-profile-inline-${profile.id}`);
+      const deleteButton = row.getByTestId(`delete-profile-inline-${profile.id}`);
       await expect(duplicate).toBeVisible({ timeout: 15_000 });
       await expect(duplicate).toHaveAccessibleName("Duplicate");
-      await expect(row.getByTestId(`delete-profile-inline-${profile.id}`)).toHaveAccessibleName(
-        "Delete",
-      );
+      await expect(duplicate).toHaveText("");
+      await expect(duplicate).toHaveAttribute("data-size", "icon");
+      await expect(deleteButton).toHaveAccessibleName("Delete");
+      await expect(deleteButton).toHaveText("");
+      await expect(deleteButton).toHaveAttribute("data-size", "icon");
       await duplicate.click();
 
       // Backend state: the copy is a new row with the source's model. The

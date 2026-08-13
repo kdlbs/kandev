@@ -35,9 +35,10 @@ to associate with the agent it changes.
   badges, authentication controls, and runtime-update controls keep their
   current behavior.
 - On a full desktop viewport (at least 1024px wide), each profile row shows
-  translated **Duplicate** and **Delete** buttons directly in the row action
-  area. The row does not show the three-dots profile-actions trigger at this
-  width.
+  compact icon-only **Duplicate** and **Delete** action buttons directly in the
+  row action area. The buttons retain translated accessible names, are small
+  and vertically centered, and the row does not show the three-dots
+  profile-actions trigger at this width.
 - Below the full desktop boundary, including compact desktop, tablet, and
   mobile viewports, each profile row keeps the three-dots profile-actions
   trigger and exposes **Duplicate** and **Delete** in its overflow menu. Inline
@@ -65,8 +66,9 @@ to associate with the agent it changes.
   **THEN** the browser navigates to that agent's profile creation route and
   the existing profile rows remain unchanged.
 - **GIVEN** a profile row in a viewport at least 1024px wide, **WHEN** the user
-  views the row, **THEN** translated **Duplicate** and **Delete** buttons are
-  visible inline and the three-dots profile-actions trigger is absent.
+  views the row, **THEN** compact icon-only **Duplicate** and **Delete** buttons
+  with translated accessible names are visible inline, vertically centered,
+  and the three-dots profile-actions trigger is absent.
 - **GIVEN** a profile row in a viewport narrower than 1024px, **WHEN** the user
   opens the profile-actions trigger, **THEN** the overflow menu contains
   **Duplicate** and **Delete**, and no inline action buttons are rendered.

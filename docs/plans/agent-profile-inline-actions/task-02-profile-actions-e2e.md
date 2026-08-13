@@ -68,9 +68,9 @@ synchronized task/plan status.
 
 The managed runner rebuilt the backend and pseudo-locale Vite assets for both
 runs, started from cleaned E2E artifact directories, and left no failure
-artifacts. Desktop coverage proves the direct inline path, the 900px tablet
-fixture proves the overflow path and document containment, and the mobile
-coverage keeps the touch menu and 44px trigger check.
+artifacts. Desktop coverage proves the compact icon-only inline path, the 900px
+tablet fixture proves the overflow path and document containment, and the
+mobile coverage keeps the touch menu and 44px trigger check.
 
 Three fresh synthetic PR screenshots were captured and visually inspected for
 full desktop, tablet, and mobile states. They were compressed, validated

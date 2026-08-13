@@ -218,15 +218,25 @@ describe("ProfileRow responsive actions", () => {
   });
   afterEach(() => cleanup());
 
-  it("renders labeled duplicate and delete actions inline on full desktop", () => {
+  it("renders compact icon-only duplicate and delete actions inline on full desktop", () => {
     mocks.responsive.isFullDesktop = true;
     render(<ProfileRow agent={AGENT} profile={AGENT.profiles[0]} />);
 
     const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
     if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
     expect(row.querySelector('[data-testid="profile-actions-inline-p-1"]')).not.toBeNull();
-    expect(row.querySelector('[data-testid="duplicate-profile-inline-p-1"]')).not.toBeNull();
-    expect(row.querySelector('[data-testid="delete-profile-inline-p-1"]')).not.toBeNull();
+    const duplicate = row.querySelector<HTMLButtonElement>(
+      '[data-testid="duplicate-profile-inline-p-1"]',
+    );
+    const deleteButton = row.querySelector<HTMLButtonElement>(
+      '[data-testid="delete-profile-inline-p-1"]',
+    );
+    expect(duplicate).not.toBeNull();
+    expect(deleteButton).not.toBeNull();
+    expect(duplicate?.textContent).toBe("");
+    expect(deleteButton?.textContent).toBe("");
+    expect(duplicate?.getAttribute("data-size")).toBe("icon");
+    expect(deleteButton?.getAttribute("data-size")).toBe("icon");
     expect(row.querySelector('[data-testid="profile-actions-menu-p-1"]')).toBeNull();
   });
 

@@ -21,8 +21,8 @@ store contract, or translated copy.
 - `apps/web/components/settings/agents/agent-profiles-section.tsx`
   - Use the canonical `useResponsiveBreakpoint` hook and its
     `isFullDesktop` value, which maps to viewport widths of at least 1024px.
-  - Render labeled, translated Duplicate and Delete buttons inline on full
-    desktop widths.
+  - Render compact icon-only Duplicate and Delete buttons inline on full
+    desktop widths, retaining translated accessible names.
   - Keep the existing three-dots menu as the only action presentation below
     that boundary, including compact desktop, tablet, and mobile.
   - Reuse `useProfileDuplicate`, `setConfirmOpen`, and
@@ -116,3 +116,8 @@ Passed.
 - The final desktop/tablet selector assertion rerun, `cd apps/web && pnpm e2e:run --no-build --project chromium tests/settings/agent-profile-duplicate.spec.ts`, passed (3 tests).
 - Both full managed E2E runs rebuilt the backend and pseudo-locale Vite assets; the final no-build rerun used those production artifacts. All runs cleaned their isolated E2E artifact directories. No failure artifacts remain.
 - Three fresh synthetic PR screenshots were captured, visually inspected, compressed, and validated through `.pr-assets/manifest.json` for full desktop, tablet, and mobile overflow-menu states. The capture-only spec was removed afterward.
+- The icon-only refinement was verified with the focused component suite (9
+  tests), managed desktop E2E (3 tests), managed mobile E2E (1 test), and a
+  fresh full-desktop screenshot. The screenshot shows compact 28px action
+  buttons centered in the profile row; the old visible labels are absent while
+  translated accessible names remain.

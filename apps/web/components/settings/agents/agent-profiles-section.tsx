@@ -123,26 +123,24 @@ function ProfileRowInlineActions({
       <Button
         type="button"
         variant="outline"
-        size="sm"
-        className="cursor-pointer min-h-11"
+        size="icon"
+        className="cursor-pointer"
         data-testid={`duplicate-profile-inline-${profile.id}`}
         onClick={onDuplicate}
         aria-label={t("agents:duplicate")}
       >
-        <IconCopy className="mr-2 h-4 w-4" />
-        {t("agents:duplicate")}
+        <IconCopy className="h-4 w-4" />
       </Button>
       <Button
         type="button"
         variant="destructive"
-        size="sm"
-        className="cursor-pointer min-h-11"
+        size="icon"
+        className="cursor-pointer"
         data-testid={`delete-profile-inline-${profile.id}`}
         onClick={onConfirmDelete}
         aria-label={t("agents:delete")}
       >
-        <IconTrash className="mr-2 h-4 w-4" />
-        {t("agents:delete")}
+        <IconTrash className="h-4 w-4" />
       </Button>
     </div>
   );
