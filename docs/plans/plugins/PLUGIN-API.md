@@ -560,19 +560,23 @@ own write).
 // React. Unknown/missing names render a puzzle glyph in the sidebar.
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
-// the first-party integration links (GitHub, Jira, ...); "insights" renders as
-// an icon button in the sidebar footer's icon row and as a labelled row in the
-// phone menu's Utilities group; "settings" is accepted but renders on no
-// surface. Hosts predating a section value, or seeing an unrecognised one,
-// simply degrade to "main"'s placement — nothing is ever silently dropped.
+// the first-party integration links (GitHub, Jira, ...); "sidebar-footer"
+// renders as an icon button in the sidebar footer's icon row and as a
+// labelled row in the phone menu's Utilities group, subject to the footer's
+// inline budget — an over-budget item is reached through the footer's
+// overflow menu instead of an inline button; "settings" is accepted but
+// renders on no surface. Hosts predating a section value, or seeing an
+// unrecognised one, simply degrade to "main"'s placement — nothing is ever
+// silently dropped.
 type PluginIcon = string | React.ComponentType<{ className?: string }>;
+export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
 
 interface NavItem {
   id: string;
   label: string;
   path: string;
   icon?: PluginIcon;
-  section?: "main" | "settings" | "integrations" | "insights";
+  section?: PluginNavSection;
 }
 
 // Configuration for the kandev-style title bar the host renders above a plugin

@@ -142,11 +142,11 @@ describe("resolveDestinations with plugin items", () => {
       id: "board",
       label: "Acme Board",
       path: "/plugins/acme",
-      section: "insights",
+      section: "sidebar-footer",
     },
   ];
 
-  it("orders the first-party stats destination before a plugin insights item on the sidebar", () => {
+  it("orders the first-party stats destination before a plugin sidebar-footer item on the sidebar", () => {
     const resolved = resolveDestinations({
       surface: "sidebar",
       section: "insights",
@@ -157,7 +157,7 @@ describe("resolveDestinations with plugin items", () => {
     expect(ids(resolved)).toEqual(["stats", "plugin:acme:board"]);
   });
 
-  it("orders the mobile utility group's manifest rows as stats, settings, then a plugin insights item", () => {
+  it("orders the mobile utility group's manifest rows as stats, settings, then a plugin sidebar-footer item", () => {
     const resolved = resolveDestinations({
       surface: "mobileMenu",
       section: MOBILE_MENU_UTILITY_SECTIONS,

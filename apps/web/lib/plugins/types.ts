@@ -22,6 +22,9 @@ export interface ActivePlugin {
   repositoryProviderIds?: string[];
 }
 
+/** Accepted `NavItem.section` values — the plugin's own vocabulary, not the host's. */
+export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
+
 /** Sidebar/main nav entry registered by a plugin. */
 export interface NavItem {
   id: string;
@@ -32,11 +35,13 @@ export interface NavItem {
   /**
    * Where the item renders: "main" (default) as a top-level sidebar entry,
    * "integrations" inside the sidebar's Integrations section alongside the
-   * first-party integration links, "insights" as an icon button in the
+   * first-party integration links, "sidebar-footer" as an icon button in the
    * sidebar footer's icon row and as a labelled row in the phone menu's
-   * Utilities group, "settings" accepted but rendered on no surface.
+   * Utilities group (subject to the footer's inline budget — an over-budget
+   * item is reached through the footer's overflow menu instead), "settings"
+   * accepted but rendered on no surface.
    */
-  section?: "main" | "settings" | "integrations" | "insights";
+  section?: PluginNavSection;
 }
 
 /**

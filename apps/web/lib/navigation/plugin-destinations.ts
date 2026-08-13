@@ -57,15 +57,18 @@ export function pluginDestinations(items: PluginNavRegistration[]): Destination[
 }
 
 /**
- * `"integrations"` and `"insights"` keep their own manifest section;
- * everything else — `"main"`, omitted, or an unrecognised string an untyped
- * bundle might pass — degrades to `"plugins"`, the plugin rail / Plugins
- * group placement.
+ * `"integrations"` keeps its own manifest section; `"sidebar-footer"` (the
+ * plugin-facing vocabulary) maps to the host's internal `"insights"` section.
+ * Everything else — `"main"`, omitted, an unrecognised string an untyped
+ * bundle might pass, or the literal `"insights"` (the host's own internal
+ * name, deliberately not accepted as an alias — see spec's "insights is not
+ * accepted, and not an alias") — degrades to `"plugins"`, the plugin rail /
+ * Plugins group placement.
  */
 function sectionFor(
   section: PluginNavRegistration["section"],
 ): "integrations" | "insights" | "plugins" {
   if (section === "integrations") return "integrations";
-  if (section === "insights") return "insights";
+  if (section === "sidebar-footer") return "insights";
   return "plugins";
 }
