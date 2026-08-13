@@ -514,7 +514,7 @@ func TestWebhookHandlerOversizedBodyReturns413(t *testing.T) {
 	}
 
 	oversized := strings.Repeat("a", int(maxWebhookBodyBytes+1))
-	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", oversized, nil)
+	rec := doAuthedRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", oversized, nil)
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413, body=%s", rec.Code, rec.Body.String())
 	}

@@ -27,8 +27,8 @@ func (s *Service) SSOProviders() []SSOProvider {
 			continue
 		}
 		for _, p := range rec.AuthProviders {
-			wh, declared := lookupWebhook(rec, p.Initiate)
-			if p.ID == "" || p.Initiate == "" || !declared || !wh.Public {
+			wh, declared := findWebhookDeclaration(rec, p.Initiate)
+			if p.ID == "" || p.Initiate == "" || !declared || wh.EffectiveAccess() != manifest.WebhookAccessPublic {
 				continue
 			}
 			out = append(out, SSOProvider{
