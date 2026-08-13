@@ -85,7 +85,7 @@ the local single-user install with a login screen it never asked for.
   verified by the handler.
 - **Plugin webhooks (`/api/plugins/{id}/webhooks/{key}`) are NOT
   self-authenticating by default.** The global middleware cannot read the
-  plugin registry, so it structurally defers the path; `plugins.Controller`
+  plugin registry, so it structurally defers GET/POST requests for the path; `plugins.Controller`
   enforces the actual gate: a webhook requires a real caller identity
   (session/PAT, or the synthetic identity while auth is disabled) unless its
   manifest declares `webhooks[].public: true`. An anonymous caller sees 401

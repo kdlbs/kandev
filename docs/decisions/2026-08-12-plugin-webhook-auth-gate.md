@@ -41,7 +41,7 @@ elsewhere, ruling out simply dropping plugin webhooks from the allowlist:
 
 `manifest.Webhook` gains a `public bool` field (`webhooks[].public`, default
 `false`). `internal/auth/httpmw` no longer allowlists plugin webhooks
-unconditionally: it structurally defers `/api/plugins/<id>/webhooks/<key>`
+unconditionally: it structurally defers GET/POST `/api/plugins/<id>/webhooks/<key>`
 (`isPluginWebhookPath`, replacing an over-matching `strings.Contains` check)
 because the middleware has no access to the plugin registry to decide policy
 per-webhook. `internal/plugins.Controller.webhook` is the one place holding

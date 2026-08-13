@@ -169,13 +169,21 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 		{name: "automation webhook", method: http.MethodPost, path: "/api/v1/automations/webhook/abc"},
 		{name: "office channel inbound", method: http.MethodPost, path: "/api/v1/office/channels/ch1/inbound"},
 		{
-			// Deferred, not public: the middleware lets any /api/plugins/<id>/webhooks/<key>
-			// request through structurally (isPluginWebhookPath) because it cannot read the
-			// plugin's manifest to know whether this specific webhook is public. This row is
-			// therefore a WEAKENED pin — it only proves the path still passes the middleware,
-			// not that anonymous callers reach the subprocess. The real 401-vs-relay policy is
-			// enforced (and tested) in internal/plugins: see handlers_webhook_auth_test.go.
+			// Deferred, not public: the middleware lets GET/POST
+			// /api/plugins/<id>/webhooks/<key> requests through structurally
+			// (isPluginWebhookPath) because it cannot read the plugin manifest to know
+			// whether this specific webhook is public. This row is therefore a WEAKENED
+			// pin: it only proves the path still passes the middleware, not that
+			// anonymous callers reach the subprocess. The real 401-vs-relay policy is
+			// enforced and tested in internal/plugins: see handlers_webhook_auth_test.go.
 			name: "plugin webhook (deferred, not a policy pin)", method: http.MethodPost, path: "/api/plugins/p1/webhooks/key1",
+		},
+		{
+			// Unsupported methods are not registered webhook relay routes, so they should
+			// not bypass the global auth challenge just because the path has the relay
+			// shape.
+			name: "plugin webhook unsupported method", method: http.MethodPut,
+			path: "/api/plugins/p1/webhooks/key1", blocked: true,
 		},
 		{name: "ws upgrade deferred", method: http.MethodGet, path: "/ws"},
 		{name: "terminal deferred", method: http.MethodGet, path: "/terminal/target"},

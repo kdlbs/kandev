@@ -145,7 +145,7 @@ func isDeferredPath(c *gin.Context, path string) bool {
 		// External MCP enforces PAT auth in its own group middleware
 		// (externalMCPAuthMiddleware) so agent clients get MCP-shaped errors.
 		return true
-	case isPluginWebhookPath(path):
+	case isPluginWebhookRelayMethod(c.Request.Method) && isPluginWebhookPath(path):
 		// Whether this specific webhook is anonymous-callable depends on the
 		// plugin's manifest (webhooks[].public), which only
 		// plugins.Controller.webhook can read — it enforces the auth gate
@@ -163,6 +163,13 @@ func isDeferredPath(c *gin.Context, path string) bool {
 		return true
 	}
 	return false
+}
+
+// isPluginWebhookRelayMethod reports whether method is registered on the plugin
+// webhook relay route. Other methods should not bypass the global auth
+// challenge just because the path has the relay shape.
+func isPluginWebhookRelayMethod(method string) bool {
+	return method == http.MethodGet || method == http.MethodPost
 }
 
 // isPluginWebhookPath structurally matches /api/plugins/<id>/webhooks/<key>
