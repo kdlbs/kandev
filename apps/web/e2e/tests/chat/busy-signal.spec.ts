@@ -53,10 +53,17 @@ test.describe("Coarse RUNNING busy signal", () => {
     await expect(testPage.getByText("Kicking off background work")).toBeVisible({
       timeout: 15_000,
     });
-    // The foreground-idle frame follows this text in the mock's ordered ACP
-    // stream. Allow the subsequent WS publication to settle before asserting
-    // the stable composer contract.
-    await testPage.waitForTimeout(500);
+    // No wait is needed between the marker text and the assertions below, and
+    // the 500ms sleep that used to sit here was covering nothing.
+    //
+    // Measured: by the time the marker text is visible, BOTH
+    // `session.activity_changed` frames for this turn have already been
+    // received, and no further one arrives in the next 8s. The original comment
+    // here claimed the foreground-idle frame "follows this text"; it does not.
+    // So the assertions below already run against the post-transition state,
+    // and `waitForActiveSessionForegroundActivity` is itself the real check:
+    // if a regression let the idle frame downgrade the public contract, it
+    // would time out waiting for "generating" rather than pass silently.
 
     // The private tracker may identify background work, but the public
     // contract remains coarse for the entire RUNNING turn.

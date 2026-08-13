@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/repository"
 	"github.com/kandev/kandev/internal/workflow/service"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 type stepEvent struct {
@@ -81,7 +82,39 @@ func (r *stepEventRecorder) only(t *testing.T, subject string) stepEvent {
 	return r.events[0]
 }
 
-func setupStepRouter(t *testing.T) (*gin.Engine, *bus.MemoryEventBus, *repository.Repository) {
+// workflowHarness is the shared fixture for this package's handler tests: a
+// real repository/service/controller stack over an in-memory SQLite database,
+// with both the HTTP routes and the WS actions registered against it.
+type workflowHarness struct {
+	router     *gin.Engine
+	dispatcher *ws.Dispatcher
+	eventBus   *bus.MemoryEventBus
+	repo       *repository.Repository
+	service    *service.Service
+	// db is the same handle the repository writes through, so a test can seed
+	// the task-owned `workflows` table the workspace step join reads.
+	db *sqlx.DB
+}
+
+// dispatch routes one WS message through the registered handlers.
+func (h *workflowHarness) dispatch(t *testing.T, action string, payload any) *ws.Message {
+	t.Helper()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	msg := &ws.Message{ID: "req-1", Type: ws.MessageTypeRequest, Action: action, Payload: raw}
+	resp, err := h.dispatcher.Dispatch(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("dispatch %s: %v", action, err)
+	}
+	if resp == nil {
+		t.Fatalf("dispatch %s returned no message", action)
+	}
+	return resp
+}
+
+func setupStepRouter(t *testing.T) *workflowHarness {
 	t.Helper()
 	rawDB, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -111,12 +144,21 @@ func setupStepRouter(t *testing.T) (*gin.Engine, *bus.MemoryEventBus, *repositor
 	eventBus := bus.NewMemoryEventBus(log)
 	workflowSvc := service.NewService(repo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
-	h := NewHandlers(controller.NewController(workflowSvc), eventBus, log)
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	h.registerHTTP(router)
-	return router, eventBus, repo
+	dispatcher := ws.NewDispatcher()
+	// Register through the production entry point so HTTP routes and WS
+	// actions are wired exactly as they are at startup.
+	RegisterRoutes(router, dispatcher, controller.NewController(workflowSvc), eventBus, log)
+	return &workflowHarness{
+		router:     router,
+		dispatcher: dispatcher,
+		eventBus:   eventBus,
+		repo:       repo,
+		service:    workflowSvc,
+		db:         db,
+	}
 }
 
 func doJSON(t *testing.T, router *gin.Engine, method, path string, body interface{}) *httptest.ResponseRecorder {
@@ -150,10 +192,10 @@ func createStepViaHTTP(t *testing.T, router *gin.Engine, body map[string]interfa
 }
 
 func TestHTTPCreateStepPublishesCreatedEvent(t *testing.T) {
-	router, eventBus, _ := setupStepRouter(t)
-	rec := recordStepEvents(t, eventBus)
+	h := setupStepRouter(t)
+	rec := recordStepEvents(t, h.eventBus)
 
-	step := createStepViaHTTP(t, router, map[string]interface{}{
+	step := createStepViaHTTP(t, h.router, map[string]interface{}{
 		"workflow_id": "workflow-1",
 		"name":        "Backlog",
 		"position":    0,
@@ -170,15 +212,15 @@ func TestHTTPCreateStepPublishesCreatedEvent(t *testing.T) {
 }
 
 func TestHTTPUpdateStepPublishesUpdatedEvent(t *testing.T) {
-	router, eventBus, _ := setupStepRouter(t)
-	step := createStepViaHTTP(t, router, map[string]interface{}{
+	h := setupStepRouter(t)
+	step := createStepViaHTTP(t, h.router, map[string]interface{}{
 		"workflow_id": "workflow-1",
 		"name":        "Backlog",
 		"position":    0,
 	})
-	rec := recordStepEvents(t, eventBus)
+	rec := recordStepEvents(t, h.eventBus)
 
-	resp := doJSON(t, router, http.MethodPut, "/api/v1/workflow/steps/"+step.ID, map[string]interface{}{
+	resp := doJSON(t, h.router, http.MethodPut, "/api/v1/workflow/steps/"+step.ID, map[string]interface{}{
 		"name":       "Triage",
 		"stage_type": "review",
 		"wip_limit":  3,
@@ -200,15 +242,15 @@ func TestHTTPUpdateStepPublishesUpdatedEvent(t *testing.T) {
 }
 
 func TestHTTPDeleteStepPublishesDeletedEvent(t *testing.T) {
-	router, eventBus, _ := setupStepRouter(t)
-	step := createStepViaHTTP(t, router, map[string]interface{}{
+	h := setupStepRouter(t)
+	step := createStepViaHTTP(t, h.router, map[string]interface{}{
 		"workflow_id": "workflow-1",
 		"name":        "Backlog",
 		"position":    0,
 	})
-	rec := recordStepEvents(t, eventBus)
+	rec := recordStepEvents(t, h.eventBus)
 
-	resp := doJSON(t, router, http.MethodDelete, "/api/v1/workflow/steps/"+step.ID, nil)
+	resp := doJSON(t, h.router, http.MethodDelete, "/api/v1/workflow/steps/"+step.ID, nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("delete status = %d, body = %s", resp.Code, resp.Body.String())
 	}
@@ -220,16 +262,16 @@ func TestHTTPDeleteStepPublishesDeletedEvent(t *testing.T) {
 }
 
 func TestHTTPCreateStepPublishesDemotedStartSteps(t *testing.T) {
-	router, eventBus, _ := setupStepRouter(t)
-	oldStart := createStepViaHTTP(t, router, map[string]interface{}{
+	h := setupStepRouter(t)
+	oldStart := createStepViaHTTP(t, h.router, map[string]interface{}{
 		"workflow_id":   "workflow-1",
 		"name":          "Old Start",
 		"position":      0,
 		"is_start_step": true,
 	})
-	rec := recordStepEvents(t, eventBus)
+	rec := recordStepEvents(t, h.eventBus)
 
-	newStart := createStepViaHTTP(t, router, map[string]interface{}{
+	newStart := createStepViaHTTP(t, h.router, map[string]interface{}{
 		"workflow_id":   "workflow-1",
 		"name":          "New Start",
 		"position":      1,
@@ -254,21 +296,21 @@ func TestHTTPCreateStepPublishesDemotedStartSteps(t *testing.T) {
 }
 
 func TestHTTPUpdateStepPublishesDemotedStartSteps(t *testing.T) {
-	router, eventBus, _ := setupStepRouter(t)
-	oldStart := createStepViaHTTP(t, router, map[string]interface{}{
+	h := setupStepRouter(t)
+	oldStart := createStepViaHTTP(t, h.router, map[string]interface{}{
 		"workflow_id":   "workflow-1",
 		"name":          "Old Start",
 		"position":      0,
 		"is_start_step": true,
 	})
-	promoted := createStepViaHTTP(t, router, map[string]interface{}{
+	promoted := createStepViaHTTP(t, h.router, map[string]interface{}{
 		"workflow_id": "workflow-1",
 		"name":        "Doing",
 		"position":    1,
 	})
-	rec := recordStepEvents(t, eventBus)
+	rec := recordStepEvents(t, h.eventBus)
 
-	resp := doJSON(t, router, http.MethodPut, "/api/v1/workflow/steps/"+promoted.ID, map[string]interface{}{
+	resp := doJSON(t, h.router, http.MethodPut, "/api/v1/workflow/steps/"+promoted.ID, map[string]interface{}{
 		"is_start_step": true,
 	})
 	if resp.Code != http.StatusOK {
@@ -290,15 +332,15 @@ func TestHTTPUpdateStepPublishesDemotedStartSteps(t *testing.T) {
 }
 
 func TestHTTPStepMutationFailurePublishesNothing(t *testing.T) {
-	router, eventBus, _ := setupStepRouter(t)
-	step := createStepViaHTTP(t, router, map[string]interface{}{
+	h := setupStepRouter(t)
+	step := createStepViaHTTP(t, h.router, map[string]interface{}{
 		"workflow_id": "workflow-1",
 		"name":        "Backlog",
 		"position":    0,
 	})
-	rec := recordStepEvents(t, eventBus)
+	rec := recordStepEvents(t, h.eventBus)
 
-	resp := doJSON(t, router, http.MethodPut, "/api/v1/workflow/steps/"+step.ID, map[string]interface{}{
+	resp := doJSON(t, h.router, http.MethodPut, "/api/v1/workflow/steps/"+step.ID, map[string]interface{}{
 		"wip_limit": -1,
 	})
 	if resp.Code != http.StatusBadRequest {

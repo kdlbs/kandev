@@ -5,6 +5,10 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+
+/** Wire action the kanban WS handler consumes when a task moves step. */
+const TASK_UPDATED_ACTION = "task.updated";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -187,6 +191,9 @@ test.describe("Session tab management — close behavior", () => {
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
 
     // …and stays gone — useAutoSessionTab must not recreate it.
+    // deliberate-sleep(negative-assertion): the regression is a tab being
+    // recreated after removal. There is no event for a recreation that must
+    // never happen, so the check needs real elapsed time to be meaningful.
     await testPage.waitForTimeout(800);
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
@@ -290,6 +297,9 @@ test.describe("Session tab management — close behavior", () => {
     // that the remaining session tab is present (and the deleted one didn't come
     // back), so gate on the surviving session tab instead.
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 15_000 });
+    // deliberate-sleep(negative-assertion): the deleted tab must not come back
+    // after a task round-trip. Nothing is rendered to wait for when the
+    // expected outcome is "no tab ever appears".
     await testPage.waitForTimeout(800);
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
   });
@@ -344,6 +354,8 @@ test.describe("Session tab management — close behavior", () => {
     await expect(session.sessionTabBySessionId(sessionB1Id)).toBeVisible({ timeout: 10_000 });
 
     // …and neither of task A's session tabs should have followed us in.
+    // deliberate-sleep(negative-assertion): asserts tabs from another task
+    // never leak in, which has no arrival event to wait on.
     await testPage.waitForTimeout(800);
     await expect(session.sessionTabBySessionId(sessionA1Id)).not.toBeVisible();
     await expect(session.sessionTabBySessionId(sessionA2Id)).not.toBeVisible();
@@ -364,6 +376,10 @@ test.describe("Session tab management — primary session persistence", () => {
     seedData,
   }) => {
     test.setTimeout(150_000);
+
+    // Attach before the first navigation so the capture sees the websocket from
+    // the moment it opens.
+    const traffic = attachGatewayTrafficCapture(testPage);
 
     const { task, session, session1Id, session2Id } = await createTaskWithTwoSessions(
       testPage,
@@ -398,10 +414,49 @@ test.describe("Session tab management — primary session persistence", () => {
     // Trigger kanban.update by moving the task to a non-start step.
     const otherStep = seedData.steps.find((s) => s.id !== seedData.startStepId);
     if (!otherStep) throw new Error("Workflow needs at least 2 steps to trigger kanban.update");
+    const taskUpdatesBeforeMove = () =>
+      traffic.frames.filter(
+        (frame) => frame.direction === "received" && frame.action === TASK_UPDATED_ACTION,
+      ).length;
+    const taskUpdatesAtMove = taskUpdatesBeforeMove();
     await apiClient.moveTask(task.id, seedData.workflowId, otherStep.id);
 
-    // Give the WS broadcast time to land.
-    await testPage.waitForTimeout(500);
+    // The kanban.update broadcast is what could wrongly move the star, so wait
+    // for the gateway to actually deliver it instead of budgeting for it.
+    // The move is delivered as `task.updated`, which `lib/ws/handlers/kanban.ts`
+    // consumes -- that handler is what this test is named after, and its
+    // regression was moving the star back to session #1. There is no
+    // `kanban.update` frame on the wire; waiting for one times out. Verified by
+    // dumping every received action after moveTask.
+    await expect
+      .poll(taskUpdatesBeforeMove, {
+        timeout: 15_000,
+        message: `no ${TASK_UPDATED_ACTION} frame was delivered after moveTask`,
+      })
+      .toBeGreaterThan(taskUpdatesAtMove);
+
+    // Observing the frame only proves the gateway delivered it, not that the
+    // handler under test ran. Both assertions below are already true before the
+    // move, so asserting in that gap would pass against the pre-move DOM and
+    // miss the regression entirely. Wait for the handler's own effect on the
+    // store -- the task's step in `kanban.tasks` -- before asserting.
+    await testPage.waitForFunction(
+      ({ taskId, stepId }) => {
+        const store = (
+          window as Window & {
+            __KANDEV_E2E_STORE__?: {
+              getState: () => { kanban: { tasks: Array<{ id: string; workflowStepId: string }> } };
+            };
+          }
+        ).__KANDEV_E2E_STORE__;
+        if (!store) throw new Error("E2E store bridge missing");
+        return (
+          store.getState().kanban.tasks.find((t) => t.id === taskId)?.workflowStepId === stepId
+        );
+      },
+      { taskId: task.id, stepId: otherStep.id },
+      { timeout: 15_000 },
+    );
 
     // Star must still be on session #2 (would jump back to #1 before the kanban.ts fix).
     await expect(starInTab(session, session2Id)).toBeVisible({ timeout: 5_000 });

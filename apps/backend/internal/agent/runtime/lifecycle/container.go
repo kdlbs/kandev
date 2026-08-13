@@ -274,7 +274,7 @@ func (cm *ContainerManager) createInstanceAndClient(
 	if config.AgentConfig != nil {
 		agentType = config.AgentConfig.ID()
 	}
-	disableAskQuestion := agents.IsPassthroughOnly(config.AgentConfig)
+	disableAskQuestion := !agents.SupportsInteractiveMCPTools(config.AgentConfig)
 	assumeMcpSse := false
 	assumeMcpHttp := false
 	requiresProcessKill := false

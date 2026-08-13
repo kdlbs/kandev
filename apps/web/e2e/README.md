@@ -152,6 +152,46 @@ Dispatch the workflow with `fail_on_flaky=true` to set
 `failOnFlakyTests: true` for a diagnostic run. Normal PR runs retain the
 existing two-retry policy while the summary makes retry groups visible.
 
+### Flake rate and trend
+
+CI retries hide flakes: with `retries: 2` and `failOnFlakyTests: false`, a test
+that fails and then passes never fails the build. The **E2E flake rate** section
+of the `e2e-report` job summary makes that number visible without downloading
+anything. It reports, for the run:
+
+- the flake count, the number of executed tests, and the rate per 1000;
+- the baseline (median of the last 10 recorded runs) and the change against it;
+- every flaky test by name, with its attempt statuses and how many of the last
+  10 recorded runs it flaked in;
+- the trend table and the repeat offenders across that window.
+
+A "flaky" test is Playwright's own verdict, not "passed after a retry":
+`computeOutcome` in `e2e/scripts/retry-summary.ts` mirrors Playwright's
+`computeTestCaseOutcome`, so an interrupted-then-passed test and a `test.fail()`
+test are classified the way Playwright classifies them. The report cross-checks
+its count against `stats.flaky` in the merged Playwright JSON report for the
+same run and prints **MISMATCH** plus a workflow warning if the two disagree.
+
+The cross-check reports its verdict in the workflow log on every run, not only
+on a mismatch, and annotates a skipped check as a warning. If only a mismatch
+spoke, a cross-check that had silently stopped running would be indistinguishable
+in the log from one that passed, which is the same shape of bug as a flake that
+never fails the build.
+
+The trend is carried between runs as the `e2e-flake-history` artifact (90 days,
+capped at 50 entries, newest first). `e2e-report` looks for the newest completed
+`main` run that published one, uses it as the baseline, appends this run's entry,
+and re-uploads it. There is no external service; a missing or unreadable baseline
+just makes the run seed a fresh trend.
+
+To render the report locally against a blob report directory:
+
+```bash
+cd apps/web
+pnpm exec tsx e2e/scripts/retry-summary.ts --input <blob-dir> --output /tmp/retry-summary.json
+pnpm exec tsx e2e/scripts/flake-report.ts --summary /tmp/retry-summary.json
+```
+
 ### `pnpm e2e:run` — the managed runner (build + run + teardown)
 
 `e2e/scripts/run-e2e.sh` (aliased as `pnpm e2e:run`) handles the build, the run, and cleanup so you don't have to assemble the steps by hand. It **auto-selects docker vs host**, runs **N shards concurrently**, enforces strict WS accounting by default (`KANDEV_E2E_WS_ASSERT=1`, matching CI), and never leaves root-owned artifacts behind.
@@ -207,6 +247,203 @@ storage reporting are filtered by the process-scoped ownership label.
 
 The SSH executor specifically has no mock controller. Tests use a real Docker-hosted sshd as the remote target, and fault-injection (host-key rotation, dropped traffic, killed pids) is done by operating on the container itself.
 
+## Waiting: name the cause, don't budget for the effect
+
+The suite's dominant flake shape is an assertion on a rendered consequence with
+a hand-picked budget:
+
+```ts
+await expect(button).toBeEnabled({ timeout: 30_000 }); // why 30s? nobody knows
+```
+
+The element renders fine. It never leaves its pending state inside the budget
+because the backend round trip that would flip it was late. Raising the number
+buys time, it does not remove the race, and when it does fail it tells you
+nothing about what was missing. Three of the four flakes measured in one recent
+green CI run were exactly this, with budgets of 5s, 10s and 30s.
+
+`helpers/causal-waits.ts` has one primitive per transport the app actually uses.
+Arm the wait **before** the action, await it after, then assert the UI with its
+default timeout:
+
+```ts
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
+
+// HTTP: the branch chip cannot enable until this read returns.
+const branchesLoaded = waitForHttp(page, "GET", /^\/api\/v1\/workspaces\/[^/]+\/branches$/);
+await createRepositoryButton.click();
+await branchesLoaded;
+await expect(branchSelector).toBeEnabled(); // no budget: only a render is left
+
+// WS notification (server push).
+const ws = watchWs(page); // MUST be called before page.goto()
+const processed = ws.waitForEvent("office.run.processed", {
+  where: (payload) => payload.task_id === task.id,
+});
+await apiClient.updateRunStatus(runId, { status: "cancelled" });
+await processed;
+
+// WS request/response round trip, correlated by frame id.
+const stamped = ws.waitForResponse("task.plan.implementation_started");
+await implementButton.tap();
+expect((await stamped).payload.implementation_started_session_id).toBe(sessionId);
+```
+
+A fourth case, "the backend has reached state X", needs no primitive:
+`expect.poll(() => apiClient.getX(id))` already reads the backend directly
+instead of through the DOM.
+
+Four things that are easy to get wrong:
+
+- **`watchWs(page)` must be called before the first `page.goto()`.** Playwright
+  only reports sockets opened after the listener is attached, so a watcher
+  created once the app is running observes nothing and every wait times out.
+  It survives `page.reload()`.
+- **Arming early is necessary but not sufficient: the page's socket has to be
+  subscribed before the frame is published.** The gateway broadcaster
+  (`internal/gateway/websocket/task_notifications.go`) is a live fan-out of the
+  event bus with **no replay on subscribe**, so a notification published while
+  the page is still booting is not delivered late, it is gone. The symptom is a
+  correctly-armed wait that never resolves, and it bites whenever the trigger
+  precedes the navigation, most often a task seeded with `createTaskWithAgent`
+  (the turn starts server-side at creation) whose early-turn frames land before
+  the page subscribes. Under load the arm can pass, which makes it a flake
+  rather than an honest failure. When the cause fires before the page exists,
+  wait on the resulting **state** instead of the frame: `expect.poll` against
+  `helpers/api-client.ts`, or a store helper such as
+  `waitForActiveSessionForegroundActivity`. This is the one-transport version of
+  the bullet below: there, two transports mean no single frame is authoritative;
+  here there is only one and you still cannot observe it.
+- **Confirm the causal chain, don't infer it from the code.** Attach a throwaway
+  `page.on("response")` / `page.on("websocket")` logger and run the spec once.
+  Two of the three chains behind this section's example specs were not what a
+  careful reading of the components predicted: the branch list comes from the
+  _workspace_-scoped route, not the repository-scoped one, and a plan panel that
+  already received `task.plan.created` over WS never fetches on mount at all.
+- **When two transports can deliver the same fact, there is no single frame to
+  wait for.** Wait on the _data_ precondition instead (assert the plan content
+  is rendered before asserting the button that depends on it) rather than
+  picking one transport and hoping it wins the race.
+
+Use `predicate` when several requests share a route and you need the one
+carrying a specific payload. That is strictly better than route matching,
+because an unrelated refetch landing first cannot satisfy it:
+
+```ts
+const cancelledDelivered = waitForHttp(page, "GET", COMMENTS_PATH, {
+  predicate: async (response) =>
+    ((await response.json()) as CommentsBody).comments.some((c) => c.runStatus === "cancelled"),
+});
+```
+
+Converted examples to copy from: `tests/task/create-task-new-local-repository.spec.ts`
+(HTTP), `tests/task/mobile-plan-toolbar-implement.spec.ts` (both WS waits), and
+`tests/office/comment-run-status.spec.ts` (HTTP with a body predicate).
+
+### `dwell` — the only sanctioned wall-clock wait
+
+Some delays genuinely cannot be replaced by an event. For those, and **only**
+for those, use `dwell(page, ms, category, reason)`:
+
+```ts
+await dwell(page, 300, "negative-assertion", "asserting the tooltip never opens");
+await dwell(page, 300, "library-timer", "Radix open delay publishes no event");
+```
+
+Backend fixtures, the API client's retry loops, docker probing and the office
+routing helpers have no `Page` in scope at all. They use the **page-less form**,
+same name, one greppable token either way:
+
+```ts
+await dwell(500, "poll-interval", "backend health poll; no page exists yet");
+```
+
+The two forms are told apart by the type of the first argument, since a `Page`
+is never a number. **Pass the page whenever one is in scope** — the wait then
+delegates to `page.waitForTimeout` and dies with the page instead of hanging
+past it. The page-less form is a plain timer with nothing to cancel it.
+
+Raw `page.waitForTimeout()` and hand-rolled promise sleeps are not sanctioned.
+They are indistinguishable, at a glance and to a grep, from someone who could
+not find the right event and reached for a number instead. `dwell` is greppable
+by name, its category is a closed `DwellCategory` union, its reason is mandatory
+rather than optional, and the whole population is countable.
+
+> **The category is validated at runtime, not only by the type.**
+> `apps/web/tsconfig.json` excludes `e2e`, and Playwright and vitest both strip
+> types without checking them, so **nothing in CI typechecks a spec file**. The
+> union gives you editor-time safety and self-documentation; the runtime check
+> is what actually stops a typo'd category from silently escaping the closed
+> set. Keep that in mind more broadly: a type error in `e2e/**` will not fail
+> any gate, so lean on tests for anything load-bearing here.
+
+| Category             | What it means                                                                                                                                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `negative-assertion` | The assertion is that something **never** happens. There is no event for a non-event, so the only way to give the regression room to occur is to outlast the window in which it would. Permanent, not debt. |
+| `product-timer`      | A `setTimeout` or debounce in our own code that publishes nothing observable. Fixable in principle: make it publish.                                                                                        |
+| `library-timer`      | A third-party timer we do not control — a Radix open delay, dnd-kit sensor arming that needs React to commit a pointerdown first.                                                                           |
+| `clock-separation`   | Forcing two writes apart so their timestamps or ordering stay distinguishable. Not waiting for a timer at all.                                                                                              |
+| `poll-interval`      | Waiting out a polling loop. Usually the best candidate for conversion to `waitForHttp` on the request the poll makes.                                                                                       |
+| `browser-chrome`     | Browser-level chrome the page cannot observe: native dialogs, focus transitions, print.                                                                                                                     |
+| `unverified`         | Pre-existing spacing that could not be tied to any timer. Debt, flagged honestly rather than dressed up as intent.                                                                                          |
+
+**Choosing between them.** Several can look applicable at once, so categorize by
+_what makes the delay unavoidable_, first match wins:
+
+1. Is the assertion that something **never** happens? → `negative-assertion`.
+   You always know this from the test itself, and it outranks whatever timer
+   happens to sit nearby.
+2. Otherwise you are waiting out a timer. Can you **name** it? → the matching
+   one of `product-timer`, `library-timer`, `clock-separation`, `poll-interval`,
+   `browser-chrome`.
+3. Cannot name it? → `unverified`. Do not guess a plausible-looking timer; an
+   honest debt marker is worth more than a confident wrong label.
+
+`unverified` is a **debt marker to be driven down, not a resting place** — it is
+the one category that should trend toward zero. `negative-assertion` is the
+opposite: it is permanent and legitimate, and a PR that "fixes" one by deleting
+the wait has removed the regression's room to happen.
+
+The `reason` must say **why no event exists**, not what the code is doing.
+"Radix opens after 300ms and publishes nothing" is a reason; "wait for the
+tooltip" is not — that is a `waitForHttp` or `watchWs` wait you have not found
+yet. Reaching for `dwell` to avoid looking is the misuse this helper exists to
+make visible, and an empty reason throws rather than passing silently.
+
+`dwell` takes no options and has no defaults, on purpose. All of its value is in
+the name, the closed category set, and the required reason; keep it that way.
+
+### `injectLatency` — slowing a mocked response on purpose
+
+A sleep inside a `page.route()` handler is not a wait. It slows the _system
+under test_ so a pending or loading state becomes observable, and shortening or
+removing it destroys the scenario:
+
+```ts
+await page.route("**/runs?*", async (route) => {
+  await injectLatency(800, "make the in-flight spinner observable");
+  await route.continue();
+});
+```
+
+**This is a sibling of `dwell`, not a `dwell` category**, for two reasons:
+
+- `dwell`'s `reason` is contractually an answer to "why can I not wait for an
+  event here?". A latency-injection site has no such answer, so folding it in
+  would mean weakening that contract for all seven categories to accommodate the
+  one case that does not fit.
+- Every `dwell` category is a compromise, from "permanent" to "fixable in
+  principle". This one is correct by construction and must **never** be
+  converted to an event wait.
+
+Keeping them apart also keeps the numbers honest: counting fixture configuration
+as sleep debt would inflate the population a ratchet is trying to drive down.
+
+A ratchet banning raw sleeps needs to allow **both** tokens, `dwell(` and
+`injectLatency(`. Do not try to exempt route handlers by scope detection
+instead — a proximity heuristic misfires, and a wrong exemption silently
+unguards real sleeps.
+
 ## Adding a new spec
 
 1. Pick a directory under `tests/` (or create one for a new feature).
@@ -216,6 +453,7 @@ The SSH executor specifically has no mock controller. Tests use a real Docker-ho
    - `import { test, expect } from "../../fixtures/docker-test-base";` for Docker executor tests.
    - `import { test, expect } from "../../fixtures/ssh-test-base";` for SSH executor tests.
 4. Use `getByTestId` for selectors. If the surface you're testing lacks stable testids, add them — drift-prone CSS / text selectors are not worth the maintenance cost.
+5. Wait on causal signals, not timeout budgets — see [Waiting](#waiting-name-the-cause-dont-budget-for-the-effect). Reach for `{ timeout: N }` only when you can say what the number is for.
 
 ## CI
 
@@ -224,7 +462,8 @@ The SSH executor specifically has no mock controller. Tests use a real Docker-ho
 - `e2e` — a 14-entry matrix executing the generated normal manifests.
 - `e2e-containers` — a 6-entry matrix executing the generated container
   manifests and requiring Docker.
-- `e2e-report` — merges blob reports and publishes timing/retry artifacts.
+- `e2e-report` — merges blob reports, publishes timing/retry artifacts, and
+  writes the flake rate and its trend to the job summary.
 
 The build job uploads `e2e-shard-manifests` for the current run. Both cohorts
 upload blob reports that `e2e-report` merges into a single HTML artifact.

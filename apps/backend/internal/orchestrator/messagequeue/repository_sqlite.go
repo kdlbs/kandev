@@ -571,11 +571,14 @@ func (r *sqliteRepository) CountPendingByTaskIDs(ctx context.Context, taskIDs []
 	if len(taskIDs) == 0 {
 		return counts, nil
 	}
+	// Join task_sessions so rows left on deleted sessions cannot inflate the
+	// sidebar badge. Pre-fix session deletes left orphans keyed only by task_id.
 	query, args, err := sqlx.In(`
-		SELECT id, session_id, task_id, position, content, model, plan_mode,
-		       attachments_json, metadata_json, queued_at, queued_by
-		FROM queued_messages
-		WHERE task_id IN (?)
+		SELECT q.id, q.session_id, q.task_id, q.position, q.content, q.model, q.plan_mode,
+		       q.attachments_json, q.metadata_json, q.queued_at, q.queued_by
+		FROM queued_messages q
+		INNER JOIN task_sessions s ON s.id = q.session_id
+		WHERE q.task_id IN (?)
 	`, taskIDs)
 	if err != nil {
 		return nil, fmt.Errorf("count pending by task ids: %w", err)

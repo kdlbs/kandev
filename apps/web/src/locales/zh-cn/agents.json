@@ -133,6 +133,10 @@
   "mcpSaveProfileHint": "保存此配置以配置 MCP 服务器。",
   "mcpServersHelp": "MCP 定义存储在数据库中，并在运行时按执行器解析。这不会覆盖你的本地智能体配置。",
   "mcpServersJson": "MCP 服务器（JSON）",
+  "mcpStrategy": "Kandev MCP 工具",
+  "mcpStrategyHelp": "Kandev 可以为该代理提供自己的工具（设置任务标题、向用户提问、更新计划、标记步骤完成）。为此，它必须以你的 CLI 能读取的格式写入 MCP 配置，因此请选择匹配的格式。选错格式会静默失败：配置已写入，但 CLI 会忽略它，并且不会显示任何错误。如果该命令不是支持 MCP 的编码代理，请保持关闭。",
+  "mcpStrategyNone": "关闭：不提供 Kandev 工具",
+  "mcpStrategyOption": "{{name}}：{{mechanism}}",
   "model": "模型",
   "modelHeading": "模型",
   "modelRequiredForAllProfiles": "所有配置都需要模型。",
@@ -223,9 +227,12 @@
   "watcherKindGithubReview": "GitHub PR 审查",
   "watcherKindJira": "Jira",
   "watcherKindLinear": "Linear",
+  "collapseAgentProfiles": "折叠 {{name}} 配置",
+  "expandAgentProfiles": "展开 {{name}} 配置",
   "duplicate": "复制",
   "duplicateProfileNamed": "复制 {{name}}",
   "duplicateProfileSuccess": "智能体配置已复制",
   "duplicateSaveBlocked": "设置仍在保存，请稍后重试。",
-  "failedToDuplicateProfile": "复制智能体配置失败"
+  "failedToDuplicateProfile": "复制智能体配置失败",
+  "noProfilesYetShort": "暂无配置"
 }

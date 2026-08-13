@@ -58,14 +58,17 @@ test.describe("Real-time dashboard updates", () => {
     // Wait for the page + initial fetches to fully settle. The dashboard
     // SSR + client hydration can fire late requests; give it a generous
     // window so we only measure fetches caused by the cross-ws event below.
-    let settledAt = 0;
     let priorFetchCount = -1;
-    while (settledAt < 8000) {
-      await testPage.waitForTimeout(1000);
-      settledAt += 1000;
-      if (fetchTimes.length === priorFetchCount) break;
-      priorFetchCount = fetchTimes.length;
-    }
+    await expect
+      .poll(
+        () => {
+          const settled = fetchTimes.length === priorFetchCount;
+          priorFetchCount = fetchTimes.length;
+          return settled;
+        },
+        { timeout: 8_000, intervals: [1_000], message: "dashboard fetches never settled" },
+      )
+      .toBe(true);
     const baselineCount = fetchTimes.length;
 
     // Create a task in the OTHER workspace via API (fires office.task.created
@@ -74,7 +77,10 @@ test.describe("Real-time dashboard updates", () => {
       workflow_id: otherWf.id,
     });
 
-    // Wait long enough for any WS event to arrive and would-be refetch to fire.
+    // deliberate-sleep(negative-assertion): the assertion below is that the
+    // cross-workspace event triggers NO dashboard refetch. There is no event
+    // for a fetch that must never happen, so the only way to give a regression
+    // room to occur is to wait past the window in which it would have fired.
     await testPage.waitForTimeout(3000);
 
     // No additional dashboard fetches should have occurred after the event.

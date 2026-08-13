@@ -547,7 +547,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 	var stripEnv []string
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
-		disableAskQuestion = agents.IsPassthroughOnly(req.AgentConfig)
+		disableAskQuestion = !agents.SupportsInteractiveMCPTools(req.AgentConfig)
 		if rt := req.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
 			assumeMcpHttp = rt.AssumeMcpHttp

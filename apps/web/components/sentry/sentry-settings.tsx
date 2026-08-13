@@ -189,7 +189,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
       icon={<IconBrandSentry className="h-5 w-5" />}
       title={t("sentry:sentryIntegration")}
       description={t("sentry:sentryIntegrationDescription")}
-      action={<SentryEnabledControl />}
+      action={<SentryEnabledControl workspaceId={workspaceId} />}
     >
       <SettingsCard isDirty={formDirty}>
         <CardContent className="space-y-3 pt-6">

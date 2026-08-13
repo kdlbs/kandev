@@ -116,9 +116,11 @@ test.describe("Session stream budget", () => {
       });
     }
 
-    // Leave a deliberate five-second observation window after the five task
-    // switches. This is a diagnostic total, not a compression-dependent
-    // correctness threshold.
+    // deliberate-sleep(negative-assertion): a deliberate five-second
+    // observation window after the five task switches, measuring how much
+    // gateway traffic keeps arriving. This is a diagnostic total, not a
+    // compression-dependent correctness threshold, so the window must be real
+    // elapsed time rather than a wait for any particular frame.
     await testPage.waitForTimeout(5_000);
 
     const summary = summarizeGatewayTraffic(capture.frames);

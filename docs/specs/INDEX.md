@@ -120,6 +120,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [settings-profile-layout](agents/settings-profile-layout.md) | shipped |
 | [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
 | [utility-agent-profiles](agents/utility-agent-profiles.md) | approved |
+| [collapsible-agent-blocks](agents/collapsible-agent-blocks.md) | draft |
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |
@@ -139,6 +140,7 @@ Per-workspace credentials and triage triggers for external services.
 | [github-authentication](integrations/github-authentication.md) | draft |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
 | [gitlab-mr-status-chip](gitlab-mr-status-chip/spec.md) | draft |
+| [gitlab-mr-task-list-badges](gitlab-mr-task-list-badges/spec.md) | draft |
 | [gitlab-workflow-sync](gitlab-workflow-sync/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
 | [enable-disable-toggle](integrations/enable-disable-toggle.md) | shipped |
@@ -182,6 +184,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [review-markdown-preview](ui/review-markdown-preview.md) | draft |
 | [sidebar-view-creation](ui/sidebar-view-creation.md) | shipped |
 | [command-panel sidebar task reveal](ui/command-panel-sidebar-task-reveal.md) | draft |
+| [sidebar-empty-task-alignment](ui/sidebar-empty-task-alignment.md) | building |
 | [sidebar-task-completion-icons](ui/sidebar-task-completion-icons.md) | shipped |
 | [sidebar-queued-prompt-count](ui/sidebar-queued-prompt-count.md) | shipped |
 | [session-tab-delete-feedback](ui/session-tab-delete-feedback.md) | shipped |

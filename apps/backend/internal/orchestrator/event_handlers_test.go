@@ -814,6 +814,11 @@ func createTestServiceWithAgent(repo *sqliterepo.Repository, stepGetter *mockSte
 	repo.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
 		_, _ = svc.messageQueue.PurgeTask(ctx, taskID)
 	})
+	// Mirror production: after task-scoped queue purge, publish queue-status
+	// so the status-summary projector can zero queued_prompt_count.
+	repo.SetTaskQueuePurgeNotifier(func(ctx context.Context, taskID string) {
+		svc.publishTaskQueueStatusEvent(ctx, taskID, "")
+	})
 	return svc
 }
 
@@ -1624,6 +1629,11 @@ func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *moc
 	}
 	repo.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
 		_, _ = svc.messageQueue.PurgeTask(ctx, taskID)
+	})
+	// Mirror production: after task-scoped queue purge, publish queue-status
+	// so the status-summary projector can zero queued_prompt_count.
+	repo.SetTaskQueuePurgeNotifier(func(ctx context.Context, taskID string) {
+		svc.publishTaskQueueStatusEvent(ctx, taskID, "")
 	})
 	return svc
 }

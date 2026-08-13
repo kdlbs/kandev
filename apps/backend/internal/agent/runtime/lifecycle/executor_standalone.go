@@ -138,7 +138,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
 	}
-	disableAskQuestion := agents.IsPassthroughOnly(req.AgentConfig)
+	disableAskQuestion := !agents.SupportsInteractiveMCPTools(req.AgentConfig)
 	assumeMcpSse := false
 	assumeMcpHttp := false
 	requiresProcessKill := false

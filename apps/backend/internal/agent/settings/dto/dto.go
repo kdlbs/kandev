@@ -79,6 +79,8 @@ type TUIConfigDTO struct {
 	Description     string   `json:"description,omitempty"`
 	CommandArgs     []string `json:"command_args,omitempty"`
 	WaitForTerminal bool     `json:"wait_for_terminal"`
+	// MCPStrategy is the selected MCP injection mechanism ("" = none).
+	MCPStrategy string `json:"mcp_strategy,omitempty"`
 }
 
 type AgentDTO struct {

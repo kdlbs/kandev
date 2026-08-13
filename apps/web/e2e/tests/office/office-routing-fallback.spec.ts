@@ -73,27 +73,28 @@ test.describe("Office provider routing — fallback", () => {
     // KANDEV_MOCK_PROVIDERS needs the full agent-registry rediscovery
     // walk to complete first — 40s rides that out without affecting
     // the happy path (resolves in <5s in isolation).
-    const deadline = Date.now() + 40_000;
     let attempts: Array<{
       provider_id: string;
       execution_profile_id: string;
       outcome: string;
       error_code?: string;
     }> = [];
-    while (Date.now() < deadline) {
-      const runs = (await officeApi.listRuns(officeSeed.workspaceId)) as {
-        runs?: Array<{ id: string; task_id?: string }>;
-      };
-      const run = (runs.runs ?? []).find((r) => r.task_id === task.id);
-      if (run?.id) {
-        const list = await officeApi.listRouteAttempts(run.id);
-        attempts = list.attempts;
-        if (attempts.length >= 2) break;
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
-    expect(attempts.length).toBeGreaterThanOrEqual(2);
+    // `attempts` is captured on each poll so the assertions below read the last
+    // observed value rather than needing another request.
+    await expect
+      .poll(
+        async () => {
+          const runs = (await officeApi.listRuns(officeSeed.workspaceId)) as {
+            runs?: Array<{ id: string; task_id?: string }>;
+          };
+          const run = (runs.runs ?? []).find((r) => r.task_id === task.id);
+          if (!run?.id) return 0;
+          attempts = (await officeApi.listRouteAttempts(run.id)).attempts;
+          return attempts.length;
+        },
+        { timeout: 40_000, message: "run never recorded 2 route attempts" },
+      )
+      .toBeGreaterThanOrEqual(2);
     expect(attempts[0].provider_id).toBe("claude-acp");
     expect(attempts[0].execution_profile_id).toBe(
       routingConfig.provider_profiles["claude-acp"].execution_profile_ids.balanced,

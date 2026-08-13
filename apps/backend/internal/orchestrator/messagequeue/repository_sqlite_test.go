@@ -23,11 +23,31 @@ func newTestSQLiteRepo(t *testing.T) Repository {
 	raw.SetMaxIdleConns(1)
 	db := sqlx.NewDb(raw, "sqlite3")
 	t.Cleanup(func() { _ = db.Close() })
+	// Minimal task_sessions table so CountPendingByTaskIDs can join live sessions.
+	// Production shares the task repo schema; the queue package only needs id.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create task_sessions stub: %v", err)
+	}
 	repo, err := NewSQLiteRepository(db, db)
 	if err != nil {
 		t.Fatalf("NewSQLiteRepository: %v", err)
 	}
 	return repo
+}
+
+// seedLiveSessions inserts stub task_sessions rows so queue counts that join
+// live sessions treat these session IDs as present.
+func seedLiveSessions(t *testing.T, repo Repository, sessionIDs ...string) {
+	t.Helper()
+	sqlRepo, ok := repo.(*sqliteRepository)
+	if !ok {
+		t.Fatalf("seedLiveSessions requires *sqliteRepository, got %T", repo)
+	}
+	for _, id := range sessionIDs {
+		if _, err := sqlRepo.db.Exec(`INSERT OR IGNORE INTO task_sessions (id) VALUES (?)`, id); err != nil {
+			t.Fatalf("seed session %s: %v", id, err)
+		}
+	}
 }
 
 func TestSQLiteRepository_InsertList(t *testing.T) {

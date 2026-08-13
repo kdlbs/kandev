@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { settledBoundingBox } from "../../helpers/settled-box";
 
 /**
  * Drags a sidebar task row's handle onto a nest drop zone using pointer
@@ -13,10 +14,7 @@ async function dragRowToNestZone(
   handleLocator: ReturnType<Page["locator"]>,
   zoneLocator: ReturnType<Page["locator"]>,
 ) {
-  await handleLocator.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(100);
-  const from = await handleLocator.boundingBox();
-  if (!from) throw new Error("drag source handle has no bounding box");
+  const from = await settledBoundingBox(handleLocator);
   const startX = from.x + from.width / 2;
   const startY = from.y + from.height / 2;
   await page.mouse.move(startX, startY);

@@ -20,8 +20,9 @@ type Repository struct {
 	ownsDB       bool
 	log          *logger.Logger
 	migrate      *db.MigrateLogger
-	queuePurgeMu sync.RWMutex
-	queuePurger  func(context.Context, string)
+	queuePurgeMu     sync.RWMutex
+	queuePurger      func(context.Context, string)
+	queuePurgeNotify func(context.Context, string)
 	// failCutoverAfter is a test-only failpoint for the worktree ownership
 	// cutover: when set to a cutover step name, the migration aborts at that
 	// step so tests can prove rollback restores the pre-upgrade state.
@@ -37,12 +38,28 @@ func (r *Repository) SetTaskQueuePurger(purger func(context.Context, string)) {
 	r.queuePurger = purger
 }
 
+// SetTaskQueuePurgeNotifier registers a post-commit observer for every path
+// that purges a task's queued_messages (archive/delete/workspace cascade).
+// Callers must not purge the production SQLite queue again — that already
+// happened in-transaction. The intended use is publishing
+// message.queue.status_changed so the status-summary projector zeros
+// queued_prompt_count on live clients.
+func (r *Repository) SetTaskQueuePurgeNotifier(notifier func(context.Context, string)) {
+	r.queuePurgeMu.Lock()
+	defer r.queuePurgeMu.Unlock()
+	r.queuePurgeNotify = notifier
+}
+
 func (r *Repository) notifyTaskQueuePurged(ctx context.Context, taskID string) {
 	r.queuePurgeMu.RLock()
 	purger := r.queuePurger
+	notifier := r.queuePurgeNotify
 	r.queuePurgeMu.RUnlock()
 	if purger != nil {
 		purger(ctx, taskID)
+	}
+	if notifier != nil {
+		notifier(ctx, taskID)
 	}
 }
 

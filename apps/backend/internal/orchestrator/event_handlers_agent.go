@@ -76,7 +76,7 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 
 // publishQueueStatusEvent publishes a queue status changed event for the given session
 func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string) {
-	if s.eventBus == nil {
+	if s.eventBus == nil || s.messageQueue == nil {
 		return
 	}
 
@@ -99,6 +99,39 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 		zap.String("session_id", sessionID),
 		zap.Int("count", queueStatus.Count))
 
+	_ = s.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
+		events.MessageQueueStatusChanged,
+		"orchestrator",
+		eventData,
+	))
+}
+
+// publishTaskQueueStatusEvent publishes a task-scoped queue status change so
+// the status-summary projector can recompute queued_prompt_count. Used after
+// lifecycle purges (archive/delete) and session delete when a single session
+// snapshot is unavailable or insufficient. Payload requires task_id; session
+// fields are optional.
+func (s *Service) publishTaskQueueStatusEvent(ctx context.Context, taskID, sessionID string) {
+	if s.eventBus == nil || taskID == "" {
+		return
+	}
+	// Lifecycle purge notifies after Archive/Delete commit on the request ctx.
+	// Detach so a client disconnect cannot cancel projector recount (which would
+	// leave queued_prompt_count stale on every live sidebar).
+	ctx = context.WithoutCancel(ctx)
+	eventData := map[string]interface{}{
+		"task_id": taskID,
+	}
+	if sessionID != "" && s.messageQueue != nil {
+		queueStatus := s.messageQueue.GetStatus(ctx, sessionID)
+		eventData["session_id"] = sessionID
+		eventData["entries"] = queueStatus.Entries
+		eventData["count"] = queueStatus.Count
+		eventData["max"] = queueStatus.Max
+	}
+	s.logger.Debug("publishing task queue status changed event",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
 	_ = s.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
 		events.MessageQueueStatusChanged,
 		"orchestrator",

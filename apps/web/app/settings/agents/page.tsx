@@ -28,6 +28,7 @@ import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agent
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
 import { AgentProfilesSubList } from "@/components/settings/agents/agent-profiles-section";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
+import { CustomTUIMcpCard } from "@/components/settings/custom-tui-mcp-card";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
 import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import {
@@ -242,6 +243,7 @@ function InstalledAgentsSection({
               savedAgent={savedAgentsByName.get(agent.name)}
               agentName={agent.name}
             />
+            <CustomTUIMcpCard agent={savedAgentsByName.get(agent.name)} />
           </InstalledAgentCard>
         ))}
       </div>
@@ -296,6 +298,7 @@ function useAgentPageState() {
     display_name: string;
     model?: string;
     command: string;
+    mcp_strategy?: string;
   }) => {
     await createCustomTUIAgent(data);
     const [discoveryResp, agentsResp, availableResp] = await Promise.all([

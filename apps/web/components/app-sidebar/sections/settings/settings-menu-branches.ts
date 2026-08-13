@@ -195,11 +195,13 @@ export function buildWorkspacesBranch(
   workspaces: ReadonlyArray<BranchWorkspace>,
   activeWorkspaceId?: string | null,
   /**
-   * Which integrations the Integrations branch may list. Omitted — the default
-   * — lists all of them; a set is passed only while "Hide disabled integrations
-   * from left panel navigation" is on.
+   * Which integrations a given workspace's Integrations branch may list.
+   * Returning `undefined` — the default — lists all of them; a set comes back
+   * only while "Hide disabled integrations from left panel navigation" is on.
+   * Resolved per workspace because the enable toggles are per workspace: one
+   * workspace hiding GitHub must not strip it from its siblings' branches.
    */
-  visibleIntegrationSlugs?: ReadonlySet<IntegrationSlug>,
+  visibleIntegrationSlugsFor?: (workspaceId: string) => ReadonlySet<IntegrationSlug> | undefined,
   integrationContributions: ReadonlyArray<BranchIntegrationContribution> = [],
 ): SettingsMenuNode[] {
   return workspaces.map((workspace) => {
@@ -226,7 +228,7 @@ export function buildWorkspacesBranch(
                 children: integrationNodes(
                   workspace.id,
                   integrationsHref,
-                  visibleIntegrationSlugs,
+                  visibleIntegrationSlugsFor?.(workspace.id),
                   integrationContributions,
                 ),
                 integrationsWorkspaceId: workspace.id,

@@ -90,6 +90,10 @@ test.describe("Onboarding task launch", () => {
         return;
       }
 
+      // deliberate-sleep(poll-interval): sampling interval for the loop above,
+      // which asserts an invariant on EVERY iteration (the session must never
+      // reach FAILED/CANCELLED before launch). Converting to expect.poll would
+      // drop that per-iteration guard, so the loop keeps sampling instead.
       await new Promise((r) => setTimeout(r, 1_000));
     }
 
