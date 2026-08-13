@@ -105,6 +105,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [autopilot-mode](tasks/autopilot-mode.md) | draft |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
+| [task-step-transition-ledger](workflow/task-step-transition-ledger/spec.md) | draft |
 | [conditional-session-settings](workflow-session-settings/spec.md) | approved |
 | [prevent-agent-autostart-on-open](prevent-agent-autostart-on-open/spec.md) | draft |
 | [workflow-duplication](workflow-duplication/spec.md) | draft |

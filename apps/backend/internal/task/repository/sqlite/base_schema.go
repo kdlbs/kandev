@@ -20,6 +20,7 @@ func (r *Repository) initSchema() error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initStepTransitionsSchema,
 		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
 		r.initGitSchema,
@@ -611,6 +612,46 @@ func (r *Repository) initSessionSchema() error {
 		return err
 	}
 	return r.initMessageTurnSchema()
+}
+
+// initStepTransitionsSchema creates task_step_transitions: one row per
+// committed change to tasks.workflow_step_id. This is a new table, not a
+// column added to an existing one, so CREATE TABLE IF NOT EXISTS in the init
+// block is correct and complete — the "columns only via runMigrations" rule
+// governs ALTER TABLE, not table creation.
+//
+// Deliberately no foreign key to workflow_steps or workflows: steps and
+// workflows get deleted, and the historical fact that a card was in a
+// now-deleted step must survive that deletion.
+func (r *Repository) initStepTransitionsSchema() error {
+	idCol := "id INTEGER PRIMARY KEY AUTOINCREMENT"
+	if dialect.IsPostgres(r.db.DriverName()) {
+		idCol = "id BIGSERIAL PRIMARY KEY"
+	}
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_step_transitions (
+		` + idCol + `,
+		task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+		session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL,
+		from_workflow_id TEXT,
+		from_workflow_step_id TEXT,
+		to_workflow_id TEXT,
+		to_workflow_step_id TEXT,
+		trigger TEXT NOT NULL,
+		actor_kind TEXT NOT NULL,
+		actor_id TEXT,
+		contract_version INTEGER NOT NULL,
+		occurred_at TIMESTAMP NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_task
+		ON task_step_transitions(task_id, occurred_at, id);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_occurred
+		ON task_step_transitions(occurred_at);
+	`)
+	if err != nil {
+		return fmt.Errorf("init step transitions schema: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) initMessageTurnSchema() error {

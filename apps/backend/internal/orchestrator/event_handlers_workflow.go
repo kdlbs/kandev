@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -351,8 +352,15 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// transition.
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.updateTransitionTaskWithCapacity(ctx, task, targetStep); err != nil {
-		s.logger.Warn("workflow transition failed",
+	// executeStepTransition's two callers are always a genuine session turn:
+	// on_turn_complete (triggerOnEnter=true) or on_turn_start (false).
+	legacyTrigger := engine.TriggerOnTurnStart
+	if triggerOnEnter {
+		legacyTrigger = engine.TriggerOnTurnComplete
+	}
+	transitionCtx := engineTransitionAttribution(ctx, sessionID, legacyTrigger)
+	if err := s.updateTransitionTaskWithCapacity(transitionCtx, task, targetStep); err != nil {
+		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
 			zap.String("to_step", targetStep.Name),
@@ -467,6 +475,40 @@ func (s *Service) updateTransitionTaskWithCapacity(
 	}
 	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
 	return err
+}
+
+// engineTriggerIsSessionOriginated reports whether an engine.Trigger is
+// caused by a session's own turn (or an on_exit/on_enter reached through
+// one). Every other trigger — a children-completed rollup, a scheduled
+// evaluation, or any future non-session trigger — is system-caused even when
+// the call site had to resolve *a* session to satisfy the engine's
+// MachineState API shape, as processOnChildrenCompleted does.
+func engineTriggerIsSessionOriginated(trigger engine.Trigger) bool {
+	switch trigger {
+	case engine.TriggerOnTurnStart, engine.TriggerOnTurnComplete, engine.TriggerOnEnter, engine.TriggerOnExit:
+		return true
+	default:
+		return false
+	}
+}
+
+// engineTransitionAttribution wraps ctx with the engine_transition trigger.
+// An engine_transition is agent when it came from a session's turn
+// (on_turn_start, on_turn_complete, or an on_exit/on_enter reached through
+// one — the sessionID this function receives) and system when it came from a
+// non-session trigger such as a children-completed rollup or a scheduled
+// evaluation. Actor kind is decided by the engine trigger itself, not by
+// sessionID presence alone: on_children_completed always resolves a session
+// (the parent's active one) purely to satisfy the engine's MachineState API
+// shape, and that session did not cause the transition.
+func engineTransitionAttribution(ctx context.Context, sessionID string, trigger engine.Trigger) context.Context {
+	attribution := steptelemetry.Attribution{Trigger: steptelemetry.TriggerEngineTransition, ActorKind: steptelemetry.ActorSystem}
+	if sessionID != "" && engineTriggerIsSessionOriginated(trigger) {
+		attribution.ActorKind = steptelemetry.ActorAgent
+		attribution.ActorID = sessionID
+		attribution.SessionID = sessionID
+	}
+	return steptelemetry.WithAttribution(ctx, attribution)
 }
 
 // handleTaskMoved handles manual task step changes (drag-and-drop, stepper "Move here").
@@ -1937,7 +1979,11 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// otherwise see RUNNING and skip the on_enter processing.
 	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 
-	if err := s.workflowStore.ApplyTransition(ctx, taskID, sessionID, fromStepID, move.WorkflowStepID, engine.TriggerOnEnter); err != nil {
+	deferredMoveCtx := steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger: steptelemetry.TriggerMCPDeferredMove, ActorKind: steptelemetry.ActorAgent,
+		ActorID: sessionID, SessionID: sessionID,
+	})
+	if err := s.workflowStore.ApplyTransition(deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, engine.TriggerOnEnter); err != nil {
 		s.logger.Error("failed to apply pending move transition",
 			zap.String("task_id", taskID),
 			zap.Error(err))

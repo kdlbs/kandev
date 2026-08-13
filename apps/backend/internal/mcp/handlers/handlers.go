@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -2309,7 +2310,21 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 	}
 
-	result, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, req.SessionID != "")
+	// The sender session is the causal actor for anything this dispatch does
+	// on its own behalf, including RestoreTaskMessageRollback if a later
+	// step fails — thread it onto ctx so that rollback's ledger row (if any)
+	// attributes the agent that sent this message, not the session-less
+	// authn seam. Conditional: SenderSessionID isn't validated non-empty
+	// above, so a caller that omits it falls back to the existing default.
+	dispatchCtx := ctx
+	if req.SenderSessionID != "" {
+		dispatchCtx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+			ActorKind: steptelemetry.ActorAgent,
+			ActorID:   req.SenderSessionID,
+			SessionID: req.SenderSessionID,
+		})
+	}
+	result, err := h.dispatchTaskMessage(dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, req.SessionID != "")
 	if err != nil {
 		if parentReply != nil {
 			if restoreErr := h.restoreParentQuestionPending(ctx, parentReply.message); restoreErr != nil {
