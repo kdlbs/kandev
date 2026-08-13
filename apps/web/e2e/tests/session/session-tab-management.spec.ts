@@ -7,6 +7,9 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 
+/** Wire action the kanban WS handler consumes when a task moves step. */
+const TASK_UPDATED_ACTION = "task.updated";
+
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
 /**
@@ -411,22 +414,26 @@ test.describe("Session tab management — primary session persistence", () => {
     // Trigger kanban.update by moving the task to a non-start step.
     const otherStep = seedData.steps.find((s) => s.id !== seedData.startStepId);
     if (!otherStep) throw new Error("Workflow needs at least 2 steps to trigger kanban.update");
-    const kanbanFramesBeforeMove = traffic.frames.filter(
-      (frame) => frame.direction === "received" && frame.action?.startsWith("kanban."),
-    ).length;
+    const taskUpdatesBeforeMove = () =>
+      traffic.frames.filter(
+        (frame) => frame.direction === "received" && frame.action === TASK_UPDATED_ACTION,
+      ).length;
+    const taskUpdatesAtMove = taskUpdatesBeforeMove();
     await apiClient.moveTask(task.id, seedData.workflowId, otherStep.id);
 
     // The kanban.update broadcast is what could wrongly move the star, so wait
     // for the gateway to actually deliver it instead of budgeting for it.
+    // The move is delivered as `task.updated`, which `lib/ws/handlers/kanban.ts`
+    // consumes -- that handler is what this test is named after, and its
+    // regression was moving the star back to session #1. There is no
+    // `kanban.update` frame on the wire; waiting for one times out. Verified by
+    // dumping every received action after moveTask.
     await expect
-      .poll(
-        () =>
-          traffic.frames.filter(
-            (frame) => frame.direction === "received" && frame.action?.startsWith("kanban."),
-          ).length,
-        { timeout: 15_000, message: "no kanban.* frame was delivered after moveTask" },
-      )
-      .toBeGreaterThan(kanbanFramesBeforeMove);
+      .poll(taskUpdatesBeforeMove, {
+        timeout: 15_000,
+        message: `no ${TASK_UPDATED_ACTION} frame was delivered after moveTask`,
+      })
+      .toBeGreaterThan(taskUpdatesAtMove);
 
     // Star must still be on session #2 (would jump back to #1 before the kanban.ts fix).
     await expect(starInTab(session, session2Id)).toBeVisible({ timeout: 5_000 });
