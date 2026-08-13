@@ -266,7 +266,7 @@ func previewPrefersNativeBinary(agentConfig agents.Agent) bool {
 // flag triggers a live Refresh() call against the warm host instance.
 func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, refresh bool) (*dto.DynamicModelsResponse, error) {
 	if _, ok := c.agentRegistry.Get(agentName); !ok {
-		return nil, fmt.Errorf("agent %q not found", agentName)
+		return nil, ErrAgentNotFound
 	}
 	if c.hostUtility == nil {
 		return &dto.DynamicModelsResponse{

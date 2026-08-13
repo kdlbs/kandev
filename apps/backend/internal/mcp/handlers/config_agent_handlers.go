@@ -115,6 +115,9 @@ func (h *Handlers) handleDeleteAgentProfile(ctx context.Context, msg *ws.Message
 		if errors.As(err, &inUseErr) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Cannot delete: profile is used by an active agent session", nil)
 		}
+		if errors.Is(err, agentsettingscontroller.ErrAgentProfileNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Agent profile not found", nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete agent profile: "+err.Error(), nil)
 	}
 	h.publishAgentProfileEvent(ctx, events.AgentProfileDeleted, profile)
