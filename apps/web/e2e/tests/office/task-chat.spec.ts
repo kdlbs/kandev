@@ -57,16 +57,19 @@ const test = base.extend<{ testPage: Page }, IssueChatFixtures>({
         "waiting_for_input",
         "review",
       ]);
-      const deadline = Date.now() + 25_000;
-      while (Date.now() < deadline) {
-        const issue = await officeApi.getTask(result.taskId);
-        const raw = issue as Record<string, unknown>;
-        const inner = (raw.task as Record<string, unknown>) ?? raw;
-        const state = ((inner.state as string) ?? (inner.status as string) ?? "").toLowerCase();
-        if (state === "failed") throw new Error("Task entered FAILED state");
-        if (launched.has(state)) break;
-        await new Promise((r) => setTimeout(r, 500));
-      }
+      await expect
+        .poll(
+          async () => {
+            const issue = await officeApi.getTask(result.taskId);
+            const raw = issue as Record<string, unknown>;
+            const inner = (raw.task as Record<string, unknown>) ?? raw;
+            const state = ((inner.state as string) ?? (inner.status as string) ?? "").toLowerCase();
+            if (state === "failed") throw new Error("Task entered FAILED state");
+            return launched.has(state);
+          },
+          { timeout: 25_000, message: "task never reached a launched state" },
+        )
+        .toBe(true);
 
       await use({
         workspaceId: result.workspaceId,
@@ -97,16 +100,21 @@ test.describe("Office issue chat", () => {
     // via maybeAsync (goroutine) and needs the DB fallback for streaming
     // agents where Data.Text is empty.
     let agentComment: Record<string, unknown> | undefined;
-    const deadline = Date.now() + 15_000;
-    while (Date.now() < deadline) {
-      const res = await officeApi.listTaskComments(chatSeed.taskId);
-      const comments = (res as { comments?: Record<string, unknown>[] }).comments ?? [];
-      agentComment = comments.find(
-        (c) => (c.authorType as string) === "agent" || (c.author_type as string) === "agent",
-      );
-      if (agentComment) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
+    // `agentComment` is captured on each poll so the assertions below read the
+    // last observed value.
+    await expect
+      .poll(
+        async () => {
+          const res = await officeApi.listTaskComments(chatSeed.taskId);
+          const comments = (res as { comments?: Record<string, unknown>[] }).comments ?? [];
+          agentComment = comments.find(
+            (c) => (c.authorType as string) === "agent" || (c.author_type as string) === "agent",
+          );
+          return Boolean(agentComment);
+        },
+        { timeout: 15_000, message: "no agent comment appeared" },
+      )
+      .toBe(true);
 
     expect(agentComment, "agent response must be auto-bridged as a task comment").toBeDefined();
     expect((agentComment!.body as string).length).toBeGreaterThan(0);

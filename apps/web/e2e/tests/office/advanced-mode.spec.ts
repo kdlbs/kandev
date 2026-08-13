@@ -60,16 +60,19 @@ const test = base.extend<{ testPage: Page }, AdvancedModeFixtures>({
         "waiting_for_input",
         "review",
       ]);
-      const deadline = Date.now() + 25_000;
-      while (Date.now() < deadline) {
-        const issue = await officeApi.getTask(result.taskId);
-        const raw = issue as Record<string, unknown>;
-        const inner = (raw.task as Record<string, unknown>) ?? raw;
-        const state = ((inner.state as string) ?? (inner.status as string) ?? "").toLowerCase();
-        if (state === "failed") throw new Error("Task entered FAILED state");
-        if (launched.has(state)) break;
-        await new Promise((r) => setTimeout(r, 500));
-      }
+      await expect
+        .poll(
+          async () => {
+            const issue = await officeApi.getTask(result.taskId);
+            const raw = issue as Record<string, unknown>;
+            const inner = (raw.task as Record<string, unknown>) ?? raw;
+            const state = ((inner.state as string) ?? (inner.status as string) ?? "").toLowerCase();
+            if (state === "failed") throw new Error("Task entered FAILED state");
+            return launched.has(state);
+          },
+          { timeout: 25_000, message: "task never reached a launched state" },
+        )
+        .toBe(true);
 
       await use({
         workspaceId: result.workspaceId,
