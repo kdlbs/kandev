@@ -360,6 +360,7 @@ function commitsMatch(
   local: Pick<LocalCommitForMerge, "commit_sha" | "repository_name">,
   pr: PRCommitForMerge,
 ): boolean {
+  if (!local.commit_sha || !pr.sha) return false;
   const shaMatches = pr.sha.startsWith(local.commit_sha) || local.commit_sha.startsWith(pr.sha);
   return shaMatches && (local.repository_name ?? "") === (pr.repository_name ?? "");
 }
@@ -419,6 +420,67 @@ function orderSingleRepoPushedCommits(
   return ordered;
 }
 
+function repositoryKey(repositoryName: string | undefined): string {
+  return repositoryName ?? "";
+}
+
+function orderPushedCommitsByRepository(
+  prCommits: PRCommitForMerge[],
+  providerOnly: MergedCommit[],
+  pushed: MergedCommit[],
+  localPushedByPRKey: Map<string, MergedCommit>,
+): MergedCommit[] {
+  const repositoryOrder: string[] = [];
+  const seenRepositories = new Set<string>();
+  const pushedByRepository = new Map<string, MergedCommit[]>();
+  const providerOnlyByRepository = new Map<string, MergedCommit[]>();
+  const prByRepository = new Map<string, PRCommitForMerge[]>();
+
+  const addRepository = (key: string) => {
+    if (seenRepositories.has(key)) return;
+    seenRepositories.add(key);
+    repositoryOrder.push(key);
+  };
+  const addCommit = (map: Map<string, MergedCommit[]>, commit: MergedCommit) => {
+    const key = repositoryKey(commit.repository_name);
+    addRepository(key);
+    const commits = map.get(key) ?? [];
+    commits.push(commit);
+    map.set(key, commits);
+  };
+
+  for (const commit of pushed) addCommit(pushedByRepository, commit);
+  for (const commit of providerOnly) addCommit(providerOnlyByRepository, commit);
+  for (const pr of prCommits) {
+    const key = repositoryKey(pr.repository_name);
+    addRepository(key);
+    const commits = prByRepository.get(key) ?? [];
+    commits.push(pr);
+    prByRepository.set(key, commits);
+  }
+
+  const ordered: MergedCommit[] = [];
+  for (const key of repositoryOrder) {
+    const repoPRCommits = prByRepository.get(key) ?? [];
+    const repoProviderOnly = providerOnlyByRepository.get(key) ?? [];
+    const repoPushed = pushedByRepository.get(key) ?? [];
+    const hasLocalAnchor = repoPRCommits.some((pr) => localPushedByPRKey.has(prCommitKey(pr)));
+    if (!hasLocalAnchor) {
+      ordered.push(...repoPushed, ...repoProviderOnly);
+      continue;
+    }
+    ordered.push(
+      ...orderSingleRepoPushedCommits(
+        repoPRCommits,
+        repoProviderOnly,
+        repoPushed,
+        localPushedByPRKey,
+      ),
+    );
+  }
+  return ordered;
+}
+
 /**
  * Merge local session commits and PR commits into a single list. A commit is
  * pushed when EITHER source confirms it: the backend's `pushed` field
@@ -440,15 +502,9 @@ export function mergeCommits(
   );
   const providerOnly: MergedCommit[] = [];
   appendPROnlyCommits(prCommits, matchedPRKeys, providerOnly);
-  // Multi-repository rows cannot share a single provider timeline. A local
-  // checkout that has no SHA overlap with the provider also has no reliable
-  // anchor for chronology, so preserve the established local-first order.
-  if (prCommits.some((pr) => pr.repository_name) || localPushedByPRKey.size === 0) {
-    return [...unpushed, ...pushed, ...providerOnly];
-  }
   return [
     ...unpushed,
-    ...orderSingleRepoPushedCommits(prCommits, providerOnly, pushed, localPushedByPRKey),
+    ...orderPushedCommitsByRepository(prCommits, providerOnly, pushed, localPushedByPRKey),
   ];
 }
 

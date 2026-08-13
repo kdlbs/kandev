@@ -21,10 +21,9 @@ The plan implements
 consumer sends the same WebSocket request. A single rejection clears the provider list and sets an
 error. `ChangesPanelBody` converts that internal error into the yellow warning shown in the report.
 
-The relation classifier also requires an upstream head before it evaluates provider ancestry. It
-therefore ignores a complete provider history that contains local HEAD when the checkout has no
-upstream. The unified commit merge appends provider-only commits after the local list, even though the
-provider API orders commits from oldest to newest. It gives these commits the same neutral marker as
+The relation classifier previously required an upstream head before it evaluated provider ancestry.
+The unified commit merge also appended provider-only commits after the local list, even though the
+provider API orders commits from oldest to newest. It gave these commits the same neutral marker as
 shared commits.
 
 ## Invariants
@@ -59,19 +58,21 @@ Evaluate provider evidence in this order:
 1. Require a selected pull request, a complete non-empty provider list, provider head, and local
    head.
 2. Classify equal heads as `aligned`.
-3. Classify a provider list that contains local HEAD as `provider_ahead`.
+3. After equal heads, classify a complete provider list with local HEAD and a different/newer
+   provider head as `provider_ahead`.
 4. Use upstream identity and counts to prove `local_ahead` or `diverged`.
 5. Use `unknown` when the remaining evidence cannot prove a relation.
 
 A provider-ahead relation disables Push. It enables Pull only when `hasUpstream` is true. An unknown
-relation keeps only actions that local Git evidence proves safe. Disabled action tooltips must describe
-the actual missing condition instead of reusing provider-history warning copy.
+relation disables remote Push and Pull until provider evidence is available. Disabled action tooltips
+must describe the actual missing condition instead of reusing provider-history warning copy.
 
 ### Commit reconciliation and presentation
 
-Reverse the provider's oldest-first list before merging it into the newest-first local timeline.
-Place provider-only commits before the shared history and mark them with the existing `current_pr`
-presentation. Keep shared commits neutral. In a confirmed divergence, keep the two history sections.
+Reverse each repository's provider oldest-first list before merging it into that repository's
+newest-first local timeline. Place provider-only commits before the shared history and mark them with
+the existing `current_pr` presentation. Keep shared commits neutral. In a confirmed divergence, keep
+the two history sections.
 Use violet for current-PR markers and amber for local-checkout markers. Keep the existing emerald arrow
 for ordinary unpushed local commits.
 
@@ -99,7 +100,8 @@ translated accessible labels. Remove provider-error banner plumbing from `Change
 - Prove that a final failure keeps an internal error without a visible Changes warning.
 - Prove that a complete provider list can establish `provider_ahead` without an upstream.
 - Prove that provider-ahead without an upstream disables Push and does not enable Pull.
-- Prove that provider-only commits appear newest first with current-PR provenance.
+- Prove that incomplete provider evidence disables remote Push and Pull.
+- Prove that provider-only commits appear newest first within each repository with current-PR provenance.
 - Prove that shared commits stay neutral.
 - Prove that confirmed provider commits use violet and local-checkout commits use amber.
 - Prove the same visible and accessible state in desktop and mobile E2E tests.
@@ -146,12 +148,14 @@ git diff --check
 - Task 01 shares provider reads by workspace, repository, pull request, and sync version; retries one
   failure; retains the final error internally; ignores stale results; and bounds cache entries.
 - Task 02 reconciles complete provider evidence by SHA, preserves checkout history, sorts provider-only
-  commits newest first, adds accessible provenance markers, removes the provider-history body warning,
-  and keeps remote actions fail-closed.
+  commits newest first within each repository, adds accessible provenance markers, removes the
+  provider-history body warning, and keeps remote actions fail-closed.
 - Task 03 passed the desktop Git Changes spec with 21 tests and the mobile rewritten-contribution spec
   with 1 test. Both surfaces expose the same provenance labels without horizontal overflow.
 - Final focused tests passed 59 tests across 6 files. Typecheck, lint, i18n checks, i18n ratchet, and
   `git diff --check` passed.
+- PR fixup hardened unavailable-evidence action gates, repository-scoped ordering, single-repository
+  contribution callbacks, empty-SHA matching, and fail-closed E2E assertions.
 
 Install workspace dependencies first in a fresh worktree:
 

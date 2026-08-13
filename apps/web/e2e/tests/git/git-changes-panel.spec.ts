@@ -562,9 +562,13 @@ test.describe("Git Changes Panel", () => {
     const commitMessages = await commitsList
       .locator('[data-testid^="commit-row-"]')
       .allTextContents();
-    expect(commitMessages.findIndex((message) => message.includes(remoteMessage))).toBeLessThan(
-      commitMessages.findIndex((message) => message.includes("Shared provider checkout commit")),
+    const remoteIndex = commitMessages.findIndex((message) => message.includes(remoteMessage));
+    const sharedIndex = commitMessages.findIndex((message) =>
+      message.includes("Shared provider checkout commit"),
     );
+    expect(remoteIndex).toBeGreaterThanOrEqual(0);
+    expect(sharedIndex).toBeGreaterThanOrEqual(0);
+    expect(remoteIndex).toBeLessThan(sharedIndex);
     await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
     await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
     await row.hover();

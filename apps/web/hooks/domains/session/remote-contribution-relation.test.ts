@@ -238,6 +238,17 @@ describe("remoteContributionActionPolicy", () => {
     });
   });
 
+  it("leaves the Pull reason empty when provider-ahead has an upstream", () => {
+    const relation = classifyRemoteContribution(
+      input({
+        providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
+        remoteBehind: 1,
+      }),
+    );
+
+    expect(remoteContributionActionReasonKey(relation, "pull")).toBeNull();
+  });
+
   it("does not offer Pull for provider-ahead without an upstream", () => {
     const relation = classifyRemoteContribution(
       input({
@@ -254,6 +265,34 @@ describe("remoteContributionActionPolicy", () => {
     });
   });
 
+  it("keeps normal push behavior for local-ahead history", () => {
+    const relation = classifyRemoteContribution(input({ remoteAhead: 2 }));
+
+    expect(remoteContributionActionPolicy(relation)).toEqual({
+      action: "normal_push",
+      pushDisabled: false,
+      pullDisabled: false,
+      replaceDisabled: true,
+      useDisabled: true,
+      disabledReason: null,
+    });
+  });
+
+  it("does not offer destructive choices when provider evidence is unavailable", () => {
+    const relation = classifyRemoteContribution(input({ providerLoading: true }));
+
+    expect(remoteContributionActionPolicy(relation)).toEqual({
+      action: "unavailable_evidence",
+      pushDisabled: true,
+      pullDisabled: true,
+      replaceDisabled: true,
+      useDisabled: true,
+      disabledReason: "provider_evidence_unavailable",
+    });
+  });
+});
+
+describe("remoteContributionActionReasonKey", () => {
   it("returns action-specific disabled reason keys", () => {
     const providerAhead = classifyRemoteContribution(
       input({
@@ -280,31 +319,8 @@ describe("remoteContributionActionPolicy", () => {
     expect(remoteContributionActionReasonKey(diverged, "pull")).toBe(
       "task:divergedActionsUnavailable",
     );
-  });
 
-  it("keeps normal push behavior for local-ahead history", () => {
-    const relation = classifyRemoteContribution(input({ remoteAhead: 2 }));
-
-    expect(remoteContributionActionPolicy(relation)).toEqual({
-      action: "normal_push",
-      pushDisabled: false,
-      pullDisabled: false,
-      replaceDisabled: true,
-      useDisabled: true,
-      disabledReason: null,
-    });
-  });
-
-  it("does not offer destructive choices when provider evidence is unavailable", () => {
-    const relation = classifyRemoteContribution(input({ providerLoading: true }));
-
-    expect(remoteContributionActionPolicy(relation)).toEqual({
-      action: "unavailable_evidence",
-      pushDisabled: false,
-      pullDisabled: false,
-      replaceDisabled: true,
-      useDisabled: true,
-      disabledReason: "provider_evidence_unavailable",
-    });
+    const unavailable = classifyRemoteContribution(input({ providerLoading: true }));
+    expect(remoteContributionActionReasonKey(unavailable, "push")).toBe("task:providerUnavailable");
   });
 });

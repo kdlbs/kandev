@@ -52,6 +52,7 @@ export type RemoteContributionActionPolicy = {
 };
 
 export type RemoteContributionActionReasonKey =
+  | "task:providerUnavailable"
   | "task:providerAheadPushDisabled"
   | "task:providerAheadPullRequiresUpstream"
   | "task:divergedActionsUnavailable";
@@ -60,6 +61,7 @@ export function remoteContributionActionReasonKey(
   relation: RemoteContributionRelation,
   action: "push" | "pull",
 ): RemoteContributionActionReasonKey | null {
+  if (relation.action === "unavailable_evidence") return "task:providerUnavailable";
   if (relation.action === "provider_ahead_pull") {
     if (action === "push") return "task:providerAheadPushDisabled";
     if (!relation.canPull) return "task:providerAheadPullRequiresUpstream";
@@ -80,8 +82,9 @@ export function remoteContributionActionPolicy(
   const diverged = relation.action === "diverged_replace";
   return {
     action: relation.action,
-    pushDisabled: diverged || relation.action === "provider_ahead_pull",
-    pullDisabled: diverged || (relation.action === "provider_ahead_pull" && !relation.canPull),
+    pushDisabled: unavailable || diverged || relation.action === "provider_ahead_pull",
+    pullDisabled:
+      unavailable || diverged || (relation.action === "provider_ahead_pull" && !relation.canPull),
     replaceDisabled: !relation.canReplaceRemote,
     useDisabled: !relation.canUseRemote,
     disabledReason: unavailable ? "provider_evidence_unavailable" : null,

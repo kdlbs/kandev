@@ -27,6 +27,7 @@ import {
   buildRemoteContributionResolutionTarget,
   useRemoteContributionResolution,
   useRemoteContributionResolutionConfirmation,
+  type RemoteContributionResolutionTarget,
 } from "@/components/task/use-remote-contribution-resolution";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import { VcsSplitButtonContent } from "./vcs-split-button-parts";
@@ -260,7 +261,12 @@ function useVcsContributionState(sessionId: string | null) {
   return { ...contribution, remoteActionPolicy, ...resolutionState };
 }
 
-function buildVcsSplitCallbacks({
+type VcsResolutionActions = Pick<
+  ReturnType<typeof useVcsContributionState>["resolution"],
+  "requestReplace" | "requestUse"
+>;
+
+export function buildVcsSplitCallbacks({
   openCommitDialog,
   openPRDialog,
   handlePull,
@@ -270,6 +276,7 @@ function buildVcsSplitCallbacks({
   resolution,
   resolutionTarget,
   selectedPR,
+  openExternalLinkFn,
 }: {
   openCommitDialog: (repo?: string) => void;
   openPRDialog: (repo?: string) => void;
@@ -277,10 +284,12 @@ function buildVcsSplitCallbacks({
   handlePush: (force?: boolean, repo?: string) => void;
   handleRebase: (repo?: string) => void;
   handleMerge: (repo?: string) => void;
-  resolution: ReturnType<typeof useVcsContributionState>["resolution"];
-  resolutionTarget: ReturnType<typeof useVcsContributionState>["resolutionTarget"];
-  selectedPR: TaskPR | null;
+  resolution: VcsResolutionActions;
+  resolutionTarget: RemoteContributionResolutionTarget | null;
+  selectedPR: Pick<TaskPR, "pr_url"> | null;
+  openExternalLinkFn?: typeof openExternalLink;
 }) {
+  const openLink = openExternalLinkFn ?? openExternalLink;
   return {
     onCommit: (repo?: string) => openCommitDialog(repo),
     onPR: (repo?: string) => openPRDialog(repo),
@@ -300,7 +309,7 @@ function buildVcsSplitCallbacks({
     },
     onViewContribution: (repo?: string) => {
       if (resolutionTarget?.repo !== repo || !selectedPR?.pr_url) return;
-      void openExternalLink(selectedPR.pr_url).catch(() => undefined);
+      void openLink(selectedPR.pr_url).catch(() => undefined);
     },
   };
 }

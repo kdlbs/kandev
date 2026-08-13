@@ -204,7 +204,7 @@ function SingleRepoVcsButton({
   );
 }
 
-type VcsSplitButtonCallbacks = {
+export type VcsSplitButtonCallbacks = {
   onCommit: (repo?: string) => void;
   onPR: (repo?: string) => void;
   onPull: (repo?: string) => void;
@@ -215,6 +215,20 @@ type VcsSplitButtonCallbacks = {
   onUseContribution: (repo?: string) => void;
   onViewContribution: (repo?: string) => void;
 };
+
+export function buildSingleRepoContributionCallbacks(
+  callbacks: Pick<
+    VcsSplitButtonCallbacks,
+    "onReplaceContribution" | "onUseContribution" | "onViewContribution"
+  >,
+  blockedRepositoryName?: string,
+) {
+  return {
+    onReplaceContribution: () => callbacks.onReplaceContribution(blockedRepositoryName),
+    onUseContribution: () => callbacks.onUseContribution(blockedRepositoryName),
+    onViewContribution: () => callbacks.onViewContribution(blockedRepositoryName),
+  };
+}
 
 type VcsSplitButtonContentProps = {
   isMultiRepo: boolean;
@@ -417,6 +431,11 @@ export function VcsSplitButtonContent({
     );
   }
 
+  const singleRepoContributionCallbacks = buildSingleRepoContributionCallbacks(
+    callbacks,
+    blockedRepositoryName,
+  );
+
   return (
     <>
       <SingleRepoVcsButton
@@ -441,9 +460,9 @@ export function VcsSplitButtonContent({
         onPR={() => callbacks.onPR()}
         onPull={() => callbacks.onPull()}
         onPush={(force) => callbacks.onPush(force)}
-        onReplaceContribution={() => callbacks.onReplaceContribution()}
-        onUseContribution={() => callbacks.onUseContribution()}
-        onViewPRVersion={() => callbacks.onViewContribution()}
+        onReplaceContribution={singleRepoContributionCallbacks.onReplaceContribution}
+        onUseContribution={singleRepoContributionCallbacks.onUseContribution}
+        onViewPRVersion={singleRepoContributionCallbacks.onViewContribution}
         prNumber={prNumber}
         onRebase={() => callbacks.onRebase()}
         onMerge={() => callbacks.onMerge()}

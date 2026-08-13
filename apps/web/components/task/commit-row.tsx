@@ -21,6 +21,13 @@ import { useTranslation } from "react-i18next";
 
 export type CommitPresentation = "current_pr" | "local_checkout";
 
+const provenanceAccessibleLabelKey = {
+  current_pr: "task:currentPRCommit",
+  local_checkout: "task:localCheckoutCommit",
+  pushed: "task:pushedCommit",
+  unpushed: "task:unpushedCommit",
+} as const;
+
 export type CommitItem = {
   commit_sha: string;
   commit_message: string;
@@ -197,16 +204,7 @@ function CommitStatusMarker({ commit }: { commit: CommitItem }) {
     marker = <IconArrowUp aria-hidden="true" className="h-3.5 w-3.5 text-emerald-500" />;
   }
 
-  let accessibleLabel: string;
-  if (commit.presentation === "current_pr") {
-    accessibleLabel = t("task:currentPRCommit");
-  } else if (commit.presentation === "local_checkout") {
-    accessibleLabel = t("task:localCheckoutCommit");
-  } else if (commit.pushed === true) {
-    accessibleLabel = t("task:pushedCommit");
-  } else {
-    accessibleLabel = t("task:unpushedCommit");
-  }
+  const accessibleLabel = t(provenanceAccessibleLabelKey[provenance]);
 
   return (
     <span

@@ -97,7 +97,7 @@ describe("usePRCommits request ownership", () => {
 
     const { result } = renderHook(() => usePRCommits("acme", "app", 1, "retry"), { wrapper });
 
-    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2), { timeout: 200 });
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(result.current.providerHead).toBe(RETRY_COMMIT_SHA));
   });
 

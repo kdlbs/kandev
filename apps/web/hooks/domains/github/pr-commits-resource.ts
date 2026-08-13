@@ -308,6 +308,8 @@ function getSnapshot(store: PRCommitsResourceStore, key: string): PRCommitsState
   if (!key) return EMPTY_STATE;
   const entry = store.entries.get(key);
   if (!entry) return PENDING_STATE;
+  // useSyncExternalStore reads during render; touching here keeps actively
+  // rendered entries recent for bounded LRU eviction.
   touch(store, entry);
   return entry.snapshot;
 }

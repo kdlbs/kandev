@@ -22,11 +22,11 @@ the provider-error banner and show proven commit provenance with accessible colo
 
 ## Acceptance
 
-1. Complete provider history that contains local HEAD classifies as `provider_ahead` without an
-   upstream.
+1. After equal heads are classified as aligned, complete provider history with local HEAD and a
+   different/newer provider head classifies as `provider_ahead` without an upstream.
 2. Provider-ahead without an upstream disables Push and does not enable Pull.
 3. Unknown evidence does not expose replacement or provider-adoption actions.
-4. Provider-only commits appear newest first and use `current_pr` provenance.
+4. Provider-only commits appear newest first within each repository and use `current_pr` provenance.
 5. Shared commits use the neutral marker. Ordinary unpushed commits keep the emerald arrow.
 6. Confirmed divergence uses violet current-PR markers and amber local-checkout markers.
 7. Marker title, screen-reader text, and a stable data attribute expose provenance without color.
@@ -88,14 +88,19 @@ exact test results. Update this task and `plan.md` in the same conversation.
 
 ## Results
 
-- Complete provider history containing local HEAD now proves `provider_ahead` without an upstream.
+- After equal heads are classified as aligned, complete provider history containing local HEAD and a
+  different provider head now proves `provider_ahead` without an upstream.
   Push remains disabled; Pull requires a configured upstream. Unknown and diverged states keep their
   existing fail-closed action policy with relation-specific reasons.
-- Provider-only commits are reconciled by SHA, rendered newest first with `current_pr` provenance, and
-  shared commits remain neutral. Confirmed divergence uses violet current-PR and amber local-checkout
-  markers, each with title, screen-reader text, and stable data attributes.
+- Provider-only commits are reconciled by SHA, rendered newest first within each repository with
+  `current_pr` provenance, and shared commits remain neutral. Confirmed divergence uses violet
+  current-PR and amber local-checkout markers, each with title, screen-reader text, and stable data
+  attributes.
 - Removed provider-history warning and empty/error body plumbing while retaining internal provider error
   evidence for safety classification. Desktop and mobile action tooltips use the specific relation
   reason keys.
 - Task-focused command passed 49 tests across the three task files. The final six-file focused command
   passed 59 tests.
+- PR fixup now disables remote Push and Pull while provider evidence is unavailable, orders named
+  repositories independently, and passes the repository scope through single-repository resolution
+  actions.

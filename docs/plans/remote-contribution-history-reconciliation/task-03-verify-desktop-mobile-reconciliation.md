@@ -23,7 +23,7 @@ fixture transitions and semantic assertions.
 
 ## Acceptance
 
-1. A transient provider read failure does not show `providerHistoryUnavailable` in the Changes body.
+1. A transient provider read failure does not show a provider-history warning in the Changes body.
 2. A successful retry reconciles the view without a user action.
 3. A provider-only commit appears before shared commits with current-PR provenance.
 4. Shared commits keep neutral provenance.

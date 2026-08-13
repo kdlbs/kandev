@@ -35,10 +35,10 @@ Kandev treats provider commit history as optional Changes enrichment.
 - Shared commits use the normal commit marker. Provider-only commits use a current-PR color and an
   accessible current-PR label. Checkout-only commits in confirmed divergence use a distinct
   local-checkout color and label.
-- Provider-only commits appear in newest-first order with the checkout history.
-- A complete provider list that contains local HEAD proves `provider_ahead` without upstream
-  evidence. Pull still requires a configured upstream. Push remains unavailable while the provider
-  is ahead.
+- Provider-only commits appear in newest-first order within each repository.
+- After equal heads are classified as `aligned`, a complete provider list that contains local HEAD
+  and has a different/newer provider head proves `provider_ahead` without upstream evidence. Pull
+  still requires a configured upstream. Push remains unavailable while the provider is ahead.
 - Confirmed divergence keeps the compact version-resolution control from
   [ADR-2026-08-12](2026-08-12-local-first-contribution-replacement.md). Provider failure alone never
   exposes those destructive choices.

@@ -84,9 +84,10 @@ Kandev must preserve both versions and ask for user intent before one version re
 - Kandev exposes no replacement action through agent MCP tools or automatic Git operations. Generic
   contribution force-push requests remain rejected. Direct terminal commands remain outside this UI
   approval boundary.
-- A provider-ahead history that still contains local HEAD is a safe fast-forward case: the UI may offer
-  Pull, but must not label the existing local commits as unpushed work. A local-ahead history whose
-  tracked upstream equals the provider head may offer a normal Push for exactly `remote_ahead` commits.
+- After equal heads are classified as aligned, a complete provider-ahead history that still contains
+  local HEAD is a safe fast-forward case: the UI may offer Pull, but must not label the existing
+  local commits as unpushed work. A local-ahead history whose tracked upstream equals the provider
+  head may offer a normal Push for exactly `remote_ahead` commits.
 
 Decisions:
 [ADR-2026-08-04-remote-contribution-bindings](../../decisions/2026-08-04-remote-contribution-bindings.md),
@@ -316,7 +317,7 @@ AND it does not claim the branch was rewritten or compare commits by message or 
 
 GIVEN a complete provider history contains local HEAD and one newer provider commit
 WHEN the Changes panel reconciles the commit lists
-THEN it shows the provider-only commit first with the current-PR color and accessible label
+THEN it shows the provider-only commit first within its repository with the current-PR color and accessible label
 AND it keeps shared commits neutral and does not mark them as local work to push
 AND it does not offer Pull when the checkout has no configured upstream
 

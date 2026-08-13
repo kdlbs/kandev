@@ -155,6 +155,55 @@ describe("mergeCommits repository identity", () => {
       detailTarget: { source: "github", repo: "widget-b" },
     });
   });
+
+  it("orders provider-only commits before shared commits within each repository", () => {
+    const local = [
+      { ...makeLocal("shared-a", "shared a"), repository_name: "widget-a", pushed: true },
+      { ...makeLocal("shared-b", "shared b"), repository_name: "widget-b", pushed: true },
+    ];
+    const provider = [
+      {
+        ...makePR("old-a", "old a"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-a",
+        repository_name: "widget-a",
+      },
+      {
+        ...makePR("shared-a", "shared a provider"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-a",
+        repository_name: "widget-a",
+      },
+      {
+        ...makePR("new-a", "new a"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-a",
+        repository_name: "widget-a",
+      },
+      {
+        ...makePR("shared-b", "shared b provider"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-b",
+        repository_name: "widget-b",
+      },
+    ];
+
+    const result = mergeCommits(local, provider);
+
+    expect(
+      result
+        .filter((commit) => commit.repository_name === "widget-a")
+        .map((commit) => commit.commit_sha),
+    ).toEqual(["new-a", "shared-a", "old-a"]);
+  });
 });
 
 describe("separateCommitHistories", () => {
