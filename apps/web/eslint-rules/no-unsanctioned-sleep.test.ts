@@ -81,6 +81,25 @@ ruleTester.run("no-unsanctioned-sleep", noUnsanctionedSleep, {
       });`,
     },
 
+    // --- In-page code: the discriminator is what the promise RESOLVES ON,
+    // --- not which context it runs in. A frame is an event; a duration is not.
+    //
+    // Instrumentation, sampling geometry frame by frame. The promise resolves on
+    // the FRAME — the `setTimeout(…, 0)` only hops out of the rAF callback so the
+    // measurement reflects painted geometry. Neither `dwell` nor `injectLatency`
+    // exists in the browser context, so flagging this would trip the gate with no
+    // legal way to comply. Excluded structurally (the executor's one statement is
+    // the rAF call), and pinned here so a future tightening of the nesting rule
+    // cannot silently break it.
+    // e2e/tests/layout/toggle-sidebar-shortcut.spec.ts:123
+    {
+      code: `await page.evaluate(() =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => setTimeout(resolve, 0));
+        }),
+      );`,
+    },
+
     // --- A promise that is not a sleep at all. ---
     { code: "new Promise((resolve) => { socket.onopen = () => resolve(); });" },
     { code: "new Promise((resolve) => setTimeout(unrelatedCallback, 100));" },
@@ -152,6 +171,17 @@ ruleTester.run("no-unsanctioned-sleep", noUnsanctionedSleep, {
     {
       code: "await page.waitForTimeout(100); await new Promise((r) => setTimeout(r, 100));",
       errors: [{ messageId: "waitForTimeout" }, { messageId: "promiseSleep" }],
+    },
+    // A DURATION wait is still a duration wait inside `page.evaluate`.
+    // `await page.evaluate(() => new Promise((r) => setTimeout(r, 500)))` blocks
+    // the test for 500ms exactly like `page.waitForTimeout(500)` — the browser
+    // context is a wrapper, not a different kind of wait. Exempting in-page code
+    // wholesale would make that one line a laundering wrapper for every sleep in
+    // the suite. There IS a legal path: hoist it to `dwell(page, ms, …)` and
+    // evaluate afterwards, or resolve on a frame/event as the rAF case above does.
+    {
+      code: "await page.evaluate(() => new Promise((r) => setTimeout(r, 500)));",
+      errors: [{ messageId: "promiseSleep" }],
     },
     // A bound reference to `resolve` is still `resolve`. Flagged so the form
     // cannot be used to launder a sleep past the rule (review finding).

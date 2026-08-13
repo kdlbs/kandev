@@ -487,6 +487,86 @@ not a duration wait. This falls out of the rule's shape rather than from a
 carve-out — a blanket "any `setTimeout(…, 0)` is fine" exemption would have been
 a loophole.
 
+## Verifying a converted wait
+
+Replacing a sleep with a causal wait is easy to do wrongly in a way that still
+passes. These four checks are ordered by how often they actually catch
+something.
+
+### 1. Verify against observed traffic, never a name that looks right
+
+Reading the components and picking the action that sounds correct is the single
+most common way a conversion goes wrong. Attach a throwaway logger, run the spec
+once, and read what actually arrived:
+
+```ts
+page.on("response", (r) => console.log(r.request().method(), new URL(r.url()).pathname));
+page.on("websocket", (ws) =>
+  ws.on("framereceived", (f) => console.log(String(f.payload).slice(0, 200))),
+);
+```
+
+Three conversions in this suite were wrong despite careful code-reading: a spec
+named after `kanban.update` whose path only ever delivers `task.updated`; a
+branch list fetched on the workspace-scoped route rather than the
+repository-scoped one the client's shape implies; and a `task.plan.get` that
+never fires on first panel open at all. Each looked right in the source.
+
+### 2. Rule out the silent burn
+
+A wait that resolves on timeout instead of throwing converts a hard failure into
+a slow pass — the test still goes green, having asserted nothing about timing.
+Every armed wait must be awaited, and must reject rather than resolve when it
+expires (the primitives in `helpers/causal-waits.ts` do).
+
+Then compare **runtime against the budget**. A spec carrying two 15s waits that
+finishes in 6.3s cannot be burning either of them; one that finishes in 30.1s is
+burning both. One fixed conversion here went from a 15s burn to 6.8s, and that
+delta is what exposed it — not any assertion.
+
+### 3. Run it enough times to mean something
+
+```sh
+pnpm run build:e2e                       # specs run against the prebuilt dist
+pnpm e2e:raw tests/<area>/<spec>.spec.ts --repeat-each=10
+```
+
+Read the **spread**, not the pass count. `1.4s-11.4s` across ten runs with zero
+failures is evidence the wait absorbs load; a single green 1.4s run is evidence
+of nothing. A component edit is invisible until `build:e2e` re-runs, so a spec
+that "passes after the fix" without a rebuild has told you nothing.
+
+### 4. Mutate what you rely on
+
+Break the thing the test depends on, confirm the intended test fails, restore,
+confirm the tree is byte-identical. Assert the expected number of tests was
+**collected and executed** — a mutant that fails to compile makes the runner
+report zero collected, which at a glance is indistinguishable from a clean run.
+
+### Two traps
+
+**Wrong Playwright project.** `mobile-*.spec.ts` exists only under
+`mobile-chrome`, `tests/auth/**` under `auth`, `office-routing-*` under
+`routing`, and `tests/{docker,ssh}/**` under `containers`. Selecting one under
+`chromium` matches nothing, prints `No tests found`, and **exits non-zero** — so
+the failure is real. What hides it is the idiom: `playwright test … | tail`
+reports `tail`'s exit status, not Playwright's. **Never pipe a gate.** Derive the
+expected test count before the run and compare it to Playwright's first line;
+checking afterwards is a habit, deriving first is a check.
+
+**Nothing typechecks `e2e/**`.** `apps/web/tsconfig.json`excludes it, there is
+no`e2e/tsconfig.json`, and eslint runs no type-aware rules here — a file
+containing `const x: number = "string"`passes both`pnpm run typecheck`and`pnpm lint`. Anything load-bearing needs a runtime check or a test. `dwell`
+validates its category at runtime for exactly this reason.
+
+### Why this matters
+
+**A sleep is where a test goes to stop asserting.** Converting them has already
+found two specs that had quietly stopped testing anything. The clearest was a
+test pressing a keybinding that is `UNBOUND_SHORTCUT` by default: the keypress
+was a no-op, and the 250ms sleep after it made the test look like it was waiting
+for a result it could never receive.
+
 ## Adding a new spec
 
 1. Pick a directory under `tests/` (or create one for a new feature).
