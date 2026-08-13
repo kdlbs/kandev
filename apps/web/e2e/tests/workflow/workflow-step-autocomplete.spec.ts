@@ -22,9 +22,13 @@ test.describe("Workflow step prompt autocomplete", () => {
 
     // Click into the editor to focus it
     await monacoEditor.click();
-    // Monaco routes keystrokes through a hidden textarea; typing before it has
-    // focus silently goes nowhere, so wait for the focus rather than budget it.
-    await expect(monacoEditor.locator("textarea").first()).toBeFocused({ timeout: 5_000 });
+    // Typing before Monaco owns focus silently goes nowhere, so wait for the
+    // focus rather than budget for it. The selector is load-bearing and was
+    // established by probing the live DOM: this Monaco build uses the
+    // EditContext API, so the focus target is `div.native-edit-context`. There
+    // is no `textarea.inputarea`, and the only textarea present is a readonly
+    // `ime-text-area` that never receives focus.
+    await expect(monacoEditor.locator(".native-edit-context")).toBeFocused({ timeout: 5_000 });
 
     // Type {{ to trigger autocomplete
     await testPage.keyboard.type("{{");
@@ -64,9 +68,9 @@ test.describe("Workflow step prompt autocomplete", () => {
 
       // Click into the editor to focus it
       await monacoEditor.click();
-      // Monaco routes keystrokes through a hidden textarea; typing before it
-      // has focus silently goes nowhere, so wait for the focus.
-      await expect(monacoEditor.locator("textarea").first()).toBeFocused({ timeout: 5_000 });
+      // Focus target is `div.native-edit-context` (EditContext API), not a
+      // textarea. See the note in the first test.
+      await expect(monacoEditor.locator(".native-edit-context")).toBeFocused({ timeout: 5_000 });
 
       // Type @ to trigger the prompt-mention autocomplete
       await testPage.keyboard.type("@");
