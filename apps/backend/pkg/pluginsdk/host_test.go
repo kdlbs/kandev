@@ -8,7 +8,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -33,6 +35,27 @@ type recordingHost struct {
 		payload map[string]any
 	}
 	deleteStateCalled bool
+	taskTrees         PluginOwnedTaskTreeManager
+}
+
+func (h *recordingHost) PluginOwnedTaskTrees() PluginOwnedTaskTreeManager {
+	if h.taskTrees != nil {
+		return h.taskTrees
+	}
+	return h.UnimplementedHostData.PluginOwnedTaskTrees()
+}
+
+type recordingTaskTreeManager struct {
+	deletedTaskIDs []string
+	err            error
+}
+
+func (m recordingTaskTreeManager) Preview(context.Context, string) ([]Task, error) {
+	return nil, nil
+}
+
+func (m recordingTaskTreeManager) Delete(context.Context, string) ([]string, error) {
+	return m.deletedTaskIDs, m.err
 }
 
 func (h *recordingHost) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
@@ -229,4 +252,19 @@ func TestHost_EmitEvent(t *testing.T) {
 	require.NoError(t, host.EmitEvent(context.Background(), "custom.thing", map[string]any{"a": float64(1)}))
 	require.Equal(t, "custom.thing", impl.emitEvent.name)
 	require.Equal(t, map[string]any{"a": float64(1)}, impl.emitEvent.payload)
+}
+
+func TestHost_DeletePluginOwnedTaskTree_PreservesPartialProgressOverWire(t *testing.T) {
+	impl := &recordingHost{taskTrees: recordingTaskTreeManager{
+		deletedTaskIDs: []string{"grandchild", "child"},
+		err:            status.Error(codes.Unavailable, "task store became unavailable"),
+	}}
+	host := dialHostOverBufconn(t, impl)
+	manager, ok := PluginOwnedTaskTrees(host)
+	require.True(t, ok)
+
+	deletedTaskIDs, err := manager.Delete(context.Background(), "root")
+
+	require.Equal(t, []string{"grandchild", "child"}, deletedTaskIDs)
+	require.Equal(t, codes.Unavailable, status.Code(err))
 }

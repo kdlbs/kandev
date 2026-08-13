@@ -12,6 +12,12 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+const (
+	sessionStateCancelled = "CANCELLED"
+	sessionStateCompleted = "COMPLETED"
+	sessionStateFailed    = "FAILED"
+)
+
 // worktreeCutover holds the legacy inventory and the normalized result.
 type worktreeCutover struct {
 	envs                      map[string]*legacyEnv
@@ -534,7 +540,7 @@ func isLegacyDeletedWorktree(wt legacySessionWorktree) bool {
 // open execution that can own a conflicting worktree during cutover.
 func isLegacyHistoricalSession(state string) bool {
 	switch state {
-	case "COMPLETED", "FAILED", "CANCELLED":
+	case sessionStateCompleted, sessionStateFailed, sessionStateCancelled:
 		return true
 	default:
 		return false

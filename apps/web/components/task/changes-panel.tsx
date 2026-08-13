@@ -59,6 +59,11 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
         repoDisplayName={data.repoDisplayName}
         taskId={data.activeTaskId}
         credentialDisplay={data.gitCredentialDisplay}
+        relation={data.relation}
+        resolution={data.resolution}
+        resolutionTarget={data.resolutionTarget}
+        remoteContributionUrl={data.selectedPR?.pr_url ?? data.existingPrUrl}
+        remoteContributionNumber={data.selectedPR?.pr_number}
       />
       <ChangesPanelBody {...buildChangesPanelBodyProps(data, props)} />
     </PanelRoot>

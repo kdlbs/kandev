@@ -201,6 +201,31 @@ func TestCreateWorktree_CheckoutBranchNoFetchWarningWithRemote(t *testing.T) {
 	}
 }
 
+func TestCreateWorktree_UsesAlreadyRefreshedRemoteWithoutNetwork(t *testing.T) {
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	repoPath := initGitRepoWithRemote(t)
+	// Leave the refreshed remote-tracking refs in place, but make any accidental
+	// network access fail. The worktree must materialize solely from local refs.
+	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
+
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID: "task-1", SessionID: "session-1", RepositoryID: "repo-1",
+		RepositoryPath: repoPath, BaseBranch: "main", CheckoutBranch: "feature/pr-branch",
+		PullBeforeWorktree: true, RemoteSyncHandled: true,
+		TaskDirName: "task-1", RepoName: "repo-1",
+	})
+	if err != nil {
+		t.Fatalf("Create() used the network after an authenticated refresh: %v", err)
+	}
+	if wt.Branch != "feature/pr-branch" || wt.FetchWarning != "" {
+		t.Fatalf("worktree = branch %q warning %q", wt.Branch, wt.FetchWarning)
+	}
+}
+
 // TestCreateWorktree_RemoteBaseRefDoesNotSetUpstream verifies that when a worktree
 // is created with a remote-tracking ref as the base (e.g. origin/feature/foo),
 // the new branch does NOT inherit upstream tracking from that ref.

@@ -4,6 +4,9 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+
+registerSeparateQueueRows(test);
 
 /**
  * E2E coverage for the cross-task message attribution feature.

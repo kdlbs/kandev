@@ -4,7 +4,15 @@
 // POST /api/plugins/register.
 package manifest
 
-import "gopkg.in/yaml.v3"
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
+// MaxActionBodyBytes is the largest request body an authenticated action may
+// declare. Individual actions must still declare their own smaller bound.
+const MaxActionBodyBytes = 1 << 20
 
 // Manifest is the plugin registration manifest.
 type Manifest struct {
@@ -38,6 +46,12 @@ type Manifest struct {
 	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
 
 	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
+	Actions  []Action  `yaml:"actions,omitempty" json:"actions,omitempty"`
+	// RepositoryProviders declares provider IDs this plugin owns while active.
+	// Ownership is checked across active plugins by the runtime registry.
+	RepositoryProviders []string `yaml:"repository_providers,omitempty" json:"repository_providers,omitempty"`
+	// ReferenceSources declares composer sources this plugin owns while active.
+	ReferenceSources []ReferenceSource `yaml:"reference_sources,omitempty" json:"reference_sources,omitempty"`
 
 	// AuthProviders declares external login options (OIDC/SAML) this plugin
 	// contributes to the pre-auth login screen. Only meaningful alongside
@@ -47,11 +61,37 @@ type Manifest struct {
 	AuthProviders []AuthProvider `yaml:"auth_providers,omitempty" json:"auth_providers,omitempty"`
 
 	ConfigSchema map[string]any `yaml:"config_schema,omitempty" json:"config_schema,omitempty"`
+	AgentTools   []AgentTool    `yaml:"agent_tools,omitempty" json:"agent_tools,omitempty"`
 
 	UI UISection `yaml:"ui,omitempty" json:"ui,omitempty"`
 
 	Runtime          Runtime `yaml:"runtime,omitempty" json:"runtime,omitempty"`
 	MinKandevVersion string  `yaml:"min_kandev_version,omitempty" json:"min_kandev_version,omitempty"`
+}
+
+const (
+	AgentToolSurfaceKanban = "kanban-task"
+	AgentToolSurfaceOffice = "office-task"
+)
+
+// AgentTool is an MCP tool a plugin contributes to matching task sessions.
+// The exposed MCP name is derived by the host and is not author-controlled.
+type AgentTool struct {
+	Name         string               `yaml:"name" json:"name"`
+	Description  string               `yaml:"description" json:"description"`
+	Surfaces     []string             `yaml:"surfaces" json:"surfaces"`
+	InputSchema  map[string]any       `yaml:"input_schema" json:"input_schema"`
+	OutputSchema map[string]any       `yaml:"output_schema,omitempty" json:"output_schema,omitempty"`
+	Annotations  AgentToolAnnotations `yaml:"annotations,omitempty" json:"annotations,omitempty"`
+}
+
+// AgentToolAnnotations are MCP hints. Nil values preserve omission so the
+// runtime descriptor can apply conservative defaults explicitly.
+type AgentToolAnnotations struct {
+	ReadOnlyHint    *bool `yaml:"read_only_hint,omitempty" json:"read_only_hint,omitempty"`
+	DestructiveHint *bool `yaml:"destructive_hint,omitempty" json:"destructive_hint,omitempty"`
+	IdempotentHint  *bool `yaml:"idempotent_hint,omitempty" json:"idempotent_hint,omitempty"`
+	OpenWorldHint   *bool `yaml:"open_world_hint,omitempty" json:"open_world_hint,omitempty"`
 }
 
 // Runtime declares that a plugin ships a kandev-managed binary rather than
@@ -139,6 +179,58 @@ func (w Webhook) EffectiveMaxBodyBytes() int64 {
 	return w.MaxBodyBytes
 }
 
+// Action is an authenticated browser-to-plugin operation. Unlike Webhook,
+// actions always pass through Kandev's normal request authentication and
+// resource authorization before reaching the plugin.
+type Action struct {
+	Key           string `yaml:"key" json:"key"`
+	ResourceScope string `yaml:"scope" json:"scope"`
+	MaxBodyBytes  int    `yaml:"max_body_bytes" json:"max_body_bytes"`
+}
+
+const (
+	ActionScopeWorkspace  = "workspace"
+	ActionScopeTask       = "task"
+	ActionScopeRepository = "repository"
+)
+
+// UnmarshalYAML accepts the frozen manifest field name (scope) and the
+// pre-release resource_scope spelling so stored local plugin records remain
+// readable through the contract correction. Marshal paths emit scope only.
+func (a *Action) UnmarshalYAML(value *yaml.Node) error {
+	var raw struct {
+		Key                 string `yaml:"key"`
+		Scope               string `yaml:"scope"`
+		LegacyResourceScope string `yaml:"resource_scope"`
+		MaxBodyBytes        int    `yaml:"max_body_bytes"`
+	}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	if raw.Scope != "" && raw.LegacyResourceScope != "" && raw.Scope != raw.LegacyResourceScope {
+		return fmt.Errorf("action scope and resource_scope disagree")
+	}
+	a.Key = raw.Key
+	a.ResourceScope = raw.Scope
+	if a.ResourceScope == "" {
+		a.ResourceScope = raw.LegacyResourceScope
+	}
+	a.MaxBodyBytes = raw.MaxBodyBytes
+	return nil
+}
+
+// ReferenceSource describes one plugin-owned entity-reference source. The
+// host owns canonical reference construction and validates every use through
+// the live plugin; these fields describe presentation and routing only.
+type ReferenceSource struct {
+	Source      string `yaml:"source" json:"source"`
+	Provider    string `yaml:"provider" json:"provider"`
+	Kind        string `yaml:"kind" json:"kind"`
+	DisplayName string `yaml:"display_name" json:"display_name"`
+	KindLabel   string `yaml:"kind_label" json:"kind_label"`
+	Order       int    `yaml:"order,omitempty" json:"order,omitempty"`
+}
+
 // UISection declares UI pages the plugin contributes, and/or a native UI
 // bundle. Bundle is a root-relative path on the plugin process serving an ES
 // module (e.g. "/ui/bundle.js"), fetched by kandev via
@@ -171,6 +263,13 @@ type UIKeybinding struct {
 	ID          string `yaml:"id" json:"id"`
 	Default     string `yaml:"default" json:"default"`
 	Description string `yaml:"description" json:"description"`
+	// AllowInEditor opts this one binding out of the dispatcher's
+	// skip-while-typing rule. By default a plugin keybinding does not fire
+	// when the keydown target is an input, textarea or contenteditable, so a
+	// plugin cannot shadow a character the user is trying to type. A binding
+	// whose whole purpose is to act on the focused composer (dictation,
+	// for instance) has to run there, and declares it here.
+	AllowInEditor bool `yaml:"allow_in_editor,omitempty" json:"allow_in_editor,omitempty"`
 }
 
 // Parse decodes a plugin manifest from YAML bytes. It does not validate the

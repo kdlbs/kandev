@@ -331,7 +331,7 @@ type RepositoryEntityRepository interface {
 	DeleteRepositoryScript(ctx context.Context, id string) error
 	ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error)
 	ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []string) (map[string][]*models.RepositoryScript, error)
-	GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, host, owner, name string) (*models.Repository, error)
+	GetRepositoryByProviderIdentity(ctx context.Context, identity models.ProviderRepositoryIdentity) (*models.Repository, error)
 	// GetRepositoryByLocalPath finds a live repository by workspace and canonical
 	// local_path. Returns nil, nil if not found. Used by
 	// Service.FindOrCreateRepositoryByLocalPath to check for an existing row by

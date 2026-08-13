@@ -10,6 +10,7 @@ import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
+import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -432,6 +433,7 @@ function ChatStatusBar({
       <PRStatusChip taskId={taskId} />
       <MRStatusChip taskId={taskId} />
       <AzureDevOpsTaskPullRequestChip taskId={taskId} />
+      <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
       {queueChip}
       {/* Distinct per-banner keys: the key remounts the banner on task switch
           so its dismissed state re-initialises, and keeping the two suffixes

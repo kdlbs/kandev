@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -235,6 +236,7 @@ type Handlers struct {
 	// registered — see registerReviewHandlers.
 	reviewService *service.ReviewService
 	reviewRunner  ReviewRunner
+	pluginSvc     *plugins.Service
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
@@ -329,12 +331,21 @@ func (h *Handlers) SetConfigDeps(
 	h.mcpConfigSvc = mcpConfigSvc
 }
 
+// SetPluginService wires the plugin agent-tool catalog and invocation bridge.
+func (h *Handlers) SetPluginService(svc *plugins.Service) {
+	h.pluginSvc = svc
+}
+
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	before := d.HandlerCount()
 
 	// Task-mode handlers (always registered)
 	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
+	if h.pluginSvc != nil {
+		d.RegisterFunc(ws.ActionMCPListPluginTools, h.handleListPluginTools)
+		d.RegisterFunc(ws.ActionMCPInvokePluginTool, h.handleInvokePluginTool)
+	}
 	d.RegisterFunc(ws.ActionMCPListWorkflows, h.handleListWorkflows)
 	d.RegisterFunc(ws.ActionMCPListWorkflowSteps, h.handleListWorkflowSteps)
 	d.RegisterFunc(ws.ActionMCPListRepositories, h.handleListRepositories)
@@ -2137,7 +2148,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"task_id":              req.TaskID,
 			"reply_to_question_id": req.ReplyToQuestionID,
-			"status":               "already_answered",
+			stopTaskStatusKey:      "already_answered",
 		})
 	}
 
@@ -2186,7 +2197,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		if parentReply != nil {
 			if restoreErr := h.restoreParentQuestionPending(ctx, parentReply.message); restoreErr != nil {
 				h.logger.Error("failed to restore parent question after answer dispatch failure",
-					zap.String("question_id", parentReply.message.ID), zap.Error(restoreErr))
+					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
 			}
 		}
 		var qfErr *queueFullDispatchError
@@ -2198,9 +2209,9 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"task_id":    req.TaskID,
-		"session_id": result.sessionID,
-		"status":     result.status,
+		"task_id":         req.TaskID,
+		"session_id":      result.sessionID,
+		stopTaskStatusKey: result.status,
 	})
 }
 

@@ -517,7 +517,6 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		},
 		"appStatusBarEnabled":   settings.AppStatusBarEnabled,
 		"appStatusBarOrder":     mapAppStatusBarOrder(settings.AppStatusBarOrder),
-		"voiceMode":             mapVoiceMode(settings.VoiceMode),
 		"hiddenWorkflowStepIds": stringSliceMap(settings.KanbanHiddenStepIDs),
 		"loaded":                true,
 	}
@@ -674,24 +673,12 @@ func mapTaskCreateLastUsed(value usermodels.TaskCreateLastUsed) map[string]any {
 	}
 	return map[string]any{
 		"repositoryId":           nullString(value.RepositoryID),
-		"branch":                 nullString(value.Branch),
+		branchFieldKey:           nullString(value.Branch),
 		"agentProfileId":         nullString(value.AgentProfileID),
 		"executorProfileId":      nullString(value.ExecutorProfileID),
 		"workflowIdsByWorkspace": workflowIDsByWorkspace,
 		"synced": value.RepositoryID != "" || value.Branch != "" || value.AgentProfileID != "" ||
 			value.ExecutorProfileID != "" || len(workflowIDsByWorkspace) > 0,
-	}
-}
-
-// mapVoiceMode maps the voice mode settings to the boot shape with defaults.
-func mapVoiceMode(value usermodels.VoiceModeSettings) map[string]any {
-	return map[string]any{
-		"enabled":         value.Enabled,
-		"engine":          defaultString(value.Engine, "auto"),
-		"language":        defaultString(value.Language, "auto"),
-		"mode":            defaultString(value.Mode, "toggle"),
-		"autoSend":        value.AutoSend,
-		"whisperWebModel": defaultString(value.WhisperWebModel, "base"),
 	}
 }
 

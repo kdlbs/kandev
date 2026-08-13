@@ -22,9 +22,6 @@ const STABLE_CONTROL_IDS = [
   "layouts-profiles",
   "sprites-connection",
   "sprites-instances",
-  "voice-enable",
-  "voice-engine",
-  "voice-behavior",
   "utility-default-model",
   "utility-actions",
   "external-mcp-endpoints",
@@ -68,17 +65,13 @@ describe("settings discovery catalog invariants", () => {
     const ids = SETTINGS_DISCOVERY_DEFINITIONS.map((entry) => entry.id);
 
     expect(ids).toEqual(expect.arrayContaining([...STABLE_CONTROL_IDS]));
+  });
 
-    const voiceEntries = SETTINGS_DISCOVERY_DEFINITIONS.filter((entry) =>
-      entry.id.startsWith("voice-"),
-    );
-    expect(voiceEntries).toHaveLength(6);
-    expect(new Set(voiceEntries.map((entry) => entry.href))).toEqual(
-      new Set(["/settings/preferences/task-behavior"]),
-    );
-    expect(new Set(voiceEntries.map((entry) => entry.groupId))).toEqual(new Set(["preferences"]));
-    expect(voiceEntries.find((entry) => entry.id === "voice-mode")?.targetId).toBe(
-      "setting-voice-mode",
+  it("no longer indexes the removed core Voice Mode controls", () => {
+    // Voice Mode moved to a plugin; its settings live on the plugin's own
+    // page and must not reappear in the core discovery catalog.
+    expect(SETTINGS_DISCOVERY_DEFINITIONS.filter((entry) => entry.id.startsWith("voice"))).toEqual(
+      [],
     );
   });
 

@@ -3,15 +3,37 @@ import {
   autoFixRoundForState,
   clampAutoFixRound,
   findCIAutomationStateForPR,
+  findPRAutomationOptionsForPR,
   normalizeAutoFixMaxRounds,
 } from "./ci-automation";
-import type { TaskCIPRAutomationState, TaskPR } from "@/lib/types/github";
+import type { TaskCIPRAutomationState, TaskPR, TaskPRAutomationOptions } from "@/lib/types/github";
 
-function makePR(repositoryID: string, prNumber = 42): TaskPR {
+function makePR(repositoryID: string, prNumber = 42, taskID = "task-1"): TaskPR {
   return {
+    task_id: taskID,
     repository_id: repositoryID,
     pr_number: prNumber,
   } as TaskPR;
+}
+
+function makePRAutomationOptions(
+  repositoryID: string,
+  prNumber: number,
+  overrides: Partial<TaskPRAutomationOptions> = {},
+): TaskPRAutomationOptions {
+  return {
+    task_id: "task-1",
+    repository_id: repositoryID,
+    pr_number: prNumber,
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    prompt_on_review_requested: false,
+    prompt_on_merged: false,
+    prompt_on_closed: false,
+    created_at: "",
+    updated_at: "",
+    ...overrides,
+  };
 }
 
 function makeState(
@@ -56,6 +78,43 @@ describe("CI automation helpers", () => {
       max: 10,
       exhausted: true,
     });
+  });
+
+  it("finds PR automation options by repository id and PR number, independent of other PRs", () => {
+    const options = [
+      makePRAutomationOptions("repo-1", 1, { auto_fix_enabled: true }),
+      makePRAutomationOptions("repo-1", 2, { auto_fix_enabled: false }),
+      makePRAutomationOptions("repo-2", 1, { auto_merge_enabled: true }),
+    ];
+
+    expect(findPRAutomationOptionsForPR(options, makePR("repo-1", 1))).toBe(options[0]);
+    expect(findPRAutomationOptionsForPR(options, makePR("repo-1", 2))).toBe(options[1]);
+    // Same PR number, different repository — must not collide with repo-1's entry.
+    expect(findPRAutomationOptionsForPR(options, makePR("repo-2", 1))).toBe(options[2]);
+  });
+
+  it("returns all-off defaults for a PR with no stored automation row", () => {
+    const options = [makePRAutomationOptions("repo-1", 1, { auto_fix_enabled: true })];
+
+    const result = findPRAutomationOptionsForPR(options, makePR("repo-1", 99, "task-9"));
+    expect(result).toEqual({
+      task_id: "task-9",
+      repository_id: "repo-1",
+      pr_number: 99,
+      auto_fix_enabled: false,
+      auto_merge_enabled: false,
+      prompt_on_review_requested: false,
+      prompt_on_merged: false,
+      prompt_on_closed: false,
+      created_at: "",
+      updated_at: "",
+    });
+  });
+
+  it("returns all-off defaults when pr_options is undefined", () => {
+    expect(findPRAutomationOptionsForPR(undefined, makePR("repo-1", 1)).auto_fix_enabled).toBe(
+      false,
+    );
   });
 
   it("normalizes max rounds and clamps current rounds", () => {

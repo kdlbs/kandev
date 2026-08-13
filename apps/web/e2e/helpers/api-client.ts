@@ -15,7 +15,6 @@ import type {
   TaskCIAutomationOptions,
   TaskCIAutomationPatch,
 } from "../../lib/types/github";
-import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
 import type { SecretListItem, SecretScope } from "../../lib/types/http-secrets";
 import type {
@@ -969,7 +968,6 @@ export class ApiClient {
     tasks_list_sort?: string;
     tasks_list_group?: string;
     task_create_last_used?: TaskCreateLastUsedApi;
-    voice_mode?: VoiceModeSettings;
     kanban_hidden_step_ids?: Record<string, string[]>;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);

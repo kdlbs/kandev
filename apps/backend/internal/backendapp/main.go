@@ -157,7 +157,7 @@ func parseBackendFlags(args []string) (backendFlags, func(), error) {
 	flags.IntVar(&out.Port, "port", 0, fmt.Sprintf("HTTP server port (default: %d)", ports.Backend))
 	flags.StringVar(&out.LogLevel, "log-level", "", "Log level: debug, info, warn, error")
 	flags.BoolVar(&out.Help, "help", false, "Show help message")
-	flags.BoolVar(&out.Version, "version", false, "Show version information")
+	flags.BoolVar(&out.Version, versionFieldKey, false, "Show version information")
 	flags.Usage = func() {
 		_, _ = fmt.Fprintf(flags.Output(), "Usage: kandev __backend [options]\n\n")
 		_, _ = fmt.Fprintf(flags.Output(), "Kandev backend server. This mode is normally started by the launcher.\n\n")
@@ -522,8 +522,10 @@ func startAgentInfrastructure(
 	repoCloner := repoclone.NewCloner(repoclone.Config{
 		BasePath: cfg.RepoClone.BasePath,
 	}, repoclone.DetectGitProtocol(), cfg.ResolvedHomeDir(), log)
-	if services.GitHub != nil {
-		repoCloner.SetGitCredentialProvider(services.GitHub)
+	if services.GitHub != nil || services.Plugins != nil {
+		repoCloner.SetGitCredentialProvider(
+			newRepositoryCloneCredentialProvider(services.GitHub, services.Plugins),
+		)
 	}
 	log.Info("Repository cloner configured",
 		zap.String("base_path", cfg.RepoClone.BasePath))
@@ -541,7 +543,7 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
-		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub)
+		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
@@ -680,7 +682,7 @@ func startAgentInfrastructure(
 	// Start the plugin system's event delivery and health monitor
 	// background loops.
 	if services.Plugins != nil {
-		startPluginsSubsystems(ctx, services.Plugins, eventBus, log, addCleanup)
+		startPluginsSubsystems(ctx, services.Plugins, lifecycleMgr, eventBus, log, addCleanup)
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
@@ -1884,8 +1886,8 @@ func buildHTTPServer(
 	if err := router.SetTrustedProxies(nil); err != nil {
 		log.Warn("failed to clear trusted proxies", zap.Error(err))
 	}
-	router.Use(httpmw.RequestLogger(log, "kandev"))
-	router.Use(httpmw.OtelTracing("kandev"))
+	router.Use(httpmw.RequestLogger(log, kandevName))
+	router.Use(httpmw.OtelTracing(kandevName))
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
 	// Generate the interim-settings interlock token before touching any
@@ -1959,7 +1961,6 @@ func buildHTTPServer(
 		devMode:                       cfg.Debug.DevMode || cfg.Debug.PprofEnabled,
 		httpPort:                      resolvedHTTPPort(cfg),
 		features:                      cfg.Features,
-		voice:                         cfg.Voice,
 		homeDir:                       cfg.ResolvedHomeDir(),
 		interimSettingsInterlockToken: interimSettingsInterlockToken,
 		log:                           log,

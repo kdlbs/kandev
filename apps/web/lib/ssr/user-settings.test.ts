@@ -6,7 +6,6 @@ import {
   parseLspStatusLocation,
   parseStartupPage,
   parseSystemMetricsDisplay,
-  parseVoiceMode,
 } from "./user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
@@ -526,81 +525,6 @@ describe("parseChangesPanelLayout", () => {
     expect(parseChangesPanelLayout(undefined)).toBe("tree");
     expect(parseChangesPanelLayout("grid")).toBe("tree");
     expect(parseChangesPanelLayout("")).toBe("tree");
-  });
-});
-
-describe("parseVoiceMode", () => {
-  it("maps every field from the snake_case wire payload", () => {
-    expect(
-      parseVoiceMode({
-        enabled: false,
-        engine: "whisperWeb",
-        language: "pt-PT",
-        mode: "hold",
-        auto_send: true,
-        whisper_web_model: "small",
-      }),
-    ).toEqual({
-      enabled: false,
-      engine: "whisperWeb",
-      language: "pt-PT",
-      mode: "hold",
-      autoSend: true,
-      whisperWebModel: "small",
-    });
-  });
-
-  it("returns the defaults when the payload is undefined", () => {
-    expect(parseVoiceMode(undefined)).toEqual({
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    });
-  });
-
-  it("defaults enabled to true when the wire payload omits the field (old rows)", () => {
-    const result = parseVoiceMode({
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      auto_send: false,
-      whisper_web_model: "base",
-    } as unknown as Parameters<typeof parseVoiceMode>[0]);
-    expect(result.enabled).toBe(true);
-  });
-
-  it("fills in defaults for missing string fields and coerces auto_send to false", () => {
-    const result = parseVoiceMode({
-      engine: "" as unknown as "auto",
-      language: "",
-      mode: "" as unknown as "toggle",
-      whisper_web_model: "" as unknown as "base",
-    } as unknown as Parameters<typeof parseVoiceMode>[0]);
-    expect(result).toEqual({
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    });
-  });
-});
-
-describe("mapUserSettingsResponse voice mode", () => {
-  it("defaults the whole voiceMode object when response is null", () => {
-    const result = mapUserSettingsResponse(null);
-    expect(result.voiceMode).toEqual({
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    });
   });
 });
 

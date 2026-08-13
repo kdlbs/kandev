@@ -1,42 +1,51 @@
 "use client";
 
-import { memo, useCallback, type ComponentProps, type ReactNode } from "react";
+import { memo, useCallback, useMemo, type ComponentProps, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
   IconGitCommit,
   IconGitPullRequest,
-  IconGitMerge,
   IconGitCherryPick,
-  IconLoader2,
-  IconChevronDown,
-  IconCloudDownload,
   IconCloudUpload,
-  IconAlertTriangle,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-} from "@kandev/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { cn } from "@kandev/ui/lib/utils";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useRemoteContributionRelation } from "@/hooks/domains/session/use-remote-contribution-relation";
 import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
 import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
-import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import type { TaskPR } from "@/lib/types/github";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
-import { MultiRepoVcsButton } from "@/components/vcs-multi-repo-menu";
+import { useAppStore } from "@/components/state-provider";
+import { useNormalizedTaskReviewsState } from "@/components/task/review-panel-provider";
+import type { ReviewItemSummary } from "@/lib/plugins/types";
+import {
+  buildRemoteContributionResolutionTarget,
+  useRemoteContributionResolution,
+  useRemoteContributionResolutionConfirmation,
+} from "@/components/task/use-remote-contribution-resolution";
+import { openExternalLink } from "@/lib/desktop/external-links";
+import { VcsSplitButtonContent } from "./vcs-split-button-parts";
+import { DEFAULT_BASE_BRANCH } from "./vcs-constants";
 
-const DEFAULT_BASE_BRANCH = "origin/main";
+export function hasOpenChangeRequest(
+  firstPartyState: string | null | undefined,
+  reviews: readonly ReviewItemSummary[],
+): boolean {
+  const isOpen = (state: string | undefined) =>
+    state ? ["open", "opened", "draft"].includes(state.toLowerCase()) : false;
+  return (
+    isOpen(firstPartyState ?? undefined) ||
+    reviews.some((review) => isOpen(review.taskStatus?.state ?? review.state))
+  );
+}
+
+function useHasOpenChangeRequest(firstPartyState: string | null | undefined): boolean {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const { reviews } = useNormalizedTaskReviewsState(activeTaskId);
+  return hasOpenChangeRequest(firstPartyState, reviews);
+}
 
 export function determinePrimaryAction(
   uncommittedFileCount: number,
@@ -51,7 +60,7 @@ export function determinePrimaryAction(
   return "commit";
 }
 
-type PrimaryButtonConfig = {
+export type PrimaryButtonConfig = {
   icon: ReactNode;
   label: string;
   badge: number | null;
@@ -158,169 +167,6 @@ function buildPrimaryButtonConfig({
   return buildCommitConfig(t, uncommittedFileCount, openCommitDialog);
 }
 
-type DivergenceTone = "ahead" | "behind";
-
-const divergenceToneClass: Record<DivergenceTone, string> = {
-  ahead: "border-emerald-500/40 bg-emerald-500/10 text-emerald-500",
-  behind: "border-yellow-500/40 bg-yellow-500/10 text-yellow-500",
-};
-
-function DivergencePill({
-  tone,
-  value,
-  ariaLabel,
-}: {
-  tone: DivergenceTone;
-  value: number;
-  ariaLabel: string;
-}) {
-  if (value <= 0) return null;
-
-  return (
-    <span
-      aria-label={ariaLabel}
-      className={cn(
-        "inline-flex h-5 items-center rounded-md border px-1.5 text-[11px] font-semibold leading-none tabular-nums",
-        divergenceToneClass[tone],
-      )}
-    >
-      {tone === "ahead" ? "↑" : "↓"}
-      {value}
-    </span>
-  );
-}
-
-function GitDivergencePills({ ahead, behind }: { ahead: number; behind: number }) {
-  const { t } = useTranslation();
-  if (ahead <= 0 && behind <= 0) return null;
-
-  // `{{value}}`, not `{{count}}`: the shipped English is count-invariant
-  // ("1 commits ahead"), and switching to a plural here would change the
-  // accessible name that E2E specs query by.
-  return (
-    <span className="ml-1 inline-flex items-center gap-1">
-      <DivergencePill
-        tone="ahead"
-        value={ahead}
-        ariaLabel={t("integrations:commitsAheadAriaLabel", { value: ahead })}
-      />
-      <DivergencePill
-        tone="behind"
-        value={behind}
-        ariaLabel={t("integrations:commitsBehindAriaLabel", { value: behind })}
-      />
-    </span>
-  );
-}
-
-type VcsDropdownItemsProps = {
-  disabled: boolean;
-  baseBranch?: string;
-  hasUpstream: boolean;
-  behindCount: number;
-  aheadCount: number;
-  pushDisabled: boolean;
-  pullDisabled: boolean;
-  onPR: () => void;
-  onPull: () => void;
-  onPush: (force: boolean) => void;
-  onRebase: () => void;
-  onMerge: () => void;
-};
-
-function VcsDropdownItems({
-  disabled,
-  baseBranch,
-  hasUpstream,
-  behindCount,
-  aheadCount,
-  pushDisabled,
-  pullDisabled,
-  onPR,
-  onPull,
-  onPush,
-  onRebase,
-  onMerge,
-}: VcsDropdownItemsProps) {
-  const { t } = useTranslation();
-  const remoteActionsDisabledTitle = t("task:remoteActionsDisabledHistoryChanged");
-  return (
-    <DropdownMenuContent align="end" className="w-56">
-      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPR} disabled={disabled}>
-        <IconGitPullRequest className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">{t("integrations:createPr")}</span>
-      </DropdownMenuItem>
-      <DropdownMenuSeparator />
-      <DropdownMenuItem
-        className="cursor-pointer gap-3"
-        onClick={onPull}
-        disabled={disabled || pullDisabled}
-        title={pullDisabled ? remoteActionsDisabledTitle : undefined}
-      >
-        <IconCloudDownload className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">{t("integrations:pull")}</span>
-        {hasUpstream && behindCount > 0 && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            ↓{behindCount}
-          </span>
-        )}
-      </DropdownMenuItem>
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger
-          className="cursor-pointer gap-3"
-          disabled={disabled || pushDisabled}
-          title={pushDisabled ? remoteActionsDisabledTitle : undefined}
-        >
-          <IconCloudUpload className="h-4 w-4 text-muted-foreground" />
-          <span className="flex-1">{t("integrations:push")}</span>
-          {hasUpstream && aheadCount > 0 && (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-              ↑{aheadCount}
-            </span>
-          )}
-        </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent>
-          <DropdownMenuItem
-            className="cursor-pointer gap-3"
-            onClick={() => onPush(false)}
-            disabled={disabled || pushDisabled}
-            title={pushDisabled ? remoteActionsDisabledTitle : undefined}
-          >
-            <IconCloudUpload className="h-4 w-4 text-muted-foreground" />
-            <span>{t("integrations:push")}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="cursor-pointer gap-3"
-            onClick={() => onPush(true)}
-            disabled={disabled || pushDisabled}
-            title={pushDisabled ? remoteActionsDisabledTitle : undefined}
-          >
-            <IconAlertTriangle className="h-4 w-4 text-muted-foreground" />
-            <span>{t("integrations:forcePush")}</span>
-          </DropdownMenuItem>
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
-      <DropdownMenuSeparator />
-      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onRebase} disabled={disabled}>
-        <IconGitCherryPick className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">{t("integrations:rebase")}</span>
-        {/* The branch is a git ref — data. One message with the ref
-            interpolated, not an "onto" stem concatenated onto it. */}
-        <span className="text-xs text-muted-foreground">
-          {t("integrations:ontoBranch", { branch: baseBranch || DEFAULT_BASE_BRANCH })}
-        </span>
-      </DropdownMenuItem>
-      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onMerge} disabled={disabled}>
-        <IconGitMerge className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">{t("integrations:merge")}</span>
-        <span className="text-xs text-muted-foreground">
-          {t("integrations:fromBranch", { branch: baseBranch || DEFAULT_BASE_BRANCH })}
-        </span>
-      </DropdownMenuItem>
-    </DropdownMenuContent>
-  );
-}
-
 type VcsSplitButtonProps = {
   sessionId: string | null;
   baseBranch?: string;
@@ -372,6 +218,45 @@ function useGitActions(git: ReturnType<typeof useSessionGit>, baseBranch?: strin
   return { handlePull, handlePush, handleRebase, handleMerge };
 }
 
+function useVcsContributionResolution(
+  sessionId: string | null,
+  relation: ReturnType<typeof useRemoteContributionRelation>["relation"],
+  repositoryName: string | undefined,
+  selectedPR: TaskPR | null,
+  refreshProviderEvidence: ReturnType<
+    typeof useRemoteContributionRelation
+  >["refreshProviderEvidence"],
+) {
+  const { t } = useTranslation();
+  const resolution = useRemoteContributionResolution(sessionId, refreshProviderEvidence);
+  const confirmResolution = useRemoteContributionResolutionConfirmation(resolution);
+  const remoteRepositoryLabel = t("task:remoteRepository");
+  const resolutionTarget = useMemo(
+    () =>
+      buildRemoteContributionResolutionTarget(
+        relation,
+        repositoryName,
+        selectedPR,
+        remoteRepositoryLabel,
+      ),
+    [relation, repositoryName, selectedPR, remoteRepositoryLabel],
+  );
+  return { resolution, confirmResolution, resolutionTarget };
+}
+
+function useVcsContributionState(sessionId: string | null) {
+  const contribution = useRemoteContributionRelation(sessionId);
+  const remoteActionPolicy = remoteContributionActionPolicy(contribution.relation);
+  const resolutionState = useVcsContributionResolution(
+    sessionId,
+    contribution.relation,
+    contribution.repositoryName,
+    contribution.selectedPR,
+    contribution.refreshProviderEvidence,
+  );
+  return { ...contribution, remoteActionPolicy, ...resolutionState };
+}
+
 const VcsSplitButton = memo(function VcsSplitButton({
   sessionId,
   baseBranch,
@@ -381,10 +266,16 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const { t } = useTranslation();
   const git = useSessionGit(sessionId);
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
-  const activePR = useActiveTaskPR();
-  const { relation, repositoryName } = useRemoteContributionRelation(sessionId);
-  const remoteActionPolicy = remoteContributionActionPolicy(relation);
-  const hasOpenPR = activePR?.state === "open";
+  const {
+    relation,
+    repositoryName,
+    selectedPR,
+    remoteActionPolicy,
+    resolution,
+    confirmResolution,
+    resolutionTarget,
+  } = useVcsContributionState(sessionId);
+  const hasOpenPR = useHasOpenChangeRequest(selectedPR?.state);
   const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
   const repoDisplayName = useRepoDisplayName(sessionId);
 
@@ -395,11 +286,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const behindCount = git.behind;
   const pullCount = git.pullBehind;
   const isDisabled = git.isLoading || !sessionId;
-  const isGitLoading = git.isLoading;
-  // Multi-repo when there's more than one named repo. Single-repo workspaces
-  // get either a single empty-name entry or no entries at all in repoNames.
-  const isMultiRepo = git.repoNames.length > 1;
-
+  const showContributionResolution = relation.action === "diverged_replace";
   const primaryAction = determinePrimaryAction(
     uncommittedFileCount,
     aheadCount,
@@ -420,153 +307,57 @@ const VcsSplitButton = memo(function VcsSplitButton({
   });
   const showDivergencePills = primaryAction !== "commit";
 
-  if (isMultiRepo) {
-    return (
-      <MultiRepoVcsButton
-        primaryButtonConfig={primaryButtonConfig}
-        primaryAction={primaryAction}
-        isDisabled={isDisabled}
-        isGitLoading={isGitLoading}
-        baseBranch={baseBranch || DEFAULT_BASE_BRANCH}
-        repoNames={git.repoNames}
-        perRepoStatus={git.perRepoStatus}
-        pushDisabled={remoteActionPolicy.pushDisabled}
-        pullDisabled={remoteActionPolicy.pullDisabled}
-        blockedRepositoryName={repositoryName}
-        repoDisplayName={repoDisplayName}
-        callbacks={{
-          onCommit: (repo) => openCommitDialog(repo),
-          onPR: (repo) => openPRDialog(repo),
-          onPull: handlePull,
-          onPush: handlePush,
-          onRebase: handleRebase,
-          onMerge: handleMerge,
-        }}
-      />
-    );
-  }
-
   return (
-    <SingleRepoVcsButton
+    <VcsSplitButtonContent
+      isMultiRepo={git.repoNames.length > 1}
       primaryButtonConfig={primaryButtonConfig}
       primaryAction={primaryAction}
       isDisabled={isDisabled}
-      isGitLoading={isGitLoading}
+      isGitLoading={git.isLoading}
       baseBranch={baseBranch}
       hasUpstream={hasUpstream}
       behindCount={pullCount}
       aheadCount={aheadCount}
       pushDisabled={remoteActionPolicy.pushDisabled}
       pullDisabled={remoteActionPolicy.pullDisabled}
+      showContributionResolution={showContributionResolution}
+      replaceDisabled={remoteActionPolicy.replaceDisabled}
+      useDisabled={remoteActionPolicy.useDisabled}
+      repoNames={git.repoNames}
+      perRepoStatus={git.perRepoStatus}
+      blockedRepositoryName={repositoryName}
+      repoDisplayName={repoDisplayName}
       buttonSize={buttonSize}
       className={className}
       showDivergencePills={showDivergencePills}
-      onPR={() => openPRDialog()}
-      onPull={() => handlePull()}
-      onPush={(force) => handlePush(force)}
-      onRebase={() => handleRebase()}
-      onMerge={() => handleMerge()}
+      callbacks={{
+        onCommit: (repo) => openCommitDialog(repo),
+        onPR: (repo) => openPRDialog(repo),
+        onPull: handlePull,
+        onPush: handlePush,
+        onRebase: handleRebase,
+        onMerge: handleMerge,
+        onReplaceContribution: (repo) => {
+          if (resolutionTarget && resolutionTarget.repo === repo) {
+            resolution.requestReplace(resolutionTarget);
+          }
+        },
+        onUseContribution: (repo) => {
+          if (resolutionTarget && resolutionTarget.repo === repo) {
+            resolution.requestUse(resolutionTarget);
+          }
+        },
+        onViewContribution: (repo) => {
+          if (resolutionTarget?.repo !== repo || !selectedPR?.pr_url) return;
+          void openExternalLink(selectedPR.pr_url).catch(() => undefined);
+        },
+      }}
+      resolution={resolution}
+      resolutionTarget={resolutionTarget}
+      confirmResolution={confirmResolution}
+      prNumber={selectedPR?.pr_number}
     />
   );
 });
-
-function SingleRepoVcsButton({
-  primaryButtonConfig,
-  primaryAction,
-  isDisabled,
-  isGitLoading,
-  baseBranch,
-  hasUpstream,
-  behindCount,
-  aheadCount,
-  pushDisabled,
-  pullDisabled,
-  onPR,
-  onPull,
-  onPush,
-  onRebase,
-  onMerge,
-  className,
-  buttonSize = "sm",
-  showDivergencePills = false,
-}: {
-  primaryButtonConfig: PrimaryButtonConfig;
-  primaryAction: "commit" | "push" | "pr" | "rebase";
-  isDisabled: boolean;
-  isGitLoading: boolean;
-  baseBranch?: string;
-  hasUpstream: boolean;
-  behindCount: number;
-  aheadCount: number;
-  pushDisabled: boolean;
-  pullDisabled: boolean;
-  onPR: () => void;
-  onPull: () => void;
-  onPush: (force: boolean) => void;
-  onRebase: () => void;
-  onMerge: () => void;
-  className?: string;
-  buttonSize?: ComponentProps<typeof Button>["size"];
-  showDivergencePills?: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className={cn("inline-flex", className)}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size={buttonSize}
-            variant="outline"
-            className="rounded-r-none border-r-0 cursor-pointer"
-            onClick={primaryButtonConfig.onClick}
-            disabled={isDisabled}
-            data-testid={`vcs-primary-${primaryAction}`}
-          >
-            {primaryButtonConfig.icon}
-            {primaryButtonConfig.label}
-            {primaryButtonConfig.badge != null && (
-              <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-                {primaryButtonConfig.badge}
-              </span>
-            )}
-            {showDivergencePills && <GitDivergencePills ahead={aheadCount} behind={behindCount} />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{primaryButtonConfig.tooltip}</TooltipContent>
-      </Tooltip>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            size={buttonSize}
-            variant="outline"
-            className="-ml-px rounded-l-none px-2 cursor-pointer"
-            aria-label={t("integrations:openVcsOptions")}
-            disabled={isDisabled}
-          >
-            {isGitLoading ? (
-              <IconLoader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <IconChevronDown className="h-4 w-4" />
-            )}
-          </Button>
-        </DropdownMenuTrigger>
-        <VcsDropdownItems
-          disabled={isDisabled}
-          baseBranch={baseBranch}
-          hasUpstream={hasUpstream}
-          behindCount={behindCount}
-          aheadCount={aheadCount}
-          pushDisabled={pushDisabled}
-          pullDisabled={pullDisabled}
-          onPR={onPR}
-          onPull={onPull}
-          onPush={onPush}
-          onRebase={onRebase}
-          onMerge={onMerge}
-        />
-      </DropdownMenu>
-    </div>
-  );
-}
 
 export { VcsSplitButton };

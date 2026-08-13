@@ -1,5 +1,5 @@
 ---
-status: draft
+status: shipped
 created: 2026-08-11
 owner: kandev
 ---
@@ -45,13 +45,15 @@ Decision: [ADR-2026-08-11-composer-access-authenticated-webhooks](../../decision
   authenticated webhook with a limit of at least 10 MiB.
 - The Voice plugin's OpenAI key belongs to its existing plugin settings and secret storage. Kandev
   relays the request but does not own, expose, or select that key.
-- Plugin localization is a separately scoped prerequisite. This package adds no host i18n API. The
-  later Voice plugin task must decide how plugin-owned catalogs follow Kandev's locale before core
-  Voice Mode is removed.
+- Plugin-owned copy uses the scoped catalog and reactive locale API established by
+  [ADR-2026-08-12-plugin-localization-contract](../../decisions/2026-08-12-plugin-localization-contract.md).
+  The later Voice plugin registers its English fallback and supported-locale catalogs before any
+  composer contribution.
 - Disabling, uninstalling, or reloading a plugin aborts its in-flight webhook requests, unregisters
   its composer actions, and leaves native drafts intact.
 - The current core Voice Mode stays present until a separately delivered Voice plugin proves parity
-  on all listed surfaces. Removing core Voice Mode is not part of these host prerequisites.
+  on all listed surfaces. Removing core Voice Mode is not part of these host prerequisites. That
+  removal has since happened; see [Voice Mode leaves core](voice-extraction.md).
 
 ## API Surface
 
@@ -91,8 +93,13 @@ interface PluginComposerSlotProps {
 ```
 
 The host re-renders slot props when native state changes. `submit()` always revalidates native state
-at call time. The host may replace the capability object when a surface is remounted; methods on the
-old object return `unavailable`.
+at call time, reading the live draft rather than the last render's snapshot, so a plugin that inserts
+and submits in one callback is not told `blocked` for text it just inserted.
+
+The host replaces the capability object whenever the composer's identity changes: its surface, task
+or session. Methods on the superseded object return `unavailable`. Identity matters separately from
+mounting because a composer is re-rendered, not remounted, when the user switches task or session, so
+without it a handle captured while recording on one conversation would act on the next.
 
 ### Authenticated webhooks
 
@@ -194,7 +201,6 @@ current external-call behavior. Request cancellation propagates through the exis
 - General authenticated REST routing, response streaming, bidirectional browser sockets, or changing
   the default limit for existing public webhooks.
 - Sandboxing mutually malicious native UI plugin bundles.
-- Plugin localization; it is a separate prerequisite for the later Voice plugin extraction.
 
 ## Implementation Plan
 

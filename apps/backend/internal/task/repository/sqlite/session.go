@@ -1447,24 +1447,27 @@ func (r *Repository) GetLastAgentMessage(ctx context.Context, sessionID string) 
 }
 
 // IncrementTaskSessionUsage adds the given deltas to the cumulative
-// tokens / cost columns on task_sessions. Used by the office cost
-// subscriber after a cost event lands so the per-session totals stay
-// in sync without re-summing office_cost_events. The model + DTO
+// tokens / cost columns on task_sessions, including cached input tokens
+// (tokens_cached_in mirrors office_cost_events.tokens_cached_in and is kept
+// separate from tokens_in because it is priced differently). Used by the
+// office cost subscriber after a cost event lands so the per-session totals
+// stay in sync without re-summing office_cost_events. The model + DTO
 // don't surface these columns yet (DB-only per the office-costs
 // wedge); the cost explorer follow-up will expose them.
 func (r *Repository) IncrementTaskSessionUsage(
-	ctx context.Context, sessionID string, tokensIn, tokensOut, costSubcents int64,
+	ctx context.Context, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
 ) error {
 	if sessionID == "" {
 		return nil
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
-		   SET tokens_in     = COALESCE(tokens_in, 0)     + ?,
-		       tokens_out    = COALESCE(tokens_out, 0)    + ?,
-		       cost_subcents = COALESCE(cost_subcents, 0) + ?
+		   SET tokens_in        = COALESCE(tokens_in, 0)        + ?,
+		       tokens_cached_in = COALESCE(tokens_cached_in, 0) + ?,
+		       tokens_out       = COALESCE(tokens_out, 0)       + ?,
+		       cost_subcents    = COALESCE(cost_subcents, 0)    + ?
 		 WHERE id = ?
-	`), tokensIn, tokensOut, costSubcents, sessionID)
+	`), tokensIn, tokensCachedIn, tokensOut, costSubcents, sessionID)
 	return err
 }
 

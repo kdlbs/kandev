@@ -99,7 +99,7 @@ test.describe("Toolbar overflow menu", () => {
     await expect(contextBadge).not.toBeVisible();
 
     // Submit button should remain visible (always-visible item). Target the
-    // submit testid specifically — the voice input button is also round, so a
+    // submit testid specifically — other toolbar buttons are round too, so a
     // bare `button.rounded-full` locator now matches both and fails strict mode.
     const submitBtn = toolbar.getByTestId("submit-message-button");
     await expect(submitBtn).toBeVisible();

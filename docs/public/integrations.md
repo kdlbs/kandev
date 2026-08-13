@@ -294,7 +294,7 @@ Repository scope, authentication, and watch filters are workspace-specific. Repo
 
 ### Automate a linked pull request
 
-For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls are task-level booleans: **Auto-fix CI & address comments**, **Auto-merge when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**. Enabling any control applies it to every PR linked to that task; Kandev tracks delivery and deduplication separately for each linked PR.
+For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls, **Auto-fix CI & address comments**, **Auto-merge when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**, are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
 
 This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight task PR poller, which checks watched linked PRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked PRs without waiting for the next poll.
 
@@ -389,6 +389,106 @@ For a task repository whose `origin` matches the workspace's GitLab host, the Ch
 A successful create returns the MR URL and asynchronously records it against the originating task repository. If association fails, use the manual link action. Retrying is idempotent for an existing open MR with the same source and target branches. A push can succeed even when MR creation fails; Kandev reports that partial result and leaves the remote branch in place for retry.
 
 </details>
+
+## Bitbucket
+
+> [!EXPERIMENTAL]
+> Bitbucket uses Kandev's experimental plugin platform. Package signatures are
+> not enforced yet, so the official plugin follows the same unsigned install
+> path as current plugins; signature enforcement is deferred.
+
+Bitbucket support is provided by the separately installed **Bitbucket** plugin.
+Install a package built for the running Kandev host from **Settings > Plugins**,
+then open its **Bitbucket** entry in the Integrations section. The connection is
+workspace-specific: configure each Kandev workspace that should discover
+repositories, launch tasks, link pull requests, or use Bitbucket review and
+watch workflows.
+
+### Connect Bitbucket Cloud
+
+Choose **Bitbucket Cloud**, enter the Bitbucket workspace slug or ID, then pick
+one of these authentication methods:
+
+| Method | Required values | Use when |
+|---|---|---|
+| API token | Atlassian account email and API token | A workspace-scoped, non-interactive connection is sufficient. |
+| OAuth 2.0 | OAuth client ID and secret, then complete the browser flow | Access should be granted interactively and refreshed by Bitbucket. |
+
+For a [scoped Cloud API token](https://support.atlassian.com/bitbucket-cloud/docs/using-api-tokens/), grant `read:user:bitbucket`,
+`read:repository:bitbucket`, `write:repository:bitbucket`,
+`read:pullrequest:bitbucket`, and `write:pullrequest:bitbucket`. The write
+grants are needed for Git push, pull-request creation/review mutations, and
+other enabled write actions; omit them only if those operations should fail
+closed. For OAuth, enable Account read plus Repository and Pull request
+read/write permissions on the consumer; the plugin requests those scopes in
+the authorization flow.
+
+For OAuth, copy the read-only callback URL that the plugin shows into the
+Bitbucket OAuth consumer. It is derived from the current Kandev origin; changing
+that origin requires updating the consumer redirect URI before reconnecting.
+Select **Check connection** and wait for the health card to report
+**Connected** before browsing repositories.
+
+### Connect Bitbucket Data Center
+
+Choose **Bitbucket Data Center**, enter the full HTTPS base URL (including any
+context path such as `/bitbucket`), and select the narrowest credential that
+matches your server:
+
+| Method | Required values |
+|---|---|
+| Personal access token | Bitbucket username and PAT. |
+| Project access token | Project token. |
+| Repository access token | Repository token. |
+| OAuth 2.0 | Bitbucket username, OAuth client ID and secret, then browser authorization. |
+
+The Data Center OAuth incoming application link must allow `REPO_READ` and
+`REPO_WRITE`. PATs and project/repository tokens likewise need read access for
+discovery/review and write access for push, pull-request, and review mutations.
+
+Data Center deployments differ in their enabled REST and OAuth capabilities.
+The plugin reports unavailable operations from the connected server rather than
+assuming Cloud behavior. Use a trusted HTTPS URL; test-only insecure endpoints
+are not accepted by the normal connection flow.
+
+### What the plugin adds
+
+With a healthy connection, the plugin contributes Bitbucket repository discovery
+to **New Task**, credential-free remote inspection/branch lookup, task link and
+launch actions, a provider-neutral review panel, pull-request create/update and
+review actions where the server grants them, and workspace pull-request watches.
+Watches persist their cursor and reservations so a restart can reconcile a
+partially created task; they still depend on the configured provider identity
+and its current access.
+
+Task Git credentials are brokered per verified Bitbucket provider/workspace/
+task/repository scope. The plugin returns credentials transiently; Kandev does
+not persist them in task metadata or remote URLs. Rotating credentials,
+disconnecting the workspace, disabling the plugin, or uninstalling it revokes
+the provider's leases so an already-issued helper fails closed. Configure
+executor SSH credentials separately for SSH remotes.
+
+### Security and limitations
+
+The plugin stores only credential-free connection settings in plugin state and
+keeps tokens, refresh tokens, and OAuth client secrets in Kandev's encrypted
+plugin secret vault. Existing secrets are never displayed; leave a secret empty
+only when the UI says it will retain the saved value. **Disconnect Bitbucket**
+removes that workspace's Bitbucket connection and stored plugin credentials.
+
+Install plugins only from sources you trust. A plugin backend runs as a Kandev
+subprocess and its native UI runs in the Kandev origin, so capabilities are
+permission gates, not an operating-system or browser sandbox. Limit Bitbucket
+tokens to the repositories and write operations the workspace needs, and review
+the plugin's requested `api_read`, `api_write`, `state`, and `secrets`
+capabilities before installation.
+
+The plugin does not turn a Bitbucket API credential into unrestricted executor
+access. A task can show a Bitbucket pull request while its selected executor
+cannot push; use the task's generated HTTPS credential path or separately
+configured SSH credentials. Dynamic `#` references and review actions are
+reauthorized against the active connection at use time, so a removed grant or
+disconnected connection is denied rather than using cached authority.
 
 ## Azure DevOps
 

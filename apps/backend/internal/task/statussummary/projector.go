@@ -342,7 +342,7 @@ func applyPermissionEventLocked(state *projectionState, data map[string]interfac
 		return false
 	}
 	identity := pendingRequestIdentity{
-		messageType: "permission_request",
+		messageType: messageTypePermissionRequest,
 		pendingID:   stringField(data, "pending_id"),
 	}
 	if state.pending[sessionID] == pendingPermission {

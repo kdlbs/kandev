@@ -8,7 +8,7 @@ import {
   executorTypeLabel,
 } from "@/app/settings/executors/new/[type]/executor-types";
 import { useAppStore } from "@/components/state-provider";
-import { pluginRegistry } from "@/lib/plugins/registry";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 import { integrationTitle } from "./settings-breadcrumb-labels";
 import {
   resolveSettingsBreadcrumbs,
@@ -29,6 +29,7 @@ import {
  */
 export function useSettingsBreadcrumbs(pathname: string): SettingsBreadcrumbs {
   const { t } = useTranslation();
+  const pluginRegistry = usePluginRegistry();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const availableAgents = useAppStore((s) => s.availableAgents.items);
   const settingsAgents = useAppStore((s) => s.settingsAgents.items);
@@ -83,12 +84,16 @@ export function useSettingsBreadcrumbs(pathname: string): SettingsBreadcrumbs {
         return t("executors:newTypeProfile", { type: executorTypeLabel(info, t) });
       },
 
-      integrationTitle: ({ integrationSlug }) => integrationTitle(integrationSlug),
+      integrationTitle: ({ integrationSlug }) =>
+        integrationTitle(integrationSlug) ??
+        (integrationSlug
+          ? (pluginRegistry.getIntegrationSetting(integrationSlug)?.label ?? null)
+          : null),
 
       pluginName: ({ pluginId }) =>
         pluginId ? (pluginRegistry.getPluginName(pluginId) ?? null) : null,
     }),
-    [workspaces, availableAgents, settingsAgents, executors, automations, t],
+    [workspaces, availableAgents, settingsAgents, executors, automations, pluginRegistry, t],
   );
 
   return resolveSettingsBreadcrumbs(pathname, t, values);

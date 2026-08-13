@@ -14,11 +14,6 @@ import type {
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
-import type {
-  VoiceInputActivationMode,
-  VoiceInputEngine,
-  WhisperWebModelSize,
-} from "@/lib/types/http-voice";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
@@ -305,7 +300,6 @@ export type UserSettingsState = {
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
-  voiceMode: VoiceModeState;
   hiddenWorkflowStepIds: Record<string, string[]>;
   loaded: boolean;
 };
@@ -322,25 +316,6 @@ export type TaskCreateLastUsedState = {
   executorProfileId: string | null;
   workflowIdsByWorkspace: Record<string, string>;
   synced?: boolean;
-};
-
-export type VoiceModeState = {
-  enabled: boolean;
-  engine: VoiceInputEngine;
-  language: string;
-  mode: VoiceInputActivationMode;
-  autoSend: boolean;
-  whisperWebModel: WhisperWebModelSize;
-};
-
-/** Default values used by the slice init and by SSR hydration fallback. */
-export const DEFAULT_VOICE_MODE_STATE: VoiceModeState = {
-  enabled: true,
-  engine: "auto",
-  language: "auto",
-  mode: "toggle",
-  autoSend: false,
-  whisperWebModel: "base",
 };
 
 export type SettingsSliceState = {
