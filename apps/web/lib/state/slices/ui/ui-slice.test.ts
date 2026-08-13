@@ -74,18 +74,18 @@ describe("migrateView", () => {
   });
 });
 
-describe("mobile merge request review selection", () => {
-  it("persists the exact MR key and clears invalid selections back to chat", () => {
+describe("mobile review selection", () => {
+  it("persists a provider-neutral review id and clears selections back to chat", () => {
     const store = makeStore();
-    store.getState().setMobileSessionReview("session-1", "https://gitlab.example|group/b|22");
+    store.getState().setMobileSessionReview("session-1", "gitlab:host|group/b|22");
     expect(store.getState().mobileSession).toMatchObject({
       activePanelBySessionId: { "session-1": "review" },
-      reviewMRKeyBySessionId: { "session-1": "https://gitlab.example|group/b|22" },
+      reviewItemIdBySessionId: { "session-1": "gitlab:host|group/b|22" },
     });
 
     store.getState().setMobileSessionReview("session-1", null);
     expect(store.getState().mobileSession.activePanelBySessionId["session-1"]).toBe("chat");
-    expect(store.getState().mobileSession.reviewMRKeyBySessionId["session-1"]).toBeUndefined();
+    expect(store.getState().mobileSession.reviewItemIdBySessionId["session-1"]).toBeUndefined();
   });
 });
 

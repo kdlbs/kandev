@@ -93,14 +93,21 @@ export function resolvePRReviewRepositoryIdentity({
   if (!pr?.repository_id || !canonicalName) return canonicalName;
 
   const taskRepository = findPRTaskRepository(pr, taskRepositories);
-  const worktreeName = worktreeDirectoryName(findPRWorktree(pr, taskRepository, worktrees)?.path);
-  if (worktreeName) return worktreeName;
-
   const siblingRepositories = taskRepositories
     .filter((candidate) => candidate.repository_id === pr.repository_id)
     .sort((left, right) => left.position - right.position);
+  // The first same-repository checkout is materialized at the task workspace
+  // root. Its worktree basename is therefore the task slug, not a repository
+  // identity, and may arrive after initial render. Keep the canonical name so
+  // hydration cannot rename the selected PR's file group.
+  if (taskRepository && siblingRepositories.length >= 2) {
+    if (taskRepository === siblingRepositories[0]) return canonicalName;
+  }
+
+  const worktreeName = worktreeDirectoryName(findPRWorktree(pr, taskRepository, worktrees)?.path);
+  if (worktreeName) return worktreeName;
+
   if (!taskRepository || siblingRepositories.length < 2) return canonicalName;
-  if (taskRepository === siblingRepositories[0]) return canonicalName;
 
   const branch = taskRepository.checkout_branch || taskRepository.base_branch || pr.head_branch;
   const branchSlug = sanitizeReviewRepositoryName(branch ?? "");

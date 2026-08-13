@@ -45,6 +45,22 @@ vi.mock("@/components/gitlab/mr-topbar-button", () => ({
   MRTopbarButton: () => null,
 }));
 
+vi.mock("@/components/integrations/registered-change-request-status", () => ({
+  RegisteredChangeRequestStatus: ({
+    taskId,
+    sessionId,
+    surface,
+  }: {
+    taskId: string | null;
+    sessionId?: string | null;
+    surface: string;
+  }) => (
+    <span data-testid={`registered-change-request-${surface}`}>
+      {taskId}:{sessionId}
+    </span>
+  ),
+}));
+
 vi.mock("@/components/jira/jira-ticket-button", () => ({
   JiraTicketButton: () => null,
   extractJiraKey: () => null,
@@ -120,6 +136,18 @@ describe("TaskTopBar GitHub issue link", () => {
     );
     expect(screen.getByLabelText("Task status and attention").className).not.toContain("[&_a]");
     expect(issue.compareDocumentPosition(pr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("TaskTopBar registered change requests", () => {
+  it("mounts plugin status beside native review controls", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" activeSessionId="session-1" />);
+
+    const native = screen.getByTestId("pr-topbar-button");
+    const plugin = screen.getByTestId("registered-change-request-topbar");
+
+    expect(plugin.textContent).toBe("task-1:session-1");
+    expect(native.compareDocumentPosition(plugin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

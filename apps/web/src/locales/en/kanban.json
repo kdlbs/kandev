@@ -91,5 +91,6 @@
   "workflow": "Workflow",
   "workflowStepFallback": "workflow step {{stepId}}",
   "columns": "Columns",
-  "columnsForWorkflow": "Columns for {{name}}"
+  "columnsForWorkflow": "Columns for {{name}}",
+  "needsReassignment": "Needs Reassignment"
 }

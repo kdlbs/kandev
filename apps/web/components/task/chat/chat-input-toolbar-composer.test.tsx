@@ -92,10 +92,6 @@ vi.mock("./reset-context-button", () => ({
   ResetContextButton: () => <button type="button">Reset context</button>,
 }));
 
-vi.mock("./voice-input-button", () => ({
-  VoiceInputButton: () => <button type="button">Voice</button>,
-}));
-
 // Records what the slot was handed instead of rendering plugin components.
 vi.mock("./chat-input-plugin-actions", () => ({
   ChatInputPluginActions: (props: Record<string, unknown>) => {

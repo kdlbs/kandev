@@ -6,7 +6,7 @@ import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 
-export type MobileReviewSource = "github" | "gitlab" | null;
+export type MobileReviewSource = string | null;
 
 /** Preserve a plugin panel through loading/recovery; only a definitive
  * removal or a ready generation missing the panel selects the core Chat view. */

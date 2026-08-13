@@ -32,7 +32,9 @@ func TestResolveQueueMaxPerSessionPrecedence(t *testing.T) {
 				t.Fatalf("new system settings store: %v", err)
 			}
 			store := queuesettings.NewStore(raw)
-			if err := store.Save(context.Background(), queuesettings.Settings{MaxPerSession: tc.persisted}); err != nil {
+			if err := store.Save(context.Background(), queuesettings.Settings{
+				MaxPerSession: tc.persisted, MergeEnabled: true, AutoMergeEnabled: true,
+			}); err != nil {
 				t.Fatalf("save setting: %v", err)
 			}
 			t.Setenv(queuesettings.EnvironmentVariable, tc.env)
@@ -64,7 +66,8 @@ func TestResolveQueueMergeEnabledPrecedence(t *testing.T) {
 				}
 				store := queuesettings.NewStore(raw)
 				if err := store.Save(context.Background(), queuesettings.Settings{
-					MaxPerSession: queuesettings.DefaultMaxPerSession, MergeEnabled: *tc.persisted,
+					MaxPerSession: queuesettings.DefaultMaxPerSession,
+					MergeEnabled:  *tc.persisted, AutoMergeEnabled: true,
 				}); err != nil {
 					t.Fatalf("save setting: %v", err)
 				}
@@ -83,6 +86,47 @@ func TestResolveQueueMergeEnabledPrecedence(t *testing.T) {
 func TestResolveQueueMergeEnabledWithoutPool(t *testing.T) {
 	if got := resolveQueueMergeEnabled(nil, testLogger(t)); !got {
 		t.Fatalf("merge enabled = %v, want true", got)
+	}
+}
+
+func TestResolveQueueAutoMergeEnabledPrecedence(t *testing.T) {
+	tests := []struct {
+		name      string
+		persisted *bool
+		env       string
+		want      bool
+	}{
+		{name: "no persisted setting defaults to enabled", want: true},
+		{name: "persisted disabled", persisted: new(false), want: false},
+		{name: "persisted enabled", persisted: new(true), want: true},
+		{name: "capacity environment does not override", persisted: new(false), env: "20", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pool := newMessageQueueSettingsTestPool(t)
+			if test.persisted != nil {
+				raw, err := systemsettings.NewStore(pool)
+				if err != nil {
+					t.Fatalf("new system settings store: %v", err)
+				}
+				if err := queuesettings.NewStore(raw).Save(context.Background(), queuesettings.Settings{
+					MaxPerSession: queuesettings.DefaultMaxPerSession,
+					MergeEnabled:  true, AutoMergeEnabled: *test.persisted,
+				}); err != nil {
+					t.Fatalf("save setting: %v", err)
+				}
+			}
+			t.Setenv(queuesettings.EnvironmentVariable, test.env)
+			if got := resolveQueueAutoMergeEnabled(pool, testLogger(t)); got != test.want {
+				t.Fatalf("automatic merge enabled = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestResolveQueueAutoMergeEnabledWithoutPool(t *testing.T) {
+	if got := resolveQueueAutoMergeEnabled(nil, testLogger(t)); !got {
+		t.Fatalf("automatic merge enabled = %v, want true", got)
 	}
 }
 

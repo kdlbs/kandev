@@ -19,6 +19,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
+import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
 import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
@@ -150,6 +151,7 @@ export function KanbanCardBody({
             </p>
             <PRTaskIcon taskId={task.id} />
             <MRTaskIcon taskId={task.id} />
+            <RegisteredChangeRequestTaskIcon taskId={task.id} />
             <TaskCardIndicators task={task} />
           </div>
         </div>

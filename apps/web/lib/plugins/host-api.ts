@@ -3,6 +3,7 @@
  * into a plugin's `initialize(registry, host)`.
  */
 import * as React from "react";
+import { useTranslation as useI18nextTranslation } from "react-i18next";
 import type { StoreApi } from "zustand";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@kandev/ui/accordion";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
@@ -37,6 +38,18 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@kandev/ui/dialog";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerOverlay,
+  DrawerPortal,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -99,22 +112,76 @@ import { Combobox } from "@/components/combobox";
 import { RichTextEditor, RichTextReadOnly } from "@/components/editors/tiptap/rich-text-editor";
 import { PageTopbar } from "@/components/page-topbar";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+import { ChangeRequestList, ChangeRequestRow } from "@/components/integrations/change-request-list";
+import type { ChangeRequestDetailProps } from "@/components/integrations/change-request-detail";
+import { IntegrationStartTaskMenu } from "@/components/integrations/integration-start-task-menu";
+import { IntegrationListToolbar } from "@/components/integrations/integration-list-toolbar";
+import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar-base";
+import { IntegrationSaveQueryDialog } from "@/components/integrations/integration-save-query-dialog";
+import { IntegrationRepositoryFilter } from "@/components/integrations/integration-repository-filter";
+import { IntegrationCursorPagination } from "@/components/integrations/integration-cursor-pagination";
+import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
+import { IntegrationChangeRequestStatus } from "@/components/integrations/integration-change-request-status";
+import { IntegrationIcon } from "@/components/integrations/integration-icon";
+import { TaskChangeRequestLinkForm } from "@/components/integrations/task-change-request-link-form";
 import { getBackendConfig } from "@/lib/config";
+import { fetchJson } from "@/lib/api/client";
+import { i18n, normalizeLocale, t } from "@/lib/i18n";
 import { formatRelativeTime } from "@/lib/i18n/formats";
 import { createPluginToast } from "@/lib/toast/sonner";
 import { generateUUID } from "@/lib/utils";
 import { softNavigate } from "@/lib/routing/client-router";
 import type { AppState } from "@/lib/state/store";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { reviewItemId } from "@/components/task/review-selection";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import { pluginModalManager } from "./modal-manager";
 import { readResolvedTheme, subscribeToThemeChanges } from "./theme";
 import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync";
+import { buildPluginContextApi } from "./plugin-context-api";
+import { pluginTranslationNamespace } from "./plugin-translations";
+import type {
+  PluginActionInput,
+  PluginActionOptions,
+  PluginHostApi,
+  PluginI18nApi,
+  PluginModalHandle,
+  PluginTaskLinkDialogOptions,
+  PluginTaskReviewOptions,
+  PluginTranslationOptions,
+} from "./types";
+import type { PluginUIApi } from "@kandev/plugin-sdk";
 import {
   PluginStorageConflictError,
-  type PluginHostApi,
   type PluginStorageApi,
   type PluginStorageEntry,
   type PluginStorageScope,
 } from "./types";
+
+const LazyChangeRequestDetail = React.lazy(async () => {
+  const module = await import("@/components/integrations/change-request-detail");
+  return { default: module.ChangeRequestDetail };
+});
+
+/**
+ * Keep Monaco and the markdown editor graph off the plugin boot path. The
+ * shared detail view loads only when a plugin actually renders a review.
+ */
+function PluginChangeRequestDetail(props: ChangeRequestDetailProps) {
+  return React.createElement(
+    React.Suspense,
+    {
+      fallback: React.createElement(
+        "div",
+        { className: "flex h-full items-center justify-center py-8" },
+        React.createElement(Spinner, {
+          "aria-label": t("integrations:loadingChangeRequest"),
+        }),
+      ),
+    },
+    React.createElement(LazyChangeRequestDetail, props),
+  );
+}
 
 /**
  * Curated `@kandev/ui` subset exposed on `host.ui`, plus a handful of
@@ -127,7 +194,7 @@ import {
  * tooltips, so a bundled second copy splits that context exactly the way a
  * second Radix copy does. Pure-React libs (e.g. icon sets) bundle fine.
  */
-const PLUGIN_UI: Record<string, unknown> = {
+const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   Accordion,
   AccordionContent,
   AccordionItem,
@@ -166,6 +233,16 @@ const PLUGIN_UI: Record<string, unknown> = {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerOverlay,
+  DrawerPortal,
+  DrawerTitle,
+  DrawerTrigger,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -227,11 +304,9 @@ const PLUGIN_UI: Record<string, unknown> = {
   Textarea,
   Tooltip,
   TooltipContent,
-  // A plain Tooltip works everywhere a plugin renders, but from two different
-  // providers: routes and slots render inside AppShell and inherit the
-  // app-wide TooltipProvider in app/layout.tsx, while `openModal` content
-  // mounts *outside* AppShell and gets its own from PluginModalHost. This is
-  // exported for plugins that want their own `delayDuration`/
+  // A plain Tooltip works everywhere a plugin renders through AppShell's
+  // provider; PluginModalHost also keeps a local provider so isolated host
+  // mounts stay safe. This is exported for plugins that want their own `delayDuration`/
   // `skipDelayDuration` for a dense cluster of tooltips — nesting a provider
   // is supported by Radix.
   TooltipProvider,
@@ -248,6 +323,20 @@ const PLUGIN_UI: Record<string, unknown> = {
   //   initialValues, so plugins hand off task creation to the native flow
   //   instead of POSTing directly.
   TaskCreateDialog,
+  ChangeRequestList,
+  ChangeRequestRow,
+  ChangeRequestDetail: PluginChangeRequestDetail,
+  IntegrationStartTaskMenu,
+  IntegrationListToolbar,
+  IntegrationChangeRequestStatus,
+  IntegrationScopeBar,
+  IntegrationSaveQueryDialog,
+  // - IntegrationRepositoryFilter / IntegrationCursorPagination: the shared
+  //   searchable provider filter and opaque-cursor footer for code-host pages.
+  IntegrationRepositoryFilter,
+  IntegrationCursorPagination,
+  IntegrationIcon,
+  TaskRowIndicator,
   // - RichTextEditor / RichTextReadOnly: narrow wrappers over the Plan
   //   panel's tiptap editor (markdown paste, slash commands, mermaid),
   //   pixel-identical to the Plan panel. See rich-text-editor.tsx.
@@ -260,12 +349,14 @@ const PLUGIN_UI: Record<string, unknown> = {
  * map). Shared rather than reimplemented per plugin: `cn` must be the host's
  * so Tailwind class merging matches the components it styles, and
  * `formatRelativeTime` must be the host's so a plugin's timestamps follow the
- * user's locale instead of the hand-rolled English-only ladders several
- * published plugins ship today.
+ * user's locale instead of hand-rolled English-only ladders. `generateUUID`
+ * keeps non-security identifiers working when secure-context crypto APIs are
+ * unavailable on a supported HTTP deployment.
  */
 const PLUGIN_UTILS = {
   cn,
   formatRelativeTime,
+  generateUUID,
 };
 
 /**
@@ -301,18 +392,66 @@ function effectiveWriterId(surfaceId: string | undefined): string {
   return composeWriterId(TAB_WRITER_ID, surfaceId);
 }
 
+function pluginTranslationValues(options?: PluginTranslationOptions): Record<string, unknown> {
+  return {
+    defaultValue: options?.defaultValue,
+    count: options?.count,
+    ...options?.values,
+  };
+}
+
+function buildPluginI18nApi(pluginId: string): PluginI18nApi {
+  const namespace = pluginTranslationNamespace(pluginId);
+  return {
+    get locale() {
+      return normalizeLocale(i18n.resolvedLanguage ?? i18n.language);
+    },
+    t: (key, options) =>
+      String(
+        i18n.t(`${namespace}:${key}`, {
+          ...pluginTranslationValues(options),
+          defaultValue: options?.defaultValue ?? key,
+        }),
+      ),
+    useTranslation() {
+      const { i18n: activeI18n, t: translate } = useI18nextTranslation(namespace);
+      const scopedTranslate = React.useCallback(
+        (key: string, options?: PluginTranslationOptions) =>
+          String(
+            translate(key, {
+              ...pluginTranslationValues(options),
+              defaultValue: options?.defaultValue ?? key,
+            }),
+          ),
+        [translate],
+      );
+      return {
+        locale: normalizeLocale(activeI18n.resolvedLanguage ?? activeI18n.language),
+        t: scopedTranslate,
+      };
+    },
+  };
+}
+
 export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): PluginHostApi {
   return {
     pluginId,
     React,
     jsx: React.createElement,
+    i18n: buildPluginI18nApi(pluginId),
     store: {
       getState: storeApi.getState,
       setState: storeApi.setState,
       subscribe: storeApi.subscribe,
     },
+    context: buildPluginContextApi(storeApi),
     api: {
       fetch: (path, init) => fetchPluginApi(pluginId, path, init),
+      invokeAction: <TResponse>(
+        key: string,
+        input?: PluginActionInput,
+        options?: PluginActionOptions,
+      ) => invokePluginAction<TResponse>(pluginId, key, input, options),
       // Getter so split-origin dev/desktop always sees the current backend
       // origin, matching what fetchPluginApi resolves per call.
       get baseUrl() {
@@ -320,6 +459,7 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
       },
     },
     ui: PLUGIN_UI,
+    useResponsiveBreakpoint,
     // Getter, not a value captured at boot: a plugin built once at page load
     // would otherwise read the boot-time theme forever, and one that paints
     // imperatively (canvas, inline SVG colors) could never follow a
@@ -330,16 +470,52 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
     onThemeChange: (listener) => subscribeToThemeChanges(listener),
     navigate: (href, options) => softNavigate(href, options?.replace ? "replace" : "push"),
     openModal: (options) => pluginModalManager.openModal(pluginId, options),
-    // Sonner's imperative global. The app mounts <Toaster/> once in
-    // app/layout.tsx, so this needs no host wiring and — unlike a rendered
-    // component — works from a plugin modal regardless of which providers
-    // that modal sits under. Scoped per plugin so `.error` logs with
+    openTaskLinkDialog: (options) => openTaskLinkDialog(pluginId, options),
+    openTaskReview: (options) => openTaskReview(storeApi, options),
+    // Sonner's imperative global. AppShell mounts <Toaster/> once, so this
+    // needs no host wiring and works from plugin modal content. Scoped per
+    // plugin so `.error` logs with
     // attribution rather than filing a kandev frontend error report; see
     // createPluginToast.
     toast: createPluginToast(pluginId),
     utils: PLUGIN_UTILS,
     storage: buildStorageApi(pluginId),
   };
+}
+
+function openTaskReview(storeApi: StoreApi<AppState>, options: PluginTaskReviewOptions): void {
+  if (options.presentation === "desktop") {
+    useDockviewStore.getState().addReviewPanel(options);
+    return;
+  }
+  storeApi.getState().setMobileSessionReview(options.sessionId, reviewItemId(options));
+}
+
+function openTaskLinkDialog(
+  pluginId: string,
+  options: PluginTaskLinkDialogOptions,
+): PluginModalHandle {
+  const handle = pluginModalManager.openTaskLinkDialog(pluginId, {
+    title: options.title,
+    description: options.description,
+    presentation: "dialog",
+    content: function PluginTaskLinkDialogContent() {
+      return React.createElement(TaskChangeRequestLinkForm, {
+        inputLabel: options.inputLabel,
+        placeholder: options.placeholder,
+        emptyError: options.emptyError,
+        failureMessage: options.failureMessage,
+        successMessage: options.successMessage,
+        inputTestId: options.inputTestId,
+        errorTestId: options.errorTestId,
+        submitTestId: options.submitTestId,
+        onSubmit: options.onSubmit,
+        onCancel: () => handle.close(),
+        onSuccess: () => handle.close(),
+      });
+    },
+  });
+  return handle;
 }
 
 /**
@@ -365,8 +541,10 @@ function userStatePath(scope: PluginStorageScope, scopeId: string, key?: string)
 /** Builds `host.storage` (`PluginStorageApi`), scoped to `pluginId`. */
 function buildStorageApi(pluginId: string): PluginStorageApi {
   return {
-    async get(scope, scopeId, key) {
-      const res = await fetchPluginApi(pluginId, userStatePath(scope, scopeId, key));
+    async get(scope, scopeId, key, options) {
+      const res = await fetchPluginApi(pluginId, userStatePath(scope, scopeId, key), {
+        signal: options?.signal,
+      });
       if (res.status === 404) return undefined;
       if (!res.ok) throw new Error(`plugin storage: get failed with status ${res.status}`);
       const body = (await res.json()) as { value: unknown; updatedAt: string };
@@ -381,6 +559,7 @@ function buildStorageApi(pluginId: string): PluginStorageApi {
           writerId: effectiveWriterId(options?.writerId),
           ifUnmodifiedSince: options?.ifUnmodifiedSince,
         }),
+        signal: options?.signal,
       });
       if (res.status === 409) throw new PluginStorageConflictError();
       if (!res.ok) throw new Error(`plugin storage: set failed with status ${res.status}`);
@@ -390,11 +569,16 @@ function buildStorageApi(pluginId: string): PluginStorageApi {
     async delete(scope, scopeId, key, options) {
       const writerId = effectiveWriterId(options?.writerId);
       const path = `${userStatePath(scope, scopeId, key)}?writerId=${encodeURIComponent(writerId)}`;
-      const res = await fetchPluginApi(pluginId, path, { method: "DELETE" });
+      const res = await fetchPluginApi(pluginId, path, {
+        method: "DELETE",
+        signal: options?.signal,
+      });
       if (!res.ok) throw new Error(`plugin storage: delete failed with status ${res.status}`);
     },
-    async list(scope, scopeId) {
-      const res = await fetchPluginApi(pluginId, userStatePath(scope, scopeId));
+    async list(scope, scopeId, options) {
+      const res = await fetchPluginApi(pluginId, userStatePath(scope, scopeId), {
+        signal: options?.signal,
+      });
       if (!res.ok) throw new Error(`plugin storage: list failed with status ${res.status}`);
       const body = (await res.json()) as { entries: PluginStorageEntry[] };
       return body.entries;
@@ -402,4 +586,24 @@ function buildStorageApi(pluginId: string): PluginStorageApi {
     subscribe: (filter, handler) =>
       subscribeToUserStateChanges(pluginId, TAB_WRITER_ID, filter, handler),
   };
+}
+
+/** Calls the authenticated declared-action route; public webhook paths stay out of this API. */
+function invokePluginAction<TResponse>(
+  pluginId: string,
+  key: string,
+  input?: PluginActionInput,
+  options?: PluginActionOptions,
+): Promise<TResponse> {
+  const payload = {
+    ...(input?.workspaceId ? { workspaceId: input.workspaceId } : {}),
+    ...(input?.taskId ? { taskId: input.taskId } : {}),
+    ...(input?.sessionId ? { sessionId: input.sessionId } : {}),
+    ...(input?.repositoryId ? { repositoryId: input.repositoryId } : {}),
+    ...(input && "body" in input ? { body: input.body } : {}),
+  };
+  return fetchJson<TResponse>(
+    `/api/plugins/${encodeURIComponent(pluginId)}/actions/${encodeURIComponent(key)}`,
+    { init: { method: "POST", body: JSON.stringify(payload), signal: options?.signal } },
+  );
 }

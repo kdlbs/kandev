@@ -410,9 +410,9 @@ func summarizePipelines(pipelines []Pipeline) (state string, jobsTotal, jobsPass
 	switch latest.Status {
 	case pipelineStatusSuccess:
 		state = pipelineStatusSuccess
-	case pipelineStatusFailed, "canceled":
+	case pipelineStatusFailed, pipelineStatusCanceled:
 		state = pipelineStateFailure
-	case "skipped":
+	case pipelineStatusSkipped:
 		state = ""
 	default:
 		state = statusPending

@@ -319,6 +319,7 @@ func (r *Repository) initTaskSchema() error {
 		provider TEXT DEFAULT '',
 		provider_repo_id TEXT DEFAULT '',
 		provider_host TEXT DEFAULT '',
+		provider_scope TEXT DEFAULT '',
 		provider_owner TEXT DEFAULT '',
 		provider_name TEXT DEFAULT '',
 		remote_url TEXT DEFAULT '',

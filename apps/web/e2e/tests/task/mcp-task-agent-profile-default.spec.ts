@@ -105,5 +105,11 @@ test.describe("MCP-created task agent profile default", () => {
         { timeout: 30_000, message: "MCP subtask should start with the workspace profile" },
       )
       .toBe(workspaceProfile.id);
+
+    const { sessions: subtaskSessions } = await apiClient.listTaskSessions(subtaskId!);
+    const subtaskRuntime = subtaskSessions[0]?.metadata?.runtime_config_overrides as
+      | { model?: string; mode?: string; config_options?: Record<string, string> }
+      | undefined;
+    expect(subtaskRuntime).toBeUndefined();
   });
 });

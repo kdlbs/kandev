@@ -89,5 +89,6 @@
   "whenEnabledClickingATaskOpens": "Quando ativado, clicar numa tarefa abre o painel de pré-visualização. Quando desativado, clicar navega diretamente para a sessão.",
   "wipTaskCount": "Tarefas em {{label}}",
   "workflow": "Fluxo de trabalho",
-  "workflowStepFallback": "passo do fluxo de trabalho {{stepId}}"
+  "workflowStepFallback": "passo do fluxo de trabalho {{stepId}}",
+  "needsReassignment": "Precisa de reatribuição"
 }

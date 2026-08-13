@@ -47,7 +47,8 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — authoring experience](plugins/authoring-experience.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
 | [plugins — agent tools](plugins/agent-tools.md) | draft |
-| [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | draft |
+| [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | shipped |
+| [plugins — Voice Mode leaves core](plugins/voice-extraction.md) | shipped |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
@@ -126,6 +127,7 @@ Per-workspace credentials and triage triggers for external services.
 | Spec | Status |
 |---|---|
 | [azure-devops-integration](azure-devops-integration/spec.md) | shipped |
+| [bitbucket-plugin](bitbucket-plugin/spec.md) | approved |
 | [slack](integrations/slack.md) | archived — moved to `kandev-plugin-slack` |
 | [external-mcp](integrations/external-mcp.md) | draft |
 | [mcp-tool-argument-validation](integrations/mcp-tool-argument-validation.md) | shipped |
@@ -184,16 +186,17 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
 | [agent-launch-prompt-composer](ui/agent-launch-prompt-composer.md) | shipped |
 | [mermaid-rendering](ui/mermaid-rendering.md) | shipped |
-[message-queue-management](ui/message-queue-management.md) | shipped |
-[message-queue-merge](ui/message-queue-merge.md) | shipped |
-[message-queue-reorder](ui/message-queue-reorder.md) | building |
-[message-queue-send-now](ui/message-queue-send-now.md) | shipped |
+| [message-queue-auto-merge](ui/message-queue-auto-merge.md) | shipped |
+| [message-queue-management](ui/message-queue-management.md) | shipped |
+| [message-queue-merge](ui/message-queue-merge.md) | shipped |
+| [message-queue-reorder](ui/message-queue-reorder.md) | building |
+| [message-queue-send-now](ui/message-queue-send-now.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [settings-discovery](ui/settings-discovery.md) | shipped |
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
-| [voice-mode-task-behavior](ui/voice-mode-task-behavior.md) | shipped |
+| [voice-mode-task-behavior](ui/voice-mode-task-behavior.md) | archived |
 | [app-status-bar](ui/app-status-bar.md) | shipped |
 | [quick-terminal](quick-terminal/spec.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |

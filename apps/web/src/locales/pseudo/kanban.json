@@ -91,5 +91,6 @@
   "workflow": "Ŵōŕķƒĺōŵ",
   "workflowStepFallback": "ŵōŕķƒĺōŵ śţēƥ {{stepId}}",
   "columns": "Ćōĺũḿńś",
-  "columnsForWorkflow": "Ćōĺũḿńś ƒōŕ {{name}}"
+  "columnsForWorkflow": "Ćōĺũḿńś ƒōŕ {{name}}",
+  "needsReassignment": "Ńēēďś Ŕēàśśĩĝńḿēńţ"
 }

@@ -28,6 +28,8 @@ import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
 import { TerminalReopenMenuItems } from "./terminal-reopen-menu";
+import { useNormalizedTaskReviews } from "./review-panel-provider";
+import { reviewItemId } from "./review-selection";
 import type { PortForwardingVisibility } from "./port-forwarding-visibility-provider";
 
 export type AddPanelMenuState = {
@@ -225,7 +227,26 @@ export function AddPanelMenuItems({
             : t("task:mergeRequest", { mriid: mr.mr_iid })}
         </DropdownMenuItem>
       ))}
+      <PluginReviewPanelMenuItems taskId={state.taskId} />
       <RepositoryScriptsMenuItems onRunScript={onRunScript} onRunDevScript={onRunDevScript} />
     </>
   );
+}
+
+function PluginReviewPanelMenuItems({ taskId }: { taskId: string | null }) {
+  const addReviewPanel = useDockviewStore((s) => s.addReviewPanel);
+  const reviews = useNormalizedTaskReviews(taskId).filter(
+    (review) => review.providerId !== "github" && review.providerId !== "gitlab",
+  );
+  return reviews.map((review) => (
+    <DropdownMenuItem
+      key={reviewItemId(review)}
+      onClick={() => addReviewPanel(review)}
+      className={MENU_ITEM_CLASS}
+      data-testid={`add-panel-review-item-${reviewItemId(review)}`}
+    >
+      <IconGitPullRequest className={MENU_ICON_CLASS} />
+      {review.title}
+    </DropdownMenuItem>
+  ));
 }

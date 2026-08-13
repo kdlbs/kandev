@@ -1,16 +1,17 @@
 "use client";
 
-import { IconGitPullRequest, IconGitPullRequestClosed, IconGitMerge } from "@tabler/icons-react";
-import type { Icon } from "@tabler/icons-react";
-import { Spinner } from "@kandev/ui/spinner";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { MR, TaskMR } from "@/lib/types/gitlab";
 import type { GitLabLaunchPayload, GitLabTaskPreset } from "./quick-task-launcher";
 import { gitLabMRKey } from "@/lib/gitlab-identity";
 import { MRRowTaskIndicator } from "./mr-row-task-indicator";
 import { StartTaskMenu } from "./start-task-menu";
-import { RowTitleLink } from "./row-title-link";
 import { useTranslation } from "react-i18next";
+import { ChangeRequestList, ChangeRequestRow } from "@/components/integrations/change-request-list";
+import {
+  IntegrationIcon,
+  type IntegrationIconName,
+} from "@/components/integrations/integration-icon";
 
 type MRListProps = {
   items: MR[];
@@ -21,14 +22,14 @@ type MRListProps = {
   mrKeyToTasks?: Map<string, TaskMR[]>;
 };
 
-function mrStateIcon(mr: MR): { Icon: Icon; className: string } {
+function mrStateIcon(mr: MR): { name: IntegrationIconName; className: string } {
   const state = mr.state === "opened" ? "open" : mr.state;
   if (state === "merged")
-    return { Icon: IconGitMerge, className: "text-purple-600 dark:text-purple-400" };
+    return { name: "merged", className: "text-purple-600 dark:text-purple-400" };
   if (state === "closed")
-    return { Icon: IconGitPullRequestClosed, className: "text-red-600 dark:text-red-400" };
-  if (mr.draft) return { Icon: IconGitPullRequest, className: "text-muted-foreground" };
-  return { Icon: IconGitPullRequest, className: "text-emerald-600 dark:text-emerald-400" };
+    return { name: "pull-request-closed", className: "text-red-600 dark:text-red-400" };
+  if (mr.draft) return { name: "pull-request", className: "text-muted-foreground" };
+  return { name: "pull-request", className: "text-emerald-600 dark:text-emerald-400" };
 }
 
 function MRRow({
@@ -42,18 +43,15 @@ function MRRow({
   presets: GitLabTaskPreset[];
   onStartTask?: MRListProps["onStartTask"];
 }) {
+  const { name: stateIconName, className: stateIconClass } = mrStateIcon(mr);
   const { t } = useTranslation();
-  const { Icon: StateIcon, className: stateIconClass } = mrStateIcon(mr);
   return (
-    <div
-      className="flex items-start gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
-      data-testid="mr-row"
-      data-mr-iid={mr.iid}
-    >
-      <StateIcon className={cn("h-4 w-4 mt-1 shrink-0", stateIconClass)} />
-      <div className="min-w-0 flex-1">
-        <RowTitleLink href={mr.web_url} title={mr.title} />
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5 text-xs text-muted-foreground">
+    <ChangeRequestRow
+      stateIcon={<IntegrationIcon name={stateIconName} className={cn("h-4 w-4", stateIconClass)} />}
+      title={mr.title}
+      href={mr.web_url}
+      metadata={
+        <>
           <span className="whitespace-nowrap">
             {mr.project_path}!{mr.iid}
           </span>
@@ -68,49 +66,26 @@ function MRRow({
               time: formatRelativeTime(mr.created_at),
             })}
           </span>
-          <MRRowTaskIndicator tasks={tasks} />
-        </div>
-      </div>
-      <div className="shrink-0">
-        {onStartTask ? (
+        </>
+      }
+      taskIndicator={<MRRowTaskIndicator tasks={tasks} />}
+      action={
+        onStartTask ? (
           <StartTaskMenu
             presets={presets}
             onSelect={(preset) => onStartTask({ kind: "mr", mr, preset })}
           />
-        ) : null}
-      </div>
-    </div>
+        ) : null
+      }
+      testId="mr-row"
+      dataAttributes={{ "data-mr-iid": mr.iid }}
+    />
   );
 }
 
-function MRListBody({
-  loading,
-  error,
-  items,
-  presets = [],
-  onStartTask,
-  mrKeyToTasks,
-}: MRListProps) {
-  const { t } = useTranslation();
-  if (loading) {
-    return (
-      <div className="flex justify-center py-10">
-        <Spinner />
-      </div>
-    );
-  }
-  if (error) {
-    return <div className="text-center py-10 text-destructive text-sm">{error}</div>;
-  }
-  if (items.length === 0) {
-    return (
-      <div className="text-center py-10 text-muted-foreground text-sm">
-        {t("gitlab:noMergeRequestsMatchThisFilter")}
-      </div>
-    );
-  }
+function MRListBody({ items, presets = [], onStartTask, mrKeyToTasks }: MRListProps) {
   return (
-    <div className="divide-y">
+    <>
       {items.map((mr) => (
         <MRRow
           key={`${mr.project_path}-${mr.iid}`}
@@ -120,14 +95,20 @@ function MRListBody({
           onStartTask={onStartTask}
         />
       ))}
-    </div>
+    </>
   );
 }
 
 export function MRList(props: MRListProps) {
+  const { t } = useTranslation();
   return (
-    <div className="rounded-md border overflow-hidden">
+    <ChangeRequestList
+      loading={props.loading}
+      error={props.error}
+      emptyMessage={t("gitlab:noMergeRequestsMatchThisFilter")}
+      isEmpty={props.items.length === 0}
+    >
       <MRListBody {...props} />
-    </div>
+    </ChangeRequestList>
   );
 }

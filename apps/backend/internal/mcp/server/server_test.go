@@ -984,6 +984,8 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, createTask.Tool.Description, "current_task")
 	assert.Contains(t, createTask.Tool.Description, "workspace_default")
 	assert.Contains(t, createTask.Tool.Description, "workflow profiles first")
+	assert.Contains(t, createTask.Tool.Description, "no creating session")
+	assert.Contains(t, createTask.Tool.Description, "parent task profile")
 
 	// External mode does NOT include session-scoped tools
 	assert.NotContains(t, tools, "ask_user_question_kandev")

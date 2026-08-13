@@ -34,6 +34,7 @@ import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
+import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
 
 type DiffStats = {
   additions: number;
@@ -379,6 +380,7 @@ function TaskItemContent({
           />
         )}
         <TaskPRIcon taskId={taskId} prInfo={prInfo} />
+        {taskId ? <RegisteredChangeRequestTaskIcon taskId={taskId} /> : null}
         {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
         {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
         {isRemoteExecutor && (

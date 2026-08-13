@@ -180,8 +180,12 @@ func TestStartTunnelReleasesReservationWhenResolutionFails(t *testing.T) {
 				t.Fatalf("StartTunnel() port = %d, want 0 on failure", port)
 			}
 			manager.mu.Lock()
-			_, stillReserved := manager.tunnels[tt.sessionID+":3000"]
+			_, stillRunning := manager.tunnels[tt.sessionID+":3000"]
+			_, stillReserved := manager.pending[tt.sessionID+":3000"]
 			manager.mu.Unlock()
+			if stillRunning {
+				t.Fatal("a failed start left an entry in the tunnel map")
+			}
 			if stillReserved {
 				t.Fatal("the reserved cache key was not released after the failure")
 			}

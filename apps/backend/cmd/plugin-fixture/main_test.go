@@ -143,6 +143,148 @@ func TestHandleWebhook_AppendsJSONLineAndRespondsOK(t *testing.T) {
 	require.Equal(t, "test-hook", recs[0].WebhookKey)
 }
 
+func TestHandleAction_ReturnsAuthenticatedConnectionStatus(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+
+	resp, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: connectionStatusAction,
+		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: "workspace-42"},
+	})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"connected":true,"workspace_id":"workspace-42"}`, string(resp.Body))
+}
+
+func TestHandleAction_CreatesPluginOwnedWatchTask(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	host := &fakeHost{createdTaskID: "watch-task-42"}
+	p.SetHost(host)
+
+	resp, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: "watch-create-task", Context: pluginsdk.VerifiedActionContext{WorkspaceID: "workspace-42"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "Bitbucket watch task", host.lastCreateInput.Title)
+	require.Equal(t, "workspace-42", host.lastCreateInput.WorkspaceID)
+	require.JSONEq(t, `{"task_id":"watch-task-42","watch_created":true}`, string(resp.Body))
+}
+
+func TestSearchEntityReferences_ReturnsBitbucketShapedPullRequest(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+
+	resp, err := p.SearchEntityReferences(context.Background(), &pluginsdk.SearchEntityReferencesRequest{
+		Source: "fixture-pull-requests", WorkspaceID: "workspace-42", Query: "provider", Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	require.Equal(t, "pull-request-42", resp.Candidates[0].ProviderLocalID)
+	require.Contains(t, resp.Candidates[0].Title, "Pull request #42")
+}
+
+func TestSearchEntityReferences_ReturnsRevokedCandidateForSubmissionAuthorization(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+
+	resp, err := p.SearchEntityReferences(context.Background(), &pluginsdk.SearchEntityReferencesRequest{
+		Source: fixtureReferenceSource, WorkspaceID: "workspace-42", Query: "revoked", Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	require.Equal(t, revokedPullRequestID, resp.Candidates[0].ProviderLocalID)
+}
+
+func TestAuthorizeEntityReference_DeniesRevokedPullRequestAtSubmission(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	search, err := p.AuthorizeEntityReference(context.Background(), &pluginsdk.AuthorizeEntityReferenceRequest{
+		Source: fixtureReferenceSource, WorkspaceID: "workspace-42", Purpose: "search",
+		Reference: map[string]any{"id": revokedPullRequestID},
+	})
+	require.NoError(t, err)
+	require.True(t, search.Allowed)
+
+	resp, err := p.AuthorizeEntityReference(context.Background(), &pluginsdk.AuthorizeEntityReferenceRequest{
+		Source: fixtureReferenceSource, WorkspaceID: "workspace-42", Purpose: submissionPurpose,
+		Reference: map[string]any{"id": revokedPullRequestID},
+	})
+	require.NoError(t, err)
+	require.False(t, resp.Allowed)
+	require.NotEmpty(t, resp.Reason)
+}
+
+func TestAuthorizeEntityReference_DeniesUnknownPullRequest(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	response, err := p.AuthorizeEntityReference(context.Background(), &pluginsdk.AuthorizeEntityReferenceRequest{
+		Source: fixtureReferenceSource, WorkspaceID: "workspace-42", Purpose: submissionPurpose,
+		Reference: map[string]any{"id": "pull-request-forged"},
+	})
+	require.NoError(t, err)
+	require.False(t, response.Allowed)
+	require.NotEmpty(t, response.Reason)
+}
+
+func TestAuthorizeEntityReference_DeniesUnsupportedPurpose(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	response, err := p.AuthorizeEntityReference(context.Background(), &pluginsdk.AuthorizeEntityReferenceRequest{
+		Source: fixtureReferenceSource, WorkspaceID: "workspace-42", Purpose: "unsupported",
+		Reference: map[string]any{"id": fixturePullRequestID},
+	})
+	require.NoError(t, err)
+	require.False(t, response.Allowed)
+	require.NotEmpty(t, response.Reason)
+}
+
+func TestGitCredentialBinding_RevokesAfterAuthenticatedConnectionAction(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	bindingRequest := &pluginsdk.GitCredentialBindingRequest{
+		ProviderID: "fixture-source-control", Host: "bitbucket.example.test", Path: "/scm/TEAM/fixture.git",
+	}
+
+	binding, err := p.GetGitCredentialBinding(context.Background(), bindingRequest)
+	require.NoError(t, err)
+	require.Equal(t, "fixture-connection-v1", binding.Binding)
+
+	_, err = p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: connectionStatusAction, Body: []byte(`{"revoke":true}`),
+	})
+	require.NoError(t, err)
+
+	binding, err = p.GetGitCredentialBinding(context.Background(), bindingRequest)
+	require.NoError(t, err)
+	require.Empty(t, binding.Binding)
+}
+
+func TestGitCredentialBinding_RevocationIsWorkspaceScoped(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+
+	_, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: connectionStatusAction,
+		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: "workspace-a"},
+		Body:      []byte(`{"revoke":true}`),
+	})
+	require.NoError(t, err)
+
+	for workspaceID, wantBinding := range map[string]string{
+		"workspace-a": "",
+		"workspace-b": "fixture-connection-v1",
+	} {
+		binding, bindingErr := p.GetGitCredentialBinding(context.Background(), &pluginsdk.GitCredentialBindingRequest{
+			ProviderID: fixtureProviderID, WorkspaceID: workspaceID, Host: fixtureCredentialHost, Path: fixtureCredentialPath,
+		})
+		require.NoError(t, bindingErr)
+		require.Equal(t, wantBinding, binding.Binding, workspaceID)
+	}
+}
+
+func TestResolveGitCredential_ReturnsTransientFixtureSecret(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+
+	credential, err := p.ResolveGitCredential(context.Background(), &pluginsdk.ResolveGitCredentialRequest{
+		ProviderID: "fixture-source-control", Host: "bitbucket.example.test", Path: "/scm/TEAM/fixture.git",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "fixture-user", credential.Username)
+	require.Equal(t, "fixture-credential-secret", credential.Secret)
+	require.NotEmpty(t, credential.ExpiresAt)
+}
+
 // TestHandleWebhook_WriteKeyRoundTripsHostWrites proves the "write" webhook
 // drives the Host data API write RPCs (CreateTask then SendMessage to the
 // returned task) and records the outcome to write-probe.json.

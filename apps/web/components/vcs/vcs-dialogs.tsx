@@ -22,21 +22,18 @@ import {
 } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
-import {
-  getChangeRequestTerminology,
-  resolveChangeRequestTerminology,
-  useChangeRequestTerminology,
-  useGitOperations,
-} from "@/hooks/use-git-operations";
-import { useAppStore } from "@/components/state-provider";
+import { useChangeRequestTerminology } from "@/hooks/use-git-operations";
 import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
-import { useToast } from "@/components/toast-provider";
-import { openExternalLink } from "@/lib/desktop/external-links";
 import type { FileInfo } from "@/lib/state/slices";
-import { getChangeRequestFailureFeedback } from "./change-request-feedback";
 import { Trans, useTranslation } from "react-i18next";
+import { createChangeRequestWithProvider } from "@/lib/plugins/change-request-creation";
+import { useChangeRequestProviderTarget } from "@/hooks/use-change-request-provider-target";
+import {
+  useCreateChangeRequestHandler,
+  type CreateChangeRequestInput,
+} from "./use-create-change-request-handler";
 
 type VcsDialogsContextValue = {
   /** When `repo` is provided, the commit is scoped to that repo only. */
@@ -383,69 +380,6 @@ export function pickRepoLabel(
   return resolveDisplayName("") || t("integrations:repository");
 }
 
-function useCreatePRHandler(
-  ps: UsePRDialogReturn,
-  baseBranch: string | undefined,
-  createPR: ReturnType<typeof useGitOperations>["createPR"],
-  toast: ReturnType<typeof useToast>["toast"],
-  defaultTerminology: ReturnType<typeof getChangeRequestTerminology>,
-) {
-  const { t } = useTranslation();
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
-  return useCallback(async () => {
-    if (!ps.title.trim()) return;
-    ps.setOpen(false);
-    try {
-      const result = await createPR(ps.title.trim(), ps.body.trim(), baseBranch, ps.draft, ps.repo);
-      if (result.success) {
-        const terms = resolveChangeRequestTerminology(result.provider, defaultTerminology);
-        const title = ps.draft
-          ? t("integrations:draftCreated", { shortName: terms.shortName })
-          : t("integrations:shortNameCreated", { shortName: terms.shortName });
-        toast({
-          title,
-          description:
-            result.pr_url || t("integrations:createdSuccessfully", { longName: terms.longName }),
-          variant: "success",
-        });
-        if (result.pr_url) {
-          if (activeTaskId) {
-            setPendingPrUrlForTask(activeTaskId, ps.repo || "", result.pr_url);
-          }
-          void openExternalLink(result.pr_url).catch(() => undefined);
-        }
-      } else {
-        const feedback = getChangeRequestFailureFeedback(result, defaultTerminology);
-        toast(feedback);
-        if (result.branch_pushed) {
-          ps.setBranchPushed(true);
-          ps.setOpen(true);
-          return;
-        }
-      }
-    } catch (e) {
-      toast({
-        title: t("integrations:createFailed", { shortName: defaultTerminology.shortName }),
-        description: e instanceof Error ? e.message : t("integrations:anErrorOccurred"),
-        variant: "error",
-      });
-    }
-    ps.setTitle("");
-    ps.setBody("");
-    ps.setBranchPushed(false);
-  }, [
-    ps,
-    baseBranch,
-    createPR,
-    toast,
-    defaultTerminology,
-    activeTaskId,
-    setPendingPrUrlForTask,
-    t,
-  ]);
-}
-
 function useVcsDialogsState(
   sessionId: string | null,
   taskTitle: string | undefined,
@@ -454,14 +388,47 @@ function useVcsDialogsState(
   const { t } = useTranslation();
   const cs = useCommitDialogState();
   const ps = usePRDialogState();
-  const { toast } = useToast();
   const gitWithFeedback = useGitWithFeedback();
   const gitStatus = useSessionGitStatus(sessionId);
   const statusByRepo = useSessionGitStatusByRepo(sessionId);
   // Use SessionGit so commit fans out per-repo for multi-repo workspaces.
   // useGitOperations.commit hits the workspace root, which fails for multi-repo
   // tasks because the task root isn't itself a git repo (exit 1).
-  const { commit, createPR, repoNames, isLoading: isGitLoading } = useSessionGit(sessionId);
+  const {
+    commit,
+    createPR: createBuiltInPR,
+    push,
+    repoNames,
+    isLoading: isGitLoading,
+  } = useSessionGit(sessionId);
+  const registeredCreateTarget = useChangeRequestProviderTarget(sessionId, ps.repo);
+  const createPR = useCallback(
+    (input: CreateChangeRequestInput) => {
+      if (!registeredCreateTarget || !sessionId) {
+        return createBuiltInPR(
+          input.title,
+          input.body,
+          input.baseBranch,
+          input.draft,
+          input.repositoryScope,
+        );
+      }
+      return createChangeRequestWithProvider({
+        target: registeredCreateTarget,
+        push,
+        repositoryScope: input.repositoryScope,
+        title: input.title,
+        body: input.body,
+        baseBranch: input.baseBranch,
+        draft: input.draft,
+        branchAlreadyPushed: input.branchAlreadyPushed,
+        sessionId,
+        signal: input.signal,
+      });
+    },
+    [createBuiltInPR, push, registeredCreateTarget, sessionId],
+  );
+  const supportsDraft = registeredCreateTarget?.provider.supportsDraft !== false;
   const repoDisplayName = useRepoDisplayName(sessionId);
   const isMultiRepo = repoNames.length > 1;
   const changeRequestTerminology = useChangeRequestTerminology(sessionId, ps.repo);
@@ -484,13 +451,13 @@ function useVcsDialogsState(
     cs.setBody("");
     cs.setRepo(undefined);
   }, [cs, gitWithFeedback, commit, t]);
-  const handleCreatePR = useCreatePRHandler(
-    ps,
+  const handleCreatePR = useCreateChangeRequestHandler({
+    dialog: ps,
     baseBranch,
-    createPR,
-    toast,
-    changeRequestTerminology,
-  );
+    createChangeRequest: createPR,
+    defaultTerminology: changeRequestTerminology,
+    supportsDraft,
+  });
   const contextValue = useMemo(
     () => ({
       openCommitDialog: cs.openDialog,
@@ -509,6 +476,7 @@ function useVcsDialogsState(
     repoDisplayName,
     isMultiRepo,
     changeRequestTerminology,
+    supportsDraft,
   };
 }
 
@@ -570,6 +538,7 @@ export function VcsDialogsProvider({
         onBodyChange={ps.setBody}
         draft={ps.draft}
         onDraftChange={ps.setDraft}
+        supportsDraft={state.supportsDraft}
         loading={isGitLoading}
         branchPushed={ps.branchPushed}
         onCreate={handleCreatePR}

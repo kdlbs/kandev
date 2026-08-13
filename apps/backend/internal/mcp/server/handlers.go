@@ -37,6 +37,7 @@ const (
 	rejectedFieldKey   = "rejected"
 	documentArg        = "document"
 	messageArg         = "message"
+	autopilotArg       = "autopilot"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
@@ -173,11 +174,14 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"workspace_mode":      req.GetString("workspace_mode", ""),
 			"title":               title,
 			"description":         req.GetString("prompt", ""),
-			"autopilot":           req.GetBool("autopilot", false),
+			autopilotArg:          req.GetBool(autopilotArg, false),
 			"agent_profile_id":    req.GetString("agent_profile_id", ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
+		}
+		if s.sessionID != "" && s.taskID != "" {
+			payload["source_session_id"] = s.sessionID
 		}
 		if externalID := req.GetString("external_id", ""); externalID != "" {
 			payload["external_id"] = externalID

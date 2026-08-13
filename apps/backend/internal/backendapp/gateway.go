@@ -228,7 +228,7 @@ func provideGateway(
 				log.Warn("failed to update renamed branch snapshot",
 					zap.String("session_id", sessionID),
 					zap.String("repository_id", repositoryID),
-					zap.String("branch", newName),
+					zap.String(branchFieldKey, newName),
 					zap.Error(err))
 			}
 		})

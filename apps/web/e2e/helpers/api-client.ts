@@ -15,7 +15,6 @@ import type {
   TaskCIAutomationOptions,
   TaskCIAutomationPatch,
 } from "../../lib/types/github";
-import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
 import type { SecretListItem, SecretScope } from "../../lib/types/http-secrets";
 import type {
@@ -969,7 +968,6 @@ export class ApiClient {
     tasks_list_sort?: string;
     tasks_list_group?: string;
     task_create_last_used?: TaskCreateLastUsedApi;
-    voice_mode?: VoiceModeSettings;
     kanban_hidden_step_ids?: Record<string, string[]>;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
@@ -1934,6 +1932,8 @@ export class ApiClient {
       id: string;
       task_id: string;
       agent_profile_id?: string;
+      executor_id?: string;
+      executor_profile_id?: string;
       state: string;
       started_at: string;
       task_environment_id?: string;
@@ -2201,6 +2201,25 @@ export class ApiClient {
       session_id: sessionId,
       content,
       attachments,
+    });
+  }
+
+  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-model`, {
+      model_id: modelId,
+    });
+  }
+
+  async setSessionMode(sessionId: string, modeId: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-mode`, {
+      mode_id: modeId,
+    });
+  }
+
+  async setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-config-option`, {
+      config_id: configId,
+      value,
     });
   }
 
