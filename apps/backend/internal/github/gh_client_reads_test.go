@@ -100,6 +100,38 @@ func TestGHClient_GetIssue_OtherFailureIsWrapped(t *testing.T) {
 	}
 }
 
+func TestGHClient_GetRepository_NotFoundBecomesTypedError(t *testing.T) {
+	newFakeGH(t, ghResponse{Prefix: "api /repos/acme/widget", Stderr: "gh: 404 Not Found", Exit: 1})
+	repository, err := NewGHClient().GetRepository(context.Background(), "acme", "widget")
+	if repository != nil {
+		t.Errorf("repository = %#v, want nil", repository)
+	}
+	var apiErr *GitHubAPIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+		t.Fatalf("err = %v, want a *GitHubAPIError with 404", err)
+	}
+	if apiErr.Endpoint != "/repos/acme/widget" {
+		t.Errorf("endpoint = %q", apiErr.Endpoint)
+	}
+}
+
+func TestGHClient_ListRepositoryForksUsesForkNetwork(t *testing.T) {
+	calls := newFakeGH(t, ghResponse{
+		Prefix: "api repos/acme/widget/forks?per_page=100",
+		Stdout: `[[{"id":200,"full_name":"alice/widget-renamed","name":"widget-renamed","owner":{"login":"alice"},"fork":true,"parent":{"id":100,"full_name":"acme/widget"},"permissions":{"push":true}}]]`,
+	})
+	forks, err := NewGHClient().ListRepositoryForks(context.Background(), "acme", "widget")
+	if err != nil {
+		t.Fatalf("ListRepositoryForks: %v", err)
+	}
+	assertGHArgv(t, calls(t), 0, []string{
+		"api", "repos/acme/widget/forks?per_page=100", "--paginate", "--slurp",
+	})
+	if len(forks) != 1 || forks[0].FullName != "alice/widget-renamed" || forks[0].ParentID != 100 {
+		t.Fatalf("forks = %#v", forks)
+	}
+}
+
 func TestGHClient_GetPR_NotFoundBecomesTypedError(t *testing.T) {
 	newFakeGH(t, ghResponse{Prefix: "pr view", Stderr: "gh: HTTP 404: Not Found", Exit: 1})
 	pr, err := NewGHClient().GetPR(context.Background(), "acme", "widget", 7)

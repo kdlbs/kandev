@@ -45,14 +45,16 @@ const (
 var ErrGitHubCredentialBrokerURL = errors.New("invalid Git credential broker URL")
 
 type githubCredentialScope struct {
-	Lease        string `json:"lease"`
-	TaskID       string `json:"task_id"`
-	SessionID    string `json:"session_id"`
-	RepositoryID string `json:"repository_id"`
-	Owner        string `json:"owner"`
-	Repo         string `json:"repo"`
-	Host         string `json:"host"`
-	Path         string `json:"path"`
+	Lease            string `json:"lease"`
+	TaskID           string `json:"task_id"`
+	SessionID        string `json:"session_id"`
+	RepositoryID     string `json:"repository_id"`
+	Owner            string `json:"owner"`
+	Repo             string `json:"repo"`
+	Host             string `json:"host"`
+	Path             string `json:"path"`
+	ProviderID       string `json:"provider_id,omitempty"`
+	ParentProviderID string `json:"parent_provider_id,omitempty"`
 }
 
 // GitCredentialLeaseIssuer creates opaque helper leases. *gitcredentials.Broker
@@ -176,17 +178,34 @@ func (e *Executor) configureGitCredentialBrokerForRepositories(
 	req *LaunchAgentRequest,
 	infos []*repoInfo,
 ) error {
-	if e.gitCredentialIssuer == nil || len(infos) == 0 {
+	if len(infos) == 0 {
 		return nil
 	}
-	githubManaged, err := e.resolveManagedGitHubCredentials(ctx, req, infos)
-	if err != nil {
-		return err
+	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
+	if e.githubCredentialPolicyResolver != nil {
+		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, req.WorkspaceID)
+		if err != nil {
+			return fmt.Errorf("resolve task Git credential policy: %w", err)
+		}
+		policy = resolved
 	}
 	if req.Env == nil {
 		req.Env = make(map[string]string)
 	}
-	scopes, helpers, err := e.issueGitCredentialScopes(ctx, req, infos, githubManaged)
+	if policy.Mode == taskGitCredentialsModeExecutor || req.Env[envGitHubToken] != "" || req.Env[envGHToken] != "" {
+		if err := removeManagedGitHubCredentials(req); err != nil {
+			return err
+		}
+		clearManagedContributionDestinations(req, infos)
+		return nil
+	}
+	if e.gitCredentialIssuer == nil {
+		if hasManagedContributionDestination(infos) {
+			return errors.New("managed contribution destination cannot be activated without the GitHub credential broker")
+		}
+		return nil
+	}
+	scopes, helpers, err := e.issueGitCredentialScopes(ctx, req, infos, true)
 	if err != nil {
 		return err
 	}
@@ -297,6 +316,34 @@ func includesGitHubRepository(infos []*repoInfo) bool {
 	return false
 }
 
+func hasManagedContributionDestination(infos []*repoInfo) bool {
+	for _, info := range infos {
+		if info != nil && info.ContributionDestination != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func clearManagedContributionDestinations(req *LaunchAgentRequest, infos []*repoInfo) {
+	for _, info := range infos {
+		if info != nil {
+			info.ContributionDestination = nil
+		}
+	}
+	if req == nil {
+		return
+	}
+	req.ContributionDestination = nil
+	for index := range req.Repositories {
+		req.Repositories[index].ContributionDestination = nil
+	}
+}
+
+func removeManagedGitHubCredentials(req *LaunchAgentRequest) error {
+	return removeManagedGitCredentials(req)
+}
+
 func removeManagedGitCredentials(req *LaunchAgentRequest) error {
 	if req == nil || req.Env == nil {
 		return nil
@@ -365,6 +412,12 @@ func (e *Executor) issueGitCredentialScope(
 	lease, err := e.gitCredentialIssuer.Issue(ctx, gitcredentials.Scope{
 		ProviderID: providerID, WorkspaceID: req.WorkspaceID, TaskID: req.TaskID, SessionID: req.SessionID,
 		RepositoryID: info.RepositoryID, Host: host, Path: path,
+		IdentityProviderID: func() string {
+			if providerID == gitHubProviderID {
+				return strings.TrimSpace(repository.ProviderRepoID)
+			}
+			return ""
+		}(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("issue Git credential lease: %w", err)
@@ -375,6 +428,12 @@ func (e *Executor) issueGitCredentialScope(
 	return &githubCredentialScope{
 		Lease: lease.Token, TaskID: req.TaskID, SessionID: req.SessionID,
 		RepositoryID: info.RepositoryID, Owner: owner, Repo: repo, Host: host, Path: path,
+		ProviderID: func() string {
+			if providerID == gitHubProviderID {
+				return strings.TrimSpace(repository.ProviderRepoID)
+			}
+			return ""
+		}(),
 	}, nil
 }
 
@@ -383,7 +442,9 @@ func appendUniqueGitHubCredentialScope(scopes *[]githubCredentialScope, scope gi
 		if existing.RepositoryID == scope.RepositoryID &&
 			strings.EqualFold(existing.Host, scope.Host) &&
 			strings.EqualFold(existing.Owner, scope.Owner) &&
-			strings.EqualFold(existing.Repo, scope.Repo) {
+			strings.EqualFold(existing.Repo, scope.Repo) &&
+			strings.EqualFold(existing.ProviderID, scope.ProviderID) &&
+			strings.EqualFold(existing.ParentProviderID, scope.ParentProviderID) {
 			return
 		}
 	}
@@ -420,7 +481,9 @@ func (e *Executor) issueGitHubContributionCredentialScope(
 	if !binding.CollaborationAllowed {
 		return nil, fmt.Errorf("remote contribution does not permit collaboration")
 	}
-	return e.issueGitHubCredentialScopeForIdentity(ctx, req, info.RepositoryID, parts[0], parts[1], defaultGitHubHost)
+	return e.issueGitHubCredentialScopeForIdentity(
+		ctx, req, info.RepositoryID, parts[0], parts[1], defaultGitHubHost, binding.SourceRepository.ProviderID, "", nil,
+	)
 }
 
 func (e *Executor) issueGitHubContributionDestinationCredentialScope(
@@ -446,6 +509,13 @@ func (e *Executor) issueGitHubContributionDestinationCredentialScope(
 	if !strings.EqualFold(destination.SourceRepository.Path, canonicalPath) {
 		return nil, fmt.Errorf("contribution destination source does not match the canonical repository")
 	}
+	if strings.TrimSpace(info.Repository.ProviderRepoID) == "" ||
+		!strings.EqualFold(destination.SourceRepository.ProviderID, info.Repository.ProviderRepoID) {
+		return nil, fmt.Errorf("contribution destination source provider identity does not match the canonical repository")
+	}
+	if destination.CredentialBinding == nil {
+		return nil, fmt.Errorf("contribution destination credential binding is missing")
+	}
 	parts := strings.Split(destination.TargetRepository.Path, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return nil, fmt.Errorf("contribution destination GitHub target identity is invalid")
@@ -453,22 +523,36 @@ func (e *Executor) issueGitHubContributionDestinationCredentialScope(
 	if strings.EqualFold(destination.TargetRepository.Path, canonicalPath) {
 		return nil, nil
 	}
-	return e.issueGitHubCredentialScopeForIdentity(ctx, req, info.RepositoryID, parts[0], parts[1], defaultGitHubHost)
+	return e.issueGitHubCredentialScopeForIdentity(
+		ctx, req, info.RepositoryID, parts[0], parts[1], defaultGitHubHost,
+		destination.TargetRepository.ProviderID, destination.SourceRepository.ProviderID, destination.CredentialBinding,
+	)
 }
 
 func (e *Executor) issueGitHubCredentialScopeForIdentity(
 	ctx context.Context,
 	req *LaunchAgentRequest,
 	repositoryID, owner, repo, host string,
+	providerID, parentProviderID string,
+	destinationBinding *models.ContributionDestinationCredentialBinding,
 ) (*githubCredentialScope, error) {
 	if err := validateGitHubCredentialBrokerURL(e.gitCredentialBrokerURL, req.ExecutorType); err != nil {
 		return nil, err
 	}
 	path := "/" + owner + "/" + repo + ".git"
-	lease, err := e.gitCredentialIssuer.Issue(ctx, gitcredentials.Scope{
+	scope := gitcredentials.Scope{
 		ProviderID: gitHubProviderID, WorkspaceID: req.WorkspaceID, TaskID: req.TaskID, SessionID: req.SessionID,
 		RepositoryID: repositoryID, Host: host, Path: path,
-	})
+		IdentityProviderID: providerID, ParentProviderID: parentProviderID,
+	}
+	if destinationBinding != nil {
+		encodedBinding, err := json.Marshal(destinationBinding)
+		if err != nil {
+			return nil, fmt.Errorf("encode contribution destination credential binding: %w", err)
+		}
+		scope.CredentialBinding = string(encodedBinding)
+	}
+	lease, err := e.gitCredentialIssuer.Issue(ctx, scope)
 	if err != nil {
 		return nil, fmt.Errorf("issue Git credential lease: %w", err)
 	}
@@ -478,6 +562,7 @@ func (e *Executor) issueGitHubCredentialScopeForIdentity(
 	return &githubCredentialScope{
 		Lease: lease.Token, TaskID: req.TaskID, SessionID: req.SessionID,
 		RepositoryID: repositoryID, Owner: owner, Repo: repo, Host: host, Path: path,
+		ProviderID: providerID, ParentProviderID: parentProviderID,
 	}, nil
 }
 

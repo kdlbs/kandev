@@ -1,6 +1,6 @@
 # ADR-2026-08-12-task-bound-fork-destinations: Bind Fork Push Destinations to Tasks
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-13)
 **Date:** 2026-08-12
 **Area:** backend, frontend, workflow, security, GitHub
 
@@ -26,19 +26,28 @@ Managed credential leases are fixed when the task runtime starts. Preparing a fo
 enters its PR workflow step is therefore too late for a long-lived managed session unless the whole
 environment is recreated. Managed fork resolution must complete before the first task launch.
 
+Path-only metadata does not prove identity when the workspace automation connection changes, GitHub
+deletes and recreates a repository at the same owner/name, or a fork is renamed. The destination contract
+must bind both the credential identity and the provider-owned repository identities.
+
 ## Decision
 
 Kandev will represent a pre-PR fork as a versioned, server-authored
 `contribution_destination` binding on the canonical task-repository attachment. The binding contains only
-the provider, the exact credential-free source repository identity and URL, and provider-owned stable IDs.
-The attachment's normal `repository_id` remains the target identity. No token, lease, provider title, or
-caller-supplied Git remote is trusted or persisted.
+the provider, the exact credential-free source repository identity and URL, provider-owned stable IDs, and
+a non-secret binding to the workspace automation source and credential generation. The attachment's normal
+`repository_id` remains the target identity. No token, lease, provider title, or caller-supplied Git remote
+is trusted or persisted.
 
 When the workspace selects managed task credentials, the Improve Kandev task-creation path resolves the
 destination through the selected workspace automation connection before the task is settled or its first
 agent starts. Direct target write access requires no second binding. Otherwise Kandev reuses or creates the
-automation actor's fork, verifies that its parent is exactly `kdlbs/kandev`, verifies write access, and
-persists the binding. A same-name repository with a different parent fails closed.
+automation actor's fork, verifies that its parent provider ID and full name are exactly `kdlbs/kandev`,
+verifies write access, and persists the binding. A same-name repository with a different parent fails closed.
+
+Exact-name lookup is only the fast path. If it returns a provider 404, Kandev searches the canonical
+repository's fork network and re-reads each same-owner candidate through the provider before accepting it.
+This reuses renamed forks without trusting list payloads or creating a duplicate.
 
 Fork ownership must match the identity that supplies managed task credentials. A human PAT or named GitHub
 CLI automation connection may own and create a fork. A GitHub App may contribute directly when its
@@ -50,8 +59,14 @@ Runtime materialization preserves canonical `origin` and adds a collision-resist
 the bound fork. The task branch tracks that remote for ordinary `git push`; pull, base comparison, issue
 lookup, and pull-request creation continue to target the canonical repository explicitly. Managed GitHub
 credentials add a second lease only when its owner/repository exactly matches a valid destination binding
-on the same task attachment. The broker authorizer accepts that scope alongside the attachment's canonical
-identity and rejects every other repository.
+on the same task attachment. The broker authorizer compares canonical, target, and parent provider IDs and
+re-reads the target through the current workspace automation connection at both lease issuance and
+redemption. A path reused by a deleted-and-recreated repository cannot inherit an old lease.
+
+If task policy becomes executor-owned or an explicit executor `GH_TOKEN`/`GITHUB_TOKEN` is present, the
+runtime clears any managed destination from the launch request and uses the separate unmanaged compatibility
+path. A destination bound to another workspace connection generation, login, App installation, or App
+credential generation is rejected or revoked.
 
 The managed Improve Kandev PR path does not run `gh repo fork` or rename `origin`. It pushes `HEAD` through
 the configured contribution remote and creates the pull request with explicit canonical `--repo`, base,
@@ -75,6 +90,9 @@ is executor-owned; it must never use that fallback after a managed preparation f
 - Bootstrap capability reporting must use the workspace automation connection, not ambient host `gh`, so
   the displayed actor and the eventual managed credential source cannot disagree in managed mode. The
   executor-owned compatibility probe remains explicitly separate.
+- Bootstrap persists the canonical provider repository ID when it can resolve it. New blocked states cross
+  the API as stable `fork_reason_code` values; the frontend translates those codes instead of displaying
+  backend-authored English text.
 - Existing `remote_contribution` bindings remain the authority for tasks attached to an already-open pull
   request. The new binding covers only the period before a pull request exists.
 - User-managed local repository rows retain their existing remote exemption. Kandev-managed provider rows

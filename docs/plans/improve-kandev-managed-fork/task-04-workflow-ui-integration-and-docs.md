@@ -16,7 +16,8 @@ spec: "../../specs/improve-kandev/spec.md"
   upstream and creates the PR with explicit canonical repository, base, fork owner, and head branch. The
   executor-owned compatibility branch remains explicit and cannot be selected after managed failure.
 - Desktop and mobile Improve Kandev dialogs block implementation reports for an unsupported managed
-  automation configuration, show actionable translated copy, and keep Open issue usable.
+  automation configuration, translate stable backend reason codes into actionable copy, and keep Open
+  issue usable.
 - Focused integration proves creation, launch, push, resume, credential authorization, canonical origin,
   and PR targeting end to end. Public reference docs describe the behavior and limitation.
 
@@ -86,11 +87,12 @@ changed, red/green commands, remaining risks, divergence, and task/plan status u
 
 ## Completion
 
-Completed 2026-08-12. The Improve Kandev prompt now uses the prepared managed route, preserves canonical
+Completed 2026-08-13. The Improve Kandev prompt now uses the prepared managed route, preserves canonical
 `origin`, blocks executor-owned recovery after managed preparation failure, and creates the PR with an
 explicit canonical repository and fork-owner head. The UI exposes translated ready/creatable/blocked
-states and keeps issue reporting available. Desktop Playwright passed 15/15 tests, including the blocked
-managed state; mobile Playwright passed 1/1 with the existing 44px touch target and overflow assertions.
+states using a stable fork reason code and keeps issue reporting available. Desktop Playwright passed
+15/15 tests, including the blocked managed state; mobile Playwright passed 1/1 with the existing 44px
+touch target and overflow assertions.
 
 Public documentation classification: reference updates only in `docs/public/integrations.md` and
 `docs/public/git-operations.md`; no new page or navigation entry was required. The public-doc test suite

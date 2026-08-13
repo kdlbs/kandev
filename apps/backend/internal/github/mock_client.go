@@ -428,6 +428,26 @@ func (m *MockClient) GetRepository(_ context.Context, owner, repo string) (*GitH
 	return &copy, nil
 }
 
+func (m *MockClient) ListRepositoryForks(_ context.Context, owner, repo string) ([]*GitHubRepository, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
+	parent, ok := m.repositoryDetails[repoKey{owner, repo}]
+	if !ok {
+		return nil, &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/" + owner + "/" + repo}
+	}
+	forks := make([]*GitHubRepository, 0)
+	for _, repository := range m.repositoryDetails {
+		if repository == nil || !repository.Fork || repository.ParentID != parent.ID {
+			continue
+		}
+		forks = append(forks, copyGitHubRepository(repository))
+	}
+	return forks, nil
+}
+
 // CreateFork creates a deterministic in-memory fork for mock Improve Kandev
 // flows. Production clients still use the provider API and bounded polling.
 func (m *MockClient) CreateFork(_ context.Context, owner, repo string) (*GitHubRepository, error) {

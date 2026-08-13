@@ -65,6 +65,10 @@ func (c *NoopClient) GetRepository(context.Context, string, string) (*GitHubRepo
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) ListRepositoryForks(context.Context, string, string) ([]*GitHubRepository, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) CreateFork(context.Context, string, string) (*GitHubRepository, error) {
 	return nil, ErrNoClient
 }

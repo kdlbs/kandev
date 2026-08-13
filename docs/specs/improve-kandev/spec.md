@@ -1,11 +1,13 @@
 ---
 status: building
 created: 2026-04-29
-amended: 2026-08-12
+amended: 2026-08-13
 owner: Carlos Florencio
 ---
 
 # Improve Kandev
+
+Decision: [ADR-2026-08-12-task-bound-fork-destinations](../../decisions/2026-08-12-task-bound-fork-destinations.md).
 
 ## Why
 
@@ -74,6 +76,15 @@ the user's own agent picks up immediately — turning every report into a contri
   fork`, rename `origin`, or depend on `gh` inferring a cross-fork topology.
   Executor-owned mode retains an explicitly separate agent-managed fork path
   because Kandev cannot prove the identity behind an opaque executor credential.
+- A managed destination is bound to the exact workspace automation source,
+  credential generation, and, for an App installation, registration,
+  installation, and App credential generation. Kandev checks this binding at
+  lease issuance and redemption. Policy changes, explicit executor tokens,
+  and connection changes cannot reuse the old destination.
+- Fork discovery uses the canonical repository's fork network after the
+  canonical-name fast path. A renamed fork is reusable only after an
+  authoritative provider read confirms its owner, provider ID, writable
+  permissions, and exact parent identity.
 - The `improve-kandev` workflow is hidden from the workflow management page in
   workspace settings and from the workflow picker in the standard task-create
   dialog, except in the dedicated `Improve Kandev` workspace itself where the
@@ -123,6 +134,10 @@ the user's own agent picks up immediately — turning every report into a contri
   mode keeps its separately labeled executor capability probe. Blocked
   responses include user-facing recovery guidance and still allow the
   issue-only workflow.
+- Bootstrap records the canonical provider repository ID whenever the
+  provider identity can be resolved. Fork failures cross the API as stable
+  `fork_reason_code` values; the frontend translates those codes and does not
+  render backend error text.
 - Both workflow IDs refer to hidden, workspace-scoped workflow instances in
   the returned workspace and are safe to request repeatedly.
 
@@ -139,8 +154,9 @@ the user's own agent picks up immediately — turning every report into a contri
   template.
 - `contribution_destination` is stored only on the canonical
   `task_repositories` attachment. It contains a version, provider, and exact
-  credential-free fork identity/URL. Tokens, leases, credential helpers, and
-  ambient Git remotes are never persisted.
+  credential-free fork identity/URL plus a non-secret automation connection
+  binding. Tokens, leases, credential helpers, and ambient Git remotes are
+  never persisted.
 
 ## Failure modes
 
@@ -167,6 +183,15 @@ the user's own agent picks up immediately — turning every report into a contri
 - If `<automation-login>/kandev` exists but is not a fork of `kdlbs/kandev`, or
   if GitHub does not make a newly created fork readable and writable within the
   bounded preparation window, creation fails without starting an agent.
+- If the recorded canonical or target provider ID changes, or the provider no
+  longer reports the target as a fork of the recorded canonical repository,
+  managed lease issuance and redemption fail closed. A deleted-and-recreated
+  repository at the same path cannot inherit an old lease.
+- If an existing fork was renamed, the next resolution searches the canonical
+  fork network and reuses it only after an authoritative repository read. It
+  does not create a second same-owner fork.
+- Bootstrap returns stable fork reason codes. Desktop and mobile translate
+  those codes, while **Open issue** remains available for blocked states.
 - A malformed, unknown-version, or target-mismatched destination binding fails
   closed during launch or resume. An unrelated fork can never be redeemed as a
   managed credential scope.
@@ -220,6 +245,20 @@ the user's own agent picks up immediately — turning every report into a contri
   `kdlbs/kandev`, **WHEN** an implementation task is created, **THEN** Kandev
   blocks creation with a destination-conflict error and does not authorize or
   overwrite that repository.
+
+- **GIVEN** the automation actor's existing fork was renamed after an earlier
+  Improve Kandev task, **WHEN** another implementation task is created,
+  **THEN** Kandev reuses that verified fork from the canonical fork network
+  without calling fork creation again.
+
+- **GIVEN** a managed destination was bound to one workspace connection,
+  **WHEN** policy changes to executor-owned, an explicit `GH_TOKEN` or
+  `GITHUB_TOKEN` is supplied, or the connection generation/login changes,
+  **THEN** Kandev does not activate the old destination lease.
+
+- **GIVEN** the destination path is deleted and recreated with another
+  provider ID or parent, **WHEN** the task lease is issued or redeemed,
+  **THEN** Kandev rejects it even when the owner/name path is unchanged.
 
 - **GIVEN** the workspace automation connection is a GitHub App that lacks
   write access to `kdlbs/kandev` and task access is managed, **WHEN** the user

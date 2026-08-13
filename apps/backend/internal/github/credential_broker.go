@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/gitcredentials"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 const gitHubTokenUsername = "x-access-token"
@@ -29,15 +30,29 @@ type BrokerScopeAuthorizer interface {
 	) error
 }
 
+// BrokerScopeAuthorizerWithIdentity extends the task scope check with the
+// provider identity that was used to issue the lease. The optional interface
+// keeps legacy test and compatibility authorizers source-compatible while the
+// production authorizer enforces stable repository IDs.
+type BrokerScopeAuthorizerWithIdentity interface {
+	AuthorizeGitHubRepositoryWithIdentity(
+		ctx context.Context,
+		workspaceID, taskID, sessionID, repositoryID, owner, repo, providerID, parentProviderID string,
+	) error
+}
+
 type CredentialLeaseRequest struct {
-	WorkspaceID  string
-	TaskID       string
-	SessionID    string
-	RepositoryID string
-	Owner        string
-	Repo         string
-	Host         string
-	TTL          time.Duration
+	WorkspaceID        string
+	TaskID             string
+	SessionID          string
+	RepositoryID       string
+	Owner              string
+	Repo               string
+	Host               string
+	ProviderID         string
+	ParentProviderID   string
+	DestinationBinding *taskmodels.ContributionDestinationCredentialBinding
+	TTL                time.Duration
 }
 
 type CredentialLease struct {
@@ -46,14 +61,16 @@ type CredentialLease struct {
 }
 
 type BrokerCredentialRequest struct {
-	Lease        string
-	TaskID       string
-	SessionID    string
-	RepositoryID string
-	Owner        string
-	Repo         string
-	Host         string
-	Path         string
+	Lease            string
+	TaskID           string
+	SessionID        string
+	RepositoryID     string
+	Owner            string
+	Repo             string
+	Host             string
+	Path             string
+	ProviderID       string
+	ParentProviderID string
 }
 
 type BrokerCredential struct {
@@ -99,10 +116,19 @@ func (b *CredentialBroker) Issue(ctx context.Context, req CredentialLeaseRequest
 	if b == nil || b.broker == nil {
 		return nil, ErrGitHubNotConfigured
 	}
-	lease, err := b.broker.Issue(ctx, gitcredentials.Scope{
+	scope := gitcredentials.Scope{
 		ProviderID: githubProviderName, WorkspaceID: req.WorkspaceID, TaskID: req.TaskID, SessionID: req.SessionID,
 		RepositoryID: req.RepositoryID, Host: req.Host, Path: githubCredentialPath(req.Owner, req.Repo), TTL: req.TTL,
-	})
+		IdentityProviderID: req.ProviderID, ParentProviderID: req.ParentProviderID,
+	}
+	if req.DestinationBinding != nil {
+		encodedBinding, err := json.Marshal(req.DestinationBinding)
+		if err != nil {
+			return nil, fmt.Errorf("encode contribution destination credential binding: %w", err)
+		}
+		scope.CredentialBinding = string(encodedBinding)
+	}
+	lease, err := b.broker.Issue(ctx, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +145,7 @@ func (b *CredentialBroker) Resolve(ctx context.Context, req BrokerCredentialRequ
 	}
 	credential, err := b.broker.Redeem(ctx, gitcredentials.Redemption{
 		Lease: req.Lease, TaskID: req.TaskID, SessionID: req.SessionID, RepositoryID: req.RepositoryID,
-		Host: req.Host, Path: path,
+		Host: req.Host, Path: path, IdentityProviderID: req.ProviderID, ParentProviderID: req.ParentProviderID,
 	})
 	if err != nil {
 		return nil, err
@@ -165,6 +191,12 @@ func (a gitHubScopeAuthorizer) AuthorizeGitCredential(ctx context.Context, scope
 	if err != nil {
 		return err
 	}
+	if identityAuthorizer, ok := a.authorizer.(BrokerScopeAuthorizerWithIdentity); ok {
+		return identityAuthorizer.AuthorizeGitHubRepositoryWithIdentity(
+			ctx, scope.WorkspaceID, scope.TaskID, scope.SessionID, scope.RepositoryID, owner, repo,
+			scope.IdentityProviderID, scope.ParentProviderID,
+		)
+	}
 	return a.authorizer.AuthorizeGitHubRepository(
 		ctx, scope.WorkspaceID, scope.TaskID, scope.SessionID, scope.RepositoryID, owner, repo,
 	)
@@ -186,6 +218,15 @@ func (p *gitHubCredentialProvider) Binding(ctx context.Context, scope gitcredent
 	connection, appGeneration, err := p.issueConnection(ctx, scope.WorkspaceID)
 	if err != nil {
 		return "", err
+	}
+	if rawBinding := strings.TrimSpace(scope.CredentialBinding); rawBinding != "" {
+		var binding taskmodels.ContributionDestinationCredentialBinding
+		if err := json.Unmarshal([]byte(rawBinding), &binding); err != nil {
+			return "", fmt.Errorf("%w: invalid destination credential binding", ErrCredentialScopeDenied)
+		}
+		if err := binding.Validate(); err != nil || !destinationBindingMatchesConnection(&binding, connection, appGeneration) {
+			return "", fmt.Errorf("%w: destination credential binding does not match the active workspace connection", ErrCredentialScopeDenied)
+		}
 	}
 	return githubCredentialBindingFor(connection, appGeneration)
 }
@@ -273,4 +314,24 @@ func githubOwnerRepo(path string) (string, string, error) {
 		return "", "", fmt.Errorf("%w: GitHub repository path is invalid", ErrCredentialScopeDenied)
 	}
 	return owner, repo, nil
+}
+
+func destinationBindingMatchesConnection(
+	binding *taskmodels.ContributionDestinationCredentialBinding,
+	connection *WorkspaceConnection,
+	appCredentialGeneration int64,
+) bool {
+	if binding == nil || connection == nil || binding.Source != string(connection.Source) ||
+		binding.CredentialGeneration != connection.CredentialGeneration ||
+		binding.AppRegistrationID != connection.AppRegistrationID {
+		return false
+	}
+	if connection.Source == ConnectionSourceGitHubAppInstallation {
+		return connection.InstallationID != nil && binding.InstallationID == *connection.InstallationID &&
+			binding.AppCredentialGeneration == appCredentialGeneration
+	}
+	if binding.Login != "" && !strings.EqualFold(binding.Login, connection.Login) {
+		return false
+	}
+	return binding.AppCredentialGeneration == 0 && binding.InstallationID == 0
 }

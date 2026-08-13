@@ -29,7 +29,13 @@ type BootstrapOverrides = {
   github_login?: string;
   has_write_access?: boolean;
   fork_status?: ForkStatus;
-  fork_message?: string;
+  fork_reason_code?:
+    | "account_cannot_fork"
+    | "app_unsupported"
+    | "fork_conflict"
+    | "fork_not_writable"
+    | "fork_not_ready"
+    | "managed_unavailable";
   issueWorkflowId?: string;
   /**
    * When provided, the bootstrap route handler awaits this promise before
@@ -77,7 +83,7 @@ async function mockImproveKandevApis(
         github_login: overrides.github_login ?? "octocat",
         has_write_access: hasWrite,
         fork_status: forkStatus,
-        ...(overrides.fork_message ? { fork_message: overrides.fork_message } : {}),
+        ...(overrides.fork_reason_code ? { fork_reason_code: overrides.fork_reason_code } : {}),
       }),
     });
   });
@@ -425,16 +431,11 @@ test.describe("Improve Kandev dialog", () => {
   }) => {
     await apiClient.createWorkspace("Improve Kandev");
     await apiClient.saveUserSettings({ agent_generated_task_titles: false });
-    const blockedMessage =
-      "Your GitHub account appears to be an Enterprise Managed User (EMU) account, " +
-      "which typically cannot fork repositories outside your owning enterprise. " +
-      "The PR step would fail when forking kdlbs/kandev. Contact your GitHub admin " +
-      "if you'd like to enable this, or contribute via another account.";
     await mockImproveKandevApis(testPage, seedData, {
       github_login: "alice_corp",
       has_write_access: false,
       fork_status: "blocked_emu",
-      fork_message: blockedMessage,
+      fork_reason_code: "account_cannot_fork",
     });
 
     await testPage.goto("/");
@@ -447,7 +448,9 @@ test.describe("Improve Kandev dialog", () => {
 
     const createDialog = testPage.getByTestId("create-task-dialog");
     await expect(createDialog).toBeVisible({ timeout: 10_000 });
-    await expect(createDialog.getByText(blockedMessage)).toBeVisible();
+    await expect(
+      createDialog.getByText("This GitHub account cannot fork kdlbs/kandev."),
+    ).toBeVisible();
     await createDialog.getByTestId("task-title-input").fill("EMU contribution");
     await createDialog.getByTestId("task-description-input").fill("Describe the problem");
     await expect(createDialog.getByTestId("submit-start-agent")).toBeDisabled();
@@ -463,13 +466,11 @@ test.describe("Improve Kandev dialog", () => {
   }) => {
     await apiClient.createWorkspace("Improve Kandev");
     await apiClient.saveUserSettings({ agent_generated_task_titles: false });
-    const blockedMessage =
-      "The selected workspace GitHub automation connection cannot prepare a verified contribution destination.";
     await mockImproveKandevApis(testPage, seedData, {
       github_login: "automation",
       has_write_access: false,
       fork_status: "blocked_managed",
-      fork_message: blockedMessage,
+      fork_reason_code: "managed_unavailable",
     });
 
     await testPage.goto("/");
@@ -478,7 +479,11 @@ test.describe("Improve Kandev dialog", () => {
 
     const createDialog = testPage.getByTestId("create-task-dialog");
     await expect(createDialog).toBeVisible({ timeout: 10_000 });
-    await expect(createDialog.getByText(blockedMessage)).toBeVisible();
+    await expect(
+      createDialog.getByText(
+        "Managed GitHub access could not prepare a verified fork for this task. Check the workspace GitHub connection or open an issue instead.",
+      ),
+    ).toBeVisible();
     await createDialog.getByTestId("task-title-input").fill("Managed fork recovery");
     await createDialog.getByTestId("task-description-input").fill("Describe the problem");
     await expect(createDialog.getByTestId("submit-start-agent")).toBeDisabled();

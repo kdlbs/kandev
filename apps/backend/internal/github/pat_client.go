@@ -163,6 +163,25 @@ func (c *PATClient) GetRepository(ctx context.Context, owner, repo string) (*Git
 	return projectGitHubRepository(raw), nil
 }
 
+// ListRepositoryForks lists every fork in the canonical repository's fork
+// network, including forks whose names differ from the canonical name.
+func (c *PATClient) ListRepositoryForks(ctx context.Context, owner, repo string) ([]*GitHubRepository, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/forks?per_page=100", owner, repo)
+	forks := make([]*GitHubRepository, 0)
+	for endpoint != "" {
+		var page []githubRepositoryResponse
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list repository forks for %s/%s: %w", owner, repo, err)
+		}
+		for _, raw := range page {
+			forks = append(forks, projectGitHubRepository(raw))
+		}
+		endpoint = next
+	}
+	return forks, nil
+}
+
 // CreateFork creates a fork for the authenticated human automation identity.
 // GitHub may return before the fork is fully readable; the service resolver
 // performs the bounded follow-up verification.

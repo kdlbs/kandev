@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,7 +24,6 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/integrations/secretadapter"
@@ -147,8 +147,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if githubSvc != nil {
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
 		githubSvc.SetPromptResolver(promptSvc)
-		taskSvc.SetContributionDestinationPreparer(&githubContributionDestinationPreparer{service: githubSvc})
-		if brokerErr := githubSvc.ConfigureCredentialBroker(&githubBrokerScopeAuthorizer{repo: repos.Task}); brokerErr != nil {
+		taskSvc.SetContributionDestinationPreparer(&githubContributionDestinationPreparer{service: githubSvc, taskSvc: taskSvc})
+		if brokerErr := githubSvc.ConfigureCredentialBroker(&githubBrokerScopeAuthorizer{repo: repos.Task, provider: githubSvc}); brokerErr != nil {
 			log.Warn("GitHub credential broker initialization failed", zap.Error(brokerErr))
 		}
 	}
@@ -286,6 +286,7 @@ func reserveBuiltinMentionIdentities(
 
 type githubContributionDestinationPreparer struct {
 	service *github.Service
+	taskSvc *taskservice.Service
 }
 
 func (p *githubContributionDestinationPreparer) PrepareContributionDestination(
@@ -306,21 +307,62 @@ func (p *githubContributionDestinationPreparer) PrepareContributionDestination(
 		return nil
 	}
 	for index := range req.Repositories {
-		input := &req.Repositories[index]
-		if input.RemoteContribution != nil || input.ContributionDestination != nil {
-			continue
+		if err := p.prepareRepository(ctx, req, repositories, index); err != nil {
+			return err
 		}
-		if !isCanonicalKandevRepositoryInput(input, repositoryAt(repositories, index)) {
-			continue
-		}
-		destination, resolveErr := p.service.ResolveContributionDestinationForWorkspace(
-			ctx, req.WorkspaceID, canonicalKandevOwner, canonicalKandevName,
-		)
-		if resolveErr != nil {
-			return fmt.Errorf("prepare Improve Kandev contribution destination: %w", resolveErr)
-		}
-		input.ContributionDestination = destination
+	}
+	return nil
+}
+
+func (p *githubContributionDestinationPreparer) prepareRepository(
+	ctx context.Context,
+	req *taskservice.CreateTaskRequest,
+	repositories []*taskmodels.Repository,
+	index int,
+) error {
+	input := &req.Repositories[index]
+	if input.RemoteContribution != nil || input.ContributionDestination != nil ||
+		!isCanonicalKandevRepositoryInput(input, repositoryAt(repositories, index)) {
 		return nil
+	}
+	resolution, err := p.service.ResolveContributionForkForWorkspace(
+		ctx, req.WorkspaceID, canonicalKandevOwner, canonicalKandevName, true,
+	)
+	if err != nil {
+		return fmt.Errorf("prepare Improve Kandev contribution destination: %w", err)
+	}
+	if resolution.Repository == nil || resolution.Repository.ID <= 0 {
+		return fmt.Errorf("prepare Improve Kandev contribution destination: canonical provider ID is missing")
+	}
+	providerRepoID := strconv.FormatInt(resolution.Repository.ID, 10)
+	destination := resolution.Destination
+	if destination != nil && strings.TrimSpace(destination.SourceRepository.ProviderID) != providerRepoID {
+		return fmt.Errorf("prepare Improve Kandev contribution destination: canonical provider ID is inconsistent")
+	}
+	if err := p.reconcileProviderRepoID(ctx, repositoryAt(repositories, index), providerRepoID); err != nil {
+		return err
+	}
+	input.ProviderRepoID = providerRepoID
+	input.ContributionDestination = destination
+	return nil
+}
+
+func (p *githubContributionDestinationPreparer) reconcileProviderRepoID(
+	ctx context.Context,
+	repository *taskmodels.Repository,
+	providerRepoID string,
+) error {
+	if repository == nil {
+		return nil
+	}
+	if repository.ProviderRepoID != "" && !strings.EqualFold(repository.ProviderRepoID, providerRepoID) {
+		return fmt.Errorf("prepare Improve Kandev contribution destination: canonical provider ID changed")
+	}
+	if repository.ProviderRepoID == "" && p.taskSvc != nil {
+		if _, err := p.taskSvc.UpdateRepository(ctx, repository.ID, &taskservice.UpdateRepositoryRequest{ProviderRepoID: &providerRepoID}); err != nil {
+			return fmt.Errorf("backfill Improve Kandev canonical provider ID: %w", err)
+		}
+		repository.ProviderRepoID = providerRepoID
 	}
 	return nil
 }
@@ -369,18 +411,34 @@ type githubBrokerScopeAuthorizer struct {
 		GetRepository(context.Context, string) (*taskmodels.Repository, error)
 		ListTaskRepositories(context.Context, string) ([]*taskmodels.TaskRepository, error)
 	}
+	provider interface {
+		VerifyContributionDestinationForWorkspace(
+			context.Context, string, string, string, string, string, string, string,
+		) error
+	}
 }
 
 func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
 	ctx context.Context,
 	workspaceID, taskID, sessionID, repositoryID, owner, repoName string,
 ) error {
-	if err := a.AuthorizeGitCredential(ctx, gitcredentials.Scope{
-		ProviderID: gitCredentialGitHubProviderID, WorkspaceID: workspaceID, TaskID: taskID, SessionID: sessionID,
-		RepositoryID: repositoryID, Host: gitCredentialGitHubHost, Path: "/" + owner + "/" + repoName + ".git",
-	}); err == nil {
-		return nil
-	}
+	return a.authorizeGitHubRepository(ctx, workspaceID, taskID, sessionID, repositoryID, owner, repoName, "", "", false)
+}
+
+func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepositoryWithIdentity(
+	ctx context.Context,
+	workspaceID, taskID, sessionID, repositoryID, owner, repoName, providerID, parentProviderID string,
+) error {
+	return a.authorizeGitHubRepository(
+		ctx, workspaceID, taskID, sessionID, repositoryID, owner, repoName, providerID, parentProviderID, true,
+	)
+}
+
+func (a *githubBrokerScopeAuthorizer) authorizeGitHubRepository(
+	ctx context.Context,
+	workspaceID, taskID, sessionID, repositoryID, owner, repoName, providerID, parentProviderID string,
+	strictIdentity bool,
+) error {
 	if a == nil || a.repo == nil {
 		return fmt.Errorf("task repository is unavailable")
 	}
@@ -391,9 +449,6 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
 	if err != nil {
 		return err
 	}
-	if link == nil {
-		return fmt.Errorf("repository identity does not match lease scope")
-	}
 	repository, err := a.repo.GetRepository(ctx, repositoryID)
 	if err != nil {
 		return err
@@ -402,23 +457,120 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
 		!strings.EqualFold(repository.Provider, "github") || !isPublicGitHubProviderHost(repository.ProviderHost) {
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
+	if strings.EqualFold(repository.ProviderOwner, owner) && strings.EqualFold(repository.ProviderName, repoName) {
+		return authorizeCanonicalGitHubRepository(repository, providerID, parentProviderID)
+	}
+	if link == nil {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
 	binding, found, err := taskmodels.LoadRemoteContribution(link.Metadata)
 	if err != nil {
 		return fmt.Errorf("validate remote contribution scope: %w", err)
 	}
-	destination, destinationFound, destinationErr := taskmodels.LoadContributionDestination(link.Metadata)
-	if destinationErr != nil {
-		return fmt.Errorf("validate contribution destination scope: %w", destinationErr)
+	if handled, destinationErr := a.authorizeContributionDestination(
+		ctx, workspaceID, repository, link, owner, repoName, providerID, parentProviderID, strictIdentity,
+	); handled {
+		return destinationErr
 	}
-	if destinationFound && destination.Provider == taskmodels.ContributionDestinationProviderGitHub &&
-		strings.EqualFold(destination.TargetRepository.Host, "github.com") {
-		parts := strings.Split(destination.TargetRepository.Path, "/")
-		canonical := strings.TrimSpace(repository.ProviderOwner) + "/" + strings.TrimSpace(repository.ProviderName)
-		if len(parts) == 2 && strings.EqualFold(parts[0], owner) && strings.EqualFold(parts[1], repoName) &&
-			strings.EqualFold(destination.SourceRepository.Path, canonical) {
-			return nil
-		}
+	return authorizeRemoteContribution(binding, found, owner, repoName, providerID, strictIdentity)
+}
+
+func authorizeCanonicalGitHubRepository(
+	repository *taskmodels.Repository,
+	providerID, parentProviderID string,
+) error {
+	if providerID != "" && !strings.EqualFold(repository.ProviderRepoID, providerID) {
+		return fmt.Errorf("repository provider identity does not match lease scope")
 	}
+	if parentProviderID != "" {
+		return fmt.Errorf("repository parent identity does not match lease scope")
+	}
+	return nil
+}
+
+func (a *githubBrokerScopeAuthorizer) authorizeContributionDestination(
+	ctx context.Context,
+	workspaceID string,
+	repository *taskmodels.Repository,
+	link *taskmodels.TaskRepository,
+	owner, repoName, providerID, parentProviderID string,
+	strictIdentity bool,
+) (bool, error) {
+	destination, found, err := taskmodels.LoadContributionDestination(link.Metadata)
+	if err != nil {
+		return true, fmt.Errorf("validate contribution destination scope: %w", err)
+	}
+	if !found || destination.Provider != taskmodels.ContributionDestinationProviderGitHub ||
+		!strings.EqualFold(destination.TargetRepository.Host, "github.com") {
+		return false, nil
+	}
+	if !contributionDestinationScopeMatches(
+		destination, repository, owner, repoName, providerID, parentProviderID, strictIdentity,
+	) {
+		return false, nil
+	}
+	if !strictIdentity {
+		return true, nil
+	}
+	return true, a.verifyContributionDestination(
+		ctx, workspaceID, destination, owner, repoName,
+	)
+}
+
+func contributionDestinationScopeMatches(
+	destination taskmodels.ContributionDestination,
+	repository *taskmodels.Repository,
+	owner, repoName, providerID, parentProviderID string,
+	strictIdentity bool,
+) bool {
+	parts := strings.Split(destination.TargetRepository.Path, "/")
+	canonical := strings.TrimSpace(repository.ProviderOwner) + "/" + strings.TrimSpace(repository.ProviderName)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], owner) || !strings.EqualFold(parts[1], repoName) ||
+		!strings.EqualFold(destination.SourceRepository.Path, canonical) {
+		return false
+	}
+	if repository.ProviderRepoID != "" &&
+		!strings.EqualFold(destination.SourceRepository.ProviderID, repository.ProviderRepoID) {
+		return false
+	}
+	if !strictIdentity {
+		return true
+	}
+	return providerID != "" && parentProviderID != "" &&
+		strings.EqualFold(destination.TargetRepository.ProviderID, providerID) &&
+		strings.EqualFold(destination.SourceRepository.ProviderID, parentProviderID) &&
+		strings.TrimSpace(repository.ProviderRepoID) != "" &&
+		strings.EqualFold(destination.SourceRepository.ProviderID, repository.ProviderRepoID)
+}
+
+func (a *githubBrokerScopeAuthorizer) verifyContributionDestination(
+	ctx context.Context,
+	workspaceID string,
+	destination taskmodels.ContributionDestination,
+	owner, repoName string,
+) error {
+	if a.provider == nil {
+		return fmt.Errorf("contribution destination provider verifier is unavailable")
+	}
+	sourceParts := strings.Split(destination.SourceRepository.Path, "/")
+	if len(sourceParts) != 2 {
+		return fmt.Errorf("contribution destination provider identity does not match lease scope")
+	}
+	if err := a.provider.VerifyContributionDestinationForWorkspace(
+		ctx, workspaceID, sourceParts[0], sourceParts[1], destination.SourceRepository.ProviderID,
+		owner, repoName, destination.TargetRepository.ProviderID,
+	); err != nil {
+		return fmt.Errorf("contribution destination provider identity does not match lease scope")
+	}
+	return nil
+}
+
+func authorizeRemoteContribution(
+	binding taskmodels.RemoteContribution,
+	found bool,
+	owner, repoName, providerID string,
+	strictIdentity bool,
+) error {
 	if !found || binding.Provider != taskmodels.RemoteContributionProviderGitHub ||
 		!binding.CollaborationAllowed || !strings.EqualFold(binding.SourceRepository.Host, "github.com") {
 		return fmt.Errorf("repository identity does not match lease scope")
@@ -426,6 +578,10 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
 	parts := strings.Split(binding.SourceRepository.Path, "/")
 	if len(parts) != 2 || !strings.EqualFold(parts[0], owner) || !strings.EqualFold(parts[1], repoName) {
 		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	if strictIdentity && binding.SourceRepository.ProviderID != "" &&
+		!strings.EqualFold(binding.SourceRepository.ProviderID, providerID) {
+		return fmt.Errorf("repository provider identity does not match lease scope")
 	}
 	return nil
 }

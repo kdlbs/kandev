@@ -65,16 +65,9 @@ function getForkBlockedReason(
   const reason = getImproveKandevForkBlockedReason(
     kind,
     ready.data.fork_status,
-    ready.data.fork_message,
+    ready.data.fork_reason_code,
   );
-  if (reason || kind === "issue") return reason;
-  if (ready.data.fork_status === "blocked_managed") {
-    return t("common:managedGithubForkUnavailable");
-  }
-  if (ready.data.fork_status === "blocked_emu") {
-    return t("common:thisGithubAccountCannotForkKdlbs");
-  }
-  return null;
+  return reason ? t(reason) : null;
 }
 
 // Keys, not resolved copy: a `t()` at module scope would freeze at the boot
@@ -374,12 +367,12 @@ function ContributorBanner({
       <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
         <IconAlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
         <span>
-          {data.fork_message ??
-            t(
-              data.fork_status === "blocked_managed"
+          {t(
+            getImproveKandevForkBlockedReason(kind, data.fork_status, data.fork_reason_code) ??
+              (data.fork_status === "blocked_managed"
                 ? "common:managedGithubForkUnavailable"
-                : "common:thisGithubAccountCannotForkKdlbs",
-            )}
+                : "common:thisGithubAccountCannotForkKdlbs"),
+          )}
         </span>
       </div>
     );

@@ -514,6 +514,13 @@ func (c *GHClient) HasRepositoryAccess(ctx context.Context, owner, repo string) 
 func (c *GHClient) GetRepository(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
 	out, err := c.run(ctx, "api", fmt.Sprintf("/repos/%s/%s", owner, repo))
 	if err != nil {
+		if isNotFoundErr(err) {
+			return nil, fmt.Errorf("get repository %s/%s: %w", owner, repo, &GitHubAPIError{
+				StatusCode: http.StatusNotFound,
+				Endpoint:   fmt.Sprintf("/repos/%s/%s", owner, repo),
+				Body:       err.Error(),
+			})
+		}
 		return nil, fmt.Errorf("get repository %s/%s: %w", owner, repo, err)
 	}
 	var raw githubRepositoryResponse
@@ -521,6 +528,27 @@ func (c *GHClient) GetRepository(ctx context.Context, owner, repo string) (*GitH
 		return nil, fmt.Errorf("decode repository %s/%s: %w", owner, repo, err)
 	}
 	return projectGitHubRepository(raw), nil
+}
+
+// ListRepositoryForks lists the canonical repository's fork network. The
+// network is authoritative for finding an existing fork whose name changed
+// after creation, so callers must not assume the canonical repository name.
+func (c *GHClient) ListRepositoryForks(ctx context.Context, owner, repo string) ([]*GitHubRepository, error) {
+	out, err := c.run(ctx, "api", fmt.Sprintf("repos/%s/%s/forks?per_page=100", owner, repo), "--paginate", "--slurp")
+	if err != nil {
+		return nil, fmt.Errorf("list repository forks for %s/%s: %w", owner, repo, err)
+	}
+	var pages [][]githubRepositoryResponse
+	if err := json.Unmarshal([]byte(out), &pages); err != nil {
+		return nil, fmt.Errorf("decode repository forks for %s/%s: %w", owner, repo, err)
+	}
+	forks := make([]*GitHubRepository, 0)
+	for _, page := range pages {
+		for _, raw := range page {
+			forks = append(forks, projectGitHubRepository(raw))
+		}
+	}
+	return forks, nil
 }
 
 // CreateFork creates a fork for the selected named gh account. The service

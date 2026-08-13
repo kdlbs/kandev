@@ -116,12 +116,16 @@ describe("improve kandev dialog model", () => {
   });
 
   it("blocks only implementation kinds for managed fork restrictions", () => {
-    const message = "Forks are unavailable";
-    expect(getImproveKandevForkBlockedReason("bug", "blocked_emu", message)).toBe(message);
-    expect(getImproveKandevForkBlockedReason("feature", "blocked_emu", message)).toBe(message);
-    expect(getImproveKandevForkBlockedReason("bug", "blocked_managed", message)).toBe(message);
-    expect(getImproveKandevForkBlockedReason("issue", "blocked_emu", message)).toBeNull();
-    expect(getImproveKandevForkBlockedReason("bug", "unknown", null)).toBeNull();
+    expect(getImproveKandevForkBlockedReason("bug", "blocked_emu", "account_cannot_fork")).toBe(
+      "common:thisGithubAccountCannotForkKdlbs",
+    );
+    expect(getImproveKandevForkBlockedReason("feature", "blocked_managed", "fork_conflict")).toBe(
+      "common:managedGithubForkUnavailable",
+    );
+    expect(
+      getImproveKandevForkBlockedReason("issue", "blocked_emu", "account_cannot_fork"),
+    ).toBeNull();
+    expect(getImproveKandevForkBlockedReason("bug", "unknown", undefined)).toBeNull();
   });
 
   it("prefers stable workflow step ids for descriptions", () => {

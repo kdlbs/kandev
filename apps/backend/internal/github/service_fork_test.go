@@ -10,11 +10,21 @@ import (
 type forkResolverFakeClient struct {
 	user       string
 	repos      map[string]*GitHubRepository
+	forks      []*GitHubRepository
 	getErrors  map[string]error
 	getCalls   map[string]int
 	readyAfter int
 	created    []string
 	createRepo *GitHubRepository
+}
+
+type contributionDestinationVerificationClient struct {
+	Client
+	repository *GitHubRepository
+}
+
+func (c *contributionDestinationVerificationClient) GetRepository(context.Context, string, string) (*GitHubRepository, error) {
+	return copyGitHubRepository(c.repository), nil
 }
 
 func (f *forkResolverFakeClient) GetAuthenticatedUser(context.Context) (string, error) {
@@ -48,6 +58,14 @@ func (f *forkResolverFakeClient) CreateFork(_ context.Context, owner, repo strin
 	}
 	f.repos[f.createRepo.FullName] = f.createRepo
 	return f.createRepo, nil
+}
+
+func (f *forkResolverFakeClient) ListRepositoryForks(context.Context, string, string) ([]*GitHubRepository, error) {
+	result := make([]*GitHubRepository, 0, len(f.forks))
+	for _, fork := range f.forks {
+		result = append(result, copyGitHubRepository(fork))
+	}
+	return result, nil
 }
 
 func TestResolveContributionForkUsesDirectTargetWrite(t *testing.T) {
@@ -104,6 +122,114 @@ func TestResolveContributionForkAcceptsOnlyExactWritableFork(t *testing.T) {
 	}
 	if len(client.created) != 0 {
 		t.Fatalf("created forks = %v, want none", client.created)
+	}
+}
+
+func TestResolveContributionForkReusesRenamedForkFromForkNetwork(t *testing.T) {
+	canonical := testGitHubRepository("kdlbs/kandev", "100", false)
+	fork := testGitHubRepository("alice/kandev-renamed", "200", true)
+	fork.Fork = true
+	fork.ParentID = canonical.ID
+	fork.ParentFullName = canonical.FullName
+	client := &forkResolverFakeClient{
+		user:  "alice",
+		repos: map[string]*GitHubRepository{"kdlbs/kandev": canonical, "alice/kandev-renamed": fork},
+		getErrors: map[string]error{
+			"alice/kandev": &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/alice/kandev"},
+		},
+		forks: []*GitHubRepository{fork},
+	}
+
+	result, err := resolveContributionFork(
+		context.Background(), client, AuthPrincipal{Kind: AuthPrincipalHuman, Login: "alice"},
+		"kdlbs", "kandev", true,
+	)
+	if err != nil {
+		t.Fatalf("resolveContributionFork: %v", err)
+	}
+	if result.Destination == nil || result.Destination.TargetRepository.Path != "alice/kandev-renamed" {
+		t.Fatalf("destination = %#v, want the renamed fork", result.Destination)
+	}
+	if len(client.created) != 0 {
+		t.Fatalf("created forks = %v, want none", client.created)
+	}
+	second, err := resolveContributionFork(
+		context.Background(), client, AuthPrincipal{Kind: AuthPrincipalHuman, Login: "alice"},
+		"kdlbs", "kandev", true,
+	)
+	if err != nil {
+		t.Fatalf("second resolveContributionFork: %v", err)
+	}
+	if second.Destination == nil || second.Destination.TargetRepository.Path != "alice/kandev-renamed" {
+		t.Fatalf("second destination = %#v, want the same renamed fork", second.Destination)
+	}
+	if len(client.created) != 0 {
+		t.Fatalf("created forks after second resolution = %v, want none", client.created)
+	}
+}
+
+func TestBindContributionDestinationCredentialCapturesConnectionGeneration(t *testing.T) {
+	canonical := testGitHubRepository("kdlbs/kandev", "100", false)
+	fork := testGitHubRepository("alice/kandev", "200", true)
+	fork.Fork = true
+	fork.ParentID = canonical.ID
+	fork.ParentFullName = canonical.FullName
+	destination, err := makeContributionDestination(canonical, fork)
+	if err != nil {
+		t.Fatalf("makeContributionDestination: %v", err)
+	}
+	resolved := &resolvedServiceClient{
+		credential: &ResolvedCredential{
+			Principal:            AuthPrincipal{Source: ConnectionSourcePAT, Login: "alice"},
+			CredentialGeneration: 9,
+		},
+	}
+
+	if err := bindContributionDestinationCredential(destination, resolved); err != nil {
+		t.Fatalf("bindContributionDestinationCredential: %v", err)
+	}
+	if destination.CredentialBinding == nil || destination.CredentialBinding.Source != string(ConnectionSourcePAT) ||
+		destination.CredentialBinding.Login != "alice" || destination.CredentialBinding.CredentialGeneration != 9 {
+		t.Fatalf("credential binding = %#v", destination.CredentialBinding)
+	}
+}
+
+func TestVerifyContributionDestinationForWorkspaceRejectsRecreatedTarget(t *testing.T) {
+	canonical := testGitHubRepository("kdlbs/kandev", "100", false)
+	fork := testGitHubRepository("automation/kandev", "200", true)
+	fork.Fork = true
+	fork.ParentID = canonical.ID
+	fork.ParentFullName = canonical.FullName
+	client := &contributionDestinationVerificationClient{Client: NewMockClient(), repository: fork}
+	connections := testConnectionReader{workspaces: map[string]*WorkspaceConnection{
+		"workspace-1": {
+			WorkspaceID: "workspace-1", Source: ConnectionSourcePAT, Login: "automation",
+			Status: ConnectionStatusActive, CredentialGeneration: 1,
+		},
+	}}
+	resolver := NewCredentialResolver(connections, fakeAuthSecrets{
+		WorkspacePATSecretKey("workspace-1"): "workspace-token",
+	})
+	resolver.SetAutomationProvider(testAutomationCredentialProvider{client: client})
+	service := &Service{resolver: resolver}
+
+	verify := func() error {
+		return service.VerifyContributionDestinationForWorkspace(
+			context.Background(), "workspace-1", "kdlbs", "kandev", "100", "automation", "kandev", "200",
+		)
+	}
+	if err := verify(); err != nil {
+		t.Fatalf("VerifyContributionDestinationForWorkspace() error = %v", err)
+	}
+
+	client.repository.ID = 201
+	if err := verify(); err == nil {
+		t.Fatal("recreated target with a different provider ID was accepted")
+	}
+	client.repository.ID = 200
+	client.repository.ParentID = 101
+	if err := verify(); err == nil {
+		t.Fatal("target with a different parent provider ID was accepted")
 	}
 }
 

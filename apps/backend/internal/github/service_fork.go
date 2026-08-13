@@ -48,6 +48,7 @@ var (
 type contributionForkClient interface {
 	GetAuthenticatedUser(context.Context) (string, error)
 	GetRepository(context.Context, string, string) (*GitHubRepository, error)
+	ListRepositoryForks(context.Context, string, string) ([]*GitHubRepository, error)
 	CreateFork(context.Context, string, string) (*GitHubRepository, error)
 }
 
@@ -72,7 +73,14 @@ func (s *Service) ResolveContributionForkForWorkspace(
 	}
 	prepareCtx, cancel := context.WithTimeout(ctx, contributionForkPreparationTimeout)
 	defer cancel()
-	return resolveContributionFork(prepareCtx, client, resolved.Principal, owner, repo, create)
+	result, err := resolveContributionFork(prepareCtx, client, resolved.Principal, owner, repo, create)
+	if err != nil || result.Destination == nil {
+		return result, err
+	}
+	if err := bindContributionDestinationCredential(result.Destination, resolved); err != nil {
+		return ContributionForkResolution{}, err
+	}
+	return result, nil
 }
 
 // ProbeContributionForkCapabilityForWorkspace returns direct, ready, or
@@ -103,6 +111,43 @@ func (s *Service) ResolveContributionDestinationForWorkspace(
 	return result.Destination, nil
 }
 
+// VerifyContributionDestinationForWorkspace re-reads the target repository
+// through the current workspace automation connection. It is used at broker
+// issuance and redemption so a deleted-and-recreated path cannot inherit an
+// old destination lease.
+func (s *Service) VerifyContributionDestinationForWorkspace(
+	ctx context.Context,
+	workspaceID, sourceOwner, sourceRepo, sourceProviderID, targetOwner, targetRepo, targetProviderID string,
+) error {
+	if strings.TrimSpace(sourceProviderID) == "" || strings.TrimSpace(targetProviderID) == "" {
+		return errors.New("contribution destination provider IDs are required")
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, targetOwner, targetRepo)
+	if err != nil {
+		return err
+	}
+	client, ok := resolved.Client.(interface {
+		GetRepository(context.Context, string, string) (*GitHubRepository, error)
+	})
+	if !ok {
+		return errors.New("GitHub automation client cannot verify contribution destinations")
+	}
+	target, err := client.GetRepository(ctx, targetOwner, targetRepo)
+	if err != nil {
+		return fmt.Errorf("verify contribution destination %s/%s: %w", targetOwner, targetRepo, err)
+	}
+	parsedTargetID, parseErr := strconv.ParseInt(strings.TrimSpace(targetProviderID), 10, 64)
+	if parseErr != nil || target == nil || target.ID != parsedTargetID || !target.Fork || target.ParentID <= 0 {
+		return errors.New("contribution destination target provider identity does not match")
+	}
+	parsedSourceID, parseErr := strconv.ParseInt(strings.TrimSpace(sourceProviderID), 10, 64)
+	if parseErr != nil || target.ParentID != parsedSourceID ||
+		!strings.EqualFold(target.ParentFullName, strings.TrimSpace(sourceOwner)+"/"+strings.TrimSpace(sourceRepo)) {
+		return errors.New("contribution destination parent provider identity does not match")
+	}
+	return nil
+}
+
 func resolveContributionFork(
 	ctx context.Context,
 	client contributionForkClient,
@@ -120,10 +165,13 @@ func resolveContributionFork(
 	if err := validateCanonicalRepository(canonical, owner, repo); err != nil {
 		return ContributionForkResolution{}, err
 	}
+	fail := func(err error) (ContributionForkResolution, error) {
+		return ContributionForkResolution{Repository: canonical}, err
+	}
 	if repositoryWritable(canonical) {
 		login, err := contributionActorLogin(ctx, client, principal)
 		if err != nil {
-			return ContributionForkResolution{}, err
+			return fail(err)
 		}
 		return ContributionForkResolution{
 			Status:     ContributionForkStatusDirectWrite,
@@ -132,35 +180,39 @@ func resolveContributionFork(
 		}, nil
 	}
 	if principal.Kind == AuthPrincipalApp {
-		return ContributionForkResolution{}, fmt.Errorf("%w: direct write to %s/%s is required", ErrContributionForkAppUnsupported, owner, repo)
+		return fail(fmt.Errorf("%w: direct write to %s/%s is required", ErrContributionForkAppUnsupported, owner, repo))
 	}
 	login, err := contributionActorLogin(ctx, client, principal)
 	if err != nil {
-		return ContributionForkResolution{}, err
+		return fail(err)
 	}
 	result, err := findContributionFork(ctx, client, canonical, login, owner, repo)
 	if err == nil {
 		return result, nil
 	}
 	if !errors.Is(err, errContributionForkMissing) {
-		return ContributionForkResolution{}, err
+		return fail(err)
 	}
 	if !create {
 		return ContributionForkResolution{Status: ContributionForkStatusCreatable, ActorLogin: login, Repository: canonical}, nil
 	}
 	created, err := client.CreateFork(ctx, owner, repo)
 	if err != nil {
-		return ContributionForkResolution{}, fmt.Errorf("create contribution fork for %s/%s: %w", owner, repo, err)
+		return fail(fmt.Errorf("create contribution fork for %s/%s: %w", owner, repo, err))
 	}
 	forkOwner, forkName, err := repositoryOwnerAndName(created)
 	if err != nil {
-		return ContributionForkResolution{}, fmt.Errorf("create contribution fork for %s/%s: %w", owner, repo, err)
+		return fail(fmt.Errorf("create contribution fork for %s/%s: %w", owner, repo, err))
 	}
 	fork, err := waitForContributionFork(ctx, client, canonical, forkOwner, forkName)
 	if err != nil {
-		return ContributionForkResolution{}, err
+		return fail(err)
 	}
-	return buildContributionForkResolution(canonical, fork, login, forkOwner, forkName)
+	result, err = buildContributionForkResolution(canonical, fork, login, forkOwner, forkName)
+	if err != nil {
+		return fail(err)
+	}
+	return result, nil
 }
 
 var errContributionForkMissing = errors.New("contribution fork is missing")
@@ -172,13 +224,49 @@ func findContributionFork(
 	login, owner, repo string,
 ) (ContributionForkResolution, error) {
 	fork, err := client.GetRepository(ctx, login, repo)
-	if err != nil {
-		if isContributionRepositoryNotFound(err) {
-			return ContributionForkResolution{}, errContributionForkMissing
-		}
+	if err == nil {
+		return buildContributionForkResolution(canonical, fork, login, login, repo)
+	}
+	if !isContributionRepositoryNotFound(err) {
 		return ContributionForkResolution{}, fmt.Errorf("verify contribution fork %s/%s: %w", login, repo, err)
 	}
-	return buildContributionForkResolution(canonical, fork, login, login, repo)
+	return findContributionForkInNetwork(ctx, client, canonical, login, owner, repo)
+}
+
+func findContributionForkInNetwork(
+	ctx context.Context,
+	client contributionForkClient,
+	canonical *GitHubRepository,
+	login, owner, repo string,
+) (ContributionForkResolution, error) {
+	forks, err := client.ListRepositoryForks(ctx, owner, repo)
+	if err != nil {
+		return ContributionForkResolution{}, fmt.Errorf("list contribution forks for %s/%s: %w", owner, repo, err)
+	}
+	var candidateErr error
+	for _, candidate := range forks {
+		candidateOwner, candidateName, nameErr := repositoryOwnerAndName(candidate)
+		if nameErr != nil || !strings.EqualFold(candidateOwner, login) {
+			continue
+		}
+		verified, verifyErr := client.GetRepository(ctx, candidateOwner, candidateName)
+		if verifyErr != nil {
+			if isContributionRepositoryNotFound(verifyErr) {
+				candidateErr = fmt.Errorf("%w: verify fork %s/%s", ErrContributionForkConflict, candidateOwner, candidateName)
+				continue
+			}
+			return ContributionForkResolution{}, fmt.Errorf("verify contribution fork %s/%s: %w", candidateOwner, candidateName, verifyErr)
+		}
+		result, validationErr := buildContributionForkResolution(canonical, verified, login, login, "")
+		if validationErr == nil {
+			return result, nil
+		}
+		candidateErr = validationErr
+	}
+	if candidateErr != nil {
+		return ContributionForkResolution{}, candidateErr
+	}
+	return ContributionForkResolution{}, errContributionForkMissing
 }
 
 func buildContributionForkResolution(
@@ -211,13 +299,58 @@ func validateCanonicalRepository(repository *GitHubRepository, owner, repo strin
 }
 
 func validateContributionFork(canonical, fork *GitHubRepository, login, repo string) error {
-	if fork == nil || !sameRepositoryName(fork, login, repo) || !fork.Fork ||
+	if fork == nil || !fork.Fork ||
+		!strings.EqualFold(repositoryOwner(fork), login) ||
+		(repo != "" && !sameRepositoryName(fork, login, repo)) ||
 		fork.ParentID != canonical.ID || !strings.EqualFold(fork.ParentFullName, canonical.FullName) {
-		return fmt.Errorf("%w: expected %s/%s to fork %s", ErrContributionForkConflict, login, repo, canonical.FullName)
+		label := login
+		if repo != "" {
+			label += "/" + repo
+		}
+		return fmt.Errorf("%w: expected %s to fork %s", ErrContributionForkConflict, label, canonical.FullName)
 	}
 	if !repositoryWritable(fork) {
 		return fmt.Errorf("%w: %s/%s", ErrContributionForkNotWritable, login, repo)
 	}
+	return nil
+}
+
+func repositoryOwner(repository *GitHubRepository) string {
+	if repository == nil {
+		return ""
+	}
+	if strings.TrimSpace(repository.Owner) != "" {
+		return strings.TrimSpace(repository.Owner)
+	}
+	owner, _, err := repositoryOwnerAndName(repository)
+	if err != nil {
+		return ""
+	}
+	return owner
+}
+
+func bindContributionDestinationCredential(
+	destination *taskmodels.ContributionDestination,
+	resolved *resolvedServiceClient,
+) error {
+	if destination == nil || resolved == nil || resolved.credential == nil {
+		return errors.New("managed contribution destination credential binding is unavailable")
+	}
+	credential := resolved.credential
+	binding := &taskmodels.ContributionDestinationCredentialBinding{
+		Source:                  string(credential.Principal.Source),
+		Login:                   strings.TrimSpace(credential.Principal.Login),
+		CredentialGeneration:    credential.CredentialGeneration,
+		AppRegistrationID:       credential.AppRegistrationID,
+		AppCredentialGeneration: credential.AppCredentialGeneration,
+	}
+	if credential.Principal.InstallationID > 0 {
+		binding.InstallationID = credential.Principal.InstallationID
+	}
+	if err := binding.Validate(); err != nil {
+		return fmt.Errorf("validate managed contribution destination credential binding: %w", err)
+	}
+	destination.CredentialBinding = binding
 	return nil
 }
 

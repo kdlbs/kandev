@@ -31,6 +31,18 @@ type recordingPluginCredentialRemote struct {
 	binding        string
 }
 
+type fakeContributionDestinationVerifier struct {
+	err   error
+	calls int
+}
+
+func (f *fakeContributionDestinationVerifier) VerifyContributionDestinationForWorkspace(
+	context.Context, string, string, string, string, string, string, string,
+) error {
+	f.calls++
+	return f.err
+}
+
 func (r *recordingPluginCredentialRemote) GetGitCredentialBinding(
 	_ context.Context,
 	request *pluginsdk.GitCredentialBindingRequest,
@@ -296,13 +308,39 @@ func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionDestination(t 
 	repo := &fakeGitHubBrokerTaskRepository{
 		task:       &taskmodels.Task{ID: "task-destination", WorkspaceID: "workspace-destination"},
 		session:    &taskmodels.TaskSession{ID: "session-destination", TaskID: "task-destination", State: taskmodels.TaskSessionStateRunning},
-		repository: &taskmodels.Repository{ID: "repository-destination", WorkspaceID: "workspace-destination", Provider: "github", ProviderHost: "https://github.com", ProviderOwner: "kdlbs", ProviderName: "kandev"},
+		repository: &taskmodels.Repository{ID: "repository-destination", WorkspaceID: "workspace-destination", Provider: "github", ProviderHost: "https://github.com", ProviderRepoID: "999", ProviderOwner: "kdlbs", ProviderName: "kandev"},
 		links:      []*taskmodels.TaskRepository{{TaskID: "task-destination", RepositoryID: "repository-destination", Metadata: metadata}},
 	}
-	authorizer := &githubBrokerScopeAuthorizer{repo: repo}
+	verifier := &fakeContributionDestinationVerifier{}
+	authorizer := &githubBrokerScopeAuthorizer{repo: repo, provider: verifier}
 
+	if err := authorizer.AuthorizeGitHubRepository(
+		context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "kandev",
+	); err == nil || !strings.Contains(err.Error(), "identity does not match") {
+		t.Fatal("stale canonical provider ID was accepted for a contribution destination")
+	}
+
+	repo.repository.ProviderRepoID = "100"
 	if err := authorizer.AuthorizeGitHubRepository(context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "kandev"); err != nil {
 		t.Fatalf("bound destination was denied: %v", err)
+	}
+	if err := authorizer.AuthorizeGitHubRepositoryWithIdentity(
+		context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "kandev", "200", "100",
+	); err != nil {
+		t.Fatalf("bound destination identity was denied: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("provider verification calls = %d, want 1", verifier.calls)
+	}
+	if err := authorizer.AuthorizeGitHubRepositoryWithIdentity(
+		context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "kandev", "201", "100",
+	); err == nil || !strings.Contains(err.Error(), "identity does not match") {
+		t.Fatal("delete/recreate target with a different provider ID was accepted")
+	}
+	if err := authorizer.AuthorizeGitHubRepositoryWithIdentity(
+		context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "kandev", "200", "101",
+	); err == nil || !strings.Contains(err.Error(), "identity does not match") {
+		t.Fatal("target with a different parent provider ID was accepted")
 	}
 	if err := authorizer.AuthorizeGitHubRepository(context.Background(), "workspace-destination", "task-destination", "session-destination", "repository-destination", "automation", "other"); err == nil || !strings.Contains(err.Error(), "identity does not match") {
 		t.Fatalf("unbound destination error = %v, want identity denial", err)

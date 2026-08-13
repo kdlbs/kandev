@@ -17,8 +17,9 @@ spec: "../../specs/improve-kandev/spec.md"
 - The binding travels only through a server-owned, JSON-excluded service field and is persisted on the
   canonical task-repository attachment; ordinary and issue-only tasks remain unchanged.
 - Managed bootstrap uses the same workspace automation resolver and reports direct, ready, creatable, or
-  blocked capability for the identity that will supply managed task credentials. Executor-owned access
-  retains a separate capability path and receives no server-authored binding.
+  blocked capability for the identity that will supply managed task credentials, including the canonical
+  provider repository ID. Executor-owned access retains a separate capability path and receives no
+  server-authored binding. Blocked responses expose a stable reason code for localized clients.
 
 ## Verification
 
@@ -78,11 +79,13 @@ commands, remaining risks, divergence, and task/plan status updates.
 
 ## Completion
 
-Completed 2026-08-12. Task creation now prepares the destination after deduplication and repository/workflow
+Completed 2026-08-13. Task creation now prepares the destination after deduplication and repository/workflow
 validation but before insertion, carries it through a JSON-excluded service field, and persists it only as
 server-authored task-repository metadata. The Improve Kandev adapter is limited to the immutable template
 and managed credential mode. Bootstrap uses the same workspace-scoped capability resolver, while
 executor-owned access remains explicitly separate and managed failures cannot fall back to ambient `gh`.
+Bootstrap also records the canonical provider ID and returns stable fork reason codes, which the UI
+localizes instead of rendering backend prose.
 
 Verification: `rtk go test ./internal/task/service ./internal/improvekandev ./internal/backendapp -count=1`
 passed, including ordering, persistence, failure, capability, and wiring cases.

@@ -17,15 +17,50 @@ const (
 // credential-free repository identity used by remote contributions.
 type ContributionDestinationRepository = RemoteContributionRepository
 
+// ContributionDestinationCredentialBinding identifies the exact workspace
+// automation connection that authorized a managed destination. It contains
+// only stable connection metadata, never a token or secret.
+type ContributionDestinationCredentialBinding struct {
+	Source                  string `json:"source"`
+	Login                   string `json:"login,omitempty"`
+	InstallationID          int64  `json:"installation_id,omitempty"`
+	AppRegistrationID       string `json:"app_registration_id,omitempty"`
+	CredentialGeneration    int64  `json:"credential_generation"`
+	AppCredentialGeneration int64  `json:"app_credential_generation,omitempty"`
+}
+
+func (b ContributionDestinationCredentialBinding) Validate() error {
+	if strings.TrimSpace(b.Source) == "" {
+		return errors.New("contribution destination credential source is required")
+	}
+	if b.CredentialGeneration <= 0 {
+		return errors.New("contribution destination credential generation must be positive")
+	}
+	switch b.Source {
+	case "pat", "gh_cli", "legacy_shared":
+		if strings.TrimSpace(b.Login) == "" {
+			return errors.New("contribution destination human credential login is required")
+		}
+	case "github_app_installation":
+		if b.InstallationID <= 0 || strings.TrimSpace(b.AppRegistrationID) == "" || b.AppCredentialGeneration <= 0 {
+			return errors.New("contribution destination app credential identity is incomplete")
+		}
+	default:
+		return fmt.Errorf("contribution destination credential source %q is unsupported", b.Source)
+	}
+	return nil
+}
+
 // ContributionDestination identifies the canonical repository and the exact
 // repository that may receive the task branch before a pull request exists.
 // It is authored by the server after provider verification and persisted on
 // the canonical task-repository attachment.
 type ContributionDestination struct {
-	Version          int                               `json:"version"`
-	Provider         string                            `json:"provider"`
-	SourceRepository ContributionDestinationRepository `json:"source_repository"`
-	TargetRepository ContributionDestinationRepository `json:"target_repository"`
+	Version           int                                       `json:"version"`
+	Provider          string                                    `json:"provider"`
+	SourceRepository  ContributionDestinationRepository         `json:"source_repository"`
+	TargetRepository  ContributionDestinationRepository         `json:"target_repository"`
+	CredentialBinding *ContributionDestinationCredentialBinding `json:"credential_binding,omitempty"`
 }
 
 // Validate is the fail-closed boundary for a destination rehydrated from task

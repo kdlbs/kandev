@@ -17,14 +17,16 @@ import (
 )
 
 type githubBrokerResolveRequest struct {
-	Lease        string `json:"lease"`
-	TaskID       string `json:"task_id"`
-	SessionID    string `json:"session_id"`
-	RepositoryID string `json:"repository_id"`
-	Owner        string `json:"owner"`
-	Repo         string `json:"repo"`
-	Host         string `json:"host"`
-	Path         string `json:"path,omitempty"`
+	Lease            string `json:"lease"`
+	TaskID           string `json:"task_id"`
+	SessionID        string `json:"session_id"`
+	RepositoryID     string `json:"repository_id"`
+	Owner            string `json:"owner"`
+	Repo             string `json:"repo"`
+	Host             string `json:"host"`
+	Path             string `json:"path,omitempty"`
+	ProviderID       string `json:"provider_id,omitempty"`
+	ParentProviderID string `json:"parent_provider_id,omitempty"`
 }
 
 type githubBrokerCredential struct {

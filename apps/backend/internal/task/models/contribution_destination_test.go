@@ -46,6 +46,52 @@ func TestContributionDestinationRoundTripsThroughMetadata(t *testing.T) {
 	}
 }
 
+func TestContributionDestinationCredentialBindingValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		binding ContributionDestinationCredentialBinding
+		valid   bool
+	}{
+		{
+			name: "pat",
+			binding: ContributionDestinationCredentialBinding{
+				Source: "pat", Login: "alice", CredentialGeneration: 3,
+			},
+			valid: true,
+		},
+		{
+			name: "app installation",
+			binding: ContributionDestinationCredentialBinding{
+				Source: "github_app_installation", InstallationID: 42, AppRegistrationID: "app-1",
+				CredentialGeneration: 3, AppCredentialGeneration: 7,
+			},
+			valid: true,
+		},
+		{
+			name: "unknown source",
+			binding: ContributionDestinationCredentialBinding{
+				Source: "ambient", Login: "alice", CredentialGeneration: 3,
+			},
+		},
+		{
+			name:    "missing generation",
+			binding: ContributionDestinationCredentialBinding{Source: "pat", Login: "alice"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.binding.Validate()
+			if tc.valid && err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+			if !tc.valid && err == nil {
+				t.Fatal("Validate() accepted an invalid binding")
+			}
+		})
+	}
+}
+
 func TestContributionDestinationRejectsUnsafeOrAmbiguousValues(t *testing.T) {
 	base := testContributionDestination()
 	cases := []struct {

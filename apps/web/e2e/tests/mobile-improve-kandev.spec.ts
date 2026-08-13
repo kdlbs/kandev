@@ -32,8 +32,7 @@ test.describe("Improve Kandev on mobile", () => {
           github_login: "octocat",
           has_write_access: false,
           fork_status: "blocked_managed",
-          fork_message:
-            "The selected workspace GitHub automation connection cannot prepare a verified contribution destination.",
+          fork_reason_code: "managed_unavailable",
         }),
       }),
     );
@@ -54,7 +53,9 @@ test.describe("Improve Kandev on mobile", () => {
     const createDialog = testPage.getByTestId("create-task-dialog");
     await expect(createDialog).toBeVisible({ timeout: 10_000 });
     await expect(
-      createDialog.getByText(/cannot prepare a verified contribution destination/i),
+      createDialog.getByText(
+        "Managed GitHub access could not prepare a verified fork for this task. Check the workspace GitHub connection or open an issue instead.",
+      ),
     ).toBeVisible();
     await createDialog.getByTestId("task-title-input").fill("Mobile issue fallback");
     await createDialog.getByTestId("task-description-input").fill("Describe the problem");

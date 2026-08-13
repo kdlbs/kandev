@@ -36,7 +36,7 @@ const STEP_DESCRIPTIONS: Record<string, string> = {
 export type ImproveKandevReadyState = {
   data: Pick<
     ImproveKandevBootstrapResponse,
-    "workflow_id" | "issue_workflow_id" | "fork_status" | "fork_message"
+    "workflow_id" | "issue_workflow_id" | "fork_status" | "fork_reason_code"
   >;
   steps: WorkflowStep[];
   issueSteps: WorkflowStep[];
@@ -120,10 +120,16 @@ export function resolveImproveKandevWorkflow(
 export function getImproveKandevForkBlockedReason(
   kind: ImproveKandevKind,
   forkStatus: ImproveKandevBootstrapResponse["fork_status"] | undefined,
-  forkMessage: string | null | undefined,
+  forkReasonCode: ImproveKandevBootstrapResponse["fork_reason_code"] | undefined,
 ): string | null {
   if (kind === "issue" || !isImproveKandevForkBlockedStatus(forkStatus)) return null;
-  return forkMessage ?? null;
+  if (forkReasonCode === "account_cannot_fork") {
+    return "common:thisGithubAccountCannotForkKdlbs";
+  }
+  if (forkStatus === "blocked_emu" && forkReasonCode === undefined) {
+    return "common:thisGithubAccountCannotForkKdlbs";
+  }
+  return "common:managedGithubForkUnavailable";
 }
 
 export function isImproveKandevForkBlockedStatus(

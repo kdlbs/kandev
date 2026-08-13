@@ -15,7 +15,12 @@ spec: "../../specs/improve-kandev/spec.md"
 - Every launch/resume path loads the validated destination, preserves canonical `origin`, adds the stable
   fork remote, and routes the task's current branch to the same branch name on that fork.
 - Managed sessions receive the canonical lease plus one exact destination lease, and the broker rejects all
-  unrelated, malformed, cross-task, cross-session, and cross-workspace requests.
+  unrelated, malformed, cross-task, cross-session, and cross-workspace requests. The destination lease
+  proves source, target, and parent provider IDs and the bound credential connection/generation against
+  live provider state.
+- A policy change to executor-owned access, or an explicit executor `GH_TOKEN`/`GITHUB_TOKEN`, clears the
+  server-managed destination and does not issue a managed destination lease. Changing the workspace
+  automation connection or its generation invalidates the old binding.
 - Raw `git push` and agentctl push use the fork destination; base fetches and change-request targeting remain
   canonical. Existing ordinary and already-open remote-contribution tasks do not regress.
 
@@ -77,11 +82,13 @@ commands, remaining risks, divergence, and task/plan status updates.
 
 ## Completion
 
-Completed 2026-08-12. The destination is projected through executor, lifecycle, materialization, Worktree,
+Completed 2026-08-13. The destination is projected through executor, lifecycle, materialization, Worktree,
 Local, Docker, SSH, Sprites, and agentctl paths. Runtime setup adds one exact push remote and branch
 pushRemote while preserving canonical `origin` and pull/upstream behavior. Managed credential scopes and
 the broker authorizer prove the exact task-bound destination. Raw pushes, agentctl pushes, and GitHub PR
 creation use the destination and canonical target respectively; malformed or conflicting state fails closed.
+Lease issuance and redemption also revalidate the credential binding and live source/target/parent IDs, and
+executor-owned policy or explicit tokens remove the managed route.
 
 Verification: `rtk make -C apps/backend test` and `rtk make -C apps/backend lint` both passed. Focused
 runtime, credential, lifecycle, Git, PR, and broker tests passed before the full suite; the new process test
