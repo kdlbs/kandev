@@ -23,14 +23,17 @@ async function pollSessions(
   expectedCount: number,
   timeoutMs = 30_000,
 ) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const { sessions } = await apiClient.listTaskSessions(taskId);
-    if (sessions.length >= expectedCount) return sessions;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  const { sessions } = await apiClient.listTaskSessions(taskId);
-  return sessions;
+  let latest: Awaited<ReturnType<typeof apiClient.listTaskSessions>>["sessions"] = [];
+  await expect
+    .poll(
+      async () => {
+        latest = (await apiClient.listTaskSessions(taskId)).sessions;
+        return latest.length;
+      },
+      { timeout: timeoutMs, message: `task ${taskId} never reached ${expectedCount} session(s)` },
+    )
+    .toBeGreaterThanOrEqual(expectedCount);
+  return latest;
 }
 
 async function waitForSessionEnvironmentId(
@@ -39,20 +42,32 @@ async function waitForSessionEnvironmentId(
   agentProfileId: string,
   timeoutMs = 30_000,
 ) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const { sessions } = await apiClient.listTaskSessions(taskId);
-    const environmentId = sessions.find(
-      (s) => s.agent_profile_id === agentProfileId,
-    )?.task_environment_id;
-    if (environmentId) return environmentId;
-    await new Promise((r) => setTimeout(r, 500));
+  let environmentId: string | null | undefined;
+  let details = "";
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(taskId);
+        // Captured on every attempt so the failure message below describes the
+        // last observed state rather than requiring an extra request.
+        details = sessions
+          .map((s) => `${s.id}:${s.agent_profile_id}:${s.state}:${s.task_environment_id ?? "none"}`)
+          .join(", ");
+        environmentId = sessions.find(
+          (s) => s.agent_profile_id === agentProfileId,
+        )?.task_environment_id;
+        return Boolean(environmentId);
+      },
+      {
+        timeout: timeoutMs,
+        message: `session for profile ${agentProfileId} did not get environment id`,
+      },
+    )
+    .toBe(true);
+  if (!environmentId) {
+    throw new Error(`session for profile ${agentProfileId} did not get environment id: ${details}`);
   }
-  const { sessions } = await apiClient.listTaskSessions(taskId);
-  const details = sessions
-    .map((s) => `${s.id}:${s.agent_profile_id}:${s.state}:${s.task_environment_id ?? "none"}`)
-    .join(", ");
-  throw new Error(`session for profile ${agentProfileId} did not get environment id: ${details}`);
+  return environmentId;
 }
 
 async function pollSessionsForEnvironmentInheritance(
@@ -62,21 +77,25 @@ async function pollSessionsForEnvironmentInheritance(
   targetProfileId: string,
   timeoutMs = 30_000,
 ) {
-  const start = Date.now();
   let latestSessions: Awaited<ReturnType<typeof pollSessions>> = [];
-  while (Date.now() - start < timeoutMs) {
-    const { sessions } = await apiClient.listTaskSessions(taskId);
-    latestSessions = sessions;
-    const sourceSession = sessions.find((s) => s.agent_profile_id === sourceProfileId);
-    const targetSession = sessions.find((s) => s.agent_profile_id === targetProfileId);
-    if (
-      sourceSession?.task_environment_id &&
-      targetSession?.task_environment_id === sourceSession.task_environment_id
-    ) {
-      return sessions;
-    }
-    await new Promise((r) => setTimeout(r, 500));
-  }
+  // Returns the last observed sessions either way: callers assert on the
+  // inheritance themselves, so a timeout here must not throw.
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(taskId);
+        latestSessions = sessions;
+        const sourceSession = sessions.find((s) => s.agent_profile_id === sourceProfileId);
+        const targetSession = sessions.find((s) => s.agent_profile_id === targetProfileId);
+        return Boolean(
+          sourceSession?.task_environment_id &&
+          targetSession?.task_environment_id === sourceSession.task_environment_id,
+        );
+      },
+      { timeout: timeoutMs },
+    )
+    .toBe(true)
+    .catch(() => undefined);
   return latestSessions;
 }
 
@@ -120,8 +139,18 @@ test.describe("Workflow agent profile switching", () => {
     expect(initialSessions.length).toBeGreaterThanOrEqual(1);
     expect(initialSessions[0].agent_profile_id).toBe(profileA.id);
 
-    // Wait for agent to be ready before moving
-    await new Promise((r) => setTimeout(r, 3000));
+    // Wait for the agent to actually settle rather than budgeting 3s for it.
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.some(
+            (s) => s.state === "WAITING_FOR_INPUT" || s.state === "IDLE" || s.state === "RUNNING",
+          );
+        },
+        { timeout: 30_000, message: "first session never became ready" },
+      )
+      .toBe(true);
 
     // Move task to Step2 — should create new session with profileB
     await apiClient.moveTask(task.id, workflow.id, step2.id);
@@ -237,11 +266,15 @@ test.describe("Workflow agent profile switching", () => {
     });
 
     // Wait for the agent to be ready (WAITING_FOR_INPUT) before moving
-    for (let i = 0; i < 20; i++) {
-      const { sessions } = await apiClient.listTaskSessions(task.id);
-      if (sessions.some((s) => s.state === "WAITING_FOR_INPUT")) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.some((s) => s.state === "WAITING_FOR_INPUT");
+        },
+        { timeout: 10_000, message: "no session reached WAITING_FOR_INPUT" },
+      )
+      .toBe(true);
 
     // Move task to Step2 — should create new session with profileB
     await apiClient.moveTask(task.id, workflow.id, step2.id);
@@ -366,11 +399,15 @@ test.describe("Workflow agent profile switching", () => {
     );
 
     // Wait for Step1 agent to finish
-    for (let i = 0; i < 20; i++) {
-      const { sessions } = await apiClient.listTaskSessions(task.id);
-      if (sessions.some((s) => s.state === "WAITING_FOR_INPUT")) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.some((s) => s.state === "WAITING_FOR_INPUT");
+        },
+        { timeout: 10_000, message: "no session reached WAITING_FOR_INPUT" },
+      )
+      .toBe(true);
 
     // Move to Step2 — should auto-launch agent despite no auto_start_agent
     await apiClient.moveTask(task.id, workflow.id, step2.id);
@@ -426,11 +463,15 @@ test.describe("Workflow agent profile switching", () => {
     );
 
     // Wait for Step1 agent to finish
-    for (let i = 0; i < 20; i++) {
-      const { sessions } = await apiClient.listTaskSessions(task.id);
-      if (sessions.some((s) => s.state === "WAITING_FOR_INPUT")) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return sessions.some((s) => s.state === "WAITING_FOR_INPUT");
+        },
+        { timeout: 10_000, message: "no session reached WAITING_FOR_INPUT" },
+      )
+      .toBe(true);
     const step1EnvironmentId = await waitForSessionEnvironmentId(apiClient, task.id, profileA.id);
 
     // Move to Step2
@@ -909,6 +950,9 @@ test.describe("Workflow agent profile switching", () => {
       expect(stableSessions.length, "no extra session should spawn within stability window").toBe(
         2,
       );
+      // deliberate-sleep(poll-interval): sampling interval for the stability
+      // window above. The assertion is that no extra session appears during
+      // it, so the loop must keep sampling across real elapsed time.
       await new Promise((r) => setTimeout(r, 250));
     }
 
@@ -943,7 +987,6 @@ test.describe("Workflow agent profile switching", () => {
       // Click first step to open config panel
       const stepNodes = card.locator(".group.relative");
       await stepNodes.first().click();
-      await testPage.waitForTimeout(500);
 
       // Reset context checkbox should be enabled (no agent profile set)
       const resetCheckbox = card.getByRole("checkbox", { name: "Reset agent context" });
@@ -957,7 +1000,6 @@ test.describe("Workflow agent profile switching", () => {
       const reloadedCard = await page.findWorkflowCard("E2E Workflow");
       const reloadedSteps = reloadedCard.locator(".group.relative");
       await reloadedSteps.first().click();
-      await testPage.waitForTimeout(500);
 
       // Reset context checkbox should be disabled
       const reloadedCheckbox = reloadedCard.getByRole("checkbox", {
