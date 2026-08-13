@@ -260,3 +260,45 @@ func TestPostgresSubagentContextBackfillJSONHelpers(t *testing.T) {
 		t.Error("is_async = false, want true (Postgres #>> 'true' spelling must normalize to 1)")
 	}
 }
+
+// TestPostgresSubagentContextHealthCountsAgreeAfterLiveWrites is the
+// PostgreSQL counterpart to TestSubagentContextHealthCountsAgreeAfterLiveWrites:
+// AC-28's message-side query uses SQLite's json_extract in the spec's
+// illustrative form, which does not exist on PostgreSQL — subagentMessageCount
+// builds the dialect-appropriate expression instead, and this test proves that
+// expression actually agrees with the context-side count on PostgreSQL, not
+// just on SQLite (AC-19).
+func TestPostgresSubagentContextHealthCountsAgreeAfterLiveWrites(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS kandev_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("create kandev_meta: %v", err)
+	}
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	seedPostgresForMsgTest(t, db, "task-pg-health", "session-pg-health", "turn-pg-health")
+	ctx := context.Background()
+	ts := time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC)
+
+	for i, toolCallID := range []string{"tc-pg-health-1", "tc-pg-health-2", "tc-pg-health-3"} {
+		seedSubagentMessage(t, repo, "msg-pg-health-"+toolCallID, "session-pg-health", "task-pg-health", "turn-pg-health",
+			toolCallID, "", "completed", map[string]interface{}{"status": "completed"},
+			ts.Add(time.Duration(i)*time.Minute), ts.Add(time.Duration(i)*time.Minute))
+		if err := repo.UpsertSubagentContext(ctx, &models.SubagentContext{
+			TaskSessionID: "session-pg-health", TaskID: "task-pg-health", ToolCallID: toolCallID,
+			Source: "live", ObservedAt: ts.Add(time.Duration(i) * time.Minute), UpdatedAt: ts.Add(time.Duration(i) * time.Minute),
+		}); err != nil {
+			t.Fatalf("UpsertSubagentContext %s: %v", toolCallID, err)
+		}
+	}
+
+	messageCount := subagentMessageCount(t, repo)
+	contextCount := subagentContextCount(t, repo)
+	if messageCount != contextCount {
+		t.Fatalf("message count = %d, context count = %d; want equal after live writes", messageCount, contextCount)
+	}
+	if messageCount != 3 {
+		t.Fatalf("message count = %d, want 3", messageCount)
+	}
+}

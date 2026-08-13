@@ -323,6 +323,12 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		return
 	}
 	if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		// A late-arriving frame for an already-completed execution is
+		// correctly dropped for message purposes (see the guard's own
+		// contract), but it can be the ONLY frame that ever recognizes and
+		// settles this subagent — dropping it here too would permanently
+		// omit the row's status/token/duration data (AC-1, AC-11).
+		s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		return
 	}
 
@@ -355,7 +361,11 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		// the task to REVIEW) leaves session=RUNNING with task=REVIEW.
 		s.setSessionRunningForExecution(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID)
 	}
-	s.recordSubagentContextFromFrame(ctx, payload, s.getActiveTurnID(payload.SessionID))
+	// Recording a subagent-context observation must never itself start a
+	// turn as a side effect (that would mutate durable state purely to label
+	// a telemetry row) — use the non-creating lookup here even though
+	// message creation above may have legitimately started one already.
+	s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 
 	ownership := toolOwnershipForeground
 	if payload.Data.ParentToolCallID != "" {
@@ -539,6 +549,10 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		return
 	}
 	if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		// See the matching guard in handleToolCallEvent: a dropped update can
+		// be the subagent's final terminal frame, and must still settle the
+		// durable row even though the message side is correctly ignored.
+		s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		return
 	}
 	ownership := s.resolveToolUpdateOwnership(payload)
@@ -598,8 +612,14 @@ func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecyc
 			// update-only reconciliation and cannot wake a settled session.
 			turnID = ""
 		}
-	} else {
+	} else if s.messageCreator != nil {
+		// Only message creation needs a turn to attach a fallback-created
+		// card to, which is why this branch alone may lazily start one.
+		// Recording subagent context must never create a turn merely to
+		// label a row — see nonCreatingActiveTurnID.
 		turnID = s.getActiveTurnID(payload.SessionID)
+	} else {
+		turnID = s.nonCreatingActiveTurnID(ctx, payload.SessionID)
 	}
 
 	// Message persistence is optional (see SetMessageCreator); turn-id
@@ -814,6 +834,22 @@ func (s *Service) recordSubagentContextFromFrame(ctx context.Context, payload *l
 		Payload:          subagentTask,
 		ObservedAt:       time.Now().UTC(),
 	})
+}
+
+// nonCreatingActiveTurnID resolves sessionID's active turn without ever
+// starting one — unlike getActiveTurnID, whose doc comment explains it
+// lazily starts a turn "even in edge cases like resumed sessions". Every
+// caller here uses the result only to label a subagent-context row, never to
+// attach a message, so recording an observation must never itself mutate
+// state by creating a durable turn as a side effect. A lookup error is
+// treated as "no turn known", matching the fail-closed pattern already used
+// for terminal tool updates below.
+func (s *Service) nonCreatingActiveTurnID(ctx context.Context, sessionID string) string {
+	turnID, err := s.peekActiveTurnID(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	return turnID
 }
 
 func (s *Service) shouldDropCompletedExecutionStreamEvent(payload *lifecycle.AgentStreamEventPayload) bool {

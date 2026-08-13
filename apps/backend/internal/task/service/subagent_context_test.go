@@ -405,6 +405,11 @@ func TestSubagentContextTerminalStatusesMatchOrchestrator(t *testing.T) {
 		t.Fatalf("read orchestrator event_handlers_streaming.go: %v", err)
 	}
 
+	// Captures only the first "case ...:" clause, i.e. isTerminalToolStatus's
+	// switch must stay a single comma-separated case (not one "case" per
+	// line) for this regex to see every status. A refactor that splits it
+	// shrinks orchestratorSet below the size check at line ~435 and fails
+	// loudly — if you land here from that failure, this is why.
 	caseRe := regexp.MustCompile(`(?s)func isTerminalToolStatus\(status string\) bool \{.*?case (.*?):`)
 	match := caseRe.FindSubmatch(switchSrc)
 	if match == nil {

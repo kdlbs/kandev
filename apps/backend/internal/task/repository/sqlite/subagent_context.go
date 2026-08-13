@@ -110,6 +110,10 @@ func (r *Repository) ListSubagentContextsByTurn(ctx context.Context, turnID stri
 	return r.listSubagentContexts(ctx, "turn_id", turnID)
 }
 
+// listSubagentContexts concatenates column directly into the query. Safe by
+// construction ONLY because both call sites above pass a hardcoded literal
+// ("task_session_id", "turn_id") — column must never be, or be derived from,
+// caller/request input.
 func (r *Repository) listSubagentContexts(ctx context.Context, column, value string) ([]*models.SubagentContext, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+selectSubagentContextColumns+`

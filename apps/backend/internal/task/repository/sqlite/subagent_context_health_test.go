@@ -5,22 +5,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// subagentMessageCount runs the AC-28 message-side query verbatim: a count
-// of task_session_messages whose metadata.normalized.kind is subagent_task.
+// subagentMessageCount runs the AC-28 message-side query: a count of
+// task_session_messages whose metadata.normalized.kind is subagent_task.
 // This is the independent expectation because the message write is
 // load-bearing for the UI subagent card — a broken message write is noticed
 // by a human within one turn, whereas a broken context write is noticed by
 // nobody. That asymmetry is what makes the comparison a real check.
+//
+// AC-28's spec text gives the SQLite form (json_extract) as the illustrative
+// query; json_extract does not exist on PostgreSQL, so this helper builds the
+// dialect-appropriate expression via the same jsonKey helper the backfill
+// migration uses, and TestPostgresSubagentContextHealthCountsAgreeAfterLiveWrites
+// exercises the PostgreSQL form directly (AC-19).
 func subagentMessageCount(t *testing.T, repo *Repository) int {
 	t.Helper()
+	postgres := dialect.IsPostgres(repo.db.DriverName())
 	var count int
-	if err := repo.db.QueryRow(`
-		SELECT COUNT(*) FROM task_session_messages
-		WHERE json_extract(metadata, '$.normalized.kind') = 'subagent_task'
-	`).Scan(&count); err != nil {
+	query := `SELECT COUNT(*) FROM task_session_messages WHERE ` +
+		jsonKey(postgres, "metadata", "normalized.kind") + ` = 'subagent_task'`
+	if err := repo.db.QueryRow(repo.db.Rebind(query)).Scan(&count); err != nil {
 		t.Fatalf("subagent message count: %v", err)
 	}
 	return count

@@ -32,9 +32,12 @@ type RecordSubagentContextRequest struct {
 }
 
 // subagentTerminalToolStatuses mirrors internal/orchestrator's unexported
-// isTerminalToolStatus (event_handlers_streaming.go:762). The two lists are
-// pinned together by TestSubagentContextTerminalStatusesMatchOrchestrator so
-// a future edit to one fails the other.
+// isTerminalToolStatus (event_handlers_streaming.go, function
+// isTerminalToolStatus — deliberately not pinned to a line number here,
+// since TestSubagentContextTerminalStatusesMatchOrchestrator re-parses the
+// function by name and a hardcoded line drifts on every unrelated edit to
+// that file). The two lists are pinned together by that test so a future
+// edit to one fails the other.
 var subagentTerminalToolStatuses = map[string]bool{
 	"complete": true, "completed": true, "success": true,
 	"error": true, "failed": true, "cancelled": true,
