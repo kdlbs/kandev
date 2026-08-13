@@ -359,7 +359,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	// must stay held so ReapStaleCheckouts (not a same-agent race) is what
 	// eventually reclaims it, instead of releasing a lock for a run that
 	// never actually reached a terminal state.
-	if err := s.FinishRun(ctx, run.ID); err != nil {
+	if err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed); err != nil {
 		return err
 	}
 	s.releaseTaskCheckoutForRun(ctx, run)
@@ -420,7 +420,7 @@ func (s *Service) handleTasklessAgentCompleted(
 	//
 	// Finish before releasing, same as handleAgentCompleted: a failed
 	// FinishRun must not still give up the checkout.
-	if err := s.FinishRun(ctx, run.ID); err != nil {
+	if err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed); err != nil {
 		return err
 	}
 	s.releaseTaskCheckoutForRun(ctx, run)

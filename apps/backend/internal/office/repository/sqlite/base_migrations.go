@@ -36,6 +36,7 @@ func (r *Repository) runMigrations() {
 	// Provider routing tables and replayable column migrations. Fresh
 	// schemas include the columns inline; ALTERs converge existing databases.
 	r.migrateProviderRouting()
+	r.migrateRunOutcome()
 }
 
 // migrateCostEventContract adds the cache read/write split, turn

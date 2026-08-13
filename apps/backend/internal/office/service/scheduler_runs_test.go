@@ -105,7 +105,7 @@ func TestFinishAndFailRun(t *testing.T) {
 		t.Fatal("expected claimed run")
 	}
 
-	if err := svc.FinishRun(ctx, req.ID); err != nil {
+	if err := svc.FinishRun(ctx, req.ID, service.RunOutcomeProcessed); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 

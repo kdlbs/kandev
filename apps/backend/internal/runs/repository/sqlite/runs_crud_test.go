@@ -261,7 +261,7 @@ func TestFinishRun_SetsStatusAndFinishedAt(t *testing.T) {
 	before := time.Now().UTC().Add(-time.Second)
 	run := mustCreateRun(t, repo, fullRun())
 
-	if err := repo.FinishRun(ctx, run.ID, "finished"); err != nil {
+	if err := repo.FinishRun(ctx, run.ID, "finished", nil); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	got := mustGetRun(t, repo, run.ID)
