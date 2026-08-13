@@ -1,7 +1,7 @@
 ---
 id: "04-failed-predecessor-halt"
 title: "Halt chains on a failed predecessor"
-status: not_started
+status: done
 wave: 4
 depends_on: ["03-resolve-and-auto-start"]
 plan: "plan.md"

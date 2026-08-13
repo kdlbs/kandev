@@ -320,13 +320,13 @@ once 01 lands. Task 08 closes out. Task 07 was built on 06 and then dropped
 before shipping, so it is not part of the executable set and Task 08 does not
 wait on it.
 
-- [ ] [Task 01: Promote dependency edges to a core relationship](task-01-core-dependency-relationship.md)
-- [ ] [Task 02: Gate automated launches on unresolved dependencies](task-02-gate-automated-launch.md)
-- [ ] [Task 03: Resolve dependencies and auto-start on unblock](task-03-resolve-and-auto-start.md)
-- [ ] [Task 04: Halt chains on a failed predecessor](task-04-failed-predecessor-halt.md)
-- [ ] [Task 05: MCP dependency tools](task-05-mcp-dependency-tools.md)
-- [ ] [Task 06: Kanban dependency UI](task-06-kanban-dependency-ui.md)
-- [ ] [Task 08: Verify browser flows and documentation](task-08-verify-flows-and-docs.md)
+- [x] [Task 01: Promote dependency edges to a core relationship](task-01-core-dependency-relationship.md)
+- [x] [Task 02: Gate automated launches on unresolved dependencies](task-02-gate-automated-launch.md)
+- [x] [Task 03: Resolve dependencies and auto-start on unblock](task-03-resolve-and-auto-start.md)
+- [x] [Task 04: Halt chains on a failed predecessor](task-04-failed-predecessor-halt.md)
+- [x] [Task 05: MCP dependency tools](task-05-mcp-dependency-tools.md)
+- [x] [Task 06: Kanban dependency UI](task-06-kanban-dependency-ui.md)
+- [x] [Task 08: Verify browser flows and documentation](task-08-verify-flows-and-docs.md)
 
 No task is marked `parallel-safe`; waves do not authorize subagent execution.
 

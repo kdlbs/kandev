@@ -318,6 +318,23 @@ type TodoDisplayItem = {
   status?: "pending" | "in_progress" | "completed" | "failed";
 };
 
+/**
+ * The status row belongs to the TASK, not to the session.
+ *
+ * `panelState.taskId` is session-derived and is null on a task that has no
+ * session yet, which is exactly the state a blocked dependency-chain step sits
+ * in: with no id the whole row is hidden, taking the dependency chip with it on
+ * the one kind of task the chip is about. Hosts that know their task pass it as
+ * `statusTaskId`. The session-derived id still wins when present, so hosts that
+ * pass nothing are unchanged.
+ */
+export function resolveStatusRowTaskId(
+  sessionTaskId: string | null,
+  statusTaskId: string | null,
+): string | null {
+  return sessionTaskId ?? statusTaskId;
+}
+
 export function shouldRenderChatStatusBar({
   hasTask,
   hasTodos,
@@ -511,6 +528,13 @@ type ChatInputAreaProps = {
    * start of the transcript. */
   showScrollToStart?: boolean;
   onScrollToStart?: () => void;
+  /**
+   * Task this composer belongs to, for the status row only. Hosts that mount a
+   * task's chat before any session exists pass it so the dependency / autopilot
+   * chips still render; without it the row is hidden on exactly the tasks a
+   * dependency chip is about.
+   */
+  statusTaskId?: string | null;
 };
 
 /** Resolves whether this session's executor environment is unavailable, and why. */
@@ -597,8 +621,10 @@ export function ChatInputArea({
   lastPromptScrollDirection,
   showScrollToStart,
   onScrollToStart,
+  statusTaskId = null,
 }: ChatInputAreaProps) {
   const { resolvedSessionId, taskId, isAgentBusy } = panelState;
+  const statusRowTaskId = resolveStatusRowTaskId(taskId, statusTaskId);
   const composerWorkspaceId = useComposerWorkspaceId(resolvedSessionId, taskId);
   const sessionState = panelState.session?.state ?? null;
   const canDrainQueue = canManuallyDrainQueue(panelState.pendingClarification, sessionState);
@@ -637,7 +663,7 @@ export function ChatInputArea({
         renderStatusBar={(queueChip) => (
           <ChatStatusBar
             todoItems={panelState.todoItems}
-            taskId={taskId}
+            taskId={statusRowTaskId}
             sessionId={resolvedSessionId}
             sessionState={sessionState}
             nextStepName={proceedStepName}

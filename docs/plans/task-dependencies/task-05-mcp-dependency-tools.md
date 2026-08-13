@@ -1,7 +1,7 @@
 ---
 id: "05-mcp-dependency-tools"
 title: "MCP dependency tools"
-status: not_started
+status: done
 wave: 5
 depends_on: ["01-core-dependency-relationship"]
 plan: "plan.md"

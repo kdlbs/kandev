@@ -1,7 +1,7 @@
 ---
 id: "03-resolve-and-auto-start"
 title: "Resolve dependencies and auto-start on unblock"
-status: not_started
+status: done
 wave: 3
 depends_on: ["02-gate-automated-launch"]
 plan: "plan.md"

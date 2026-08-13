@@ -1,7 +1,7 @@
 ---
 id: "01-core-dependency-relationship"
 title: "Promote dependency edges to a core relationship"
-status: not_started
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

@@ -1,7 +1,7 @@
 ---
 id: "02-gate-automated-launch"
 title: "Gate automated launches on unresolved dependencies"
-status: not_started
+status: done
 wave: 2
 depends_on: ["01-core-dependency-relationship"]
 plan: "plan.md"

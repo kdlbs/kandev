@@ -682,6 +682,23 @@ func HasStartWhenUnblockedIntent(task *Task) bool {
 	return ok && flag
 }
 
+// DropWIPDeferredLaunch removes a deferred launch record that only existed
+// because the task was waiting on WIP capacity.
+//
+// Every WIP admission point calls this instead of deleting the key outright.
+// An admitted task has nothing left to wait for as far as WIP is concerned, so
+// its overflow record is stale. A start-when-unblocked intent is NOT stale in
+// that situation: it is waiting on a predecessor, not on capacity, and the two
+// share this one metadata record. Deleting it on admission silently unmakes
+// every dependency chain, because admission happens at create time for any task
+// entering a step with room.
+func DropWIPDeferredLaunch(task *Task) {
+	if task == nil || task.Metadata == nil || HasStartWhenUnblockedIntent(task) {
+		return
+	}
+	delete(task.Metadata, MetaKeyDeferredLaunch)
+}
+
 // IsTerminalTaskState reports whether a task state means no further child work
 // is expected from that task.
 func IsTerminalTaskState(state v1.TaskState) bool {

@@ -17,7 +17,7 @@ const AGENT_PAYLOAD_DEFAULTS = {
   executorId: "executor-1",
   executorProfileId: "profile-1",
   withAgent: true,
-} as const;
+};
 
 beforeEach(() => {
   localStorage.clear();

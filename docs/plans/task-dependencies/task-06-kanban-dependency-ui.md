@@ -1,7 +1,7 @@
 ---
 id: "06-kanban-dependency-ui"
 title: "Kanban dependency UI"
-status: not_started
+status: done
 wave: 6
 depends_on: ["01-core-dependency-relationship"]
 plan: "plan.md"
