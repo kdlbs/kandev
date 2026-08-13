@@ -1401,13 +1401,22 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 	}
 
 	// Guard against duplicate completion (e.g. ACP prompt error + process exit error).
-	// MarkCompleted is a terminal transition — once in Completed/Failed, skip re-publishing.
-	if execution.Status == v1.AgentStatusCompleted || execution.Status == v1.AgentStatusFailed {
+	// MarkCompleted is a terminal transition — once in Completed/Failed/Stopped, skip
+	// re-publishing. Stopped is a terminal state too (shutdown-race abort, StopAgent),
+	// so a second completion must not overwrite it or re-emit an event.
+	if isTerminalStatus(execution.Status) {
 		m.logger.Warn("ignoring duplicate MarkCompleted for already-terminal execution",
 			zap.String("execution_id", executionID),
 			zap.String("current_status", string(execution.Status)),
 			zap.Int("exit_code", exitCode))
 		return nil
+	}
+
+	// A turn aborted because backend graceful shutdown killed the agent
+	// subprocess is not an agent failure. Treat the terminal error as a benign
+	// stop so the session stays resumable and the UI shows no red error banner.
+	if (exitCode != 0 || errorMessage != "") && m.IsShuttingDown() {
+		return m.markStoppedDuringShutdown(execution, exitCode, errorMessage)
 	}
 
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -1447,6 +1456,63 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 		m.classifyAndMaybeRemediate(execution, exitCode, errorMessage)
 	}
 	m.eventPublisher.PublishAgentEvent(context.Background(), eventType, execution)
+
+	return nil
+}
+
+// isTerminalStatus reports whether a status is a final execution state that
+// MarkCompleted / markStoppedDuringShutdown must not overwrite or re-publish.
+func isTerminalStatus(status v1.AgentStatus) bool {
+	return status == v1.AgentStatusCompleted ||
+		status == v1.AgentStatusFailed ||
+		status == v1.AgentStatusStopped
+}
+
+// markStoppedDuringShutdown records a terminal error completion that arrived
+// while backend graceful shutdown was in progress as a benign STOPPED outcome
+// instead of a FAILED one. It stamps the terminal fields, runs the same teardown
+// as the failed branch, and publishes events.AgentStopped — mirroring the
+// StopReasonBackendShutdown teardown so the orchestrator treats it as resumable.
+// It deliberately does not remove the execution or run classifyAndMaybeRemediate.
+//
+// Both terminal chokepoints (handleCompleteEventMarkState and MarkCompleted) can
+// reach this during shutdown for the same execution (ACP error event + process
+// exit). The transition is therefore guarded under the store lock: if the
+// execution is already terminal, or was removed by StopAgentWithReason, this is a
+// stale/duplicate callback — skip teardown and the AgentStopped publish so the
+// orchestrator does not process the same stop twice.
+func (m *Manager) markStoppedDuringShutdown(execution *AgentExecution, exitCode int, errorMessage string) error {
+	applied := false
+	err := m.executionStore.WithLock(execution.ID, func(exec *AgentExecution) {
+		if isTerminalStatus(exec.Status) {
+			return
+		}
+		now := time.Now()
+		exec.FinishedAt = &now
+		exec.ExitCode = &exitCode
+		exec.ErrorMessage = errorMessage
+		exec.Status = v1.AgentStatusStopped
+		applied = true
+	})
+	if err != nil || !applied {
+		m.logger.Debug("ignoring stale/duplicate shutdown completion",
+			zap.String("execution_id", execution.ID),
+			zap.String("current_status", string(execution.Status)),
+			zap.Error(err))
+		return nil
+	}
+
+	m.logger.Warn("error completion during shutdown, treating as cancellation",
+		zap.String("execution_id", execution.ID),
+		zap.String("task_id", execution.TaskID),
+		zap.Int("exit_code", exitCode),
+		zap.String("error", errorMessage))
+
+	execution.EndSessionSpan()
+	m.persistExecutorRunning(context.Background(), execution)
+	m.releaseActivity(executionActivityKey(execution.ID))
+
+	m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentStopped, execution)
 
 	return nil
 }

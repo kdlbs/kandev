@@ -40,6 +40,12 @@ export interface PluginKeybinding {
   id: string;
   default: string;
   description: string;
+  /**
+   * Lets this binding fire while an input, textarea or contenteditable has
+   * focus. Off by default so a plugin cannot shadow ordinary typing; the
+   * backend only accepts it on a combo carrying a ctrl/cmd/mod/alt modifier.
+   */
+  allow_in_editor?: boolean;
 }
 
 export interface PluginUISection {

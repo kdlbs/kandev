@@ -2,7 +2,11 @@
 
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { autoFixRoundForState, findCIAutomationStateForPR } from "@/lib/github/ci-automation";
+import {
+  autoFixRoundForState,
+  findCIAutomationStateForPR,
+  findPRAutomationOptionsForPR,
+} from "@/lib/github/ci-automation";
 import type { AutoFixRoundInfo } from "@/lib/github/ci-automation";
 import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
@@ -31,12 +35,24 @@ export function automationForPR(
   options: TaskCIAutomationOptions | null | undefined,
   pr: TaskPR,
 ): AutomationFlags {
+  const prOptions = options?.pr_options
+    ? findPRAutomationOptionsForPR(options.pr_options, pr)
+    : null;
+  const flags = prOptions
+    ? {
+        autoFix: prOptions.auto_fix_enabled,
+        autoMerge: prOptions.auto_merge_enabled,
+        promptOnReviewRequested: prOptions.prompt_on_review_requested,
+        promptOnMerged: prOptions.prompt_on_merged,
+        promptOnClosed: prOptions.prompt_on_closed,
+      }
+    : taskWideAutomationFlags(options);
   return {
-    ...taskWideAutomationFlags(options),
-    autoFixRound: options?.auto_fix_enabled
+    ...flags,
+    autoFixRound: (prOptions ? prOptions.auto_fix_enabled : options?.auto_fix_enabled)
       ? autoFixRoundForState(
-          findCIAutomationStateForPR(options.pr_states, pr),
-          options.auto_fix_max_rounds,
+          findCIAutomationStateForPR(options?.pr_states, pr),
+          options?.auto_fix_max_rounds,
         )
       : null,
   };
@@ -46,16 +62,37 @@ export function automationForPRs(
   options: TaskCIAutomationOptions | null | undefined,
   prs: TaskPR[],
 ): AutomationFlags {
-  const roundInfos = options?.auto_fix_enabled
-    ? prs.map((pr) =>
-        autoFixRoundForState(
-          findCIAutomationStateForPR(options.pr_states, pr),
-          options.auto_fix_max_rounds,
-        ),
-      )
-    : [];
+  if (!options?.pr_options) {
+    const roundInfos = options?.auto_fix_enabled
+      ? prs.map((pr) =>
+          autoFixRoundForState(
+            findCIAutomationStateForPR(options.pr_states, pr),
+            options.auto_fix_max_rounds,
+          ),
+        )
+      : [];
+    return {
+      ...taskWideAutomationFlags(options),
+      autoFixRound: pickAttentionRound(roundInfos),
+    };
+  }
+  const perPR = prs.map((pr) => findPRAutomationOptionsForPR(options.pr_options, pr));
+  const roundInfos = perPR
+    .map((prOptions, index) =>
+      prOptions.auto_fix_enabled
+        ? autoFixRoundForState(
+            findCIAutomationStateForPR(options.pr_states, prs[index]),
+            options.auto_fix_max_rounds,
+          )
+        : null,
+    )
+    .filter((round): round is AutoFixRoundInfo => round !== null);
   return {
-    ...taskWideAutomationFlags(options),
+    autoFix: perPR.some((prOptions) => prOptions.auto_fix_enabled),
+    autoMerge: perPR.some((prOptions) => prOptions.auto_merge_enabled),
+    promptOnReviewRequested: perPR.some((prOptions) => prOptions.prompt_on_review_requested),
+    promptOnMerged: perPR.some((prOptions) => prOptions.prompt_on_merged),
+    promptOnClosed: perPR.some((prOptions) => prOptions.prompt_on_closed),
     autoFixRound: pickAttentionRound(roundInfos),
   };
 }

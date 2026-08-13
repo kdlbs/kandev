@@ -18,6 +18,7 @@ func TestStoreTaskPRAgentAutomationSchema(t *testing.T) {
 			"review_prompt_override",
 			"merged_prompt_override",
 			"closed_prompt_override",
+			"pr_scope_migrated_at",
 		},
 		"github_task_ci_pr_state": {
 			"review_request_initialized",
@@ -26,6 +27,18 @@ func TestStoreTaskPRAgentAutomationSchema(t *testing.T) {
 			"last_lifecycle_event",
 			"last_lifecycle_prompt_at",
 			"last_lifecycle_session_id",
+		},
+		"github_task_pr_automation_options": {
+			"task_id",
+			"repository_id",
+			"pr_number",
+			"auto_fix_enabled",
+			"auto_merge_enabled",
+			"prompt_on_review_requested",
+			"prompt_on_merged",
+			"prompt_on_closed",
+			"created_at",
+			"updated_at",
 		},
 	} {
 		got, err := store.tableColumns(table)
@@ -37,6 +50,23 @@ func TestStoreTaskPRAgentAutomationSchema(t *testing.T) {
 				t.Errorf("%s.%s is missing", table, column)
 			}
 		}
+	}
+}
+
+// TestStoreTaskPRAutomationOptionsSchemaReplay confirms initSchema can run
+// twice against the same database without error — the fresh-DB CREATE TABLE
+// and the idempotent ADD COLUMN/fan-out migration must both tolerate replay.
+func TestStoreTaskPRAutomationOptionsSchemaReplay(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("replay schema migration: %v", err)
+	}
+	got, err := store.tableColumns("github_task_pr_automation_options")
+	if err != nil {
+		t.Fatalf("tableColumns: %v", err)
+	}
+	if _, ok := got["auto_fix_enabled"]; !ok {
+		t.Fatal("github_task_pr_automation_options.auto_fix_enabled is missing after replay")
 	}
 }
 
@@ -197,15 +227,23 @@ func TestStoreRebindTaskPRReviewerQuietlyResetsReviewBaselines(t *testing.T) {
 	}
 }
 
-func TestStoreTaskCIOptionsReenableTerminalPromptResetsOnlyMatchingCheckpoint(t *testing.T) {
+// TestStoreTaskPRAutomationOptionsReenableTerminalPromptResetsOnlyMatchingCheckpoint
+// covers AC11/AC12-adjacent PR-scoping: re-enabling the merged-prompt switch
+// on repo-merged/1 must reset only that PR's checkpoint, not repo-closed/2's
+// — both because the reset predicate is keyed by observed state ("merged"
+// vs "closed") and because it is now scoped to the specific PR.
+func TestStoreTaskPRAutomationOptionsReenableTerminalPromptResetsOnlyMatchingCheckpoint(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	enabled := true
 	disabled := false
-	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{
-		PromptOnMerged: &enabled, PromptOnClosed: &enabled,
-	}); err != nil {
-		t.Fatalf("enable terminal prompts: %v", err)
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-merged", 1,
+		TaskPRAutomationOptionsPatch{PromptOnMerged: &enabled}, false); err != nil {
+		t.Fatalf("enable merged prompt for repo-merged/1: %v", err)
+	}
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-closed", 2,
+		TaskPRAutomationOptionsPatch{PromptOnClosed: &enabled}, false); err != nil {
+		t.Fatalf("enable closed prompt for repo-closed/2: %v", err)
 	}
 	for _, prompt := range []TaskPRLifecyclePrompt{
 		{TaskID: "task-1", RepositoryID: "repo-merged", PRNumber: 1, Event: "merged", ObservedState: "merged"},
@@ -215,10 +253,12 @@ func TestStoreTaskCIOptionsReenableTerminalPromptResetsOnlyMatchingCheckpoint(t 
 			t.Fatalf("seed terminal checkpoint: %v", err)
 		}
 	}
-	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{PromptOnMerged: &disabled}); err != nil {
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-merged", 1,
+		TaskPRAutomationOptionsPatch{PromptOnMerged: &disabled}, false); err != nil {
 		t.Fatalf("disable merged prompt: %v", err)
 	}
-	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{PromptOnMerged: &enabled}); err != nil {
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-merged", 1,
+		TaskPRAutomationOptionsPatch{PromptOnMerged: &enabled}, false); err != nil {
 		t.Fatalf("re-enable merged prompt: %v", err)
 	}
 
@@ -234,10 +274,14 @@ func TestStoreTaskCIOptionsReenableTerminalPromptResetsOnlyMatchingCheckpoint(t 
 		t.Fatalf("get closed state: %v", err)
 	}
 	if closed.LastObservedPRState != "closed" || closed.LastLifecycleEvent != "closed" {
-		t.Fatalf("closed checkpoint changed while re-enabling merged: %+v", closed)
+		t.Fatalf("closed checkpoint changed while re-enabling merged on a different PR: %+v", closed)
 	}
 }
 
+// TestStoreTaskCIOptions_DefaultAndUpdate covers the genuinely task-level
+// fields still owned by github_task_ci_options: AutoFixPromptOverride. The
+// five automation switches moved to per-PR scope — see
+// TestStoreTaskPRAutomationOptions_DefaultAndUpdate.
 func TestStoreTaskCIOptions_DefaultAndUpdate(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -249,18 +293,52 @@ func TestStoreTaskCIOptions_DefaultAndUpdate(t *testing.T) {
 	if got.TaskID != "task-1" {
 		t.Fatalf("TaskID=%q, want task-1", got.TaskID)
 	}
-	if got.AutoFixEnabled || got.AutoMergeEnabled {
-		t.Fatalf("default options should be disabled, got %+v", got)
-	}
 	if got.AutoFixPromptOverride != nil {
 		t.Fatalf("default prompt override should be nil, got %q", *got.AutoFixPromptOverride)
 	}
 
 	override := "Fix only the new CI feedback."
 	updated, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{
-		AutoFixEnabled:        boolPtr(true),
 		AutoFixPromptOverride: &override,
 	})
+	if err != nil {
+		t.Fatalf("update options: %v", err)
+	}
+	if updated.AutoFixPromptOverride == nil || *updated.AutoFixPromptOverride != override {
+		t.Fatalf("override=%v, want %q", updated.AutoFixPromptOverride, override)
+	}
+
+	clearOverride := ""
+	updated, err = store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{
+		AutoFixPromptOverride: &clearOverride,
+	})
+	if err != nil {
+		t.Fatalf("second update options: %v", err)
+	}
+	if updated.AutoFixPromptOverride != nil {
+		t.Fatalf("override should be cleared, got %q", *updated.AutoFixPromptOverride)
+	}
+}
+
+// TestStoreTaskPRAutomationOptions_DefaultAndUpdate covers the per-PR
+// automation switches, keyed by (task_id, repository_id, pr_number).
+func TestStoreTaskPRAutomationOptions_DefaultAndUpdate(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	got, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", 1)
+	if err != nil {
+		t.Fatalf("get default options: %v", err)
+	}
+	if got.TaskID != "task-1" || got.RepositoryID != "repo-1" || got.PRNumber != 1 {
+		t.Fatalf("identity = %+v, want task-1/repo-1/1", got)
+	}
+	if got.AutoFixEnabled || got.AutoMergeEnabled {
+		t.Fatalf("default options should be disabled, got %+v", got)
+	}
+
+	updated, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-1", 1,
+		TaskPRAutomationOptionsPatch{AutoFixEnabled: boolPtr(true)}, false)
 	if err != nil {
 		t.Fatalf("update options: %v", err)
 	}
@@ -270,16 +348,10 @@ func TestStoreTaskCIOptions_DefaultAndUpdate(t *testing.T) {
 	if updated.AutoMergeEnabled {
 		t.Fatalf("AutoMergeEnabled=true, want unchanged default false")
 	}
-	if updated.AutoFixPromptOverride == nil || *updated.AutoFixPromptOverride != override {
-		t.Fatalf("override=%v, want %q", updated.AutoFixPromptOverride, override)
-	}
 
 	enableMerge := true
-	clearOverride := ""
-	updated, err = store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{
-		AutoMergeEnabled:      &enableMerge,
-		AutoFixPromptOverride: &clearOverride,
-	})
+	updated, err = store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-1", 1,
+		TaskPRAutomationOptionsPatch{AutoMergeEnabled: &enableMerge}, false)
 	if err != nil {
 		t.Fatalf("second update options: %v", err)
 	}
@@ -289,8 +361,23 @@ func TestStoreTaskCIOptions_DefaultAndUpdate(t *testing.T) {
 	if !updated.AutoMergeEnabled {
 		t.Fatalf("AutoMergeEnabled=false, want true")
 	}
-	if updated.AutoFixPromptOverride != nil {
-		t.Fatalf("override should be cleared, got %q", *updated.AutoFixPromptOverride)
+
+	// A different PR on the same task starts independently disabled (AC1/AC2).
+	other, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", 2)
+	if err != nil {
+		t.Fatalf("get other PR options: %v", err)
+	}
+	if other.AutoFixEnabled || other.AutoMergeEnabled {
+		t.Fatalf("other PR should be independently disabled, got %+v", other)
+	}
+
+	// Same PR number in a different repository is independent (AC4).
+	otherRepo, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-2", 1)
+	if err != nil {
+		t.Fatalf("get other repo options: %v", err)
+	}
+	if otherRepo.AutoFixEnabled || otherRepo.AutoMergeEnabled {
+		t.Fatalf("same PR number in a different repo should be independent, got %+v", otherRepo)
 	}
 }
 
@@ -408,11 +495,13 @@ func TestStoreTaskCIPRState_MarkExhaustedAndResetOnReenable(t *testing.T) {
 	}
 
 	disabled := false
-	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{AutoFixEnabled: &disabled}); err != nil {
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-1", 42,
+		TaskPRAutomationOptionsPatch{AutoFixEnabled: &disabled}, false); err != nil {
 		t.Fatalf("disable auto-fix: %v", err)
 	}
 	enabled := true
-	if _, err := store.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{AutoFixEnabled: &enabled}); err != nil {
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-1", 42,
+		TaskPRAutomationOptionsPatch{AutoFixEnabled: &enabled}, false); err != nil {
 		t.Fatalf("re-enable auto-fix: %v", err)
 	}
 	state, err = store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
@@ -459,6 +548,206 @@ func TestStoreTaskCIPRState_RefreshCheckpointClearsPromptDispatchMetadata(t *tes
 	}
 	if state.LastFixEnqueuedAt != nil {
 		t.Fatalf("LastFixEnqueuedAt=%v, want nil", state.LastFixEnqueuedAt)
+	}
+}
+
+// seedLegacyTaskCIOptions inserts a pre-migration github_task_ci_options row
+// directly, bypassing UpdateTaskCIOptions (which no longer writes the five
+// legacy boolean columns), to simulate a database from before per-PR scoping.
+func seedLegacyTaskCIOptions(t *testing.T, store *Store, taskID string, autoFix, autoMerge bool) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := store.db.Exec(`
+		INSERT INTO github_task_ci_options (task_id, auto_fix_enabled, auto_merge_enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)`,
+		taskID, autoFix, autoMerge, now, now); err != nil {
+		t.Fatalf("seed legacy task CI options: %v", err)
+	}
+}
+
+// TestStoreMigrateTaskCIOptionsToPRScope_FansOutToLinkedPRs covers AC14: a
+// pre-upgrade task row with two linked PRs yields, after one boot, two
+// per-PR rows each matching the legacy booleans.
+func TestStoreMigrateTaskCIOptionsToPRScope_FansOutToLinkedPRs(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedLegacyTaskCIOptions(t, store, "task-1", true, false)
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed PR 1: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 2, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed PR 2: %v", err)
+	}
+
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("replay schema migration: %v", err)
+	}
+
+	for _, prNumber := range []int{1, 2} {
+		opts, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", prNumber)
+		if err != nil {
+			t.Fatalf("get PR %d options: %v", prNumber, err)
+		}
+		if !opts.AutoFixEnabled || opts.AutoMergeEnabled {
+			t.Fatalf("PR %d options = %+v, want auto_fix_enabled=true auto_merge_enabled=false", prNumber, opts)
+		}
+	}
+	migrated, err := store.GetTaskCIOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get task options: %v", err)
+	}
+	if migrated.PRScopeMigratedAt == nil {
+		t.Fatal("pr_scope_migrated_at was not stamped")
+	}
+}
+
+func TestStoreMigrateTaskCIOptionsToPRScope_SkipsDetachedPRs(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedLegacyTaskCIOptions(t, store, "task-1", true, true)
+	active := &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,
+	}
+	detached := &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 2, CreatedAt: now.Add(time.Second),
+	}
+	for _, pr := range []*TaskPR{active, detached} {
+		if err := store.CreateTaskPR(ctx, pr); err != nil {
+			t.Fatalf("seed PR #%d: %v", pr.PRNumber, err)
+		}
+	}
+	if _, transitioned, err := store.DetachTaskPR(ctx, detached.ID); err != nil || !transitioned {
+		t.Fatalf("detach PR #%d: transitioned=%v err=%v", detached.PRNumber, transitioned, err)
+	}
+
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("replay schema migration: %v", err)
+	}
+	activeOptions, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", active.PRNumber)
+	if err != nil {
+		t.Fatalf("get active PR options: %v", err)
+	}
+	if !activeOptions.AutoFixEnabled || !activeOptions.AutoMergeEnabled {
+		t.Fatalf("active PR options = %+v, want legacy switches enabled", activeOptions)
+	}
+	detachedOptions, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", detached.PRNumber)
+	if err != nil {
+		t.Fatalf("get detached PR options: %v", err)
+	}
+	if detachedOptions.AutoFixEnabled || detachedOptions.AutoMergeEnabled {
+		t.Fatalf("detached PR inherited legacy switches: %+v", detachedOptions)
+	}
+}
+
+// TestStoreMigrateTaskCIOptionsToPRScope_Idempotent covers AC15: replaying
+// the migration on an already-migrated database changes no per-PR row.
+func TestStoreMigrateTaskCIOptionsToPRScope_Idempotent(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedLegacyTaskCIOptions(t, store, "task-1", true, false)
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed PR: %v", err)
+	}
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("first replay: %v", err)
+	}
+	before, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", 1)
+	if err != nil {
+		t.Fatalf("get options after first replay: %v", err)
+	}
+
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("second replay: %v", err)
+	}
+	after, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", 1)
+	if err != nil {
+		t.Fatalf("get options after second replay: %v", err)
+	}
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Fatalf("updated_at changed on replay: before=%v after=%v", before.UpdatedAt, after.UpdatedAt)
+	}
+}
+
+// TestStoreMigrateTaskCIOptionsToPRScope_DoesNotReenableUserDisabled covers
+// AC16: once migrated, a user's deliberate per-PR disable must survive a
+// later boot even though the stale legacy row still says "enabled".
+func TestStoreMigrateTaskCIOptionsToPRScope_DoesNotReenableUserDisabled(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedLegacyTaskCIOptions(t, store, "task-1", true, false)
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed PR: %v", err)
+	}
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("first boot migration: %v", err)
+	}
+
+	disabled := false
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, "task-1", "repo-1", 1,
+		TaskPRAutomationOptionsPatch{AutoFixEnabled: &disabled}, false); err != nil {
+		t.Fatalf("user disables auto-fix: %v", err)
+	}
+
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("second boot: %v", err)
+	}
+
+	opts, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", 1)
+	if err != nil {
+		t.Fatalf("get options: %v", err)
+	}
+	if opts.AutoFixEnabled {
+		t.Fatal("auto-fix was re-enabled by a replayed migration after the user turned it off")
+	}
+}
+
+// TestStoreMigrateTaskCIOptionsToPRScope_NewlyLinkedPRStartsAllOff covers
+// AC17: a PR linked to the task after migration has already run starts with
+// all five switches off rather than inheriting the stale legacy value.
+func TestStoreMigrateTaskCIOptionsToPRScope_NewlyLinkedPRStartsAllOff(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedLegacyTaskCIOptions(t, store, "task-1", true, true)
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed PR 1: %v", err)
+	}
+	if err := store.initSchema(false); err != nil {
+		t.Fatalf("boot migration: %v", err)
+	}
+
+	// PR 2 links to the task only after the fan-out migration already ran.
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 2, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed PR 2: %v", err)
+	}
+
+	opts, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", 2)
+	if err != nil {
+		t.Fatalf("get options: %v", err)
+	}
+	if opts.AutoFixEnabled || opts.AutoMergeEnabled {
+		t.Fatalf("newly linked PR should start all-off, got %+v", opts)
 	}
 }
 

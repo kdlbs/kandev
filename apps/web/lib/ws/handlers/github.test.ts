@@ -37,6 +37,7 @@ describe("registerGitHubHandlers CI options", () => {
       using_default_prompt: true,
       updated_at: updatedAt,
       pr_states: prStates,
+      pr_options: [],
     });
 
     handler({ payload: options(NEWER_UPDATED_AT, true) } as Parameters<typeof handler>[0]);
@@ -79,6 +80,7 @@ describe("registerGitHubHandlers CI options", () => {
       using_default_prompt: true,
       updated_at: INITIAL_UPDATED_AT,
       pr_states: [],
+      pr_options: [],
     };
     const updated: TaskCIAutomationOptions = {
       ...initial,

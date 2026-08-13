@@ -244,6 +244,8 @@ Open **PR events** for three notification controls:
 
 Lifecycle messages only report the observed event and canonical PR URL; the task workflow and agent context decide what to do next. The repair prompt comes from the built-in `ci-auto-fix` saved prompt and can be overridden for the task. These controls currently operate on GitHub-linked PRs, require the GitHub integration and repository permissions, and do not bypass provider policy. Azure PR creation returns a URL but does not supply the same linked checks, review, or automation panel. See [Integrations](integrations.md).
 
+When a task has more than one linked PR, each PR's tab in the automation popover controls that PR only. Enabling auto-fix or a review notification for one linked PR does not turn it on for the task's other linked PRs. The saved auto-fix prompt override is the one exception: it applies to every linked PR.
+
 </details>
 
 ### GitLab MR automation

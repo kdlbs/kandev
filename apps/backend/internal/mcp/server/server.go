@@ -14,8 +14,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
+	"github.com/kandev/kandev/internal/mcp/toolschema"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -89,26 +91,30 @@ func normalizeMode(mode string) string {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
-	backend            BackendClient
-	sessionID          string
-	taskID             string
-	disableAskQuestion bool
-	mode               string // "task" (default), "task-title-pending", "config", or "office"
-	mcpProviders       []string
-	profile            mcpprofile.Context
-	mcpServer          *server.MCPServer
-	sseServer          *server.SSEServer
-	httpServer         *server.StreamableHTTPServer
-	logger             *logger.Logger
-	mcpLogger          *zap.Logger // optional file logger for MCP debug traces
-	mu                 sync.RWMutex
-	running            bool
-	attachmentMu       sync.RWMutex
-	attachmentAttempt  streams.MCPAttachmentAttempt
-	attachmentAttempts map[string]streams.MCPAttachmentAttempt
-	attachmentReporter func(streams.MCPAttachmentEvidence)
-	validatorMu        sync.RWMutex
-	toolValidators     map[string]toolArgumentValidator
+	backend             BackendClient
+	sessionID           string
+	taskID              string
+	disableAskQuestion  bool
+	mode                string // "task" (default), "task-title-pending", "config", or "office"
+	mcpProviders        []string
+	profile             mcpprofile.Context
+	mcpServer           *server.MCPServer
+	sseServer           *server.SSEServer
+	httpServer          *server.StreamableHTTPServer
+	logger              *logger.Logger
+	mcpLogger           *zap.Logger // optional file logger for MCP debug traces
+	mu                  sync.RWMutex
+	running             bool
+	attachmentMu        sync.RWMutex
+	attachmentAttempt   streams.MCPAttachmentAttempt
+	attachmentAttempts  map[string]streams.MCPAttachmentAttempt
+	attachmentReporter  func(streams.MCPAttachmentEvidence)
+	validatorMu         sync.RWMutex
+	toolValidators      map[string]toolArgumentValidator
+	pluginToolsUpdateMu sync.Mutex
+	pluginToolsMu       sync.Mutex
+	pluginTools         plugintools.Snapshot
+	pluginToolsReady    bool
 }
 
 // New creates a new MCP server for agentctl.
@@ -228,6 +234,9 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolsListObserved, len(result.Tools), "")
+	})
+	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
+		s.syncPluginTools(ctx)
 	})
 	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ *mcp.CallToolResult) {
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
@@ -405,18 +414,26 @@ func (s *Server) Close(ctx context.Context) error {
 
 // wrapHandler wraps a tool handler with debug logging for tracing MCP calls.
 func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return s.wrapHandlerWithArgumentLogging(toolName, handler, true)
+}
+
+func (s *Server) wrapSensitiveHandler(toolName string, handler server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return s.wrapHandlerWithArgumentLogging(toolName, handler, false)
+}
+
+func (s *Server) wrapHandlerWithArgumentLogging(toolName string, handler server.ToolHandlerFunc, logArguments bool) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		start := time.Now()
-		args := req.GetArguments()
 
-		s.logger.Debug("MCP tool call",
-			zap.String("tool", toolName),
-			zap.Any("args", args))
+		fields := []zap.Field{zap.String("tool", toolName)}
+		if logArguments {
+			fields = append(fields, zap.Any("args", req.GetArguments()))
+		}
+		s.logger.Debug("MCP tool call", fields...)
 		if s.mcpLogger != nil {
-			s.mcpLogger.Debug("MCP tool call",
-				zap.String("tool", toolName),
-				zap.String("session_id", s.sessionID),
-				zap.Any("args", args))
+			mcpFields := append([]zap.Field(nil), fields...)
+			mcpFields = append(mcpFields, zap.String("session_id", s.sessionID))
+			s.mcpLogger.Debug("MCP tool call", mcpFields...)
 		}
 
 		validatedReq, validationErr := s.validateToolArguments(toolName, req)
@@ -443,16 +460,18 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 					zap.Error(err))
 			}
 		case result != nil && result.IsError:
-			s.logger.Debug("MCP tool returned error",
+			resultFields := []zap.Field{
 				zap.String("tool", toolName),
 				zap.Duration("duration", duration),
-				zap.Any("result", result.Content))
+			}
+			if logArguments {
+				resultFields = append(resultFields, zap.Any("result", result.Content))
+			}
+			s.logger.Debug("MCP tool returned error", resultFields...)
 			if s.mcpLogger != nil {
-				s.mcpLogger.Debug("MCP tool returned error",
-					zap.String("tool", toolName),
-					zap.String("session_id", s.sessionID),
-					zap.Duration("duration", duration),
-					zap.Any("result", result.Content))
+				mcpResultFields := append([]zap.Field(nil), resultFields...)
+				mcpResultFields = append(mcpResultFields, zap.String("session_id", s.sessionID))
+				s.mcpLogger.Debug("MCP tool returned error", mcpResultFields...)
 			}
 		default:
 			s.logger.Debug("MCP tool success",
@@ -569,6 +588,173 @@ func (s *Server) rebuildTools() {
 	s.mcpServer.SetTools(s.assembleTools()...)
 }
 
+// SetPluginTools validates and atomically replaces sideloaded tools. SetTools
+// emits one tools/list_changed notification to initialized MCP clients.
+func (s *Server) SetPluginTools(snapshot plugintools.Snapshot) error {
+	s.pluginToolsUpdateMu.Lock()
+	defer s.pluginToolsUpdateMu.Unlock()
+	if err := validatePluginToolSnapshot(snapshot); err != nil {
+		return err
+	}
+	normalized := plugintools.Normalize(snapshot)
+	s.pluginToolsMu.Lock()
+	if s.pluginToolsReady && normalized.Generation == s.pluginTools.Generation && normalized.Revision <= s.pluginTools.Revision {
+		s.pluginToolsMu.Unlock()
+		return nil
+	}
+	if s.pluginToolsReady && equivalentPluginToolCatalog(s.pluginTools, normalized) {
+		s.pluginTools = normalized
+		s.pluginToolsMu.Unlock()
+		return nil
+	}
+	s.pluginTools = normalized
+	s.pluginToolsReady = true
+	s.pluginToolsMu.Unlock()
+	s.mu.Lock()
+	s.rebuildTools()
+	s.mu.Unlock()
+	return nil
+}
+
+func equivalentPluginToolCatalog(left, right plugintools.Snapshot) bool {
+	left.Generation, right.Generation = "", ""
+	left.Revision, right.Revision = 0, 0
+	return plugintools.Equal(left, right)
+}
+
+func validatePluginToolSnapshot(snapshot plugintools.Snapshot) error {
+	if snapshot.Generation == "" {
+		return fmt.Errorf("plugin tool snapshot generation is required")
+	}
+	seen := make(map[string]struct{}, len(snapshot.Tools))
+	for i, definition := range snapshot.Tools {
+		name := fmt.Sprintf("plugin tool %d", i)
+		if definition.PluginID == "" || definition.LocalName == "" || definition.ExposedName == "" || definition.Description == "" {
+			return fmt.Errorf("%s has incomplete identity or description", name)
+		}
+		if expected := plugintools.ExposedName(definition.PluginID, definition.LocalName); definition.ExposedName != expected {
+			return fmt.Errorf("%s exposed name %q does not match %q", name, definition.ExposedName, expected)
+		}
+		if _, ok := seen[definition.ExposedName]; ok {
+			return fmt.Errorf("duplicate plugin tool exposed name %q", definition.ExposedName)
+		}
+		seen[definition.ExposedName] = struct{}{}
+		if err := validatePluginToolSurfaces(name, definition.Surfaces); err != nil {
+			return err
+		}
+		if err := validatePluginToolSchema(definition.ExposedName+"/input", definition.InputSchema); err != nil {
+			return fmt.Errorf("%s input schema: %w", name, err)
+		}
+		if len(definition.OutputSchema) > 0 {
+			if err := validatePluginToolSchema(definition.ExposedName+"/output", definition.OutputSchema); err != nil {
+				return fmt.Errorf("%s output schema: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validatePluginToolSurfaces(name string, surfaces []string) error {
+	if len(surfaces) == 0 {
+		return fmt.Errorf("%s has no surfaces", name)
+	}
+	seen := make(map[string]struct{}, len(surfaces))
+	for _, surface := range surfaces {
+		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice {
+			return fmt.Errorf("%s has unsupported surface %q", name, surface)
+		}
+		if _, ok := seen[surface]; ok {
+			return fmt.Errorf("%s duplicates surface %q", name, surface)
+		}
+		seen[surface] = struct{}{}
+	}
+	return nil
+}
+
+func validatePluginToolSchema(name string, raw json.RawMessage) error {
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return fmt.Errorf("decode schema: %w", err)
+	}
+	if _, err := toolschema.Compile(name, document); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Server) syncPluginTools(ctx context.Context) {
+	if s.backend == nil {
+		return
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	s.mu.RLock()
+	surface := string(s.profile.Surface)
+	s.mu.RUnlock()
+	var snapshot plugintools.Snapshot
+	if err := s.backend.RequestPayload(requestCtx, ws.ActionMCPListPluginTools, map[string]string{"surface": surface}, &snapshot); err != nil {
+		return
+	}
+	if err := s.SetPluginTools(snapshot); err != nil {
+		s.logger.Warn("ignoring invalid plugin tool catalog", zap.Error(err))
+	}
+}
+
+func (s *Server) registerPluginTools() {
+	s.pluginToolsMu.Lock()
+	ready := s.pluginToolsReady
+	snapshot := plugintools.Normalize(s.pluginTools)
+	s.pluginToolsMu.Unlock()
+	if !ready {
+		return
+	}
+	for _, definition := range snapshot.Tools {
+		if !pluginToolSupportsSurface(definition, string(s.profile.Surface)) {
+			continue
+		}
+		tool := mcp.NewToolWithRawSchema(definition.ExposedName, definition.Description, definition.InputSchema)
+		tool.RawOutputSchema = append(json.RawMessage(nil), definition.OutputSchema...)
+		tool.Annotations = mcp.ToolAnnotation{
+			ReadOnlyHint: &definition.ReadOnlyHint, DestructiveHint: &definition.DestructiveHint,
+			IdempotentHint: &definition.IdempotentHint, OpenWorldHint: &definition.OpenWorldHint,
+		}
+		d := definition
+		s.mcpServer.AddTool(tool, s.wrapSensitiveHandler(d.ExposedName, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			s.mu.RLock()
+			surface := string(s.profile.Surface)
+			s.mu.RUnlock()
+			payload := map[string]any{
+				"plugin_id": d.PluginID, "local_name": d.LocalName, "arguments": req.GetArguments(),
+				"invocation_id": fmt.Sprintf("mcp-%d", time.Now().UnixNano()), "surface": surface,
+			}
+			var result struct {
+				Text              string         `json:"text"`
+				StructuredContent map[string]any `json:"structured_content,omitempty"`
+				IsError           bool           `json:"is_error"`
+			}
+			if err := s.backend.RequestPayload(ctx, ws.ActionMCPInvokePluginTool, payload, &result); err != nil {
+				return nil, err
+			}
+			if result.IsError {
+				return mcp.NewToolResultError(result.Text), nil
+			}
+			if result.StructuredContent != nil {
+				return mcp.NewToolResultStructured(result.StructuredContent, result.Text), nil
+			}
+			return mcp.NewToolResultText(result.Text), nil
+		}))
+	}
+}
+
+func pluginToolSupportsSurface(definition plugintools.Definition, surface string) bool {
+	for _, allowed := range definition.Surfaces {
+		if allowed == surface {
+			return true
+		}
+	}
+	return false
+}
+
 func sameProviderSet(left, right []string) bool {
 	if len(left) != len(right) {
 		return false
@@ -667,6 +853,7 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
+	s.registerPluginTools()
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
 		zap.Int("count", len(s.mcpServer.ListTools())),
@@ -838,17 +1025,29 @@ If the child has no live execution, the call succeeds idempotently with status="
 func (s *Server) registerPRAutomationTools() {
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("get_task_pr_automation_kandev",
-			"Get the current task's GitHub PR automation settings, including lifecycle notification switches.",
+			"Get the current task's GitHub PR automation settings, including lifecycle notification switches. "+
+				"The five automation switches are scoped per linked PR; pr_options carries one entry per PR "+
+				"(repository_id, pr_number, and the five booleans). The top-level booleans are an aggregate "+
+				"that reports true only when every linked PR has that switch on and at least one PR is linked "+
+				"— use them to check whether a task-wide enable fully took, and use pr_options for anything "+
+				"PR-specific.",
 			json.RawMessage(`{"type":"object","properties":{}}`),
 		),
 		s.wrapHandler("get_task_pr_automation_kandev", s.getTaskPRAutomationHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_pr_automation_kandev",
-			mcp.WithDescription("Update this task's PR automation options (auto-fix, auto-merge, and lifecycle notifications)."),
+			mcp.WithDescription(
+				"Update this task's PR automation options (auto-fix, auto-merge, and lifecycle notifications). "+
+					"The five switches are scoped per linked PR: pass both repository_id and pr_number to target "+
+					"one linked PR, or omit both to apply the change to every PR currently linked to the task "+
+					"(unchanged default behavior). auto_fix_prompt_override applies task-wide regardless of PR identity.",
+			),
+			mcp.WithString("repository_id", mcp.Description("Target one linked PR's repository_id; must be paired with pr_number. Omit both to apply to every linked PR.")),
+			mcp.WithNumber("pr_number", mcp.Description("Target one linked PR's number; must be paired with repository_id. Omit both to apply to every linked PR.")),
 			mcp.WithBoolean("auto_fix_enabled", mcp.Description("Enable or disable auto-fix when CI checks fail")),
 			mcp.WithBoolean("auto_merge_enabled", mcp.Description("Enable or disable auto-merge when PR passes all checks")),
-			mcp.WithString("auto_fix_prompt_override", mcp.Description("Custom prompt for auto-fix (empty string clears the override)")),
+			mcp.WithString("auto_fix_prompt_override", mcp.Description("Custom prompt for auto-fix (empty string clears the override). Task-wide; not affected by repository_id/pr_number.")),
 			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
 			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked PR becomes merged")),
 			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked PR becomes closed without merge")),
