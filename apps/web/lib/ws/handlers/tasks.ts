@@ -6,6 +6,7 @@ import { cleanupTaskStorage } from "@/lib/local-storage";
 import { removeRecentTask } from "@/lib/recent-tasks";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask } from "@/lib/kanban/map-task";
+import { isNewerStatusSummary } from "@/lib/task-status-summary";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
 import { softNavigate } from "@/lib/routing/client-router";
@@ -416,10 +417,8 @@ function updateTaskStatusSummaryInBothKanbans(
   message: TaskStatusSummaryUpdatedMessage,
 ): AppState {
   const { task_id: taskId, status_summary: nextSummary } = message.payload;
-  const shouldReplace = (task: KanbanTask): boolean => {
-    const current = task.statusSummary;
-    return !current || nextSummary.revision > current.revision;
-  };
+  const shouldReplace = (task: KanbanTask): boolean =>
+    isNewerStatusSummary(nextSummary, task.statusSummary);
   const updateTask = (task: KanbanTask): KanbanTask =>
     shouldReplace(task) ? { ...task, statusSummary: nextSummary } : task;
 

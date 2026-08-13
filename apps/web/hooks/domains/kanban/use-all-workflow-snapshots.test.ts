@@ -296,3 +296,109 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
     expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].autopilot).toBe(false);
   });
 });
+
+describe("useAllWorkflowSnapshots — status summary revision race", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
+
+  /**
+   * A snapshot request issued before a `task.status_summary.updated` delta can
+   * land after it. Writing the response's summary unconditionally regresses the
+   * cached row to the older revision, and a settled task emits no further
+   * deltas — so the row stays wrong until the next full hydrate. This surfaced
+   * as a finished task stuck behind a "preparing" spinner in the sidebar.
+   */
+  function renderWithSummaries(
+    cachedRevision: number,
+    cachedState: string,
+    responseRevision: number,
+    responseState: string,
+  ) {
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": {
+        workflowId: "wf-A",
+        workflowName: "A",
+        steps: [],
+        tasks: [
+          {
+            id: "task-1",
+            workflowStepId: "step-1",
+            statusSummary: {
+              revision: cachedRevision,
+              primary_session: { state: cachedState },
+            },
+          },
+        ],
+      },
+    };
+    // Not `...Once`: the hook can fetch more than once (mount + foreground
+    // refresh), and falling back to the empty default would make the assertion
+    // read a write that carries no tasks at all.
+    mockFetchWorkflowSnapshot.mockResolvedValue({
+      steps: [{ id: "step-1", name: "In Progress", position: 0 }],
+      tasks: [
+        {
+          id: "task-1",
+          workflow_step_id: "step-1",
+          title: "Task",
+          status_summary: {
+            revision: responseRevision,
+            primary_session: { state: responseState },
+          },
+        },
+      ],
+    });
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    // Boot-hydrated snapshots skip the mount fetch; focus forces the refetch.
+    act(() => window.dispatchEvent(new Event("focus")));
+  }
+
+  it("keeps the newer cached summary when a slow response carries an older revision", async () => {
+    renderWithSummaries(4, "WAITING_FOR_INPUT", 1, "STARTING");
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    const written = mockSetWorkflowSnapshot.mock.calls.at(-1)![1].tasks[0];
+    expect(written.statusSummary.revision).toBe(4);
+    expect(written.statusSummary.primary_session.state).toBe("WAITING_FOR_INPUT");
+  });
+
+  it("adopts the response summary when it is newer than the cached one", async () => {
+    renderWithSummaries(1, "STARTING", 5, "WAITING_FOR_INPUT");
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    const written = mockSetWorkflowSnapshot.mock.calls.at(-1)![1].tasks[0];
+    expect(written.statusSummary.revision).toBe(5);
+    expect(written.statusSummary.primary_session.state).toBe("WAITING_FOR_INPUT");
+  });
+
+  it("keeps the cached summary when the response omits it entirely", async () => {
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": {
+        workflowId: "wf-A",
+        workflowName: "A",
+        steps: [],
+        tasks: [
+          {
+            id: "task-1",
+            workflowStepId: "step-1",
+            statusSummary: { revision: 4, primary_session: { state: "WAITING_FOR_INPUT" } },
+          },
+        ],
+      },
+    };
+    // Not `...Once`: the hook can fetch more than once (mount + foreground
+    // refresh), and falling back to the empty default would make the assertion
+    // read a write that carries no tasks at all.
+    mockFetchWorkflowSnapshot.mockResolvedValue({
+      steps: [{ id: "step-1", name: "In Progress", position: 0 }],
+      tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Task" }],
+    });
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    const written = mockSetWorkflowSnapshot.mock.calls.at(-1)![1].tasks[0];
+    expect(written.statusSummary.revision).toBe(4);
+  });
+});
