@@ -18,6 +18,9 @@ export type RetryAttachment = TimingAttachment & {
   artifactUrl?: string;
 };
 
+/** Playwright's per-test verdict, as reported by `TestCase.outcome()`. */
+export type TestOutcome = "expected" | "unexpected" | "flaky" | "skipped";
+
 export type RetryTestSummary = {
   key: string;
   project: string;
@@ -26,10 +29,24 @@ export type RetryTestSummary = {
   attempts: number;
   statuses: TimingStatus[];
   finalStatus: TimingStatus;
+  outcome: TestOutcome;
   finalDurationSeconds: number;
   errorCategory: "none" | "failure" | "timeout" | "interrupted";
   errors: TimingError[];
   attachments: RetryAttachment[];
+};
+
+export type FlakeCounts = {
+  /** Tests that failed at least once and still ended up expected. */
+  flaky: number;
+  /** Tests that never reached their expected status. */
+  unexpected: number;
+  /** Tests that produced a verdict at all, i.e. the flake-rate denominator. */
+  executed: number;
+  /** `flaky / executed * 1000`, rounded to two decimals. */
+  ratePerThousand: number;
+  /** Keys of the flaky tests, sorted, for per-test attribution. */
+  flakyTests: string[];
 };
 
 export type RetrySummary = {
@@ -41,6 +58,7 @@ export type RetrySummary = {
     timedOut: number;
     skipped: number;
   };
+  flake: FlakeCounts;
   planning: {
     mode: "main" | "count-fallback" | "mixed" | "unknown";
     unknownUnits: number;
@@ -115,6 +133,51 @@ function errorCategory(
   return "none";
 }
 
+/**
+ * Mirror of Playwright's `computeTestCaseOutcome` (packages/playwright/src/isomorphic/teleReceiver.ts).
+ * Keeping the algorithm identical is what lets the CI cross-check assert that our
+ * flake count equals the merged report's `stats.flaky` for the same run.
+ *
+ * Playwright also tallies interrupted and did-not-run (skipped-but-expected-to-run)
+ * results, but never reads those tallies when picking the outcome, so they are
+ * skipped here rather than counted.
+ */
+export function computeOutcome(
+  statuses: readonly TimingStatus[],
+  expectedStatus: TimingStatus = "passed",
+): TestOutcome {
+  let skipped = 0;
+  let expected = 0;
+  let unexpected = 0;
+  for (const status of statuses) {
+    if (status === "interrupted") continue;
+    if (status === "skipped") {
+      if (expectedStatus === "skipped") skipped += 1;
+      continue;
+    }
+    if (status === expectedStatus) expected += 1;
+    else unexpected += 1;
+  }
+  if (expected === 0 && unexpected === 0) return "skipped";
+  if (unexpected === 0) return "expected";
+  if (expected === 0 && skipped === 0) return "unexpected";
+  return "flaky";
+}
+
+function flakeCounts(tests: RetryTestSummary[]): FlakeCounts {
+  const flakyTests = tests.filter((test) => test.outcome === "flaky").map((test) => test.key);
+  const unexpected = tests.filter((test) => test.outcome === "unexpected").length;
+  const executed = tests.filter((test) => test.outcome !== "skipped").length;
+  const rate = executed === 0 ? 0 : (flakyTests.length / executed) * 1000;
+  return {
+    flaky: flakyTests.length,
+    unexpected,
+    executed,
+    ratePerThousand: Math.round(rate * 100) / 100,
+    flakyTests,
+  };
+}
+
 export function summarizeObservations(
   observations: TimingObservation[],
   generatedAt = new Date().toISOString(),
@@ -132,14 +195,16 @@ export function summarizeObservations(
       const ordered = [...attempts].sort((left, right) => left.retry - right.retry);
       const finalAttempt = ordered.at(-1)!;
       const errors = ordered.flatMap((attempt) => attempt.errors);
+      const statuses = ordered.map((attempt) => attempt.status);
       return {
         key: finalAttempt.key,
         project: finalAttempt.project,
         file: finalAttempt.file,
         title: finalAttempt.title,
         attempts: ordered.length,
-        statuses: ordered.map((attempt) => attempt.status),
+        statuses,
         finalStatus: finalAttempt.status,
+        outcome: computeOutcome(statuses, finalAttempt.expectedStatus ?? "passed"),
         finalDurationSeconds: finalAttempt.durationSeconds,
         errorCategory: errorCategory(finalAttempt.status, errors),
         errors,
@@ -197,7 +262,7 @@ export function summarizeObservations(
     };
   });
 
-  return { generatedAt, counts, planning, shards, tests };
+  return { generatedAt, counts, flake: flakeCounts(tests), planning, shards, tests };
 }
 
 function readPlanSummaries(manifestDir: string): PlanSummaryInput[] {
@@ -230,7 +295,7 @@ function readPlanSummaries(manifestDir: string): PlanSummaryInput[] {
   });
 }
 
-function parseArguments(argv: string[]): Record<string, string> {
+export function parseArguments(argv: string[]): Record<string, string> {
   const args: Record<string, string> = {};
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
@@ -316,7 +381,8 @@ function runCli(): void {
   fs.mkdirSync(path.dirname(path.resolve(args.output)), { recursive: true });
   fs.writeFileSync(args.output, `${JSON.stringify(summary, null, 2)}\n`);
   console.log(
-    `retry summary: ${summary.counts.passedAfterRetry} passed after retry, ${summary.counts.failed} failed`,
+    `retry summary: ${summary.flake.flaky} flaky of ${summary.flake.executed} executed ` +
+      `(${summary.flake.ratePerThousand} per 1000), ${summary.flake.unexpected} unexpected`,
   );
 }
 

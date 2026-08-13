@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { summarizeObservations } from "./retry-summary";
+import { computeOutcome, summarizeObservations } from "./retry-summary";
 import type { ShardMetadata } from "./e2e-timings";
 import type { TimingObservation } from "./e2e-timings";
 
@@ -68,6 +68,13 @@ describe("retry summary", () => {
       timedOut: 1,
       skipped: 0,
     });
+    expect(summary.flake).toEqual({
+      flaky: 1,
+      unexpected: 2,
+      executed: 4,
+      ratePerThousand: 250,
+      flakyTests: ["chromium::tests/flaky.spec.ts::flaky"],
+    });
     expect(summary.tests).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ key: "chromium::tests/flaky.spec.ts::flaky", attempts: 2 }),
@@ -90,6 +97,58 @@ describe("retry summary", () => {
         }),
       ]),
     );
+  });
+
+  it("matches Playwright's outcome algorithm, including the cases a retry count gets wrong", () => {
+    // A retried-then-passed test is the flake we want to count.
+    expect(computeOutcome(["failed", "passed"])).toBe("flaky");
+    expect(computeOutcome(["timedOut", "timedOut", "passed"])).toBe("flaky");
+    // Playwright never counts an interrupted attempt as unexpected, so an
+    // interrupted-then-passed test is expected, not flaky.
+    expect(computeOutcome(["interrupted", "passed"])).toBe("expected");
+    expect(computeOutcome(["passed"])).toBe("expected");
+    expect(computeOutcome(["failed", "failed", "failed"])).toBe("unexpected");
+    // A did-not-run attempt of a test expected to pass is neither expected nor
+    // unexpected, so failing and then skipping stays unexpected.
+    expect(computeOutcome(["failed", "skipped"])).toBe("unexpected");
+    expect(computeOutcome(["skipped"])).toBe("skipped");
+    expect(computeOutcome(["interrupted"])).toBe("skipped");
+    // `test.fail()` inverts the expectation: failing is expected, passing is not.
+    expect(computeOutcome(["failed"], "failed")).toBe("expected");
+    expect(computeOutcome(["passed"], "failed")).toBe("unexpected");
+    expect(computeOutcome(["passed", "failed"], "failed")).toBe("flaky");
+  });
+
+  it("reads the expected status recorded on each attempt", () => {
+    const summary = summarizeObservations(
+      [
+        observation({
+          key: "chromium::tests/expected-failure.spec.ts::fails on purpose",
+          status: "failed",
+          expectedStatus: "failed",
+        }),
+      ],
+      "2026-08-10T10:02:00.000Z",
+    );
+
+    expect(summary.tests[0]?.outcome).toBe("expected");
+    expect(summary.flake).toMatchObject({ flaky: 0, unexpected: 0, executed: 1 });
+  });
+
+  it("reports the flake rate per thousand executed tests, ignoring skipped ones", () => {
+    const observations = Array.from({ length: 8 }, (_, index) =>
+      observation({ key: `chromium::tests/bulk.spec.ts::case ${index}`, title: `case ${index}` }),
+    );
+    observations.push(
+      observation({ key: "chromium::tests/skipped.spec.ts::off", status: "skipped" }),
+      observation({ key: "chromium::tests/flaky.spec.ts::flaky", status: "failed" }),
+      observation({ key: "chromium::tests/flaky.spec.ts::flaky", retry: 1, status: "passed" }),
+    );
+
+    const summary = summarizeObservations(observations, "2026-08-10T10:02:00.000Z");
+
+    expect(summary.flake.executed).toBe(9);
+    expect(summary.flake.ratePerThousand).toBe(111.11);
   });
 
   it("compares planned and actual shard durations and keeps plan health counters", () => {

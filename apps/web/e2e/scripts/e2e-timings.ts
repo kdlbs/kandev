@@ -29,6 +29,12 @@ export type TimingObservation = {
   title: string;
   retry: number;
   status: TimingStatus;
+  /**
+   * Playwright's expected status for the test, as recorded on the blob's
+   * `onTestEnd` event. Absent in older blobs; consumers must default to
+   * `"passed"`, which is what Playwright itself uses for an unannotated test.
+   */
+  expectedStatus?: TimingStatus;
   durationSeconds: number;
   errors: TimingError[];
   attachments: TimingAttachment[];
@@ -259,10 +265,12 @@ function parseTestEndEvent(
   if (!descriptor) return undefined;
 
   const resultId = asString(result.id);
+  const expectedStatus = parseTimingStatus(test.expectedStatus);
   return {
     ...descriptor,
     retry: state.retries.get(resultId) ?? 0,
     status: parseTimingStatus(result.status),
+    expectedStatus: expectedStatus === "unknown" ? undefined : expectedStatus,
     durationSeconds: asNumber(result.duration) / 1000,
     errors: parseTimingErrors(result.errors),
     attachments: state.attachments.get(resultId) ?? [],
