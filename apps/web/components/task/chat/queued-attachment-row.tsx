@@ -59,13 +59,13 @@ export function AttachmentRow({ attachments, interactive }: AttachmentRowProps) 
           />
         );
       })}
-      {files.map((_, i) => (
+      {files.map((att, i) => (
         <span
           key={`file-${i}`}
           className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground"
         >
           <IconFile className="h-3 w-3" />
-          {t("task:attachment")}
+          {att.name || t("task:attachment")}
         </span>
       ))}
     </div>

@@ -117,6 +117,9 @@ func provideOrchestrator(
 		}
 		taskSvc.SetAttachmentService(attachmentSvc)
 	}
+	if attachmentSvc := taskSvc.AttachmentService(); attachmentSvc != nil {
+		attachmentSvc.SetTaskAuthorizer(taskSvc.AuthorizeTaskAccess)
+	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
 	if gitCredentialBroker != nil {

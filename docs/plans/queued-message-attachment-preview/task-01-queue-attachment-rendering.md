@@ -14,7 +14,7 @@ spec: "../../specs/tasks/prompt-attachments.md"
 
 1. A queued image descriptor with `attachment_id` and no inline `data` renders
    from `/api/v1/attachments/<id>/content` in both thumbnail and full-size
-   preview contexts.
+   preview contexts for callers authorized to read the owning task.
 2. Legacy inline image descriptors continue to render from their MIME-qualified
    data URL, and missing image sources do not produce a broken `<img>` URL.
 3. Existing queue thumbnail dimensions, dialog behavior, edit-mode read-only
@@ -33,6 +33,9 @@ cd apps/web && pnpm run typecheck
 - `apps/web/components/task/chat/queued-attachment-row.tsx`
 - `apps/web/components/task/chat/queued-ghost-message.tsx`
 - `apps/web/components/task/chat/queued-ghost-message.test.tsx`
+- `apps/backend/internal/task/service/attachment_service.go`
+- `apps/backend/internal/task/service/attachment_service_lifecycle_test.go`
+- `apps/backend/internal/backendapp/orchestrator.go`
 
 ## Dependencies
 
@@ -66,6 +69,9 @@ and plan status.
   components/task/chat/queued-ghost-message.test.tsx` from `apps` passed with
   44 tests.
 - Typecheck: `rtk pnpm run typecheck` from `apps/web` passed.
+- Backend authorization regression: `rtk go test -v ./internal/task/service -run
+  'TestAttachment(OpenClaimedAllowsAuthorizedTaskReader|OpenClaimedAuthorizesByBinding|OpenReturnsBytesAndScopes)' -count=1`
+  passed, 3 tests.
 - Formatting: `rtk git diff --check` passed.
 - Mobile verification: no new Playwright test was needed because the repair
   only changes attachment source resolution inside the existing row; the
