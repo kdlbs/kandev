@@ -258,6 +258,31 @@ func TestFlattenHeaders_StripsPATBearerCaseInsensitively(t *testing.T) {
 	}
 }
 
+// TestFlattenHeaders_StripsSessionCookieFromRepeatedHeaders proves that a client
+// cannot hide the Kandev session by splitting cookies over repeated fields.
+func TestFlattenHeaders_StripsSessionCookieFromRepeatedHeaders(t *testing.T) {
+	h := http.Header{}
+	h.Add("Cookie", "other=keep-me")
+	h.Add("Cookie", "kandev_session=secret-token")
+
+	out := flattenHeaders(h, "kandev_session")
+	if got := out["Cookie"]; got != "other=keep-me" {
+		t.Fatalf("Cookie = %q, want only the non-Kandev cookie", got)
+	}
+}
+
+// TestFlattenHeaders_StripsPATFromRepeatedAuthorizationHeaders proves that a
+// Kandev PAT cannot be hidden behind a provider bearer in another field.
+func TestFlattenHeaders_StripsPATFromRepeatedAuthorizationHeaders(t *testing.T) {
+	h := http.Header{}
+	h.Add("Authorization", "Bearer provider-issued-token")
+	h.Add("Authorization", "Bearer kandev_pat_abc123_secret")
+
+	if out := flattenHeaders(h, ""); out["Authorization"] != "" {
+		t.Fatalf("Authorization = %q, want omitted when any field carries a PAT", out["Authorization"])
+	}
+}
+
 // TestServiceSessionCookieName_ReflectsWiredBridge pins the seam the
 // flattenHeaders tests above cannot reach: they pass the cookie name in
 // directly, so they stay green no matter what Service.sessionCookieName()

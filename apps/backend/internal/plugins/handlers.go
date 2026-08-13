@@ -538,22 +538,46 @@ func readCappedWebhookBody(ctx *gin.Context, maxBytes int64) ([]byte, error) {
 func flattenHeaders(h http.Header, sessionCookieName string) map[string]string {
 	out := make(map[string]string, len(h))
 	for k, v := range h {
-		joined := strings.Join(v, ", ")
 		switch http.CanonicalHeaderKey(k) {
 		case "Cookie":
-			stripped, keep := stripSessionCookie(joined, sessionCookieName)
+			stripped, keep := stripSessionCookies(v, sessionCookieName)
 			if !keep {
 				continue
 			}
-			joined = stripped
+			out[k] = stripped
 		case "Authorization":
-			if isKandevPATCredential(joined) {
+			if containsKandevPATCredential(v) {
 				continue
 			}
+			out[k] = strings.Join(v, ", ")
+		default:
+			out[k] = strings.Join(v, ", ")
 		}
-		out[k] = joined
 	}
 	return out
+}
+
+func stripSessionCookies(headers []string, sessionCookieName string) (string, bool) {
+	kept := make([]string, 0, len(headers))
+	for _, header := range headers {
+		stripped, keep := stripSessionCookie(header, sessionCookieName)
+		if keep {
+			kept = append(kept, stripped)
+		}
+	}
+	if len(kept) == 0 {
+		return "", false
+	}
+	return strings.Join(kept, "; "), true
+}
+
+func containsKandevPATCredential(values []string) bool {
+	for _, value := range values {
+		if isKandevPATCredential(value) || strings.Contains(value, auth.PATPrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // isKandevPATCredential reports whether an Authorization header value carries
