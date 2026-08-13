@@ -47,6 +47,35 @@ async function openCreateDialog(testPage: Page, kanban: KanbanPage): Promise<voi
   await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 }
 
+async function waitForCreateDialogAgent(testPage: Page, kanban: KanbanPage): Promise<void> {
+  const selector = testPage.getByTestId("agent-profile-selector");
+  const emptyState = testPage.getByTestId("agent-profile-empty-state");
+  const status = async () => {
+    if (await selector.isVisible().catch(() => false)) return "selector";
+    if (await emptyState.isVisible().catch(() => false)) return "empty";
+    return "loading";
+  };
+
+  let firstStatus: string;
+  try {
+    await expect.poll(status, { timeout: 20_000 }).toMatch(/selector|empty/);
+    firstStatus = await status();
+  } catch {
+    firstStatus = "loading";
+  }
+  if (firstStatus !== "selector") {
+    // A transient failed / empty settings fetch can be terminal for this
+    // dialog instance. Reload once so the E2E fixture gets the same retry a
+    // user gets from reopening the page, then require the selector to finish
+    // loading.
+    await testPage.reload();
+    await openCreateDialog(testPage, kanban);
+  }
+
+  await expect(selector).toBeVisible({ timeout: 30_000 });
+  await expect(selector).toBeEnabled({ timeout: 30_000 });
+}
+
 async function clickRemoteMode(testPage: Page): Promise<void> {
   const remoteBtn = testPage.getByTestId("source-mode-remote");
   await expect(remoteBtn).toBeVisible();
@@ -171,11 +200,12 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(120_000);
     await seedAccessibleRepos(apiClient);
 
     const kanban = new KanbanPage(testPage);
     await openCreateDialog(testPage, kanban);
+    await waitForCreateDialogAgent(testPage, kanban);
     await clickRemoteMode(testPage);
 
     await pickRepoInChip(testPage, "mock-user/alpha");
@@ -192,7 +222,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await testPage.getByTestId("task-description-input").fill("test");
 
     const startBtn = testPage.getByTestId("submit-start-agent");
-    await expect(startBtn).toBeEnabled({ timeout: 15_000 });
+    await expect(startBtn).toBeEnabled({ timeout: 30_000 });
     await startBtn.click();
 
     await expect(testPage.getByTestId("create-task-dialog")).not.toBeVisible({

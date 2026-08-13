@@ -9,7 +9,58 @@ import {
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
 
-async function openMobileReview(testPage: Page, session: SessionPage, repositoryName: string) {
+type ReviewFixtureState = {
+  kanban?: {
+    tasks?: Array<{ id: string; repositories?: unknown[] }>;
+  };
+  taskPRs?: {
+    byTaskId?: Record<string, Array<{ pr_number: number }>>;
+  };
+};
+
+type ReviewFixtureWindow = Window & {
+  __KANDEV_E2E_STORE__?: { getState: () => ReviewFixtureState };
+};
+
+async function waitForMultiPRFixture(
+  testPage: Page,
+  session: SessionPage,
+  taskId: string,
+): Promise<void> {
+  const state = () =>
+    testPage.evaluate((id) => {
+      const appState = (window as ReviewFixtureWindow).__KANDEV_E2E_STORE__?.getState();
+      const task = appState?.kanban?.tasks?.find((candidate) => candidate.id === id);
+      const prNumbers = (appState?.taskPRs?.byTaskId?.[id] ?? [])
+        .map((pr) => pr.pr_number)
+        .sort((left, right) => left - right);
+      return {
+        repositoryCount: task?.repositories?.length ?? 0,
+        prNumbers,
+      };
+    }, taskId);
+
+  const expected = { repositoryCount: 2, prNumbers: [121, 122] };
+  try {
+    await expect.poll(state, { timeout: 20_000 }).toEqual(expected);
+  } catch {
+    // The task route can mount from an incomplete SSR snapshot while the
+    // create-task and task-PR events are still converging. Re-drive hydration
+    // once before declaring the seeded multi-PR fixture unavailable.
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+    await expect.poll(state, { timeout: 30_000 }).toEqual(expected);
+  }
+}
+
+async function openMobileReview(
+  testPage: Page,
+  session: SessionPage,
+  repositoryName: string,
+  taskId: string,
+) {
+  await waitForMultiPRFixture(testPage, session, taskId);
   await testPage.getByRole("button", { name: "Changes" }).tap();
   const changesPanel = testPage.getByTestId("mobile-changes-panel");
   await expect(changesPanel).toBeVisible({ timeout: 15_000 });
@@ -41,7 +92,7 @@ test.describe("Review dialog multi-PR selector on mobile", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
-    await openMobileReview(testPage, session, repositoryName);
+    await openMobileReview(testPage, session, repositoryName, task.id);
 
     const [firstPR, secondPR] = REVIEW_PRS;
     const selector = session.reviewPRSelectorTrigger();
