@@ -44,6 +44,28 @@ def run_tests_step(workflow: str) -> str:
     return remainder.partition(NEXT_STEP_MARKER)[0]
 
 
+def trigger_paths(workflow: str, trigger: str) -> str:
+    """Return the `paths:` list of `trigger`'s block under `on:`.
+
+    Scoped to the `paths:` key rather than the whole trigger block. GitHub
+    rejects `paths` and `paths-ignore` on the same event, so renaming the key
+    inverts the filter wholesale: the job would then run on everything *except*
+    these files, and a match against the block as a whole would not notice.
+    """
+    block = re.search(rf"(?m)^  {trigger}:\n(?:^ {{4}}.*\n|^\n)*", workflow)
+    if block is None:
+        raise AssertionError(f"lint-action-pinning.yml has no {trigger} trigger")
+
+    paths = re.search(r"(?m)^    paths:\n((?:^      - .*\n)+)", block.group(0))
+    if paths is None:
+        raise AssertionError(
+            f"lint-action-pinning.yml's {trigger} trigger has no `paths:` list. A "
+            "`paths-ignore:` key in its place inverts the filter, and the job stops "
+            "running for the very files listed under it."
+        )
+    return paths.group(1)
+
+
 class FrontendTestsWorkflowContractTest(unittest.TestCase):
     def test_test_step_reproduces_the_production_environment(self) -> None:
         step = run_tests_step(WORKFLOW.read_text(encoding="utf-8"))
@@ -94,21 +116,23 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
         deletes `production=false` and nothing else runs no job at all and the
         assertion above never executes. Mirrors the equivalent test in
         `release-workflow-contract_test.py`.
+
+        The step assertion at the end is weaker than the path ones by
+        construction: this file runs only from that step, so the PR that deletes
+        it also deletes the only thing that would fail. It holds for local runs
+        and for a step whose command is renamed or moved elsewhere. Keeping the
+        job a required check is what covers outright removal, and that lives in
+        branch protection, not here.
         """
         lint_workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
 
         for trigger in ("push", "pull_request"):
-            block = re.search(
-                rf"  {trigger}:\n.*?(?=\n  [a-z_]+:|\nconcurrency:)",
-                lint_workflow,
-                re.DOTALL,
-            )
-            self.assertIsNotNone(block, f"lint-action-pinning.yml has no {trigger} trigger")
+            paths = trigger_paths(lint_workflow, trigger)
 
             for subject in UNTRIGGERED_SUBJECTS:
                 self.assertIn(
-                    f'"{subject}"',
-                    block.group(0),
+                    f'      - "{subject}"\n',
+                    paths,
                     f"{subject} must be a {trigger} path trigger in "
                     "lint-action-pinning.yml. It is a subject of this contract "
                     "but lives outside .github/, so nothing else brings this "
@@ -116,10 +140,11 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
                 )
 
         self.assertIn(
-            "run: python3 .github/scripts/frontend-tests-workflow-contract_test.py",
+            "\n        run: python3 .github/scripts/frontend-tests-workflow-contract_test.py\n",
             lint_workflow,
-            "lint-action-pinning.yml must run this file. Without the step it "
-            "is dead code and every assertion here silently stops guarding.",
+            "lint-action-pinning.yml must run this file, as a live step rather "
+            "than a commented-out one. Without it this file is dead code and "
+            "every assertion here silently stops guarding.",
         )
 
 
