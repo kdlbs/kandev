@@ -164,8 +164,11 @@ func (r *Repository) Upsert(ctx context.Context, in UpsertInput) (UpsertResult, 
 		reachedAt = &t
 		rb := string(in.ReachedBasis)
 		reachedBasis = &rb
-		rr := in.ReachedRef
-		reachedRef = &rr
+		// An empty ReachedRef (a merged, non-detached provider row with an
+		// empty pr_url/mr_url/pull_request_url — all TEXT NOT NULL with no
+		// DEFAULT) must store NULL, not '', in the write-once
+		// reached_default_ref column (R6-F3).
+		reachedRef = refPtr(in.ReachedRef)
 	}
 
 	query := r.db.Rebind(upsertSQL)
