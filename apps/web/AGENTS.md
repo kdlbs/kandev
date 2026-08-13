@@ -295,6 +295,6 @@ plugin leaks a stale registration.
 
 ## Testing notes
 
+- `vitest.config.ts` pins `process.env.NODE_ENV = "test"`, and that line is load-bearing. React exports `act()` only from its development build, so under `NODE_ENV=production` — which the runtime image sets (`Dockerfile`) and every container/agent shell inherits, while CI's image does not — `@testing-library/react` falls back to `react-dom/test-utils` and **every** `render()`/`renderHook()` throws `TypeError: React.act is not a function` before any assertion, with CI still green. `vitest-environment.test.tsx` and the `vitest.setup.ts` preflight fail by name if the pin goes, and the `Run tests` step in `.github/workflows/frontend-tests.yml` exports `NODE_ENV=production` on purpose so those guards fire in CI too rather than only in a container.
 - jsdom secure cookies need cookie-setter interception; Radix Tooltip tests use keyboard focus, while Playwright covers pointer hover with `locator.hover()`.
-- Scope terminal selectors to the active panel/container; mobile and dockview may
-  mount multiple instances, so shared helpers must not use global selectors.
+- Scope terminal selectors to the active panel/container; mobile and dockview may mount multiple instances, so shared helpers must not use global selectors.

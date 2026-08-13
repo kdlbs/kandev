@@ -16,6 +16,7 @@ export function PerRepoPullMenu({
   onRepoRebase,
   onRepoMerge,
   pullDisabled,
+  pullDisabledReason,
   repoDisplayName,
 }: {
   repoNames: string[];
@@ -24,6 +25,7 @@ export function PerRepoPullMenu({
   onRepoRebase: (repo: string) => void;
   onRepoMerge: (repo: string) => void;
   pullDisabled?: boolean;
+  pullDisabledReason?: string;
   repoDisplayName?: (repositoryName: string) => string | undefined;
 }) {
   const { t } = useTranslation();
@@ -49,7 +51,11 @@ export function PerRepoPullMenu({
               onClick={() => onRepoPull(repo)}
               className="cursor-pointer text-xs gap-2"
               disabled={pullDisabled}
-              title={pullDisabled ? t("task:providerHistoryUnavailable") : undefined}
+              title={
+                pullDisabled
+                  ? (pullDisabledReason ?? t("task:divergedActionsUnavailable"))
+                  : undefined
+              }
             >
               <IconCloudDownload className="h-3.5 w-3.5 text-muted-foreground" />
               {t("task:pull")}

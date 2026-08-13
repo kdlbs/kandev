@@ -8,6 +8,9 @@ on:
       - ".github/scripts/lint-action-pinning.py"
       - ".github/scripts/lint-action-pinning_test.py"
       - ".github/scripts/claude-code-review-workflow-contract_test.py"
+      - ".github/scripts/frontend-tests-workflow-contract_test.py"
+      - "apps/web/vitest.config.ts"
+      - "apps/.npmrc"
       - ".github/scripts/preview-env-workflow-contract_test.py"
       - ".github/scripts/collect-macos-desktop-diagnostics.sh"
       - ".github/scripts/release-workflow-contract_test.py"
@@ -37,6 +40,9 @@ on:
       - ".github/scripts/lint-action-pinning.py"
       - ".github/scripts/lint-action-pinning_test.py"
       - ".github/scripts/claude-code-review-workflow-contract_test.py"
+      - ".github/scripts/frontend-tests-workflow-contract_test.py"
+      - "apps/web/vitest.config.ts"
+      - "apps/.npmrc"
       - ".github/scripts/preview-env-workflow-contract_test.py"
       - ".github/scripts/collect-macos-desktop-diagnostics.sh"
       - ".github/scripts/release-workflow-contract_test.py"
@@ -87,6 +93,9 @@ jobs:
 
       - name: Test preview environment workflow contract
         run: python3 .github/scripts/preview-env-workflow-contract_test.py
+
+      - name: Test frontend tests workflow contract
+        run: python3 .github/scripts/frontend-tests-workflow-contract_test.py
 
       - name: Test release workflow contract
         run: python3 .github/scripts/release-workflow-contract_test.py

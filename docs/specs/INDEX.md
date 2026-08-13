@@ -43,6 +43,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [setup-launch-timeout](platform/setup-launch-timeout.md) | approved |
 | [task-sleep-inhibition](platform/task-sleep-inhibition.md) | building |
 | [i18n](platform/i18n.md) | building |
+| [traditional-chinese-locales](platform/traditional-chinese-locales.md) | building |
 | [mid-turn-steering](platform/mid-turn-steering.md) | shipped |
 | [plugins](plugins/spec.md) | draft |
 | [plugins — authoring experience](plugins/authoring-experience.md) | draft |
@@ -116,6 +117,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 |---|---|
 | [runtime-updates](agents/runtime-updates.md) | approved |
 | [profile-disable](agents/profile-disable.md) | draft |
+| [settings-profile-layout](agents/settings-profile-layout.md) | shipped |
 | [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
 | [utility-agent-profiles](agents/utility-agent-profiles.md) | approved |
 | [roles](agents/roles.md) | shipped |
@@ -149,6 +151,7 @@ Per-workspace credentials and triage triggers for external services.
 | [deletion](workspaces/deletion.md) | shipped |
 | [local-repositories](workspaces/local-repositories.md) | shipped |
 | [repository-secrets](workspaces/repository-secrets.md) | shipped |
+| [secret-scope-transfer](workspaces/secret-scope-transfer.md) | shipped |
 
 ## costs/ — cost tracking & budgets
 

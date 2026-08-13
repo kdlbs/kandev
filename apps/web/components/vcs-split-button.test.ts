@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { t } from "@/lib/i18n";
-import { determinePrimaryAction, hasOpenChangeRequest } from "./vcs-split-button";
+import {
+  buildVcsSplitCallbacks,
+  determinePrimaryAction,
+  hasOpenChangeRequest,
+} from "./vcs-split-button";
+import { buildSingleRepoContributionCallbacks } from "./vcs-split-button-parts";
 
 /**
  * The VCS tooltips used to build their plural by hand:
@@ -86,6 +91,56 @@ describe("vcs split-button remote action semantics", () => {
 
   it("does not select Push when divergence policy removes unsafe push evidence", () => {
     expect(determinePrimaryAction(0, 0, 7, true)).toBe("rebase");
+  });
+
+  it("passes the blocked repository to single-repository contribution actions", async () => {
+    const requestReplace = vi.fn();
+    const requestUse = vi.fn();
+    const openExternalLinkFn = vi.fn().mockResolvedValue("browser");
+    const resolutionTarget = {
+      expectedRemoteHead: "a".repeat(40),
+      repo: "widget-a",
+      repositoryName: "widget-a",
+    };
+    const callbacks = buildVcsSplitCallbacks({
+      openCommitDialog: vi.fn(),
+      openPRDialog: vi.fn(),
+      handlePull: vi.fn(),
+      handlePush: vi.fn(),
+      handleRebase: vi.fn(),
+      handleMerge: vi.fn(),
+      resolution: { requestReplace, requestUse },
+      resolutionTarget,
+      selectedPR: { pr_url: "https://github.com/acme/widget-a/pull/42" },
+      openExternalLinkFn,
+    });
+
+    callbacks.onReplaceContribution("widget-a");
+    callbacks.onUseContribution("widget-a");
+    callbacks.onViewContribution("widget-a");
+    await Promise.resolve();
+
+    expect(requestReplace).toHaveBeenCalledWith(resolutionTarget);
+    expect(requestUse).toHaveBeenCalledWith(resolutionTarget);
+    expect(openExternalLinkFn).toHaveBeenCalledWith("https://github.com/acme/widget-a/pull/42");
+  });
+
+  it("scopes the single-repository menu callbacks to the blocked repository", () => {
+    const onReplaceContribution = vi.fn();
+    const onUseContribution = vi.fn();
+    const onViewContribution = vi.fn();
+    const callbacks = buildSingleRepoContributionCallbacks(
+      { onReplaceContribution, onUseContribution, onViewContribution },
+      "widget-a",
+    );
+
+    callbacks.onReplaceContribution();
+    callbacks.onUseContribution();
+    callbacks.onViewContribution();
+
+    expect(onReplaceContribution).toHaveBeenCalledWith("widget-a");
+    expect(onUseContribution).toHaveBeenCalledWith("widget-a");
+    expect(onViewContribution).toHaveBeenCalledWith("widget-a");
   });
 });
 

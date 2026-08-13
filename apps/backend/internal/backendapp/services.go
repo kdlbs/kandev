@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
@@ -68,6 +69,12 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
 	agentSettingsController.SetSecretStore(userSecretStore)
+	managedRuntimeSettings, err := systemsettings.NewStore(dbPool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize managed runtime settings: %w", err)
+	}
+	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
+	agentSettingsController.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
@@ -224,23 +231,24 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 
 	services := &Services{
-		Task:           taskSvc,
-		User:           userSvc,
-		Editor:         editorSvc,
-		Prompts:        promptSvc,
-		Utility:        utilitySvc,
-		Workflow:       workflowSvc,
-		GitHub:         githubSvc,
-		GitLab:         gitlabSvc,
-		AzureDevOps:    azureDevOpsSvc,
-		Jira:           jiraSvc,
-		Linear:         linearSvc,
-		Sentry:         sentrySvc,
-		WorkflowSync:   workflowSyncSvc,
-		Share:          shareHTTP,
-		Automation:     automationComponents,
-		Plugins:        pluginsSvc,
-		GitCredentials: gitCredentialBroker,
+		ManagedRuntimeSelections: managedRuntimeSelections,
+		Task:                     taskSvc,
+		User:                     userSvc,
+		Editor:                   editorSvc,
+		Prompts:                  promptSvc,
+		Utility:                  utilitySvc,
+		Workflow:                 workflowSvc,
+		GitHub:                   githubSvc,
+		GitLab:                   gitlabSvc,
+		AzureDevOps:              azureDevOpsSvc,
+		Jira:                     jiraSvc,
+		Linear:                   linearSvc,
+		Sentry:                   sentrySvc,
+		WorkflowSync:             workflowSyncSvc,
+		Share:                    shareHTTP,
+		Automation:               automationComponents,
+		Plugins:                  pluginsSvc,
+		GitCredentials:           gitCredentialBroker,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
 		Office: nil,

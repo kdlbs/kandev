@@ -68,6 +68,7 @@
   "projects": "Projetos",
   "queuedPromptCount_one": "{{count}} prompt em fila",
   "queuedPromptCount_other": "{{count}} prompts em fila",
+  "wipQueuePosition": "Posição {{position}} de {{total}} na fila de {{step}}",
   "quickChat": "Chat rápido",
   "quickTerminal": "Terminal rápido",
   "quickChatTerminals": "Terminais",

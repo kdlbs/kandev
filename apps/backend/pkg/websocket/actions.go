@@ -360,6 +360,8 @@ const (
 	ActionSecretUpdate = "secrets.update"
 	ActionSecretDelete = "secrets.delete"
 	ActionSecretReveal = "secrets.reveal"
+	ActionSecretCopy   = "secrets.copy"
+	ActionSecretMove   = "secrets.move"
 
 	// Sprites actions
 	ActionSpritesStatus              = "sprites.status"

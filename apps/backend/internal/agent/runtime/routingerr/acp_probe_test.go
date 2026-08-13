@@ -27,7 +27,7 @@ func writeShellBin(t *testing.T, dir, name, body string) string {
 // every provider id. Used to exercise the probe loop without wiring the
 // full agent registry into a unit test.
 func staticResolver(argv []string) CommandResolver {
-	return func(_ string) ([]string, map[string]string, bool) {
+	return func(_ context.Context, _ string) ([]string, map[string]string, bool) {
 		return argv, nil, true
 	}
 }
@@ -89,7 +89,7 @@ func TestACPProbe_MissingResolver(t *testing.T) {
 }
 
 func TestACPProbe_ResolverReturnsNotOK(t *testing.T) {
-	probe := NewACPProbe(func(_ string) ([]string, map[string]string, bool) {
+	probe := NewACPProbe(func(_ context.Context, _ string) ([]string, map[string]string, bool) {
 		return nil, nil, false
 	}, nil)
 	got := probe.Probe(context.Background(), ProbeInput{ProviderID: "unknown"})

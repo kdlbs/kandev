@@ -203,11 +203,24 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 			PermissionValues: req.PermissionSettings,
 		})
 	} else {
+		managedRuntimeVersion := ""
+		var err error
+		if managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent); ok {
+			managedRuntimeVersion, err = c.activeRuntimeVersion(
+				ctx,
+				agentName,
+				managed.ManagedNPMRuntime().Package,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("resolve active managed runtime version: %w", err)
+			}
+		}
 		cmd = agentConfig.BuildCommand(agents.CommandOptions{
-			Model:              req.Model,
-			PermissionValues:   req.PermissionSettings,
-			CLIFlagTokens:      cliFlagTokens,
-			PreferNativeBinary: previewPrefersNativeBinary(agentConfig),
+			Model:                 req.Model,
+			PermissionValues:      req.PermissionSettings,
+			CLIFlagTokens:         cliFlagTokens,
+			PreferNativeBinary:    previewPrefersNativeBinary(agentConfig),
+			ManagedRuntimeVersion: managedRuntimeVersion,
 		})
 		if len(cliFlagTokens) > 0 {
 			cmd = cmd.With().Flag(cliFlagTokens...).Build()
