@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
@@ -47,14 +47,17 @@ describe.each(CONTROLS)("%s enable/disable slider", (slug, name, Control) => {
   });
 
   it("persists to the workspace it was given", async () => {
-    render(
+    // Queries are scoped to this render, not the document: several of these
+    // sliders can be mounted at once on the index page, and a global lookup
+    // would be free to answer with another one's switch.
+    const view = render(
       <SettingsSaveProvider>
         <Control workspaceId={WORKSPACE_A} />
       </SettingsSaveProvider>,
     );
 
-    fireEvent.click(screen.getByRole("switch", { name: `Enable ${name}` }));
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(view.getByRole("switch", { name: `Enable ${name}` }));
+    fireEvent.click(view.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>
       expect(window.localStorage.getItem(`${storageKey}:${WORKSPACE_A}`)).toBe("false"),
@@ -65,14 +68,14 @@ describe.each(CONTROLS)("%s enable/disable slider", (slug, name, Control) => {
   it("reads the workspace it was given, not another one's state", () => {
     window.localStorage.setItem(`${storageKey}:${WORKSPACE_B}`, "false");
 
-    render(
+    const view = render(
       <SettingsSaveProvider>
         <Control workspaceId={WORKSPACE_A} />
       </SettingsSaveProvider>,
     );
 
-    expect(
-      screen.getByRole("switch", { name: `Enable ${name}` }).getAttribute("aria-checked"),
-    ).toBe("true");
+    expect(view.getByRole("switch", { name: `Enable ${name}` }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
   });
 });

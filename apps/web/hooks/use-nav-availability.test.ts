@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
     state: {
       workspaces: {
         activeId: workspaceId as string | null,
-        items: [{ id: workspaceId }],
+        items: [{ id: workspaceId }] as Array<{ id: string; created_at?: string }>,
       },
     },
     azureDevOpsAvailable: vi.fn(() => false),
@@ -188,8 +188,24 @@ describe("useNavAvailability", () => {
     expect(mocks.jiraAuthed).toHaveBeenCalledWith(null);
     expect(mocks.linearAuthed).toHaveBeenCalledWith(null);
     expect(mocks.azureDevOpsAvailable).toHaveBeenCalledWith(null);
+    // The toggles are browser-local, so null would read the unscoped key while
+    // the probes above answer for whichever workspace the backend resolved.
+    // They follow the backend's tie-breaker (oldest workspace) instead.
     for (const key of NAV_GATED_KEYS) {
-      expect(ENABLED_MOCK_BY_KEY[key]).toHaveBeenCalledWith(null);
+      expect(ENABLED_MOCK_BY_KEY[key]).toHaveBeenCalledWith("workspace-2");
+    }
+  });
+
+  it("reads the oldest workspace's toggles when the active id is stale", () => {
+    mocks.state.workspaces.items = [
+      { id: "workspace-3", created_at: "2026-02-01T00:00:00Z" },
+      { id: "workspace-2", created_at: "2026-01-01T00:00:00Z" },
+    ];
+
+    renderHook(() => useNavAvailability());
+
+    for (const key of NAV_GATED_KEYS) {
+      expect(ENABLED_MOCK_BY_KEY[key]).toHaveBeenCalledWith("workspace-2");
     }
   });
 

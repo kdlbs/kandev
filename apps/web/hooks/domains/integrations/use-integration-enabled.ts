@@ -23,32 +23,52 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 // renders — passing an inline `{...}` would give getSnapshot a new identity
 // every render and re-run the migration scan on each pass.
 
-// migrateLegacyKey is idempotent: the first call moves any leftover
-// pre-`v1` per-workspace value onto storageKey and removes the legacy entries;
-// subsequent calls are no-ops because there are no legacy keys left to scan.
-// Cheap enough to run on every snapshot read (a localStorage iteration over
-// kandev:* keys), so we don't need to memoize across re-renders.
+const LEGACY_KEY_SUFFIX = ":v1";
+
+// Prefixes already scanned this session. The scan is a full localStorage
+// iteration and `getSnapshot` runs on every render, so without this a browser
+// that has no legacy keys (every install since Aug 2026) would re-scan forever.
+const scannedLegacyPrefixes = new Set<string>();
+
+/** Test-only: forget which prefixes were scanned, so a case can re-run one. */
+export function resetIntegrationEnabledMigrations(): void {
+  scannedLegacyPrefixes.clear();
+}
+
+// The pre-`v1` keys were `kandev:<slug>:enabled:<workspaceId>:v1` — already one
+// per workspace. Each is restored to that workspace's own key rather than
+// folded into the install-wide one: folding is what let a single workspace's
+// preference answer for every other workspace, which is the bug this scoping
+// exists to fix. An id-less or unrecognized key is left alone rather than
+// guessed at.
 //
-// Today's per-workspace keys (`<storageKey>:<workspaceId>`) also start with the
-// legacy prefix, so they are skipped explicitly — folding them together would
-// let one workspace's toggle overwrite every other workspace's.
-function migrateLegacyKey(storageKey: string, legacyKeyPrefix: string): void {
-  if (typeof window === "undefined") return;
+// Today's keys (`<storageKey>:<workspaceId>`) share the legacy prefix, so they
+// are skipped explicitly — otherwise the migration would eat its own output.
+function migrateLegacyKeys(storageKey: string, legacyKeyPrefix: string): void {
+  if (typeof window === "undefined" || scannedLegacyPrefixes.has(storageKey)) return;
+  scannedLegacyPrefixes.add(storageKey);
   try {
-    if (window.localStorage.getItem(storageKey) !== null) return;
-    let surviving: string | null = null;
-    const stale: string[] = [];
+    // Collected before writing: mutating localStorage mid-scan shifts the
+    // indices `key(i)` walks.
+    const legacy: Array<{ key: string; workspaceId: string }> = [];
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
       if (!key || !key.startsWith(legacyKeyPrefix) || key.startsWith(storageKey)) continue;
-      stale.push(key);
+      const scoped = key.slice(legacyKeyPrefix.length);
+      if (!scoped.endsWith(LEGACY_KEY_SUFFIX)) continue;
+      const workspaceId = scoped.slice(0, -LEGACY_KEY_SUFFIX.length);
+      if (workspaceId) legacy.push({ key, workspaceId });
+    }
+    for (const { key, workspaceId } of legacy) {
       const value = window.localStorage.getItem(key);
-      if (value !== null && surviving === null) surviving = value;
+      const target = integrationEnabledStorageKey(storageKey, workspaceId);
+      // A value the user has since set for that workspace wins over the
+      // migration; the legacy entry goes either way.
+      if (value !== null && window.localStorage.getItem(target) === null) {
+        window.localStorage.setItem(target, value);
+      }
+      window.localStorage.removeItem(key);
     }
-    if (surviving !== null) {
-      window.localStorage.setItem(storageKey, surviving);
-    }
-    for (const k of stale) window.localStorage.removeItem(k);
   } catch {
     // Quota / private mode — fall through; the toggle just defaults to on.
   }
@@ -106,7 +126,7 @@ export function useIntegrationEnabled(
   );
 
   const getSnapshot = useCallback(() => {
-    migrateLegacyKey(storageKey, legacyKeyPrefix);
+    migrateLegacyKeys(storageKey, legacyKeyPrefix);
     return readIntegrationEnabled(storageKey, workspaceId);
   }, [storageKey, legacyKeyPrefix, workspaceId]);
 
@@ -134,27 +154,51 @@ export function useIntegrationEnabled(
   return { enabled, setEnabled, loaded: true };
 }
 
+/** The storage identity of one integration's toggle, as the reader needs it. */
+export type IntegrationEnabledKeyPair = {
+  storageKey: string;
+  legacyKeyPrefix: string;
+};
+
+/** Reads one (integration, workspace) pair, migrating legacy keys first. */
+export type IntegrationEnabledReader = (
+  keys: IntegrationEnabledKeyPair,
+  workspaceId?: string | null,
+) => boolean;
+
+function makeIntegrationEnabledReader(): IntegrationEnabledReader {
+  return ({ storageKey, legacyKeyPrefix }, workspaceId) => {
+    // The hook form migrates in its own snapshot read; a surface built only on
+    // the reader (the settings tree lists every workspace and mounts no
+    // `useXEnabled`) would otherwise never see a legacy value at all.
+    migrateLegacyKeys(storageKey, legacyKeyPrefix);
+    return readIntegrationEnabled(storageKey, workspaceId);
+  };
+}
+
 /**
  * A `readIntegrationEnabled` bound to a live subscription, for surfaces that
  * read many (integration, workspace) pairs at once — the settings menu tree
  * lists every workspace, and rules of hooks forbid calling `useXEnabled` in a
  * loop over them.
  *
- * The returned function takes a new identity whenever any of `syncEvents`
- * fires or another tab writes, which is what re-runs a consumer's memoized
- * derivation. Pass a module-level constant for `syncEvents`.
+ * The reader is held in state and replaced on every toggle: its identity *is*
+ * the change signal, which is what re-runs a consumer's memoized derivation.
+ * Returning a fresh closure each render would work too, but it would defeat the
+ * memo the settings menu builds its whole branch forest behind. Pass a
+ * module-level constant for `syncEvents`.
  */
 export function useIntegrationEnabledReader(
   syncEvents: readonly string[],
-): (storageKey: string, workspaceId?: string | null) => boolean {
-  const [revision, setRevision] = useState(0);
+): IntegrationEnabledReader {
+  const [read, setRead] = useState<IntegrationEnabledReader>(makeIntegrationEnabledReader);
   // Joined rather than spread so the effect keys off the event names' contents,
   // not the array's identity.
   const eventKey = syncEvents.join("|");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const bump = () => setRevision((current) => current + 1);
+    const bump = () => setRead(() => makeIntegrationEnabledReader());
     const events = eventKey ? eventKey.split("|") : [];
     window.addEventListener("storage", bump);
     for (const event of events) window.addEventListener(event, bump);
@@ -164,11 +208,5 @@ export function useIntegrationEnabledReader(
     };
   }, [eventKey]);
 
-  return useMemo(() => {
-    // `revision` is the change signal: a new identity per bump is precisely
-    // what invalidates consumers' memoized sets.
-    void revision;
-    return (storageKey: string, workspaceId?: string | null) =>
-      readIntegrationEnabled(storageKey, workspaceId);
-  }, [revision]);
+  return read;
 }

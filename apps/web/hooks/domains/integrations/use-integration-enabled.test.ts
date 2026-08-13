@@ -4,6 +4,7 @@ import { makeLocalStorageMock } from "../../local-storage-mock.test-helpers";
 import {
   integrationEnabledStorageKey,
   readIntegrationEnabled,
+  resetIntegrationEnabledMigrations,
   useIntegrationEnabled,
   useIntegrationEnabledReader,
 } from "./use-integration-enabled";
@@ -11,6 +12,10 @@ import {
 const STORAGE_KEY = "kandev:acme:enabled:v1";
 const LEGACY_PREFIX = "kandev:acme:enabled:";
 const SYNC_EVENT = "kandev:acme:enabled-changed";
+const KEYS = { storageKey: STORAGE_KEY, legacyKeyPrefix: LEGACY_PREFIX };
+// The pre-scoping key shape, workspace id in the middle: see the versions of
+// `use-jira-enabled.ts` before the toggle was made install-wide.
+const legacyKey = (workspaceId: string) => `${LEGACY_PREFIX}${workspaceId}:v1`;
 const WORKSPACE_A = "ws-a";
 const WORKSPACE_B = "ws-b";
 
@@ -28,7 +33,10 @@ function renderEnabled(workspaceId?: string | null) {
 }
 
 describe("useIntegrationEnabled workspace scoping", () => {
-  beforeEach(() => localStorageMock.clear());
+  beforeEach(() => {
+    localStorageMock.clear();
+    resetIntegrationEnabledMigrations();
+  });
   afterEach(() => localStorageMock.clear());
 
   it("writes each workspace's toggle to its own key", () => {
@@ -98,18 +106,40 @@ describe("useIntegrationEnabled workspace scoping", () => {
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe("false");
   });
 
-  it("folds a pre-v1 legacy key in without touching the per-workspace keys", () => {
-    // The scoped keys start with the legacy prefix too; folding them together
-    // would let one workspace's toggle overwrite every other workspace's.
-    window.localStorage.setItem(`${LEGACY_PREFIX}ws-legacy`, "false");
-    window.localStorage.setItem(`${STORAGE_KEY}:${WORKSPACE_B}`, "true");
+  it("restores each pre-v1 legacy key to its own workspace", () => {
+    // The pre-v1 keys were already per workspace. Folding them into one value
+    // would recreate exactly the bug this scoping fixes, so each is restored to
+    // the workspace it came from.
+    window.localStorage.setItem(legacyKey(WORKSPACE_A), "false");
+    window.localStorage.setItem(legacyKey(WORKSPACE_B), "true");
+
+    const a = renderEnabled(WORKSPACE_A);
+
+    expect(a.result.current.enabled).toBe(false);
+    expect(renderEnabled(WORKSPACE_B).result.current.enabled).toBe(true);
+    expect(window.localStorage.getItem(`${STORAGE_KEY}:${WORKSPACE_A}`)).toBe("false");
+    expect(window.localStorage.getItem(legacyKey(WORKSPACE_A))).toBeNull();
+    expect(window.localStorage.getItem(legacyKey(WORKSPACE_B))).toBeNull();
+    // The install-wide key is never invented from a workspace's value.
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it("never migrates over a value the workspace already has", () => {
+    window.localStorage.setItem(legacyKey(WORKSPACE_A), "false");
+    window.localStorage.setItem(`${STORAGE_KEY}:${WORKSPACE_A}`, "true");
 
     const { result } = renderEnabled(WORKSPACE_A);
 
-    expect(result.current.enabled).toBe(false);
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("false");
-    expect(window.localStorage.getItem(`${LEGACY_PREFIX}ws-legacy`)).toBeNull();
-    expect(window.localStorage.getItem(`${STORAGE_KEY}:${WORKSPACE_B}`)).toBe("true");
+    expect(result.current.enabled).toBe(true);
+    expect(window.localStorage.getItem(legacyKey(WORKSPACE_A))).toBeNull();
+  });
+
+  it("leaves the current per-workspace keys alone, though they share the prefix", () => {
+    window.localStorage.setItem(`${STORAGE_KEY}:${WORKSPACE_B}`, "false");
+
+    renderEnabled(WORKSPACE_A);
+
+    expect(window.localStorage.getItem(`${STORAGE_KEY}:${WORKSPACE_B}`)).toBe("false");
   });
 
   it("propagates a same-tab toggle to the other slider on the same workspace", () => {
@@ -125,7 +155,10 @@ describe("useIntegrationEnabled workspace scoping", () => {
 });
 
 describe("readIntegrationEnabled", () => {
-  beforeEach(() => localStorageMock.clear());
+  beforeEach(() => {
+    localStorageMock.clear();
+    resetIntegrationEnabledMigrations();
+  });
 
   it("keys the value by workspace, falling back to the install-wide value", () => {
     window.localStorage.setItem(STORAGE_KEY, "false");
@@ -141,14 +174,28 @@ describe("readIntegrationEnabled", () => {
 });
 
 describe("useIntegrationEnabledReader", () => {
-  beforeEach(() => localStorageMock.clear());
+  beforeEach(() => {
+    localStorageMock.clear();
+    resetIntegrationEnabledMigrations();
+  });
 
   it("reads any workspace's toggle without a hook per workspace", () => {
     window.localStorage.setItem(`${STORAGE_KEY}:${WORKSPACE_A}`, "false");
     const { result } = renderHook(() => useIntegrationEnabledReader([SYNC_EVENT]));
 
-    expect(result.current(STORAGE_KEY, WORKSPACE_A)).toBe(false);
-    expect(result.current(STORAGE_KEY, WORKSPACE_B)).toBe(true);
+    expect(result.current(KEYS, WORKSPACE_A)).toBe(false);
+    expect(result.current(KEYS, WORKSPACE_B)).toBe(true);
+  });
+
+  it("migrates a legacy key itself, with no `useIntegrationEnabled` mounted", () => {
+    // The settings tree is built on the reader alone, so if only the hook
+    // migrated, a legacy value would read as enabled there.
+    window.localStorage.setItem(legacyKey(WORKSPACE_A), "false");
+    const { result } = renderHook(() => useIntegrationEnabledReader([SYNC_EVENT]));
+
+    expect(result.current(KEYS, WORKSPACE_A)).toBe(false);
+    expect(window.localStorage.getItem(`${STORAGE_KEY}:${WORKSPACE_A}`)).toBe("false");
+    expect(window.localStorage.getItem(legacyKey(WORKSPACE_A))).toBeNull();
   });
 
   it("takes a new identity on a toggle, so memoized consumers recompute", () => {
@@ -161,7 +208,7 @@ describe("useIntegrationEnabledReader", () => {
     });
 
     expect(result.current).not.toBe(before);
-    expect(result.current(STORAGE_KEY, WORKSPACE_A)).toBe(false);
+    expect(result.current(KEYS, WORKSPACE_A)).toBe(false);
   });
 
   it("also reacts to another tab's write", () => {

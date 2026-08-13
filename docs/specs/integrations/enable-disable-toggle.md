@@ -30,7 +30,7 @@ per-workspace toggle.
 - Every integration (Azure DevOps, GitHub, GitLab, Jira, Linear, Sentry)
   SHALL expose an enable/disable slider on its own settings page
   (`/settings/integrations/<slug>`, and the per-workspace equivalent
-  `/settings/workspace/<id>/integrations/<slug>`). Jira, Linear and Sentry
+  `/settings/workspaces/<id>/integrations/<slug>`). Jira, Linear and Sentry
   already have this; Azure DevOps, GitHub and GitLab gain it.
 - The same slider SHALL also appear on each integration's row/card on the
   integrations index page (`/settings/integrations` and its per-workspace
@@ -93,9 +93,18 @@ in `hooks/domains/integrations/use-integration-enabled.ts`:
 The unsuffixed `kandev:<slug>:enabled:v1` keys hold the value written while the
 toggle was install-wide. They are never written again, and are read as the
 default for a workspace that has never been toggled, so upgrading does not
-silently re-enable an integration a user had turned off. Pre-`v1` per-workspace
-keys (`kandev:<slug>:enabled:<workspaceId>`) keep folding into the unsuffixed
-key on first read, and the fold explicitly skips the new suffixed keys.
+silently re-enable an integration a user had turned off.
+
+Keys from before that install-wide period (`kandev:<slug>:enabled:<workspaceId>:v1`)
+were themselves per workspace. Each SHALL be restored to that workspace's own
+key, never folded into the unsuffixed one: folding would let a single
+workspace's stored preference answer for every other workspace, which is the
+behavior this scoping exists to remove. A workspace that already has a value
+keeps it, the legacy entry is then dropped either way, and a legacy key with no
+recoverable workspace id is left untouched rather than guessed at. The scan
+skips the current suffixed keys (they share the prefix) and runs at most once
+per integration per page load, so a browser holding no legacy keys pays for one
+pass rather than one per render.
 
 ## API surface
 

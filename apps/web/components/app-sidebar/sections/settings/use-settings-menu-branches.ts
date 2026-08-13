@@ -138,7 +138,7 @@ function useVisibleIntegrationSlugsFor(): (
     return (workspaceId: string) =>
       new Set(
         WORKSPACE_INTEGRATIONS.map(([slug]) => slug).filter((slug) =>
-          readEnabled(INTEGRATION_ENABLED_KEYS[slug].storageKey, workspaceId),
+          readEnabled(INTEGRATION_ENABLED_KEYS[slug], workspaceId),
         ),
       );
   }, [hideDisabled, readEnabled]);
