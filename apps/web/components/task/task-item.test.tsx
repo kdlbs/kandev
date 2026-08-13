@@ -182,12 +182,10 @@ describe("TaskItem queue status", () => {
     });
 
     expect(screen.getByTestId("sidebar-task-queued-count")).not.toBeNull();
-    expect(screen.getByTestId("sidebar-task-wip-queue").getAttribute("aria-label")).toBe(
-      "Position 2 of 4 in Review queue",
-    );
-    expect(screen.getByTestId("sidebar-task-wip-queue-coarse").getAttribute("aria-label")).toBe(
-      "Position 2 of 4 in Review queue",
-    );
+    const queueStatus = screen.getByTestId("sidebar-task-wip-queue");
+    expect(queueStatus.querySelector("svg")).not.toBeNull();
+    expect(queueStatus.textContent).toBe("");
+    expect(queueStatus.getAttribute("aria-label")).toBe("Position 2 of 4 in Review queue");
   });
 });
 

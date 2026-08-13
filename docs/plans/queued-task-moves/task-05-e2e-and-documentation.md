@@ -20,10 +20,10 @@ spec: "../../specs/tasks/wip-limit-pull-system.md"
   destination queue placement, admitted/queued Kanban areas, WIP count, and
   sidebar queue-position tooltip, then frees capacity and verifies promotion.
 - Mobile Chrome E2E repeats the move through the focused-column/task-switcher
-  flow, verifies inline `N/M`, promotion, touch usability, and no page-level
-  horizontal overflow.
-- Desktop and mobile workflow-settings coverage shows visible `Pull from`
-  guidance. The guidance identifies automatic feeder intake as optional and
+  flow, verifies the queue icon tooltip, promotion, touch usability, and no
+  page-level horizontal overflow.
+- Desktop and mobile workflow-settings coverage opens the `Pull from` info
+  tooltip. The guidance identifies automatic feeder intake as optional and
   distinguishes it from direct or automatic transitions.
 - Tests seed prerequisite workflow/task state through the API but perform and
   assert the behavior under test through visible UI interactions.
@@ -67,9 +67,12 @@ pnpm --filter @kandev/web run i18n:ratchet
 - Mobile queue E2E passed: `mobile-wip-overflow-queue.spec.ts`, 2 tests.
 - Desktop and mobile workflow-settings guidance checks each passed 1 test.
   They cover both the no-feeder and selected-feeder messages.
-- The managed E2E checks assert admitted counts, queued sections, sidebar
-  tooltip/inline position, promotion, touch interaction, and no horizontal
+- The managed E2E checks assert admitted counts, queued sections, sidebar icon
+  tooltip position, promotion, touch interaction, and no horizontal
   overflow. Existing queue overflow behavior remains green.
+- The backend boot-state serializer regression test verifies that WIP limits,
+  feeder configuration, admission, and queue metadata are present in the
+  first-paint Kanban payload.
 - After the review hardening, the desktop and mobile queue suites were rerun
   against the updated selectors and each passed two tests.
 - The pseudo-locale E2E build passed. The focused queue helper and sidebar

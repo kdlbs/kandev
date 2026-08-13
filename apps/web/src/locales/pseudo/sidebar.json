@@ -70,8 +70,6 @@
   "projects": "Ƥŕōĵēćţś",
   "queuedPromptCount_one": "{{count}} qũēũēď ƥŕōḿƥţ",
   "queuedPromptCount_other": "{{count}} qũēũēď ƥŕōḿƥţś",
-  "wipQueued": "Qũēũēď {{position}}/{{total}}",
-  "wipQueuedCompact": "Qũēũēď",
   "wipQueuePosition": "Ƥōśĩţĩōń {{position}} ōƒ {{total}} ĩń {{step}} qũēũē",
   "quickChat": "Qũĩćķ Ćĥàţ",
   "quickTerminal": "Qũĩćķ ţēŕḿĩńàĺ",

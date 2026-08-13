@@ -15,9 +15,9 @@ admits destination-resident queued tasks before pulling work from a configured
 feeder.
 
 The UI makes this state explicit. Limited Kanban columns show separate active
-and queued areas, and the task sidebar shows a distinct WIP `Queued` chip with
-the task's one-based queue position. The desktop chip discloses details on
-hover; the touch presentation includes the position without requiring hover.
+and queued areas, and the task sidebar shows a distinct WIP queue icon. Hovering
+or focusing the icon discloses the task's one-based queue position, total, and
+destination step on desktop and touch layouts.
 
 No new persistence fields are required. The implementation reuses
 `wip_admitted`, `queued_for_step_id`, and `queued_at`, but changes task moves
@@ -139,9 +139,9 @@ Derive queue positions from workspace workflow snapshots in
 desktop and mobile item mappers. `TaskItem` renders the same semantic chip in
 both task switchers.
 
-For fine pointers, the compact chip reads `Queued` and its tooltip states
-`Position N of M in STEP queue`. For coarse pointers, the chip includes
-`Queued N/M` inline. The chip is status information, not a new action.
+The sidebar renders one compact queue icon on all pointer types. Its tooltip
+states `Position N of M in STEP queue`, and the focusable trigger also supports
+touch and keyboard users. The icon is status information, not a new action.
 
 All new copy is localized in English, pseudo, Portuguese, and Simplified
 Chinese catalogs. Queue helper and component tests cover ordering, render/hide
@@ -150,7 +150,8 @@ presentation.
 
 ### Workflow step settings
 
-Keep `Pull from` optional. Add visible help that separates three behaviors:
+Keep `Pull from` optional. Add an info tooltip beside it that separates three
+behaviors:
 
 - Destination-resident queued tasks receive admission first.
 - Kandev then pulls eligible tasks from the selected feeder when capacity is
@@ -158,9 +159,9 @@ Keep `Pull from` optional. Add visible help that separates three behaviors:
 - Direct moves and automatic workflow transitions queue in the destination and
   do not require a feeder.
 
-The help also states that new tasks targeting a full step use the selected
-feeder. Show this guidance inline on desktop and mobile. Do not make a hover
-tooltip the only source of this contract.
+The help also states that new tasks targeting a full step uses the selected
+feeder. The tooltip is available by hover or keyboard focus on desktop and by
+tap or focus on mobile, so the contract does not depend on pointer hover.
 
 ## Responsive and Mobile Contract
 
@@ -168,12 +169,13 @@ tooltip the only source of this contract.
   sheet.
 - **Nearest pattern:** `MobileColumnTabs`, `SwipeableColumns`, shared
   `KanbanColumn`, and shared `TaskItem`.
-- **Presentation:** inline column section and inline status chip; no modal,
-  drawer, or mobile-only route.
+- **Presentation:** inline column section and inline status chip; the workflow
+  settings explanation is a compact info tooltip, with no modal, drawer, or
+  mobile-only route.
 - **Scroll ownership:** the existing Kanban column and task-switcher sheet keep
   their single scroll owners.
-- **Touch behavior:** queue position is visible without hover; no tap-only
-  replacement is required.
+- **Touch behavior:** queue position is visible without hover; the workflow
+  explanation opens from the existing info icon by tap or focus.
 - **Parity:** move, queue visibility, position, and promotion are available on
   desktop and mobile.
 
@@ -201,15 +203,16 @@ tooltip the only source of this contract.
 - Kanban columns partition admitted and queued cards and preserve admitted WIP
   counts.
 - Sidebar queue status is separate from queued prompts, localized, accessible,
-  and correct in desktop and coarse-pointer presentations.
+  and correct in desktop and touch presentations.
 
 ### Browser E2E
 
 - Desktop: use the UI to move a task into a full step, verify queued placement,
   column partition, sidebar tooltip position, then free capacity and verify
   promotion.
-- Mobile Chrome: repeat the move in the focused-column flow, verify inline
-  `N/M`, promotion, touch usability, and no page-level horizontal overflow.
+- Mobile Chrome: repeat the move in the focused-column flow, verify the queue
+  icon tooltip, promotion, touch usability, and no page-level horizontal
+  overflow.
 - Seed prerequisite workflow/tasks through the API; perform and assert the
   behavior under test through the UI.
 
@@ -237,10 +240,12 @@ Tasks 01 through 05 are implemented. The backend now commits admitted or
 destination-queued placement atomically, defers destination lifecycle work
 until promotion, and prioritizes destination-resident queues over feeder work.
 The web client shows the same queue order in Kanban and desktop/mobile task
-switchers, with localized `Pull from` guidance. Review hardening also keeps
-replay tokens available after prerequisite failures, preserves state changes in
-the promotion event path, and skips failed fallback candidates while filling
-capacity.
+switchers, with localized `Pull from` guidance in an info tooltip. The initial
+Kanban boot payload now includes WIP limits and task admission metadata, and the
+sidebar uses an accessible queue icon with a position tooltip. Review hardening
+also keeps replay tokens available after prerequisite failures, preserves state
+changes in the promotion event path, and skips failed fallback candidates while
+filling capacity.
 
 Focused backend and frontend checks pass. The broad backend regression gate,
 managed browser checks, public-doc validation, and final diff review are

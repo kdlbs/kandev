@@ -19,16 +19,15 @@ spec: "../../specs/tasks/wip-limit-pull-system.md"
   existing `queuedCount`, which remains the pending-agent-prompt count.
 - Desktop and mobile sidebar mappers pass the same queue object to shared
   `TaskItem` rendering for tasks and subtasks.
-- Fine-pointer presentation shows a compact localized `Queued` chip whose
-  tooltip states `Position N of M in STEP queue`.
-- Coarse-pointer presentation includes localized `Queued N/M` in the chip, so
-  position does not depend on hover.
-- The chip is accessible status information, remains shrink-safe, and does not
+- All pointer presentations show one compact localized queue icon whose tooltip
+  states `Position N of M in STEP queue`. Its focusable trigger supports hover,
+  keyboard focus, and touch focus, so the position does not depend on hover.
+- The icon is accessible status information, remains shrink-safe, and does not
   create horizontal overflow or a second scroll owner.
 - Live task updates and queue promotions update or remove the chip without a
   reload.
-- Unit/component tests prove mapping, ordering, render/hide behavior, tooltip,
-  coarse-pointer copy, subtasks, and separation from the queued-prompt badge.
+- Unit/component tests prove mapping, ordering, render/hide behavior, icon and
+  tooltip accessibility, subtasks, and separation from the queued-prompt badge.
 
 ## TDD Sequence
 
@@ -58,12 +57,13 @@ pnpm --filter @kandev/web run i18n:ratchet
 - `useWorkspaceSidebarTasks` derives WIP queue positions from the shared
   helper and carries them separately from the existing queued-agent-prompt
   count.
-- Desktop and mobile task switchers share the same queue status mapping.
-  Fine pointers receive a tooltip with `Position N of M in STEP queue`; coarse
-  pointers receive an inline `Queued N/M` chip.
+- Desktop and mobile task switchers share the same queue status mapping and
+  focusable queue icon. The icon tooltip states `Position N of M in STEP queue`.
 - Focused mapper and component tests passed with the exact 5-file, 71-test
-  Vitest run above. The queue chip disappears after promotion and preserves
+  Vitest run above. The queue icon disappears after promotion and preserves
   mobile width constraints in managed E2E coverage.
+- The SSR Kanban boot payload includes WIP limits and task admission metadata,
+  so the initial column count does not wait for a later snapshot refresh.
 
 ## Files Likely Touched
 

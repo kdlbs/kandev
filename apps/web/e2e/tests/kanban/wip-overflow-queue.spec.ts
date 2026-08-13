@@ -94,10 +94,13 @@ test("moves into a full step, shows sidebar queue position, and promotes through
     .getByTestId("sidebar-task-item")
     .filter({ hasText: "Moved Review Queue" });
   await expect(sidebarRow).toBeVisible({ timeout: 10_000 });
-  await expect(sidebarRow.getByTestId("sidebar-task-wip-queue")).toHaveAttribute(
-    "aria-label",
-    "Position 1 of 1 in Review queue",
-  );
+  const queueStatus = sidebarRow.getByTestId("sidebar-task-wip-queue");
+  await expect(queueStatus).toBeVisible();
+  await expect(queueStatus.locator("svg")).toBeVisible();
+  await expect(queueStatus).toHaveAttribute("aria-label", "Position 1 of 1 in Review queue");
+  await queueStatus.hover();
+  await expect(testPage.getByRole("tooltip")).toHaveText("Position 1 of 1 in Review queue");
+  await testPage.keyboard.press("Escape");
 
   await kanban.moveTaskWithinWorkflow(admittedOne.id, doneStep.id);
   await expect(queuedCard).not.toContainText("Queued for Review", { timeout: 15_000 });

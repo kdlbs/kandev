@@ -58,9 +58,12 @@ GitHub-specific retry logic.
   each limited step. It continues to show WIP consumption as
   `admitted/limit`. The total number of cards may be larger than the admitted
   count.
-- The task sidebar shows a `Queued` chip for a destination-resident queued
-  task. Fine-pointer users can hover over the chip to see the task position and
-  queue size. Touch users see the same position in the chip.
+- The initial server-rendered Kanban boot state includes each step's WIP limit
+  and each task's admission and queue metadata, so the admitted count is
+  correct on first paint and does not depend on a later snapshot refresh.
+- The task sidebar shows a queue icon for a destination-resident queued task.
+  Hover or focus on the icon shows the task position, queue size, and
+  destination step. The same focusable icon and tooltip work on touch devices.
 - The rule applies to task creation through the UI, HTTP, WebSocket, MCP, and
   integration watchers, including requests that resolve the workflow start
   step implicitly.
@@ -78,8 +81,9 @@ GitHub-specific retry logic.
   tasks automatically from another step. Direct moves and automatic workflow
   transitions still queue in the destination when it is full.
 - The workflow step settings page explains that `Pull from` controls automatic
-  feeder intake. Its help text also explains destination-queue priority and
-  does not depend on hover on touch devices.
+  feeder intake through an info tooltip. Its help text also explains
+  destination-queue priority and is available by tap or focus on touch
+  devices.
 - A queued move processes the source step's `on_exit` behavior immediately.
   The destination step's `on_enter` behavior runs only after admission.
 - Ephemeral tasks remain outside workflow WIP and queue behavior.
@@ -318,9 +322,9 @@ promotion.
 - **GIVEN** a step with no `Pull from` selection, **WHEN** a direct or automatic
   transition targets that full step, **THEN** the task still queues in the
   destination and no feeder is required.
-- **GIVEN** a user edits a workflow step, **WHEN** the user reads the
-  `Pull from` control, **THEN** visible help identifies it as optional automatic
-  intake and explains destination-queue priority.
+- **GIVEN** a user edits a workflow step, **WHEN** the user opens the
+  `Pull from` info tooltip, **THEN** the help identifies it as optional
+  automatic intake and explains destination-queue priority.
 - **GIVEN** two tasks queued in `Test`, **WHEN** capacity opens, **THEN** Kandev
   admits the first destination-resident queued task before it pulls work from a
   configured feeder.
@@ -332,12 +336,12 @@ promotion.
 - **GIVEN** a limited Kanban step with admitted and queued tasks, **WHEN** a user
   views the board, **THEN** the column shows separate active and queued areas
   with the queued cards in promotion order.
-- **GIVEN** a destination-resident queued task, **WHEN** a fine-pointer user
-  hovers over its sidebar `Queued` chip, **THEN** the disclosure shows its
-  one-based position, total queue size, and destination step.
+- **GIVEN** a destination-resident queued task, **WHEN** a user hovers over or
+  focuses its sidebar queue icon, **THEN** the tooltip shows its one-based
+  position, total queue size, and destination step.
 - **GIVEN** the same task on a touch viewport, **WHEN** the task appears in the
-  mobile task switcher, **THEN** the chip shows the same position without a
-  hover-only action or horizontal page overflow.
+  mobile task switcher, **THEN** focusing or tapping the queue icon exposes the
+  same tooltip without a hover-only action or horizontal page overflow.
 - **GIVEN** an auto-start `Review` step with a WIP limit and a `pull_from_step_id`
   feeder that has capacity, **WHEN** a GitHub review watch creates a task that is
   placed in the feeder and immediately promoted into `Review` during the same

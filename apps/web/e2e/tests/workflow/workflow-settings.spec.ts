@@ -320,14 +320,23 @@ test.describe("Workflow settings", () => {
     await expect(card).toBeVisible();
     await page.stepNodeByName(card, "Review").click();
 
-    await expect(card).toContainText(
+    const guidanceHelp = card.getByTestId(`${reviewStep.id}-pull-from-guidance-help`);
+    await expect(guidanceHelp).toBeVisible();
+    await guidanceHelp.hover();
+    const guidanceTooltip = testPage.getByRole("tooltip");
+    await expect(guidanceTooltip).toContainText(
       "No feeder is selected. Direct moves and automatic transitions queue in this destination",
     );
+    await expect(guidanceTooltip).toContainText(
+      "WIP limits active work, not visibility. Overflow remains on the board until capacity opens",
+    );
+    await testPage.keyboard.press("Escape");
 
     await card.getByTestId(`${reviewStep.id}-wip-limit-input`).fill("2");
     await card.getByTestId(`${reviewStep.id}-pull-from-step-select`).click();
     await testPage.getByRole("option", { name: "Backlog" }).click();
-    await expect(card).toContainText(
+    await guidanceHelp.hover();
+    await expect(guidanceTooltip).toContainText(
       "Optional automatic feeder intake. Destination-queued tasks are admitted first",
     );
 

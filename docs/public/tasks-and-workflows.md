@@ -282,7 +282,8 @@ tasks do not start sessions or consume destination WIP until promoted. If you
 manually move a task, or an automatic transition sends it to a full limited
 step, it queues in that destination instead of using the feeder. The Kanban
 column shows the admitted count and limit, then a **Queued** section. The task
-sidebar shows the task's position in that destination queue. If the configured
+sidebar shows a queue icon whose tooltip gives the task's position in that
+destination queue. If the configured
 feeder is also full, creation returns a conflict. Ephemeral tasks are not
 counted.
 

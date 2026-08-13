@@ -164,7 +164,7 @@ test.describe("Workflow settings on mobile", () => {
     expect(hasDocumentOverflow).toBe(false);
   });
 
-  test("shows optional feeder guidance beside the WIP controls", async ({
+  test("shows optional feeder guidance from the WIP info tooltip", async ({
     testPage,
     apiClient,
     seedData,
@@ -178,21 +178,25 @@ test.describe("Workflow settings on mobile", () => {
     const card = await page.findWorkflowCard("Mobile WIP Guidance");
     await page.selectStep(card, "Review", true);
 
-    const guidance = card.getByText(
+    const guidanceHelp = card.getByTestId(`${reviewStep.id}-pull-from-guidance-help`);
+    await expect(guidanceHelp).toBeVisible();
+    await guidanceHelp.tap();
+    const guidanceTooltip = testPage.getByRole("tooltip");
+    await expect(guidanceTooltip).toContainText(
       "No feeder is selected. Direct moves and automatic transitions queue in this destination",
     );
-    await expect(guidance).toBeVisible();
-    const box = await guidance.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThan(0);
-    expect(box!.x).toBeGreaterThanOrEqual(0);
+    await expect(guidanceTooltip).toContainText(
+      "WIP limits active work, not visibility. Overflow remains on the board until capacity opens",
+    );
+    await testPage.keyboard.press("Escape");
 
     await card.getByTestId(`${reviewStep.id}-pull-from-step-select`).tap();
     await testPage.getByRole("option", { name: "Backlog" }).tap();
-    await expect(card).toContainText(
+    await guidanceHelp.tap();
+    await expect(guidanceTooltip).toContainText(
       "Optional automatic feeder intake. Destination-queued tasks are admitted first",
     );
-    await expect(card).toContainText(
+    await expect(guidanceTooltip).toContainText(
       "Direct moves and automatic transitions queue in the destination",
     );
   });

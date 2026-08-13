@@ -103,8 +103,13 @@ test("moves through the mobile task switcher and shows touch queue status", asyn
     .getByRole("dialog", { name: "Tasks" })
     .getByTestId("sidebar-task-item")
     .filter({ hasText: "Mobile Moved Queue" });
-  await expect(queuedSourceRow.getByTestId("sidebar-task-wip-queue-coarse")).toBeVisible();
-  await expect(queuedSourceRow.getByTestId("sidebar-task-wip-queue-coarse")).toContainText("1/1");
+  const queueStatus = queuedSourceRow.getByTestId("sidebar-task-wip-queue");
+  await expect(queueStatus).toBeVisible();
+  await expect(queueStatus.locator("svg")).toBeVisible();
+  await expect(queueStatus).toHaveAttribute("aria-label", "Position 1 of 1 in Review queue");
+  await queueStatus.focus();
+  await expect(testPage.getByRole("tooltip")).toHaveText("Position 1 of 1 in Review queue");
+  await testPage.keyboard.press("Escape");
 
   const mobile = new MobileKanbanPage(testPage);
   await testPage.goto(`/?workflowId=${workflow.id}`);
@@ -137,7 +142,7 @@ test("moves through the mobile task switcher and shows touch queue status", asyn
       .getByRole("dialog", { name: "Tasks" })
       .getByTestId("sidebar-task-item")
       .filter({ hasText: "Mobile Moved Queue" })
-      .getByTestId("sidebar-task-wip-queue-coarse"),
+      .getByTestId("sidebar-task-wip-queue"),
   ).toHaveCount(0);
   await expect(
     await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

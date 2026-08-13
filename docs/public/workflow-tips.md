@@ -139,9 +139,10 @@ Workflow-level settings include the name and default agent profile. A step can o
 | Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
 
 The Kanban column shows the admitted count and limit, followed by a **Queued**
-section when overflow exists. The task sidebar shows each queued task's
-position in its destination queue. Queued tasks do not start destination entry
-actions or consume WIP until promotion.
+section when overflow exists. The task sidebar shows a queue icon for each
+queued task; hover or focus gives its position in the destination queue.
+Queued tasks do not start destination entry actions or consume WIP until
+promotion.
 
 Pull candidates are selected by board position, then priority, queue time, creation time, and ID. A candidate that cannot be moved is skipped. Pulling runs for every limited step; a feeder is only needed for overflow created outside the destination step.
 

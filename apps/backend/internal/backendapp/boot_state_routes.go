@@ -574,6 +574,8 @@ func mapKanbanStepState(step taskdto.WorkflowStepDTO) map[string]any {
 		"show_in_command_panel": step.ShowInCommandPanel,
 		"agent_profile_id":      nullString(step.AgentProfileID),
 		"stage_type":            nullString(step.StageType),
+		"wip_limit":             step.WIPLimit,
+		"pull_from_step_id":     nullString(step.PullFromStepID),
 	}
 }
 
@@ -606,6 +608,9 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"primarySessionState":         task.PrimarySessionState,
 		"primarySessionPendingAction": task.PrimarySessionPendingAction,
 		"taskPendingAction":           task.TaskPendingAction,
+		"wipAdmitted":                 task.WIPAdmitted,
+		"queuedForStepId":             nullString(task.QueuedForStepID),
+		"queuedAt":                    task.QueuedAt,
 		"interrupted":                 task.Interrupted,
 		"statusSummary":               task.StatusSummary,
 		"sessionCount":                task.SessionCount,

@@ -70,8 +70,6 @@
   "projects": "Projects",
   "queuedPromptCount_one": "{{count}} queued prompt",
   "queuedPromptCount_other": "{{count}} queued prompts",
-  "wipQueued": "Queued {{position}}/{{total}}",
-  "wipQueuedCompact": "Queued",
   "wipQueuePosition": "Position {{position}} of {{total}} in {{step}} queue",
   "quickChat": "Quick Chat",
   "quickTerminal": "Quick terminal",
