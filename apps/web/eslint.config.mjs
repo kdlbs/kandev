@@ -98,14 +98,16 @@ const eslintConfig = defineConfig([
       "sonarjs/no-duplicate-string": "off",
     },
   },
-  // Unconditional wall-clock sleeps in E2E specs. An ERROR, but only on
-  // `e2eSleepGuardFiles` — the directories the causal-waits conversion has
-  // already driven to zero. `pnpm lint` is `eslint --max-warnings 0`, so a
-  // repo-wide registration at ANY severity (warning included) would fail the
-  // build on the ~126 sleeps that predate the rule. Everything not listed is
-  // covered by `scripts/check-new-e2e-sleeps.mjs`, which judges only the lines a
-  // change added, so new sleeps are caught everywhere without a treadmill.
-  // Append a directory here when it reaches zero; see the list's own comment.
+  // Unconditional wall-clock sleeps in E2E specs. An ERROR across all of `e2e/`.
+  // This was a narrow allowlist while the causal-waits conversion was running —
+  // `pnpm lint` is `eslint --max-warnings 0`, so a repo-wide registration at ANY
+  // severity (warning included) would have failed the build on the sleeps that
+  // predated the rule and blocked every unrelated PR. The conversion reached
+  // zero, so `e2eSleepGuardFiles` has graduated to the whole tree and this now
+  // fails only a PR that ADDS a sleep.
+  // `scripts/check-new-e2e-sleeps.mjs` remains as the second line of defence: it
+  // judges only the lines a change added, and covers anything `ignores` carves
+  // out. Never narrow the guard to make a build pass; see the list's own comment.
   {
     files: e2eSleepGuardFiles,
     // `causal-waits.ts` implements both banned forms — see SLEEP_EXEMPT_FILES.
