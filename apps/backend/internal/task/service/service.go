@@ -260,6 +260,7 @@ type Repos struct {
 	Reviews           repository.ReviewRepository
 	ResourceCleanups  repository.TaskResourceCleanupRepository
 	StatusSummaries   repository.TaskStatusSummaryRepository
+	SubagentContexts  repository.SubagentContextRepository
 }
 
 // Service provides task business logic
@@ -282,6 +283,7 @@ type Service struct {
 	reviews                     repository.ReviewRepository
 	resourceCleanups            repository.TaskResourceCleanupRepository
 	statusSummaries             repository.TaskStatusSummaryRepository
+	subagentContexts            repository.SubagentContextRepository
 	attachmentSvc               *AttachmentService
 	statusSummaryPRs            TaskStatusSummaryPRReader
 	queuedPromptCounter         QueuedPromptCounter
@@ -411,6 +413,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		reviews:               repos.Reviews,
 		resourceCleanups:      repos.ResourceCleanups,
 		statusSummaries:       repos.StatusSummaries,
+		subagentContexts:      repos.SubagentContexts,
 		eventBus:              eventBus,
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
