@@ -114,7 +114,8 @@ Kandev on a remote VM can identify an address to open from another machine.
 The banner lists IPv4 addresses before IPv6 addresses, omits link-local addresses, and
 wraps IPv6 hosts in brackets. Network-address discovery is best effort: if the host
 cannot enumerate its interfaces, the launcher still starts and prints the localhost
-URL.
+URL. When `KANDEV_SERVER_HOST` restricts the backend to loopback or specific addresses,
+the banner omits unreachable interface addresses and only advertises matching binds.
 
 ### Backend restart from the UI still rebuilds
 
@@ -222,3 +223,5 @@ them: building and serving the web app (Vite), the published npm shim, and repo 
   the address is rendered as `http://[<address>]:<port>`.
 - **GIVEN** interface enumeration returns an error, **WHEN** the launcher starts,
   **THEN** it continues startup and prints the localhost URL without a `network:` line.
+- **GIVEN** `KANDEV_SERVER_HOST` is a loopback or specific bind address, **WHEN** the
+  startup banner is printed, **THEN** it omits unrelated network addresses.

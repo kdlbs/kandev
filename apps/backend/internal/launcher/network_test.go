@@ -11,6 +11,7 @@ import (
 )
 
 func TestLogStartupPrintsNetworkAddress(t *testing.T) {
+	t.Setenv("KANDEV_SERVER_HOST", "")
 	oldNetworkInterfaces := networkInterfacesFn
 	oldNetworkInterfaceAddrs := networkInterfaceAddrsFn
 	t.Cleanup(func() {
@@ -80,7 +81,33 @@ func TestNetworkURLsForPortFormatsIPv6(t *testing.T) {
 	}
 }
 
+func TestNetworkAddressesForBindHost(t *testing.T) {
+	addresses := []string{"192.168.1.34", "100.94.173.104", "2001:db8::1"}
+	tests := []struct {
+		name     string
+		bindHost string
+		want     []string
+	}{
+		{name: "wildcard default", bindHost: "", want: addresses},
+		{name: "ipv4 wildcard", bindHost: "0.0.0.0", want: addresses},
+		{name: "ipv6 wildcard", bindHost: "::", want: addresses},
+		{name: "loopback", bindHost: "127.0.0.1"},
+		{name: "specific address", bindHost: "192.168.1.34", want: []string{"192.168.1.34"}},
+		{name: "multiple addresses", bindHost: "127.0.0.1,100.94.173.104", want: []string{"100.94.173.104"}},
+		{name: "hostname loopback", bindHost: "localhost"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := networkAddressesForBindHost(addresses, test.bindHost)
+			if strings.Join(got, ",") != strings.Join(test.want, ",") {
+				t.Fatalf("networkAddressesForBindHost(%q) = %v, want %v", test.bindHost, got, test.want)
+			}
+		})
+	}
+}
+
 func TestLogStartupKeepsLocalhostWhenNetworkDiscoveryFails(t *testing.T) {
+	t.Setenv("KANDEV_SERVER_HOST", "")
 	oldNetworkInterfaces := networkInterfacesFn
 	oldNetworkInterfaceAddrs := networkInterfaceAddrsFn
 	t.Cleanup(func() {
@@ -102,6 +129,32 @@ func TestLogStartupKeepsLocalhostWhenNetworkDiscoveryFails(t *testing.T) {
 	}
 	if strings.Contains(output, "network:") {
 		t.Fatalf("startup output = %q, want no network lines", output)
+	}
+}
+
+func TestLogStartupSuppressesNetworkAddressesForLoopbackBind(t *testing.T) {
+	oldNetworkInterfaces := networkInterfacesFn
+	oldNetworkInterfaceAddrs := networkInterfaceAddrsFn
+	t.Cleanup(func() {
+		networkInterfacesFn = oldNetworkInterfaces
+		networkInterfaceAddrsFn = oldNetworkInterfaceAddrs
+	})
+	t.Setenv("KANDEV_SERVER_HOST", "127.0.0.1")
+	networkInterfacesFn = func() ([]net.Interface, error) {
+		return []net.Interface{{Name: "eth0"}}, nil
+	}
+	networkInterfaceAddrsFn = func(net.Interface) ([]net.Addr, error) {
+		return []net.Addr{testNetworkAddr(t, "192.168.1.34/22")}, nil
+	}
+
+	output := captureLauncherStdout(t, func() {
+		logStartup("test", portConfig{
+			BackendPort: 38429,
+			BackendURL:  "http://localhost:38429",
+		}, "", "")
+	})
+	if strings.Contains(output, "network:") {
+		t.Fatalf("startup output = %q, want no network lines for loopback bind", output)
 	}
 }
 

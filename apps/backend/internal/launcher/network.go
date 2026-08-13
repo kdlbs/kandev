@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -67,4 +68,36 @@ func networkURLsForPort(port int, hosts []string) []string {
 		urls = append(urls, fmt.Sprintf("http://%s", net.JoinHostPort(host, strconv.Itoa(port))))
 	}
 	return urls
+}
+
+func networkAddressesForBindHost(addresses []string, bindHost string) []string {
+	if strings.TrimSpace(bindHost) == "" {
+		return addresses
+	}
+
+	allowed := make(map[string]struct{})
+	for _, rawHost := range strings.Split(bindHost, ",") {
+		host := strings.TrimSpace(rawHost)
+		if host == "" {
+			continue
+		}
+		ip := net.ParseIP(host)
+		if ip == nil {
+			continue
+		}
+		if ip.IsUnspecified() {
+			return addresses
+		}
+		if !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
+			allowed[ip.String()] = struct{}{}
+		}
+	}
+
+	filtered := make([]string, 0, len(allowed))
+	for _, address := range addresses {
+		if _, ok := allowed[address]; ok {
+			filtered = append(filtered, address)
+		}
+	}
+	return filtered
 }

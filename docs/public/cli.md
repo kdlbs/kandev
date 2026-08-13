@@ -225,7 +225,7 @@ Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `statu
 
 There is no separate web-server port in an installed release: the backend serves embedded assets. For the `run`, `start`, and development launcher flows, if `--port`, `KANDEV_BACKEND_PORT`, or `KANDEV_PORT` specifies a port, the launcher checks it before declaring the backend ready, does not substitute another one, and fails startup if the configured listen address cannot bind it. `kandev service install --port` remains the separate installer behavior described above.
 
-The launcher prints `http://localhost:<port>`. When it can enumerate non-loopback interfaces, it also prints `network:` URLs for each unique LAN or Tailscale address on the same port. IPv6 addresses are shown in brackets. These lines are informational and are omitted if interface discovery is unavailable.
+The launcher prints `http://localhost:<port>`. When it can enumerate non-loopback interfaces, it also prints `network:` URLs for each unique LAN or Tailscale address on the same port. IPv6 addresses are shown in brackets. If `KANDEV_SERVER_HOST` restricts the listener, the launcher only prints matching addresses. These lines are informational and are omitted if interface discovery is unavailable.
 
 The backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. Bind it to loopback unless remote access is deliberately protected:
 

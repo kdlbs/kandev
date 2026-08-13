@@ -18,6 +18,7 @@ Implement the startup-banner contract added to the Go dev-launcher spec.
   non-link-local host address on the backend port.
 - IPv4 addresses appear before IPv6 addresses, and IPv6 URLs use brackets.
 - Interface enumeration errors do not prevent startup or remove the localhost URL.
+- Explicit loopback or specific bind hosts do not advertise unrelated interfaces.
 - Internal Vite and agentctl ports remain absent from the network-address lines.
 
 ## Verification
@@ -64,6 +65,9 @@ platform-specific risk, and synchronize this task and `plan.md` status.
 - `cd apps/backend && go test -run 'Test(ListHostNetworkAddresses|NetworkURLsForPort|LogStartup)' ./internal/launcher` —
   passed, 4 tests.
 - `cd apps/backend && go test ./internal/launcher` — passed, 186 tests.
+- `cd apps/backend && go test -run TestLogStartupSuppressesNetworkAddressesForLoopbackBind ./internal/launcher` —
+  failed before the bind-host fix, then passed after the fix.
+- `cd apps/backend && go test -run 'Test(NetworkAddressesForBindHost|LogStartupSuppressesNetworkAddressesForLoopbackBind)' ./internal/launcher` — passed.
 - `rtk git diff --check` — passed.
 - `gofmt -w apps/backend/internal/launcher/network.go apps/backend/internal/launcher/network_test.go apps/backend/internal/launcher/start.go` — completed successfully.
 - `node --test scripts/validate-public-docs.test.mjs` — passed, 61 tests.

@@ -23,7 +23,7 @@ agentctl ports.
 
 - Add `apps/backend/internal/launcher/network.go` with best-effort enumeration of
   non-loopback host addresses, deduplication, link-local filtering, IPv4-first
-  ordering, and IPv6 URL formatting.
+  ordering, IPv6 URL formatting, and filtering against an explicit bind host.
 - Update `apps/backend/internal/launcher/start.go` so `logStartup` prints the
   filtered network URLs for `portConfig.BackendPort` between the localhost URL and
   the existing MCP/DB/log-level lines.
@@ -59,6 +59,9 @@ agentctl ports.
 - `cd apps/backend && go test -run 'Test(ListHostNetworkAddresses|NetworkURLsForPort|LogStartup)' ./internal/launcher` —
   passed, 4 tests.
 - `cd apps/backend && go test ./internal/launcher` — passed, 186 tests.
+- `cd apps/backend && go test -run TestLogStartupSuppressesNetworkAddressesForLoopbackBind ./internal/launcher` —
+  failed before the fix, then passed after bind-host filtering was added.
+- `cd apps/backend && go test -run 'Test(NetworkAddressesForBindHost|LogStartupSuppressesNetworkAddressesForLoopbackBind)' ./internal/launcher` — passed.
 - `rtk git diff --check` — passed.
 - `node --test scripts/validate-public-docs.test.mjs` — passed, 61 tests.
 - `node scripts/validate-public-docs.mjs` — passed, 41 published docs pages.

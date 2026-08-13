@@ -134,7 +134,8 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 func logStartup(header string, ports portConfig, dbPath, logLevel string) {
 	fmt.Println("[kandev] " + header)
 	fmt.Println("[kandev] url:", ports.BackendURL)
-	for _, url := range networkURLsForPort(ports.BackendPort, listHostNetworkAddresses()) {
+	hosts := networkAddressesForBindHost(listHostNetworkAddresses(), os.Getenv("KANDEV_SERVER_HOST"))
+	for _, url := range networkURLsForPort(ports.BackendPort, hosts) {
 		fmt.Println("[kandev]   network:", url)
 	}
 	fmt.Println("[kandev] mcp:", ports.BackendURL+"/mcp")
