@@ -207,6 +207,84 @@ storage reporting are filtered by the process-scoped ownership label.
 
 The SSH executor specifically has no mock controller. Tests use a real Docker-hosted sshd as the remote target, and fault-injection (host-key rotation, dropped traffic, killed pids) is done by operating on the container itself.
 
+## Waiting: name the cause, don't budget for the effect
+
+The suite's dominant flake shape is an assertion on a rendered consequence with
+a hand-picked budget:
+
+```ts
+await expect(button).toBeEnabled({ timeout: 30_000 }); // why 30s? nobody knows
+```
+
+The element renders fine. It never leaves its pending state inside the budget
+because the backend round trip that would flip it was late. Raising the number
+buys time, it does not remove the race, and when it does fail it tells you
+nothing about what was missing. Three of the four flakes measured in one recent
+green CI run were exactly this, with budgets of 5s, 10s and 30s.
+
+`helpers/causal-waits.ts` has one primitive per transport the app actually uses.
+Arm the wait **before** the action, await it after, then assert the UI with its
+default timeout:
+
+```ts
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
+
+// HTTP: the branch chip cannot enable until this read returns.
+const branchesLoaded = waitForHttp(page, "GET", /^\/api\/v1\/workspaces\/[^/]+\/branches$/);
+await createRepositoryButton.click();
+await branchesLoaded;
+await expect(branchSelector).toBeEnabled(); // no budget: only a render is left
+
+// WS notification (server push).
+const ws = watchWs(page); // MUST be called before page.goto()
+const processed = ws.waitForEvent("office.run.processed", {
+  where: (payload) => payload.task_id === task.id,
+});
+await apiClient.updateRunStatus(runId, { status: "cancelled" });
+await processed;
+
+// WS request/response round trip, correlated by frame id.
+const stamped = ws.waitForResponse("task.plan.implementation_started");
+await implementButton.tap();
+expect((await stamped).payload.implementation_started_session_id).toBe(sessionId);
+```
+
+A fourth case, "the backend has reached state X", needs no primitive:
+`expect.poll(() => apiClient.getX(id))` already reads the backend directly
+instead of through the DOM.
+
+Three things that are easy to get wrong:
+
+- **`watchWs(page)` must be called before the first `page.goto()`.** Playwright
+  only reports sockets opened after the listener is attached, so a watcher
+  created once the app is running observes nothing and every wait times out.
+  It survives `page.reload()`.
+- **Confirm the causal chain, don't infer it from the code.** Attach a throwaway
+  `page.on("response")` / `page.on("websocket")` logger and run the spec once.
+  Two of the three chains behind this section's example specs were not what a
+  careful reading of the components predicted: the branch list comes from the
+  _workspace_-scoped route, not the repository-scoped one, and a plan panel that
+  already received `task.plan.created` over WS never fetches on mount at all.
+- **When two transports can deliver the same fact, there is no single frame to
+  wait for.** Wait on the _data_ precondition instead (assert the plan content
+  is rendered before asserting the button that depends on it) rather than
+  picking one transport and hoping it wins the race.
+
+Use `predicate` when several requests share a route and you need the one
+carrying a specific payload. That is strictly better than route matching,
+because an unrelated refetch landing first cannot satisfy it:
+
+```ts
+const cancelledDelivered = waitForHttp(page, "GET", COMMENTS_PATH, {
+  predicate: async (response) =>
+    ((await response.json()) as CommentsBody).comments.some((c) => c.runStatus === "cancelled"),
+});
+```
+
+Converted examples to copy from: `tests/task/create-task-new-local-repository.spec.ts`
+(HTTP), `tests/task/mobile-plan-toolbar-implement.spec.ts` (both WS waits), and
+`tests/office/comment-run-status.spec.ts` (HTTP with a body predicate).
+
 ## Adding a new spec
 
 1. Pick a directory under `tests/` (or create one for a new feature).
@@ -216,6 +294,7 @@ The SSH executor specifically has no mock controller. Tests use a real Docker-ho
    - `import { test, expect } from "../../fixtures/docker-test-base";` for Docker executor tests.
    - `import { test, expect } from "../../fixtures/ssh-test-base";` for SSH executor tests.
 4. Use `getByTestId` for selectors. If the surface you're testing lacks stable testids, add them — drift-prone CSS / text selectors are not worth the maintenance cost.
+5. Wait on causal signals, not timeout budgets — see [Waiting](#waiting-name-the-cause-dont-budget-for-the-effect). Reach for `{ timeout: N }` only when you can say what the number is for.
 
 ## CI
 
