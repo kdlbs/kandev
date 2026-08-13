@@ -102,6 +102,7 @@ func buildContainerCreateInstanceRequest(
 		AutoStart:           false,
 		McpServers:          config.McpServers,
 		SessionID:           config.SessionID,
+		TaskID:              config.TaskID,
 		DisableAskQuestion:  disableAskQuestion,
 		AssumeMcpSse:        assumeMcpSse,
 		AssumeMcpHttp:       assumeMcpHttp,
