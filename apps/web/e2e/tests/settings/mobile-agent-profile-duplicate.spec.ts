@@ -31,9 +31,10 @@ test.describe("Mobile agent profile duplicate", () => {
 
       const row = testPage.getByTestId("agent-profile-row").filter({ hasText: profile.name });
       await expect(row).toBeVisible({ timeout: 15_000 });
+      await expect(row.getByTestId(`profile-actions-inline-${profile.id}`)).toHaveCount(0);
       // The row's actions trigger exposes a touch-sized hitbox (>= 44px).
       // Poll for the box: layout can settle a frame after visibility.
-      const trigger = row.getByRole("button", { name: "Profile actions" });
+      const trigger = row.getByTestId(`profile-actions-menu-${profile.id}`);
       await expect
         .poll(
           async () => {

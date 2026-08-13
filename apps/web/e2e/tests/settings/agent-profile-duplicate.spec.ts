@@ -3,7 +3,8 @@ import { test, expect } from "../../fixtures/test-base";
 /**
  * Verifies the agent profile duplicate flow:
  *
- * - The /settings/agents profile list shows a Duplicate button per row.
+ * - A full-desktop /settings/agents profile row shows inline Duplicate/Delete
+ *   buttons.
  * - Clicking it creates a "<source> Copy" profile that appears in the list
  *   without a page reload, copying the source's model.
  * - The copy is an independent profile with its own settings page.
@@ -24,12 +25,17 @@ test.describe("Agent profile duplicate", () => {
     try {
       await testPage.goto("/settings/agents");
 
-      // The per-row Duplicate action lives in the row's actions dropdown.
+      // Full desktop exposes the row actions directly, without the overflow menu.
       const row = testPage.getByTestId("agent-profile-row").filter({ hasText: profile.name });
       await expect(row).toBeVisible({ timeout: 15_000 });
-      await row.getByRole("button", { name: "Profile actions" }).click();
-      const duplicate = testPage.getByTestId(`duplicate-profile-${profile.id}`);
+      await expect(row.getByTestId(`profile-actions-inline-${profile.id}`)).toBeVisible();
+      await expect(row.getByTestId(`profile-actions-menu-${profile.id}`)).toHaveCount(0);
+      const duplicate = row.getByTestId(`duplicate-profile-inline-${profile.id}`);
       await expect(duplicate).toBeVisible({ timeout: 15_000 });
+      await expect(duplicate).toHaveAccessibleName("Duplicate");
+      await expect(row.getByTestId(`delete-profile-inline-${profile.id}`)).toHaveAccessibleName(
+        "Delete",
+      );
       await duplicate.click();
 
       // Backend state: the copy is a new row with the source's model. The
@@ -73,6 +79,34 @@ test.describe("Agent profile duplicate", () => {
         await apiClient.deleteAgentProfile(copy.id, true).catch(() => {});
       }
     }
+  });
+
+  test("keeps profile actions in the overflow menu at tablet width", async ({
+    tabletTestPage,
+    apiClient,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    const profile = agent.profiles[0];
+
+    await tabletTestPage.goto("/settings/agents");
+
+    await expect
+      .poll(
+        async () =>
+          tabletTestPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+
+    const row = tabletTestPage.getByTestId("agent-profile-row").filter({ hasText: profile.name });
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await expect(row.getByTestId(`profile-actions-inline-${profile.id}`)).toHaveCount(0);
+    const trigger = row.getByTestId(`profile-actions-menu-${profile.id}`);
+    await expect(trigger).toBeVisible();
+    await trigger.tap();
+    await expect(tabletTestPage.getByTestId(`duplicate-profile-${profile.id}`)).toBeVisible();
+    await expect(tabletTestPage.getByTestId(`delete-profile-${profile.id}`)).toBeVisible();
   });
 
   test("duplicates from the profile page header and navigates to the copy", async ({

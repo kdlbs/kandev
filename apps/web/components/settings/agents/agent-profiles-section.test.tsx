@@ -9,16 +9,20 @@ const mocks = vi.hoisted(() => ({
   duplicateAgentProfileAction: vi.fn(),
   toast: vi.fn(),
   routerPush: vi.fn(),
+  responsive: { isFullDesktop: false },
 }));
 
 function profile(id: string, name: string): AgentProfile {
   return { id, name, agentDisplayName: "Claude Code" } as AgentProfile;
 }
 
+const ALPHA_PROFILE_NAME = "Alpha";
+const PROFILE_ROW_SELECTOR = '[data-testid="agent-profile-row"]';
+
 const AGENT = {
   id: "agent-1",
   name: "claude",
-  profiles: [profile("p-1", "Alpha"), profile("p-2", "Beta")],
+  profiles: [profile("p-1", ALPHA_PROFILE_NAME), profile("p-2", "Beta")],
 } as unknown as Agent;
 
 const EMPTY_AGENT = { ...AGENT, profiles: [] } as unknown as Agent;
@@ -59,6 +63,10 @@ vi.mock("@/components/toast-provider", () => ({
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
   usePathname: () => "/settings/agents",
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => mocks.responsive,
 }));
 
 vi.mock("@/components/routing/app-link", () => ({
@@ -115,9 +123,10 @@ function renderRows() {
 }
 
 function confirmDeleteFor(name: string) {
-  const row = screen.getByLabelText(name).closest('[data-testid="agent-profile-row"]');
+  const row = screen.getByLabelText(name).closest(PROFILE_ROW_SELECTOR);
   if (!row) throw new Error(`no row for ${name}`);
-  fireEvent.click(row.querySelector('[data-testid="delete-item"]')!);
+  const profileId = name === "Alpha" ? "p-1" : "p-2";
+  fireEvent.click(row.querySelector(`[data-testid="delete-profile-${profileId}"]`)!);
   fireEvent.click(row.querySelector('[data-testid="confirm-delete"]')!);
 }
 
@@ -173,11 +182,13 @@ describe("ProfileRow deletion", () => {
 
 describe("ProfileRow duplicate", () => {
   beforeEach(() => {
+    mocks.responsive.isFullDesktop = false;
     storeState = {
       settingsAgents: { items: [{ ...AGENT, profiles: [...AGENT.profiles] }] },
       agentProfiles: { items: [] },
     };
   });
+  afterEach(() => cleanup());
 
   it("calls the duplicate action with the profile id", async () => {
     mocks.duplicateAgentProfileAction.mockResolvedValue({
@@ -186,11 +197,65 @@ describe("ProfileRow duplicate", () => {
     } as unknown as AgentProfile);
     renderRows();
 
-    const row = screen.getByLabelText("Alpha").closest('[data-testid="agent-profile-row"]');
-    if (!row) throw new Error("no row for Alpha");
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
     fireEvent.click(row.querySelector('[data-testid="duplicate-profile-p-1"]')!);
 
     await waitFor(() => expect(mocks.duplicateAgentProfileAction).toHaveBeenCalledWith("p-1"));
+  });
+});
+
+describe("ProfileRow responsive actions", () => {
+  beforeEach(() => {
+    storeState = {
+      settingsAgents: { items: [{ ...AGENT, profiles: [...AGENT.profiles] }] },
+      agentProfiles: { items: [] },
+    };
+    mocks.responsive.isFullDesktop = false;
+    vi.clearAllMocks();
+  });
+  afterEach(() => cleanup());
+
+  it("renders labeled duplicate and delete actions inline on full desktop", () => {
+    mocks.responsive.isFullDesktop = true;
+    render(<ProfileRow agent={AGENT} profile={AGENT.profiles[0]} />);
+
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
+    expect(row.querySelector('[data-testid="profile-actions-inline-p-1"]')).not.toBeNull();
+    expect(row.querySelector('[data-testid="duplicate-profile-inline-p-1"]')).not.toBeNull();
+    expect(row.querySelector('[data-testid="delete-profile-inline-p-1"]')).not.toBeNull();
+    expect(row.querySelector('[data-testid="profile-actions-menu-p-1"]')).toBeNull();
+  });
+
+  it("keeps duplicate and delete in the overflow menu below full desktop", () => {
+    render(<ProfileRow agent={AGENT} profile={AGENT.profiles[0]} />);
+
+    const row = screen.getByLabelText(ALPHA_PROFILE_NAME).closest(PROFILE_ROW_SELECTOR);
+    if (!row) throw new Error(`no row for ${ALPHA_PROFILE_NAME}`);
+    expect(row.querySelector('[data-testid="profile-actions-inline-p-1"]')).toBeNull();
+    expect(row.querySelector('[data-testid="profile-actions-menu-p-1"]')).not.toBeNull();
+    expect(row.querySelector('[data-testid="duplicate-profile-p-1"]')).not.toBeNull();
+    expect(row.querySelector('[data-testid="delete-profile-p-1"]')).not.toBeNull();
+  });
+
+  it("wires inline duplicate and delete to the shared row behavior", async () => {
+    mocks.responsive.isFullDesktop = true;
+    mocks.duplicateAgentProfileAction.mockResolvedValue({
+      id: "p-3",
+      name: "Alpha Copy",
+    } as unknown as AgentProfile);
+    mocks.deleteAgentProfileAction.mockResolvedValue({ status: "ok" });
+    render(<ProfileRow agent={AGENT} profile={AGENT.profiles[0]} />);
+
+    const row = screen.getByLabelText("Alpha").closest('[data-testid="agent-profile-row"]');
+    if (!row) throw new Error("no row for Alpha");
+    fireEvent.click(row.querySelector('[data-testid="duplicate-profile-inline-p-1"]')!);
+    fireEvent.click(row.querySelector('[data-testid="delete-profile-inline-p-1"]')!);
+    fireEvent.click(row.querySelector('[data-testid="confirm-delete"]')!);
+
+    await waitFor(() => expect(mocks.duplicateAgentProfileAction).toHaveBeenCalledWith("p-1"));
+    await waitFor(() => expect(mocks.deleteAgentProfileAction).toHaveBeenCalledWith("p-1"));
   });
 });
 
