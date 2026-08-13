@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { dwell } from "../../helpers/causal-waits";
 
 test.describe("Real-time dashboard updates", () => {
   test("dashboard metrics update after task creation", async ({
@@ -77,11 +78,12 @@ test.describe("Real-time dashboard updates", () => {
       workflow_id: otherWf.id,
     });
 
-    // deliberate-sleep(negative-assertion): the assertion below is that the
-    // cross-workspace event triggers NO dashboard refetch. There is no event
-    // for a fetch that must never happen, so the only way to give a regression
-    // room to occur is to wait past the window in which it would have fired.
-    await testPage.waitForTimeout(3000);
+    await dwell(
+      testPage,
+      3000,
+      "negative-assertion",
+      "the assertion below is that a cross-workspace event triggers no dashboard refetch; a fetch that must never happen has no event, so a regression needs the window in which it would have fired to elapse",
+    );
 
     // No additional dashboard fetches should have occurred after the event.
     const newFetches = fetchTimes.length - baselineCount;

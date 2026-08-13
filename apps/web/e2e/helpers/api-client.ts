@@ -39,6 +39,7 @@ import type {
   SSHTestResult,
 } from "../../lib/types/http-ssh";
 import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
+import { dwell } from "./causal-waits";
 
 // --- GitHub Mock Types ---
 
@@ -2398,7 +2399,11 @@ export class ApiClient {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (await this.integrationReportsHealthy(integration, workspaceId)) return;
-      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      await dwell(
+        100,
+        "poll-interval",
+        "sampling interval for the auth-health loop above; this client has no Page, and the 90s health poller updates the record without publishing anything it can subscribe to",
+      );
     }
     throw new Error(`${integration} config never reported lastOk: true within ${timeoutMs}ms`);
   }

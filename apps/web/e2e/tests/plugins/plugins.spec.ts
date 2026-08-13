@@ -49,6 +49,7 @@ import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
+import { dwell } from "../../helpers/causal-waits";
 
 const PLUGIN_ID = "kandev-plugin-e2e";
 const NAV_ITEM_ID = "e2e-hello";
@@ -578,7 +579,12 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     // every .error, so a polling plugin would file an Error-level backend log
     // entry per cycle. The report is scheduled in a microtask and sent async,
     // so give it a real chance to fire before asserting it never did.
-    await testPage.waitForTimeout(500);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "the report is scheduled in a microtask and sent async, and the assertion is that it never fires; a request that must not happen has no event, so it needs a real chance to arrive",
+    );
     expect(reportRequests).toEqual([]);
 
     // Attribution goes to the console instead, matching every other plugin

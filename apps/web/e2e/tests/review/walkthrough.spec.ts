@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -419,7 +420,12 @@ test.describe("Code walkthrough", () => {
     const reviewProgress = reviewDialog.getByText(/^0 of \d+ files reviewed$/);
     await expect(reviewProgress).toBeVisible({ timeout: 15_000 });
     const initialProgress = await reviewProgress.textContent();
-    await testPage.waitForTimeout(600);
+    await dwell(
+      testPage,
+      600,
+      "negative-assertion",
+      "asserts the walkthrough behind the dialog never scrolls the review or advances its progress; both checks are absences, so they need the window in which a stray scroll or auto-review would land to elapse first",
+    );
     await expect(reviewDialog.getByTestId("review-diff-scroll")).toHaveJSProperty("scrollTop", 0);
     await expect(reviewProgress).toHaveText(initialProgress ?? "");
     await expectWalkthroughBehindDialog(testPage, reviewDialog, [

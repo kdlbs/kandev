@@ -6,6 +6,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { waitForStableActiveSession } from "../../helpers/session-store";
+import { dwell } from "../../helpers/causal-waits";
 
 /**
  * Regression: opening / switching to a second agent session in a task that
@@ -172,11 +173,12 @@ test.describe("Session flicker", () => {
     });
 
     await session.sessionTabBySessionId(session2Id).click();
-    // deliberate-sleep(negative-assertion): this is the observation window the
-    // test exists for. It asserts the ABSENCE of sustained oscillation after a
-    // deliberate switch, so it must sample real elapsed time rather than wait
-    // for any single event.
-    await testPage.waitForTimeout(2_500);
+    await dwell(
+      testPage,
+      2_500,
+      "negative-assertion",
+      "the observation window this test exists for: it asserts the absence of sustained oscillation after a deliberate switch, so it has to sample real elapsed time rather than await any single event",
+    );
 
     const activeLog = await testPage.evaluate(
       () => (window as unknown as FlickerWindow).__activeLog__ ?? [],
@@ -253,11 +255,12 @@ test.describe("Session flicker", () => {
     await session.sessionTabBySessionId(session1Id).click();
     await waitForStableActiveSession(testPage, session1Id);
     await session.sessionTabBySessionId(session2Id).click();
-    // deliberate-sleep(negative-assertion): final observation window. The
-    // assertions below are that neither tab was stripped and no session panel
-    // was torn down, which only means something after giving the regression
-    // real time to occur.
-    await testPage.waitForTimeout(1_500);
+    await dwell(
+      testPage,
+      1_500,
+      "negative-assertion",
+      "final observation window; the assertions below are that neither tab was stripped and no session panel was torn down, which only mean something after the regression has had real time to occur",
+    );
 
     // Both tabs must remain present throughout, and the active session's chat
     // must still be visible (dockview keeps inactive panels mounted-but-hidden,

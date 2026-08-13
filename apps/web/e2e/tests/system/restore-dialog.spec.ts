@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 
 async function listBackups(apiClient: { rawRequest: (m: string, p: string) => Promise<Response> }) {
   const res = await apiClient.rawRequest("GET", "/api/v1/system/backups");
@@ -48,7 +49,11 @@ test.describe("Restore snapshot dialog", () => {
         found = true;
         break;
       }
-      await new Promise((r) => setTimeout(r, 250));
+      await dwell(
+        250,
+        "poll-interval",
+        "sampling interval for the backup-list poll above; snapshot creation is backend work read back over HTTP, with no page bound to this loop",
+      );
     }
     expect(found).toBeTruthy();
 

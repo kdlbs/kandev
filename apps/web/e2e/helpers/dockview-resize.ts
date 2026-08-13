@@ -3,10 +3,7 @@ import { computeRightMaxPx, computeSidebarMaxPx } from "../../lib/state/layout-m
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
 import { SessionPage } from "../pages/session-page";
-
-/** Bounding-box info Playwright returns. Re-declared to avoid pulling the
- *  full Locator type just for one shape. */
-type Box = { x: number; y: number; width: number; height: number };
+import { dwell } from "./causal-waits";
 
 export const WIDE_VIEWPORT = { width: 1600, height: 900 };
 
@@ -63,43 +60,6 @@ export async function getDockviewGroupWidthById(page: Page, groupId: string): Pr
     if (!g) throw new Error(`group ${id} not found`);
     return g.width;
   }, groupId);
-}
-
-async function sashBoxAt(page: Page, index: number): Promise<Box> {
-  const sashes = page.locator(".dv-sash");
-  const count = await sashes.count();
-  if (count === 0) throw new Error("no .dv-sash elements found");
-  if (index >= count) {
-    throw new Error(`sash index ${index} out of range (${count} sashes)`);
-  }
-  const box = await sashes.nth(index).boundingBox();
-  if (!box) throw new Error(`sash ${index} has no bounding box`);
-  return box;
-}
-
-/**
- * Drag a horizontal-direction sash (between two columns) by deltaX pixels.
- * sashIndex is the dockview sash order (0 = left-most). Reserved for tests
- * that exercise real pointer motion (double-click smoke tests, etc.); most
- * resize tests should prefer {@link resizeColumnViaSplitview} for stability
- * in headless CI.
- */
-export async function dragHorizontalSash(
-  page: Page,
-  sashIndex: number,
-  deltaX: number,
-  steps = 20,
-): Promise<void> {
-  const box = await sashBoxAt(page, sashIndex);
-  const cx = box.x + box.width / 2;
-  const cy = box.y + box.height / 2;
-  await page.mouse.move(cx, cy);
-  await page.mouse.down();
-  await page.mouse.move(cx + deltaX, cy, { steps });
-  await page.mouse.up();
-  // Give the debounced layout-save 350ms to fire so subsequent reload assertions
-  // see the new width.
-  await page.waitForTimeout(400);
 }
 
 /**
@@ -210,8 +170,17 @@ export async function resizeColumnViaSplitview(
     },
     { col: column, target: targetWidth },
   );
-  // Allow the debounced layout persistence to fire.
-  await page.waitForTimeout(400);
+  // The evaluate above force-flushes via `__persistDockviewLayout__`, but the
+  // ordinary debounced write can still be in flight behind it. Not converted to
+  // an observation of the stored layout: a resize that clamps to the width it
+  // already had writes nothing, and the ~30 call sites include several that
+  // deliberately ask for a clamped width.
+  await dwell(
+    page,
+    400,
+    "product-timer",
+    "the dockview layout persists on a ~350ms debounce in our own code and publishes nothing when it lands, so reload assertions downstream have to be spaced past it",
+  );
   return result;
 }
 

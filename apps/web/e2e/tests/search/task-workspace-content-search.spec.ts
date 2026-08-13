@@ -6,6 +6,7 @@ import { expect, test } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { MODIFIER } from "./shared";
+import { dwell } from "../../helpers/causal-waits";
 
 const SEARCH_TERM = "TaskWorkspaceNeedle";
 const EXTRA_REPOSITORY_NAME = "content-search-extra";
@@ -59,7 +60,12 @@ async function waitForRepositoryGroups({
 
     if (Date.now() >= deadline) break;
     await input.fill("");
-    await page.waitForTimeout(50);
+    await dwell(
+      page,
+      50,
+      "poll-interval",
+      "spacing between retype attempts in the retry loop above; the search input is debounced and the retry exists to re-trigger it, so there is no completion event to await here",
+    );
     await input.fill(query);
   }
 

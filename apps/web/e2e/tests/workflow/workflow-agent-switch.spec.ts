@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { dwell } from "../../helpers/causal-waits";
 
 async function createProfiles(
   apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
@@ -962,10 +963,11 @@ test.describe("Workflow agent profile switching", () => {
       expect(stableSessions.length, "no extra session should spawn within stability window").toBe(
         2,
       );
-      // deliberate-sleep(poll-interval): sampling interval for the stability
-      // window above. The assertion is that no extra session appears during
-      // it, so the loop must keep sampling across real elapsed time.
-      await new Promise((r) => setTimeout(r, 250));
+      await dwell(
+        250,
+        "poll-interval",
+        "sampling interval for the stability window above; the assertion is that no extra session appears during it, so the loop keeps sampling across real elapsed time",
+      );
     }
 
     // Critical assertion: no extra profileA session was spawned after the

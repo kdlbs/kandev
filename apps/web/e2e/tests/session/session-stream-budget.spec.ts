@@ -6,6 +6,7 @@ import {
   summarizeGatewayTraffic,
   type GatewayTrafficFrame,
 } from "../../helpers/ws-traffic";
+import { dwell } from "../../helpers/causal-waits";
 
 const TASK_COUNT = 27;
 const SWITCH_COUNT = 5;
@@ -116,12 +117,12 @@ test.describe("Session stream budget", () => {
       });
     }
 
-    // deliberate-sleep(negative-assertion): a deliberate five-second
-    // observation window after the five task switches, measuring how much
-    // gateway traffic keeps arriving. This is a diagnostic total, not a
-    // compression-dependent correctness threshold, so the window must be real
-    // elapsed time rather than a wait for any particular frame.
-    await testPage.waitForTimeout(5_000);
+    await dwell(
+      testPage,
+      5_000,
+      "negative-assertion",
+      "a deliberate observation window measuring how much gateway traffic keeps arriving after five task switches; it is a diagnostic total rather than a wait for any particular frame, so it has to be real elapsed time",
+    );
 
     const summary = summarizeGatewayTraffic(capture.frames);
     await test.info().attach("gateway-traffic.json", {

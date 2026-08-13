@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -869,8 +870,12 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
 
-    // Wait for initial load
-    await testPage.waitForTimeout(2_000);
+    await dwell(
+      testPage,
+      2_000,
+      "unverified",
+      "pre-existing spacing before the external-git edits below; the panel is already asserted visible above and no timer was identified behind this, so it is labelled as debt rather than given a cause it does not have",
+    );
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -1273,10 +1278,15 @@ test.describe("Git Changes Panel", () => {
 
     const session = await openTaskSession(testPage, "Git Cumulative Test");
 
-    // Wait for the session to fully initialize including base commit capture.
-    // The captureBaseCommit runs async after agent launch, we need it to complete
-    // before making commits so the cumulative diff works correctly.
-    await testPage.waitForTimeout(3_000);
+    // captureBaseCommit runs asynchronously after agent launch and has to finish
+    // before the commits below, or the cumulative diff is computed against the
+    // wrong base.
+    await dwell(
+      testPage,
+      3_000,
+      "product-timer",
+      "captureBaseCommit runs async after agent launch and publishes nothing when it completes, so the commits below have to be spaced past it",
+    );
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -1314,14 +1324,36 @@ test.describe("Git Changes Panel", () => {
     // Click the "Diff" button in the header to open the cumulative diff view
     await session.changes.getByRole("button", { name: "Diff" }).click();
 
-    // Wait for diff viewer to load
-    await testPage.waitForTimeout(2_000);
+    // Assert what the click actually opens. Without this the checks below are
+    // vacuous: the two commit texts were already visible before the click and
+    // never go away, and "No changes" is absent from a page where the diff
+    // never opened at all, so all three passed whether or not the button did
+    // anything. The button calls `addDiffViewerPanel()`, which mounts a
+    // dockview panel with id "diff-viewer" -- it is not the Review dialog, as a
+    // first attempt at this assertion assumed and a run disproved.
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate(() => {
+            type Api = { getPanel: (id: string) => unknown };
+            const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+            return Boolean(api?.getPanel("diff-viewer"));
+          }),
+        { timeout: 15_000, message: "the Diff button never opened the cumulative diff panel" },
+      )
+      .toBe(true);
 
-    // Verify commits are visible (this proves git changes are tracked)
     await expect(session.changes.getByText("Add first line")).toBeVisible({ timeout: 5_000 });
     await expect(session.changes.getByText("Add second line")).toBeVisible({ timeout: 5_000 });
 
-    // The cumulative diff should NOT show "No changes"
+    // The cumulative diff should NOT show "No changes". A negative has no event
+    // to wait on, so it needs the render window to elapse before sampling.
+    await dwell(
+      testPage,
+      2_000,
+      "negative-assertion",
+      'asserts the cumulative diff never renders its empty state; "No changes" not appearing publishes nothing, so the check has to outlast the dialog\'s own load',
+    );
     await expect(testPage.locator("text=No changes")).not.toBeVisible({ timeout: 5_000 });
   });
 

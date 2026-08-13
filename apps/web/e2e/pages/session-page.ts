@@ -1,5 +1,6 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 import { FileTreePage } from "./file-tree-page";
+import { dwell } from "../helpers/causal-waits";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -344,7 +345,12 @@ export class SessionPage {
       if ((await this.readXtermBuffer("passthrough-terminal")).includes(text)) {
         throw new Error(`Expected passthrough terminal NOT to contain "${text}", but it was found`);
       }
-      await this.page.waitForTimeout(200);
+      await dwell(
+        this.page,
+        200,
+        "poll-interval",
+        "sampling interval for the stability window above; the assertion is that the text never appears, so the loop keeps re-reading the buffer across real elapsed time",
+      );
     }
   }
 
@@ -679,7 +685,12 @@ export class SessionPage {
       } catch {
         // Menu was likely detached by a re-render — dismiss and retry
         await this.page.keyboard.press("Escape");
-        await this.page.waitForTimeout(500);
+        await dwell(
+          this.page,
+          500,
+          "unverified",
+          "spacing before the next attempt in this menu-retry loop; the menu was detached mid-render and nothing was identified that signals it is safe to re-open",
+        );
       }
     }
     // Final attempt without catch
