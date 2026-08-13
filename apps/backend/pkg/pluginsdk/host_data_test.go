@@ -175,22 +175,29 @@ func (r dataRecordingMessageReader) Send(_ context.Context, taskID, sessionID, t
 func TestHostData_TasksListAndGet(t *testing.T) {
 	impl := &dataRecordingHost{
 		tasks: map[string]Task{
-			"task-1": {ID: "task-1", Title: "Fix the bug", State: "todo"},
+			"task-1": {ID: "task-1", Title: "Fix the bug", State: "todo", Repositories: []TaskRepository{{
+				ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix",
+			}}},
 		},
-		taskList:     []Task{{ID: "task-1", Title: "Fix the bug", State: "todo"}},
+		taskList: []Task{{ID: "task-1", Title: "Fix the bug", State: "todo", Repositories: []TaskRepository{{
+			ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix",
+		}}}},
 		taskPageInfo: &PageInfo{NextCursor: "next-1", HasMore: true},
 	}
 	host := dialHostOverBufconn(t, impl)
 
 	tasks, pageInfo, err := host.Tasks().List(context.Background(), TaskFilter{States: []string{"todo"}}, Page{Limit: 10})
 	require.NoError(t, err)
-	require.Equal(t, []Task{{ID: "task-1", Title: "Fix the bug", State: "todo"}}, tasks)
+	require.Equal(t, []Task{{ID: "task-1", Title: "Fix the bug", State: "todo", Repositories: []TaskRepository{{
+		ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix",
+	}}}}, tasks)
 	require.Equal(t, &PageInfo{NextCursor: "next-1", HasMore: true}, pageInfo)
 	require.Equal(t, TaskFilter{States: []string{"todo"}}, impl.lastTaskFilter)
 
 	task, err := host.Tasks().Get(context.Background(), "task-1")
 	require.NoError(t, err)
 	require.Equal(t, "Fix the bug", task.Title)
+	require.Equal(t, "feature/fix", task.Repositories[0].CheckoutBranch)
 
 	_, err = host.Tasks().Get(context.Background(), "missing")
 	require.Error(t, err)
@@ -326,7 +333,11 @@ func TestHostData_AgentProfiles(t *testing.T) {
 }
 
 func TestHostData_Repositories(t *testing.T) {
-	impl := &dataRecordingHost{repositories: []Repository{{ID: "repo-1", WorkspaceID: "ws-1", Name: "kdlbs/kandev"}}}
+	impl := &dataRecordingHost{repositories: []Repository{{
+		ID: "repo-1", WorkspaceID: "ws-1", Name: "team/kandev", SourceType: "provider", ProviderID: "example-vcs",
+		ProviderRepositoryID: "repo-42", ProviderHost: "code.example.test", OwnerOrProject: "team", ProviderName: "kandev",
+		RemoteURL: "https://code.example.test/scm/team/kandev.git",
+	}}}
 	host := dialHostOverBufconn(t, impl)
 
 	repos, _, err := host.Repositories().List(context.Background(), "ws-1", Page{})

@@ -174,6 +174,43 @@ for the full contract.
   assert.deepEqual(findings, []);
 });
 
+test("validatePluginApiClaims keeps unrelated absence prose sentence-scoped", async () => {
+  const dir = await createFixture({
+    "types.ts": FIXTURE_TYPES_TS,
+    "AGENTS.md": `# Frontend
+
+The Host can be unavailable during construction, so resolve it when handling
+work. Honor context cancellation and use host.storage for user settings.
+`,
+  });
+
+  const { findings } = await validatePluginApiClaims({
+    repoRoot: dir,
+    typesPath: path.join(dir, "types.ts"),
+    scanFiles: [path.join(dir, "AGENTS.md")],
+  });
+
+  assert.deepEqual(findings, []);
+});
+
+test("validatePluginApiClaims ignores ordinary words that share an API name", async () => {
+  const dir = await createFixture({
+    "types.ts": FIXTURE_TYPES_TS,
+    "AGENTS.md": `# Reviews
+
+Expand the review before deciding whether its thread context is unavailable.
+`,
+  });
+
+  const { findings } = await validatePluginApiClaims({
+    repoRoot: dir,
+    typesPath: path.join(dir, "types.ts"),
+    scanFiles: [path.join(dir, "AGENTS.md")],
+  });
+
+  assert.deepEqual(findings, []);
+});
+
 test("validatePluginApiClaims exits clean against the real kandev tree", async () => {
   const repoRoot = path.resolve(import.meta.dirname, "..");
   const { findings } = await validatePluginApiClaims({ repoRoot });

@@ -126,19 +126,19 @@ func prPlaceholders(data map[string]interface{}) []string {
 	return []string{
 		"{{pr.number}}", toString(data["number"]),
 		"{{pr.title}}", toString(data["title"]),
-		"{{pr.url}}", toString(data["html_url"]),
-		"{{pr.author}}", toString(data["author_login"]),
-		"{{pr.repo}}", toString(data["repo"]),
-		"{{pr.branch}}", toString(data["head_branch"]),
-		"{{pr.base_branch}}", toString(data["base_branch"]),
-		"{{pr.body}}", toString(data["body"]),
+		"{{pr.url}}", toString(data[automationHTMLURLKey]),
+		"{{pr.author}}", toString(data[automationAuthorLoginKey]),
+		"{{pr.repo}}", toString(data[automationRepoKey]),
+		"{{pr.branch}}", toString(data[automationHeadBranchKey]),
+		"{{pr.base_branch}}", toString(data[automationBaseBranchKey]),
+		"{{pr.body}}", toString(data[automationBodyKey]),
 	}
 }
 
 func pushPlaceholders(data map[string]interface{}) []string {
 	return []string{
 		"{{push.branch}}", toString(data["branch"]),
-		"{{push.repo}}", toString(data["repo"]),
+		"{{push.repo}}", toString(data[automationRepoKey]),
 		"{{push.sha}}", toString(data["sha"]),
 		"{{push.message}}", toString(data["message"]),
 	}
@@ -148,8 +148,8 @@ func ciPlaceholders(data map[string]interface{}) []string {
 	return []string{
 		"{{ci.check_name}}", toString(data["check_name"]),
 		"{{ci.conclusion}}", toString(data["conclusion"]),
-		"{{ci.repo}}", toString(data["repo"]),
-		"{{ci.url}}", toString(data["html_url"]),
+		"{{ci.repo}}", toString(data[automationRepoKey]),
+		"{{ci.url}}", toString(data[automationHTMLURLKey]),
 	}
 }
 

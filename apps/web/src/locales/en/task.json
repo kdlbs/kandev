@@ -1084,6 +1084,8 @@
   "reviewTheseChangesBeforeAddingSources": "Review these changes before adding sources. The task must remain idle until the operation finishes.",
   "reviewed": "Reviewed",
   "reviewers": "Reviewers",
+  "reviewsCount_one": "Review ({{count}})",
+  "reviewsCount_other": "Reviews ({{count}})",
   "revoke": "Revoke",
   "revokeShare": "Revoke share",
   "revoking": "Revoking…",

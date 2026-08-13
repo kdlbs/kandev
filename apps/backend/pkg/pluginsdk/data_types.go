@@ -61,18 +61,20 @@ func pageInfoFromProto(p *pluginv1.PageInfo) *PageInfo {
 
 // TaskRepository is the Go-native mirror of kandev.plugin.v1.TaskRepository.
 type TaskRepository struct {
-	ID           string
-	RepositoryID string
-	BaseBranch   string
-	Position     int32
+	ID             string
+	RepositoryID   string
+	BaseBranch     string
+	Position       int32
+	CheckoutBranch string
 }
 
 func (r TaskRepository) toProto() *pluginv1.TaskRepository {
 	return &pluginv1.TaskRepository{
-		Id:           r.ID,
-		RepositoryId: r.RepositoryID,
-		BaseBranch:   r.BaseBranch,
-		Position:     r.Position,
+		Id:             r.ID,
+		RepositoryId:   r.RepositoryID,
+		BaseBranch:     r.BaseBranch,
+		Position:       r.Position,
+		CheckoutBranch: r.CheckoutBranch,
 	}
 }
 
@@ -81,10 +83,11 @@ func taskRepositoryFromProto(p *pluginv1.TaskRepository) TaskRepository {
 		return TaskRepository{}
 	}
 	return TaskRepository{
-		ID:           p.GetId(),
-		RepositoryID: p.GetRepositoryId(),
-		BaseBranch:   p.GetBaseBranch(),
-		Position:     p.GetPosition(),
+		ID:             p.GetId(),
+		RepositoryID:   p.GetRepositoryId(),
+		BaseBranch:     p.GetBaseBranch(),
+		Position:       p.GetPosition(),
+		CheckoutBranch: p.GetCheckoutBranch(),
 	}
 }
 
@@ -427,6 +430,46 @@ type AgentProfile struct {
 	Mode        string
 }
 
+// ExecutorProfile is the Go-native mirror of kandev.plugin.v1.ExecutorProfile.
+type ExecutorProfile struct {
+	ID           string
+	DisplayName  string
+	ExecutorType string
+}
+
+func (e ExecutorProfile) toProto() *pluginv1.ExecutorProfile {
+	return &pluginv1.ExecutorProfile{Id: e.ID, DisplayName: e.DisplayName, ExecutorType: e.ExecutorType}
+}
+
+func executorProfileFromProto(p *pluginv1.ExecutorProfile) ExecutorProfile {
+	if p == nil {
+		return ExecutorProfile{}
+	}
+	return ExecutorProfile{ID: p.GetId(), DisplayName: p.GetDisplayName(), ExecutorType: p.GetExecutorType()}
+}
+
+func executorProfilesFromProto(profiles []*pluginv1.ExecutorProfile) []ExecutorProfile {
+	if profiles == nil {
+		return nil
+	}
+	out := make([]ExecutorProfile, len(profiles))
+	for i, profile := range profiles {
+		out[i] = executorProfileFromProto(profile)
+	}
+	return out
+}
+
+func executorProfilesToProto(profiles []ExecutorProfile) []*pluginv1.ExecutorProfile {
+	if profiles == nil {
+		return nil
+	}
+	out := make([]*pluginv1.ExecutorProfile, len(profiles))
+	for i, profile := range profiles {
+		out[i] = profile.toProto()
+	}
+	return out
+}
+
 func (a AgentProfile) toProto() *pluginv1.AgentProfile {
 	return &pluginv1.AgentProfile{
 		Id:          a.ID,
@@ -476,18 +519,34 @@ func agentProfilesToProto(items []AgentProfile) []*pluginv1.AgentProfile {
 
 // Repository is the Go-native mirror of kandev.plugin.v1.Repository.
 type Repository struct {
-	ID            string
-	WorkspaceID   string
-	Name          string
-	DefaultBranch *string
+	ID                   string
+	WorkspaceID          string
+	Name                 string
+	DefaultBranch        *string
+	SourceType           string
+	ProviderID           string
+	ProviderRepositoryID string
+	ProviderHost         string
+	ProviderScope        string
+	OwnerOrProject       string
+	ProviderName         string
+	RemoteURL            string
 }
 
 func (r Repository) toProto() *pluginv1.Repository {
 	return &pluginv1.Repository{
-		Id:            r.ID,
-		WorkspaceId:   r.WorkspaceID,
-		Name:          r.Name,
-		DefaultBranch: r.DefaultBranch,
+		Id:                   r.ID,
+		WorkspaceId:          r.WorkspaceID,
+		Name:                 r.Name,
+		DefaultBranch:        r.DefaultBranch,
+		SourceType:           r.SourceType,
+		ProviderId:           r.ProviderID,
+		ProviderRepositoryId: r.ProviderRepositoryID,
+		ProviderHost:         r.ProviderHost,
+		ProviderScope:        r.ProviderScope,
+		OwnerOrProject:       r.OwnerOrProject,
+		ProviderName:         r.ProviderName,
+		RemoteUrl:            r.RemoteURL,
 	}
 }
 
@@ -496,10 +555,18 @@ func repositoryFromProto(p *pluginv1.Repository) Repository {
 		return Repository{}
 	}
 	return Repository{
-		ID:            p.GetId(),
-		WorkspaceID:   p.GetWorkspaceId(),
-		Name:          p.GetName(),
-		DefaultBranch: p.DefaultBranch,
+		ID:                   p.GetId(),
+		WorkspaceID:          p.GetWorkspaceId(),
+		Name:                 p.GetName(),
+		DefaultBranch:        p.DefaultBranch,
+		SourceType:           p.GetSourceType(),
+		ProviderID:           p.GetProviderId(),
+		ProviderRepositoryID: p.GetProviderRepositoryId(),
+		ProviderHost:         p.GetProviderHost(),
+		ProviderScope:        p.GetProviderScope(),
+		OwnerOrProject:       p.GetOwnerOrProject(),
+		ProviderName:         p.GetProviderName(),
+		RemoteURL:            p.GetRemoteUrl(),
 	}
 }
 
@@ -803,10 +870,17 @@ type CreateTaskInput struct {
 	// StartAgent asks the host to auto-launch an agent on the created task,
 	// mirroring the REST/MCP create_task start_agent flag. Best-effort: a
 	// launch failure does not fail task creation.
-	StartAgent bool
+	StartAgent   bool
+	Repositories []PluginTaskRepository
+	Launch       *PluginTaskLaunchOptions
+	Metadata     map[string]any
 }
 
-func (in CreateTaskInput) toProto() *pluginv1.CreateTaskRequest {
+func (in CreateTaskInput) toProto() (*pluginv1.CreateTaskRequest, error) {
+	metadata, err := mapToStruct(in.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: task metadata: %w", err)
+	}
 	return &pluginv1.CreateTaskRequest{
 		WorkspaceId:    in.WorkspaceID,
 		WorkflowId:     in.WorkflowID,
@@ -815,12 +889,19 @@ func (in CreateTaskInput) toProto() *pluginv1.CreateTaskRequest {
 		Description:    in.Description,
 		ParentId:       in.ParentID,
 		StartAgent:     in.StartAgent,
-	}
+		Repositories:   pluginTaskRepositoriesToProto(in.Repositories),
+		Launch:         in.Launch.toProto(),
+		Metadata:       metadata,
+	}, nil
 }
 
-func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) CreateTaskInput {
+func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) (CreateTaskInput, error) {
 	if p == nil {
-		return CreateTaskInput{}
+		return CreateTaskInput{}, nil
+	}
+	metadata, err := structToMap(p.GetMetadata())
+	if err != nil {
+		return CreateTaskInput{}, fmt.Errorf("pluginsdk: task metadata: %w", err)
 	}
 	return CreateTaskInput{
 		WorkspaceID:    p.GetWorkspaceId(),
@@ -830,7 +911,114 @@ func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) CreateTaskInput {
 		Description:    p.GetDescription(),
 		ParentID:       p.ParentId,
 		StartAgent:     p.GetStartAgent(),
+		Repositories:   pluginTaskRepositoriesFromProto(p.GetRepositories()),
+		Launch:         pluginTaskLaunchOptionsFromProto(p.GetLaunch()),
+		Metadata:       metadata,
+	}, nil
+}
+
+// RemoteRepositoryDescriptor is a fully resolved plugin-provider repository
+// identity. CloneURL is exact and credential-free; the host must not rebuild it.
+type RemoteRepositoryDescriptor struct {
+	ProviderID           string
+	ProviderHost         string
+	ProviderScope        string
+	OwnerOrProject       string
+	ProviderRepositoryID string
+	Name                 string
+	CloneURL             string
+	DefaultBranch        *string
+	BaseBranch           *string
+	HeadBranch           *string
+	PullRequestNumber    *int64
+}
+
+func (d *RemoteRepositoryDescriptor) toProto() *pluginv1.RemoteRepositoryDescriptor {
+	if d == nil {
+		return nil
 	}
+	return &pluginv1.RemoteRepositoryDescriptor{
+		ProviderId: d.ProviderID, ProviderHost: d.ProviderHost, ProviderScope: d.ProviderScope, OwnerOrProject: d.OwnerOrProject,
+		ProviderRepositoryId: d.ProviderRepositoryID, Name: d.Name, CloneUrl: d.CloneURL,
+		DefaultBranch: d.DefaultBranch, BaseBranch: d.BaseBranch, HeadBranch: d.HeadBranch, PullRequestNumber: d.PullRequestNumber,
+	}
+}
+
+func remoteRepositoryDescriptorFromProto(p *pluginv1.RemoteRepositoryDescriptor) *RemoteRepositoryDescriptor {
+	if p == nil {
+		return nil
+	}
+	return &RemoteRepositoryDescriptor{
+		ProviderID: p.GetProviderId(), ProviderHost: p.GetProviderHost(), ProviderScope: p.GetProviderScope(), OwnerOrProject: p.GetOwnerOrProject(),
+		ProviderRepositoryID: p.GetProviderRepositoryId(), Name: p.GetName(), CloneURL: p.GetCloneUrl(),
+		DefaultBranch: p.DefaultBranch, BaseBranch: p.BaseBranch, HeadBranch: p.HeadBranch, PullRequestNumber: p.PullRequestNumber,
+	}
+}
+
+// PluginTaskRepository selects an existing repository or a complete remote
+// descriptor to attach when a plugin creates a task.
+type PluginTaskRepository struct {
+	RepositoryID      string
+	Remote            *RemoteRepositoryDescriptor
+	BaseBranch        *string
+	CheckoutBranch    *string
+	PullRequestNumber *int64
+}
+
+func (r PluginTaskRepository) toProto() *pluginv1.PluginTaskRepository {
+	return &pluginv1.PluginTaskRepository{RepositoryId: r.RepositoryID, Remote: r.Remote.toProto(), BaseBranch: r.BaseBranch, CheckoutBranch: r.CheckoutBranch, PullRequestNumber: r.PullRequestNumber}
+}
+
+func pluginTaskRepositoryFromProto(p *pluginv1.PluginTaskRepository) PluginTaskRepository {
+	if p == nil {
+		return PluginTaskRepository{}
+	}
+	return PluginTaskRepository{RepositoryID: p.GetRepositoryId(), Remote: remoteRepositoryDescriptorFromProto(p.GetRemote()), BaseBranch: p.BaseBranch, CheckoutBranch: p.CheckoutBranch, PullRequestNumber: p.PullRequestNumber}
+}
+
+func pluginTaskRepositoriesToProto(repositories []PluginTaskRepository) []*pluginv1.PluginTaskRepository {
+	if repositories == nil {
+		return nil
+	}
+	out := make([]*pluginv1.PluginTaskRepository, len(repositories))
+	for i, repository := range repositories {
+		out[i] = repository.toProto()
+	}
+	return out
+}
+
+func pluginTaskRepositoriesFromProto(repositories []*pluginv1.PluginTaskRepository) []PluginTaskRepository {
+	if repositories == nil {
+		return nil
+	}
+	out := make([]PluginTaskRepository, len(repositories))
+	for i, repository := range repositories {
+		out[i] = pluginTaskRepositoryFromProto(repository)
+	}
+	return out
+}
+
+// PluginTaskLaunchOptions declares the optional launch context for a plugin-
+// created task. Host implementation validates each value before use.
+type PluginTaskLaunchOptions struct {
+	AgentProfileID    *string
+	ExecutorProfileID *string
+	Prompt            *string
+	PlanMode          *string
+}
+
+func (o *PluginTaskLaunchOptions) toProto() *pluginv1.PluginTaskLaunchOptions {
+	if o == nil {
+		return nil
+	}
+	return &pluginv1.PluginTaskLaunchOptions{AgentProfileId: o.AgentProfileID, ExecutorProfileId: o.ExecutorProfileID, Prompt: o.Prompt, PlanMode: o.PlanMode}
+}
+
+func pluginTaskLaunchOptionsFromProto(p *pluginv1.PluginTaskLaunchOptions) *PluginTaskLaunchOptions {
+	if p == nil {
+		return nil
+	}
+	return &PluginTaskLaunchOptions{AgentProfileID: p.AgentProfileId, ExecutorProfileID: p.ExecutorProfileId, Prompt: p.Prompt, PlanMode: p.PlanMode}
 }
 
 // UpdateTaskInput is the Go-native mirror of

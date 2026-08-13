@@ -54,7 +54,9 @@ async function createCoverageRepo({
     "docs/public/index.md": validPage,
     "apps/web/src/settings-routes.tsx": `const SETTINGS_ROUTES = {\n${settingsRoutes
       .map((route) => `  "${route}": () => null,`)
-      .join("\n")}\n};\n\nexport const SETTINGS_ROUTE_PATHS = new Set(Object.keys(SETTINGS_ROUTES));\n\nexport function SettingsRoutes() {}`,
+      .join(
+        "\n",
+      )}\n};\n\nexport const SETTINGS_ROUTE_PATHS = new Set(Object.keys(SETTINGS_ROUTES));\n\nexport function SettingsRoutes() {}`,
     "apps/web/src/settings-routes.test.ts": "// settings route coverage",
     "apps/backend/internal/mcp/server/server.go": mcpTools
       .map((tool) => `mcp.NewTool("${tool}")`)
@@ -212,6 +214,34 @@ test("accepts explicitly ordered pages with required frontmatter", async () => {
   );
 
   await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("plugin authoring reference documents authenticated actions and live host writes", async () => {
+  const [authoring, manifest, integrations] = await Promise.all([
+    fs.readFile(
+      path.join(process.cwd(), "docs/public/plugins-authoring.md"),
+      "utf8",
+    ),
+    fs.readFile(
+      path.join(process.cwd(), "docs/public/plugins-manifest.md"),
+      "utf8",
+    ),
+    fs.readFile(
+      path.join(process.cwd(), "docs/public/integrations.md"),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(authoring, /Authenticated declared actions/);
+  assert.match(authoring, /workspaceId/);
+  assert.match(authoring, /AbortSignal/);
+  assert.match(authoring, /CreateTask/);
+  assert.match(manifest, /\bscope\b/);
+  assert.match(manifest, /repository_providers/);
+  assert.match(manifest, /reference_sources/);
+  assert.match(manifest, /webhooks\[\]\.access/);
+  assert.match(manifest, /webhooks\[\]\.max_body_bytes/);
+  assert.match(integrations, /Bitbucket/);
 });
 
 test("rejects public pages that contain an em dash", async () => {

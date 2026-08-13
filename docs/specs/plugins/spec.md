@@ -53,7 +53,8 @@ surfaces. The core stays small; the ecosystem grows independently.
   runtime"). This is the one in-process surface; the backend stays out-of-process
   (but is now kandev-managed, not operator-managed).
 - A plugin manifest declares identity, runtime executables (per OS/arch), capabilities,
-  declared webhooks, config schema, and optional UI bundle.
+  declared webhooks and authenticated actions, repository-provider and reference-source
+  ownership, config schema, and optional UI bundle.
 - Plugins SHALL receive events, expose proxied external webhook
   endpoints, and read/write a plugin-scoped KV state — all over gRPC.
 - Plugins are distributed as a signed-or-unsigned release **tarball** and installed
@@ -69,6 +70,21 @@ surfaces. The core stays small; the ecosystem grows independently.
   on crash or health-check failure. Operators no longer run or manage plugin processes
   themselves. The remote/self-hosted tier (`base_url` registration of an
   operator-run process kandev never spawns) is removed; see "Out of scope".
+- Plugin repository providers, task actions, and review panels register through
+  revocable generic frontend contracts. A provider plugin can participate in native
+  task creation, Link menus, desktop/mobile review surfaces, and composer `#` search
+  without a host-specific provider branch.
+- The independently consumable, runtime-free `@kandev/plugin-sdk` package is the
+  frontend author contract. Official plugins use its typed `host.context` reads and
+  named UI/provider contracts instead of importing or copying private Kandev store,
+  React, Zustand, or `@/` application types.
+- First-party-parity code-host dashboards use host-owned provider-neutral list,
+  toolbar, scope, task-menu, and linked-task primitives exposed through `host.ui`.
+  Plugins provide normalized data and callbacks; task presets open the native
+  `TaskCreateDialog`, while review remains owned by the task review-provider surface.
+- Native UI plugins register bounded, plugin-owned translation catalogs and consume them through a
+  host-scoped imperative/reactive localization API. Locale changes follow Kandev without bundling a
+  second i18n runtime, and disable/reload/uninstall removes only that plugin's resources.
 
 ## Data model
 
@@ -118,6 +134,21 @@ capabilities:
                                               # "Frontend plugin runtime" and ADR
                                               # 2026-08-01-per-user-plugin-storage
 
+actions:
+  - key: "connection.save"
+    scope: workspace                          # workspace | task | repository
+    max_body_bytes: 65536
+
+repository_providers: ["example-repository-provider"]
+
+reference_sources:
+  - source: "example_change_requests"
+    provider: "example-repository-provider"
+    kind: "change_request"
+    display_name: "Example change requests"
+    kind_label: "Change request"
+    order: 100
+
 webhooks:
   - key: "slack-events"
     description: "Slack Events API webhook"
@@ -159,7 +190,7 @@ fields. Existing records without these fields load as null.
 `capabilities.api_read` / `capabilities.api_write` gate the **Host data API** Host
 RPCs (both reads and writes live now) — the vocabulary is a list of
 resource names: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`,
-`agent_profiles`, `repositories` for `api_read`, plus `tasks` (CreateTask/
+`agent_profiles`, `executor_profiles`, `repositories` for `api_read`, plus `tasks` (CreateTask/
 UpdateTask) and `messages` (SendMessage) for `api_write`. See "Host data API".
 
 **Declaring data access.** Listing a resource under `api_read` grants the
@@ -173,6 +204,21 @@ not declared`. Writes work the same way under `api_write` (message
 `capability 'api_write:<resource>' not declared`), and reads and writes gate
 independently on the same resource — a plugin may declare `api_read:tasks`
 without `api_write:tasks`, or vice versa (see "Host data API writes").
+
+`actions` declare the only browser-invocable plugin operations. Each key is unique per
+plugin, has one resource scope (`workspace`, `task`, or `repository`), and supplies a
+bounded request-body maximum. `repository_providers` declares stable IDs the plugin may
+register in the frontend repository-provider registry; one enabled plugin owns one
+provider ID. A provider that supports the native task branch picker declares the
+workspace-scoped `repositories.branches` action. Kandev invokes it server-to-server with
+the persisted repository identity and accepts only a bounded normalized branch list;
+browser input cannot select the provider or repository for that invocation.
+`reference_sources` declares plugin-owned composer sources. Source names
+are unique, a descriptor cannot claim another provider, and all entries are removed when
+the plugin disables. See ADRs
+[2026-07-31-authenticated-plugin-actions](../../decisions/2026-07-31-authenticated-plugin-actions.md)
+and
+[2026-07-31-plugin-repository-provider-extensions](../../decisions/2026-07-31-plugin-repository-provider-extensions.md).
 
 **External login (`auth`).** An `auth`-capable plugin can log a visitor in
 against an external IdP (OIDC/SAML): its webhook (the callback / SAML ACS)
@@ -192,8 +238,9 @@ See [ADR 0050](../../decisions/0050-plugin-external-auth-capability.md).
 There is no manifest-paste registration step. A plugin is installed from a URL or an
 uploaded tarball:
 
-1. Operator calls `POST /api/plugins/install` with JSON `{"url": "..."}` (kandev
-   downloads the tarball) or a multipart `package` field (direct upload).
+1. An administrator calls `POST /api/plugins/install` with JSON `{"url": "..."}`
+   (kandev downloads the tarball) or a multipart `package` field (direct upload).
+   Auth-disabled single-user instances retain their synthetic administrator.
 2. Kandev verifies `checksums.txt` covers every other file in the tarball and every
    hash matches (integrity gate, always enforced).
 3. If `checksums.txt.sig` is present, kandev verifies the ed25519 signature; if
@@ -235,6 +282,10 @@ CREATE TABLE plugin_state (
 
 ### Plugin management API (operator -> kandev, HTTP)
 
+Install is administrator-only when authentication is enabled. Auth-disabled
+single-user instances retain the synthetic administrator used by other system
+settings.
+
 ```
 POST   /api/plugins/install           # Install a plugin: JSON {"url": "..."} or multipart `package`
 POST   /api/plugins/sync              # Reconcile the registry with the plugins directory on disk
@@ -249,6 +300,7 @@ POST   /api/plugins/{id}/enable
 POST   /api/plugins/{id}/disable
 GET    /api/plugins/{id}/bundle       # Frontend bundle, served from the extracted package dir
 GET    /api/plugins/{id}/ui/*         # Frontend bundle assets, served from the extracted package dir
+POST   /api/plugins/{id}/actions/{key} # Authenticated declared browser action
 ```
 
 `POST /api/plugins/sync` is documented in full under "Filesystem sideloading & sync"
@@ -262,6 +314,31 @@ since the files are already on local disk after install.
 Enable/disable/uninstall act on the supervised subprocess: disable stops it (state and
 config preserved); enable respawns it; uninstall stops it and deletes its package,
 record, and state.
+
+### Authenticated plugin actions (browser -> kandev -> plugin)
+
+`POST /api/plugins/{id}/actions/{key}` is the only browser action route. Kandev first
+applies ordinary HTTP authentication, then rejects inactive plugins or undeclared keys
+and authorizes every referenced workspace, task, or repository. It derives a task's
+workspace relation server-side, passes verified actor/resource context separately from
+bounded untrusted JSON, invokes `Plugin.HandleAction` with a hard timeout and
+cancellation, and relays only an allowlisted response-header set. Provider callback
+routes under `/webhooks/` stay public and must not serve authenticated browser actions.
+Task-scoped actions require a verified task and may optionally select one persisted
+repository attached to that task; Kandev rejects unattached repository IDs and passes
+the accepted repository separately in `VerifiedActionContext`.
+The manifest's canonical action field is `scope`; `resource_scope` remains a read-only
+compatibility alias for packages produced during the prerelease contract rollout.
+
+### Dynamic composer reference sources (plugin -> kandev)
+
+An active manifest `reference_sources` descriptor registers a plugin bridge in
+`internal/mentions`. Kandev calls `Plugin.SearchEntityReferences` with verified
+workspace, plain query, and bounded limit; plugin candidates are untrusted. The host
+injects descriptor identity and constructs canonical references. Kandev calls
+`Plugin.AuthorizeEntityReference` at search and again at message submission with
+purpose `search` or `submission`. A disabled plugin, invalid result, stale selection,
+or denial fails closed; no stale reference metadata enters the message queue.
 
 ### Event delivery (kandev -> plugin, gRPC `DeliverEvent`)
 
@@ -280,6 +357,7 @@ message Event {
 Expected response: `EventAck{}`. A non-nil gRPC error or a timeout counts as failure.
 
 Delivery semantics (unchanged from earlier design, now carried over gRPC):
+
 - **At-least-once.** Plugins must be idempotent (dedup by `event_id`).
 - **Timeout:** 10 seconds. Up to 3 retries with exponential backoff (5s, 15s, 45s).
 - **Sequential per plugin** — no concurrent delivery to the same plugin. Plugins
@@ -292,14 +370,14 @@ Event types: any subject kandev publishes on its internal event bus
 below is a non-exhaustive sample across feature areas — the plugin system is not tied to
 any one of them.
 
-| Category | Events |
-|----------|--------|
-| Tasks | `task.created`, `task.updated`, `task.state_changed`, `task.deleted`, `task.moved` |
-| Sessions | `task_session.state_changed`, `turn.started`, `turn.completed` |
-| Agents | `agent.started`, `agent.completed`, `agent.failed`, `agent.stopped` |
+| Category                       | Events                                                                                                                                                                                                            |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tasks                          | `task.created`, `task.updated`, `task.state_changed`, `task.deleted`, `task.moved`                                                                                                                                |
+| Sessions                       | `task_session.state_changed`, `turn.started`, `turn.completed`                                                                                                                                                    |
+| Agents                         | `agent.started`, `agent.completed`, `agent.failed`, `agent.stopped`                                                                                                                                               |
 | Other feature areas (examples) | Any additional subjects emitted by feature areas such as office/agents (e.g. `office.comment.created`, `office.approval.created`) — plugins may subscribe to these, but the plugin system does not depend on them |
-| GitHub | `github.pr_state_changed`, `github.pr_feedback`, `github.new_issue` |
-| Plugin | `plugin.<plugin_id>.<name>` (cross-plugin events) |
+| GitHub                         | `github.pr_state_changed`, `github.pr_feedback`, `github.new_issue`                                                                                                                                               |
+| Plugin                         | `plugin.<plugin_id>.<name>` (cross-plugin events)                                                                                                                                                                 |
 
 Wildcard subscriptions: `task.*`, `agent.*`, `<feature>.*` (any subject prefix).
 
@@ -427,17 +505,18 @@ domain structs. See [ADR 0043](../../decisions/0043-plugin-host-data-api.md) and
 
 **Readable resources (v1).** Each is gated by an `api_read:<resource>` capability:
 
-| RPC | Capability | Returns |
-|---|---|---|
-| `ListTasks` / `GetTask` | `api_read:tasks` | Tasks (id, workspace, workflow, title, description, state, priority, timestamps, parent, identifier, repositories, metadata) |
-| `ListWorkspaces` | `api_read:workspaces` | Workspaces (id, name, owner, defaults, timestamps) |
-| `ListWorkflows` | `api_read:workflows` | Workflows for a workspace |
-| `ListWorkflowSteps` | `api_read:workflows` | Steps for a workflow (id, name, position, stage type) |
-| `ListAgentProfiles` | `api_read:agent_profiles` | Agent profiles (id, agent id, display name, model, mode) |
-| `ListRepositories` | `api_read:repositories` | Repositories for a workspace (id, name, default branch) |
-| `ListSessions` | `api_read:sessions` | Session identity + agent context (id, task, agent profile, resolved display name + model, `acp_session_id`, state, timestamps) |
-| `ListSessionCodeStats` | `api_read:sessions` | **Computed** per-session code metrics: committed lines added/deleted, peak pending-diff lines added/deleted |
-| `ListMessages` | `api_read:messages` | Historical conversation content (id, session, task, turn, `author_type` (user/agent), `content`, `type`, `created_at`), filterable by session ids, task ids, a `created_at` range (`since`/`until`), and types. See "Conversation content" below. |
+| RPC                     | Capability                   | Returns                                                                                                                                                                                                                                           |
+| ----------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ListTasks` / `GetTask` | `api_read:tasks`             | Tasks (id, workspace, workflow, title, description, state, priority, timestamps, parent, identifier, repositories, metadata)                                                                                                                      |
+| `ListWorkspaces`        | `api_read:workspaces`        | Workspaces (id, name, owner, defaults, timestamps)                                                                                                                                                                                                |
+| `ListWorkflows`         | `api_read:workflows`         | Workflows for a workspace                                                                                                                                                                                                                         |
+| `ListWorkflowSteps`     | `api_read:workflows`         | Steps for a workflow (id, name, position, stage type)                                                                                                                                                                                             |
+| `ListAgentProfiles`     | `api_read:agent_profiles`    | Agent profiles (id, agent id, display name, model, mode)                                                                                                                                                                                          |
+| `ListExecutorProfiles`  | `api_read:executor_profiles` | Executor profiles (id, display name, executor type)                                                                                                                                                                                               |
+| `ListRepositories`      | `api_read:repositories`      | Repositories for a workspace (id, name, default branch)                                                                                                                                                                                           |
+| `ListSessions`          | `api_read:sessions`          | Session identity + agent context (id, task, agent profile, resolved display name + model, `acp_session_id`, state, timestamps)                                                                                                                    |
+| `ListSessionCodeStats`  | `api_read:sessions`          | **Computed** per-session code metrics: committed lines added/deleted, peak pending-diff lines added/deleted                                                                                                                                       |
+| `ListMessages`          | `api_read:messages`          | Historical conversation content (id, session, task, turn, `author_type` (user/agent), `content`, `type`, `created_at`), filterable by session ids, task ids, a `created_at` range (`since`/`until`), and types. See "Conversation content" below. |
 
 `acp_session_id` on a session is the external usage-attribution join key (e.g.
 `tokscale`): kandev exposes the session identity and code stats but stays out of
@@ -478,7 +557,7 @@ missing task returns gRPC `NotFound`.
 `Host.Messages().Send` (capability `api_write:messages`) delivers a prompt to a
 task session through the orchestrator's real delivery path — the same one
 `message_task` uses — so the message reaches the agent and drives a turn (it is
-*not* an office comment). It resolves the target session (an explicit
+_not_ an office comment). It resolves the target session (an explicit
 `session_id`, verified to belong to the task, or the task's primary session),
 records a user message stamped with the plugin source, and dispatches by session
 state: a running session queues the prompt (`status: queued`); an idle/completed
@@ -533,7 +612,7 @@ refreshes the list) reconciles the registry with whatever is actually on disk:
    registered and the others are reported as skipped, not registered.
 2. **Dropped tarballs.** Every `*.tar.gz` file sitting directly in the plugins
    directory is run through the same verified install pipeline `POST
-   /api/plugins/install` uses (checksum verification, manifest validation, platform
+/api/plugins/install` uses (checksum verification, manifest validation, platform
    executable check, extraction, spawn, activate). On success the tarball file is
    deleted. On a validation failure the file is left in place (not retried
    automatically) and the failure is reported.
@@ -572,17 +651,28 @@ Mattermost-webapp model), not iframes. The full contract lives in
   involved in serving these assets — the plugin subprocess only needs to be running
   to serve gRPC calls, not the UI bundle.
 - **Boot payload:** the SPA boot payload carries
-  `plugins: [{ id, name, bundleUrl, styleUrls }]` for every **active** plugin that
-  declares a bundle (gated on the `plugins` feature flag).
+  `plugins: [{ id, name, bundleUrl, styleUrls, repositoryProviderIds? }]` for every
+  **active** plugin that declares a bundle (gated on the `plugins` feature flag).
+  `repositoryProviderIds` is the JSON projection of manifest
+  `repository_providers`; before `initialize`, the loader supplies it to the registry
+  as the plugin's provider/review ownership allowlist. Omission keeps older payloads
+  compatible but grants no invented manifest declaration.
 - **Loading:** on boot (and on runtime enable), the frontend host dynamically
   `import()`s each `bundleUrl`. The bundle calls
   `window.registerKandevPlugin(id, { initialize(registry, host), destroy? })`.
   `host` shares the kandev React instance, the app store, a plugin-scoped
   `api.fetch`, a curated `@kandev/ui` subset, and the theme — so a plugin can build
   a page indistinguishable from first-party UI (e.g. a native `/jira` page).
+  Activation is transactional: failure or timeout revokes every partial registration,
+  aborts owned work, and fences callbacks that arrive after the attempt ended.
 - **Registry surface:** `registerRoute(path, C)`, `registerNavItem(item)`,
-  `registerSettingsRoute(path, C)`, `registerComponent(slot, C)` (including
-  `app-status-bar-left` and `app-status-bar-right`), `registerWsHandler(action, fn)`.
+  `registerSettingsRoute(path, C)`,
+  `registerIntegrationSettings({ id, label, description, icon?, Component })`,
+  `registerComponent(slot, C)` (including `app-status-bar-left` and
+  `app-status-bar-right`), and `registerWsHandler(action, fn)`. Integration-settings
+  contributions appear in the native global integrations index, workspace settings
+  navigation, and global/workspace settings routes. IDs are URL-safe, unique among
+  active plugins, and cannot shadow host integrations; unload revokes the contribution.
   Status-slot components receive the exact `AppStatusBarSlotProps` contract in
   `PLUGIN-API.md`: current path/context plus placement and presentation. The host
   renders one responsive presentation at once — 24 px bar on tablet/desktop or
@@ -602,16 +692,45 @@ Mattermost-webapp model), not iframes. The full contract lives in
   it globally, skipping editable targets the same way core app shortcuts do. User
   overrides are namespaced `plugin:{pluginId}:{id}` so they survive independently
   per plugin.
-- **Modals:** `host.openModal({ title?, content, size?, dismissible? })` imperatively
-  opens a modal rendered by the host's `<PluginModalHost/>` (mounted once at the app
-  root, isolated behind its own error boundary) and returns `{ close() }` to close
+- **Modals and drawers:** `host.openModal({ title?, description?, content, size?, dismissible?, presentation? })` imperatively
+  opens a modal rendered by the host's `<PluginModalHost/>` (mounted once inside the
+  authenticated `AppShell` theme/tooltip/toast provider tree and isolated behind its
+  own error boundary) and returns `{ close() }` to close
   that instance. `content` reuses the slot-component contract (rendered with the
-  host React instance). Independent of keybindings — any plugin code path may call
-  it, including a keybinding handler.
+  host React instance). `presentation: "drawer"` renders the contribution in a
+  safe-area-aware host drawer for phone actions; omitted/`dialog` keeps desktop modal
+  presentation. Independent of keybindings — any plugin code path may call it.
+- **Task change-request links:** `host.openTaskLinkDialog(...)` renders the same
+  one-field dialog anatomy, inline validation, Cancel/Save footer, submitting state,
+  success toast, and close behavior as Kandev's GitHub task-link flow. Code-host
+  plugins supply provider copy and an authenticated
+  `onSubmit(reference, signal)` callback; closing, unmounting, or revoking the plugin
+  aborts that signal and suppresses late feedback;
+  they do not build this workflow inside `openModal`. Link submenu children name only
+  the target because the parent already supplies the verb.
+- **Provider registrations:** `registry.registerRepositoryProvider(...)` contributes
+  repository listing, optional coarse URL matching, structured URL inspection, and
+  branch listing. `matchesURL` is only a synchronous performance hint; workspace-scoped
+  `inspectURL` is authoritative, returns `null` when the configured provider does not
+  own the URL, and must produce exactly one winner across active providers. `inspectURL` returns
+  a complete credential-free provider/repository/pull-request descriptor with an HTTPS
+  clone URL. The host
+  persists that descriptor rather than parsing plugin URLs. Once persisted, native task
+  branch requests are routed to the active manifest owner through its declared
+  workspace-scoped `repositories.branches` action using only that stored descriptor.
+  `registerTaskAction(...)`
+  contributes children of the native **Link** submenu with visibility and a read-only
+  task/workspace/repository context. Unsupported top-level action placements are
+  rejected at compile/registration time rather than accepted without a consumer.
+  `registerReviewProvider(...)` supplies
+  normalized review summaries, an external-store task-item source, and a plugin
+  `ReviewPanel` rendered in native desktop/mobile review surfaces. All are
+  manifest-owned, lifecycle-revocable registrations; duplicate active provider
+  ownership is rejected.
 - **Task panels:** `registerTaskPanel({ id, title, icon?, Component, mobileEnabled? })`
   adds a row to the task workspace's "+" (add panel) menu; selecting it opens a
   dockview panel rendering `Component` with `{ panelId, taskId, sessionId,
-  presentation }`. Every plugin panel shares one generic `"plugin-panel"` dockview
+presentation }`. Every plugin panel shares one generic `"plugin-panel"` dockview
   component (identity in `params.pluginId`/`params.panelKey`), so a saved layout
   round-trips even when the owning plugin is later uninstalled — the layout manager
   drops an unresolvable reference instead of throwing, and `Settings > Layouts`
@@ -628,12 +747,12 @@ Mattermost-webapp model), not iframes. The full contract lives in
   the layout. Decision:
   ADR-2026-08-04-plugin-contribution-lifecycle-authority.
 - **Kanban card contributions:** `registerTaskMenuAction({ id, label, icon?,
-  group: "edit", visible?, run })` adds an item to the kanban card's `Edit`
+group: "edit", visible?, run })` adds an item to the kanban card's `Edit`
   submenu (the flat `Edit` item becomes `Edit > Edit task` once any plugin
   registers one); `run(context)` receives `{ workspaceId, taskId, taskTitle,
-  workflowStepId, presentation }`, and a rejected `run` is caught and logged
+workflowStepId, presentation }`, and a rejected `run` is caught and logged
   without blocking the menu from closing. `registerComponent("task-card-indicators",
-  C)` renders `C` beside the PR status icon on every kanban card, receiving
+C)` renders `C` beside the PR status icon on every kanban card, receiving
   `{ taskId, workspaceId, workflowStepId }` as `slotProps`.
   `registerComponent("task-card-tags", C)` renders `C` in its own row on every
   kanban card (below the badges row), receiving the same
@@ -661,13 +780,13 @@ error --successful Enable/health recovery--> active
 error --Disable--> disabled
 ```
 
-| State | Meaning |
-|---|---|
-| `registered` | Package extracted and record written; go-plugin spawn/handshake pending or in flight |
-| `active` | Handshake succeeded and health (`Ping`) passes; events delivered, webhooks proxied |
-| `error` | 3 consecutive `Ping` failures (30s interval, injectable), or the subprocess crashed and restart attempts (backoff, max 5) are exhausted. Events buffered (ring buffer, 100 events, 5-minute TTL). Webhooks return 503 |
-| `disabled` | Operator explicitly disabled. Subprocess stopped. No events, no webhooks. State and config preserved |
-| `uninstalled` | Subprocess stopped, package/record/state deleted (no grace period in v1) |
+| State         | Meaning                                                                                                                                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `registered`  | Package extracted and record written; go-plugin spawn/handshake pending or in flight                                                                                                                                  |
+| `active`      | Handshake succeeded and health (`Ping`) passes; events delivered, webhooks proxied                                                                                                                                    |
+| `error`       | 3 consecutive `Ping` failures (30s interval, injectable), or the subprocess crashed and restart attempts (backoff, max 5) are exhausted. Events buffered (ring buffer, 100 events, 5-minute TTL). Webhooks return 503 |
+| `disabled`    | Operator explicitly disabled. Subprocess stopped. No events, no webhooks. State and config preserved                                                                                                                  |
+| `uninstalled` | Subprocess stopped, package/record/state deleted (no grace period in v1)                                                                                                                                              |
 
 Health monitoring: kandev's go-plugin client calls `Ping()` on the plugin every 30
 seconds (injectable). 3 consecutive failures -> `error` + inbox item + restart attempt
@@ -737,6 +856,13 @@ complete.
 - **External webhook hits a disabled/error plugin**: kandev returns 503.
 - **Undeclared capability access attempt on a Host RPC**: gRPC `PermissionDenied` with
   a message naming the missing capability.
+- **Undeclared, unauthorized, oversized, or timed-out browser action**: Kandev rejects
+  it before/at bounded plugin dispatch; it never falls back to public webhook routing.
+- **Disabled/unloaded repository or review provider**: registrations and in-flight work
+  are revoked; provider credential leases are invalidated immediately, and host
+  selectors/panels remove stale plugin items safely, including after same-ID reload.
+- **Reference source denied during message submission**: Kandev rejects the selected
+  reference rather than queuing stale or cross-workspace metadata.
 - **Checksum mismatch or unresolvable host-platform executable at install time**:
   install is rejected before any code runs.
 - **Frontend bundle import or initialization remains in flight**: open and saved
@@ -901,6 +1027,37 @@ complete.
   a failed delivery leaves no durable user message and a retry can't duplicate
   the prompt.
 
+- **GIVEN** an active plugin declares `connection.save` with workspace scope,
+  **WHEN** a signed-in user invokes `host.api.invokeAction("connection.save", ...)`,
+  **THEN** Kandev authenticates the caller, authorizes the workspace, bounds the
+  payload, and passes verified context separately to `Plugin.HandleAction`; the public
+  webhook endpoint is not invoked.
+
+- **GIVEN** a provider operation owns an `AbortSignal`, **WHEN** its registration is
+  replaced, unloaded, or its request is superseded, **THEN** `invokeAction` propagates
+  cancellation to the authenticated HTTP request and backend action context.
+
+- **GIVEN** a manifest-owned repository and review provider, **WHEN** it registers
+  native task-link actions and a review panel, **THEN** Kandev renders those contributions
+  in applicable desktop and mobile task/review surfaces and removes them, including
+  in-flight work, when the plugin disables.
+
+- **GIVEN** a registered review provider publishes normalized task status, **WHEN** a
+  linked task renders on desktop or mobile, **THEN** Kandev automatically mounts the
+  same topbar control, composer CI chip, hover popover/mobile drawer, review summary,
+  comment summary, and checks anatomy used by GitHub, refreshes through the provider
+  lifecycle, and requires no provider-owned visual slot or second poller.
+
+- **GIVEN** a compatible code-host review provider, **WHEN** its panel renders normalized
+  detail through `host.ui.ChangeRequestDetail`, **THEN** GitHub and the provider share
+  the same header, collapsible sections, add-to-context controls, scroll ownership,
+  loading/error treatment, and desktop/mobile geometry; only data, capabilities, and
+  callbacks remain provider-owned.
+
+- **GIVEN** a plugin-owned `#` reference source returns a pull-request candidate,
+  **WHEN** the user submits the selected reference, **THEN** Kandev authorizes it
+  again against the live plugin and rejects a disabled, stale, tampered, or
+  cross-workspace candidate before queueing message metadata.
 - **GIVEN** a saved or open plugin task panel and a plugin reload whose import or
   `initialize()` takes longer than 500 milliseconds, **WHEN** registration eventually
   succeeds with the same panel identity, **THEN** the panel remains in the layout and
@@ -953,10 +1110,10 @@ complete.
   in the kandev origin with full app-store access. Isolating plugin JS in a worker,
   realm, or comparable sandbox is future work; v1 relies on only loading active,
   operator-installed plugins served same-origin.
-- **In-process backend plugins.** Plugin *backends* remain out-of-process — no Go
+- **In-process backend plugins.** Plugin _backends_ remain out-of-process — no Go
   plugin loading via `plugin.Open`, no WASM, no shared-memory communication. (This is
   distinct from the frontend bundle, which does load into the SPA.)
-- **Plugin marketplace or registry.** Out of scope *for this spec*: this spec covers
+- **Plugin marketplace or registry.** Out of scope _for this spec_: this spec covers
   install-by-URL/upload as a manual, single-plugin action. The discoverable, curated
   catalog (central registry, one-click install, star ranking, third-party sources) is
   a sibling feature specified in [marketplace.md](marketplace.md) and built on top of

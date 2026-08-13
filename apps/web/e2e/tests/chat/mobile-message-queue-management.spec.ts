@@ -5,6 +5,9 @@ import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
+import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+
+registerSeparateQueueRows(test);
 
 async function expectTouchTarget(locator: Locator): Promise<void> {
   await expect(locator).toBeVisible();

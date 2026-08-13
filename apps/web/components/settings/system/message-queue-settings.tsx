@@ -43,14 +43,15 @@ function sourceLabelKey(source: MessageQueueSettingsSource): string {
   }
 }
 
-/** Loads the persisted snapshot and owns the two editable drafts (the
- * max-per-session text field and the merge-enabled toggle). Split out of
+/** Loads the persisted snapshot and owns the editable queue-setting drafts.
+ * Split out of
  * `useMessageQueueSettingsDraft` so neither function needs to grow past the
  * project's per-function line limit as the page gains fields. */
 function useMessageQueueSettingsLoad() {
   const [snapshot, setSnapshot] = useState<MessageQueueSettingsResponse | null>(null);
   const [draft, setDraft] = useState("");
   const [mergeDraft, setMergeDraft] = useState(true);
+  const [autoMergeDraft, setAutoMergeDraft] = useState(true);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const loadVersion = useRef(0);
@@ -65,6 +66,7 @@ function useMessageQueueSettingsLoad() {
       setSnapshot(response);
       setDraft(String(response.settings.max_per_session));
       setMergeDraft(response.settings.merge_enabled);
+      setAutoMergeDraft(response.settings.auto_merge_enabled);
     } catch {
       if (version === loadVersion.current) setLoadFailed(true);
     } finally {
@@ -86,58 +88,71 @@ function useMessageQueueSettingsLoad() {
     setDraft,
     mergeDraft,
     setMergeDraft,
+    autoMergeDraft,
+    setAutoMergeDraft,
     loading,
     loadFailed,
     reload,
   };
 }
 
-/** Derives dirty/validity/permission state from the loaded snapshot and the
- * two drafts, and registers the combined save/discard contributor that the
- * page's floating save bar drives. */
-function useMessageQueueSettingsDraft() {
-  const { t } = useTranslation();
-  const role = useAppStore((state) => state.auth.user?.role);
-  const [saveFailed, setSaveFailed] = useState(false);
-  const load = useMessageQueueSettingsLoad();
-  const { snapshot, setSnapshot, draft, setDraft, mergeDraft, setMergeDraft } = load;
+type QueueSettingsContributorOptions = {
+  load: ReturnType<typeof useMessageQueueSettingsLoad>;
+  parsed: number | null;
+  isMaxDirty: boolean;
+  isMergeDirty: boolean;
+  isAutoMergeDirty: boolean;
+  isAdmin: boolean;
+  isLocked: boolean;
+  invalidReason: string | undefined;
+  onSaveFailed: (failed: boolean) => void;
+};
 
-  const parsed = parseMaximum(draft);
+/** Registers all queue drafts as one atomic settings-page contributor. */
+function useQueueSettingsContributor({
+  load,
+  parsed,
+  isMaxDirty,
+  isMergeDirty,
+  isAutoMergeDirty,
+  isAdmin,
+  isLocked,
+  invalidReason,
+  onSaveFailed,
+}: QueueSettingsContributorOptions) {
+  const {
+    snapshot,
+    setSnapshot,
+    draft,
+    setDraft,
+    mergeDraft,
+    setMergeDraft,
+    autoMergeDraft,
+    setAutoMergeDraft,
+  } = load;
   const baseline = snapshot?.settings.max_per_session;
   const mergeBaseline = snapshot?.settings.merge_enabled;
-  const isMaxDirty = baseline !== undefined && draft !== String(baseline);
-  const isMergeDirty = mergeBaseline !== undefined && mergeDraft !== mergeBaseline;
-  const isDirty = isMaxDirty || isMergeDirty;
-  const isAdmin = role === undefined || role === "admin";
-  const isLocked = snapshot?.effective.locked === true;
-  // The environment lock only governs max_per_session; merging has no
-  // environment override, so an admin may always toggle it.
-  const canEdit = isAdmin && !isLocked;
-  const canEditMerge = isAdmin;
-  let invalidReason: string | undefined;
-  if (parsed === null) invalidReason = t("system:messageQueueValidation");
-  else if (!isAdmin) invalidReason = t("system:messageQueueAdminOnly");
-  else if (isLocked && isMaxDirty) {
-    invalidReason = t("system:messageQueueEnvironmentLocked", { variable: ENVIRONMENT_VARIABLE });
-  }
-
+  const autoMergeBaseline = snapshot?.settings.auto_merge_enabled;
+  const isDirty = isMaxDirty || isMergeDirty || isAutoMergeDirty;
   useSettingsSaveContributor({
     id: "system-message-queue",
-    revision: `${draft}:${mergeDraft}`,
+    revision: `${draft}:${mergeDraft}:${autoMergeDraft}`,
     isDirty,
-    canSave: parsed !== null && (isMaxDirty ? canEdit : canEditMerge),
+    canSave: parsed !== null && isAdmin && (!isMaxDirty || !isLocked),
     invalidReason,
     save: async () => {
-      if (parsed === null || (isMaxDirty && !canEdit) || (isMergeDirty && !canEditMerge)) {
+      if (parsed === null || !isAdmin || (isMaxDirty && isLocked)) {
         throw new Error(invalidReason);
       }
       const submitted = draft;
       const submittedMerge = mergeDraft;
-      setSaveFailed(false);
+      const submittedAutoMerge = autoMergeDraft;
+      onSaveFailed(false);
       try {
         const response = await updateMessageQueueSettings({
           ...(isMaxDirty ? { max_per_session: parsed } : {}),
           ...(isMergeDirty ? { merge_enabled: mergeDraft } : {}),
+          ...(isAutoMergeDirty ? { auto_merge_enabled: autoMergeDraft } : {}),
         });
         setSnapshot(response);
         setDraft((current) =>
@@ -146,28 +161,70 @@ function useMessageQueueSettingsDraft() {
         setMergeDraft((current) =>
           current === submittedMerge ? response.settings.merge_enabled : current,
         );
+        setAutoMergeDraft((current) =>
+          current === submittedAutoMerge ? response.settings.auto_merge_enabled : current,
+        );
       } catch (error) {
-        setSaveFailed(true);
+        onSaveFailed(true);
         throw error;
       }
     },
     discard: () => {
       if (baseline !== undefined) setDraft(String(baseline));
       if (mergeBaseline !== undefined) setMergeDraft(mergeBaseline);
-      setSaveFailed(false);
+      if (autoMergeBaseline !== undefined) setAutoMergeDraft(autoMergeBaseline);
+      onSaveFailed(false);
     },
+  });
+}
+
+/** Derives dirty, validation, and permission state for all queue drafts. */
+function useMessageQueueSettingsDraft() {
+  const { t } = useTranslation();
+  const role = useAppStore((state) => state.auth.user?.role);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const load = useMessageQueueSettingsLoad();
+  const { snapshot, draft, mergeDraft, autoMergeDraft } = load;
+  const parsed = parseMaximum(draft);
+  const baseline = snapshot?.settings.max_per_session;
+  const mergeBaseline = snapshot?.settings.merge_enabled;
+  const autoMergeBaseline = snapshot?.settings.auto_merge_enabled;
+  const isMaxDirty = baseline !== undefined && draft !== String(baseline);
+  const isMergeDirty = mergeBaseline !== undefined && mergeDraft !== mergeBaseline;
+  const isAutoMergeDirty = autoMergeBaseline !== undefined && autoMergeDraft !== autoMergeBaseline;
+  const isAdmin = role === undefined || role === "admin";
+  const isLocked = snapshot?.effective.locked === true;
+  let invalidReason: string | undefined;
+  if (parsed === null) invalidReason = t("system:messageQueueValidation");
+  else if (!isAdmin) invalidReason = t("system:messageQueueAdminOnly");
+  else if (isLocked && isMaxDirty) {
+    invalidReason = t("system:messageQueueEnvironmentLocked", { variable: ENVIRONMENT_VARIABLE });
+  }
+
+  useQueueSettingsContributor({
+    load,
+    parsed,
+    isMaxDirty,
+    isMergeDirty,
+    isAutoMergeDirty,
+    isAdmin,
+    isLocked,
+    invalidReason,
+    onSaveFailed: setSaveFailed,
   });
 
   return {
     snapshot,
     draft,
-    setDraft,
+    setDraft: load.setDraft,
     mergeDraft,
-    setMergeDraft,
+    setMergeDraft: load.setMergeDraft,
+    autoMergeDraft,
+    setAutoMergeDraft: load.setAutoMergeDraft,
     loading: load.loading,
     loadFailed: load.loadFailed,
     saveFailed,
-    isDirty,
+    isDirty: isMaxDirty || isMergeDirty || isAutoMergeDirty,
     isAdmin,
     isLocked,
     reload: load.reload,
@@ -272,8 +329,48 @@ function MergeToggleFields({ enabled, onChange, disabled }: MergeToggleFieldsPro
   );
 }
 
-/** Settings → General → Message Queue page: the per-session queue limit and
- * the queued-message merge toggle, sharing one save contributor. */
+/** Renders the automatic same-source admission merge setting. */
+function AutoMergeToggleFields({ enabled, onChange, disabled }: MergeToggleFieldsProps) {
+  const { t } = useTranslation();
+  const label = t("system:messageQueueAutoMergeToggleLabel");
+  return (
+    <div className="min-w-0 space-y-3 border-t border-border/70 pt-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <Label
+            htmlFor="message-queue-auto-merge-enabled"
+            className="inline-flex min-h-11 cursor-pointer items-center py-2"
+          >
+            {label}
+          </Label>
+          <p className="text-sm text-muted-foreground">
+            {t("system:messageQueueAutoMergeDescription")}
+          </p>
+        </div>
+        <div
+          data-testid="message-queue-auto-merge-touch-target"
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center"
+        >
+          <Switch
+            id="message-queue-auto-merge-enabled"
+            data-testid="message-queue-auto-merge-enabled"
+            checked={enabled}
+            disabled={disabled}
+            onCheckedChange={onChange}
+            aria-label={label}
+            className="cursor-pointer [@media(pointer:coarse)]:after:-inset-y-3.5 disabled:cursor-not-allowed"
+          />
+        </div>
+      </div>
+      <div className="flex gap-2 rounded-md border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
+        <IconInfoCircle className="size-4 shrink-0" />
+        <p>{t("system:messageQueueAutoMergeNotice")}</p>
+      </div>
+    </div>
+  );
+}
+
+/** Settings → Task Behavior → Message Queue controls, sharing one save contributor. */
 export function MessageQueueSettings() {
   const { t } = useTranslation();
   const state = useMessageQueueSettingsDraft();
@@ -342,6 +439,11 @@ export function MessageQueueSettings() {
         <MergeToggleFields
           enabled={state.mergeDraft}
           onChange={state.setMergeDraft}
+          disabled={!state.isAdmin}
+        />
+        <AutoMergeToggleFields
+          enabled={state.autoMergeDraft}
+          onChange={state.setAutoMergeDraft}
           disabled={!state.isAdmin}
         />
       </CardContent>

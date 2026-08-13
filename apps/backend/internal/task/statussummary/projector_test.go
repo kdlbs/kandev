@@ -1,5 +1,7 @@
 package statussummary
 
+//revive:disable:file-length-limit // Projector regression coverage is intentionally scenario-heavy.
+
 import (
 	"context"
 	"fmt"
@@ -688,7 +690,7 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 	}{
 		{
 			name:        "permission approved",
-			messageType: "permission_request",
+			messageType: messageTypePermissionRequest,
 			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
 				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
 					"task_id":    taskID,
@@ -701,7 +703,7 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 		},
 		{
 			name:        "permission expired",
-			messageType: "permission_request",
+			messageType: messageTypePermissionRequest,
 			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
 				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
 					"task_id":    taskID,
@@ -730,7 +732,7 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 		},
 		{
 			name:        "permission rejected",
-			messageType: "permission_request",
+			messageType: messageTypePermissionRequest,
 			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
 				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
 					"task_id":    taskID,
@@ -819,7 +821,7 @@ func TestProjectorKeepsPendingWhenUnrelatedMessageResolves(t *testing.T) {
 	publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
 		"task_id":    taskID,
 		"session_id": sessionID,
-		"type":       "permission_request",
+		"type":       messageTypePermissionRequest,
 		"metadata":   map[string]interface{}{"status": "expired", "pending_id": "permission-b"},
 	})
 
@@ -831,7 +833,7 @@ func TestProjectorKeepsPendingWhenUnrelatedMessageResolves(t *testing.T) {
 	publishProjectorEvent(t, eventBus, events.MessageDeleted, events.MessageDeleted, map[string]interface{}{
 		"task_id":    taskID,
 		"session_id": sessionID,
-		"type":       "permission_request",
+		"type":       messageTypePermissionRequest,
 		"metadata":   map[string]interface{}{"pending_id": "permission-b"},
 	})
 
@@ -843,7 +845,7 @@ func TestProjectorKeepsPendingWhenUnrelatedMessageResolves(t *testing.T) {
 	publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
 		"task_id":    taskID,
 		"session_id": sessionID,
-		"type":       "permission_request",
+		"type":       messageTypePermissionRequest,
 		"metadata":   map[string]interface{}{"status": "approved", "pending_id": "permission-a"},
 	})
 

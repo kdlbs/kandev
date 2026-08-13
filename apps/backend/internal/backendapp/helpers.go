@@ -104,6 +104,14 @@ const (
 	agentShutdownTimeout     = 20 * time.Second
 	httpShutdownTimeout      = 10 * time.Second
 	tracingShutdownTimeout   = 5 * time.Second
+	addedFieldKey            = "added"
+	branchFieldKey           = "branch"
+	branchAdditionsFieldKey  = "branch_additions"
+	branchDeletionsFieldKey  = "branch_deletions"
+	deletedFieldKey          = "deleted"
+	versionFieldKey          = "version"
+	kandevName               = "kandev"
+	startingStatus           = "starting"
 )
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
@@ -332,24 +340,24 @@ func tryGetLiveGitStatus(ctx context.Context, lifecycleMgr *lifecycle.Manager, s
 // stores it under byEnvironmentRepo[envKey][repository_name].
 func buildGitStatusNotification(sessionID, repositoryName string, status client.GitStatusResult) *ws.Message {
 	statusPayload := map[string]interface{}{
-		"branch":             status.Branch,
-		"remote_branch":      status.RemoteBranch,
-		"head_commit":        status.HeadCommit,
-		"base_commit":        status.BaseCommit,
-		"ahead":              status.Ahead,
-		"behind":             status.Behind,
-		"remote_ahead":       status.RemoteAhead,
-		"remote_behind":      status.RemoteBehind,
-		"remote_head_commit": status.RemoteHeadCommit,
-		"files":              status.Files,
-		"modified":           status.Modified,
-		"added":              status.Added,
-		"deleted":            status.Deleted,
-		"untracked":          status.Untracked,
-		"renamed":            status.Renamed,
-		"branch_additions":   status.BranchAdditions,
-		"branch_deletions":   status.BranchDeletions,
-		"is_submodule":       status.IsSubmodule,
+		branchFieldKey:          status.Branch,
+		"remote_branch":         status.RemoteBranch,
+		"head_commit":           status.HeadCommit,
+		"base_commit":           status.BaseCommit,
+		"ahead":                 status.Ahead,
+		"behind":                status.Behind,
+		"remote_ahead":          status.RemoteAhead,
+		"remote_behind":         status.RemoteBehind,
+		"remote_head_commit":    status.RemoteHeadCommit,
+		"files":                 status.Files,
+		"modified":              status.Modified,
+		addedFieldKey:           status.Added,
+		deletedFieldKey:         status.Deleted,
+		"untracked":             status.Untracked,
+		"renamed":               status.Renamed,
+		branchAdditionsFieldKey: status.BranchAdditions,
+		branchDeletionsFieldKey: status.BranchDeletions,
+		"is_submodule":          status.IsSubmodule,
 	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName
@@ -395,18 +403,18 @@ func appendDBSnapshotGitStatus(ctx context.Context, taskRepo *sqliterepo.Reposit
 		"session_id": sessionID,
 		"timestamp":  metadata["timestamp"],
 		"status": map[string]interface{}{
-			"branch":           latestSnapshot.Branch,
-			"remote_branch":    latestSnapshot.RemoteBranch,
-			"ahead":            latestSnapshot.Ahead,
-			"behind":           latestSnapshot.Behind,
-			"files":            latestSnapshot.Files,
-			"modified":         metadata["modified"],
-			"added":            metadata["added"],
-			"deleted":          metadata["deleted"],
-			"untracked":        metadata["untracked"],
-			"renamed":          metadata["renamed"],
-			"branch_additions": metadata["branch_additions"],
-			"branch_deletions": metadata["branch_deletions"],
+			branchFieldKey:          latestSnapshot.Branch,
+			"remote_branch":         latestSnapshot.RemoteBranch,
+			"ahead":                 latestSnapshot.Ahead,
+			"behind":                latestSnapshot.Behind,
+			"files":                 latestSnapshot.Files,
+			"modified":              metadata["modified"],
+			addedFieldKey:           metadata[addedFieldKey],
+			deletedFieldKey:         metadata[deletedFieldKey],
+			"untracked":             metadata["untracked"],
+			"renamed":               metadata["renamed"],
+			branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
+			branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
 		},
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionGitEvent, gitEventData)
@@ -763,9 +771,9 @@ func healthHandler(p routeParams) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !ready.Load() {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status":  "starting",
-				"service": "kandev",
-				"version": version,
+				"status":        startingStatus,
+				"service":       kandevName,
+				versionFieldKey: version,
 			})
 			return
 		}
@@ -773,10 +781,10 @@ func healthHandler(p routeParams) gin.HandlerFunc {
 			c.Header(desktopHealthTokenHeader, token)
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"status":  "ok",
-			"service": "kandev",
-			"mode":    "websocket+http",
-			"version": version,
+			"status":        "ok",
+			"service":       kandevName,
+			"mode":          "websocket+http",
+			versionFieldKey: version,
 		})
 	}
 }
@@ -862,12 +870,18 @@ func bootActivePlugins(p routeParams) []webapp.ActivePluginPayload {
 	records := p.services.Plugins.ActiveUIPlugins()
 	out := make([]webapp.ActivePluginPayload, 0, len(records))
 	for _, rec := range records {
-		out = append(out, webapp.ActivePluginPayload{
+		entry := webapp.ActivePluginPayload{
 			ID:        rec.ID,
 			Name:      rec.DisplayName,
 			BundleURL: pluginBundleURL(rec),
 			StyleURLs: pluginStyleURLs(rec),
-		})
+		}
+		if rec.RepositoryProviders != nil {
+			providerIDs := make([]string, len(rec.RepositoryProviders))
+			copy(providerIDs, rec.RepositoryProviders)
+			entry.RepositoryProviderIDs = &providerIDs
+		}
+		out = append(out, entry)
 	}
 	return out
 }

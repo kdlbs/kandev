@@ -31,6 +31,11 @@ import (
 	"github.com/kandev/kandev/pkg/agent"
 )
 
+const (
+	windowsOS  = "windows"
+	pathEnvKey = "PATH"
+)
+
 // Config is the agentctl configuration.
 // agentctl always exposes the same instance management API regardless of
 // deployment context (Docker container or host machine).
@@ -579,7 +584,7 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		return nil, fmt.Errorf("compose indexed Git config: %w", err)
 	}
 	if envMap[githubauth.CredentialBrokerURLEnv] != "" {
-		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv], runtime.GOOS == "windows")
+		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv], runtime.GOOS == windowsOS)
 		configureGitHubCLIStartupEnv(envMap)
 	}
 
@@ -592,7 +597,7 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 }
 
 func configureGitHubCLIStartupEnv(env map[string]string) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsOS {
 		return
 	}
 	startupEnv := env[githubauth.CredentialCLIBashEnvEnv]
@@ -700,17 +705,17 @@ func prependPathEntry(env map[string]string, entry string, caseInsensitive bool)
 // testable on every runner. An exact "PATH" always wins, so a caller-supplied
 // key still takes precedence over an inherited case variant.
 func searchPathKey(env map[string]string, caseInsensitive bool) string {
-	if _, ok := env["PATH"]; ok {
-		return "PATH"
+	if _, ok := env[pathEnvKey]; ok {
+		return pathEnvKey
 	}
 	if caseInsensitive {
 		for key := range env {
-			if strings.EqualFold(key, "PATH") {
+			if strings.EqualFold(key, pathEnvKey) {
 				return key
 			}
 		}
 	}
-	return "PATH"
+	return pathEnvKey
 }
 
 func envBool(env []string, key string) bool {

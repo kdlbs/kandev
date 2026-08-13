@@ -218,6 +218,39 @@ func TestPluginHostData_Wire_PermissionDeniedPerResource(t *testing.T) {
 	})
 }
 
+func TestPluginHostData_Wire_ExecutorProfiles(t *testing.T) {
+	t.Run("DeniedWithoutCapability", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{})
+		host := dialPluginHostOverWire(t, d.host)
+		reader, ok := pluginsdk.ExecutorProfiles(host)
+		require.True(t, ok)
+
+		_, _, err := reader.List(context.Background(), pluginsdk.Page{})
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		require.Equal(t, codes.PermissionDenied, st.Code())
+		require.Equal(t, "capability 'api_read:executor_profiles' not declared", st.Message())
+	})
+
+	t.Run("MapsProfilesAndExecutorType", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{APIRead: []string{"executor_profiles"}})
+		d.tasks.executorProfiles = []*taskmodels.ExecutorProfile{{ID: "profile-1", ExecutorID: "executor-1", Name: "Docker"}}
+		d.tasks.executors = map[string]*taskmodels.Executor{"executor-1": {ID: "executor-1", Type: taskmodels.ExecutorTypeLocalDocker}}
+		host := dialPluginHostOverWire(t, d.host)
+		reader, ok := pluginsdk.ExecutorProfiles(host)
+		require.True(t, ok)
+
+		profiles, pageInfo, err := reader.List(context.Background(), pluginsdk.Page{})
+		require.NoError(t, err)
+		require.Len(t, profiles, 1)
+		require.Equal(t, "profile-1", profiles[0].ID)
+		require.Equal(t, "Docker", profiles[0].DisplayName)
+		require.Equal(t, "local_docker", profiles[0].ExecutorType)
+		require.NotNil(t, pageInfo)
+	})
+}
+
 // TestPluginHostData_Wire_Messages proves the api_read:messages gate and the
 // content sanitization travel intact over the real transport: an undeclared
 // manifest is denied with the exact wire message, and a declared one reads

@@ -1,5 +1,7 @@
 package sqlite
 
+//revive:disable:file-length-limit // Ownership cutover coverage is intentionally scenario-heavy.
+
 import (
 	"context"
 	"path/filepath"
@@ -212,12 +214,12 @@ func TestCutover_FreshSchemaHasFinalShape(t *testing.T) {
 	}
 
 	envCols := tableColumnSet(t, sqlxDB, "task_environments")
-	for _, gone := range []string{"repository_id", "worktree_id", "worktree_path", "worktree_branch"} {
+	for _, gone := range []string{columnRepositoryID, columnWorktreeID, columnWorktreePath, columnWorktreeBranch} {
 		if envCols[gone] {
 			t.Fatalf("fresh task_environments still has legacy column %s", gone)
 		}
 	}
-	repoCols := tableColumnSet(t, sqlxDB, "task_environment_repos")
+	repoCols := tableColumnSet(t, sqlxDB, tableTaskEnvRepos)
 	for _, required := range []string{"status", "merged_at", "deleted_at"} {
 		if !repoCols[required] {
 			t.Fatalf("fresh task_environment_repos missing %s", required)
@@ -653,7 +655,7 @@ func TestCutover_PrefersCanonicalMetadataForResumableSession(t *testing.T) {
 // TestCutover_PrefersFlatMetadataForSameWorktree proves that the surviving
 // flat environment beats stale session metadata when no canonical row exists.
 func TestCutover_PrefersFlatMetadataForSameWorktree(t *testing.T) {
-	for _, state := range []string{"RUNNING", "WAITING_FOR_INPUT", "CANCELLED"} {
+	for _, state := range []string{"RUNNING", "WAITING_FOR_INPUT", sessionStateCancelled} {
 		t.Run(state, func(t *testing.T) {
 			db := openLegacyDB(t)
 			now := time.Now().UTC().Truncate(time.Second)
@@ -779,7 +781,7 @@ func TestCutover_IgnoresDeletedHistoricalSessionConflict(t *testing.T) {
 // TestCutover_IgnoresTerminalHistoricalSessionConflict proves that a
 // completed, failed, or cancelled session cannot override a canonical owner.
 func TestCutover_IgnoresTerminalHistoricalSessionConflict(t *testing.T) {
-	for _, state := range []string{"COMPLETED", "FAILED", "CANCELLED"} {
+	for _, state := range []string{sessionStateCompleted, sessionStateFailed, sessionStateCancelled} {
 		t.Run(state, func(t *testing.T) {
 			db := openLegacyDB(t)
 			now := time.Now().UTC().Truncate(time.Second)

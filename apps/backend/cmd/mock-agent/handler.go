@@ -128,6 +128,9 @@ const (
 	// Tool-input/output map keys, shared to avoid repeating the literals.
 	toolKeyFilePath = "file_path"
 	toolKeyContent  = "content"
+	toolKeyTaskID   = "task_id"
+	toolKeyError    = "error"
+	toolKeyResult   = "result"
 )
 
 // parseBulkCmd reports whether the prompt is the /bulk command and, if so, how
@@ -249,20 +252,20 @@ func handleAutopilotParentQuestion(e *emitter, prompt string) bool {
 	waitForDelay(e.ctx, autopilotParentReplyDelayMillis)
 	toolID := nextToolID()
 	e.startTool(toolID, "message_task_kandev", acp.ToolKindOther, map[string]any{
-		"task_id":              childTaskID,
+		toolKeyTaskID:          childTaskID,
 		"reply_to_question_id": questionID,
 	})
 	result, err := callMCPTool("kandev", "message_task_kandev", map[string]any{
-		"task_id":              childTaskID,
-		"prompt":               "Use the first safe option and continue.",
+		toolKeyTaskID:          childTaskID,
+		clarificationPromptKey: "Use the first safe option and continue.",
 		"reply_to_question_id": questionID,
 	})
 	if err != nil {
-		e.completeTool(toolID, map[string]any{"error": err.Error()})
+		e.completeTool(toolID, map[string]any{toolKeyError: err.Error()})
 		e.text("Mock parent could not answer the autopilot question.")
 		return true
 	}
-	e.completeTool(toolID, map[string]any{"result": result})
+	e.completeTool(toolID, map[string]any{toolKeyResult: result})
 	e.text("Answered the autopilot child question.")
 	return true
 }
@@ -645,11 +648,11 @@ func emitCreateSubtask(e *emitter, cmd, model string) {
 
 	result, err := callMCPTool("kandev", "create_task_kandev", args)
 	if err != nil {
-		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
+		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("Failed to create subtask: %v", err))
 		return
 	}
-	e.completeTool(toolID, map[string]any{"result": result})
+	e.completeTool(toolID, map[string]any{toolKeyResult: result})
 	e.text(fmt.Sprintf("Created subtask %q under the current task.", title))
 }
 

@@ -80,6 +80,8 @@ export interface PluginRecord {
    */
   repo_url?: string;
   capabilities: PluginCapabilities;
+  /** Manifest-owned repository providers, serialized by the plugin API. */
+  repository_providers?: string[];
   webhooks?: PluginWebhook[];
   config_schema?: Record<string, unknown>;
   ui?: PluginUISection;

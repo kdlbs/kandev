@@ -25,15 +25,16 @@ func TestResolvePrecedenceAndNormalization(t *testing.T) {
 		invalidEnv  bool
 	}{
 		{name: "default", want: responseFor(10, 10, SourceDefault, false, true)},
-		{name: "setting", configured: &Settings{MaxPerSession: 6, MergeEnabled: true}, want: responseFor(6, 6, SourceSetting, false, true)},
-		{name: "environment", configured: &Settings{MaxPerSession: 6, MergeEnabled: true}, environment: Environment{Value: "20", Present: true}, want: responseFor(6, 20, SourceEnvironment, true, true)},
-		{name: "zero environment is unlimited", configured: &Settings{MaxPerSession: 6, MergeEnabled: true}, environment: Environment{Value: "0", Present: true}, want: responseFor(6, 0, SourceEnvironment, true, true)},
-		{name: "negative environment is unlimited", configured: &Settings{MaxPerSession: 6, MergeEnabled: true}, environment: Environment{Value: "-3", Present: true}, want: responseFor(6, 0, SourceEnvironment, true, true)},
-		{name: "invalid environment is ignored", configured: &Settings{MaxPerSession: 6, MergeEnabled: true}, environment: Environment{Value: "many", Present: true}, want: responseFor(6, 6, SourceSetting, false, true), invalidEnv: true},
-		{name: "merge disabled setting", configured: &Settings{MaxPerSession: 6, MergeEnabled: false}, want: responseFor(6, 6, SourceSetting, false, false)},
+		{name: "setting", configured: &Settings{MaxPerSession: 6, MergeEnabled: true, AutoMergeEnabled: true}, want: responseFor(6, 6, SourceSetting, false, true)},
+		{name: "environment", configured: &Settings{MaxPerSession: 6, MergeEnabled: true, AutoMergeEnabled: true}, environment: Environment{Value: "20", Present: true}, want: responseFor(6, 20, SourceEnvironment, true, true)},
+		{name: "zero environment is unlimited", configured: &Settings{MaxPerSession: 6, MergeEnabled: true, AutoMergeEnabled: true}, environment: Environment{Value: "0", Present: true}, want: responseFor(6, 0, SourceEnvironment, true, true)},
+		{name: "negative environment is unlimited", configured: &Settings{MaxPerSession: 6, MergeEnabled: true, AutoMergeEnabled: true}, environment: Environment{Value: "-3", Present: true}, want: responseFor(6, 0, SourceEnvironment, true, true)},
+		{name: "invalid environment is ignored", configured: &Settings{MaxPerSession: 6, MergeEnabled: true, AutoMergeEnabled: true}, environment: Environment{Value: "many", Present: true}, want: responseFor(6, 6, SourceSetting, false, true), invalidEnv: true},
+		{name: "merge disabled setting", configured: &Settings{MaxPerSession: 6, MergeEnabled: false, AutoMergeEnabled: true}, want: responseFor(6, 6, SourceSetting, false, false)},
+		{name: "automatic merge disabled setting", configured: &Settings{MaxPerSession: 6, MergeEnabled: true, AutoMergeEnabled: false}, want: responseForAutoMerge(6, 6, SourceSetting, false, true, false)},
 		{
 			name:        "merge disabled setting survives an environment override of max_per_session",
-			configured:  &Settings{MaxPerSession: 6, MergeEnabled: false},
+			configured:  &Settings{MaxPerSession: 6, MergeEnabled: false, AutoMergeEnabled: true},
 			environment: Environment{Value: "20", Present: true},
 			want:        responseFor(6, 20, SourceEnvironment, true, false),
 		},
@@ -65,11 +66,18 @@ func TestStoreRoundTripAndValidation(t *testing.T) {
 	if err != nil || loaded != nil {
 		t.Fatalf("missing load = %+v, %v", loaded, err)
 	}
-	if err := store.Save(context.Background(), Settings{MaxPerSession: 8, MergeEnabled: true}); err != nil {
+	if err := store.Save(context.Background(), Settings{MaxPerSession: 8, MergeEnabled: true, AutoMergeEnabled: true}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
+	var saved map[string]interface{}
+	if err := json.Unmarshal(raw.raw, &saved); err != nil {
+		t.Fatalf("decode saved JSON: %v", err)
+	}
+	if saved["auto_merge_enabled"] != true || len(saved) != 3 {
+		t.Fatalf("saved settings are not normalized: %s", raw.raw)
+	}
 	loaded, err = store.Load(context.Background())
-	if err != nil || loaded == nil || loaded.MaxPerSession != 8 || !loaded.MergeEnabled {
+	if err != nil || loaded == nil || loaded.MaxPerSession != 8 || !loaded.MergeEnabled || !loaded.AutoMergeEnabled {
 		t.Fatalf("round trip = %+v, %v", loaded, err)
 	}
 	if err := store.Save(context.Background(), Settings{MaxPerSession: -1}); !errors.Is(err, ErrValidation) {
@@ -92,8 +100,8 @@ func TestStoreLoadDefaultsMergeEnabledForPreExistingRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load pre-existing record: %v", err)
 	}
-	if loaded == nil || loaded.MaxPerSession != 6 || !loaded.MergeEnabled {
-		t.Fatalf("loaded = %+v, want {MaxPerSession:6 MergeEnabled:true}", loaded)
+	if loaded == nil || loaded.MaxPerSession != 6 || !loaded.MergeEnabled || !loaded.AutoMergeEnabled {
+		t.Fatalf("loaded = %+v, want both merge settings enabled", loaded)
 	}
 }
 
@@ -109,8 +117,21 @@ func TestStoreLoadPreservesExplicitMergeDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load explicit-false record: %v", err)
 	}
-	if loaded == nil || loaded.MergeEnabled {
-		t.Fatalf("loaded = %+v, want MergeEnabled:false preserved", loaded)
+	if loaded == nil || loaded.MergeEnabled || !loaded.AutoMergeEnabled {
+		t.Fatalf("loaded = %+v, want manual false and legacy automatic true", loaded)
+	}
+}
+
+func TestStoreLoadPreservesExplicitAutomaticMergeDisabled(t *testing.T) {
+	raw := &fakeRawStore{
+		raw: []byte(`{"max_per_session":6,"merge_enabled":true,"auto_merge_enabled":false}`), found: true,
+	}
+	loaded, err := NewStore(raw).Load(context.Background())
+	if err != nil {
+		t.Fatalf("load explicit automatic false: %v", err)
+	}
+	if loaded == nil || loaded.AutoMergeEnabled || !loaded.MergeEnabled {
+		t.Fatalf("loaded = %+v, want automatic false and manual true", loaded)
 	}
 }
 
@@ -135,6 +156,12 @@ func TestServiceUpdatePersistsBeforeLiveApply(t *testing.T) {
 	if target.max != 4 {
 		t.Fatalf("target applied before failed save: %d", target.max)
 	}
+	if _, err := service.Update(context.Background(), SettingsPatch{AutoMergeEnabled: new(false)}); err == nil {
+		t.Fatal("expected automatic merge persistence error")
+	}
+	if !target.AutoMergeEnabled() {
+		t.Fatal("automatic merge applied before failed save")
+	}
 }
 
 // TestServiceUpdatePatchPreservesUnspecifiedFields guards against a patch
@@ -157,6 +184,9 @@ func TestServiceUpdatePatchPreservesUnspecifiedFields(t *testing.T) {
 	if !response.Settings.MergeEnabled || !target.MergeEnabled() {
 		t.Fatalf("max-only patch reset merge_enabled: response=%+v target=%v", response, target.MergeEnabled())
 	}
+	if !response.Settings.AutoMergeEnabled || !target.AutoMergeEnabled() {
+		t.Fatalf("max-only patch reset auto_merge_enabled: response=%+v target=%v", response, target.AutoMergeEnabled())
+	}
 
 	response, err = service.Update(context.Background(), SettingsPatch{MergeEnabled: new(false)})
 	if err != nil {
@@ -167,6 +197,20 @@ func TestServiceUpdatePatchPreservesUnspecifiedFields(t *testing.T) {
 	}
 	if response.Settings.MergeEnabled || target.MergeEnabled() {
 		t.Fatalf("merge-only patch did not apply: response=%+v target=%v", response, target.MergeEnabled())
+	}
+	if !response.Settings.AutoMergeEnabled || !target.AutoMergeEnabled() {
+		t.Fatalf("manual merge patch reset auto merge: response=%+v target=%v", response, target.AutoMergeEnabled())
+	}
+
+	response, err = service.Update(context.Background(), SettingsPatch{AutoMergeEnabled: new(false)})
+	if err != nil {
+		t.Fatalf("auto-only update: %v", err)
+	}
+	if response.Settings.MaxPerSession != 4 || response.Settings.MergeEnabled || response.Settings.AutoMergeEnabled {
+		t.Fatalf("auto-only update clobbered other fields: %+v", response)
+	}
+	if target.MaxPerSession() != 4 || target.MergeEnabled() || target.AutoMergeEnabled() {
+		t.Fatalf("auto-only live apply = max:%d manual:%v auto:%v", target.MaxPerSession(), target.MergeEnabled(), target.AutoMergeEnabled())
 	}
 }
 
@@ -284,6 +328,9 @@ func TestServiceEnvironmentLockAllowsMergeOnlyUpdate(t *testing.T) {
 	if response.Settings.MergeEnabled || target.MergeEnabled() {
 		t.Fatalf("merge-only update did not apply: response=%+v target=%v", response, target.MergeEnabled())
 	}
+	if target.MaxPerSession() != 20 || response.Effective.MaxPerSession != 20 {
+		t.Fatalf("merge-only update lost environment capacity: response=%+v target=%d", response, target.MaxPerSession())
+	}
 }
 
 func TestHandlerReturnsConflictForEnvironmentLock(t *testing.T) {
@@ -310,7 +357,7 @@ func TestHandlerGetReturnsConfiguredAndEffectiveValues(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	raw := &fakeRawStore{}
 	store := NewStore(raw)
-	if err := store.Save(context.Background(), Settings{MaxPerSession: 6, MergeEnabled: true}); err != nil {
+	if err := store.Save(context.Background(), Settings{MaxPerSession: 6, MergeEnabled: true, AutoMergeEnabled: true}); err != nil {
 		t.Fatalf("save baseline: %v", err)
 	}
 	service := NewService(store, &fakeTarget{max: 20}, func() Environment {
@@ -334,6 +381,64 @@ func TestHandlerGetReturnsConfiguredAndEffectiveValues(t *testing.T) {
 	want := responseFor(6, 20, SourceEnvironment, true, true)
 	if payload != want {
 		t.Fatalf("response = %+v, want %+v", payload, want)
+	}
+}
+
+func TestHandlerGetDefaultsAutomaticMergeEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := NewService(
+		NewStore(&fakeRawStore{}), &fakeTarget{max: 10},
+		func() Environment { return Environment{} }, testLogger(t),
+	)
+	router := gin.New()
+	group := router.Group("/api/v1/system")
+	RegisterRoutes(group, group, service)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(
+		http.MethodGet, "/api/v1/system/message-queue/settings", nil,
+	))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	var payload map[string]map[string]interface{}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["settings"]["auto_merge_enabled"] != true || payload["effective"]["auto_merge_enabled"] != true {
+		t.Fatalf("automatic merge defaults missing from response: %s", response.Body.String())
+	}
+}
+
+func TestHandlerAutoOnlyPatchPreservesEnvironmentCapacity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	target := &fakeTarget{max: 20, mergeEnabled: true}
+	service := NewService(
+		NewStore(&fakeRawStore{}), target,
+		func() Environment { return Environment{Value: "20", Present: true} }, testLogger(t),
+	)
+	router := gin.New()
+	group := router.Group("/api/v1/system")
+	RegisterRoutes(group, group, service)
+	request := httptest.NewRequest(
+		http.MethodPatch, "/api/v1/system/message-queue/settings",
+		bytes.NewBufferString(`{"auto_merge_enabled":false}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", response.Code, response.Body.String())
+	}
+	if target.MaxPerSession() != 20 {
+		t.Fatalf("auto-only PATCH changed live environment capacity to %d", target.MaxPerSession())
+	}
+	var payload map[string]map[string]interface{}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["settings"]["auto_merge_enabled"] != false || payload["effective"]["max_per_session"] != float64(20) {
+		t.Fatalf("auto-only PATCH response = %s", response.Body.String())
 	}
 }
 
@@ -394,9 +499,18 @@ func TestHandlerUpdateOmittingMergeEnabledPreservesIt(t *testing.T) {
 }
 
 func responseFor(configured, effective int, source Source, locked bool, mergeEnabled bool) Response {
+	return responseForAutoMerge(configured, effective, source, locked, mergeEnabled, true)
+}
+
+func responseForAutoMerge(configured, effective int, source Source, locked, mergeEnabled, autoMergeEnabled bool) Response {
 	return Response{
-		Settings:  Settings{MaxPerSession: configured, MergeEnabled: mergeEnabled},
-		Effective: Effective{MaxPerSession: effective, Source: source, Locked: locked, MergeEnabled: mergeEnabled},
+		Settings: Settings{
+			MaxPerSession: configured, MergeEnabled: mergeEnabled, AutoMergeEnabled: autoMergeEnabled,
+		},
+		Effective: Effective{
+			MaxPerSession: effective, Source: source, Locked: locked,
+			MergeEnabled: mergeEnabled, AutoMergeEnabled: autoMergeEnabled,
+		},
 	}
 }
 
@@ -422,14 +536,17 @@ func (f *fakeRawStore) Save(_ context.Context, _ string, value []byte) error {
 }
 
 type fakeTarget struct {
-	max          int
-	mergeEnabled bool
+	max              int
+	mergeEnabled     bool
+	autoMergeEnabled bool
 }
 
-func (f *fakeTarget) MaxPerSession() int     { return f.max }
-func (f *fakeTarget) SetMaxPerSession(n int) { f.max = n }
-func (f *fakeTarget) MergeEnabled() bool     { return f.mergeEnabled }
-func (f *fakeTarget) SetMergeEnabled(v bool) { f.mergeEnabled = v }
+func (f *fakeTarget) MaxPerSession() int         { return f.max }
+func (f *fakeTarget) SetMaxPerSession(n int)     { f.max = n }
+func (f *fakeTarget) MergeEnabled() bool         { return f.mergeEnabled }
+func (f *fakeTarget) SetMergeEnabled(v bool)     { f.mergeEnabled = v }
+func (f *fakeTarget) AutoMergeEnabled() bool     { return f.autoMergeEnabled }
+func (f *fakeTarget) SetAutoMergeEnabled(v bool) { f.autoMergeEnabled = v }
 
 type blockingRawStore struct {
 	mu                sync.Mutex
@@ -480,14 +597,17 @@ func (s *blockingRawStore) Save(_ context.Context, _ string, value []byte) error
 }
 
 type atomicTarget struct {
-	max          atomic.Int64
-	mergeEnabled atomic.Bool
+	max              atomic.Int64
+	mergeEnabled     atomic.Bool
+	autoMergeEnabled atomic.Bool
 }
 
-func (t *atomicTarget) MaxPerSession() int     { return int(t.max.Load()) }
-func (t *atomicTarget) SetMaxPerSession(n int) { t.max.Store(int64(n)) }
-func (t *atomicTarget) MergeEnabled() bool     { return t.mergeEnabled.Load() }
-func (t *atomicTarget) SetMergeEnabled(v bool) { t.mergeEnabled.Store(v) }
+func (t *atomicTarget) MaxPerSession() int         { return int(t.max.Load()) }
+func (t *atomicTarget) SetMaxPerSession(n int)     { t.max.Store(int64(n)) }
+func (t *atomicTarget) MergeEnabled() bool         { return t.mergeEnabled.Load() }
+func (t *atomicTarget) SetMergeEnabled(v bool)     { t.mergeEnabled.Store(v) }
+func (t *atomicTarget) AutoMergeEnabled() bool     { return t.autoMergeEnabled.Load() }
+func (t *atomicTarget) SetAutoMergeEnabled(v bool) { t.autoMergeEnabled.Store(v) }
 
 func testLogger(t *testing.T) *logger.Logger {
 	t.Helper()

@@ -10,6 +10,22 @@ option go_package = "github.com/kandev/kandev/proto/kandev/plugin/v1;pluginv1";
 service Plugin {
   rpc DeliverEvent(Event) returns (EventAck);
   rpc HandleWebhook(WebhookRequest) returns (WebhookResponse);
+  // Browser-originated calls reach this method only through Kandev's
+  // authenticated declared-action route. Context is host-verified; body is
+  // bounded untrusted JSON.
+  rpc HandleAction(PluginActionRequest) returns (PluginActionResponse);
+  // Dynamic composer-reference operations. Candidate identity is untrusted;
+  // the host owns canonical references and reauthorizes on submission.
+  rpc SearchEntityReferences(SearchEntityReferencesRequest) returns (SearchEntityReferencesResponse);
+  rpc AuthorizeEntityReference(AuthorizeEntityReferenceRequest) returns (AuthorizeEntityReferenceResponse);
+  // Optional resolver for manifest-owned repository providers. Returned
+  // credentials are transient and never persisted by the host.
+  rpc ResolveGitCredential(ResolveGitCredentialRequest) returns (ResolveGitCredentialResponse);
+  // Optional non-secret credential revision for an exact resolver scope.
+  // The host stores this opaque value in a lease and compares it before and
+  // after credential redemption so a rotated or disconnected provider fails
+  // closed without resolving a secret merely to inspect its revision.
+  rpc GetGitCredentialBinding(GitCredentialBindingRequest) returns (GitCredentialBindingResponse);
   rpc InvokeAgentTool(AgentToolRequest) returns (AgentToolResponse);
 }
 
@@ -67,6 +83,7 @@ service Host {
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
   rpc ListAgentProfiles(ListAgentProfilesRequest) returns (ListAgentProfilesResponse);
+  rpc ListExecutorProfiles(ListExecutorProfilesRequest) returns (ListExecutorProfilesResponse);
   rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
 
   // Sessions + code stats — capability api_read:sessions. Driven by a real
@@ -101,6 +118,8 @@ service Host {
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc PreviewPluginOwnedTaskTree(PreviewPluginOwnedTaskTreeRequest) returns (PreviewPluginOwnedTaskTreeResponse);
+  rpc DeletePluginOwnedTaskTree(DeletePluginOwnedTaskTreeRequest) returns (DeletePluginOwnedTaskTreeResponse);
 }
 
 message Event {
@@ -142,6 +161,82 @@ message WebhookResponse {
   int32 status = 1;
   map<string, string> headers = 2;
   bytes body = 3;
+}
+
+// VerifiedActionContext is derived after normal HTTP authentication and
+// resource authorization; plugins must never infer authority from body.
+message PluginActionRequest {
+  string action_key = 1;
+  VerifiedActionContext context = 2;
+  bytes body = 3;
+}
+message VerifiedActionContext {
+  string actor_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string repository_id = 4;
+  string session_id = 5;
+  string head_branch = 6;
+}
+message PluginActionResponse {
+  bytes body = 1;
+  map<string, string> headers = 2;
+  // Final HTTP status. Zero preserves compatibility and means 200.
+  int32 status = 3;
+}
+
+message SearchEntityReferencesRequest {
+  string source = 1;
+  string workspace_id = 2;
+  string query = 3;
+  int32 limit = 4;
+}
+message SearchEntityReferencesResponse {
+  repeated EntityReferenceCandidate candidates = 1;
+}
+message EntityReferenceCandidate {
+  string provider_local_id = 1;
+  string title = 2;
+  string url = 3;
+  google.protobuf.Struct attributes = 4;
+}
+message AuthorizeEntityReferenceRequest {
+  string source = 1;
+  string workspace_id = 2;
+  string purpose = 3;
+  google.protobuf.Struct reference = 4;
+}
+message AuthorizeEntityReferenceResponse {
+  bool allowed = 1;
+  string reason = 2;
+}
+
+message ResolveGitCredentialRequest {
+  string provider_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string repository_id = 5;
+  string host = 6;
+  string path = 7;
+}
+message ResolveGitCredentialResponse {
+  string username = 1;
+  string secret = 2;
+  string expires_at = 3;
+}
+
+message GitCredentialBindingRequest {
+  string provider_id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string session_id = 4;
+  string repository_id = 5;
+  string host = 6;
+  string path = 7;
+}
+message GitCredentialBindingResponse {
+  string binding = 1;
 }
 
 message GetStateRequest {
@@ -256,6 +351,7 @@ message TaskRepository {
   string repository_id = 2;
   string base_branch = 3;
   int32 position = 4;
+  string checkout_branch = 5;
 }
 
 message TaskFilter {
@@ -348,11 +444,37 @@ message ListAgentProfilesResponse {
   PageInfo page_info = 2;
 }
 
+message ExecutorProfile {
+  string id = 1;
+  string display_name = 2;
+  string executor_type = 3;
+}
+message ListExecutorProfilesRequest {
+  Page page = 1;
+}
+message ListExecutorProfilesResponse {
+  repeated ExecutorProfile profiles = 1;
+  PageInfo page_info = 2;
+}
+
 message Repository {
   string id = 1;
   string workspace_id = 2;
   string name = 3; // owner/repo slug when known, else name
   optional string default_branch = 4;
+  // Provider origin identity and credential-free clone URL. These deliberately
+  // exclude local paths, scripts, and credentials.
+  string source_type = 5;
+  string provider_id = 6;
+  string provider_repository_id = 7;
+  string provider_host = 8;
+  string owner_or_project = 9;
+  string provider_name = 10;
+  string remote_url = 11;
+  // Opaque provider-defined connection scope. Together with
+  // provider_repository_id this is the durable upstream identity; the host
+  // never derives it from provider_host or clone_url.
+  string provider_scope = 12;
 }
 message ListRepositoriesRequest {
   string workspace_id = 1;
@@ -475,6 +597,37 @@ message CreateTaskRequest {
   optional string parent_id = 6;
   bool start_agent = 7;
   // kandev stamps source = "plugin:<id>" server-side; not settable here.
+  repeated PluginTaskRepository repositories = 8;
+  optional PluginTaskLaunchOptions launch = 9;
+  google.protobuf.Struct metadata = 10; // plugin namespace only; host reserves source.
+}
+message PluginTaskRepository {
+  string repository_id = 1; // existing Kandev repository, or empty with remote below
+  optional RemoteRepositoryDescriptor remote = 2;
+  optional string base_branch = 3;
+  optional string checkout_branch = 4;
+  optional int64 pull_request_number = 5;
+}
+message RemoteRepositoryDescriptor {
+  string provider_id = 1;
+  string provider_host = 2;
+  string owner_or_project = 3;
+  string provider_repository_id = 4;
+  string name = 5;
+  string clone_url = 6; // exact credential-free URL; host never reconstructs it
+  optional string default_branch = 7;
+  optional string base_branch = 8;
+  optional string head_branch = 9;
+  optional int64 pull_request_number = 10;
+  // Opaque provider-defined connection scope. It must be stable for one
+  // configured provider instance and contain no credentials.
+  string provider_scope = 11;
+}
+message PluginTaskLaunchOptions {
+  optional string agent_profile_id = 1;
+  optional string executor_profile_id = 2;
+  optional string prompt = 3;
+  optional string plan_mode = 4;
 }
 message CreateTaskResponse {
   Task task = 1;
@@ -503,4 +656,23 @@ message SendMessageRequest {
 message SendMessageResponse {
   string session_id = 1; // the session the message was delivered to
   string status = 2;     // "queued" | "sent" | "started"
+}
+
+message PreviewPluginOwnedTaskTreeRequest {
+  string root_task_id = 1;
+}
+message PreviewPluginOwnedTaskTreeResponse {
+  repeated Task tasks = 1;
+}
+message DeletePluginOwnedTaskTreeRequest {
+  string root_task_id = 1;
+}
+message DeletePluginOwnedTaskTreeResponse {
+  repeated string deleted_task_ids = 1;
+}
+// Attached to a non-OK DeletePluginOwnedTaskTree gRPC status when one or more
+// descendants were already deleted. Callers must reconcile these ids before
+// retrying the remaining idempotent cleanup.
+message DeletePluginOwnedTaskTreeProgress {
+  repeated string deleted_task_ids = 1;
 }
