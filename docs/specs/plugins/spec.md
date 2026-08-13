@@ -153,6 +153,7 @@ webhooks:
   - key: "slack-events"
     description: "Slack Events API webhook"
     method: "POST"
+    access: public # anonymous delivery; the plugin must validate Slack signatures
 
 config_schema:
   type: object
