@@ -16,31 +16,15 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
-// failingGetTaskRepo wraps a real TaskRepository and fails GetTask for one
-// task ID, so a test can exercise the "task read fails" path without
-// violating the task_sessions.task_id foreign key (which a nonexistent task
-// ID would).
-type failingGetTaskRepo struct {
-	repository.TaskRepository
-	failTaskID string
-}
-
-func (f *failingGetTaskRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
-	if id == f.failTaskID {
-		return nil, errors.New("simulated task read failure")
-	}
-	return f.TaskRepository.GetTask(ctx, id)
-}
-
-// failingCreateTurnRepo wraps a real TurnRepository and fails CreateTurn
-// unconditionally, so a test can exercise "turn persistence failed" without
-// a real database-level failure.
+// failingCreateTurnRepo wraps a real TurnRepository and fails
+// CreateTurnWithStepStamp unconditionally, so a test can exercise "turn
+// persistence failed" without a real database-level failure.
 type failingCreateTurnRepo struct {
 	repository.TurnRepository
 }
 
-func (f *failingCreateTurnRepo) CreateTurn(ctx context.Context, turn *models.Turn) error {
-	return errors.New("simulated turn create failure")
+func (f *failingCreateTurnRepo) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
+	return false, errors.New("simulated turn create failure")
 }
 
 // setupStepStampTask creates a workspace/workflow/task fixture with the given
@@ -167,22 +151,17 @@ func TestStartTurnStampIsImmutableAcrossMidTurnMove(t *testing.T) {
 	}
 }
 
-func TestStartTurnOmitsStampWhenTaskReadFails(t *testing.T) {
-	svc, _, repo := createTestService(t)
-	ctx := context.Background()
-	setupStepStampTask(t, repo, "task-stamp-fail", "step-a")
-	session := createStepStampSession(t, repo, "session-stamp-fail", "task-stamp-fail")
-
-	svc.tasks = &failingGetTaskRepo{TaskRepository: repo, failTaskID: "task-stamp-fail"}
-
-	turn, err := svc.StartTurn(ctx, session.ID)
-	if err != nil {
-		t.Fatalf("StartTurn should not fail when the task read fails: %v", err)
-	}
-	if _, ok := turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart]; ok {
-		t.Fatalf("turn metadata carries a stamp despite a task read failure: %v", turn.Metadata)
-	}
-}
+// "Task read fails during turn-start stamping degrades gracefully" was
+// tested here via a wrapped TaskRepository until CreateTurnWithStepStamp
+// moved the step read into the same repository transaction as the turn
+// insert (see that method's doc comment) to close a race the turn-start
+// read previously had against a concurrent step mover. s.tasks.GetTask is
+// no longer part of this path at all, so the old fault-injection seam is
+// dead; the equivalent guarantee — a missing/unreadable task row degrades
+// to an unstamped turn rather than failing turn creation — is now pinned
+// at the repository layer where the read actually happens:
+// TestCreateTurnWithStepStampOmitsStampWhenTaskNotFound in
+// internal/task/repository/sqlite/turn_step_stamp_test.go.
 
 // TestStartTurnDoesNotRecordStampMetricWhenCreateTurnFails pins Review round
 // 4's must-fix: steptelemetry.RecordTurnStamp used to fire inside

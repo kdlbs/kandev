@@ -37,18 +37,18 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 	unlock := s.lockWorkspaceSources(session.TaskID)
 	defer unlock()
 
-	metadata, stamped := s.turnStartMetadata(ctx, session)
 	turn := &models.Turn{
 		ID:            uuid.New().String(),
 		TaskSessionID: sessionID,
 		TaskID:        session.TaskID,
 		StartedAt:     time.Now().UTC(),
-		Metadata:      metadata,
+		Metadata:      turnStartRuntimeMetadata(session),
 		CreatedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
 	}
 
-	if err := s.turns.CreateTurn(ctx, turn); err != nil {
+	stamped, err := s.turns.CreateTurnWithStepStamp(ctx, turn)
+	if err != nil {
 		s.logger.Error("failed to create turn", zap.Error(err))
 		return nil, err
 	}
@@ -75,18 +75,18 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 		return nil, errors.New("cannot create completed turn without a session")
 	}
 	now := time.Now().UTC()
-	metadata, stamped := s.turnStartMetadata(ctx, session)
 	turn := &models.Turn{
 		ID:            uuid.New().String(),
 		TaskSessionID: session.ID,
 		TaskID:        session.TaskID,
 		StartedAt:     now,
 		CompletedAt:   &now,
-		Metadata:      metadata,
+		Metadata:      turnStartRuntimeMetadata(session),
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	if err := s.turns.CreateTurn(ctx, turn); err != nil {
+	stamped, err := s.turns.CreateTurnWithStepStamp(ctx, turn)
+	if err != nil {
 		return nil, fmt.Errorf("failed to create completed turn: %w", err)
 	}
 	// Recorded only once the turn is durably persisted — the counter's
@@ -95,38 +95,18 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 	return turn, nil
 }
 
-// turnStartMetadata composes the turn's immutable start-of-turn metadata: the
-// runtime config snapshot and the workflow step the task was in. The step
-// stamp is independent of the runtime snapshot — a turn with nothing to
-// snapshot still carries the stamp. A task read failure logs and omits the
-// stamp; turn creation must never fail because telemetry could not be
-// resolved. Returns the stamp-presence boolean alongside the metadata so the
-// caller can record steptelemetry.RecordTurnStamp only after the turn is
-// actually persisted, rather than at metadata-construction time.
-func (s *Service) turnStartMetadata(ctx context.Context, session *models.TaskSession) (map[string]interface{}, bool) {
+// turnStartRuntimeMetadata composes the turn's immutable start-of-turn
+// runtime-config-snapshot metadata. The workflow-step-at-start stamp is
+// added separately by CreateTurnWithStepStamp, which reads the task's
+// current step inside the same transaction as the turn insert — see that
+// method's doc comment for why the read can no longer happen here, ahead of
+// and unlocked against the insert.
+func turnStartRuntimeMetadata(session *models.TaskSession) map[string]interface{} {
 	metadata := runtimeConfigSnapshotMetadata(session)
 	if metadata == nil {
-		metadata = map[string]interface{}{}
+		return map[string]interface{}{}
 	}
-
-	stamped := false
-	if session != nil {
-		task, err := s.tasks.GetTask(ctx, session.TaskID)
-		if err != nil {
-			if s.logger != nil {
-				s.logger.Debug("failed to read task for turn-start step stamp",
-					zap.String("task_id", session.TaskID), zap.Error(err))
-			}
-		} else if task != nil && task.WorkflowStepID != "" {
-			metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = task.WorkflowStepID
-			stamped = true
-		}
-	}
-
-	if len(metadata) == 0 {
-		return nil, stamped
-	}
-	return metadata, stamped
+	return metadata
 }
 
 func runtimeConfigSnapshotMetadata(session *models.TaskSession) map[string]interface{} {

@@ -223,6 +223,15 @@ type AttachmentRepository interface {
 // TurnRepository handles conversation turn persistence.
 type TurnRepository interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
+	// CreateTurnWithStepStamp creates turn atomically with the
+	// workflow-step-at-start stamp: it reads the task's current step and
+	// inserts the turn row in the same transaction, taking the same lock
+	// readTaskStepInTx takes for step moves, so the stamp reflects a state
+	// serialized against concurrent movers of the same task rather than a
+	// plain unlocked read taken before the insert. A task-step read failure
+	// (missing task, transient error) degrades to an unstamped turn rather
+	// than failing turn creation. Returns whether the stamp was applied.
+	CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (stamped bool, err error)
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error

@@ -254,6 +254,9 @@ func (m *mockRepository) DeleteMessage(ctx context.Context, id string) error {
 func (m *mockRepository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 	return nil
 }
+func (m *mockRepository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) GetTurn(ctx context.Context, id string) (*models.Turn, error) {
 	return nil, nil
 }
