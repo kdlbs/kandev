@@ -10,10 +10,12 @@ import type { DialogFormState } from "@/components/task-create-dialog-types";
 import type { DialogPromptEnhance } from "@/components/task-create-dialog-types";
 import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
+import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 
 type SelectorOption = {
   value: string;
@@ -283,7 +285,7 @@ type WorkflowSectionProps = {
   workflowLocked?: boolean;
 };
 
-export const WorkflowSection = memo(function WorkflowSection({
+function renderWorkflowSection({
   isCreateMode,
   isTaskStarted,
   workflows: allWorkflows,
@@ -351,6 +353,49 @@ export const WorkflowSection = memo(function WorkflowSection({
   }
 
   return null;
+}
+
+export const WorkflowSection = memo(function WorkflowSection(props: WorkflowSectionProps) {
+  return renderWorkflowSection(props);
+});
+
+type WorkflowDependencySectionProps = WorkflowSectionProps & {
+  blockedBy: string[];
+  onBlockedByChange: (next: string[]) => void;
+  dependenciesDisabled?: boolean;
+};
+
+export const WorkflowDependencySection = memo(function WorkflowDependencySection({
+  blockedBy,
+  onBlockedByChange,
+  dependenciesDisabled,
+  ...workflowProps
+}: WorkflowDependencySectionProps) {
+  if (!workflowProps.isCreateMode || workflowProps.isTaskStarted) return null;
+
+  const workflowContent = renderWorkflowSection(workflowProps);
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start"
+      data-testid="task-create-workflow-dependency-row"
+    >
+      {workflowContent && (
+        <div className="min-w-0 md:w-1/2" data-testid="task-create-workflow-slot">
+          {workflowContent}
+        </div>
+      )}
+      <div
+        className={cn("min-w-0", workflowContent ? "md:w-1/2" : "md:ml-auto md:w-1/2")}
+        data-testid="task-create-dependency-slot"
+      >
+        <TaskCreateDependencies
+          value={blockedBy}
+          onChange={onBlockedByChange}
+          disabled={dependenciesDisabled}
+        />
+      </div>
+    </div>
+  );
 });
 
 export type DialogPromptSectionProps = {

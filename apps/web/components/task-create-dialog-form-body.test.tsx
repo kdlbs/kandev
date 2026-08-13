@@ -1,16 +1,27 @@
 import { createRef } from "react";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CreateEditSelectors,
   DialogPromptSection,
+  WorkflowDependencySection,
   WorkflowSection,
 } from "./task-create-dialog-form-body";
 import type { DialogFormState, TaskFormInputsHandle } from "./task-create-dialog-types";
 
+afterEach(cleanup);
+
 vi.mock("@/components/workflow-selector-row", () => ({
   WorkflowSelectorRow: ({ selectedWorkflowId }: { selectedWorkflowId: string | null }) => (
     <button type="button">Workflow selector {selectedWorkflowId ?? "none"}</button>
+  ),
+}));
+
+vi.mock("@/components/task-create-dialog-dependencies", () => ({
+  TaskCreateDependencies: ({ value }: { value: string[] }) => (
+    <button type="button" data-testid="task-create-dependencies-trigger">
+      {value.length > 0 ? `${value.length} dependencies` : "No dependency"}
+    </button>
   ),
 }));
 
@@ -57,6 +68,48 @@ describe("WorkflowSection", () => {
     const { container } = renderWorkflowSection("wf-1");
 
     expect(container.textContent).toBe("");
+  });
+});
+
+describe("WorkflowDependencySection", () => {
+  const secondWorkflow = { id: "wf-2", name: "Support" };
+
+  function renderWorkflowDependencySection(
+    effectiveWorkflowId: string | null,
+    workflows = [workflow, secondWorkflow],
+  ) {
+    return render(
+      <WorkflowDependencySection
+        isCreateMode
+        isTaskStarted={false}
+        workflows={workflows}
+        snapshots={{}}
+        effectiveWorkflowId={effectiveWorkflowId}
+        onWorkflowChange={() => {}}
+        agentProfiles={[]}
+        blockedBy={[]}
+        onBlockedByChange={() => {}}
+      />,
+    );
+  }
+
+  it("places the dependency selector after the workflow selector in a responsive row", () => {
+    renderWorkflowDependencySection("wf-1");
+
+    const row = screen.getByTestId("task-create-workflow-dependency-row");
+    expect(row.className).toContain("md:flex-row");
+    expect(row.firstElementChild?.getAttribute("data-testid")).toBe("task-create-workflow-slot");
+    expect(row.lastElementChild?.getAttribute("data-testid")).toBe("task-create-dependency-slot");
+    expect(screen.getByTestId("task-create-dependencies-trigger")).toBeTruthy();
+  });
+
+  it("keeps dependencies visible when a single workflow hides its selector", () => {
+    renderWorkflowDependencySection("wf-1", [workflow]);
+
+    const row = screen.getByTestId("task-create-workflow-dependency-row");
+    expect(screen.queryByTestId("task-create-workflow-slot")).toBeNull();
+    expect(screen.getByTestId("task-create-dependency-slot")).toBeTruthy();
+    expect(row.lastElementChild?.className).toContain("md:ml-auto");
   });
 });
 

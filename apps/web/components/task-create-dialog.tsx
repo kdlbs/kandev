@@ -12,11 +12,10 @@ import { DiscardLocalChangesDialog } from "@/components/discard-local-changes-di
 import { DialogHeaderContent } from "@/components/task-create-dialog-header";
 import {
   SessionSelectors,
-  WorkflowSection,
+  WorkflowDependencySection,
   DialogPromptSection,
 } from "@/components/task-create-dialog-form-body";
 import { CreateModeSelectors } from "@/components/task-create-dialog-create-mode-selectors";
-import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
 import {
   AgentSelector,
   ExecutorProfileSelector,
@@ -111,13 +110,6 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onComposerSubmit={props.onComposerSubmit}
       />
       <CreateModeAgentSelectors {...props} />
-      {isCreateMode && !isTaskStarted && (
-        <TaskCreateDependencies
-          value={fs.blockedBy}
-          onChange={fs.setBlockedBy}
-          disabled={props.isCreatingSession}
-        />
-      )}
       {props.bottomSlot}
     </>
   );
@@ -180,15 +172,18 @@ function DialogFormBody(props: DialogFormBodyProps) {
   return (
     <div className="flex-1 space-y-4 overflow-y-auto pr-1">
       {isSessionMode ? <SessionModeBody {...props} /> : <CreateModeBody {...props} />}
-      <WorkflowSection
+      <WorkflowDependencySection
         isCreateMode={isCreateMode}
         isTaskStarted={isTaskStarted}
-        workflows={workflows as Parameters<typeof WorkflowSection>[0]["workflows"]}
-        snapshots={snapshots as Parameters<typeof WorkflowSection>[0]["snapshots"]}
+        workflows={workflows as Parameters<typeof WorkflowDependencySection>[0]["workflows"]}
+        snapshots={snapshots as Parameters<typeof WorkflowDependencySection>[0]["snapshots"]}
         effectiveWorkflowId={props.effectiveWorkflowId}
         onWorkflowChange={props.onWorkflowChange}
         agentProfiles={props.agentProfiles}
         workflowLocked={props.workflowLocked}
+        blockedBy={props.fs.blockedBy}
+        onBlockedByChange={props.fs.setBlockedBy}
+        dependenciesDisabled={props.isCreatingSession}
       />
     </div>
   );
