@@ -368,6 +368,7 @@ func (r *Repository) CreateSessionCommit(ctx context.Context, commit *models.Ses
 		return false, err
 	}
 
+	// RowsAffected returns 0 on a conflict-skipped row in both SQLite and Postgres.
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return false, err

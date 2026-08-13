@@ -1069,7 +1069,7 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	// this very session (reuseSessionForStep/createNewSessionForStep ->
 	// completeAndStopSession -> StopAgent), which would make a
 	// GetGitLog call placed after it find the agent already gone.
-	s.captureSessionCommitsSweep(ctx, data.SessionID)
+	s.captureSessionCommitsSweep(context.WithoutCancel(ctx), data.SessionID)
 
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
 		s.logger.Info("deferring on_turn_complete on agent.completed while clarification is pending",
