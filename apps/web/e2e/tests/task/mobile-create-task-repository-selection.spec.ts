@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { dwell } from "../../helpers/causal-waits";
 
 useRegularMode();
 
@@ -28,10 +29,12 @@ test.describe("Create task workspace repository picker on mobile", () => {
     await expect(selectedElsewhere.getByTestId("already-added-repository-marker")).toBeVisible();
     await selectedElsewhere.tap();
     await expect(repositoryChips.nth(1)).toContainText("E2E Repo");
-    // deliberate-sleep(negative-assertion): a tap must not leave a hover
-    // tooltip behind on touch. Nothing is rendered to wait for, so the only
-    // meaningful check is to outlast Radix's open delay first.
-    await testPage.waitForTimeout(300);
+    await dwell(
+      testPage,
+      300,
+      "negative-assertion",
+      "a tap must not leave a hover tooltip behind on touch; nothing is rendered to wait for, so the check has to outlast Radix's open delay first",
+    );
     await expect(testPage.getByRole("tooltip")).toBeHidden();
     await assertNoDocumentHorizontalOverflow(testPage, "repository picker selection");
     await prCapture.screenshot("mobile-repository-chip-selection", {

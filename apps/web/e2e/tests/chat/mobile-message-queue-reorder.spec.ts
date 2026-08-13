@@ -5,6 +5,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+import { dwell } from "../../helpers/causal-waits";
 
 /** Fragment of dnd-kit's default `onDragOver` accessibility announcement. */
 const MOVED_OVER = "was moved over droppable area";
@@ -110,12 +111,12 @@ async function touchDragTo(
     ) ?? "";
 
   await source.dispatchEvent("pointerdown", down);
-  // deliberate-sleep(library-timer): dnd-kit's PointerSensor arms on
-  // pointerdown and only activates once a later move clears its distance
-  // constraint. Nothing is rendered in between, so there is no DOM signal to
-  // wait for; this just lets React commit the pointerdown before the
-  // activating move lands in the same task.
-  await page.waitForTimeout(100);
+  await dwell(
+    page,
+    100,
+    "library-timer",
+    "dnd-kit's PointerSensor arms on pointerdown and only activates once a later move clears its distance constraint; nothing renders in between, so this just lets React commit the pointerdown before the activating move lands in the same task",
+  );
   await page.dispatchEvent("body", "pointermove", { ...down, clientX: end.x, clientY: end.y });
 
   // The first move activates the drag; measuring is complete once dnd-kit can

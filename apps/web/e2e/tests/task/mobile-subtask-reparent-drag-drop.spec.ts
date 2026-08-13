@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { settledBoundingBox } from "../../helpers/settled-box";
+import { dwell } from "../../helpers/causal-waits";
 
 /**
  * Touch-drags a task row's handle onto a nest drop zone via CDP touch events.
@@ -23,11 +24,12 @@ async function touchDragRowToNestZone(
     type: "touchStart",
     touchPoints: [{ x: startX, y: startY }],
   });
-  // deliberate-sleep(library-timer): dnd-kit's TouchSensor arms a 250ms
-  // activation timer on touchStart and only starts the drag if the touch is
-  // still held when it fires. Nothing renders while that timer runs, so it has
-  // to be waited out rather than observed.
-  await page.waitForTimeout(350);
+  await dwell(
+    page,
+    350,
+    "library-timer",
+    "dnd-kit's TouchSensor arms a 250ms activation timer on touchStart and only starts the drag if the touch is still held when it fires; nothing renders while that timer runs",
+  );
   await cdp.send("Input.dispatchTouchEvent", {
     type: "touchMove",
     touchPoints: [{ x: startX + 14, y: startY }],

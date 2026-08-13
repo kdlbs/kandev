@@ -1,4 +1,5 @@
 import { expect, type Page, type WebSocketRoute } from "@playwright/test";
+import { injectLatency } from "../../helpers/causal-waits";
 
 const AGENT_NAME = "claude-acp";
 const NOW = "2026-07-26T12:00:00.000Z";
@@ -223,7 +224,10 @@ export async function installRuntimeUpdateFixture(
         });
       }
       if (requestedTarget && previewDelayMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, previewDelayMs));
+        await injectLatency(
+          previewDelayMs,
+          "simulates a slow agent-update preview so the in-flight preview state stays observable",
+        );
       }
       const response = requestedTarget
         ? {
