@@ -220,6 +220,21 @@ func TestBuildContainerConfig_LabelsExecutorProfileAndTaskEnvironment(t *testing
 	assertLabel(t, got.Labels, "com.kandev.image", "kandev/agent:custom")
 }
 
+func TestBuildContainerConfig_LabelsE2EDockerScope(t *testing.T) {
+	t.Setenv("KANDEV_E2E_DOCKER_SCOPE", "e2e-test-scope")
+	cm := newCMTest(t)
+	got, err := cm.buildContainerConfig(ContainerConfig{
+		AgentConfig: newConfigStubAgent(),
+		InstanceID:  "0123456789abcdef",
+		TaskID:      "task-1",
+	})
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+
+	assertLabel(t, got.Labels, "kandev.e2e.run", "e2e-test-scope")
+}
+
 func TestBuildContainerConfig_PublishesAgentctlPorts(t *testing.T) {
 	cm := newCMTest(t)
 	cfg := ContainerConfig{

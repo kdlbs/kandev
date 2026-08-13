@@ -49,17 +49,17 @@ describe("useSettingsDiscovery hook", () => {
   it("follows the auth feature and mode when exposing account settings", () => {
     const { result, rerender } = renderHook(() => useSettingsDiscovery());
 
-    expect(result.current.some((entry) => entry.groupId === "account")).toBe(false);
+    expect(result.current.some((entry) => entry.id === "account-security")).toBe(false);
 
     mocks.authEnabled = true;
     rerender();
 
-    expect(result.current.some((entry) => entry.groupId === "account")).toBe(false);
+    expect(result.current.some((entry) => entry.id === "account-security")).toBe(false);
 
     mocks.state.auth.mode = "enabled";
     rerender();
 
-    expect(result.current.some((entry) => entry.groupId === "account")).toBe(true);
+    expect(result.current.some((entry) => entry.id === "account-security")).toBe(true);
   });
 
   it("exposes user administration only to admins", () => {

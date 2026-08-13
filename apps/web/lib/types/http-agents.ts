@@ -411,10 +411,8 @@ export type CompletedTaskActivityDTO = {
   completed_tasks: number;
 };
 
-export type AgentUsageDTO = {
-  agent_profile_id: string;
-  agent_profile_name: string;
-  agent_model: string;
+export type ModelUsageDTO = {
+  model: string;
   session_count: number;
   turn_count: number;
   total_duration_ms: number;
@@ -450,7 +448,7 @@ export type StatsResponse = {
   task_stats: TaskStatsDTO[];
   daily_activity: DailyActivityDTO[];
   completed_activity: CompletedTaskActivityDTO[];
-  agent_usage: AgentUsageDTO[];
+  model_usage: ModelUsageDTO[];
   repository_stats: RepositoryStatsDTO[];
   git_stats: GitStatsDTO;
 };

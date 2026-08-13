@@ -47,11 +47,37 @@ type Manifest struct {
 	AuthProviders []AuthProvider `yaml:"auth_providers,omitempty" json:"auth_providers,omitempty"`
 
 	ConfigSchema map[string]any `yaml:"config_schema,omitempty" json:"config_schema,omitempty"`
+	AgentTools   []AgentTool    `yaml:"agent_tools,omitempty" json:"agent_tools,omitempty"`
 
 	UI UISection `yaml:"ui,omitempty" json:"ui,omitempty"`
 
 	Runtime          Runtime `yaml:"runtime,omitempty" json:"runtime,omitempty"`
 	MinKandevVersion string  `yaml:"min_kandev_version,omitempty" json:"min_kandev_version,omitempty"`
+}
+
+const (
+	AgentToolSurfaceKanban = "kanban-task"
+	AgentToolSurfaceOffice = "office-task"
+)
+
+// AgentTool is an MCP tool a plugin contributes to matching task sessions.
+// The exposed MCP name is derived by the host and is not author-controlled.
+type AgentTool struct {
+	Name         string               `yaml:"name" json:"name"`
+	Description  string               `yaml:"description" json:"description"`
+	Surfaces     []string             `yaml:"surfaces" json:"surfaces"`
+	InputSchema  map[string]any       `yaml:"input_schema" json:"input_schema"`
+	OutputSchema map[string]any       `yaml:"output_schema,omitempty" json:"output_schema,omitempty"`
+	Annotations  AgentToolAnnotations `yaml:"annotations,omitempty" json:"annotations,omitempty"`
+}
+
+// AgentToolAnnotations are MCP hints. Nil values preserve omission so the
+// runtime descriptor can apply conservative defaults explicitly.
+type AgentToolAnnotations struct {
+	ReadOnlyHint    *bool `yaml:"read_only_hint,omitempty" json:"read_only_hint,omitempty"`
+	DestructiveHint *bool `yaml:"destructive_hint,omitempty" json:"destructive_hint,omitempty"`
+	IdempotentHint  *bool `yaml:"idempotent_hint,omitempty" json:"idempotent_hint,omitempty"`
+	OpenWorldHint   *bool `yaml:"open_world_hint,omitempty" json:"open_world_hint,omitempty"`
 }
 
 // Runtime declares that a plugin ships a kandev-managed binary rather than
@@ -111,9 +137,32 @@ type AuthProvider struct {
 
 // Webhook is a proxied external webhook endpoint the plugin declares.
 type Webhook struct {
-	Key         string `yaml:"key" json:"key"`
-	Description string `yaml:"description,omitempty" json:"description,omitempty"`
-	Method      string `yaml:"method,omitempty" json:"method,omitempty"`
+	Key          string `yaml:"key" json:"key"`
+	Description  string `yaml:"description,omitempty" json:"description,omitempty"`
+	Method       string `yaml:"method,omitempty" json:"method,omitempty"`
+	Access       string `yaml:"access,omitempty" json:"access,omitempty"`
+	MaxBodyBytes int64  `yaml:"max_body_bytes,omitempty" json:"max_body_bytes,omitempty"`
+}
+
+const (
+	WebhookAccessPublic              = "public"
+	WebhookAccessAuthenticated       = "authenticated"
+	DefaultWebhookMaxBodyBytes int64 = 4 << 20
+	MaximumWebhookMaxBodyBytes int64 = 16 << 20
+)
+
+func (w Webhook) EffectiveAccess() string {
+	if w.Access == "" {
+		return WebhookAccessPublic
+	}
+	return w.Access
+}
+
+func (w Webhook) EffectiveMaxBodyBytes() int64 {
+	if w.MaxBodyBytes == 0 {
+		return DefaultWebhookMaxBodyBytes
+	}
+	return w.MaxBodyBytes
 }
 
 // UISection declares UI pages the plugin contributes, and/or a native UI
@@ -148,6 +197,13 @@ type UIKeybinding struct {
 	ID          string `yaml:"id" json:"id"`
 	Default     string `yaml:"default" json:"default"`
 	Description string `yaml:"description" json:"description"`
+	// AllowInEditor opts this one binding out of the dispatcher's
+	// skip-while-typing rule. By default a plugin keybinding does not fire
+	// when the keydown target is an input, textarea or contenteditable, so a
+	// plugin cannot shadow a character the user is trying to type. A binding
+	// whose whole purpose is to act on the focused composer (dictation,
+	// for instance) has to run there, and declares it here.
+	AllowInEditor bool `yaml:"allow_in_editor,omitempty" json:"allow_in_editor,omitempty"`
 }
 
 // Parse decodes a plugin manifest from YAML bytes. It does not validate the

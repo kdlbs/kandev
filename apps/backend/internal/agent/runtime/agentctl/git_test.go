@@ -56,6 +56,22 @@ func TestGitOperations_PostExpectedPathAndPayload(t *testing.T) {
 			wantBody: map[string]any{"repo": "svc"},
 		},
 		{
+			name: "replace remote contribution",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitReplaceRemoteContribution(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "svc")
+			},
+			wantPath: "/api/v1/git/contribution/replace",
+			wantBody: map[string]any{"expected_remote_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "repo": "svc"},
+		},
+		{
+			name: "use remote contribution",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitUseRemoteContribution(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "svc")
+			},
+			wantPath: "/api/v1/git/contribution/use",
+			wantBody: map[string]any{"expected_remote_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "repo": "svc"},
+		},
+		{
 			name: "rebase onto base branch",
 			call: func(c *Client) (*GitOperationResult, error) {
 				return c.GitRebase(context.Background(), "main", "svc")
@@ -195,6 +211,48 @@ func TestGitOperations_PostExpectedPathAndPayload(t *testing.T) {
 				t.Errorf("result = %+v, want the decoded success body", result)
 			}
 		})
+	}
+}
+
+func TestGitUseRemoteContribution_DecodesRecoveryBranch(t *testing.T) {
+	srv, _ := captureServer(t, jsonResponder(http.StatusOK, `{
+		"success":true,
+		"operation":"use_remote_contribution",
+		"output":"HEAD is now at provider",
+		"recovery_branch":"kandev/recovery-123"
+	}`))
+
+	result, err := newHTTPOnlyClient(srv.URL).GitUseRemoteContribution(
+		context.Background(),
+		"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"svc",
+	)
+	if err != nil {
+		t.Fatalf("GitUseRemoteContribution: %v", err)
+	}
+	if result.RecoveryBranch != "kandev/recovery-123" {
+		t.Errorf("RecoveryBranch = %q, want %q", result.RecoveryBranch, "kandev/recovery-123")
+	}
+}
+
+func TestGitOperation_DecodesContributionErrorCode(t *testing.T) {
+	srv, _ := captureServer(t, jsonResponder(http.StatusOK, `{
+		"success":false,
+		"operation":"replace_remote_contribution",
+		"error":"remote contribution head changed",
+		"error_code":"lease_mismatch"
+	}`))
+
+	result, err := newHTTPOnlyClient(srv.URL).GitReplaceRemoteContribution(
+		context.Background(),
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"svc",
+	)
+	if err != nil {
+		t.Fatalf("GitReplaceRemoteContribution: %v", err)
+	}
+	if result.ErrorCode != "lease_mismatch" {
+		t.Errorf("ErrorCode = %q, want %q", result.ErrorCode, "lease_mismatch")
 	}
 }
 
@@ -611,7 +669,8 @@ const gitStatusBody = `{
 	"success":true,"is_submodule":true,
 	"branch":"feature/x","remote_branch":"origin/feature/x",
 	"head_commit":"head1","base_commit":"base1",
-	"ahead":3,"behind":1,
+	"ahead":3,"behind":1,"remote_ahead":4,"remote_behind":2,
+	"remote_head_commit":"remote1",
 	"modified":["m.go"],"added":["a.go"],"deleted":["d.go"],
 	"untracked":["u.go"],"renamed":["r.go"],
 	"files":{"m.go":{"status":"M"}},
@@ -632,6 +691,10 @@ func assertFullGitStatus(t *testing.T, result *GitStatusResult) {
 	}
 	if result.Ahead != 3 || result.Behind != 1 {
 		t.Errorf("ahead/behind = %d / %d, want 3 / 1", result.Ahead, result.Behind)
+	}
+	if result.RemoteAhead != 4 || result.RemoteBehind != 2 || result.RemoteHeadCommit != "remote1" {
+		t.Errorf("remote ancestry = %d / %d / %q, want 4 / 2 / remote1",
+			result.RemoteAhead, result.RemoteBehind, result.RemoteHeadCommit)
 	}
 	for name, got := range map[string][]string{
 		"modified":  result.Modified,

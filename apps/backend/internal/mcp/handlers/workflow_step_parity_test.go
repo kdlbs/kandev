@@ -81,6 +81,7 @@ func setupParitySurfaces(t *testing.T) (*Handlers, *gin.Engine, *eventbus.Memory
 
 	log := testLogger(t)
 	svc := workflowsvc.NewService(repo, log)
+	t.Cleanup(func() { _ = svc.Close() })
 	ctrl := workflowctrl.NewController(svc)
 	eventBus := eventbus.NewMemoryEventBus(log)
 

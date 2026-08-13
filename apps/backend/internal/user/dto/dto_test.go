@@ -8,6 +8,13 @@ import (
 	"github.com/kandev/kandev/internal/user/models"
 )
 
+func TestFromUserSettingsIncludesAtomicRevision(t *testing.T) {
+	got := FromUserSettings(&models.UserSettings{Revision: 42}).Revision
+	if got != 42 {
+		t.Fatalf("Revision = %d, want 42", got)
+	}
+}
+
 func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing.T) {
 	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("AzureDevOpsBrowsePreferences")
 	if !ok || field.Tag.Get("json") != "azure_devops_browse_preferences,omitempty" {

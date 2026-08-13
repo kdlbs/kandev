@@ -26,6 +26,12 @@ on:
   # Manual trigger for verifying CI on draft PRs and ad-hoc reruns. The
   # default sharded run uses the same ref the user picks in the dispatch UI.
   workflow_dispatch:
+    inputs:
+      fail_on_flaky:
+        description: "Fail the run when Playwright needs a retry"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,6 +39,8 @@ concurrency:
 
 permissions:
   contents: read
+  # The build/report jobs read the latest successful main timing artifact.
+  actions: read
   # Required so the containerized build / e2e shards / e2e-report jobs can
   # pull the kandev-ci image from GHCR via GITHUB_TOKEN.
   packages: read
@@ -91,6 +99,98 @@ jobs:
       # always do it; the regular E2E job ignores them.
       - name: Build Docker E2E helper binaries
         run: make build-backend-linux-helpers
+
+      - name: Locate latest successful main timing profile
+        id: main-timing-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          (async () => {
+            const url =
+              process.env.GITHUB_API_URL +
+              "/repos/" +
+              process.env.GITHUB_REPOSITORY +
+              "/actions/workflows/e2e-tests.yml/runs?branch=main&status=success&per_page=20";
+            const response = await fetch(url, {
+              headers: {
+                accept: "application/vnd.github+json",
+                authorization: "Bearer " + process.env.GH_TOKEN,
+              },
+            });
+            if (!response.ok) {
+              console.log(
+                "::warning::Unable to query successful main E2E runs (" +
+                  response.status +
+                  "); using count fallback.",
+              );
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, "run_id=\n");
+              return;
+            }
+            const payload = await response.json();
+            const run = (payload.workflow_runs ?? []).find(
+              (candidate) => candidate.head_branch === "main" && candidate.conclusion === "success",
+            );
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, "run_id=" + (run?.id ?? "") + "\n");
+            console.log(
+              run
+                ? "Using successful main E2E run " + run.id + " for timing history."
+                : "No successful main E2E run found; using count fallback.",
+            );
+          })().catch((error) => {
+            console.error(error);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, "run_id=\n");
+          });
+          NODE
+
+      - name: Download latest main timing profile
+        if: steps.main-timing-run.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-timing-profile
+          path: e2e/previous-profile
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.main-timing-run.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Upload selected timing baseline for report job
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-selected-main-timing-profile
+          path: e2e/previous-profile/timing-profile.json
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Generate duration-aware E2E shard manifests
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+          rm -rf "$GITHUB_WORKSPACE/e2e-manifests"
+          if [[ -f "$GITHUB_WORKSPACE/e2e/previous-profile/timing-profile.json" ]]; then
+            echo "Planning from the latest successful main timing profile."
+            pnpm exec tsx e2e/scripts/plan-shards.ts \
+              --web-root "$GITHUB_WORKSPACE/apps/web" \
+              --output-dir "$GITHUB_WORKSPACE/e2e-manifests" \
+              --profile "$GITHUB_WORKSPACE/e2e/previous-profile/timing-profile.json"
+          else
+            echo "Planning with deterministic count fallback; no usable main timing profile was downloaded."
+            pnpm exec tsx e2e/scripts/plan-shards.ts \
+              --web-root "$GITHUB_WORKSPACE/apps/web" \
+              --output-dir "$GITHUB_WORKSPACE/e2e-manifests"
+          fi
+
+      - name: Upload E2E shard manifests
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-shard-manifests
+          path: e2e-manifests/
+          retention-days: 3
 
       - name: Upload backend build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -197,14 +297,26 @@ jobs:
         working-directory: apps/web
         run: tar -xf web-dist.tar && rm web-dist.tar
 
+      - name: Enable strict flaky-test diagnostics
+        if: github.event_name == 'workflow_dispatch' && inputs.fail_on_flaky
+        run: echo "E2E_FAIL_ON_FLAKY=1" >> "$GITHUB_ENV"
+
+      - name: Download E2E shard manifests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-shard-manifests
+          path: e2e-manifests
+
       # Pinned to chromium + mobile-chrome so the dedicated `e2e-containers`
       # job below owns the real-Docker project (which covers both the Docker
       # executor and the SSH executor's sshd target). Without --project the
       # container-bound specs would run here too, fail seeding (Docker not
       # enabled for these shards), and spam every shard.
-      - name: Run E2E tests (shard ${{ matrix.shard }}/14)
+      - name: Run planned E2E tests (shard ${{ matrix.shard }}/14)
         working-directory: apps/web
-        run: npx playwright test --config e2e/playwright.config.ts --project=chromium --project=mobile-chrome --shard=${{ matrix.shard }}/14
+        env:
+          E2E_SHARD: ${{ matrix.shard }}
+        run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${{ matrix.shard }}.json"
 
       - name: Upload blob report
         if: always()
@@ -225,9 +337,8 @@ jobs:
   # Real-Docker E2E: exercises the local_docker executor end-to-end.
   # ubuntu-latest ships with Docker preinstalled, so no service container is
   # required. Container-bound tests are slow (~2 min each), so we shard across
-  # 6 runners — Playwright's --shard splits the project's tests into N groups.
-  # Cleans up any leftover kandev-managed containers at the end so a leaky
-  # process doesn't poison the next run on the same self-hosted runner.
+  # 6 runners — the build job creates a duration-aware manifest for this
+  # cohort, and each runner executes its explicit file selection.
   #
   # This job runs the `containers` Playwright project, which covers both the
   # Docker executor and the SSH executor (since the SSH executor's e2e tests
@@ -280,11 +391,12 @@ jobs:
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
-      # Required for the docker pull below to succeed even if the kandev-ci
-      # package is private on GHCR. The `e2e` / `e2e-report` jobs above don't
-      # need this because GitHub's `container:` integration handles auth
-      # implicitly using GITHUB_TOKEN.
+      # The kandev-ci image is public, so fork PRs can pull it anonymously.
+      # Their read-only GITHUB_TOKEN can still be rejected by GHCR during an
+      # explicit login because it belongs to the base repository, not the
+      # contributor's fork. Keep authenticated pulls for trusted runs.
       - name: Log in to GHCR
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -366,15 +478,22 @@ jobs:
         working-directory: apps/web
         run: tar -xf web-dist.tar && rm web-dist.tar
 
-      - name: Run container-backed E2E tests shard ${{ matrix.shard }}/6 (Docker executor + SSH executor)
+      - name: Enable strict flaky-test diagnostics
+        if: github.event_name == 'workflow_dispatch' && inputs.fail_on_flaky
+        run: echo "E2E_FAIL_ON_FLAKY=1" >> "$GITHUB_ENV"
+
+      - name: Download E2E shard manifests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-shard-manifests
+          path: e2e-manifests
+
+      - name: Run planned container-backed E2E tests shard ${{ matrix.shard }}/6 (Docker executor + SSH executor)
         working-directory: apps/web
         env:
           KANDEV_E2E_CONTAINERS: "1"
-        run: npx playwright test --config e2e/playwright.config.ts --project=containers --shard=${{ matrix.shard }}/6
-
-      - name: Cleanup leftover kandev containers
-        if: always()
-        run: docker ps -aq --filter label=kandev.managed=true | xargs -r docker rm -f
+          E2E_SHARD: ${{ matrix.shard }}
+        run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/containers/${{ matrix.shard }}.json"
 
       # Named with the same `blob-report-*` prefix the merge job globs for
       # so the containers results land in the unified HTML report alongside
@@ -487,6 +606,16 @@ jobs:
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
+      # The published runtime image may predate the report-tool dependency;
+      # keep older images usable while the image rebuild adds unzip permanently.
+      - name: Ensure timing report tools are installed
+        run: |
+          if ! command -v unzip >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends unzip
+            rm -rf /var/lib/apt/lists/*
+          fi
+
       - name: Download blob reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -494,7 +623,165 @@ jobs:
           pattern: blob-report-*
           merge-multiple: true
 
+      - name: Download E2E shard manifests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: e2e-shard-manifests
+          path: e2e-manifests
+
+      - name: Download selected main timing profile
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: e2e-selected-main-timing-profile
+          path: e2e/previous-profile
+
+      - name: Collect timing and retry diagnostics
+        if: always()
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+          if [[ -f "$GITHUB_WORKSPACE/e2e/previous-profile/timing-profile.json" ]]; then
+            pnpm exec tsx e2e/scripts/e2e-timings.ts \
+              --input e2e/blob-reports \
+              --output e2e/timing-profile.json \
+              --web-root "$GITHUB_WORKSPACE/apps/web" \
+              --branch "$GITHUB_REF_NAME" \
+              --sha "$GITHUB_SHA" \
+              --run-id "$GITHUB_RUN_ID" \
+              --previous "$GITHUB_WORKSPACE/e2e/previous-profile/timing-profile.json"
+          else
+            pnpm exec tsx e2e/scripts/e2e-timings.ts \
+              --input e2e/blob-reports \
+              --output e2e/timing-profile.json \
+              --web-root "$GITHUB_WORKSPACE/apps/web" \
+              --branch "$GITHUB_REF_NAME" \
+              --sha "$GITHUB_SHA" \
+              --run-id "$GITHUB_RUN_ID"
+          fi
+          pnpm exec tsx e2e/scripts/retry-summary.ts \
+            --input e2e/blob-reports \
+            --output e2e/retry-summary.json \
+            --manifest-dir "$GITHUB_WORKSPACE/e2e-manifests" \
+            --attachment-output e2e/retry-artifacts \
+            --artifact-name e2e-timing-diagnostics \
+            --artifact-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts"
+
+      - name: Write E2E timing summary
+        if: always()
+        working-directory: apps/web
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const summaryPath = "e2e/retry-summary.json";
+          if (!fs.existsSync(summaryPath)) process.exit(0);
+          const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
+          const counts = summary.counts;
+          const diagnosticTests = summary.tests.filter(
+            (test) => test.attempts > 1 || !["passed", "skipped"].includes(test.finalStatus),
+          );
+          const markdown = (value) => String(value).replaceAll("|", "\\|").replace(/\s+/g, " ");
+          const lines = [
+            "## E2E timing and retry summary",
+            "",
+            "- Plan mode: " + summary.planning.mode,
+            "- Unknown units: " + summary.planning.unknownUnits,
+            "- Warm units: " + summary.planning.warmUnits,
+            "- Stale profile units: " + summary.planning.staleUnits,
+            "- Passed after retry: " + counts.passedAfterRetry,
+            "- Final failures: " + (counts.failed + counts.timedOut),
+            "",
+            "| Cohort | Shard | Predicted (s) | Actual (s) | Delta (s) | Exit |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+            ...summary.shards.map(
+              (shard) =>
+                "| " +
+                shard.cohort +
+                " | " +
+                shard.shard +
+                "/" +
+                shard.shardCount +
+                " | " +
+                shard.predictedSeconds.toFixed(1) +
+                " | " +
+                shard.actualSeconds.toFixed(1) +
+                " | " +
+                shard.deltaSeconds.toFixed(1) +
+                " | " +
+                shard.exitCode +
+                " |",
+            ),
+          ];
+          if (diagnosticTests.length > 0) {
+            lines.push(
+              "",
+              "### Retry and failure details",
+              "",
+              "| Test | Attempts | Final status | Error | Artifacts |",
+              "| --- | ---: | --- | --- | --- |",
+              ...diagnosticTests.map((test) => {
+                const links = test.attachments
+                  .map((attachment) =>
+                    attachment.artifactUrl
+                      ? "[" + markdown(attachment.name + " — " + attachment.path) + "](" +
+                        attachment.artifactUrl +
+                        ")"
+                      : markdown(attachment.name),
+                  )
+                  .join(", ");
+                return (
+                  "| `" +
+                  markdown(test.key) +
+                  "` | " +
+                  test.attempts +
+                  " | " +
+                  test.finalStatus +
+                  " | " +
+                  test.errorCategory +
+                  " | " +
+                  (links || "Not captured") +
+                  " |"
+                );
+              }),
+            );
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+          NODE
+
+      - name: Upload timing profile candidate
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-timing-profile
+          path: apps/web/e2e/timing-profile.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload retry and shard timing summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-retry-summary
+          path: apps/web/e2e/retry-summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload timing diagnostics bundle
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-timing-diagnostics
+          path: |
+            apps/web/e2e/timing-profile.json
+            apps/web/e2e/retry-summary.json
+            apps/web/e2e/retry-artifacts/
+            apps/web/e2e/blob-reports/*metadata.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Merge reports
+        if: hashFiles('apps/web/e2e/blob-reports/**/*.zip') != ''
         working-directory: apps/web
         # `-c e2e/playwright.config.ts` is required because the blobs come from
         # two different absolute checkout paths: the containerized `e2e` shards

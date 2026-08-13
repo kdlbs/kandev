@@ -2,8 +2,9 @@
 // authentication. It runs after CORS on every request (see
 // backendapp.buildHTTPServer) and implements the allowlist policy from
 // docs/specs/auth: identity injection in disabled mode, credential resolution
-// (session cookie, then PAT bearer), self-authenticating webhook passthrough,
-// the office agent-JWT deferral, and SPA-shell availability for the login page.
+// (session cookie, then PAT bearer), self-authenticating callback and webhook
+// passthrough, the office agent-JWT deferral, and SPA-shell availability for
+// the login page.
 //
 // CSRF note: cross-origin browser requests are already rejected by
 // backendapp.corsMiddleware (httpmw.AllowedOrigin) before this middleware
@@ -113,6 +114,13 @@ func isPublicPath(method, path string) bool {
 	case strings.HasPrefix(path, "/api/v1/office/channels/") && strings.HasSuffix(path, "/inbound"):
 		// HMAC-SHA256 / provider token verified by the channel handler.
 		return true
+	case strings.HasPrefix(path, "/api/v1/github/app/registrations/") &&
+		(strings.HasSuffix(path, "/manifest/callback") ||
+			strings.HasSuffix(path, "/install/callback") ||
+			strings.HasSuffix(path, "/personal/callback")):
+		// GitHub redirects through a public hostname that cannot carry the
+		// Kandev session cookie. The handlers validate expiring, single-use state.
+		return method == http.MethodGet
 	case strings.HasPrefix(path, "/api/v1/github/app/registrations/") && strings.HasSuffix(path, "/webhook"):
 		// GitHub App webhook delivery; HMAC (X-Hub-Signature-256) verified by
 		// the handler, not request identity.

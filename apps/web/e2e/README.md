@@ -77,6 +77,10 @@ Or a single spec:
 KANDEV_E2E_CONTAINERS=1 pnpm e2e:raw --project=containers tests/ssh/launch-task.spec.ts
 ```
 
+### Remote-executor fixture contracts
+
+Host-only `file://` fixtures are not reachable from an SSH or Docker target. Use a disposable provider-shaped HTTP Git fixture with a target-side URL rewrite; if the spec also uses host-local `GitHelper` or LSP paths, materialize a local clone at the expected temporary path. Verify both the remote checkout and every host-local fixture consumer.
+
 ### Why "containers" instead of "docker"?
 
 This project used to be named `docker`. It was renamed to `containers` once SSH e2e tests joined it — calling it `docker` was misleading because SSH tests have nothing to do with the Docker _executor_; they just happen to use Docker as the runtime that hosts the sshd target.
@@ -100,6 +104,54 @@ This project used to be named `docker`. It was renamed to `containers` once SSH 
 
 Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (flake hunting).
 
+### Duration-aware CI sharding
+
+CI creates an ephemeral manifest for each cohort from the current test catalog.
+The normal cohort has 14 shards and runs `chromium` plus `mobile-chrome`; the
+container cohort has 6 shards and runs `containers`. The manifest assigns
+project/file units with a deterministic longest-processing-time planner. Matrix
+jobs pass the assigned files to `run-planned-shard.sh`; they do not use ordinal
+Playwright `--shard` selection.
+
+Successful `main` runs publish `e2e-timing-profile`, which stores bounded
+first-attempt passing samples keyed by project, file, and full test title. The
+next planning job downloads that artifact when available. New files use the
+count fallback, and changed files are marked warm and receive the conservative
+multiplier. If the artifact is missing, the planner records
+`profile.mode=count-fallback` and still validates complete catalog coverage.
+
+The runner validates the manifest against the checkout before launching
+Playwright. A missing, stale, overlapping, or incomplete manifest is a hard
+failure; it cannot silently fall back to ordinal sharding.
+
+To dry-run the planner locally:
+
+```bash
+cd apps
+pnpm exec tsx web/e2e/scripts/plan-shards.ts \
+  --web-root "$PWD/web" \
+  --output-dir "$PWD/web/e2e/manifests"
+```
+
+To execute one generated shard locally, set `E2E_SHARD` and pass its manifest:
+
+```bash
+cd apps/web
+E2E_SHARD=1 bash e2e/scripts/run-planned-shard.sh e2e/manifests/normal/1.json
+```
+
+The report job publishes `e2e-retry-summary` and `e2e-timing-diagnostics`.
+The summary includes first-attempt passes, passed-after-retry tests, final
+failures, timeouts, skipped tests, predicted/actual shard duration deltas, and
+unknown/warm/stale/fallback planning counters. The profile candidate is uploaded on
+every report, but only a successful `main` workflow run is eligible to seed a
+future plan. Manifests are retained for 3 days; timing profiles for 30 days;
+retry diagnostics for 14 days.
+
+Dispatch the workflow with `fail_on_flaky=true` to set
+`failOnFlakyTests: true` for a diagnostic run. Normal PR runs retain the
+existing two-retry policy while the summary makes retry groups visible.
+
 ### `pnpm e2e:run` — the managed runner (build + run + teardown)
 
 `e2e/scripts/run-e2e.sh` (aliased as `pnpm e2e:run`) handles the build, the run, and cleanup so you don't have to assemble the steps by hand. It **auto-selects docker vs host**, runs **N shards concurrently**, enforces strict WS accounting by default (`KANDEV_E2E_WS_ASSERT=1`, matching CI), and never leaves root-owned artifacts behind.
@@ -122,6 +174,8 @@ Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5
 >
 > This used to break when e2e was launched from a shell that had inherited `KANDEV_FEATURES_OFFICE=false` (e.g. from a host kandev backend running the prod profile): `profiles.ApplyProfile` only sets vars that are **unset** (so launchers/shells win — see `docs/decisions/0007-runtime-feature-flags.md`), and the fixture spreads `process.env` into the spawned backend, so the stale prod value won and 404'd every office spec. Fixed at the source: `sanitizeInheritedEnv` in `e2e/fixtures/backend.ts` strips all inherited `KANDEV_FEATURES_*` before spawn, so the e2e profile — not whatever the host exported — decides feature flags. No `unset` needed.
 
+> **Profile-managed environment variables:** when adding an environment variable with an `e2e:` or `dev:` profile default, add it to `sanitizeInheritedEnv` in `e2e/fixtures/backend.ts` so inherited shell/task values cannot override the selected profile. Keep explicit `backend.restart({ ... })` overrides applied after baseline sanitization, so a spec can still opt into a deliberate per-test value.
+
 > **Host oversubscription:** running >=5 heavy shards concurrently on one machine (each = Go backend + Vite-served SPA assets + Chromium + mock agent) starves CPU/IO and induces timing flakes that CI's isolated runners never see. Use 2-3 concurrent shards locally for a clean signal; see "flake triage" in the `/e2e` skill.
 
 ## Backend isolation per worker
@@ -133,8 +187,18 @@ Every Playwright worker gets:
 - A fresh tmpdir (`HOME`, `KANDEV_HOME_DIR`, worktree base, repo clone base — all under that tmpdir).
 - A unique agentctl instance port range (`30001 + E2E_PORT_OFFSET * 1000 + workerIndex * 200`).
 - Its own SQLite DB.
+- A process-scoped Docker ownership label for backend-created E2E containers
+  and test-created SSH/storage fixtures. Cleanup and storage reporting filter
+  by that label and never sweep another shard's `kandev.managed=true`
+  containers.
 
-Workers run in parallel across CI shards (`--shard=N/M`); within a worker, tests run serially because the `testPage` fixture calls `e2eReset` on the shared backend before each test.
+Workers run in parallel across CI manifest shards; within a worker, tests run
+serially because the `testPage` fixture calls `e2eReset` on the shared backend
+before each test.
+
+Docker image usage remains daemon-wide because images and their layers are
+shared across shards; only container records, cleanup, and container-based
+storage reporting are filtered by the process-scoped ownership label.
 
 ## Mocked vs real
 
@@ -155,9 +219,35 @@ The SSH executor specifically has no mock controller. Tests use a real Docker-ho
 
 ## CI
 
-`.github/workflows/e2e-tests.yml` defines two jobs:
+`.github/workflows/e2e-tests.yml` defines two test cohorts and a report job:
 
-- `e2e` — matrixed `chromium` + `mobile-chrome` shards.
-- `e2e-containers` — single job, runs `--project=containers`, needs Docker.
+- `e2e` — a 14-entry matrix executing the generated normal manifests.
+- `e2e-containers` — a 6-entry matrix executing the generated container
+  manifests and requiring Docker.
+- `e2e-report` — merges blob reports and publishes timing/retry artifacts.
 
-Both upload blob reports that `e2e-report` merges into a single HTML artifact.
+The build job uploads `e2e-shard-manifests` for the current run. Both cohorts
+upload blob reports that `e2e-report` merges into a single HTML artifact.
+
+Keep the default at `workers: 1` until the controlled worker-concurrency
+experiment shows a repeatable wall-time improvement without retries. Record
+worker count, shard wall time, CPU/memory pressure, setup time, and retry count
+for comparisons. Measure package install, runtime image startup, and browser
+extraction separately from test-work balance before changing the CI matrix.
+
+For a local worker experiment, run the same selected heavy files twice and
+save the command output. The second command is diagnostic only; it does not
+change the checked-in default:
+
+```bash
+cd apps/web
+E2E_SHARD=2 /usr/bin/time -v bash e2e/scripts/run-planned-shard.sh \
+  e2e/manifests/normal/2.json -- --workers=1
+E2E_SHARD=2 /usr/bin/time -v bash e2e/scripts/run-planned-shard.sh \
+  e2e/manifests/normal/2.json -- --workers=2
+```
+
+Record results as `{ "workers": 2, "wall_seconds": 0, "max_rss_kb": 0,
+"retries": 0, "backend_errors": 0 }`. Compare at least three repetitions
+with the same build, duration-aware manifest, and profile before considering a
+default change.

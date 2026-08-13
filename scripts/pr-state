@@ -8,7 +8,8 @@
 #
 # Raw output:
 #   JSON object with:
-#   - pr: { number, branch, is_cross_repository, head_repository_owner,
+#   - pr: { number, branch, is_cross_repository, base_ref_name, base_head_oid,
+#       merge_base_oid, base_advanced_since_head, head_repository_owner,
 #       head_repository_name, head_ref_name, head_ref_oid, maintainer_can_modify }
 #   - since: { head_oid, committed_at } or null
 #   - checks: [{ type, name, workflow, status, conclusion, details_url, target_url, run_id, job_id }]
@@ -30,7 +31,8 @@
 #
 # Summary output (--summary):
 #   JSON object with:
-#   - pr: { number, branch, is_cross_repository, head_repository_owner,
+#   - pr: { number, branch, is_cross_repository, base_ref_name, base_head_oid,
+#       merge_base_oid, base_advanced_since_head, head_repository_owner,
 #       head_repository_name, head_ref_name, head_ref_oid, maintainer_can_modify }
 #   - since: { head_oid, committed_at } or null
 #   - failed_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
@@ -148,9 +150,14 @@ fi
 
 errors='[]'
 pr_json='{}'
+pr_view_succeeded=false
 checks_json='[]'
 checks_head_sha=''
 checks_snapshot_complete=false
+base_ref_name=''
+base_head_oid=''
+merge_base_oid=''
+base_advanced_since_head=null
 approval_required_runs_json='[]'
 review_threads_json='[]'
 hidden_unresolved_threads_json='[]'
@@ -670,6 +677,38 @@ fetch_head_commit_json() {
     }'
 }
 
+fetch_base_ref_json() {
+  local owner=$1
+  local repo=$2
+  local pr_number=$3
+
+  gh_json api graphql \
+    -f query='
+      query($owner: String!, $repo: String!, $pr: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $pr) {
+            baseRefName
+            baseRefOid
+          }
+        }
+      }' \
+    -f owner="$owner" -f repo="$repo" -F pr="$pr_number" |
+    jq -c '{
+      base_ref_name: (.data.repository.pullRequest.baseRefName // null),
+      base_head_oid: (.data.repository.pullRequest.baseRefOid // null)
+    }'
+}
+
+fetch_merge_base_json() {
+  local owner=$1
+  local repo=$2
+  local base_head_oid=$3
+  local head_oid=$4
+
+  gh_json api "repos/$owner/$repo/compare/$base_head_oid...$head_oid" |
+    jq -c '{merge_base_oid: (.merge_base_commit.sha // null)}'
+}
+
 fetch_review_threads_nodes_json() {
   local owner=$1
   local repo=$2
@@ -761,7 +800,8 @@ comments_json='[]'
 status_json='[]'
 resolved_pr_number=''
 is_cross_repository=null
-if pr_view_json="$(gh_json pr view "$PR" --json number,headRefName,headRefOid,headRepositoryOwner,headRepository,maintainerCanModify,isCrossRepository,statusCheckRollup,comments,url)"; then
+if pr_view_json="$(gh_json pr view "$PR" --json number,baseRefName,headRefName,headRefOid,headRepositoryOwner,headRepository,maintainerCanModify,isCrossRepository,statusCheckRollup,comments,url)"; then
+  pr_view_succeeded=true
   resolved_pr_number="$(jq -r '.number // ""' <<<"$pr_view_json")"
   if pr_url_owner="$(jq -r '.url | capture("github.com/(?<owner>[^/]+)/(?<repo>[^/]+)/pull/[0-9]+").owner // ""' <<<"$pr_view_json" 2>/dev/null)" && [[ -n "$pr_url_owner" ]]; then
     repo_owner="$pr_url_owner"
@@ -771,6 +811,10 @@ if pr_view_json="$(gh_json pr view "$PR" --json number,headRefName,headRefOid,he
     number: .number,
     branch: (.headRefName // "unknown"),
     is_cross_repository: (if has("isCrossRepository") then .isCrossRepository else null end),
+    base_ref_name: (.baseRefName // null),
+    base_head_oid: null,
+    merge_base_oid: null,
+    base_advanced_since_head: null,
     head_repository_owner: (.headRepositoryOwner.login // null),
     head_repository_name: (.headRepository.name // null),
     head_ref_name: (.headRefName // null),
@@ -789,6 +833,43 @@ else
     pr_json="$(jq -cn --arg branch "$PR" '{number: null, branch: $branch}')"
   fi
   add_error "pr_view" "gh pr view failed"
+fi
+
+if [[ "$pr_view_succeeded" == "true" && -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
+  if base_context_json="$(fetch_base_ref_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
+    base_ref_name="$(jq -r '.base_ref_name // ""' <<<"$base_context_json")"
+    base_head_oid="$(jq -r '.base_head_oid // ""' <<<"$base_context_json")"
+  else
+    add_error "base" "gh api graphql base ref lookup failed"
+  fi
+
+  if [[ -n "$base_head_oid" && -n "$checks_head_sha" ]]; then
+    if merge_base_json="$(fetch_merge_base_json "$repo_owner" "$repo_name" "$base_head_oid" "$checks_head_sha")"; then
+      merge_base_oid="$(jq -r '.merge_base_oid // ""' <<<"$merge_base_json")"
+    else
+      add_error "merge_base" "gh api compare base and head failed"
+    fi
+  fi
+
+  if [[ -n "$base_head_oid" && -n "$merge_base_oid" ]]; then
+    if [[ "$base_head_oid" == "$merge_base_oid" ]]; then
+      base_advanced_since_head=false
+    else
+      base_advanced_since_head=true
+    fi
+  fi
+
+  pr_json="$(jq -c \
+    --arg base_ref_name "$base_ref_name" \
+    --arg base_head_oid "$base_head_oid" \
+    --arg merge_base_oid "$merge_base_oid" \
+    --argjson base_advanced_since_head "$base_advanced_since_head" \
+    '. + {
+      base_ref_name: (if $base_ref_name == "" then null else $base_ref_name end),
+      base_head_oid: (if $base_head_oid == "" then null else $base_head_oid end),
+      merge_base_oid: (if $merge_base_oid == "" then null else $merge_base_oid end),
+      base_advanced_since_head: $base_advanced_since_head
+    }' <<<"$pr_json")"
 fi
 
 if ! approval_required_runs_json="$(fetch_approval_required_runs_json "$repo_owner" "$repo_name" "$resolved_pr_number" "$checks_head_sha")"; then
@@ -865,6 +946,55 @@ if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
     add_error "closing_head" "gh api graphql closing head commit failed"
   fi
 fi
+
+# Re-read the base alongside the closing head. The base can advance while
+# reviews and checks are collected, so the initial divergence fields are not a
+# safe final snapshot.
+if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
+  if closing_base_context_json="$(fetch_base_ref_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
+    closing_base_ref_name="$(jq -r '.base_ref_name // ""' <<<"$closing_base_context_json")"
+    closing_base_head_oid="$(jq -r '.base_head_oid // ""' <<<"$closing_base_context_json")"
+    closing_merge_base_oid=''
+    comparison_head_oid="$closing_head_oid"
+    [[ -n "$comparison_head_oid" ]] || comparison_head_oid="$checks_head_sha"
+    if [[ -n "$closing_base_head_oid" && -n "$comparison_head_oid" ]]; then
+      if closing_merge_base_json="$(fetch_merge_base_json "$repo_owner" "$repo_name" "$closing_base_head_oid" "$comparison_head_oid")"; then
+        closing_merge_base_oid="$(jq -r '.merge_base_oid // ""' <<<"$closing_merge_base_json")"
+      else
+        add_error "closing_merge_base" "gh api compare base and head failed after evidence collection"
+      fi
+    fi
+    base_ref_name="$closing_base_ref_name"
+    base_head_oid="$closing_base_head_oid"
+    merge_base_oid="$closing_merge_base_oid"
+    base_advanced_since_head=null
+    if [[ -n "$base_head_oid" && -n "$merge_base_oid" ]]; then
+      if [[ "$base_head_oid" == "$merge_base_oid" ]]; then
+        base_advanced_since_head=false
+      else
+        base_advanced_since_head=true
+      fi
+    fi
+  else
+    add_error "closing_base" "gh api graphql base ref lookup failed after evidence collection"
+    base_ref_name=''
+    base_head_oid=''
+    merge_base_oid=''
+    base_advanced_since_head=null
+  fi
+  pr_json="$(jq -c \
+    --arg base_ref_name "$base_ref_name" \
+    --arg base_head_oid "$base_head_oid" \
+    --arg merge_base_oid "$merge_base_oid" \
+    --argjson base_advanced_since_head "$base_advanced_since_head" \
+    '. + {
+      base_ref_name: (if $base_ref_name == "" then null else $base_ref_name end),
+      base_head_oid: (if $base_head_oid == "" then null else $base_head_oid end),
+      merge_base_oid: (if $merge_base_oid == "" then null else $merge_base_oid end),
+      base_advanced_since_head: $base_advanced_since_head
+    }' <<<"$pr_json")"
+fi
+
 if [[ -n "$opening_head_oid" && -n "$closing_head_oid" && "$opening_head_oid" != "$closing_head_oid" ]]; then
   add_error "review_evidence" "head changed during evidence collection"
 fi

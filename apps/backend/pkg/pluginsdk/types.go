@@ -99,6 +99,71 @@ type WebhookResponse struct {
 	Body    []byte
 }
 
+type AgentToolContext struct {
+	TaskID      string
+	SessionID   string
+	WorkspaceID string
+	Surface     string
+}
+
+type AgentToolRequest struct {
+	InvocationID string
+	Name         string
+	Arguments    map[string]any
+	Context      AgentToolContext
+}
+
+type AgentToolResult struct {
+	Text              string
+	StructuredContent map[string]any
+	IsError           bool
+}
+
+func (r *AgentToolRequest) toProto() (*pluginv1.AgentToolRequest, error) {
+	arguments, err := mapToStruct(r.Arguments)
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: agent tool arguments: %w", err)
+	}
+	return &pluginv1.AgentToolRequest{
+		InvocationId: r.InvocationID,
+		Name:         r.Name,
+		Arguments:    arguments,
+		Context: &pluginv1.AgentToolContext{
+			TaskId: r.Context.TaskID, SessionId: r.Context.SessionID,
+			WorkspaceId: r.Context.WorkspaceID, Surface: r.Context.Surface,
+		},
+	}, nil
+}
+
+func agentToolRequestFromProto(p *pluginv1.AgentToolRequest) (*AgentToolRequest, error) {
+	arguments, err := structToMap(p.GetArguments())
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: agent tool arguments: %w", err)
+	}
+	ctx := p.GetContext()
+	return &AgentToolRequest{
+		InvocationID: p.GetInvocationId(), Name: p.GetName(), Arguments: arguments,
+		Context: AgentToolContext{TaskID: ctx.GetTaskId(), SessionID: ctx.GetSessionId(),
+			WorkspaceID: ctx.GetWorkspaceId(), Surface: ctx.GetSurface()},
+	}, nil
+}
+
+func (r *AgentToolResult) toProto() (*pluginv1.AgentToolResponse, error) {
+	structured, err := mapToStruct(r.StructuredContent)
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: agent tool result: %w", err)
+	}
+	return &pluginv1.AgentToolResponse{Text: r.Text, StructuredContent: structured, IsError: r.IsError}, nil
+}
+
+func agentToolResultFromProto(p *pluginv1.AgentToolResponse) (*AgentToolResult, error) {
+	structured, err := structToMap(p.GetStructuredContent())
+	if err != nil {
+		return nil, fmt.Errorf("pluginsdk: agent tool result: %w", err)
+	}
+	return &AgentToolResult{Text: p.GetText(), StructuredContent: structured, IsError: p.GetIsError()}, nil
+}
+
 func (r *WebhookResponse) toProto() *pluginv1.WebhookResponse {
 	return &pluginv1.WebhookResponse{
 		Status:  r.Status,

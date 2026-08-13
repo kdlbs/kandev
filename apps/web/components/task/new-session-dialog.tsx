@@ -32,7 +32,7 @@ import { Trans, useTranslation } from "react-i18next";
 
 export type { HandoffPreset } from "./handoff-types";
 
-const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+const PROGRAMMATIC_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 
 type NewSessionDialogProps = {
   open: boolean;
@@ -444,6 +444,7 @@ function NewSessionForm({
       />
       <TaskFormInputs
         isSessionMode
+        taskId={taskId}
         workspaceId={workspaceId}
         autoFocus
         initialDescription=""
@@ -467,9 +468,12 @@ function NewSessionForm({
         onEnhancePrompt={handleEnhancePrompt}
         isEnhancingPrompt={isEnhancingPrompt}
         isUtilityConfigured={isUtilityConfigured}
-        onVoiceAutoSend={() => {
-          if (isBusyState || hasPendingAttachmentUploads || !profileSelection.hasProfiles) return;
-          void handleSubmit(VOICE_SUBMIT_EVENT);
+        onComposerSubmit={() => {
+          if (isBusyState || hasPendingAttachmentUploads || !profileSelection.hasProfiles) {
+            return false;
+          }
+          void handleSubmit(PROGRAMMATIC_SUBMIT_EVENT);
+          return true;
         }}
       />
       <PromptResultRecovery

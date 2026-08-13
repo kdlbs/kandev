@@ -10,6 +10,8 @@ import (
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -88,7 +90,12 @@ func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID str
 		return nil
 	}
 
-	moved, err := s.MoveTask(ctx, result.Session.TaskID, step.WorkflowID, newStepID, 0)
+	moved, err := s.MoveTaskWithOptions(ctx, result.Session.TaskID, step.WorkflowID, newStepID, 0,
+		MoveTaskOptions{
+			StepHistoryTrigger:   wfmodels.StepTransitionTriggerApproval,
+			StepHistorySessionID: sessionID,
+			StepHistoryActor:     wfmodels.StepTransitionActorHuman,
+		})
 	if err != nil {
 		return fmt.Errorf("failed to move task to next step after approval: %w", err)
 	}
@@ -388,6 +395,21 @@ type MoveTaskOptions struct {
 	// PreserveDeferredLaunch keeps the deferred launch intent when an internal
 	// queue promotion changes workflow steps. Manual moves still clear it.
 	PreserveDeferredLaunch bool
+	// StepHistoryTrigger overrides the ADR 0015 audit-row trigger recorded for
+	// this move. Zero value defaults to StepTransitionTriggerManual — callers
+	// driving an approval-gated transition (ApproveSession) set
+	// StepTransitionTriggerApproval instead.
+	StepHistoryTrigger wfmodels.StepTransitionTrigger
+	// StepHistorySessionID pins the ADR 0015 audit-row session_id to a
+	// specific session, overriding the primary/active-session resolution
+	// MoveTaskWithOptions otherwise uses. ApproveSession sets this to the
+	// session it is actually approving — on a task with more than one
+	// active session, resolvePrimaryOrActiveSession can pick a different
+	// (primary) session than the one being approved.
+	StepHistorySessionID string
+	// StepHistoryActor identifies the caller. Agent moves must not inherit the
+	// owner identity that MCP uses for authorization.
+	StepHistoryActor wfmodels.StepTransitionActor
 }
 
 type workflowMoveLimitsRepository interface {
@@ -487,6 +509,11 @@ func (s *Service) MoveTaskWithOptions(
 	if stepChanged {
 		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
 		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
+		historySessionID := opts.StepHistorySessionID
+		if historySessionID == "" {
+			historySessionID = sessionID
+		}
+		s.recordManualStepTransition(ctx, historySessionID, oldStepID, workflowStepID, opts.StepHistoryTrigger, opts.StepHistoryActor)
 	}
 
 	s.logger.Info("task moved",
@@ -687,6 +714,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 		}
 		s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil, oldWorkflowID)
+		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
 		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
 		return true
 	}
@@ -709,6 +737,23 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
 	return true
+}
+
+func (s *Service) recordQueuedPromotion(ctx context.Context, taskID, fromStepID, toStepID string) {
+	if s.stepHistoryRecorder == nil {
+		return
+	}
+	session := s.resolvePrimaryOrActiveSession(ctx, taskID)
+	if session == nil {
+		return
+	}
+	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+		asyncRecorder.EnqueueStepTransition(session.ID, fromStepID, toStepID, wfmodels.StepTransitionTriggerQueuePromotion, nil, nil)
+		return
+	}
+	if err := s.stepHistoryRecorder.CreateStepTransition(ctx, session.ID, fromStepID, toStepID, wfmodels.StepTransitionTriggerQueuePromotion, nil, nil); err != nil {
+		s.logger.Warn("failed to record queued task promotion", zap.String("task_id", taskID), zap.Error(err))
+	}
 }
 
 func (s *Service) feederCandidateBlocked(ctx context.Context, taskID string) bool {
@@ -915,6 +960,59 @@ func (s *Service) resolvePrimaryOrActiveSession(ctx context.Context, taskID stri
 		return nil
 	}
 	return active
+}
+
+// recordManualStepTransition writes the ADR 0015 audit row for a
+// user/agent-initiated move. trigger is normally StepTransitionTriggerManual;
+// callers driving an approval-gated transition (ApproveSession) pass
+// StepTransitionTriggerApproval — a zero value defaults to Manual. It is a
+// no-op when no recorder is wired or when the task has no session to record
+// against — session_step_history.session_id is a NOT NULL FK to
+// task_sessions, so a session-less move cannot be recorded without a
+// schema change. Runtime writes use the workflow service's bounded worker;
+// failures are logged and swallowed because this is best-effort telemetry.
+func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actors ...wfmodels.StepTransitionActor) {
+	if s.stepHistoryRecorder == nil {
+		return
+	}
+	if sessionID == "" {
+		s.logger.Debug("skipping manual step transition audit: task has no session",
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID))
+		return
+	}
+	if trigger == "" {
+		trigger = wfmodels.StepTransitionTriggerManual
+	}
+	var actorID *string
+	actor := wfmodels.StepTransitionActorHuman
+	if len(actors) > 0 {
+		actor = actors[0]
+	}
+	if actor == wfmodels.StepTransitionActorHuman {
+		if identity, ok := authn.IdentityFromContext(ctx); ok && identity.UserID != "" {
+			actorID = &identity.UserID
+		}
+	}
+	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+		asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, trigger, actorID, nil)
+		return
+	}
+	// The step change is already durably persisted by the time this runs.
+	// Use a detached, bounded context so a cancelled request context (client
+	// disconnect, turn-end) cannot drop the audit row for a transition that
+	// already committed.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
+	defer cancel()
+	if err := s.stepHistoryRecorder.CreateStepTransition(
+		writeCtx, sessionID, fromStepID, toStepID, trigger, actorID, nil,
+	); err != nil {
+		s.logger.Warn("failed to record manual step transition",
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID),
+			zap.Error(err))
+	}
 }
 
 func isSessionActive(state models.TaskSessionState) bool {

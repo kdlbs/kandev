@@ -3,7 +3,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { t as translate } from "@/lib/i18n";
-import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconGripVertical, IconArrowsShuffle } from "@tabler/icons-react";
 import {
@@ -21,8 +20,6 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Button } from "@kandev/ui/button";
-import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { WorkflowCard } from "@/components/settings/workflow-card";
 import { WorkflowSectionActions } from "@/components/settings/workflow-section-actions";
@@ -186,6 +183,7 @@ function useWorkflowActions({
   const finalizedWorkflowIdsRef = useRef(new Map<string, string>());
   const creation = useWorkflowCreation({
     workspace,
+    workflowItems,
     workflowTemplates,
     setWorkflowItems,
   });
@@ -297,6 +295,7 @@ type WorkflowListProps = {
     u: { name?: string; description?: string; agent_profile_id?: string },
   ) => void;
   onDelete: (id: string) => void;
+  onDuplicate: (workflow: Workflow, steps: WorkflowStep[]) => void;
   onWorkflowSaved: (params: WorkflowSavedParams) => void;
   onDiscard: (id: string) => void;
   onReorder: (items: Workflow[]) => void;
@@ -355,6 +354,7 @@ function WorkflowList({
   isImproveWorkspace,
   onUpdate,
   onDelete,
+  onDuplicate,
   onWorkflowSaved,
   onDiscard,
   onReorder,
@@ -406,6 +406,7 @@ function WorkflowList({
                 onDeleteWorkflow={async () => {
                   await onDelete(workflow.id);
                 }}
+                onDuplicateWorkflow={(steps) => onDuplicate(workflow, steps)}
                 onWorkflowSaved={onWorkflowSaved}
                 onDiscardWorkflow={() => onDiscard(workflow.id)}
               />
@@ -428,30 +429,24 @@ export function WorkspaceWorkflowsClient({
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
 
   if (!workspace)
-    return <WorkspaceNotFoundCard onBack={() => page.router.push("/settings/workspace")} />;
+    return <WorkspaceNotFoundCard onBack={() => page.router.push("/settings/workspaces")} />;
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold">{workspace.name}</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            {isImproveWorkspace
-              ? t("workflows:workflowsReadOnlyImprove")
-              : t("workflows:manageWorkflowsForThisWorkspace")}
-          </p>
-        </div>
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/settings/workspace/${workspace.id}`}>
-            {t("workflows:workspaceSettings")}
-          </Link>
-        </Button>
-      </div>
-      <Separator />
+      {/* No section header — see the Repositories tab: the section below is
+          already named, marked and described. */}
       <SettingsSection
+        divided
         icon={<IconArrowsShuffle className="h-5 w-5" />}
         title={t("workflows:workflows")}
-        description={t("workflows:workflowsSectionDescription")}
+        // The read-only note is the section's description here rather than a
+        // heading above it: the duplicated heading is gone, and this workspace
+        // being immutable is the one thing the static description omits.
+        description={
+          isImproveWorkspace
+            ? t("workflows:workflowsReadOnlyImprove")
+            : t("workflows:workflowsSectionDescription")
+        }
         action={
           isImproveWorkspace ? undefined : (
             <WorkflowSectionActions
@@ -479,6 +474,7 @@ export function WorkspaceWorkflowsClient({
           isImproveWorkspace={isImproveWorkspace}
           onUpdate={page.handleUpdateWorkflow}
           onDelete={page.handleDeleteWorkflow}
+          onDuplicate={page.handleDuplicateWorkflow}
           onWorkflowSaved={page.handleWorkflowSaved}
           onDiscard={page.handleDiscardWorkflow}
           onReorder={page.handleReorderWorkflows}

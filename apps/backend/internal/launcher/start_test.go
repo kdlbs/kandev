@@ -237,6 +237,92 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	}
 }
 
+func TestRunManagedAppPreservesDesktopOwnedHealthToken(t *testing.T) {
+	oldNewSupervisor := newSupervisorFn
+	oldLaunchBackend := launchBackendFn
+	oldAttachSignals := attachSignalsFn
+	oldWaitForHealth := waitForHealthFn
+	t.Cleanup(func() {
+		newSupervisorFn = oldNewSupervisor
+		launchBackendFn = oldLaunchBackend
+		attachSignalsFn = oldAttachSignals
+		waitForHealthFn = oldWaitForHealth
+	})
+
+	const desktopToken = "desktop-owned-token"
+	var launchedHealthToken string
+	var waitedHealthToken string
+	newSupervisorFn = newSupervisor
+	attachSignalsFn = func(_ *processSupervisor) {}
+	launchBackendFn = func(cfg backendLaunchConfig) (*restartableBackend, func(), error) {
+		launchedHealthToken = envValue(cfg.Env, "KANDEV_DESKTOP_HEALTH_TOKEN")
+		exitCh := make(chan int, 1)
+		exitCh <- 0
+		return &restartableBackend{exitCh: exitCh}, func() {}, nil
+	}
+	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, expectedToken string, _ func()) error {
+		waitedHealthToken = expectedToken
+		return nil
+	}
+	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	t.Setenv("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS", "true")
+	t.Setenv("KANDEV_DESKTOP_HEALTH_TOKEN", desktopToken)
+
+	code := runManagedApp(context.Background(), managedAppConfig{
+		Header:     "test",
+		Mode:       "start",
+		Backend:    "kandev",
+		BackendCWD: t.TempDir(),
+		Ports: portConfig{
+			BackendPort: 48123,
+			BackendURL:  "http://localhost:48123",
+		},
+		Opts: Options{Headless: true},
+	})
+	if code != 0 {
+		t.Fatalf("runManagedApp() = %d, want 0", code)
+	}
+	if launchedHealthToken != desktopToken || waitedHealthToken != desktopToken {
+		t.Fatalf("health tokens launched=%q waited=%q, want %q", launchedHealthToken, waitedHealthToken, desktopToken)
+	}
+}
+
+func TestLaunchHealthTokenOwnership(t *testing.T) {
+	const staleToken = "stale-token"
+	tests := []struct {
+		name        string
+		marker      string
+		healthToken string
+		want        string
+		wantFresh   bool
+	}{
+		{name: "desktop-owned", marker: "true", healthToken: "desktop-token", want: "desktop-token"},
+		{name: "desktop-owned-without-token", marker: "true", wantFresh: true},
+		{name: "ordinary-launch-with-stale-token", healthToken: staleToken, wantFresh: true},
+		{name: "non-exact-marker-with-stale-token", marker: "TRUE", healthToken: staleToken, wantFresh: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS", test.marker)
+			t.Setenv("KANDEV_DESKTOP_HEALTH_TOKEN", test.healthToken)
+
+			got, err := launchHealthToken()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.wantFresh {
+				if got == "" || got == test.healthToken {
+					t.Fatalf("health token = %q, want a fresh non-empty token", got)
+				}
+				return
+			}
+			if got != test.want {
+				t.Fatalf("health token = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func envValue(env []string, key string) string {
 	prefix := key + "="
 	for _, item := range env {

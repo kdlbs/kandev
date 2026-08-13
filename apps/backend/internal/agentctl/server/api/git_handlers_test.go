@@ -130,6 +130,8 @@ func TestGitHandlers_RejectMalformedBody(t *testing.T) {
 		{"/api/v1/git/pull", "pull"},
 		{"/api/v1/git/push", "push"},
 		{"/api/v1/git/push-preflight", "push_preflight"},
+		{"/api/v1/git/contribution/replace", "replace_remote_contribution"},
+		{"/api/v1/git/contribution/use", "use_remote_contribution"},
 		{"/api/v1/git/rebase", "rebase"},
 		{"/api/v1/git/merge", "merge"},
 		{"/api/v1/git/abort", "abort"},
@@ -200,6 +202,8 @@ func TestGitHandlers_RejectMissingRequiredFields(t *testing.T) {
 			"commit_sha is required",
 		},
 		{"reset without sha", "/api/v1/git/reset", GitResetRequest{}, "reset", "commit_sha is required"},
+		{"replace without expected head", "/api/v1/git/contribution/replace", GitContributionRequest{}, "replace_remote_contribution", "expected_remote_head is required"},
+		{"use without expected head", "/api/v1/git/contribution/use", GitContributionRequest{}, "use_remote_contribution", "expected_remote_head is required"},
 		{
 			"reset with unknown mode",
 			"/api/v1/git/reset",

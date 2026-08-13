@@ -16,9 +16,11 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	hcplugin "github.com/hashicorp/go-plugin"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/manifest"
@@ -391,6 +393,10 @@ func (m *Manager) spawnFuncFor(id string, mf *manifest.Manifest, installPath str
 		cmd.Dir = installPath
 		cmd.Env = append(os.Environ(), pluginDataDirEnv+"="+dataDir)
 
+		// Route go-plugin's internal hclog through zap and share a stopping
+		// flag with the returned hcProcess so a deliberate Kill downgrades the
+		// expected "signal: terminated" exit from ERROR to DEBUG.
+		stopping := &atomic.Bool{}
 		client := hcplugin.NewClient(&hcplugin.ClientConfig{
 			HandshakeConfig:  pluginsdk.Handshake,
 			Plugins:          map[string]hcplugin.Plugin{pluginsdk.PluginMapKey: &pluginsdk.GRPCPlugin{Host: hostFactory(id)}},
@@ -398,6 +404,7 @@ func (m *Manager) spawnFuncFor(id string, mf *manifest.Manifest, installPath str
 			AutoMTLS:         true,
 			Cmd:              cmd,
 			StartTimeout:     startTimeout,
+			Logger:           newHCLogAdapter(m.log.WithFields(zap.String("plugin_id", id)), stopping),
 		})
 
 		rpcClient, err := client.Client()
@@ -415,7 +422,7 @@ func (m *Manager) spawnFuncFor(id string, mf *manifest.Manifest, installPath str
 			client.Kill()
 			return nil, fmt.Errorf("plugins/runtime: plugin %q dispensed %T, want *pluginsdk.RemotePlugin", id, raw)
 		}
-		return &hcProcess{client: client, proto: rpcClient, remote: remote}, nil
+		return &hcProcess{client: client, proto: rpcClient, remote: remote, stopping: stopping}, nil
 	}, nil
 }
 
@@ -426,11 +433,20 @@ type hcProcess struct {
 	client *hcplugin.Client
 	proto  hcplugin.ClientProtocol
 	remote *pluginsdk.RemotePlugin
+	// stopping is shared with the client's hclog adapter: setting it before
+	// Kill marks the resulting subprocess exit as an expected teardown so the
+	// adapter logs it at DEBUG rather than ERROR.
+	stopping *atomic.Bool
 }
 
-func (h *hcProcess) Ping() error                     { return h.proto.Ping() }
-func (h *hcProcess) Exited() bool                    { return h.client.Exited() }
-func (h *hcProcess) Kill()                           { h.client.Kill() }
+func (h *hcProcess) Ping() error  { return h.proto.Ping() }
+func (h *hcProcess) Exited() bool { return h.client.Exited() }
+func (h *hcProcess) Kill() {
+	if h.stopping != nil {
+		h.stopping.Store(true)
+	}
+	h.client.Kill()
+}
 func (h *hcProcess) Remote() *pluginsdk.RemotePlugin { return h.remote }
 
 var _ spawnedProcess = (*hcProcess)(nil)

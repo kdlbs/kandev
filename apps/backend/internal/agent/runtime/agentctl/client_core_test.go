@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 )
 
 func TestNewClient_BuildsBaseURLAndTimeouts(t *testing.T) {
@@ -379,6 +380,24 @@ func TestSetMcpProviders_FailsOnNonOKStatus(t *testing.T) {
 	err := newHTTPOnlyClient(srv.URL).SetMcpProviders(context.Background(), nil)
 	if err == nil || !strings.Contains(err.Error(), "set MCP providers failed with status 500") {
 		t.Fatalf("error = %v, want status 500 named", err)
+	}
+}
+
+func TestSetPluginToolsPutsSnapshotUnderControlEndpoint(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{}`))
+	snapshot := plugintools.Snapshot{Generation: "g", Revision: 7}
+	if err := newHTTPOnlyClient(srv.URL).SetPluginTools(context.Background(), snapshot); err != nil {
+		t.Fatalf("SetPluginTools: %v", err)
+	}
+	if got.Method != http.MethodPut || got.Path != "/api/v1/mcp/plugin-tools" {
+		t.Fatalf("request = %s %s", got.Method, got.Path)
+	}
+	var sent plugintools.Snapshot
+	if err := json.Unmarshal(got.Body, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent.Generation != "g" || sent.Revision != 7 {
+		t.Fatalf("snapshot = %#v", sent)
 	}
 }
 

@@ -11,6 +11,7 @@ import {
   type WorkflowTemplate,
   type Workspace,
 } from "@/lib/types/http";
+import { createWorkflowDuplication } from "./workflow-duplication";
 
 // Seeded step definitions used whenever no template supplies default steps —
 // the Custom option, and any template whose `default_steps` is absent or empty.
@@ -26,6 +27,7 @@ export const DEFAULT_CUSTOM_STEPS: StepDefinition[] = [
 
 type WorkflowCreationArgs = {
   workspace: Workspace | null;
+  workflowItems: Workflow[];
   workflowTemplates: WorkflowTemplate[];
   setWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
 };
@@ -93,6 +95,7 @@ export function createDraftWorkflowSteps(
 
 export function useWorkflowCreation({
   workspace,
+  workflowItems,
   workflowTemplates,
   setWorkflowItems,
 }: WorkflowCreationArgs) {
@@ -135,6 +138,16 @@ export function useWorkflowCreation({
     setIsAddWorkflowDialogOpen(false);
   };
 
+  const handleDuplicateWorkflow = (source: Workflow, sourceSteps: WorkflowStep[]) => {
+    const { workflow, steps } = createWorkflowDuplication(source, workflowItems, sourceSteps);
+    setInitialStepsByWorkflowId((previous) => new Map(previous).set(workflow.id, steps));
+    setWorkflowItems((previous) => {
+      const sourceIndex = previous.findIndex((item) => item.id === source.id);
+      if (sourceIndex === -1) return [...previous, workflow];
+      return [...previous.slice(0, sourceIndex + 1), workflow, ...previous.slice(sourceIndex + 1)];
+    });
+  };
+
   const forgetInitialSteps = (workflowId: string) => {
     setInitialStepsByWorkflowId((previous) => {
       const next = new Map(previous);
@@ -167,6 +180,7 @@ export function useWorkflowCreation({
     initialStepsByWorkflowId,
     handleOpenAddWorkflowDialog,
     handleCreateWorkflow,
+    handleDuplicateWorkflow,
     forgetInitialSteps,
     remapInitialSteps,
   };

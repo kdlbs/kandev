@@ -31,7 +31,7 @@ import {
   DEFAULT_ISSUE_WATCH_PROMPT,
 } from "@/components/github/issue-watch-placeholders";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
-import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
+import { STEP_DEFAULT, resolveProfileId } from "@/lib/watcher-profile-default";
 import type {
   RepoFilter,
   IssueWatch,
@@ -271,6 +271,7 @@ function IssueAutomationFields({
 }) {
   const { t } = useTranslation();
   const { workflows, agentProfiles, allExecutorProfiles } = useWatchFormData(form.workspaceId);
+  const stepDefaultLabel = t("common:useStepDefaultOption");
   const { steps: workflowSteps, loading: stepsLoading } = useWorkflowSteps(form.workflowId);
   const placeholders = useMemo(() => issueWatchPlaceholders(t), [t]);
 
@@ -302,9 +303,9 @@ function IssueAutomationFields({
           description={t("github:optionalFallsBackToStepDefault")}
           value={form.agentProfileId || STEP_DEFAULT}
           onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: resolveProfileId(v) }))}
-          placeholder={STEP_DEFAULT_LABEL}
+          placeholder={stepDefaultLabel}
           items={[
-            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            { id: STEP_DEFAULT, label: stepDefaultLabel },
             ...agentProfiles.map((p) => ({
               id: p.id,
               label: p.label,
@@ -317,9 +318,9 @@ function IssueAutomationFields({
           description={t("github:optionalFallsBackToStepDefault")}
           value={form.executorProfileId || STEP_DEFAULT}
           onChange={(v) => setForm((prev) => ({ ...prev, executorProfileId: resolveProfileId(v) }))}
-          placeholder={STEP_DEFAULT_LABEL}
+          placeholder={stepDefaultLabel}
           items={[
-            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            { id: STEP_DEFAULT, label: stepDefaultLabel },
             ...allExecutorProfiles.map((p) => ({ id: p.id, label: p.name })),
           ]}
         />

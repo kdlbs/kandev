@@ -331,5 +331,21 @@
   "mrTooltipState": "Śţàţē: {{state}}",
   "mrTooltipReview": "Ŕēvĩēŵ: {{state}}",
   "mrTooltipPipeline": "Ƥĩƥēĺĩńē: {{state}}",
-  "mrTooltipReadyToMerge": "Ŕēàďŷ ţō ḿēŕĝē"
+  "mrTooltipReadyToMerge": "Ŕēàďŷ ţō ḿēŕĝē",
+  "mrChipAriaLabelSingle": "Ḿēŕĝē ŕēqũēśţ !{{mriid}}, {{status}}",
+  "mrChipAriaLabelMulti_one": "{{count}} ḿēŕĝē ŕēqũēśţ, {{status}}",
+  "mrChipAriaLabelMulti_other": "{{count}} ḿēŕĝē ŕēqũēśţś, {{status}}",
+  "mrChipStatusMerged": "ḿēŕĝēď",
+  "mrChipStatusClosed": "ćĺōśēď",
+  "mrChipStatusFailed": "ƥĩƥēĺĩńē ƒàĩĺēď",
+  "mrChipStatusDraft": "ďŕàƒţ",
+  "mrChipStatusReady": "ŕēàďŷ ţō ḿēŕĝē",
+  "mrChipStatusAwaitingApproval": "àŵàĩţĩńĝ àƥƥŕōvàĺ",
+  "mrChipStatusRunning": "ƥĩƥēĺĩńē ŕũńńĩńĝ",
+  "mrChipStatusNeutral": "ńō ƥĩƥēĺĩńē",
+  "mrChipAutoFix": "Àũţō-ƒĩx",
+  "mrChipAutoMerge": "Àũţō-ḿēŕĝē",
+  "mrChipDrawerTitle": "Ḿēŕĝē ŕēqũēśţ !{{mriid}}",
+  "mrChipDrawerDescription": "Ƥĩƥēĺĩńē śţàţũś, ŕēvĩēŵ śţàţũś, àńď ḿēŕĝē ŕēqũēśţ àćţĩōńś.",
+  "mrChipDrawerClose": "Ćĺōśē ḿēŕĝē ŕēqũēśţ śţàţũś"
 }

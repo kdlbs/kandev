@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agent/executor"
+	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -112,6 +113,39 @@ func decodePayload(t *testing.T, raw json.RawMessage) map[string]interface{} {
 		t.Fatalf("failed to decode payload: %v", err)
 	}
 	return payload
+}
+
+func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
+	msg := buildGitStatusNotification("session-1", "web", client.GitStatusResult{
+		Branch:           "feature/rewrite",
+		RemoteBranch:     "origin/feature/rewrite",
+		HeadCommit:       "local-head",
+		BaseCommit:       "base-head",
+		Ahead:            5,
+		Behind:           1,
+		RemoteAhead:      2,
+		RemoteBehind:     3,
+		RemoteHeadCommit: "remote-head",
+	})
+	if msg == nil {
+		t.Fatal("buildGitStatusNotification returned nil")
+	}
+	payload := decodePayload(t, msg.Payload)
+	status, ok := payload["status"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("status payload = %#v, want an object", payload["status"])
+	}
+	for key, want := range map[string]interface{}{
+		"head_commit":        "local-head",
+		"base_commit":        "base-head",
+		"remote_ahead":       float64(2),
+		"remote_behind":      float64(3),
+		"remote_head_commit": "remote-head",
+	} {
+		if got := status[key]; got != want {
+			t.Errorf("status[%q] = %#v, want %#v", key, got, want)
+		}
+	}
 }
 
 // TestAppendSessionStateMessage_IncludesTaskEnvironmentID asserts the snapshot
@@ -1929,6 +1963,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	eventBus := bus.NewMemoryEventBus(log)
 	userSvc := userservice.NewService(userRepo, eventBus, log)
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
+	t.Cleanup(func() { _ = workflowSvc.Close() })
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
 			Workspaces:       taskRepo,

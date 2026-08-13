@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -16,7 +15,7 @@ import (
 
 // WorkspaceFileHandlers handles workspace file operations
 type WorkspaceFileHandlers struct {
-	lifecycle *lifecycle.Manager
+	lifecycle ExecutionLookup
 	logger    *logger.Logger
 }
 
@@ -27,7 +26,7 @@ type workspaceContentSearchRequest struct {
 }
 
 // NewWorkspaceFileHandlers creates new workspace file handlers
-func NewWorkspaceFileHandlers(lm *lifecycle.Manager, log *logger.Logger) *WorkspaceFileHandlers {
+func NewWorkspaceFileHandlers(lm ExecutionLookup, log *logger.Logger) *WorkspaceFileHandlers {
 	return &WorkspaceFileHandlers{
 		lifecycle: lm,
 		logger:    log.WithFields(zap.String("component", "workspace-file-handlers")),

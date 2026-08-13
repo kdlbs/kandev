@@ -46,6 +46,7 @@ import {
 
 function makeUnloadedSettings(): UserSettingsState {
   return {
+    revision: null,
     workspaceId: null,
     workflowId: null,
     kanbanViewMode: null,
@@ -61,6 +62,7 @@ function makeUnloadedSettings(): UserSettingsState {
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
+    preventAutoStartAgentOnOpen: false,
     unreadDivider: true,
     agentGeneratedTaskTitles: false,
     mcpTaskAgentProfileDefault: "current_task",
@@ -69,6 +71,7 @@ function makeUnloadedSettings(): UserSettingsState {
     showScrollToStart: false,
     showTranscriptAutoScrollControl: true,
     showTodoListPanel: false,
+    showTodoListPanelOnlyWhenNotEmpty: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     savedLayouts: [],
@@ -96,15 +99,8 @@ function makeUnloadedSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    appStatusBarEnabled: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
-    voiceMode: {
-      enabled: true,
-      engine: "auto",
-      language: "auto",
-      mode: "toggle",
-      autoSend: false,
-      whisperWebModel: "base",
-    },
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},

@@ -148,12 +148,12 @@ type Screen = {
 const SCREENS: Screen[] = [
   {
     name: "settings — appearance",
-    url: "/settings/general/appearance",
+    url: "/settings/preferences/appearance",
     anchor: "[data-testid=theme-settings-card]",
   },
   {
     name: "settings — notifications",
-    url: "/settings/general/notifications",
+    url: "/settings/preferences/notifications",
     anchor: "[data-testid=notification-sound-group]",
     // Provider names are rows in the notification_providers table. The backend
     // seeds these two (apps/backend/internal/notifications/service/service.go)
@@ -163,24 +163,46 @@ const SCREENS: Screen[] = [
   },
   {
     name: "settings — secrets",
-    url: "/settings/general/secrets",
+    url: "/settings/secrets",
     anchor: "[data-testid=secrets-settings-body]",
   },
   {
-    name: "settings — terminal",
-    url: "/settings/general/terminal",
+    name: "settings — terminal & editors",
+    url: "/settings/preferences/terminal-editors",
     anchor: "[data-testid=terminal-font-size-card]",
+    // Every entry is a `label` or a `binary` from `LSP_LANGUAGE_OPTIONS`
+    // (components/settings/lsp-language-options.ts), whose header states the
+    // rule these follow: a language name and an executable name are shown
+    // verbatim, and translating either would name a server that does not exist.
+    // The qualifier around them ("experimental") and the frame around the
+    // binaries in the `Auto-start {{language}} language server` aria-labels DO
+    // go through `t()`, and the attribute pass still checks that frame after
+    // these tokens are stripped. `Go` is absent on purpose: it is under the
+    // four-letter `wordlike` threshold, so it is never reported and adding it
+    // would only widen the mask; `gopls` is over it, so it is listed.
+    allow: [
+      "TypeScript / JavaScript",
+      "typescript-language-server",
+      "gopls",
+      "Rust",
+      "rust-analyzer",
+      "Python",
+      "pyright-langserver",
+      "Kotlin",
+      "kotlin-lsp",
+    ],
   },
-  {
-    name: "settings — sprites",
-    url: "/settings/general/sprites",
-    anchor: "[data-testid=sprites-connection-card]",
-    // Product name of the sandbox provider.
-    allow: ["Sprites.dev"],
-  },
+  // NOT YET: "settings — sprites". The entry existed at `/settings/general/sprites`
+  // with the `sprites-connection-card` anchor; this restructure folded that card
+  // into `/settings/executors` (SpritesSettings is rendered by the executors
+  // page), and that route is excluded below because the fixture's executor
+  // profile NAMES are user data. The card's copy is covered the moment the
+  // executors entry is unblocked — it does not need a screen of its own, and
+  // pointing this entry at `/settings/executors` would just re-import that
+  // screen's blocker under a name that hides it.
   {
     name: "settings — layouts",
-    url: "/settings/general/layouts",
+    url: "/settings/preferences/layouts",
     anchor: "[data-testid=layout-settings]",
     // NOTE: everything here must be a PERSISTED name. This list is load-bearing
     // in the wrong direction — a broad token also hides genuinely un-migrated
@@ -210,14 +232,13 @@ const SCREENS: Screen[] = [
   },
   {
     name: "settings — keyboard shortcuts",
-    url: "/settings/general/keyboard-shortcuts",
+    url: "/settings/preferences/keyboard-shortcuts",
     anchor: "[data-testid=chat-submit-key-card]",
     // Modifier/key names label a physical key and are out of scope for
     // translation — the same rule the eslint guard's keyboard pattern encodes.
     //
     // Shortcut names come from CONFIGURABLE_SHORTCUTS in
-    // lib/keyboard/shortcut-overrides.ts, a registry shared with the
-    // un-migrated voice-mode settings page; it migrates with that page.
+    // lib/keyboard/shortcut-overrides.ts.
     allow: [
       "Ctrl",
       "Shift",
@@ -240,15 +261,14 @@ const SCREENS: Screen[] = [
       "Toggle Plan Mode",
       "Recent Task Switcher",
       "Recent Task Switcher (Backward)",
-      "Voice Input",
       "Reverse Chat Search",
       "Open Task Pull Request",
       "Open Workspace Picker",
     ],
   },
   {
-    name: "settings — task actions",
-    url: "/settings/general/task-actions",
+    name: "settings — task behavior",
+    url: "/settings/preferences/task-behavior",
     anchor: "[data-testid=archive-confirmation-card]",
   },
   {
@@ -393,7 +413,7 @@ const SCREENS: Screen[] = [
   // The settings-nav half of this blocker is now GONE: `settings-tree.tsx`,
   // `workspaces-group.tsx`, `executors-group.tsx`, `account-group.tsx` and
   // `theme-toggle.tsx` are migrated, so "Workspaces", "Integrations",
-  // "Automations", "Executors", "Voice Mode", "Utility Agents", "External MCP",
+  // "Automations", "Executors", "Utility Agents", "External MCP",
   // "Plugins" and "Toggle theme" render accented on every screen. Only "System"
   // is left, from `sections/settings/system-group.tsx`, which the System-routes
   // migration owns.
@@ -402,14 +422,12 @@ const SCREENS: Screen[] = [
   // the nav. `components/integrations/**` is now migrated, which cleared
   // `drafted-integration-enabled-control.tsx` ("Enabled"/"Disabled"),
   // `auth-status-banner.tsx` ("Authenticated", "· checked <relative>") and the
-  // watcher card's loading state. What is left is
-  // `components/watcher-repository-fields.tsx` ("Repository", "Base Branch",
-  // "(no repository)"), `STEP_DEFAULT_LABEL` and `stepPlaceholder` — all shared
-  // with the un-migrated Azure DevOps surface — plus
+  // watcher card's loading state. What is left is `stepPlaceholder`, shared
+  // with the un-migrated Azure DevOps surface, plus
   // `components/integrations/settings-section.tsx` chrome and `@kandev/ui`'s
   // built-in dialog "Close" label.
   //
-  // NOT YET: "settings — external mcp", "… prompts", "… voice mode",
+  // NOT YET: "settings — external mcp", "… prompts",
   // "… utility agents". All four pages' own copy is fully migrated and was
   // verified by running this oracle against each of them — every string those
   // routes own renders accented, including the 43 in the MCP tool catalog
@@ -439,7 +457,7 @@ const SCREENS: Screen[] = [
   // product names and config paths on External MCP, and `Ctrl+Shift+M`.
   //
   // NOT YET: "settings — workspace workflows"
-  // (`/settings/workspace/:id/workflows`). The workflow editor's own copy is
+  // (`/settings/workspaces/:id/workflows`). The workflow editor's own copy is
   // fully migrated and was verified with this oracle against a live instance,
   // and the Workspaces branch of the nav it expands is now migrated too. What
   // remains is that the route renders the workspace's own name and its
@@ -835,7 +853,7 @@ test.describe("i18n pseudo-locale coverage", () => {
    * so it fired on three screens that were fine.
    */
   test("the attribute pass recognizes migrated attribute copy", async ({ testPage }) => {
-    const appearance = SCREENS.find((screen) => screen.url === "/settings/general/appearance");
+    const appearance = SCREENS.find((screen) => screen.url === "/settings/preferences/appearance");
     if (!appearance) throw new Error("the appearance screen is no longer in SCREENS");
 
     await activatePseudo(testPage, appearance.url);

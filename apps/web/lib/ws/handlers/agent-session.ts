@@ -729,6 +729,14 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
 
+      // A confirmed RUNNING transition clears the resume-skipped marker
+      // (prevent-auto-start-on-open). STARTING deliberately does NOT clear
+      // it: a failed manual resume emits STARTING before the launch fails,
+      // and clearing there would drop the Start agent retry affordance.
+      if (newState === "RUNNING") {
+        store.getState().setResumeSkipped(sessionId, false);
+      }
+
       maybeAdoptSessionOnTransition(
         store,
         taskId,

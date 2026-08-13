@@ -1,5 +1,4 @@
 import type { WorkspaceId } from "./ids";
-import type { VoiceModeSettings } from "./http-voice";
 
 export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
 export type StartupPage = "task_overview" | "last_task";
@@ -68,8 +67,10 @@ export type UserSettings = {
   show_scroll_to_start?: boolean;
   show_transcript_auto_scroll_control?: boolean;
   show_todo_list_panel?: boolean;
+  show_todo_list_panel_only_when_not_empty?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
+  prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
@@ -100,9 +101,10 @@ export type UserSettings = {
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
+  app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
-  voice_mode?: VoiceModeSettings;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  revision?: number;
   updated_at: string;
 };
 
@@ -129,8 +131,10 @@ export type UserSettingsUpdatePayload = {
   show_scroll_to_start?: boolean;
   show_transcript_auto_scroll_control?: boolean;
   show_todo_list_panel?: boolean;
+  show_todo_list_panel_only_when_not_empty?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
+  prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
@@ -161,7 +165,7 @@ export type UserSettingsUpdatePayload = {
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
+  app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
-  voice_mode?: VoiceModeSettings;
   kanban_hidden_step_ids?: Record<string, string[]>;
 };

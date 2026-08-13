@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type {
-  AgentUsageDTO,
+  ModelUsageDTO,
   CompletedTaskActivityDTO,
   DailyActivityDTO,
   GitStatsDTO,
@@ -12,7 +12,7 @@ import type {
   TaskStatsDTO,
 } from "@/lib/types/http";
 import {
-  fetchAgentUsage,
+  fetchModelUsage,
   fetchCompletedActivity,
   fetchDailyActivity,
   fetchGitStats,
@@ -33,7 +33,7 @@ export type StatsSections = {
   tasks: SectionStatus<TaskStatsResponse>;
   daily: SectionStatus<DailyActivityDTO[]>;
   completed: SectionStatus<CompletedTaskActivityDTO[]>;
-  agents: SectionStatus<AgentUsageDTO[]>;
+  models: SectionStatus<ModelUsageDTO[]>;
   repos: SectionStatus<RepositoryStatsDTO[]>;
   git: SectionStatus<GitStatsDTO>;
 };
@@ -45,7 +45,7 @@ const INITIAL_SECTIONS: StatsSections = {
   tasks: LOADING,
   daily: LOADING,
   completed: LOADING,
-  agents: LOADING,
+  models: LOADING,
   repos: LOADING,
   git: LOADING,
 };
@@ -96,7 +96,7 @@ export function useStatsSections(workspaceId: string | undefined, range: RangeKe
     run("tasks", fetchTaskStats(workspaceId, opts, range));
     run("daily", fetchDailyActivity(workspaceId, opts, range));
     run("completed", fetchCompletedActivity(workspaceId, opts, range));
-    run("agents", fetchAgentUsage(workspaceId, opts, range));
+    run("models", fetchModelUsage(workspaceId, opts, range));
     run("repos", fetchRepositoryStats(workspaceId, opts, range));
     run("git", fetchGitStats(workspaceId, opts, range));
 
@@ -111,7 +111,7 @@ export function readyGlobal(sections: StatsSections): GlobalStatsDTO | null {
 }
 
 // firstError returns the message of the first errored section in object-iteration
-// order (insertion order: global → tasks → daily → completed → agents → repos →
+// order (insertion order: global → tasks → daily → completed → models → repos →
 // git). Callers use it only as a boolean "any section failed?" signal driving
 // the header's "Failed to load stats" subtitle, so the deterministic ordering
 // is fine — surface a specific section's error inside its own panel instead.
@@ -126,13 +126,13 @@ export function firstError(sections: StatsSections): string | null {
 // composeStatsResponse builds a full StatsResponse when every section is ready.
 // Returns null otherwise — used to gate the Copy Stats button.
 export function composeStatsResponse(sections: StatsSections): StatsResponse | null {
-  const { global, tasks, daily, completed, agents, repos, git } = sections;
+  const { global, tasks, daily, completed, models, repos, git } = sections;
   if (
     global.kind !== "ready" ||
     tasks.kind !== "ready" ||
     daily.kind !== "ready" ||
     completed.kind !== "ready" ||
-    agents.kind !== "ready" ||
+    models.kind !== "ready" ||
     repos.kind !== "ready" ||
     git.kind !== "ready"
   ) {
@@ -143,7 +143,7 @@ export function composeStatsResponse(sections: StatsSections): StatsResponse | n
     task_stats: tasks.data.task_stats,
     daily_activity: daily.data,
     completed_activity: completed.data,
-    agent_usage: agents.data,
+    model_usage: models.data,
     repository_stats: repos.data,
     git_stats: git.data,
   };
