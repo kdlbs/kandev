@@ -111,6 +111,64 @@ func TestComputeStallSignal_UnattributedSessionExcludedFromComparand(t *testing.
 	}
 }
 
+// TestComputeStallSignal_MissingLedgerTableReportsUnavailable covers spec
+// "Writer health": a genuinely broken ledger (its migration swallowed at
+// WARN) must report -1/-1, never 0/0 — the healthy-and-empty state — or a
+// broken writer would be indistinguishable from a fresh, working one.
+func TestComputeStallSignal_MissingLedgerTableReportsUnavailable(t *testing.T) {
+	repo, db := newTestRepo(t)
+	if _, err := db.Exec(`DROP TABLE task_delivery_ledger`); err != nil {
+		t.Fatalf("drop ledger table: %v", err)
+	}
+
+	sig := repo.ComputeStallSignal(context.Background())
+	if sig.LastEvaluatedUnix != -1 || sig.StallSeconds != -1 {
+		t.Fatalf("sig = %+v, want -1/-1 for a missing ledger table", sig)
+	}
+	if sig.LedgerErr == nil {
+		t.Fatal("expected LedgerErr, got nil")
+	}
+	if sig.ComparandErr != nil {
+		t.Fatalf("ComparandErr = %v, want nil (never reached)", sig.ComparandErr)
+	}
+}
+
+// TestComputeStallSignal_ComparandQueryErrorReportsUnknownStall covers spec
+// "Writer health": when the ledger query succeeds but the comparand query
+// errors, the true last-evaluated instant is still published — it did not
+// fail — but the stall figure is unknown (-1) rather than 0, so a
+// repeatedly failing comparand read can never report a healthy writer.
+func TestComputeStallSignal_ComparandQueryErrorReportsUnknownStall(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-1", "ws-1")
+	if _, err := repo.Upsert(context.Background(), delivery.UpsertInput{
+		TaskID: "task-1", RepositoryID: "repo-1", WorkspaceID: "ws-1",
+		Classification: delivery.Classification{Outcome: delivery.OutcomeUnknown, Basis: delivery.BasisNoObservations, Rank: 2},
+		EvaluatedAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if _, err := db.Exec(`DROP TABLE task_sessions`); err != nil {
+		t.Fatalf("drop task_sessions: %v", err)
+	}
+
+	sig := repo.ComputeStallSignal(context.Background())
+	if sig.LastEvaluatedUnix == 0 || sig.LastEvaluatedUnix == -1 {
+		t.Fatalf("last_evaluated_unix = %d, want the true MAX from the still-healthy ledger query", sig.LastEvaluatedUnix)
+	}
+	if sig.StallSeconds != -1 {
+		t.Fatalf("stall_seconds = %d, want -1 (unknown, not 0)", sig.StallSeconds)
+	}
+	if sig.LedgerErr != nil {
+		t.Fatalf("LedgerErr = %v, want nil", sig.LedgerErr)
+	}
+	if sig.ComparandErr == nil {
+		t.Fatal("expected ComparandErr, got nil")
+	}
+}
+
 func TestCountUnattributedSessions_IsAGaugeNotSummedAcrossCalls(t *testing.T) {
 	repo, db := newTestRepo(t)
 	seedWorkspace(t, db, "ws-1")
