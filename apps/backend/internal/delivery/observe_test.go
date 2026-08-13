@@ -142,6 +142,42 @@ func TestSnapshotsForPair_JoinsThroughSessions(t *testing.T) {
 	}
 }
 
+// TestSnapshotsForPair_NullHeadCommitNormalizesToEmpty covers Review round
+// 1, finding #6: task_session_git_snapshots.head_commit defaults to an
+// empty string but is not NOT NULL (base_schema.go), and spec
+// "Classification"'s normalization rule explicitly anticipates a real SQL
+// NULL there ("A head_commit that is NULL, empty, or whitespace-only is
+// not a distinct head value"). Scanning the column into a bare Go string
+// instead of sql.NullString used to fail the whole query on a literal
+// NULL row, aborting the pair's evaluation rather than normalizing to
+// empty. seedGitSnapshot cannot express a literal NULL (a Go empty string
+// binds as a SQL empty string, not NULL), so this test inserts one
+// directly.
+func TestSnapshotsForPair_NullHeadCommitNormalizesToEmpty(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-1", "ws-1")
+	seedTaskSession(t, db, "sess-1", "task-1", "repo-1")
+
+	at0 := time.Now().UTC().Add(-time.Hour)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_git_snapshots (id, session_id, snapshot_type, branch, head_commit, ahead, created_at)
+		VALUES (?, ?, 'test', ?, NULL, ?, ?)
+	`), "snap-null", "sess-1", "feature", 2, at0); err != nil {
+		t.Fatalf("seed null-head snapshot: %v", err)
+	}
+
+	ctx := context.Background()
+	snaps, err := repo.SnapshotsForPair(ctx, "task-1", "repo-1")
+	if err != nil {
+		t.Fatalf("SnapshotsForPair must tolerate a literal NULL head_commit, got: %v", err)
+	}
+	if len(snaps) != 1 || snaps[0].HeadCommit != "" {
+		t.Fatalf("snaps = %+v, want exactly one snapshot with HeadCommit normalized to empty", snaps)
+	}
+}
+
 func TestProvidersForPair_MissingTablesTolerated(t *testing.T) {
 	// A database with only the task schema (no github/gitlab/azuredevops
 	// store initialized) must not error; it simply contributes no rows.

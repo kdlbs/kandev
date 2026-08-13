@@ -30,6 +30,31 @@ func readExpvarInt(t *testing.T, name string) int64 {
 	return iv.Value()
 }
 
+// readExpvarMapTotal sums every key of a package-level expvar.Map (the
+// evaluations-by-outcome map published by metrics.go), following the same
+// before/after-delta convention as readExpvarInt since the map is also
+// process-global and never reset between tests.
+func readExpvarMapTotal(t *testing.T, name string) int64 {
+	t.Helper()
+	v := expvar.Get(name)
+	if v == nil {
+		t.Fatalf("expvar %q not published", name)
+	}
+	mv, ok := v.(*expvar.Map)
+	if !ok {
+		t.Fatalf("expvar %q is not an *expvar.Map", name)
+	}
+	var total int64
+	mv.Do(func(kv expvar.KeyValue) {
+		iv, ok := kv.Value.(*expvar.Int)
+		if !ok {
+			t.Fatalf("expvar map %q key %q value not an *expvar.Int", name, kv.Key)
+		}
+		total += iv.Value()
+	})
+	return total
+}
+
 func TestSelectDuePairs_NoLedgerRowIsUnconditionallyDue(t *testing.T) {
 	repo, db := newTestRepo(t)
 	seedWorkspace(t, db, "ws-1")
@@ -334,8 +359,10 @@ func countLedgerRows(t *testing.T, db *sqlx.DB, taskID, repositoryID string) int
 // and this test covers what happens next — each due pair's Upsert then
 // fails against the missing table, write_errors_total increments once per
 // pair (never evaluation_errors_total, since every input read before the
-// upsert still succeeds), and the pass reaches its LAST candidate rather
-// than aborting after the first failure.
+// upsert still succeeds), evaluations_total does NOT increment for a pair
+// whose upsert failed (it counts persisted evaluations, not computed
+// ones — Review round 1, finding #2), and the pass reaches its LAST
+// candidate rather than aborting after the first failure.
 func TestRunPass_MissingLedgerTableCountsWriteErrorsAndReachesEveryCandidate(t *testing.T) {
 	repo, db := newTestRepo(t)
 	seedWorkspace(t, db, "ws-1")
@@ -351,18 +378,23 @@ func TestRunPass_MissingLedgerTableCountsWriteErrorsAndReachesEveryCandidate(t *
 
 	writeErrorsBefore := readExpvarInt(t, "delivery_ledger_write_errors_total")
 	evalErrorsBefore := readExpvarInt(t, "delivery_ledger_evaluation_errors_total")
+	evaluationsBefore := readExpvarMapTotal(t, "delivery_ledger_evaluations_total")
 
 	sweep := delivery.NewSweep(repo, nil, nil)
 	sweep.RunPass(context.Background())
 
 	writeErrorsDelta := readExpvarInt(t, "delivery_ledger_write_errors_total") - writeErrorsBefore
 	evalErrorsDelta := readExpvarInt(t, "delivery_ledger_evaluation_errors_total") - evalErrorsBefore
+	evaluationsDelta := readExpvarMapTotal(t, "delivery_ledger_evaluations_total") - evaluationsBefore
 
 	if writeErrorsDelta != 2 {
 		t.Fatalf("write_errors_total delta = %d, want 2 (both candidates reached and failed their upsert)", writeErrorsDelta)
 	}
 	if evalErrorsDelta != 0 {
 		t.Fatalf("evaluation_errors_total delta = %d, want 0 (input reads succeed; only the upsert fails)", evalErrorsDelta)
+	}
+	if evaluationsDelta != 0 {
+		t.Fatalf("evaluations_total delta = %d, want 0 (a failed upsert must not count as a persisted evaluation)", evaluationsDelta)
 	}
 }
 
