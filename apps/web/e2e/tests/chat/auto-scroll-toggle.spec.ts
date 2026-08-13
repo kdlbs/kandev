@@ -285,6 +285,10 @@ test.describe("Transcript auto-scroll toggle", () => {
     // was already scrolled away from before disabling, not progression.
     await toggleAfter.click();
     await expect(toggleAfter).toHaveAttribute("aria-pressed", "true");
+    // Time-based on purpose: this asserts a *negative* (no jump to bottom).
+    // There is no event for "the scroll that must not happen", so the only
+    // way to give a regression room to occur is to wait out the smooth-scroll
+    // window before sampling the position.
     await testPage.waitForTimeout(300);
     expect(await listAfter.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 20);
   });
@@ -317,6 +321,10 @@ test.describe("Transcript auto-scroll toggle", () => {
     // already existed below their view before they disabled.
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    // Time-based on purpose: this asserts a *negative* (no jump to bottom).
+    // There is no event for "the scroll that must not happen", so the only
+    // way to give a regression room to occur is to wait out the smooth-scroll
+    // window before sampling the position.
     await testPage.waitForTimeout(300);
     expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 20);
     expect(await list.evaluate((el) => el.scrollTop)).toBeLessThan(targetScrollTop + 20);
@@ -353,6 +361,10 @@ test.describe("Transcript auto-scroll toggle", () => {
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    // Time-based on purpose: this asserts a *negative* (no jump to bottom).
+    // There is no event for "the scroll that must not happen", so the only
+    // way to give a regression room to occur is to wait out the smooth-scroll
+    // window before sampling the position.
     await testPage.waitForTimeout(300);
     expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
   });

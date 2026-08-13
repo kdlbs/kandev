@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 
@@ -25,6 +26,9 @@ test.describe("Mobile coarse RUNNING busy signal", () => {
       },
     );
 
+    // Attach before navigating so the capture sees the websocket open.
+    const traffic = attachGatewayTrafficCapture(testPage);
+
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -32,7 +36,20 @@ test.describe("Mobile coarse RUNNING busy signal", () => {
     await expect(testPage.getByText("Kicking off background work")).toBeVisible({
       timeout: 20_000,
     });
-    await testPage.waitForTimeout(500);
+    // The foreground-idle frame follows that text in the mock's ordered ACP
+    // stream and is what could wrongly downgrade the public contract. Wait for
+    // the gateway to deliver it rather than sleeping, so the assertions below
+    // are pinned to the event they are meant to survive.
+    await expect
+      .poll(
+        () =>
+          traffic.frames.filter(
+            (frame) =>
+              frame.direction === "received" && frame.action === "session.activity_changed",
+          ).length,
+        { timeout: 20_000, message: "no session.activity_changed frame was delivered" },
+      )
+      .toBeGreaterThan(0);
 
     await waitForActiveSessionForegroundActivity(testPage, "generating");
     await expect(session.idleInput()).not.toBeVisible();

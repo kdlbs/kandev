@@ -41,6 +41,10 @@ test.describe("Chat message timestamp tooltip", () => {
       .locator("xpath=..");
     const timestamp = messageRow.locator("time[datetime]");
     await timestamp.hover();
+    // Time-based on purpose: the only thing this dwell waits for is Chrome's
+    // native `title` tooltip delay, which is browser chrome rather than DOM,
+    // so there is nothing in the page to observe. It is kept solely so the
+    // capture below shows the same hover dwell a real user would see.
     await testPage.waitForTimeout(1500);
     await prCapture.screenshot("message-relative-timestamp-hover", {
       caption:

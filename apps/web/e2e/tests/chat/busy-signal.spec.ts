@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 
@@ -41,6 +42,10 @@ test.describe("Coarse RUNNING busy signal", () => {
   }) => {
     test.setTimeout(120_000);
 
+    // Attach before the first navigation so the capture sees the session's
+    // websocket from the moment it opens.
+    const traffic = attachGatewayTrafficCapture(testPage);
+
     const session = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,
@@ -54,9 +59,20 @@ test.describe("Coarse RUNNING busy signal", () => {
       timeout: 15_000,
     });
     // The foreground-idle frame follows this text in the mock's ordered ACP
-    // stream. Allow the subsequent WS publication to settle before asserting
-    // the stable composer contract.
-    await testPage.waitForTimeout(500);
+    // stream, and it is the frame that could wrongly downgrade the public
+    // contract. Wait for the gateway to actually deliver it instead of
+    // sleeping, so the assertions below are pinned to the event they are
+    // meant to survive rather than to a hopeful budget.
+    await expect
+      .poll(
+        () =>
+          traffic.frames.filter(
+            (frame) =>
+              frame.direction === "received" && frame.action === "session.activity_changed",
+          ).length,
+        { timeout: 15_000, message: "no session.activity_changed frame was delivered" },
+      )
+      .toBeGreaterThan(0);
 
     // The private tracker may identify background work, but the public
     // contract remains coarse for the entire RUNNING turn.
