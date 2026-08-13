@@ -183,6 +183,14 @@ type Channels = {
  * created once the app is running observes nothing. Attaching early is free:
  * nothing is buffered, frames are dispatched straight to whichever waits are
  * armed at the time. The watcher survives `page.reload()`.
+ *
+ * Arming early is necessary but **not sufficient**: the page's socket must also
+ * be subscribed by the time the frame is published. The gateway broadcaster is
+ * a live fan-out with no replay on subscribe, so a notification published while
+ * the page is still booting is gone, not late, and the wait times out however
+ * correctly it was armed. If the trigger precedes the navigation -- a task
+ * seeded with an agent is already mid-turn before `page.goto()` -- wait on the
+ * resulting state instead of the frame. See `e2e/README.md`.
  */
 export function watchWs(page: Page): WsWatcher {
   const channels: Channels = { sent: new Set(), received: new Set() };

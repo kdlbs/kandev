@@ -293,12 +293,27 @@ A fourth case, "the backend has reached state X", needs no primitive:
 `expect.poll(() => apiClient.getX(id))` already reads the backend directly
 instead of through the DOM.
 
-Three things that are easy to get wrong:
+Four things that are easy to get wrong:
 
 - **`watchWs(page)` must be called before the first `page.goto()`.** Playwright
   only reports sockets opened after the listener is attached, so a watcher
   created once the app is running observes nothing and every wait times out.
   It survives `page.reload()`.
+- **Arming early is necessary but not sufficient: the page's socket has to be
+  subscribed before the frame is published.** The gateway broadcaster
+  (`internal/gateway/websocket/task_notifications.go`) is a live fan-out of the
+  event bus with **no replay on subscribe**, so a notification published while
+  the page is still booting is not delivered late, it is gone. The symptom is a
+  correctly-armed wait that never resolves, and it bites whenever the trigger
+  precedes the navigation, most often a task seeded with `createTaskWithAgent`
+  (the turn starts server-side at creation) whose early-turn frames land before
+  the page subscribes. Under load the arm can pass, which makes it a flake
+  rather than an honest failure. When the cause fires before the page exists,
+  wait on the resulting **state** instead of the frame: `expect.poll` against
+  `helpers/api-client.ts`, or a store helper such as
+  `waitForActiveSessionForegroundActivity`. This is the one-transport version of
+  the bullet below: there, two transports mean no single frame is authoritative;
+  here there is only one and you still cannot observe it.
 - **Confirm the causal chain, don't infer it from the code.** Attach a throwaway
   `page.on("response")` / `page.on("websocket")` logger and run the spec once.
   Two of the three chains behind this section's example specs were not what a
