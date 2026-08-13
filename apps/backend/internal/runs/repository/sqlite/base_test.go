@@ -225,7 +225,7 @@ func TestReadPathsUseTheReadOnlyHandle(t *testing.T) {
 	}
 
 	// Writes must not fall back to the reader.
-	if err := repo.FinishRun(ctx, run.ID, "finished"); err == nil {
+	if err := repo.FinishRun(ctx, run.ID, "finished", nil); err == nil {
 		t.Errorf("FinishRun succeeded with a closed writer; the write path is not using r.db")
 	}
 }

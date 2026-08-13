@@ -158,7 +158,7 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 	// this call's own resolved value. persistAndPublishTaskPRSync already
 	// re-reads before publishing for exactly this reason (codex [P2] on the
 	// SyncTaskPR path); reuse it here instead of duplicating the write.
-	return s.persistAndPublishTaskPRSync(ctx, tp, changed, status.OutcomeFieldsPopulated)
+	return s.persistAndPublishTaskPRSync(ctx, tp, status.PR, changed, status.OutcomeFieldsPopulated)
 }
 
 // fetchUnwatchedTaskPRs prefers the batched GraphQL query — one call for the

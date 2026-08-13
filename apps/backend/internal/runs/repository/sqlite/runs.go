@@ -156,12 +156,16 @@ func (r *Repository) ClaimRun(ctx context.Context, agentInstanceID string) (*mod
 	return &req, nil
 }
 
-// FinishRun marks a run as finished.
-func (r *Repository) FinishRun(ctx context.Context, id, status string) error {
+// FinishRun marks a run as terminal (status) and records its outcome in the
+// same statement, so the row can never hold a terminal status with a stale
+// outcome from a different transition. outcome is nil for the failed path
+// and for callers with no established semantic label (docs/specs/
+// task-delivery-ledger/spec.md, "Office run outcome").
+func (r *Repository) FinishRun(ctx context.Context, id, status string, outcome *string) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE runs SET status = ?, finished_at = ? WHERE id = ?
-	`), status, now, id)
+		UPDATE runs SET status = ?, outcome = ?, finished_at = ? WHERE id = ?
+	`), status, outcome, now, id)
 	return err
 }
 
