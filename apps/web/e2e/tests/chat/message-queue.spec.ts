@@ -2,7 +2,7 @@ import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import {
@@ -101,7 +101,7 @@ test.describe("Quick chat queue", () => {
         timeout: 15_000,
       },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     await typeWhileBusy(testPage, editor, "hello world");
     await testPage.keyboard.press(`${modifier}+Enter`);
@@ -142,7 +142,7 @@ test.describe("Quick chat queue", () => {
         timeout: 15_000,
       },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     // Before typing, only the cancel button should be visible (no send button).
     const submitBtn = dialog.getByTestId("submit-message-button");
@@ -288,7 +288,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy.
     await session.sendMessage("/slow 5s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     // Type a message while agent is busy.
     const editor = testPage.locator(".tiptap.ProseMirror").first();
@@ -382,7 +382,7 @@ test.describe("Task session queue", () => {
     );
     await session.sendMessage("/slow 30s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     const editor = testPage.locator(".tiptap.ProseMirror").first();
     await queueMessagesWhileBusy(testPage, editor, ["bulk first", "bulk second", "bulk third"]);
@@ -431,7 +431,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy.
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     // Type a short message while agent is busy and queue it.
     const editor = testPage.locator(".tiptap.ProseMirror").first();
@@ -464,20 +464,20 @@ test.describe("Task session queue", () => {
       el.dispatchEvent(new Event("change", { bubbles: true }));
     }, longText);
 
-    // Allow layout to settle after content change.
-    await testPage.waitForTimeout(300);
-
     // Verify the textarea has a constrained max-height and is scrollable.
-    const metrics = await textarea.evaluate((el: HTMLTextAreaElement) => ({
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-      maxHeight: getComputedStyle(el).maxHeight,
-      overflowY: getComputedStyle(el).overflowY,
-    }));
-
-    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
-    expect(metrics.maxHeight).toBe("200px");
-    expect(metrics.overflowY).toBe("auto");
+    // The auto-grow effect re-measures after React commits the new value, so
+    // poll the metrics rather than sampling them once behind a fixed settle.
+    await expect
+      .poll(
+        async () =>
+          textarea.evaluate((el: HTMLTextAreaElement) => ({
+            scrollable: el.scrollHeight > el.clientHeight,
+            maxHeight: getComputedStyle(el).maxHeight,
+            overflowY: getComputedStyle(el).overflowY,
+          })),
+        { timeout: 5_000 },
+      )
+      .toEqual({ scrollable: true, maxHeight: "200px", overflowY: "auto" });
   });
 
   test("merges a queued message into the message above it", async ({
@@ -492,7 +492,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy while we queue two messages.
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     const editor = testPage.locator(".tiptap.ProseMirror").first();
     await typeWhileBusy(testPage, editor, "first message");
@@ -539,7 +539,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy.
     await session.sendMessage("/slow 5s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     // In plan mode with no typed text, only the cancel button should be visible.
     // The auto-added plan context should NOT cause the send button to appear.
@@ -592,7 +592,7 @@ test.describe("Queue affordance", () => {
     await expect(testPage.getByRole("status", { name: /Agent is (starting|running)/ })).toBeVisible(
       { timeout: 15_000 },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     await typeWhileBusy(testPage, editor, "first queued");
     await testPage.keyboard.press(`${modifier}+Enter`);
@@ -629,7 +629,7 @@ test.describe("Queue affordance", () => {
     await expect(testPage.getByRole("status", { name: /Agent is (starting|running)/ })).toBeVisible(
       { timeout: 15_000 },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     await typeWhileBusy(testPage, editor, "queued for esc");
     await testPage.keyboard.press(`${modifier}+Enter`);
@@ -659,7 +659,7 @@ test.describe("Queue affordance", () => {
 
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     const editor = testPage.locator(".tiptap.ProseMirror").first();
     await typeWhileBusy(testPage, editor, "to be cleared");

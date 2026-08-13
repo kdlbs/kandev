@@ -1,4 +1,27 @@
-import { type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
+
+/**
+ * Wait until the composer has actually entered queue ("busy") mode.
+ *
+ * The `Agent is starting|running` status indicator renders straight off
+ * `session.state`, but the composer's queue affordance comes from a separate
+ * derivation (`deriveSessionInputMode`: state + foreground_activity +
+ * supports_steering). Asserting the status alone can therefore return before
+ * the toolbar has re-rendered into queue mode, which is why these call sites
+ * used to chase it with a fixed sleep.
+ *
+ * The cancel button is the rendered signal of that second derivation, so
+ * waiting on it gives the same guarantee reactively: it returns immediately
+ * when the composer is already busy and keeps waiting when the store is slow,
+ * instead of spending a fixed budget that is simultaneously too long and too
+ * short.
+ */
+export async function waitForComposerQueueMode(
+  scope: Page | Locator,
+  timeout = 15_000,
+): Promise<void> {
+  await expect(scope.getByTestId("cancel-agent-button")).toBeVisible({ timeout });
+}
 
 /**
  * Type text into the TipTap editor while the agent is busy.

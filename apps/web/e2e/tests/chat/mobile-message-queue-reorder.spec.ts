@@ -2,9 +2,12 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+
+/** Fragment of dnd-kit's default `onDragOver` accessibility announcement. */
+const MOVED_OVER = "was moved over droppable area";
 
 registerSeparateQueueRows(test);
 
@@ -39,7 +42,7 @@ async function seedBusyQueueTask(
   await session.waitForChatIdle({ timeout: 60_000 });
   await session.sendMessageViaButton("/slow 30s");
   await session.agentStatus().waitFor({ state: "visible", timeout: 15_000 });
-  await testPage.waitForTimeout(500);
+  await waitForComposerQueueMode(testPage);
   return session;
 }
 
@@ -98,19 +101,36 @@ async function touchDragTo(
     clientX: start.x,
     clientY: start.y,
   };
+  // dnd-kit announces each resolved drag target in its accessibility live
+  // region; that announcement is the observable signal for the drag-start and
+  // target-resolution steps between these dispatches.
+  const announcedTarget = async () =>
+    (await page.locator('[id^="DndLiveRegion"]').allTextContents()).find((text) =>
+      text.includes(MOVED_OVER),
+    ) ?? "";
+
   await source.dispatchEvent("pointerdown", down);
-  // Each event is a separate task; the gaps let React commit the drag start
-  // and dnd-kit finish droppable measuring before the move dispatches
-  // DragMove — otherwise the drop resolves no target.
+  // Time-based on purpose: PointerSensor arms on pointerdown and only activates
+  // once a later move clears its distance constraint. Nothing is rendered in
+  // between, so there is no DOM signal to wait for — just let React commit the
+  // pointerdown before the activating move lands in the same task.
   await page.waitForTimeout(100);
   await page.dispatchEvent("body", "pointermove", { ...down, clientX: end.x, clientY: end.y });
-  await page.waitForTimeout(100);
+
+  // The first move activates the drag; measuring is complete once dnd-kit can
+  // announce a droppable for it. Dispatching DragMove before that resolves no
+  // target and the drop silently becomes a no-op.
+  await expect.poll(announcedTarget, { timeout: 5_000 }).toContain(MOVED_OVER);
+
   await page.dispatchEvent("body", "pointermove", {
     ...down,
     clientX: end.x,
     clientY: end.y + 2,
   });
-  await page.waitForTimeout(100);
+  // The second move has resolved a target once an announcement is present for
+  // the new position; only then is the pointerup a meaningful drop.
+  await expect.poll(announcedTarget, { timeout: 5_000 }).toContain(MOVED_OVER);
+
   await page.dispatchEvent("body", "pointerup", {
     ...down,
     clientX: end.x,

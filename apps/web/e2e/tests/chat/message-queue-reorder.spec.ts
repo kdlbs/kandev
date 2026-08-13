@@ -2,9 +2,12 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+
+/** Fragment of dnd-kit's default `onDragOver` accessibility announcement. */
+const MOVED_OVER = "was moved over droppable area";
 
 registerSeparateQueueRows(test);
 
@@ -101,7 +104,7 @@ test.describe("Queue reorder", () => {
     const session = await seedIdleTask(testPage, apiClient, seedData, "Queue reorder drag");
     await session.sendMessage("/slow 30s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     const editor = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
     await queueMessagesWhileBusy(testPage, editor, [
@@ -163,7 +166,7 @@ test.describe("Queue reorder", () => {
     const session = await seedIdleTask(testPage, apiClient, seedData, "Queue reorder keyboard");
     await session.sendMessage("/slow 30s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     const editor = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
     await queueMessagesWhileBusy(testPage, editor, [
@@ -182,11 +185,25 @@ test.describe("Queue reorder", () => {
     await handle.focus();
     await testPage.keyboard.press("Space");
     await expect(row).toHaveClass(/opacity-40/, { timeout: 5_000 });
+    // dnd-kit announces every resolved drag target in its accessibility live
+    // region. That makes the two internal steps below observable rather than
+    // guessed at: droppable measuring after the drag starts, and target
+    // resolution after the arrow key.
+    const announcedTarget = async () =>
+      (await testPage.locator('[id^="DndLiveRegion"]').allTextContents()).find((text) =>
+        text.includes(MOVED_OVER),
+      ) ?? "";
+
     // Droppable measuring happens asynchronously after the drag starts; an
-    // arrow press before it completes computes no target. Settle briefly.
-    await testPage.waitForTimeout(200);
+    // arrow press before a droppable resolves computes no target. Measuring is
+    // done once dnd-kit announces a target for the held row.
+    await expect.poll(announcedTarget, { timeout: 5_000 }).toContain(MOVED_OVER);
+    const targetBeforeArrow = await announcedTarget();
+
     await testPage.keyboard.press("ArrowDown");
-    await testPage.waitForTimeout(100);
+    // The arrow has resolved the next droppable once the announced target changes.
+    await expect.poll(announcedTarget, { timeout: 5_000 }).not.toBe(targetBeforeArrow);
+
     await testPage.keyboard.press("Space");
     await expect(row).not.toHaveClass(/opacity-40/, { timeout: 5_000 });
 
