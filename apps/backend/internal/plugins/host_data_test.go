@@ -19,6 +19,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+func int64Ptr(v int64) *int64 { return &v }
+
 // ── fakes for the narrow Host data API interfaces ───────────────────────
 
 type fakeTaskDataSource struct {
@@ -634,7 +636,7 @@ func TestPluginHost_Sessions_PaginatesBeforeResolvingACPSessionID(t *testing.T) 
 func TestPluginHost_SessionsCodeStats_DelegatesToAnalyticsService(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"sessions"}})
 	d.codeStats.stats = []*analyticsmodels.SessionCodeStats{
-		{SessionID: "session-1", LinesAddedCommitted: 10, LinesDeletedCommitted: 2, LinesAddedPeakPending: 5, LinesDeletedPeakPending: 1},
+		{SessionID: "session-1", LinesAddedCommitted: int64Ptr(10), LinesDeletedCommitted: int64Ptr(2), LinesAddedPeakPending: 5, LinesDeletedPeakPending: 1},
 	}
 
 	filter := pluginsdk.SessionFilter{TaskIDs: []string{"task-1"}, WorkspaceIDs: []string{"ws-1"}, States: []string{"RUNNING"}}
@@ -659,7 +661,8 @@ func TestPluginHost_SessionsCodeStats_DelegatesToAnalyticsService(t *testing.T) 
 	if d.codeStats.lastFilter.Limit != 11 {
 		t.Errorf("filter.Limit = %d, want 11 (requested 10 + 1 probe row)", d.codeStats.lastFilter.Limit)
 	}
-	if len(stats) != 1 || stats[0].SessionID != "session-1" || stats[0].LinesAddedCommitted != 10 {
+	if len(stats) != 1 || stats[0].SessionID != "session-1" ||
+		stats[0].LinesAddedCommitted == nil || *stats[0].LinesAddedCommitted != 10 {
 		t.Fatalf("CodeStats() = %+v, want session-1 passed through unchanged", stats)
 	}
 	if info == nil || info.HasMore {

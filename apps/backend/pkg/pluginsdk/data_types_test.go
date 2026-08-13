@@ -7,6 +7,7 @@ import (
 )
 
 func strPtr(s string) *string { return &s }
+func int64Ptr(v int64) *int64 { return &v }
 
 func TestPageProtoRoundTrip(t *testing.T) {
 	p := Page{Limit: 25, Cursor: "cursor-1"}
@@ -202,12 +203,33 @@ func TestSessionFilterProtoRoundTrip(t *testing.T) {
 func TestSessionCodeStatsProtoRoundTrip(t *testing.T) {
 	stats := SessionCodeStats{
 		SessionID:               "session-1",
-		LinesAddedCommitted:     120,
-		LinesDeletedCommitted:   40,
+		LinesAddedCommitted:     int64Ptr(120),
+		LinesDeletedCommitted:   int64Ptr(40),
 		LinesAddedPeakPending:   15,
 		LinesDeletedPeakPending: 3,
 	}
 	proto := stats.toProto()
+	require.Equal(t, stats, sessionCodeStatsFromProto(proto))
+}
+
+// A session that predates commit-capture activation reports nil, not 0, for
+// committed lines — the wire contract must round-trip that absence exactly,
+// not silently coerce it to a zero value.
+func TestSessionCodeStatsProtoRoundTrip_NilCommittedLines(t *testing.T) {
+	stats := SessionCodeStats{
+		SessionID:               "session-legacy",
+		LinesAddedCommitted:     nil,
+		LinesDeletedCommitted:   nil,
+		LinesAddedPeakPending:   7,
+		LinesDeletedPeakPending: 1,
+	}
+	proto := stats.toProto()
+	if proto.LinesAddedCommitted != nil {
+		t.Errorf("proto.LinesAddedCommitted = %v, want nil", proto.LinesAddedCommitted)
+	}
+	if proto.LinesDeletedCommitted != nil {
+		t.Errorf("proto.LinesDeletedCommitted = %v, want nil", proto.LinesDeletedCommitted)
+	}
 	require.Equal(t, stats, sessionCodeStatsFromProto(proto))
 }
 

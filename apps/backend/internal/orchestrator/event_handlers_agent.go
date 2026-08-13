@@ -1016,6 +1016,23 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		return
 	}
 
+	// Reconcile task_session_commits before either early-return guard below.
+	// This call is read-only (git log) and idempotent (ON CONFLICT DO NOTHING
+	// on the write side, see CreateSessionCommit), so running it unconditionally
+	// here is always safe - see captureSessionCommitsSweep. It must run before
+	// the guards, not after: GetGitLog is resolved by session ID (not execution
+	// ID), and a session's worktree is shared across its executions (see
+	// internal/worktree.Manager), so even when the rotated-execution guard
+	// below fires - a newer execution has already replaced the one this stale
+	// event refers to - a live GetGitLog call still reads that same shared
+	// workspace and captures any commit the old execution made before
+	// rotation. When the terminal-state guard fires instead (the session was
+	// already deliberately stopped via completeAndStopSession), the old
+	// execution is very likely already torn down and this call safely no-ops
+	// (see TestCaptureSessionCommitsSweep_AgentNotRunningIsNoop) rather than
+	// hanging or erroring.
+	s.captureSessionCommitsSweep(context.WithoutCancel(ctx), data.SessionID)
+
 	// Skip transition logic when this event is the side-effect of a deliberate
 	// stop (e.g. a workflow profile-switch calling completeAndStopSession). Two
 	// signals identify that case:
@@ -1059,17 +1076,6 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	s.clearRecoveredAgentError(context.WithoutCancel(ctx), data.TaskID, session)
 
 	s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
-
-	// Reconcile task_session_commits while the agent process for THIS turn is
-	// still guaranteed alive - see captureSessionCommitsSweep. This must run
-	// before both branches below: the pending-clarification early return
-	// skips straight to cleanup (so a later branch would never run for this
-	// turn at all), and a profile-switch transition inside
-	// processOnTurnCompleteViaEngine can synchronously stop the agent for
-	// this very session (reuseSessionForStep/createNewSessionForStep ->
-	// completeAndStopSession -> StopAgent), which would make a
-	// GetGitLog call placed after it find the agent already gone.
-	s.captureSessionCommitsSweep(context.WithoutCancel(ctx), data.SessionID)
 
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
 		s.logger.Info("deferring on_turn_complete on agent.completed while clarification is pending",

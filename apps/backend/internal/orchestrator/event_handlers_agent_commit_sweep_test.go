@@ -218,3 +218,109 @@ func TestHandleAgentCompleted_CommitSweepRunsEvenWhileClarificationPending(t *te
 		t.Fatalf("commits = %+v, want exactly [mid-turn-sha]", commits)
 	}
 }
+
+// Regression: handleAgentCompletedLocked's rotated-execution guard (a
+// profile switch already replaced this session's live execution before this
+// stale agent.completed event arrived) must not skip captureSessionCommitsSweep.
+// GetGitLog is resolved by session ID, not execution ID, and a session's
+// worktree is shared across its executions (see internal/worktree/Manager),
+// so a live GetGitLog call issued through the NEW execution still reads the
+// commits the OLD execution made before rotation - the exact commits this
+// stale event's own turn would otherwise never get another chance to record.
+func TestHandleAgentCompleted_CommitSweepRunsWhenExecutionRotated(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-sweep-rotate", "s-sweep-rotate", "step1")
+	seedExecutorRunning(t, repo, "s-sweep-rotate", "t-sweep-rotate", "exec-new")
+
+	session, err := repo.GetTaskSession(ctx, "s-sweep-rotate")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.BaseCommitSHA = "base-sha"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set base commit: %v", err)
+	}
+
+	gitLogCalls := 0
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		getGitLogFunc: func(_ context.Context, sessionID, baseCommit string, _ int, _ string) (*client.GitLogResult, error) {
+			gitLogCalls++
+			if sessionID != "s-sweep-rotate" || baseCommit != "base-sha" {
+				t.Fatalf("GetGitLog called with (%q, %q), want (s-sweep-rotate, base-sha)", sessionID, baseCommit)
+			}
+			return &client.GitLogResult{
+				Success: true,
+				Commits: []*client.GitCommitInfo{
+					{CommitSHA: "pre-rotation-sha", CommitMessage: "feat: made by the old execution", CommittedAt: "2026-04-02T03:04:05Z", Insertions: 4},
+				},
+			}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	// The event's AgentExecutionID ("exec-old") differs from the seeded live
+	// execution ("exec-new"), so this fires the rotated-execution guard.
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID: "t-sweep-rotate", SessionID: "s-sweep-rotate", AgentExecutionID: "exec-old",
+	})
+
+	if gitLogCalls != 1 {
+		t.Fatalf("GetGitLog calls = %d, want 1 (sweep must run even when the rotated-execution guard fires)", gitLogCalls)
+	}
+	commits, err := repo.GetSessionCommits(ctx, "s-sweep-rotate")
+	if err != nil {
+		t.Fatalf("GetSessionCommits: %v", err)
+	}
+	if len(commits) != 1 || commits[0].CommitSHA != "pre-rotation-sha" {
+		t.Fatalf("commits = %+v, want exactly [pre-rotation-sha]", commits)
+	}
+}
+
+// Regression: handleAgentCompletedLocked's terminal-session-state guard (the
+// session was already deliberately stopped via completeAndStopSession before
+// this stale agent.completed event arrived) must not skip
+// captureSessionCommitsSweep either. In this scenario the underlying agent
+// process is very likely already torn down, so the sweep's GetGitLog call is
+// expected to be attempted and to safely no-op (see
+// TestCaptureSessionCommitsSweep_AgentNotRunningIsNoop) - the point of this
+// test is that the sweep is reached at all, not skipped by the same early
+// return that skips the workflow-transition logic.
+func TestHandleAgentCompleted_CommitSweepRunsWhenSessionAlreadyTerminal(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-sweep-terminal", "s-sweep-terminal", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s-sweep-terminal")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.BaseCommitSHA = "base-sha"
+	session.State = models.TaskSessionStateCompleted
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set base commit and terminal state: %v", err)
+	}
+
+	gitLogCalls := 0
+	agentMgr := &mockAgentManager{
+		getGitLogFunc: func(_ context.Context, sessionID, baseCommit string, _ int, _ string) (*client.GitLogResult, error) {
+			gitLogCalls++
+			if sessionID != "s-sweep-terminal" || baseCommit != "base-sha" {
+				t.Fatalf("GetGitLog called with (%q, %q), want (s-sweep-terminal, base-sha)", sessionID, baseCommit)
+			}
+			// The old execution is torn down by the time this stale event
+			// arrives - matches the documented "agent not running" contract.
+			return nil, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID: "t-sweep-terminal", SessionID: "s-sweep-terminal", AgentExecutionID: "exec-old",
+	})
+
+	if gitLogCalls != 1 {
+		t.Fatalf("GetGitLog calls = %d, want 1 (sweep must be attempted even when the terminal-state guard fires)", gitLogCalls)
+	}
+}

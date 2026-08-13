@@ -623,10 +623,15 @@ func sessionFilterFromProto(p *pluginv1.SessionFilter) SessionFilter {
 // SessionCodeStats is the Go-native mirror of
 // kandev.plugin.v1.SessionCodeStats — a computed per-session code-change
 // summary, never the raw commit/snapshot rows.
+//
+// LinesAddedCommitted / LinesDeletedCommitted are nil, not 0, for a session
+// that predates commit-capture activation and has no observed commits —
+// capture wasn't running yet, so zero cannot be told apart from unknown. See
+// internal/analytics/models.SessionCodeStats for the full contract.
 type SessionCodeStats struct {
 	SessionID               string
-	LinesAddedCommitted     int64
-	LinesDeletedCommitted   int64
+	LinesAddedCommitted     *int64
+	LinesDeletedCommitted   *int64
 	LinesAddedPeakPending   int64
 	LinesDeletedPeakPending int64
 }
@@ -647,8 +652,8 @@ func sessionCodeStatsFromProto(p *pluginv1.SessionCodeStats) SessionCodeStats {
 	}
 	return SessionCodeStats{
 		SessionID:               p.GetSessionId(),
-		LinesAddedCommitted:     p.GetLinesAddedCommitted(),
-		LinesDeletedCommitted:   p.GetLinesDeletedCommitted(),
+		LinesAddedCommitted:     p.LinesAddedCommitted,
+		LinesDeletedCommitted:   p.LinesDeletedCommitted,
 		LinesAddedPeakPending:   p.GetLinesAddedPeakPending(),
 		LinesDeletedPeakPending: p.GetLinesDeletedPeakPending(),
 	}
