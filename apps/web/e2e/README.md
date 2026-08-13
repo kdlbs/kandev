@@ -429,6 +429,64 @@ A ratchet banning raw sleeps needs to allow **both** tokens, `dwell(` and
 instead — a proximity heuristic misfires, and a wrong exemption silently
 unguards real sleeps.
 
+### How this is enforced
+
+Two checks, deliberately scoped differently, because ~126 raw sleeps predate
+them and `pnpm lint` is `eslint --max-warnings 0` — a repo-wide rule at _any_
+severity would break every unrelated PR until the conversion finishes.
+
+**1. The new-code ratchet** (`scripts/check-new-e2e-sleeps.mjs`) runs in CI and
+pre-commit and judges the **change**, not the file:
+
+- a file the change **added** must be clean outright;
+- a file the change **modified** is judged only on the lines it touched.
+
+So editing a line next to somebody else's `waitForTimeout` never becomes your
+problem, and there is no migration treadmill. Same model as
+`golangci-lint --new-from-rev` and the i18n ratchet.
+
+**2. The eslint rule** (`eslint-rules/no-unsanctioned-sleep.mjs`) is an
+**error**, but only on `e2eSleepGuardFiles` — directories the conversion has
+already driven to zero. Append a directory there in the same PR that clears it.
+**Never remove an entry to make a build pass**: a removal means a sleep was added
+to a clean directory.
+
+When the list would cover all of `e2e/`, replace it with `e2e/**/*.ts`. That is
+the graduation, and from then on the ratchet is a second line of defence rather
+than the only one.
+
+Two commands:
+
+```bash
+pnpm run e2e:waits              # debt report: raw sleeps, dwell by category
+pnpm run lint:e2e-sleeps <path> # preview the rule on a path not yet guarded
+```
+
+`e2e:waits` reports three numbers that must not be added together. Raw sleeps are
+what the conversion drives to zero. **Dwell debt excludes `negative-assertion`,
+which is permanent** — a test asserting something never happens has no event to
+wait for, and deleting its wait removes the window the regression needs in order
+to appear. `injectLatency` is counted apart from both, so deliberate fixture
+configuration cannot inflate a number that is supposed to be shrinking. Inside
+the debt, `unverified` is the sub-total to attack first.
+
+**What the rule does not flag, and why.** It is an AST rule rather than a grep
+because `e2e/` holds ~700 `test.setTimeout(60_000)` calls — Playwright's per-test
+timeout setter, unrelated to sleeping. It also leaves alone two shapes that look
+almost identical to a sleep:
+
+- a **race guard**, where the timer is one of several resolution paths
+  (`socket.onopen = …; setTimeout(() => resolve(false), 3000)`);
+- a **cancellable timer**, where the handle is kept for a later `clearTimeout`.
+  A sleep never keeps the handle.
+
+The same reasoning leaves `requestAnimationFrame(() => setTimeout(resolve, 0))`
+alone: that promise resolves on the **frame**, and the `setTimeout(…, 0)` only
+hops out of the rAF callback so a measurement reflects painted geometry. It is
+not a duration wait. This falls out of the rule's shape rather than from a
+carve-out — a blanket "any `setTimeout(…, 0)` is fine" exemption would have been
+a loophole.
+
 ## Adding a new spec
 
 1. Pick a directory under `tests/` (or create one for a new feature).
