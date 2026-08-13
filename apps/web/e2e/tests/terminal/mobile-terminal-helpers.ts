@@ -3,6 +3,7 @@
 // shell-connect path, so the connect/readiness helpers live here to avoid
 // drift between the two files.
 import { type Page, expect } from "@playwright/test";
+import { dwell } from "../../helpers/causal-waits";
 
 export async function tapTerminalTab(testPage: Page): Promise<void> {
   await testPage.getByRole("button", { name: "Terminal" }).tap();
@@ -41,7 +42,12 @@ async function remountTerminalPanel(testPage: Page): Promise<void> {
   const chatTab = testPage.getByRole("button", { name: "Chat" });
   if (await chatTab.isVisible()) {
     await chatTab.tap();
-    await testPage.waitForTimeout(250);
+    // The point of the detour through Chat is to unmount the terminal panel, so
+    // wait for it to be gone. Budgeting for it instead would let a lost tap
+    // fall through to `switchToTerminalPanel`, which finds the panel already
+    // visible and returns without remounting anything -- turning the retry that
+    // exists to rescue a dead shell WS into a no-op.
+    await expect(testPage.getByTestId("terminal-panel")).toBeHidden({ timeout: 5_000 });
   }
   await switchToTerminalPanel(testPage);
 }
@@ -70,7 +76,12 @@ export async function waitForShellReady(testPage: Page, timeout = 45_000): Promi
       remounts += 1;
       nextRemountAt = Date.now() + 15_000;
     }
-    await testPage.waitForTimeout(1_000);
+    await dwell(
+      testPage,
+      1_000,
+      "poll-interval",
+      "sampling interval for the loop above, which re-taps and remounts between reads; the shell WS connect publishes nothing this side of xterm's buffer filling, so there is no event to await instead",
+    );
   }
   expect(
     (await readTerminalBuffer(testPage)).length,
