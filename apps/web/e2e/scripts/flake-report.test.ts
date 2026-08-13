@@ -1,11 +1,14 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   appendHistoryEntry,
   baselineFrom,
   crossCheckFlakeCount,
+  crossCheckLogLine,
   entryFromSummary,
   MAX_HISTORY_ENTRIES,
   median,
@@ -16,6 +19,8 @@ import {
   type FlakeHistoryEntry,
 } from "./flake-report";
 import type { RetrySummary, RetryTestSummary } from "./retry-summary";
+
+const scriptsRoot = path.dirname(fileURLToPath(import.meta.url));
 
 function entry(overrides: Partial<FlakeHistoryEntry> = {}): FlakeHistoryEntry {
   const runId = overrides.runId ?? "100";
@@ -178,6 +183,66 @@ describe("playwright cross-check", () => {
       flaky: 4,
     });
   });
+
+  // A cross-check that silently stopped running must not look like one that
+  // passed, so every status speaks in the workflow log, not just a mismatch.
+  it("logs a line for every cross-check status, warning on anything but a match", () => {
+    expect(crossCheckLogLine({ status: "match", ours: 3, theirs: 3 })).toBe(
+      "E2E flake cross-check: match. retry-summary and the merged Playwright report both report 3 flaky.",
+    );
+    expect(crossCheckLogLine({ status: "mismatch", ours: 3, theirs: 4 })).toBe(
+      "::warning::E2E flake cross-check: MISMATCH. retry-summary reports 3 flaky, the merged Playwright " +
+        "report reports 4. The trended flake rate is not trustworthy for this run.",
+    );
+    expect(
+      crossCheckLogLine({
+        status: "unavailable",
+        ours: 3,
+        reason: "no merged Playwright JSON report",
+      }),
+    ).toBe(
+      "::warning::E2E flake cross-check: SKIPPED (no merged Playwright JSON report). " +
+        "The reported flake count of 3 was not verified against Playwright.",
+    );
+  });
+
+  // Asserting the strings only proves they are right, not that the CLI ever
+  // prints them, so this drives the real entry point. Without it, restoring the
+  // "only a mismatch speaks" behaviour passes every other test in this file.
+  it("prints the cross-check verdict from the CLI on a match, not only on a mismatch", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-flake-cli-"));
+    const summaryPath = path.join(directory, "retry-summary.json");
+    const mergedPath = path.join(directory, "merged-report.json");
+    fs.writeFileSync(summaryPath, JSON.stringify(summary({ flaky: 3 })));
+    fs.writeFileSync(
+      mergedPath,
+      '{"suites":[],"errors":[],"stats":{"expected":10,"skipped":0,"unexpected":0,"flaky":3}}',
+    );
+
+    const stdout = execFileSync(
+      path.join(scriptsRoot, "../../node_modules/.bin/tsx"),
+      [
+        path.join(scriptsRoot, "flake-report.ts"),
+        "--summary",
+        summaryPath,
+        "--step-summary",
+        path.join(directory, "step-summary.md"),
+        "--playwright-json",
+        mergedPath,
+        "--run-id",
+        "7",
+        "--branch",
+        "main",
+        "--sha",
+        "abcdef1234567",
+      ],
+      { encoding: "utf8" },
+    );
+
+    expect(stdout.trim()).toBe(
+      "E2E flake cross-check: match. retry-summary and the merged Playwright report both report 3 flaky.",
+    );
+  }, 30_000);
 
   it("reports match, mismatch, and unavailable distinctly", () => {
     const stats = { expected: 10, unexpected: 0, flaky: 4, skipped: 0 };

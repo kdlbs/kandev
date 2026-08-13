@@ -204,6 +204,29 @@ function runLabel(entry: FlakeHistoryEntry): string {
   return entry.runUrl ? `[${label}](${entry.runUrl})` : label;
 }
 
+/**
+ * The workflow-log counterpart of the summary's cross-check line. Every status
+ * gets a line, including a match: if only a mismatch spoke, a cross-check that
+ * silently stopped running would be indistinguishable in the log from one that
+ * passed, and an unverified flake rate is the failure this whole report exists
+ * to prevent. A skip is annotated as a warning for the same reason.
+ */
+export function crossCheckLogLine(check: CrossCheck): string {
+  if (check.status === "match") {
+    return `E2E flake cross-check: match. retry-summary and the merged Playwright report both report ${check.ours} flaky.`;
+  }
+  if (check.status === "mismatch") {
+    return (
+      `::warning::E2E flake cross-check: MISMATCH. retry-summary reports ${check.ours} flaky, ` +
+      `the merged Playwright report reports ${check.theirs}. The trended flake rate is not trustworthy for this run.`
+    );
+  }
+  return (
+    `::warning::E2E flake cross-check: SKIPPED (${check.reason}). ` +
+    `The reported flake count of ${check.ours} was not verified against Playwright.`
+  );
+}
+
 function crossCheckLine(check: CrossCheck): string {
   if (check.status === "match") {
     return `- Playwright cross-check: **match** (${check.ours} flaky in both retry-summary and the merged report)`;
@@ -337,12 +360,7 @@ function runCli(): void {
     );
   }
 
-  if (check.status === "mismatch") {
-    console.log(
-      `::warning::E2E flake count mismatch: retry-summary reports ${check.ours}, ` +
-        `the merged Playwright report reports ${check.theirs}.`,
-    );
-  }
+  console.log(crossCheckLogLine(check));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

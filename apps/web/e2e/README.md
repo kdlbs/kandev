@@ -172,6 +172,12 @@ test are classified the way Playwright classifies them. The report cross-checks
 its count against `stats.flaky` in the merged Playwright JSON report for the
 same run and prints **MISMATCH** plus a workflow warning if the two disagree.
 
+The cross-check reports its verdict in the workflow log on every run, not only
+on a mismatch, and annotates a skipped check as a warning. If only a mismatch
+spoke, a cross-check that had silently stopped running would be indistinguishable
+in the log from one that passed, which is the same shape of bug as a flake that
+never fails the build.
+
 The trend is carried between runs as the `e2e-flake-history` artifact (90 days,
 capped at 50 entries, newest first). `e2e-report` looks for the newest completed
 `main` run that published one, uses it as the baseline, appends this run's entry,
