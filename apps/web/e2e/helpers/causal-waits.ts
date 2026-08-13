@@ -292,37 +292,83 @@ function armWsWait(
 // ---------------------------------------------------------------------------
 
 /**
- * Wait on the wall clock, on purpose, with a reason.
+ * The closed set of reasons a wall-clock wait can be legitimate, ordered by the
+ * decision procedure in {@link dwell}. Exported as a const array so a ratchet
+ * or report can enumerate categories without restating the union.
+ */
+export const DWELL_CATEGORIES = [
+  /** The assertion is that something never happens, so there is no event. Permanent. */
+  "negative-assertion",
+  /** A `setTimeout`/debounce in our own code that publishes nothing. Fixable in principle. */
+  "product-timer",
+  /** A third-party timer we do not control: Radix open delay, dnd-kit sensor arming. */
+  "library-timer",
+  /** Forcing two writes apart so their timestamps or ordering stay distinguishable. */
+  "clock-separation",
+  /** Waiting out a polling loop. Usually the best candidate for conversion to `waitForHttp`. */
+  "poll-interval",
+  /** Browser-level chrome the page cannot observe: native dialogs, focus, print. */
+  "browser-chrome",
+  /** Pre-existing spacing that could not be tied to any timer. Debt, not intent. */
+  "unverified",
+] as const;
+
+export type DwellCategory = (typeof DWELL_CATEGORIES)[number];
+
+/**
+ * Wait on the wall clock, on purpose, with a category and a reason.
  *
  * This is the **only** sanctioned way to sleep in a spec. Raw
  * `page.waitForTimeout()` and hand-rolled promise sleeps are not: they are
  * indistinguishable, at a glance and to a grep, from someone who could not
  * find the right event and reached for a number instead.
  *
- * There are exactly two situations where no event can replace a delay:
- *
- * 1. **Negative assertions.** "The tooltip must never open", "the list must
- *    not scroll." There is no event for a non-event, so the only way to give
- *    the regression room to happen is to outlast the window in which it would.
- * 2. **Timers that publish nothing observable.** A Radix open delay, a
- *    smooth-scroll window, a `setTimeout` inside a component, a polling
- *    interval, dnd-kit sensor arming that needs React to commit a pointerdown
- *    first.
- *
- * `reason` is required and must say *why no event exists*, not what the code
- * is doing. "Radix opens after 300ms and publishes nothing" is a reason;
- * "wait for the tooltip" is not — that one is a {@link waitForHttp} or a
- * {@link watchWs} wait that has not been found yet, and reaching for `dwell`
- * to avoid looking is the misuse this helper exists to make visible.
- *
  * ```ts
- * await dwell(page, 300, "Radix open delay; asserting the tooltip never opens, so there is no event");
+ * await dwell(page, 300, "negative-assertion", "asserting the tooltip never opens");
+ * await dwell(page, 300, "library-timer", "Radix open delay publishes no event");
  * ```
  *
- * Deliberately has no options and no defaults. All of its value is in the
- * name being greppable and the reason being mandatory.
+ * ## Choosing the category
+ *
+ * Several can look applicable at once, so categorize by *what makes the delay
+ * unavoidable*, first match wins:
+ *
+ * 1. Is the assertion that something **never** happens? → `negative-assertion`.
+ *    You always know this from the test itself, and it outranks whatever timer
+ *    happens to be nearby.
+ * 2. Otherwise you are waiting out a timer. Can you **name** it? → the matching
+ *    one of `product-timer`, `library-timer`, `clock-separation`,
+ *    `poll-interval`, `browser-chrome`.
+ * 3. Cannot name it? → `unverified`. Do not guess a plausible-looking timer;
+ *    an honest debt marker is worth more than a confident wrong label.
+ *
+ * `unverified` is a debt marker to be driven down, not a resting place. It is
+ * the one category that should trend toward zero.
+ *
+ * `reason` must say *why no event exists*, not what the code is doing. "Radix
+ * opens after 300ms and publishes nothing" is a reason; "wait for the tooltip"
+ * is not — that one is a {@link waitForHttp} or {@link watchWs} wait that has
+ * not been found yet, and reaching for `dwell` to avoid looking is the misuse
+ * this helper exists to make visible.
+ *
+ * Deliberately has no options and no defaults. All of its value is in the name
+ * being greppable, and the category and reason being mandatory.
  */
-export function dwell(page: Page, ms: number, reason: string): Promise<void> {
+export function dwell(
+  page: Page,
+  ms: number,
+  category: DwellCategory,
+  reason: string,
+): Promise<void> {
+  // Checked at runtime, not just by the type. `apps/web/tsconfig.json` excludes
+  // `e2e`, and Playwright and vitest both strip types without checking them, so
+  // nothing in CI would catch a typo'd category on the strength of the union
+  // alone -- only an editor would. This keeps the closed set actually closed.
+  if (!DWELL_CATEGORIES.includes(category)) {
+    throw new Error(
+      `dwell: unknown category "${category}", expected one of ${DWELL_CATEGORIES.join(", ")}`,
+    );
+  }
   if (reason.trim() === "") {
     throw new Error("dwell: a reason is required, and must say why no event exists to wait on");
   }

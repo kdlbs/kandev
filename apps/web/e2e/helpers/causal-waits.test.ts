@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Page, Response } from "@playwright/test";
-import { dwell, waitForHttp, watchWs } from "./causal-waits";
+import { DWELL_CATEGORIES, dwell, waitForHttp, watchWs } from "./causal-waits";
 
 // ---------------------------------------------------------------------------
 // Doubles for the slivers of the Playwright API these primitives touch.
@@ -331,15 +331,44 @@ describe("watchWs().waitForResponse", () => {
 describe("dwell", () => {
   it("waits for exactly the requested wall-clock delay", async () => {
     const { page, fake } = fakePage();
-    await dwell(page, 300, "Radix open delay publishes nothing observable");
+    await dwell(page, 300, "library-timer", "Radix open delay publishes nothing observable");
     expect(fake.waitedMs).toEqual([300]);
   });
 
   it("rejects an empty reason, so the argument cannot be silenced", () => {
     const { page, fake } = fakePage();
-    expect(() => dwell(page, 300, "   ")).toThrow(
+    expect(() => dwell(page, 300, "negative-assertion", "   ")).toThrow(
       "dwell: a reason is required, and must say why no event exists to wait on",
     );
     expect(fake.waitedMs).toEqual([]);
+  });
+
+  it("rejects an unknown category at runtime, since nothing typechecks e2e", () => {
+    const { page, fake } = fakePage();
+    expect(() =>
+      // @ts-expect-error -- the union rejects this in an editor; the runtime
+      // check is what catches it in CI, where e2e is never typechecked.
+      dwell(page, 300, "libary-timer", "typo in the category"),
+    ).toThrow(
+      'dwell: unknown category "libary-timer", expected one of negative-assertion, ' +
+        "product-timer, library-timer, clock-separation, poll-interval, browser-chrome, unverified",
+    );
+    expect(fake.waitedMs).toEqual([]);
+  });
+
+  // Chunk 4's ratchet reports the category mix off this list, and chunk 1's
+  // migrated sites are typed against it. Pin the exact set and its order so a
+  // rename or silent drop is a failing test here rather than a quietly wrong
+  // report there.
+  it("pins the closed category set", () => {
+    expect(DWELL_CATEGORIES).toEqual([
+      "negative-assertion",
+      "product-timer",
+      "library-timer",
+      "clock-separation",
+      "poll-interval",
+      "browser-chrome",
+      "unverified",
+    ]);
   });
 });

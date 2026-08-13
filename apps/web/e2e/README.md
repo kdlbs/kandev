@@ -288,26 +288,53 @@ Converted examples to copy from: `tests/task/create-task-new-local-repository.sp
 ### `dwell` — the only sanctioned wall-clock wait
 
 Some delays genuinely cannot be replaced by an event. For those, and **only**
-for those, use `dwell(page, ms, reason)`:
+for those, use `dwell(page, ms, category, reason)`:
 
 ```ts
-await dwell(page, 300, "Radix open delay; asserting the tooltip never opens, so there is no event");
+await dwell(page, 300, "negative-assertion", "asserting the tooltip never opens");
+await dwell(page, 300, "library-timer", "Radix open delay publishes no event");
 ```
 
 Raw `page.waitForTimeout()` and hand-rolled promise sleeps are not sanctioned.
 They are indistinguishable, at a glance and to a grep, from someone who could
 not find the right event and reached for a number instead. `dwell` is greppable
-by name, its reason is mandatory rather than optional, and it can be counted.
+by name, its category is a closed `DwellCategory` union, its reason is mandatory
+rather than optional, and the whole population is countable.
 
-Exactly two situations qualify:
+> **The category is validated at runtime, not only by the type.**
+> `apps/web/tsconfig.json` excludes `e2e`, and Playwright and vitest both strip
+> types without checking them, so **nothing in CI typechecks a spec file**. The
+> union gives you editor-time safety and self-documentation; the runtime check
+> is what actually stops a typo'd category from silently escaping the closed
+> set. Keep that in mind more broadly: a type error in `e2e/**` will not fail
+> any gate, so lean on tests for anything load-bearing here.
 
-1. **Negative assertions** — "the tooltip must never open", "the list must not
-   scroll". There is no event for a non-event, so the only way to give the
-   regression room to happen is to outlast the window in which it would. This
-   category is permanent, not debt.
-2. **Timers that publish nothing observable** — a Radix open delay, a
-   smooth-scroll window, a `setTimeout` inside a component, a polling interval,
-   dnd-kit sensor arming that needs React to commit a pointerdown first.
+| Category             | What it means                                                                                                                                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `negative-assertion` | The assertion is that something **never** happens. There is no event for a non-event, so the only way to give the regression room to occur is to outlast the window in which it would. Permanent, not debt. |
+| `product-timer`      | A `setTimeout` or debounce in our own code that publishes nothing observable. Fixable in principle: make it publish.                                                                                        |
+| `library-timer`      | A third-party timer we do not control — a Radix open delay, dnd-kit sensor arming that needs React to commit a pointerdown first.                                                                           |
+| `clock-separation`   | Forcing two writes apart so their timestamps or ordering stay distinguishable. Not waiting for a timer at all.                                                                                              |
+| `poll-interval`      | Waiting out a polling loop. Usually the best candidate for conversion to `waitForHttp` on the request the poll makes.                                                                                       |
+| `browser-chrome`     | Browser-level chrome the page cannot observe: native dialogs, focus transitions, print.                                                                                                                     |
+| `unverified`         | Pre-existing spacing that could not be tied to any timer. Debt, flagged honestly rather than dressed up as intent.                                                                                          |
+
+**Choosing between them.** Several can look applicable at once, so categorize by
+_what makes the delay unavoidable_, first match wins:
+
+1. Is the assertion that something **never** happens? → `negative-assertion`.
+   You always know this from the test itself, and it outranks whatever timer
+   happens to sit nearby.
+2. Otherwise you are waiting out a timer. Can you **name** it? → the matching
+   one of `product-timer`, `library-timer`, `clock-separation`, `poll-interval`,
+   `browser-chrome`.
+3. Cannot name it? → `unverified`. Do not guess a plausible-looking timer; an
+   honest debt marker is worth more than a confident wrong label.
+
+`unverified` is a **debt marker to be driven down, not a resting place** — it is
+the one category that should trend toward zero. `negative-assertion` is the
+opposite: it is permanent and legitimate, and a PR that "fixes" one by deleting
+the wait has removed the regression's room to happen.
 
 The `reason` must say **why no event exists**, not what the code is doing.
 "Radix opens after 300ms and publishes nothing" is a reason; "wait for the
@@ -315,8 +342,8 @@ tooltip" is not — that is a `waitForHttp` or `watchWs` wait you have not found
 yet. Reaching for `dwell` to avoid looking is the misuse this helper exists to
 make visible, and an empty reason throws rather than passing silently.
 
-`dwell` takes no options and has no defaults, on purpose. All of its value is
-in the name and the required reason; keep it that way.
+`dwell` takes no options and has no defaults, on purpose. All of its value is in
+the name, the closed category set, and the required reason; keep it that way.
 
 ## Adding a new spec
 
