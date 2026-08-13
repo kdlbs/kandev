@@ -488,6 +488,7 @@ func (c *Controller) start(
 	if restartRequiresRunningServer(action, *current) {
 		return nil, ErrServerDisabled
 	}
+	previousMayHaveProcess := action == ActionRestart && stateMayHaveProcess(*current)
 	if !taskAllowsLSPRuntime(task) {
 		return c.waitForTaskWithoutAllocation(ctx, *current, settings, origin, action)
 	}
@@ -510,7 +511,9 @@ func (c *Controller) start(
 	if err != nil {
 		return nil, err
 	}
-	return c.startAllocatedWithEnvironment(ctx, task, *state, settings, acceptedAt, action, environment)
+	return c.startAllocatedWithEnvironment(
+		ctx, task, *state, settings, acceptedAt, action, environment, previousMayHaveProcess,
+	)
 }
 
 func restartRequiresRunningServer(action Action, state TaskLanguageState) bool {
@@ -610,31 +613,6 @@ func (c *Controller) recordExplicitStartIntent(
 	})
 }
 
-func (c *Controller) startAllocatedWithEnvironment(
-	ctx context.Context,
-	task *taskmodels.Task,
-	state TaskLanguageState,
-	settings TaskSettings,
-	acceptedAt time.Time,
-	action Action,
-	environment *taskmodels.TaskEnvironment,
-) (*LanguageSnapshot, error) {
-	if task.ArchivedAt != nil {
-		return c.transition(ctx, state, settings, PhaseWaitingForTask, "", "")
-	}
-	if !readyTaskEnvironment(environment) {
-		return c.transition(ctx, state, settings, PhaseWaitingForTask, "", "")
-	}
-	if !ExecutorSupportsLSP(environment.ExecutorType) {
-		return c.transition(ctx, state, settings, PhaseUnsupported, "unsupported_executor", "")
-	}
-	key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
-	if !c.capacity.Admit(key, state.Generation, acceptedAt) {
-		return c.transition(ctx, state, settings, PhaseQueued, "", "")
-	}
-	return c.launchReserved(ctx, state, settings, environment, action)
-}
-
 func (c *Controller) transition(
 	ctx context.Context,
 	state TaskLanguageState,
@@ -647,6 +625,9 @@ func (c *Controller) transition(
 		next.ErrorCode = errorCode
 		next.ErrorMessage = errorMessage
 		next.LastTransitionAt = c.clock()
+		if phase == PhaseOff && next.Generation > 0 {
+			next.ProcessAbsentGeneration = next.Generation
+		}
 	})
 	if err != nil {
 		return nil, err
@@ -735,6 +716,11 @@ func staleRuntimeObservation(state TaskLanguageState, runtime RuntimeSnapshot) b
 }
 
 func recordRuntimeObservation(state *TaskLanguageState, previousGeneration uint64, runtime RuntimeSnapshot) {
+	if runtimeFailureProvesNoProcess(&runtime, state.Generation) {
+		state.ProcessAbsentGeneration = runtime.Generation
+	} else if runtimeHasProcess(&runtime) {
+		state.ProcessAbsentGeneration = 0
+	}
 	if state.Generation != previousGeneration {
 		state.RuntimeIncarnation = ""
 		state.RuntimeStartedAt = nil

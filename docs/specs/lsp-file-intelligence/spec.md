@@ -322,6 +322,13 @@ empty capacity ledger or start a background retry behind apparently usable contr
 successful inventory read, every possibly-live generation is reserved before fallible runtime
 inspection begins.
 
+Capacity uses durable generation-scoped process-presence evidence rather than inferring ownership
+from the current display error. Proven absence survives later task-host, watch, and reconciliation
+errors and backend restart; allocating a new generation clears that proof. If Restart allocates a
+replacement generation but task-host access fails before the replacement command runs, the
+task/language keeps its reservation because the previous generation may still be alive. No queued
+language may be promoted until absence is proved.
+
 Startup registers watches from a post-reconciliation durable inventory. A watch failure may record
 `task_host_watch_lost` only if the current row still has a server-bearing phase and nonzero
 generation; a stale pre-reconcile row must not replace `off`, `queued`, `waiting_for_task`, or

@@ -37,13 +37,15 @@ func TestPostgresTaskLSPSchemaReplay(t *testing.T) {
 	state.Policy = lsp.PolicyKeepWarm
 	state.Detected = true
 	state.DetectionState = lsp.DetectionComplete
+	state.Generation = 3
+	state.ProcessAbsentGeneration = 3
 	state.LastTransitionAt = now
 	stored, err := repo.CompareAndUpdateTaskLSPLanguage(ctx, state, 0)
 	if err != nil {
 		t.Fatalf("insert postgres task LSP state: %v", err)
 	}
-	if stored.Revision != 1 {
-		t.Fatalf("postgres task LSP revision = %d", stored.Revision)
+	if stored.Revision != 1 || stored.ProcessAbsentGeneration != stored.Generation {
+		t.Fatalf("postgres task LSP state = %#v", stored)
 	}
 	allocated, err := repo.AllocateTaskLSPGeneration(
 		ctx,
@@ -57,7 +59,7 @@ func TestPostgresTaskLSPSchemaReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("allocate postgres task LSP generation: %v", err)
 	}
-	if allocated.Generation != 1 || allocated.Revision != 2 {
+	if allocated.Generation != 4 || allocated.Revision != 2 || allocated.ProcessAbsentGeneration != 0 {
 		t.Fatalf("postgres task LSP allocation = %#v", allocated)
 	}
 

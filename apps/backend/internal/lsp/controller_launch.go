@@ -3,10 +3,34 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/kandev/kandev/internal/lsp/installer"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
+
+func (c *Controller) startAllocatedWithEnvironment(
+	ctx context.Context,
+	task *taskmodels.Task,
+	state TaskLanguageState,
+	settings TaskSettings,
+	acceptedAt time.Time,
+	action Action,
+	environment *taskmodels.TaskEnvironment,
+	previousMayHaveProcess bool,
+) (*LanguageSnapshot, error) {
+	if task.ArchivedAt != nil || !readyTaskEnvironment(environment) {
+		return c.transition(ctx, state, settings, PhaseWaitingForTask, "", "")
+	}
+	if !ExecutorSupportsLSP(environment.ExecutorType) {
+		return c.transition(ctx, state, settings, PhaseUnsupported, "unsupported_executor", "")
+	}
+	key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
+	if !c.capacity.Admit(key, state.Generation, acceptedAt) {
+		return c.transition(ctx, state, settings, PhaseQueued, "", "")
+	}
+	return c.launchReserved(ctx, state, settings, environment, action, previousMayHaveProcess)
+}
 
 func (c *Controller) launchReserved(
 	ctx context.Context,
@@ -14,12 +38,18 @@ func (c *Controller) launchReserved(
 	settings TaskSettings,
 	environment *taskmodels.TaskEnvironment,
 	action Action,
+	previousMayHaveProcess bool,
 ) (*LanguageSnapshot, error) {
 	key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
 	host, err := c.runtimes.EnsureTaskHost(ctx, state.TaskID, environment.ID)
 	if err != nil {
-		c.releaseCapacity(ctx, key, state.Generation)
-		snapshot, transitionErr := c.transition(ctx, state, settings, PhaseError, "task_host_unavailable", err.Error())
+		processAbsent := !previousMayHaveProcess
+		if processAbsent {
+			c.releaseCapacity(ctx, key, state.Generation)
+		}
+		snapshot, transitionErr := c.transitionRuntimeFailure(
+			ctx, state, settings, "task_host_unavailable", err, processAbsent,
+		)
 		c.scheduleDesiredRecovery(key, snapshot)
 		return snapshot, transitionErr
 	}
@@ -92,7 +122,33 @@ func (c *Controller) transitionLaunchFailure(
 	settings TaskSettings,
 	controlErr error,
 ) (*LanguageSnapshot, error) {
-	snapshot, err := c.transition(ctx, state, settings, PhaseError, "task_host_control_failed", controlErr.Error())
+	snapshot, err := c.transitionRuntimeFailure(
+		ctx, state, settings, "task_host_control_failed", controlErr, false,
+	)
 	c.scheduleDesiredRecovery(key, snapshot)
 	return snapshot, err
+}
+
+func (c *Controller) transitionRuntimeFailure(
+	ctx context.Context,
+	state TaskLanguageState,
+	settings TaskSettings,
+	errorCode string,
+	cause error,
+	processAbsent bool,
+) (*LanguageSnapshot, error) {
+	stored, err := c.updateState(ctx, state.TaskID, state.Language, func(next *TaskLanguageState) {
+		next.Phase = PhaseError
+		next.ErrorCode = errorCode
+		next.ErrorMessage = cause.Error()
+		next.LastTransitionAt = c.clock()
+		if processAbsent {
+			next.ProcessAbsentGeneration = next.Generation
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	snapshot := c.languageSnapshot(*stored, settings, nil)
+	return &snapshot, nil
 }

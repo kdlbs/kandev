@@ -57,6 +57,12 @@ attachments, or discovery can launch competing work. Reconciliation releases a r
 after the task host proves that runtime absent; inspection failures and error snapshots remain
 capacity-bearing unless their evidence proves process absence.
 
+Process absence is durable generation-scoped evidence, separate from the user-visible phase and
+error. A later transport, watch, or reconciliation error cannot erase that evidence and create a
+phantom capacity occupant after backend restart. Allocating a new generation clears the prior
+absence proof. Conversely, Restart retains the existing task/language reservation if task-host
+reattachment fails before the replacement command, because the previous generation may still run.
+
 The durable startup inventory is the capacity ledger's authority. If that inventory cannot be
 read, the controller records one sticky startup failure and every task-LSP operation fails closed
 with that error until backend restart; it never exposes an empty ledger as ready or launches work

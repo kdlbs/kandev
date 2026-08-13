@@ -39,6 +39,9 @@ func TestTaskLSPStateRejectsInvalidEnumsAndRestartOverlay(t *testing.T) {
 		{name: "phase", mutate: func(state *TaskLanguageState) { state.Phase = "indexing" }},
 		{name: "action", mutate: func(state *TaskLanguageState) { state.LastAction = "attach" }},
 		{name: "initiator", mutate: func(state *TaskLanguageState) { state.LastInitiator = "session" }},
+		{name: "process absence generation", mutate: func(state *TaskLanguageState) {
+			state.ProcessAbsentGeneration = 1
+		}},
 		{name: "restart reason without overlay", mutate: func(state *TaskLanguageState) {
 			state.RestartRequiredReason = "workspace_roots_changed"
 		}},

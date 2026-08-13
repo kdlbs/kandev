@@ -38,6 +38,8 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   non-server phase.
 - Concurrent or retried Close calls share one lifecycle completion signal; recovery, ready-reset,
   and discovery callbacks validate immutable registration identity across map deletion/recreation.
+- Generation-scoped process-absence evidence survives display errors and backend restart, while a
+  pre-command Restart reattachment failure retains the old server's capacity reservation.
 
 ## TDD Evidence
 
@@ -73,6 +75,9 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   the resulting watch loss could replace `waiting_for_task` with an error and schedule recovery.
 - A timed-out Close made later Close calls return success before owned callbacks joined, and deleted
   timer entries could reuse epoch one so delayed callbacks consumed their replacements.
+- Restart released capacity when task-host access failed before the replacement RPC even though the
+  old generation could still run; proven start absence was also lost behind a generic display error
+  and became a phantom capacity occupant after backend restart.
 
 ## Verification
 
@@ -108,6 +113,8 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
 - Post-reconcile watch selection, non-server watch-loss preservation, shared Close joining, and
   recovery/ready/discovery registration-identity regressions each failed before their production
   repairs, then passed 20 race-enabled repetitions together.
+- Pre-command Restart reservation and durable process-absence regressions failed before their
+  repairs, then passed with the SQLite round-trip and migration-backfill coverage.
 - `go test -count=1 ./...` passed across the complete backend after the callback-ownership repair;
   changed-code `golangci-lint` reported zero issues and the architecture linter passed.
 - Commit hooks passed architecture, formatting, changed-code Go/Web lint, i18n, public-copy, and

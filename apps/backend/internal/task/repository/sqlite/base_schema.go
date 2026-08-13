@@ -209,6 +209,7 @@ const taskLSPSchemaDDL = `
 		runtime_incarnation TEXT NOT NULL DEFAULT '',
 		runtime_started_at TIMESTAMP,
 		runtime_revision BIGINT NOT NULL DEFAULT 0 CHECK (runtime_revision >= 0),
+		process_absent_generation BIGINT NOT NULL DEFAULT 0 CHECK (process_absent_generation >= 0),
 		process_started_at TIMESTAMP,
 		initialize_started_at TIMESTAMP,
 		ready_at TIMESTAMP,

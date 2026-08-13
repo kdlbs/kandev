@@ -349,6 +349,18 @@ func (r *Repository) runMigrations() error {
 		ALTER TABLE task_lsp_languages ADD COLUMN runtime_started_at TIMESTAMP`)
 	r.migrate.Apply("task_lsp_languages.runtime_revision", `
 		ALTER TABLE task_lsp_languages ADD COLUMN runtime_revision BIGINT NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_lsp_languages.process_absent_generation", `
+		ALTER TABLE task_lsp_languages ADD COLUMN process_absent_generation BIGINT NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_lsp_languages.process_absent_generation.backfill", `
+		UPDATE task_lsp_languages
+		SET process_absent_generation = generation
+		WHERE generation > 0 AND process_absent_generation = 0 AND (
+			phase = 'off' OR (
+				phase = 'error' AND error_code IN (
+					'binary_unavailable', 'process_start_failed', 'start_canceled', 'process_exited'
+				)
+			)
+		)`)
 
 	if err := r.clearRecoveredAgentErrors(); err != nil {
 		return err

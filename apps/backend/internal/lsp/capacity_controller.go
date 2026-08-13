@@ -124,7 +124,7 @@ func (c *Controller) promoteCapacityEntry(
 		)
 		return snapshot, transitionErr
 	}
-	return c.launchReserved(ctx, *state, settings, environment, state.LastAction)
+	return c.launchReserved(ctx, *state, settings, environment, state.LastAction, false)
 }
 
 func (c *Controller) failCapacityPromotion(
@@ -135,8 +135,8 @@ func (c *Controller) failCapacityPromotion(
 	cause error,
 ) (*LanguageSnapshot, error) {
 	c.releaseCapacity(ctx, TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}, state.Generation)
-	snapshot, transitionErr := c.transition(
-		ctx, state, settings, PhaseError, errorCode, cause.Error(),
+	snapshot, transitionErr := c.transitionRuntimeFailure(
+		ctx, state, settings, errorCode, cause, true,
 	)
 	return snapshot, errors.Join(cause, transitionErr)
 }

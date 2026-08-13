@@ -398,6 +398,9 @@ func (c *Controller) stopReconciledRuntime(
 		if runtime != nil {
 			next.Generation = runtime.Generation
 		}
+		if next.Generation > 0 {
+			next.ProcessAbsentGeneration = next.Generation
+		}
 		next.LastAction = ActionReconcile
 		next.LastInitiator = InitiatorAutomatic
 		next.LastStopReason = reason
@@ -572,6 +575,9 @@ func (c *Controller) finishTaskLanguageCleanup(
 	c.releaseCapacity(ctx, TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}, state.Generation)
 	_, updateErr := c.updateState(ctx, state.TaskID, state.Language, func(next *TaskLanguageState) {
 		next.Phase = PhaseOff
+		if next.Generation > 0 {
+			next.ProcessAbsentGeneration = next.Generation
+		}
 		next.LastAction = ActionReconcile
 		next.LastInitiator = InitiatorAutomatic
 		next.LastStopReason = reason
@@ -633,6 +639,9 @@ func runtimeFailureProvesNoProcess(snapshot *RuntimeSnapshot, generation uint64)
 }
 
 func stateMayHaveProcess(state TaskLanguageState) bool {
+	if state.Generation > 0 && state.ProcessAbsentGeneration == state.Generation {
+		return false
+	}
 	if !phaseHasServer(state.Phase) {
 		return false
 	}

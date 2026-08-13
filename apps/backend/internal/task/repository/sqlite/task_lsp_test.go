@@ -109,31 +109,32 @@ func TestTaskLSPPolicyEvidenceRoundTripAndRevisionCAS(t *testing.T) {
 	actionAt := now.Add(4 * time.Second)
 	runtimeStartedAt := now.Add(-time.Minute)
 	next := lsp.TaskLanguageState{
-		TaskID:                "task-lsp-roundtrip",
-		Language:              "kotlin",
-		Policy:                lsp.PolicyKeepWarm,
-		Detected:              true,
-		DetectionState:        lsp.DetectionPartial,
-		DetectionScannedAt:    &now,
-		DetectionTruncated:    true,
-		Phase:                 lsp.PhaseReady,
-		Generation:            7,
-		RuntimeIncarnation:    "task-host-a",
-		RuntimeStartedAt:      &runtimeStartedAt,
-		RuntimeRevision:       12,
-		ProcessStartedAt:      &processStarted,
-		InitializeStartedAt:   &initializeStarted,
-		ReadyAt:               &readyAt,
-		LastTransitionAt:      readyAt,
-		LastAction:            lsp.ActionRestart,
-		LastActionAt:          &actionAt,
-		LastStopReason:        "task_environment_stopped",
-		LastRestartReason:     "user_restart",
-		LastInitiator:         lsp.InitiatorUser,
-		RestartRequired:       true,
-		RestartRequiredReason: "workspace_roots_changed",
-		ErrorCode:             "initialize_failed",
-		ErrorMessage:          "task-host detail",
+		TaskID:                  "task-lsp-roundtrip",
+		Language:                "kotlin",
+		Policy:                  lsp.PolicyKeepWarm,
+		Detected:                true,
+		DetectionState:          lsp.DetectionPartial,
+		DetectionScannedAt:      &now,
+		DetectionTruncated:      true,
+		Phase:                   lsp.PhaseReady,
+		Generation:              7,
+		RuntimeIncarnation:      "task-host-a",
+		RuntimeStartedAt:        &runtimeStartedAt,
+		RuntimeRevision:         12,
+		ProcessAbsentGeneration: 6,
+		ProcessStartedAt:        &processStarted,
+		InitializeStartedAt:     &initializeStarted,
+		ReadyAt:                 &readyAt,
+		LastTransitionAt:        readyAt,
+		LastAction:              lsp.ActionRestart,
+		LastActionAt:            &actionAt,
+		LastStopReason:          "task_environment_stopped",
+		LastRestartReason:       "user_restart",
+		LastInitiator:           lsp.InitiatorUser,
+		RestartRequired:         true,
+		RestartRequiredReason:   "workspace_roots_changed",
+		ErrorCode:               "initialize_failed",
+		ErrorMessage:            "task-host detail",
 	}
 	stored, err := repo.CompareAndUpdateTaskLSPLanguage(ctx, next, 0)
 	if err != nil {
@@ -151,6 +152,7 @@ func TestTaskLSPPolicyEvidenceRoundTripAndRevisionCAS(t *testing.T) {
 		loaded.Generation != 7 || loaded.LastRestartReason != next.LastRestartReason ||
 		loaded.RuntimeIncarnation != next.RuntimeIncarnation || loaded.RuntimeRevision != next.RuntimeRevision ||
 		loaded.RuntimeStartedAt == nil || !loaded.RuntimeStartedAt.Equal(runtimeStartedAt) ||
+		loaded.ProcessAbsentGeneration != next.ProcessAbsentGeneration ||
 		loaded.RestartRequiredReason != next.RestartRequiredReason || loaded.ErrorMessage != next.ErrorMessage {
 		t.Fatalf("round-tripped state = %#v", loaded)
 	}
@@ -199,6 +201,7 @@ func TestTaskLSPGenerationAllocationIsMonotonic(t *testing.T) {
 	withRuntime.RuntimeIncarnation = "task-host-before-restart"
 	withRuntime.RuntimeStartedAt = &runtimeStartedAt
 	withRuntime.RuntimeRevision = 9
+	withRuntime.ProcessAbsentGeneration = first.Generation
 	if _, err := repo.CompareAndUpdateTaskLSPLanguage(ctx, withRuntime, first.Revision); err != nil {
 		t.Fatalf("seed runtime ordering evidence: %v", err)
 	}
@@ -220,7 +223,8 @@ func TestTaskLSPGenerationAllocationIsMonotonic(t *testing.T) {
 	if second.Generation != 2 || second.Revision != 3 || second.LastRestartReason != "crash_recovery" {
 		t.Fatalf("second allocation = %#v", second)
 	}
-	if second.RuntimeIncarnation != "" || second.RuntimeStartedAt != nil || second.RuntimeRevision != 0 {
+	if second.RuntimeIncarnation != "" || second.RuntimeStartedAt != nil || second.RuntimeRevision != 0 ||
+		second.ProcessAbsentGeneration != 0 {
 		t.Fatalf("new generation retained runtime ordering evidence: %#v", second)
 	}
 	if second.Phase != lsp.PhaseStarting || second.LastInitiator != lsp.InitiatorAutomatic {
@@ -233,6 +237,34 @@ func TestTaskLSPGenerationAllocationIsMonotonic(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].Generation != 2 {
 		t.Fatalf("listed task LSP languages = %#v", rows)
+	}
+}
+
+func TestTaskLSPMigrationBackfillsProvenProcessAbsence(t *testing.T) {
+	repo, db := newTaskLSPTestRepo(t)
+	seedTaskForStatusSummary(t, db, "task-lsp-absence", "workspace-lsp-absence")
+	if _, err := db.Exec(`ALTER TABLE task_lsp_languages DROP COLUMN process_absent_generation`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_lsp_languages (
+			task_id, language, policy, phase, generation, error_code,
+			last_transition_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), "task-lsp-absence", "go", lsp.PolicyKeepWarm, lsp.PhaseError, 4,
+		"process_start_failed", now, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatal(err)
+	}
+	state, found, err := repo.GetTaskLSPLanguage(context.Background(), "task-lsp-absence", "go")
+	if err != nil || !found {
+		t.Fatalf("load migrated process evidence: found=%t err=%v", found, err)
+	}
+	if state.ProcessAbsentGeneration != state.Generation {
+		t.Fatalf("absence generation = %d, want %d", state.ProcessAbsentGeneration, state.Generation)
 	}
 }
 
