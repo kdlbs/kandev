@@ -498,7 +498,7 @@
         id: "e2e-insights-tools",
         label: "E2E Insights Tools",
         path: "/plugins/e2e-hello",
-        section: "insights",
+        section: "sidebar-footer",
       });
       registry.registerRoute("/plugins/e2e-hello", PluginPage);
       registry.registerComponent("task-sidebar", SidebarSlot);

@@ -220,14 +220,14 @@ describe("AppNavSections", () => {
     expect(screen.getByTestId("app-nav-health-button")).not.toBeNull();
   });
 
-  it("orders the Utilities group's manifest rows as Stats, Settings, then a plugin insights item", () => {
+  it("orders the Utilities group's manifest rows as Stats, Settings, then a plugin sidebar-footer item", () => {
     navRegistrations = [
       {
         pluginId: "acme",
         id: "board",
         label: "Acme Board",
         path: "/plugins/acme",
-        section: "insights",
+        section: "sidebar-footer",
       },
     ];
 

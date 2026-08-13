@@ -288,7 +288,7 @@ test.describe("Mobile plugin navigation", () => {
     }
   });
 
-  test("shows the insights item in the Utilities group, not the Plugins group", async ({
+  test("shows the sidebar-footer item in the Utilities group, not the Plugins group", async ({
     testPage,
   }) => {
     test.setTimeout(60_000);

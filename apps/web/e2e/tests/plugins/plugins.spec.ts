@@ -773,7 +773,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     });
   });
 
-  test("registers an insights-section item as a footer icon, not a rail row", async ({
+  test("registers a sidebar-footer-section item as a footer icon, not a rail row", async ({
     testPage,
   }) => {
     test.setTimeout(60_000);

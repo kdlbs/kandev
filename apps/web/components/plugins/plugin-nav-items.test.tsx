@@ -73,12 +73,12 @@ describe("PluginNavItems", () => {
     expect(screen.queryByTestId("plugin-nav-item-integration-item")).toBeNull();
   });
 
-  it("keeps insights items out of the main plugin rail", () => {
+  it("keeps sidebar-footer items out of the main plugin rail", () => {
     pluginRegistry.forPlugin("plugin-a").registerNavItem({
       id: "insights-item",
       label: "Insights Item",
       path: "/plugins/insights-item",
-      section: "insights",
+      section: "sidebar-footer",
     });
 
     renderNavItems();

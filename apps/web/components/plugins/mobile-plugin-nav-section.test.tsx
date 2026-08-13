@@ -73,12 +73,12 @@ describe("MobilePluginNavSection", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("also excludes insights-section items: they belong to the Utilities group, not here", () => {
+  it("also excludes sidebar-footer items: they belong to the Utilities group, not here", () => {
     pluginRegistry.forPlugin("plugin-a").registerNavItem({
       id: "board",
       label: "Board",
       path: "/plugins/board",
-      section: "insights",
+      section: "sidebar-footer",
     });
 
     const { container } = renderSection();
