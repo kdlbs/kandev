@@ -48,11 +48,14 @@ must treat an active task LSP runtime as owned background work.
 Loss of the backend's in-memory task-host handle is not proof that the physical host is absent.
 Both read and ensure paths first perform an executor-specific, existing-only reattachment that may
 not launch, resume, or provision resources. Only an authoritative not-found result permits a new
-task host. Backend startup reserves every durable generation that may still own a process before
-any fallible task-host inspection and before controls, settings work, attachments, or discovery can
-launch competing work. Reconciliation releases a reservation only after the task host proves that
-runtime absent; inspection failures and error snapshots remain capacity-bearing unless their
-evidence proves process absence.
+task host. That probe uses only stable task/environment identity and physical reconnect data; it
+does not resolve launch-time executor profiles, repository credentials, managed-cache state, or
+remote-resume preflight. Those inputs remain mandatory for a genuinely new launch, while an
+inspection error still fails closed. Backend startup reserves every durable generation that may
+still own a process before any fallible task-host inspection and before controls, settings work,
+attachments, or discovery can launch competing work. Reconciliation releases a reservation only
+after the task host proves that runtime absent; inspection failures and error snapshots remain
+capacity-bearing unless their evidence proves process absence.
 
 Browsers attach through a task-and-language route after task-owner authorization. An attachment
 receives the initialized server capabilities and then exchanges feature requests and document

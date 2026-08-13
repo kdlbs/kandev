@@ -43,6 +43,9 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   conservative pre-inspection capacity reservation and identity-aware release.
 - Detached/unhealthy task-host lookup and no-create executor regressions failed before physical
   existing-only reattachment.
+- Existing-only cleanup with a deleted launch profile failed before reattachment stopped resolving
+  launch-time profiles and environment inputs; the absent and live physical-runtime cases now prove
+  cleanup independently while a later new launch still fails closed on the missing profile.
 - Blocked Start versus Stop and terminal task-mutation regressions failed before command and task
   admission cancellation.
 - Task subscription readiness and post-ACK hydration regressions failed before acknowledged task
@@ -63,6 +66,8 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
   ./internal/agentctl/server/lsp ./internal/gateway/websocket` passed.
 - The ambiguous-startup reservation, mismatched-generation release, and queued-owned shutdown
   regressions passed 20 race-enabled repetitions.
+- The deleted-launch-profile existing-only cleanup regression passed 20 race-enabled repetitions,
+  and the production Playwright branch-split reproducer passed with its profile-deletion cleanup.
 - `go test -race -count=20 ./internal/task/service -run
   '^TestServiceTerminalMutationCancelsActiveTaskLSPAdmission$'` passed. The full task-service race
   package also exercised the changed path; one broad run exceeded the package timeout while waiting

@@ -363,7 +363,10 @@ reacquire capacity or replace Off after Stop has cancelled that watch.
 - **Backend watch disconnect/restart:** the task host retains the generation. Recovery adopts its
   snapshot and capacity before controls or background settings/discovery can consider a new start.
   A cache miss first probes for the existing physical task host without creating or resuming one.
-  Stale backend progress is cleared only if no matching live generation exists.
+  This existing-only probe uses stable task/environment identity and physical reconnect data without
+  loading launch-time executor profiles, repository credentials, managed-cache state, or remote
+  resume preflight. A genuinely new launch still resolves and validates every launch input. Stale
+  backend progress is cleared only if no matching live generation exists.
 - **Agentctl/task-host loss:** its process manager reaps descendants. The backend records the loss
   and uses bounded recovery only after the old runtime is known dead.
 - **Environment replacement ambiguity:** Kandev blocks the replacement launch until the old
@@ -504,6 +507,10 @@ task-environment cleanup merely because a browser remains connected.
 - **GIVEN** backend memory loses the task-host handle while its process remains alive, **WHEN** a
   read or Ensure occurs, **THEN** Kandev reattaches to that stable physical host before permitting
   any replacement process.
+- **GIVEN** a task host may still exist after its launch-time executor profile was deleted, **WHEN**
+  cleanup probes the physical runtime, **THEN** Kandev performs an existing-only inspection without
+  reloading that profile, stops the process tree when present, and still requires the profile before
+  any later new launch.
 - **GIVEN** Start is blocked in install or task-host launch, **WHEN** Stop, Disabled policy, or task
   teardown is accepted, **THEN** the blocked work is cancelled and the terminal transition proceeds
   without waiting for startup to finish.

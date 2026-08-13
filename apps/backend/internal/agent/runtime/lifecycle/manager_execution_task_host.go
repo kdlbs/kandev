@@ -46,14 +46,17 @@ func (m *Manager) createTaskHostExecution(
 		return nil, fmt.Errorf("no runtime configured: %w", err)
 	}
 	executionID := taskHostExecutionID(info.TaskEnvironmentID)
-	request, err := m.prepareTaskHostCreateRequest(ctx, taskID, info, executionID, rt.Name())
+	request, err := m.prepareTaskHostCreateRequest(
+		ctx, taskID, info, executionID, rt.Name(), requireExisting,
+	)
 	if err != nil {
 		return nil, err
 	}
-	if err := resumeRemoteInstancePreflight(ctx, rt, request); err != nil {
-		return nil, err
+	if !requireExisting {
+		if err := resumeRemoteInstancePreflight(ctx, rt, request); err != nil {
+			return nil, err
+		}
 	}
-	request.RequireExistingInstance = requireExisting
 	releaseCredentials := m.lockTaskEnvironmentCredentials(info.ExecutorType, info.TaskEnvironmentID)
 	defer releaseCredentials()
 	runtimeInstance, err := rt.CreateInstance(ctx, request)
@@ -81,15 +84,20 @@ func (m *Manager) prepareTaskHostCreateRequest(
 	info *WorkspaceInfo,
 	executionID string,
 	runtimeName agentruntime.Runtime,
+	requireExisting bool,
 ) (*ExecutorCreateRequest, error) {
 	runtimeSessionID := taskHostRuntimeSessionPrefix + info.TaskEnvironmentID
 	hostInfo := *info
 	hostInfo.SessionID = runtimeSessionID
 	hostInfo.AgentProfileID = ""
 	hostInfo.ExecutionProfileID = ""
-	environment, err := m.prepareExecutionEnvironment(ctx, taskID, &hostInfo, executionID, "", nil, nil)
-	if err != nil {
-		return nil, err
+	environment := &executionEnvironmentPreparation{}
+	if !requireExisting {
+		var err error
+		environment, err = m.prepareExecutionEnvironment(ctx, taskID, &hostInfo, executionID, "", nil, nil)
+		if err != nil {
+			return nil, err
+		}
 	}
 	metadata := executionMetadata(info.Metadata, true)
 	metadata["task_host"] = true
@@ -106,20 +114,21 @@ func (m *Manager) prepareTaskHostCreateRequest(
 	}
 	previousExecutionID, authToken, bootstrapNonce := m.taskHostReconnectDetails(ctx, info, executionID)
 	return &ExecutorCreateRequest{
-		InstanceID:            executionID,
-		TaskID:                taskID,
-		SessionID:             runtimeSessionID,
-		TaskEnvironmentID:     info.TaskEnvironmentID,
-		IsTaskHost:            true,
-		WorkspacePath:         workspacePath,
-		WorkspaceSourceRoots:  workspaceSourceRoots,
-		Env:                   environment.env,
-		Metadata:              metadata,
-		ApprovedSecretEnvKeys: append([]string(nil), environment.approvedSecretEnvKeys...),
-		RemoteContributions:   remoteContributions,
-		PreviousExecutionID:   previousExecutionID,
-		AuthToken:             authToken,
-		BootstrapNonce:        bootstrapNonce,
+		InstanceID:              executionID,
+		TaskID:                  taskID,
+		SessionID:               runtimeSessionID,
+		TaskEnvironmentID:       info.TaskEnvironmentID,
+		IsTaskHost:              true,
+		RequireExistingInstance: requireExisting,
+		WorkspacePath:           workspacePath,
+		WorkspaceSourceRoots:    workspaceSourceRoots,
+		Env:                     environment.env,
+		Metadata:                metadata,
+		ApprovedSecretEnvKeys:   append([]string(nil), environment.approvedSecretEnvKeys...),
+		RemoteContributions:     remoteContributions,
+		PreviousExecutionID:     previousExecutionID,
+		AuthToken:               authToken,
+		BootstrapNonce:          bootstrapNonce,
 	}, nil
 }
 
