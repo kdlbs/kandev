@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 
 import { convertWeb } from "./convert-zh-cn-to-zh-hant.mjs";
 import {
@@ -196,6 +196,16 @@ describe("convertMessage regional vocabulary", () => {
   it("uses Traditional Chinese corner quotes for UI copy", () => {
     assert.equal(convertMessage("点击“启动智能体”", "zh-tw"), "點選「啟動代理程式」");
     assert.equal(convertMessage("点击“启动智能体”", "zh-hk"), "點擊「啓動代理程式」");
+  });
+});
+
+describe("convertMessage idempotence", () => {
+  it("does not expand glossary targets when converting an existing target", () => {
+    for (const locale of TARGET_LOCALES) {
+      const converted = convertMessage("工作流和文件夹", locale);
+      assert.equal(converted, "工作流程和資料夾");
+      assert.equal(convertMessage(converted, locale), converted);
+    }
   });
 });
 
