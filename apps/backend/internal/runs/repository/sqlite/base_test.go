@@ -76,20 +76,22 @@ func newTestRepoWithHandles(t *testing.T) (*runssqlite.Repository, *sqlx.DB, *sq
 // seedAgentProfile inserts the minimal agent_profiles row ListRuns
 // needs to resolve a run's workspace. agent_profiles.agent_id is a
 // foreign key into agents (and the harness DSN enables FK enforcement),
-// so the parent agent row is seeded alongside it.
+// so each profile gets its own parent agent row in the same workspace —
+// sharing one agent row across profiles would leave it pointing at
+// whichever workspace was seeded first.
 func seedAgentProfile(t *testing.T, writer *sqlx.DB, id, workspaceID string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if _, err := writer.Exec(`INSERT OR IGNORE INTO agents
+	if _, err := writer.Exec(`INSERT INTO agents
 		(id, name, workspace_id, created_at, updated_at)
-		VALUES ('agent', 'agent', ?, ?, ?)`, workspaceID, now, now); err != nil {
-		t.Fatalf("seed agent: %v", err)
+		VALUES (?, ?, ?, ?, ?)`, id, "agent-"+id, workspaceID, now, now); err != nil {
+		t.Fatalf("seed agent %q: %v", id, err)
 	}
 	_, err := writer.Exec(`INSERT INTO agent_profiles
 		(id, agent_id, name, agent_display_name, workspace_id, role,
 		 created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, '', ?, ?)`,
-		id, "agent", "name", "display", workspaceID, now, now)
+		id, id, "name", "display", workspaceID, now, now)
 	if err != nil {
 		t.Fatalf("seed agent_profile %q: %v", id, err)
 	}

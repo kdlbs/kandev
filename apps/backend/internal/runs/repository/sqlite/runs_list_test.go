@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -259,8 +260,5 @@ func seedTaskRun(
 // padded keeps seeded run IDs sortable as strings so an ID tie-break
 // cannot masquerade as a timestamp ordering.
 func padded(i int) string {
-	if i < 10 {
-		return "0" + string(rune('0'+i))
-	}
-	return string(rune('0'+i/10)) + string(rune('0'+i%10))
+	return fmt.Sprintf("%02d", i)
 }

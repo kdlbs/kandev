@@ -76,6 +76,17 @@ func TestAppendRunEvent_AppliesLevelAndPayloadDefaults(t *testing.T) {
 
 // TestAppendRunEvent_SeqIsMonotonicPerRun pins that the sequence is
 // scoped to one run: each run starts at 0 and increments independently.
+//
+// Sequential only, deliberately. AppendRunEvent's doc comment claims
+// events "land monotonically even when multiple writers race", but the
+// implementation reads MAX(seq)+1 and inserts in two separate
+// statements, so concurrent appends to one run collide on the
+// (run_id, seq) primary key. Ten concurrent appends were measured
+// failing 6-8 times with "UNIQUE constraint failed: run_events.run_id,
+// run_events.seq". Making the allocation atomic is a production change
+// and is out of scope for this test-only change; a concurrent test is
+// therefore not added here, since it would pin a bug rather than a
+// contract.
 func TestAppendRunEvent_SeqIsMonotonicPerRun(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
