@@ -203,6 +203,17 @@ describe("watchWs().waitForEvent", () => {
     );
   });
 
+  it("does not settle on a partial frame that has an action but no type", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    const pending = ws.waitForEvent("office.run.processed", { timeout: 30 });
+    socket.emit("framereceived", { action: "office.run.processed", payload: { task_id: "t1" } });
+    await expect(pending).rejects.toThrow(
+      'watchWs.waitForEvent: no "office.run.processed" notification within 30ms',
+    );
+  });
+
   it("tolerates binary and malformed frames without settling", async () => {
     const { page, fake } = fakePage();
     const ws = watchWs(page);

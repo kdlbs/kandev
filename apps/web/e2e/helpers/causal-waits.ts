@@ -216,7 +216,13 @@ function waitForEvent(
     );
     wait.listen(channels.received, (frame) => {
       if (frame.action !== action) return;
-      if (frame.type && frame.type !== "notification") return;
+      // Strict, not `frame.type && ...`: a frame carrying the right `action` but
+      // no `type` is not a confirmed server push, and resolving on one would be
+      // the exact false-positive this module exists to remove. Matches the
+      // sibling guard in `waitForResponse`. Observed gateway traffic only ever
+      // carries `notification` / `response` / `request`, so nothing legitimate
+      // relies on the loose form.
+      if (frame.type !== "notification") return;
       if (where && !where(frame.payload)) return;
       wait.dispose();
       resolve(frame);
