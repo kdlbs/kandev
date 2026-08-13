@@ -1,5 +1,16 @@
-import type { AgentUpdateJob, AgentUpdateOperation, AgentUpdatePreview } from "@/lib/api";
+import type {
+  AgentUpdateJob,
+  AgentUpdateOperation,
+  AgentUpdatePreview,
+  AgentUpdateVersion,
+} from "@/lib/api";
 import { t } from "@/lib/i18n";
+
+const MAX_VISIBLE_RUNTIME_VERSIONS = 10;
+
+export function latestRuntimeVersions(versions: AgentUpdateVersion[]): AgentUpdateVersion[] {
+  return versions.slice(0, MAX_VISIBLE_RUNTIME_VERSIONS);
+}
 
 export type RuntimeVersionPair = {
   /** Display copy — localized, and therefore never compared. */

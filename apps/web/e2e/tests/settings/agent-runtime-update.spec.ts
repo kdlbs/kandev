@@ -33,6 +33,14 @@ test.describe("managed agent runtime updates", () => {
     await trigger.click();
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
     await expect(dialog).toBeVisible();
+    const dialogBox = await dialog.boundingBox();
+    expect(dialogBox).not.toBeNull();
+    expect(dialogBox!.width).toBeGreaterThanOrEqual(640);
+    const selectorBox = await dialog
+      .getByTestId(`agent-update-version-${runtime.agentName}`)
+      .boundingBox();
+    expect(selectorBox).not.toBeNull();
+    expect(selectorBox!.height).toBeLessThanOrEqual(40);
     await expect(dialog).toContainText("0.62.0 → 0.63.0");
     await expect(dialog).toContainText(
       'npm exec --yes --prefer-online --package=@agentclientprotocol/claude-agent-acp -- node -e ""',
@@ -193,6 +201,69 @@ test.describe("managed agent runtime updates", () => {
     await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).click();
     expect(runtime.postTargets()).toEqual(["0.61.0"]);
     expect(runtime.previewTargets()).toEqual(["", "0.61.0"]);
+  });
+
+  test("keeps the dialog content visible while changing versions", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage, { previewDelayMs: 500 });
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+    const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
+    const body = dialog.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
+
+    await dialog.getByTestId(`agent-update-version-${runtime.agentName}`).selectOption("0.61.0");
+
+    await expect(
+      dialog.getByTestId(`agent-update-version-loading-${runtime.agentName}`),
+    ).toBeVisible();
+    await expect(body).toContainText("Active sessions keep running");
+    await expect(body).toContainText("Command that will run");
+    await expect(dialog.getByTestId(`agent-update-version-${runtime.agentName}`)).toBeDisabled();
+    await expect(
+      dialog.getByTestId(`agent-update-version-loading-${runtime.agentName}`),
+    ).toBeHidden();
+  });
+
+  test("limits the version selector to the ten newest options", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage);
+    runtime.setPreviewResponse({
+      agent_name: "claude-acp",
+      package: "@agentclientprotocol/claude-agent-acp",
+      current_version: "0.62.0",
+      target_version: "0.74.0",
+      operation: "update",
+      active_version: "0.62.0",
+      available_versions: Array.from({ length: 12 }, (_, index) => ({
+        version: `0.${74 - index}.0`,
+        latest: index === 0,
+      })),
+      command: ["npm", "exec"],
+      command_string: "npm exec",
+    });
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+    const options = testPage
+      .getByTestId(`agent-update-version-${runtime.agentName}`)
+      .locator("option");
+
+    await expect(options).toHaveCount(10);
+    expect(
+      await options.evaluateAll((elements) =>
+        elements.map((element) => (element as HTMLOptionElement).value),
+      ),
+    ).toEqual([
+      "0.74.0",
+      "0.73.0",
+      "0.72.0",
+      "0.71.0",
+      "0.70.0",
+      "0.69.0",
+      "0.68.0",
+      "0.67.0",
+      "0.66.0",
+      "0.65.0",
+    ]);
   });
 
   test("retries a failed preview for the selected target", async ({ testPage }) => {

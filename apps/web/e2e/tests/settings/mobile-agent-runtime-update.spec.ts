@@ -91,7 +91,11 @@ test.describe("managed agent runtime updates on mobile", () => {
     await testPage.goto("/settings/agents");
     await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).tap();
     const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
-    await drawer.getByTestId(`agent-update-version-${runtime.agentName}`).selectOption("0.61.0");
+    const selector = drawer.getByTestId(`agent-update-version-${runtime.agentName}`);
+    const selectorBox = await selector.boundingBox();
+    expect(selectorBox).not.toBeNull();
+    expect(selectorBox!.height).toBeGreaterThanOrEqual(44);
+    await selector.selectOption("0.61.0");
 
     await expect(drawer).toContainText("0.62.0 → 0.61.0");
     await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toHaveText(

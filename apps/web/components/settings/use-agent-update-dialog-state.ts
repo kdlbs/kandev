@@ -46,7 +46,6 @@ export function useAgentUpdateDialogState({
     async (targetVersion?: string) => {
       const requestID = ++previewRequestID.current;
       setLoading(true);
-      setPreview(null);
       setPreviewError(null);
       setApproveError(null);
       try {

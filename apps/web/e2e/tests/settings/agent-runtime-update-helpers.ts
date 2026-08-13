@@ -127,6 +127,7 @@ export type RuntimeUpdateFixtureOptions = {
   postResponse?: UpdateJob;
   previewResponse?: UpdatePreview;
   previewFailures?: string[];
+  previewDelayMs?: number;
 };
 
 export async function installRuntimeUpdateFixture(
@@ -149,6 +150,7 @@ export async function installRuntimeUpdateFixture(
   const previewTargets: string[] = [];
   const postTargets: string[] = [];
   const previewFailures = [...(options.previewFailures ?? [])];
+  const previewDelayMs = options.previewDelayMs ?? 0;
   let previewResponse: UpdatePreview =
     options.previewResponse ??
     ({
@@ -202,7 +204,7 @@ export async function installRuntimeUpdateFixture(
       body: JSON.stringify(savedAgents()),
     }),
   );
-  await page.route("**/api/v1/agent-update/**", (route) => {
+  await page.route("**/api/v1/agent-update/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (
@@ -219,6 +221,9 @@ export async function installRuntimeUpdateFixture(
           contentType: "application/json",
           body: JSON.stringify({ error: "preview temporarily unavailable" }),
         });
+      }
+      if (requestedTarget && previewDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, previewDelayMs));
       }
       const response = requestedTarget
         ? {

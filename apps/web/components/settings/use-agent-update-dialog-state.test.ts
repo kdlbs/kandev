@@ -122,6 +122,36 @@ describe("useAgentUpdateDialogState", () => {
 });
 
 describe("useAgentUpdateDialogState target selection", () => {
+  it("keeps the current preview while a selected target is loading", async () => {
+    const selectedTargetPreview = deferred<AgentUpdatePreview>();
+    const onPreview = vi
+      .fn<(agentName: string, targetVersion?: string) => Promise<AgentUpdatePreview>>()
+      .mockResolvedValueOnce(FIRST_PREVIEW)
+      .mockReturnValueOnce(selectedTargetPreview.promise);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview,
+        onUpdate: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.loadPreview();
+    });
+    act(() => result.current.selectTarget("0.61.0"));
+
+    await waitFor(() => expect(onPreview).toHaveBeenCalledWith(AGENT_NAME, "0.61.0"));
+    expect(result.current.preview).toEqual(FIRST_PREVIEW);
+    expect(result.current.loading).toBe(true);
+
+    await act(async () => {
+      selectedTargetPreview.resolve({ ...FIRST_PREVIEW, target_version: "0.61.0" });
+      await selectedTargetPreview.promise;
+    });
+    await waitFor(() => expect(result.current.preview?.target_version).toBe("0.61.0"));
+  });
+
   it("refreshes a selected target and ignores an older target response", async () => {
     const first = deferred<AgentUpdatePreview>();
     const olderTarget = deferred<AgentUpdatePreview>();
@@ -154,7 +184,7 @@ describe("useAgentUpdateDialogState target selection", () => {
       olderTarget.resolve({ ...FIRST_PREVIEW, target_version: "0.61.0" });
       await olderTarget.promise;
     });
-    expect(result.current.preview).toBeNull();
+    expect(result.current.preview).toEqual(FIRST_PREVIEW);
 
     await act(async () => {
       newerTarget.resolve({ ...FIRST_PREVIEW, target_version: "0.60.0" });

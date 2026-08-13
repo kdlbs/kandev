@@ -3,11 +3,23 @@ import i18n from "i18next";
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
 import {
   canApproveAgentRuntimeUpdate,
+  latestRuntimeVersions,
   resolveRuntimeActiveVersion,
   resolveRuntimeOperation,
   resolveRuntimeVersionPair,
   runtimeOperationLabelKey,
 } from "./agent-runtime-update";
+
+describe("latestRuntimeVersions", () => {
+  it("limits the selector to the ten newest options", () => {
+    const versions = Array.from({ length: 12 }, (_, index) => ({
+      version: `1.0.${12 - index}`,
+      latest: index === 0,
+    }));
+
+    expect(latestRuntimeVersions(versions)).toEqual(versions.slice(0, 10));
+  });
+});
 
 const preview = (overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePreview => ({
   agent_name: "claude-acp",

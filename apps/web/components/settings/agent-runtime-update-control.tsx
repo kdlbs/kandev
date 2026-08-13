@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { IconAlertTriangle, IconLoader2, IconRefresh } from "@tabler/icons-react";
+import { IconAlertTriangle, IconChevronDown, IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -27,6 +27,7 @@ import {
   resolveRuntimeActiveVersion,
   resolveRuntimeOperation,
   resolveRuntimeVersionPair,
+  latestRuntimeVersions,
   runtimeOperationLabelKey,
 } from "@/lib/agent-runtime-update";
 import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
@@ -148,6 +149,7 @@ function RuntimeVersionSelector({
   agentName,
   preview,
   selectedTarget,
+  loading,
   starting,
   job,
   onSelectTarget,
@@ -155,46 +157,61 @@ function RuntimeVersionSelector({
   agentName: string;
   preview: AgentUpdatePreview;
   selectedTarget: string;
+  loading: boolean;
   starting: boolean;
   job?: AgentUpdateJob;
   onSelectTarget: (targetVersion: string) => void;
 }) {
   const { t } = useTranslation();
-  const versions = preview.available_versions ?? [
-    { version: preview.target_version, latest: false },
-  ];
+  const versions = latestRuntimeVersions(
+    preview.available_versions ?? [{ version: preview.target_version, latest: false }],
+  );
   const activeVersion = resolveRuntimeActiveVersion(preview, job);
   return (
     <div className="space-y-1">
       <label className="font-medium" htmlFor={`agent-update-version-${agentName}`}>
         {t("agents:selectRuntimeVersion")}
       </label>
-      <select
-        id={`agent-update-version-${agentName}`}
-        className="h-11 w-full min-w-0 rounded-md border bg-background px-3 text-sm"
-        value={selectedTarget || preview.target_version}
-        onChange={(event) => onSelectTarget(event.target.value)}
-        disabled={Boolean(job && ACTIVE_UPDATE_STATUSES.has(job.status)) || starting}
-        data-testid={`agent-update-version-${agentName}`}
-      >
-        {versions.map((version) => {
-          const markers = [
-            version.latest ? t("agents:latestRuntimeVersion") : "",
-            version.version === activeVersion ? t("agents:activeRuntimeVersionMarker") : "",
-          ]
-            .filter(Boolean)
-            .join(", ");
-          const markerLabel = markers ? t("agents:runtimeVersionMarkerGroup", { markers }) : "";
-          return (
-            <option key={version.version} value={version.version}>
-              {t("agents:runtimeVersionOption", {
-                version: version.version,
-                markers: markerLabel,
-              })}
-            </option>
-          );
-        })}
-      </select>
+      <div className="relative">
+        <select
+          id={`agent-update-version-${agentName}`}
+          className="h-11 w-full min-w-0 appearance-none rounded-md border bg-background px-3 pr-10 text-sm sm:h-10"
+          value={selectedTarget || preview.target_version}
+          onChange={(event) => onSelectTarget(event.target.value)}
+          disabled={Boolean(job && ACTIVE_UPDATE_STATUSES.has(job.status)) || starting || loading}
+          data-testid={`agent-update-version-${agentName}`}
+        >
+          {versions.map((version) => {
+            const markers = [
+              version.latest ? t("agents:latestRuntimeVersion") : "",
+              version.version === activeVersion ? t("agents:activeRuntimeVersionMarker") : "",
+            ]
+              .filter(Boolean)
+              .join(", ");
+            const markerLabel = markers ? t("agents:runtimeVersionMarkerGroup", { markers }) : "";
+            return (
+              <option key={version.version} value={version.version}>
+                {t("agents:runtimeVersionOption", {
+                  version: version.version,
+                  markers: markerLabel,
+                })}
+              </option>
+            );
+          })}
+        </select>
+        <span
+          className="pointer-events-none absolute inset-y-0 right-3 flex items-center"
+          data-testid={loading ? `agent-update-version-loading-${agentName}` : undefined}
+          role={loading ? "status" : undefined}
+        >
+          {loading ? (
+            <IconLoader2 className="size-4 animate-spin text-muted-foreground" />
+          ) : (
+            <IconChevronDown className="size-4 text-muted-foreground" aria-hidden="true" />
+          )}
+          {loading && <span className="sr-only">{t("agents:checkingLatestRuntimeVersion")}</span>}
+        </span>
+      </div>
     </div>
   );
 }
@@ -218,7 +235,7 @@ function UpdateBody({
       className="max-h-[calc(80dvh-10rem)] min-h-0 space-y-3 overflow-y-auto overscroll-contain px-4 py-3 text-xs/relaxed"
       data-testid={`agent-update-dialog-body-${agentName}`}
     >
-      {loading && (
+      {loading && !preview && (
         <p className="flex items-center gap-2 text-muted-foreground" role="status">
           <IconLoader2 className="size-4 animate-spin" />
           {t("agents:checkingLatestRuntimeVersion")}
@@ -257,6 +274,7 @@ function UpdateBody({
             agentName={agentName}
             preview={preview}
             selectedTarget={selectedTarget}
+            loading={loading}
             starting={starting}
             job={job}
             onSelectTarget={onSelectTarget}
@@ -492,7 +510,7 @@ export function AgentRuntimeUpdateControl({
       ) : (
         <Dialog open={open} onOpenChange={handleOpenChange}>
           <DialogContent
-            className="max-h-[80dvh] gap-0 p-0 sm:max-w-xl"
+            className="max-h-[80dvh] gap-0 p-0 sm:max-w-2xl"
             data-testid={`agent-update-dialog-${agentName}`}
           >
             <DialogHeader className="px-4 pt-4">
