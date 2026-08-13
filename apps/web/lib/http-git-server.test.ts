@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { expect, test } from "vitest";
 import { startHTTPGitFixture } from "../e2e/helpers/http-git-server";
 import { execFileSync } from "node:child_process";
