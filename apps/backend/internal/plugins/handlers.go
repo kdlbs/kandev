@@ -497,8 +497,6 @@ func (c *Controller) applyAuthLogin(ctx *gin.Context, record *store.Record, raw 
 	return bridge.LoginExternal(ctx, a.Provider, a.Subject, a.Email, a.DisplayName)
 }
 
-// manifestDeclaresWebhookKey reports whether record's manifest declares a
-// webhooks[] entry with the given key.
 func findWebhookDeclaration(record *store.Record, key string) (manifest.Webhook, bool) {
 	if record == nil {
 		return manifest.Webhook{}, false
@@ -509,11 +507,6 @@ func findWebhookDeclaration(record *store.Record, key string) (manifest.Webhook,
 		}
 	}
 	return manifest.Webhook{}, false
-}
-
-func manifestDeclaresWebhookKey(record *store.Record, key string) bool {
-	_, ok := findWebhookDeclaration(record, key)
-	return ok
 }
 
 // readCappedWebhookBody reads ctx.Request.Body bounded at
@@ -562,6 +555,7 @@ func flattenHeaders(h http.Header, sessionCookieName string) map[string]string {
 	}
 	return out
 }
+
 // isKandevPATCredential reports whether an Authorization header value carries
 // a kandev_pat_* token, with or without a bearer scheme prefix. RFC 9110 makes
 // the auth scheme case-insensitive, so "bearer kandev_pat_..." has to be

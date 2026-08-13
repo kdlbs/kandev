@@ -53,7 +53,8 @@ export function PluginManifestCard({ plugin }: { plugin: PluginRecord }) {
           label={t("plugins:manifestWebhooks")}
           items={(plugin.webhooks ?? []).map((w) => ({
             key: w.key,
-            text: w.access === "public" ? t("plugins:manifestWebhookPublic", { key: w.key }) : w.key,
+            text:
+              w.access === "public" ? t("plugins:manifestWebhookPublic", { key: w.key }) : w.key,
           }))}
         />
 
