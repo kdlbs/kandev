@@ -12,7 +12,7 @@ import { DiscardLocalChangesDialog } from "@/components/discard-local-changes-di
 import { DialogHeaderContent } from "@/components/task-create-dialog-header";
 import {
   SessionSelectors,
-  WorkflowDependencySection,
+  WorkflowSection,
   DialogPromptSection,
 } from "@/components/task-create-dialog-form-body";
 import { CreateModeSelectors } from "@/components/task-create-dialog-create-mode-selectors";
@@ -22,6 +22,7 @@ import {
   InlineTaskName,
 } from "@/components/task-create-dialog-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
+import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
 import type {
   DialogFormBodyProps,
   TaskCreateDialogProps,
@@ -84,6 +85,13 @@ function CreateModeBody(props: DialogFormBodyProps) {
         localRepositoryCreation={localRepositoryCreation}
         onRefreshRepositories={onRefreshRepositories}
         repositoriesRefreshing={repositoriesRefreshing}
+      />
+      <TaskCreateAdvancedSettings
+        isCreateMode={isCreateMode}
+        isTaskStarted={isTaskStarted}
+        blockedBy={fs.blockedBy}
+        onBlockedByChange={fs.setBlockedBy}
+        dependenciesDisabled={props.isCreatingSession}
       />
       {showTaskName && (
         <InlineTaskName
@@ -172,18 +180,15 @@ function DialogFormBody(props: DialogFormBodyProps) {
   return (
     <div className="flex-1 space-y-4 overflow-y-auto pr-1">
       {isSessionMode ? <SessionModeBody {...props} /> : <CreateModeBody {...props} />}
-      <WorkflowDependencySection
+      <WorkflowSection
         isCreateMode={isCreateMode}
         isTaskStarted={isTaskStarted}
-        workflows={workflows as Parameters<typeof WorkflowDependencySection>[0]["workflows"]}
-        snapshots={snapshots as Parameters<typeof WorkflowDependencySection>[0]["snapshots"]}
+        workflows={workflows as Parameters<typeof WorkflowSection>[0]["workflows"]}
+        snapshots={snapshots as Parameters<typeof WorkflowSection>[0]["snapshots"]}
         effectiveWorkflowId={props.effectiveWorkflowId}
         onWorkflowChange={props.onWorkflowChange}
         agentProfiles={props.agentProfiles}
         workflowLocked={props.workflowLocked}
-        blockedBy={props.fs.blockedBy}
-        onBlockedByChange={props.fs.setBlockedBy}
-        dependenciesDisabled={props.isCreatingSession}
       />
     </div>
   );

@@ -31,6 +31,15 @@ test.describe("Create task dependency selector on mobile", () => {
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
+    const advancedTrigger = dialog.getByTestId("task-create-advanced-settings-trigger");
+    const advancedTriggerBox = await advancedTrigger.boundingBox();
+    expect(advancedTriggerBox).not.toBeNull();
+    expect(advancedTriggerBox!.height).toBeGreaterThanOrEqual(44);
+    await assertLocatorWithinViewportX(advancedTrigger, "mobile advanced settings trigger");
+    await expect(dialog.getByTestId("task-create-dependencies-trigger")).toHaveCount(0);
+
+    await advancedTrigger.tap();
+    await expect(advancedTrigger).toHaveAttribute("aria-expanded", "true");
     const trigger = dialog.getByTestId("task-create-dependencies-trigger");
     const triggerBox = await trigger.boundingBox();
     expect(triggerBox).not.toBeNull();

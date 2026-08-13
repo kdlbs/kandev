@@ -41,6 +41,7 @@
   "addedRemoved": "{{added}} added · {{removed}} removed",
   "adding": "Adding…",
   "advanced": "Advanced",
+  "advancedSettings": "Advanced settings",
   "afterDuration": " after {{duration}}",
   "agent": "Agent",
   "agentBootFailedToResume": "Failed to resume agent {{agentName}}",

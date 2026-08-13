@@ -81,6 +81,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [subtask-completion-trigger](tasks/subtask-completion-trigger.md) | draft |
 | [task-dependencies](task-dependencies/spec.md) | draft |
 | [task-dependencies - create dialog selector](task-dependencies/create-dialog-dependency-selector.md) | implemented |
+| [task-dependencies - create dialog advanced settings](task-dependencies/create-dialog-advanced-settings.md) | shipped |
 | [subtree-controls](tasks/subtree-controls.md) | shipped |
 | [blocked-task-escalation](tasks/blocked-task-escalation.md) | draft |
 | [runtime-cleanup](tasks/runtime-cleanup.md) | draft |

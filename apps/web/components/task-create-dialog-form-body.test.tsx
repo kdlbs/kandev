@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CreateEditSelectors,
   DialogPromptSection,
-  WorkflowDependencySection,
+  WorkflowSection,
 } from "./task-create-dialog-form-body";
 import type { DialogFormState, TaskFormInputsHandle } from "./task-create-dialog-types";
 
@@ -44,7 +44,7 @@ const workflow = { id: "wf-1", name: "Development" };
 
 function renderWorkflowSection(effectiveWorkflowId: string | null) {
   return render(
-    <WorkflowDependencySection
+    <WorkflowSection
       isCreateMode={true}
       isTaskStarted={false}
       workflows={[workflow]}
@@ -52,13 +52,11 @@ function renderWorkflowSection(effectiveWorkflowId: string | null) {
       effectiveWorkflowId={effectiveWorkflowId}
       onWorkflowChange={() => {}}
       agentProfiles={[]}
-      blockedBy={[]}
-      onBlockedByChange={() => {}}
     />,
   );
 }
 
-describe("WorkflowDependencySection workflow rendering", () => {
+describe("WorkflowSection workflow rendering", () => {
   it("keeps the selector reachable when no effective workflow is selected", () => {
     renderWorkflowSection(null);
 
@@ -69,19 +67,19 @@ describe("WorkflowDependencySection workflow rendering", () => {
     renderWorkflowSection("wf-1");
 
     expect(screen.queryByRole("button", { name: /workflow selector wf-1/i })).toBeNull();
-    expect(screen.getByTestId("task-create-dependencies-trigger")).toBeTruthy();
+    expect(screen.queryByTestId("task-create-dependencies-trigger")).toBeNull();
   });
 });
 
-describe("WorkflowDependencySection", () => {
+describe("WorkflowSection", () => {
   const secondWorkflow = { id: "wf-2", name: "Support" };
 
-  function renderWorkflowDependencySection(
+  function renderWorkflowSection(
     effectiveWorkflowId: string | null,
     workflows = [workflow, secondWorkflow],
   ) {
     return render(
-      <WorkflowDependencySection
+      <WorkflowSection
         isCreateMode
         isTaskStarted={false}
         workflows={workflows}
@@ -89,29 +87,29 @@ describe("WorkflowDependencySection", () => {
         effectiveWorkflowId={effectiveWorkflowId}
         onWorkflowChange={() => {}}
         agentProfiles={[]}
-        blockedBy={[]}
-        onBlockedByChange={() => {}}
       />,
     );
   }
 
-  it("places the dependency selector after the workflow selector in a responsive row", () => {
-    renderWorkflowDependencySection("wf-1");
+  it("renders the workflow selector without an inline dependency slot", () => {
+    renderWorkflowSection("wf-1");
 
-    const row = screen.getByTestId("task-create-workflow-dependency-row");
-    expect(row.className).toContain("md:flex-row");
-    expect(row.firstElementChild?.getAttribute("data-testid")).toBe("task-create-workflow-slot");
-    expect(row.lastElementChild?.getAttribute("data-testid")).toBe("task-create-dependency-slot");
-    expect(screen.getByTestId("task-create-dependencies-trigger")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /workflow selector wf-1/i })).toBeTruthy();
+    expect(screen.queryByTestId("task-create-dependencies-trigger")).toBeNull();
   });
 
-  it("keeps dependencies visible when a single workflow hides its selector", () => {
-    renderWorkflowDependencySection("wf-1", [workflow]);
+  it("does not render a workflow row for a single workflow without overrides", () => {
+    renderWorkflowSection("wf-1", [workflow]);
 
-    const row = screen.getByTestId("task-create-workflow-dependency-row");
-    expect(screen.queryByTestId("task-create-workflow-slot")).toBeNull();
-    expect(screen.getByTestId("task-create-dependency-slot")).toBeTruthy();
-    expect(row.lastElementChild?.className).toContain("md:ml-auto");
+    expect(screen.queryByRole("button", { name: /workflow selector wf-1/i })).toBeNull();
+    expect(screen.queryByTestId("task-create-dependencies-trigger")).toBeNull();
+  });
+
+  it("keeps the workflow section independent from advanced dependencies", () => {
+    renderWorkflowSection("wf-1");
+
+    expect(screen.getByRole("button", { name: /workflow selector wf-1/i })).toBeTruthy();
+    expect(screen.queryByTestId("task-create-dependency-slot")).toBeNull();
   });
 });
 

@@ -45,15 +45,24 @@ test.describe("Task-create dependency selector", () => {
 
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
-      const row = dialog.getByTestId("task-create-workflow-dependency-row");
-      await expect(row).toBeVisible();
-      await expect(row.getByTestId("workflow-selector-trigger")).toBeVisible();
-      const childTestIds = await row
-        .locator(":scope > *")
-        .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")));
-      expect(childTestIds).toEqual(["task-create-workflow-slot", "task-create-dependency-slot"]);
+      const advancedSettings = dialog.getByTestId("task-create-advanced-settings");
+      const advancedTrigger = advancedSettings.getByTestId("task-create-advanced-settings-trigger");
+      await expect(advancedTrigger).toBeVisible();
+      await expect(advancedTrigger).toHaveAttribute("aria-expanded", "false");
+      await expect(dialog.getByTestId(DEPENDENCY_TRIGGER)).toHaveCount(0);
+      expect(
+        await advancedSettings.evaluate((element) =>
+          element.previousElementSibling?.getAttribute("data-testid"),
+        ),
+      ).toBe("repo-chips-row");
+
+      const workflowSelector = dialog.getByTestId("workflow-selector-trigger");
+      await expect(workflowSelector).toBeVisible();
+      await advancedTrigger.click();
+      await expect(advancedTrigger).toHaveAttribute("aria-expanded", "true");
 
       const dependency = dialog.getByTestId(DEPENDENCY_TRIGGER);
+      await expect(dependency).toBeVisible();
       await expect(dependency).toContainText("No dependency");
       await dependency.click();
 
