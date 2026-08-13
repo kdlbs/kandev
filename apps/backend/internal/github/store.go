@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/persistence"
 )
 
 // Store provides SQLite persistence for GitHub integration data.
@@ -136,6 +137,14 @@ const createTablesSQL = `
 		last_synced_at DATETIME,
 		detached_at DATETIME,
 		updated_at DATETIME NOT NULL,
+		is_draft BOOLEAN,
+		changed_files INTEGER,
+		merged_by_login TEXT,
+		closed_by_login TEXT,
+		auto_merge_observed_at DATETIME,
+		disposition TEXT,
+		disposition_superseded_by_url TEXT,
+		disposition_recorded_at DATETIME,
 		UNIQUE(task_id, repository_id, pr_number)
 	);
 
@@ -477,11 +486,41 @@ func (s *Store) initSchema(legacyUpgrade bool) error {
 	if err := s.initSchemaUpgrades(); err != nil {
 		return err
 	}
+	if err := s.activateTaskPROutcomeTracking(); err != nil {
+		return err
+	}
 	if err := s.initSchemaData(legacyUpgrade); err != nil {
 		return err
 	}
 	s.applyIdempotentSchemaIndexes()
 	return s.ensureWorkspaceOwnershipIndexes()
+}
+
+// taskPROutcomeActivatedAtMetaKey is the kandev_meta key under which the
+// PR-outcome-attribution feature's one-time activation instant is recorded
+// (AC-05). Any point-in-time extract over the eight outcome columns must
+// read this key to scope its window and distinguish "not yet activated"
+// from "writer broke" (spec: Persistence guarantees).
+const taskPROutcomeActivatedAtMetaKey = "github_task_pr_outcome_activated_at"
+
+// activateTaskPROutcomeTracking stamps the activation instant exactly once
+// per database (AC-05, AC-06). WriteMetaKeyIfAbsent's ON CONFLICT DO NOTHING
+// makes this safe to call on every boot rather than gate it behind whether
+// this boot's migration literally ran an ALTER TABLE: a fresh install
+// receives the eight columns inline via createTablesSQL, not an ALTER, but
+// still needs the instant stamped on its very first boot. A write failure
+// aborts startup — a database with the columns but no activation instant is
+// unreportable and must not be shipped (spec: Failure modes).
+func (s *Store) activateTaskPROutcomeTracking() error {
+	if err := persistence.EnsureMetaTable(s.db); err != nil {
+		return fmt.Errorf("ensure kandev_meta table: %w", err)
+	}
+	if _, err := persistence.WriteMetaKeyIfAbsent(
+		s.db, taskPROutcomeActivatedAtMetaKey, time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		return fmt.Errorf("activate task PR outcome tracking: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) initSchemaFoundations() error {
@@ -553,6 +592,52 @@ func (s *Store) initSchemaUpgrades() error {
 	}
 	if err := s.addAppRegistrationReferenceColumns(); err != nil {
 		return err
+	}
+	if err := s.addTaskPROutcomeColumns(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// taskPROutcomeColumnDDL lists the eight nullable PR-outcome-attribution
+// columns and their type fragments. Every column is nullable with no
+// DEFAULT (AC-01): NULL means "never observed" or "nobody looked" and must
+// never be confused with a zero value or an empty string.
+var taskPROutcomeColumnDDL = []struct {
+	name string
+	ddl  string
+}{
+	{"is_draft", "BOOLEAN"},
+	{"changed_files", "INTEGER"},
+	{"merged_by_login", "TEXT"},
+	{"closed_by_login", "TEXT"},
+	{"auto_merge_observed_at", "DATETIME"},
+	{"disposition", "TEXT"},
+	{"disposition_superseded_by_url", "TEXT"},
+	{"disposition_recorded_at", "DATETIME"},
+}
+
+// addTaskPROutcomeColumns adds the eight PR-outcome-attribution columns to
+// github_task_prs. These columns join taskPRColumns, so every existing read
+// scans them unconditionally; unlike applyIdempotentSchemaColumns, a
+// driver-level ALTER failure here must abort startup rather than silently
+// turn into a scan error on the next read (AC-03). Only
+// dbutil.IsDuplicateColumnError is tolerated, per ADR 0027 — no local
+// error-string classifier, and no UPDATE/backfill runs against
+// github_task_prs anywhere in this path (AC-04).
+func (s *Store) addTaskPROutcomeColumns() error {
+	cols, err := s.tableColumns("github_task_prs")
+	if err != nil {
+		return fmt.Errorf("read github_task_prs columns: %w", err)
+	}
+	for _, col := range taskPROutcomeColumnDDL {
+		if _, ok := cols[col.name]; ok {
+			continue
+		}
+		stmt := "ALTER TABLE github_task_prs ADD COLUMN " + col.name + " " + col.ddl
+		if _, err := s.db.Exec(stmt); err != nil && !dbutil.IsDuplicateColumnError(err) {
+			return fmt.Errorf("add github_task_prs.%s: %w", col.name, err)
+		}
 	}
 	return nil
 }
@@ -1267,18 +1352,35 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			last_synced_at DATETIME,
 			detached_at DATETIME,
 			updated_at DATETIME NOT NULL,
+			is_draft BOOLEAN,
+			changed_files INTEGER,
+			merged_by_login TEXT,
+			closed_by_login TEXT,
+			auto_merge_observed_at DATETIME,
+			disposition TEXT,
+			disposition_superseded_by_url TEXT,
+			disposition_recorded_at DATETIME,
 			UNIQUE(task_id, repository_id, pr_number)
 		)`,
+		// The eight outcome-attribution columns are selected directly, not
+		// via COALESCE: addTaskPROutcomeColumns runs earlier in
+		// initSchemaUpgrades, before this data-migration step, so the old
+		// table being rebuilt here already has them (fail-loud — startup
+		// would have aborted otherwise).
 		`INSERT INTO github_task_prs_new (
 			id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, author_login, state, review_state, checks_state,
 			mergeable_state, review_count, pending_review_count, comment_count,
-			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at
+			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
+			disposition, disposition_superseded_by_url, disposition_recorded_at
 		) SELECT
 			id, COALESCE(workspace_id, ''), task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, author_login, state, review_state, checks_state,
 			mergeable_state, review_count, pending_review_count, comment_count,
-			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at
+			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
+			disposition, disposition_superseded_by_url, disposition_recorded_at
 		FROM github_task_prs`,
 	)
 }
@@ -1596,12 +1698,16 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
-			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
+			disposition, disposition_superseded_by_url, disposition_recorded_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
-		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt)
+		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt,
+		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt,
+		tp.Disposition, tp.DispositionSupersededByURL, tp.DispositionRecordedAt)
 	return err
 }
 
@@ -1618,7 +1724,9 @@ const taskPRColumns = `id, workspace_id, task_id, repository_id, owner, repo, pr
 	pr_title, head_branch, base_branch, author_login, state, review_state, checks_state,
 	mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 	unresolved_review_threads, checks_total, checks_passing, additions, deletions,
-	created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at`
+	created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
+	is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
+	disposition, disposition_superseded_by_url, disposition_recorded_at`
 
 // taskPRColumnsQualified is taskPRColumns with each column qualified by the
 // `gtp` alias, for queries that join github_task_prs against another table.
@@ -1627,7 +1735,9 @@ const taskPRColumnsQualified = `gtp.id, gtp.workspace_id, gtp.task_id, gtp.repos
 	gtp.state, gtp.review_state, gtp.checks_state, gtp.mergeable_state, gtp.review_count,
 	gtp.pending_review_count, gtp.required_reviews, gtp.comment_count, gtp.unresolved_review_threads,
 	gtp.checks_total, gtp.checks_passing, gtp.additions, gtp.deletions,
-	gtp.created_at, gtp.merged_at, gtp.closed_at, gtp.last_synced_at, gtp.detached_at, gtp.updated_at`
+	gtp.created_at, gtp.merged_at, gtp.closed_at, gtp.last_synced_at, gtp.detached_at, gtp.updated_at,
+	gtp.is_draft, gtp.changed_files, gtp.merged_by_login, gtp.closed_by_login, gtp.auto_merge_observed_at,
+	gtp.disposition, gtp.disposition_superseded_by_url, gtp.disposition_recorded_at`
 
 // GetTaskPR returns the first PR association for a task. For multi-repo tasks
 // the result is non-deterministic across repos — use ListTaskPRsByTask instead.
@@ -1917,18 +2027,28 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
-			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at,
+			is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
+			disposition, disposition_superseded_by_url, disposition_recorded_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
-		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt); err != nil {
+		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt,
+		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt,
+		tp.Disposition, tp.DispositionSupersededByURL, tp.DispositionRecordedAt); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// UpdateTaskPR updates a task-PR association.
+// UpdateTaskPR updates a task-PR association. This is the sync writer's
+// exclusive write path: its column list SHALL NOT include any
+// disposition* column. That disjoint-writer guarantee (spec: Concurrency)
+// lets a poll landing between a user's read and their disposition PATCH
+// never clobber the disposition, and lets a disposition PATCH never revert
+// a freshly-synced state. UpdateTaskPRDisposition is the disposition
+// writer's exclusive counterpart and names no sync-owned column.
 func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 	tp.UpdatedAt = time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, `
@@ -1936,13 +2056,33 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 			review_count = ?, pending_review_count = ?, required_reviews = ?, comment_count = ?,
 			unresolved_review_threads = ?, checks_total = ?, checks_passing = ?,
 			additions = ?, deletions = ?, pr_title = ?, base_branch = ?,
-			merged_at = ?, closed_at = ?, last_synced_at = ?, updated_at = ?
+			merged_at = ?, closed_at = ?, last_synced_at = ?, updated_at = ?,
+			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
+			auto_merge_observed_at = ?
 		WHERE id = ?`,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState,
 		tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing,
 		tp.Additions, tp.Deletions, tp.PRTitle, tp.BaseBranch,
-		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt, tp.ID)
+		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt,
+		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin,
+		tp.AutoMergeObservedAt, tp.ID)
+	return err
+}
+
+// UpdateTaskPRDisposition is the disposition writer's exclusive write path:
+// it touches only the three disposition* columns plus updated_at, and names
+// no sync-owned column. Passing disposition == nil clears all three
+// disposition columns to NULL in one statement, restoring the "nobody
+// looked" state (AC-22).
+func (s *Store) UpdateTaskPRDisposition(
+	ctx context.Context, associationID string, disposition, supersededByURL *string, recordedAt *time.Time,
+) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE github_task_prs SET disposition = ?, disposition_superseded_by_url = ?,
+			disposition_recorded_at = ?, updated_at = ?
+		WHERE id = ?`,
+		disposition, supersededByURL, recordedAt, time.Now().UTC(), associationID)
 	return err
 }
 

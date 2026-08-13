@@ -72,6 +72,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/task-prs", c.httpListTaskPRs)
 	api.POST("/task-prs", c.httpCreateTaskPR)
 	api.DELETE("/task-prs/:associationId", c.httpDeleteTaskPR)
+	api.PATCH("/task-prs/:associationId/disposition", c.httpSetTaskPRDisposition)
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
 	api.GET("/task-issues", c.httpListTaskIssues)
 	api.PUT("/tasks/:taskId/issue", c.httpLinkTaskIssue)
@@ -278,6 +279,42 @@ func (c *Controller) httpDeleteTaskPR(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+// httpSetTaskPRDisposition records or clears a human-supplied closure reason
+// for a task-PR association. A nil (absent or explicit null) disposition
+// clears all three disposition columns.
+func (c *Controller) httpSetTaskPRDisposition(ctx *gin.Context) {
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	associationID := ctx.Param("associationId")
+	var req struct {
+		Disposition     *string `json:"disposition"`
+		SupersededByURL *string `json:"superseded_by_url"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	tp, err := c.service.SetTaskPRDisposition(ctx.Request.Context(), workspaceID, associationID, req.Disposition, req.SupersededByURL)
+	if err != nil {
+		if errors.Is(err, ErrTaskPRNotFound) || writeWatchWorkspaceError(ctx, "task PR", err) {
+			if !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+				ctx.JSON(http.StatusNotFound, gin.H{"error": "task PR not found"})
+			}
+			return
+		}
+		if errors.Is(err, ErrInvalidDisposition) || errors.Is(err, ErrInvalidPRURL) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, tp)
 }
 
 func (c *Controller) httpGetTaskPR(ctx *gin.Context) {

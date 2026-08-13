@@ -5,6 +5,7 @@ import type {
   GitHubPR,
   TaskPRsResponse,
   TaskPR,
+  TaskPRDisposition,
   PRWatchesResponse,
   ReviewWatch,
   ReviewWatchesResponse,
@@ -102,6 +103,29 @@ export async function deleteTaskPR(
       init: {
         ...(options?.init ?? {}),
         method: "DELETE",
+      },
+    },
+  );
+}
+
+/** Records or clears a human-recorded closure reason for a task-PR
+ *  association. Passing `disposition: null` clears all three disposition
+ *  fields, restoring the "nobody looked" state. */
+export async function patchTaskPRDisposition(
+  associationId: string,
+  workspaceId: string,
+  body: { disposition: TaskPRDisposition | null; superseded_by_url?: string | null },
+  options?: ApiRequestOptions,
+) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<TaskPR>(
+    `/api/v1/github/task-prs/${encodeURIComponent(associationId)}/disposition?${query.toString()}`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "PATCH",
+        body: JSON.stringify(body),
       },
     },
   );

@@ -631,3 +631,25 @@ func intPtrEqual(a, b *int) bool {
 	}
 	return *a == *b
 }
+
+// boolPtrEqual compares two nullable bool pointers for equality.
+func boolPtrEqual(a, b *bool) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// stringPtrEqual compares two nullable string pointers for equality.
+func stringPtrEqual(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}

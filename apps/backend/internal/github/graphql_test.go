@@ -164,6 +164,31 @@ func TestBuildBatchedPRQuery_GroupsByRepo(t *testing.T) {
 	}
 }
 
+// TestPRFieldsBlock_RequestsOutcomeFields covers AC-08: the shared field
+// block requests changedFiles, mergedBy, autoMergeRequest, and a
+// CLOSED_EVENT timeline selection, so both the batched PR query and the
+// batched branch query return the same fields.
+func TestPRFieldsBlock_RequestsOutcomeFields(t *testing.T) {
+	block := prFieldsBlock()
+	for _, want := range []string{"changedFiles", "mergedBy { login }", "autoMergeRequest", "CLOSED_EVENT"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("prFieldsBlock() missing %q: %s", want, block)
+		}
+	}
+	if strings.Contains(block, "closedBy") {
+		t.Errorf("prFieldsBlock() must not request closedBy (absent from PullRequest type): %s", block)
+	}
+
+	prQuery, _ := buildBatchedPRQuery([]graphQLPRRef{{Owner: "o", Repo: "r", Number: 1}})
+	if !strings.Contains(prQuery, "changedFiles") || !strings.Contains(prQuery, "CLOSED_EVENT") {
+		t.Errorf("buildBatchedPRQuery must include the outcome fields: %s", prQuery)
+	}
+	branchQuery, _ := buildBatchedBranchQuery([]graphQLBranchRef{{Owner: "o", Repo: "r", Branch: "feat"}})
+	if !strings.Contains(branchQuery, "changedFiles") || !strings.Contains(branchQuery, "CLOSED_EVENT") {
+		t.Errorf("buildBatchedBranchQuery must include the outcome fields: %s", branchQuery)
+	}
+}
+
 func TestBuildBatchedBranchQuery_AliasesAllBranches(t *testing.T) {
 	q, _ := buildBatchedBranchQuery([]graphQLBranchRef{
 		{Owner: "o", Repo: "r", Branch: "feat-1"},
@@ -178,6 +203,74 @@ func TestBuildBatchedBranchQuery_AliasesAllBranches(t *testing.T) {
 	if strings.Contains(q, `ref(qualifiedName:`) {
 		t.Errorf("branch lookup should not require a base-repo ref: %s", q)
 	}
+}
+
+// TestConvertBatchedPRResult_SetsOutcomeFieldsPopulatedUnconditionally
+// covers AC-10: the batched GraphQL path always marks the outcome-field
+// group populated, since it always fetches a full pull request.
+func TestConvertBatchedPRResult_SetsOutcomeFieldsPopulatedUnconditionally(t *testing.T) {
+	status := convertBatchedPRResult(&batchedPRResult{State: "OPEN"}, "o", "r", 1)
+	if !status.OutcomeFieldsPopulated {
+		t.Error("OutcomeFieldsPopulated = false, want true")
+	}
+}
+
+// TestConvertBatchedPRResult_MergedByAndChangedFiles covers AC-12's upstream
+// half: a merged PR with a non-null mergedBy and a real changedFiles count
+// converts onto PR, not just PRStatus.
+func TestConvertBatchedPRResult_MergedByAndChangedFiles(t *testing.T) {
+	raw := &batchedPRResult{
+		State:        "MERGED",
+		MergedAt:     "2026-08-12T00:00:00Z",
+		ChangedFiles: 8,
+	}
+	raw.MergedBy.Login = "carlosflorencio"
+	status := convertBatchedPRResult(raw, "kdlbs", "kandev", 2554)
+	if status.PR.ChangedFiles != 8 {
+		t.Errorf("ChangedFiles = %d, want 8", status.PR.ChangedFiles)
+	}
+	if status.PR.MergedByLogin != "carlosflorencio" {
+		t.Errorf("MergedByLogin = %q, want carlosflorencio", status.PR.MergedByLogin)
+	}
+}
+
+// TestConvertBatchedPRResult_ClosedEventActorPopulatesAttribution covers
+// AC-14: a closed PR carrying a ClosedEvent timeline node with a non-empty
+// actor login marks closure attribution populated and copies the login.
+func TestConvertBatchedPRResult_ClosedEventActorPopulatesAttribution(t *testing.T) {
+	raw := &batchedPRResult{State: "CLOSED"}
+	raw.TimelineItems.Nodes = []timelineClosedEventNode{{}}
+	raw.TimelineItems.Nodes[0].Actor = &timelineActor{Login: "nova28"}
+	status := convertBatchedPRResult(raw, "kdlbs", "kandev", 2476)
+	if !status.ClosureAttributionPopulated {
+		t.Fatal("ClosureAttributionPopulated = false, want true")
+	}
+	if status.ClosedByLogin != "nova28" {
+		t.Errorf("ClosedByLogin = %q, want nova28", status.ClosedByLogin)
+	}
+}
+
+// TestConvertBatchedPRResult_NullActorLeavesAttributionUnpopulated covers
+// AC-15's decode half: no timeline node, or a node with a null actor, must
+// not mark closure attribution populated.
+func TestConvertBatchedPRResult_NullActorLeavesAttributionUnpopulated(t *testing.T) {
+	t.Run("no timeline nodes", func(t *testing.T) {
+		status := convertBatchedPRResult(&batchedPRResult{State: "CLOSED"}, "o", "r", 1)
+		if status.ClosureAttributionPopulated {
+			t.Error("ClosureAttributionPopulated = true, want false")
+		}
+		if status.ClosedByLogin != "" {
+			t.Errorf("ClosedByLogin = %q, want empty", status.ClosedByLogin)
+		}
+	})
+	t.Run("null actor", func(t *testing.T) {
+		raw := &batchedPRResult{State: "CLOSED"}
+		raw.TimelineItems.Nodes = []timelineClosedEventNode{{}}
+		status := convertBatchedPRResult(raw, "o", "r", 1)
+		if status.ClosureAttributionPopulated {
+			t.Error("ClosureAttributionPopulated = true, want false")
+		}
+	})
 }
 
 func TestRunBatchedPRQuery_DecodesAliasesBackToRefs(t *testing.T) {

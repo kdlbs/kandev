@@ -148,6 +148,7 @@ Per-workspace credentials and triage triggers for external services.
 | [gitlab-mr-task-list-badges](gitlab-mr-task-list-badges/spec.md) | draft |
 | [gitlab-workflow-sync](gitlab-workflow-sync/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
+| [pr-outcome-attribution](pr-outcome-attribution/spec.md) | draft |
 | [enable-disable-toggle](integrations/enable-disable-toggle.md) | shipped |
 
 ## workspaces/ — workspace lifecycle

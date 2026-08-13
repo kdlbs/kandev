@@ -235,6 +235,28 @@ describe("setTaskPR", () => {
     expect(list.find((p) => p.repository_id === "repo-b")?.id).toBe("b");
   });
 
+  it("replaces the prior row in place when a disposition PATCH response is applied", () => {
+    const store = makeStore();
+    const original = makePR({ id: "a", repository_id: "repo-a", pr_number: 1, state: "closed" });
+    const withDisposition = makePR({
+      id: "a",
+      repository_id: "repo-a",
+      pr_number: 1,
+      state: "closed",
+      disposition: "superseded",
+      disposition_superseded_by_url: "https://github.com/o/r/pull/2",
+      disposition_recorded_at: "2026-08-13T00:00:00Z",
+    });
+
+    store.getState().setTaskPR("task-1", original);
+    store.getState().setTaskPR("task-1", withDisposition);
+
+    const list = store.getState().taskPRs.byTaskId["task-1"];
+    expect(list).toHaveLength(1);
+    expect(list[0].disposition).toBe("superseded");
+    expect(list[0].disposition_superseded_by_url).toBe("https://github.com/o/r/pull/2");
+  });
+
   it("keeps multi-branch PRs as siblings (same repo, different pr_number)", () => {
     const store = makeStore();
     const pr1 = makePR({ id: "p1", repository_id: "repo-a", pr_number: 1221 });

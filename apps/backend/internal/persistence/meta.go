@@ -58,6 +58,16 @@ func ensureMetaTable(db *sqlx.DB) error {
 	return nil
 }
 
+// EnsureMetaTable is the exported form of ensureMetaTable, for repository
+// packages outside internal/persistence that write to kandev_meta before
+// persistence.Provide is guaranteed to have run (e.g. isolated unit tests
+// that construct a repository store directly). In production,
+// persistence.Provide already creates the table before any repository
+// schema init runs, so this is a cheap, idempotent no-op there.
+func EnsureMetaTable(db *sqlx.DB) error {
+	return ensureMetaTable(db)
+}
+
 // readKey returns the value for key, or "" when the key is absent.
 func readKey(db *sqlx.DB, key string) (string, error) {
 	var value string
@@ -74,6 +84,33 @@ func readKey(db *sqlx.DB, key string) (string, error) {
 // writeKey upserts key=value into kandev_meta.
 func writeKey(db *sqlx.DB, key, value string) error {
 	return writeMetaKey(db, db.Rebind(metaKeyUpsert), key, value)
+}
+
+// ReadMetaKey returns the value for key, or "" when the key is absent. It is
+// the exported form of readKey, for repository packages outside
+// internal/persistence (e.g. internal/github) that need to read a
+// kandev_meta value such as an activation instant.
+func ReadMetaKey(db *sqlx.DB, key string) (string, error) {
+	return readKey(db, key)
+}
+
+// WriteMetaKeyIfAbsent inserts key=value only when key is not already
+// present in kandev_meta, and reports whether this call performed the
+// insert. Unlike writeKey (an upsert), this never overwrites an existing
+// value, and the INSERT ... ON CONFLICT DO NOTHING form makes the
+// write-once guarantee race-free without a read-modify-write.
+func WriteMetaKeyIfAbsent(db *sqlx.DB, key, value string) (bool, error) {
+	result, err := db.Exec(db.Rebind(
+		`INSERT INTO kandev_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING`,
+	), key, value)
+	if err != nil {
+		return false, fmt.Errorf("write meta key %q if absent: %w", key, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("write meta key %q if absent: rows affected: %w", key, err)
+	}
+	return affected > 0, nil
 }
 
 // WriteVersion records currentVersion as the binary version that last

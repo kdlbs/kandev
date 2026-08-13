@@ -1031,20 +1031,30 @@ func (c *PATClient) FetchBranchProtection(ctx context.Context, owner, repo, bran
 
 // patPR is the JSON shape from the GitHub REST API for PRs.
 type patPR struct {
-	Number             int       `json:"number"`
-	Title              string    `json:"title"`
-	HTMLURL            string    `json:"html_url"`
-	Body               string    `json:"body"`
-	State              string    `json:"state"`
-	Draft              bool      `json:"draft"`
-	Mergeable          *bool     `json:"mergeable"`
-	MergeableState     string    `json:"mergeable_state"`
-	Additions          int       `json:"additions"`
-	Deletions          int       `json:"deletions"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
-	MergedAt           *string   `json:"merged_at"`
-	ClosedAt           *string   `json:"closed_at"`
+	Number         int       `json:"number"`
+	Title          string    `json:"title"`
+	HTMLURL        string    `json:"html_url"`
+	Body           string    `json:"body"`
+	State          string    `json:"state"`
+	Draft          bool      `json:"draft"`
+	Mergeable      *bool     `json:"mergeable"`
+	MergeableState string    `json:"mergeable_state"`
+	Additions      int       `json:"additions"`
+	Deletions      int       `json:"deletions"`
+	ChangedFiles   int       `json:"changed_files"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	MergedAt       *string   `json:"merged_at"`
+	ClosedAt       *string   `json:"closed_at"`
+	// MergedBy is absent from the REST pulls response for an unmerged PR;
+	// its zero-value Login must never be written as a placeholder.
+	MergedBy *struct {
+		Login string `json:"login"`
+	} `json:"merged_by"`
+	// AutoMerge is present as a non-null object only while auto-merge is
+	// armed; GitHub clears it to null once it fires, so this can only ever
+	// mean "armed at fetch time" — never "merged by auto-merge".
+	AutoMerge          *struct{} `json:"auto_merge"`
 	RequestedReviewers []struct {
 		Login string `json:"login"`
 	} `json:"requested_reviewers"`
@@ -1149,6 +1159,10 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 	if raw.Mergeable != nil {
 		mergeable = *raw.Mergeable
 	}
+	mergedByLogin := ""
+	if raw.MergedBy != nil {
+		mergedByLogin = raw.MergedBy.Login
+	}
 	pr := &PR{
 		Number:              raw.Number,
 		Title:               raw.Title,
@@ -1167,6 +1181,9 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		MergeableState:      strings.ToLower(raw.MergeableState),
 		Additions:           raw.Additions,
 		Deletions:           raw.Deletions,
+		ChangedFiles:        raw.ChangedFiles,
+		MergedByLogin:       mergedByLogin,
+		AutoMergeEnabled:    raw.AutoMerge != nil,
 		RequestedReviewers:  convertPatRequestedReviewers(raw),
 		CreatedAt:           raw.CreatedAt,
 		UpdatedAt:           raw.UpdatedAt,

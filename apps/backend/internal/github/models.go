@@ -280,6 +280,16 @@ type PR struct {
 	UpdatedAt           time.Time           `json:"updated_at"`
 	MergedAt            *time.Time          `json:"merged_at,omitempty"`
 	ClosedAt            *time.Time          `json:"closed_at,omitempty"`
+	// ChangedFiles is the number of files touched by the PR. 0 is a real
+	// observation, distinct from "never observed" upstream of this struct.
+	ChangedFiles int `json:"changed_files,omitempty"`
+	// MergedByLogin is "" when the PR was never merged, or upstream reported
+	// no merger. Callers that persist this must write NULL for "", never "".
+	MergedByLogin string `json:"merged_by_login,omitempty"`
+	// AutoMergeEnabled reports whether upstream observed auto-merge armed at
+	// fetch time. GitHub clears auto_merge once it fires, so this can only
+	// ever mean "armed at this instant" — never "merged by auto-merge".
+	AutoMergeEnabled bool `json:"auto_merge_enabled,omitempty"`
 }
 
 // RequestedReviewer represents a pending reviewer request on a PR.
@@ -367,6 +377,19 @@ type PRStatus struct {
 	// the REST value back to 0 (the popover's "Approved (1)" turning
 	// into "Approved (0)" until a new REST call landed).
 	ReviewCountsPopulated bool `json:"review_counts_populated,omitempty"`
+	// OutcomeFieldsPopulated mirrors ChecksPopulated for is_draft,
+	// changed_files, and merged_by_login: set only by sync paths that fetched
+	// a full single pull request or a batched GraphQL result, so a zero/empty
+	// value is a real observation rather than "I didn't look."
+	OutcomeFieldsPopulated bool `json:"outcome_fields_populated,omitempty"`
+	// ClosedByLogin is the closed-event actor's login, populated only by the
+	// GraphQL path (closed_by is absent from the REST pulls endpoint and the
+	// gh CLI's PR field set).
+	ClosedByLogin string `json:"closed_by_login,omitempty"`
+	// ClosureAttributionPopulated is set only when a GraphQL sync observed a
+	// closed-event actor with a non-empty login. REST and gh CLI single-PR
+	// syncs can never set this — they have no closing-actor field to read.
+	ClosureAttributionPopulated bool `json:"closure_attribution_populated,omitempty"`
 }
 
 // PRSearchPage is a paginated slice of PR search results, with the total
@@ -444,6 +467,104 @@ type TaskPR struct {
 	LastSyncedAt            *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
 	DetachedAt              *time.Time `json:"-" db:"detached_at"`
 	UpdatedAt               time.Time  `json:"updated_at" db:"updated_at"`
+
+	// --- PR outcome attribution (eight nullable columns, never backfilled) ---
+	//
+	// Every field below is NULL on any row that predates this feature's
+	// activation instant (kandev_meta key taskPROutcomeActivatedAtMetaKey)
+	// and stays NULL until a post-activation observation or explicit user
+	// action writes it. None has a non-NULL default, and none is ever
+	// inferred, backfilled, or defaulted to a zero value. No `omitempty` on
+	// any of these json tags: AC-30 requires the keys to always be present,
+	// because `null` vs. absent is exactly the distinction this feature
+	// exists to preserve.
+	//
+	// Writer-health invariants (auditable, not a dashboard):
+	//   - AC-36: for any row where merged_at >= activation, MergedByLogin
+	//     must be non-NULL. merged_at is only ever written by the sync
+	//     writer, so a row that merged after activation was necessarily
+	//     observed by a post-activation writer; a NULL there is a writer
+	//     fault, not a data gap.
+	//   - AC-37: for any row where last_synced_at >= activation, IsDraft
+	//     must be non-NULL whenever the row's most recent sync was a
+	//     populating one. IsDraft is supplied by every populating sync path,
+	//     so it is the primary canary for "the writer stopped."
+	//   - AC-39: neither invariant applies to rows whose merged_at /
+	//     closed_at predates the activation instant — those rows are
+	//     legitimately and permanently NULL.
+
+	// IsDraft is never observed by a populating sync when NULL.
+	IsDraft *bool `json:"is_draft" db:"is_draft"`
+	// ChangedFiles is never observed when NULL, distinct from 0 (a real
+	// "no files changed" observation).
+	ChangedFiles *int `json:"changed_files" db:"changed_files"`
+	// MergedByLogin is NULL when the PR was never merged, or merged but
+	// never observed by a populating sync.
+	MergedByLogin *string `json:"merged_by_login" db:"merged_by_login"`
+	// ClosedByLogin is NULL when the PR was never closed, or closure was
+	// never observed by the GraphQL path specifically. GitHub's closed_by
+	// is absent from the REST pulls endpoint and from the gh CLI's PR field
+	// set (only the issues endpoint carries it), so this column is sourced
+	// from a GraphQL closed-event actor selection only. A PR whose only
+	// post-closure sync came through REST or gh CLI keeps this NULL
+	// permanently, because terminal rows are excluded from the orphan sweep
+	// (service_pr_unwatched.go). This gap is accepted (AC-15) and must be
+	// stated wherever this column is consumed.
+	ClosedByLogin *string `json:"closed_by_login" db:"closed_by_login"`
+	// AutoMergeObservedAt is a latched observation, never a merge cause.
+	// GitHub clears `auto_merge` once it fires, so a poller can only ever
+	// learn "auto-merge was armed at some instant while we were looking."
+	// It is set once (the first time armed auto-merge is observed) and is
+	// never cleared or overwritten afterwards, including when a later sync
+	// observes auto-merge disarmed or absent. It must not be read, named,
+	// or charted as "merged by auto-merge."
+	AutoMergeObservedAt *time.Time `json:"auto_merge_observed_at" db:"auto_merge_observed_at"`
+	// Disposition is a human-recorded closure reason: upstream has no
+	// usable field for this (a PR's state_reason is always null; Kandev
+	// never closes a PR itself). NULL and "unknown" are deliberately
+	// distinct facts and must never be collapsed by a reader: NULL means
+	// nobody looked, "unknown" means somebody looked and could not
+	// determine why. One of validTaskPRDispositions when non-NULL.
+	Disposition *string `json:"disposition" db:"disposition"`
+	// DispositionSupersededByURL is set only alongside
+	// Disposition == "superseded".
+	DispositionSupersededByURL *string `json:"disposition_superseded_by_url" db:"disposition_superseded_by_url"`
+	// DispositionRecordedAt is set only alongside a non-NULL Disposition. A
+	// sync never clears a disposition: UpdateTaskPR does not name any
+	// disposition* column, so a reopen-then-merge leaves a previously
+	// recorded value intact by construction (AC-29c) even though it was
+	// recorded against a closure that was later undone. Consumers must
+	// scope disposition reporting to state == "closed" && merged_at == nil.
+	DispositionRecordedAt *time.Time `json:"disposition_recorded_at" db:"disposition_recorded_at"`
+}
+
+// The five permitted TaskPR.Disposition values. This set is complete: adding
+// a sixth later is a new contract, not an implementation detail, because a
+// downstream extract's time series would otherwise change meaning
+// mid-series.
+const (
+	TaskPRDispositionUnknown     = "unknown"
+	TaskPRDispositionSuperseded  = "superseded"
+	TaskPRDispositionDuplicate   = "duplicate"
+	TaskPRDispositionExploratory = "exploratory"
+	TaskPRDispositionWithdrawn   = "withdrawn"
+)
+
+// validTaskPRDispositions is the complete set of permitted TaskPR.Disposition
+// values, used by validTaskPRDisposition.
+var validTaskPRDispositions = map[string]struct{}{
+	TaskPRDispositionUnknown:     {},
+	TaskPRDispositionSuperseded:  {},
+	TaskPRDispositionDuplicate:   {},
+	TaskPRDispositionExploratory: {},
+	TaskPRDispositionWithdrawn:   {},
+}
+
+// validTaskPRDisposition reports whether value is one of the five permitted
+// TaskPR.Disposition values.
+func validTaskPRDisposition(value string) bool {
+	_, ok := validTaskPRDispositions[value]
+	return ok
 }
 
 // TaskCIOptions stores task-level PR automation preferences.

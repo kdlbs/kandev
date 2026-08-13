@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -92,5 +93,140 @@ func TestTaskPRReads_ToleratesExtraColumn(t *testing.T) {
 	fatalOnScanError("ListTaskPRsByWorkspaceID", err)
 	if len(byWorkspace["task-drift"]) != 1 || byWorkspace["task-drift"][0].PRNumber != 1978 {
 		t.Fatalf("ListTaskPRsByWorkspaceID: expected 1 PR (#1978) for task-drift, got %+v", byWorkspace)
+	}
+}
+
+// taskPROutcomeColumnNames is the AC-07 checklist: every one of the eight
+// outcome-attribution columns must appear in taskPRColumns,
+// taskPRColumnsQualified, and the CreateTaskPR/ReplaceTaskPR INSERT column
+// lists, or a read/write path silently regresses to losing the column.
+var taskPROutcomeColumnNames = []string{
+	"is_draft", "changed_files", "merged_by_login", "closed_by_login",
+	"auto_merge_observed_at", "disposition", "disposition_superseded_by_url",
+	"disposition_recorded_at",
+}
+
+// TestTaskPRColumnLists_IncludeAllOutcomeColumns covers AC-07: every outcome
+// column is present in both the qualified and unqualified read projections.
+func TestTaskPRColumnLists_IncludeAllOutcomeColumns(t *testing.T) {
+	for _, name := range taskPROutcomeColumnNames {
+		if !strings.Contains(taskPRColumns, name) {
+			t.Errorf("taskPRColumns missing %q", name)
+		}
+		if !strings.Contains(taskPRColumnsQualified, "gtp."+name) {
+			t.Errorf("taskPRColumnsQualified missing qualified %q", name)
+		}
+	}
+}
+
+// TestCreateAndReplaceTaskPR_RoundTripOutcomeColumns covers the write half
+// of AC-07: CreateTaskPR and ReplaceTaskPR must persist all eight outcome
+// columns, not just the pre-existing ones, or a linked PR loses any
+// upstream-observed or human-recorded outcome data the moment it is
+// (re)written.
+func TestCreateAndReplaceTaskPR_RoundTripOutcomeColumns(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-roundtrip', 'ws-roundtrip')`); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	isDraft := true
+	changedFiles := 7
+	mergedBy := "carlosflorencio"
+	closedBy := "nova28"
+	autoMergeAt := time.Now().UTC().Truncate(time.Second)
+	disposition := TaskPRDispositionExploratory
+	supersededURL := "https://github.com/kdlbs/kandev/pull/4242"
+	recordedAt := autoMergeAt
+
+	created := &TaskPR{
+		WorkspaceID:                "ws-roundtrip",
+		TaskID:                     "task-roundtrip",
+		Owner:                      "kdlbs",
+		Repo:                       "kandev",
+		PRNumber:                   5001,
+		PRURL:                      "https://github.com/kdlbs/kandev/pull/5001",
+		PRTitle:                    "outcome column round trip",
+		State:                      "closed",
+		CreatedAt:                  time.Now().UTC(),
+		IsDraft:                    &isDraft,
+		ChangedFiles:               &changedFiles,
+		MergedByLogin:              &mergedBy,
+		ClosedByLogin:              &closedBy,
+		AutoMergeObservedAt:        &autoMergeAt,
+		Disposition:                &disposition,
+		DispositionSupersededByURL: &supersededURL,
+		DispositionRecordedAt:      &recordedAt,
+	}
+	if err := store.CreateTaskPR(ctx, created); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+	gotCreated, err := store.GetTaskPRByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID after CreateTaskPR: %v", err)
+	}
+	assertOutcomeColumnsRoundTrip(t, "CreateTaskPR", gotCreated, isDraft, changedFiles, mergedBy, closedBy, disposition, supersededURL)
+
+	replaced := &TaskPR{
+		WorkspaceID:                "ws-roundtrip",
+		TaskID:                     "task-roundtrip",
+		Owner:                      "kdlbs",
+		Repo:                       "kandev",
+		PRNumber:                   5001,
+		PRURL:                      "https://github.com/kdlbs/kandev/pull/5001",
+		PRTitle:                    "outcome column round trip (replaced)",
+		State:                      "closed",
+		CreatedAt:                  time.Now().UTC(),
+		IsDraft:                    &isDraft,
+		ChangedFiles:               &changedFiles,
+		MergedByLogin:              &mergedBy,
+		ClosedByLogin:              &closedBy,
+		AutoMergeObservedAt:        &autoMergeAt,
+		Disposition:                &disposition,
+		DispositionSupersededByURL: &supersededURL,
+		DispositionRecordedAt:      &recordedAt,
+	}
+	if err := store.ReplaceTaskPR(ctx, replaced); err != nil {
+		t.Fatalf("ReplaceTaskPR: %v", err)
+	}
+	gotReplaced, err := store.GetTaskPRByRepoAndNumber(ctx, "task-roundtrip", "", 5001)
+	if err != nil {
+		t.Fatalf("GetTaskPRByRepoAndNumber after ReplaceTaskPR: %v", err)
+	}
+	assertOutcomeColumnsRoundTrip(t, "ReplaceTaskPR", gotReplaced, isDraft, changedFiles, mergedBy, closedBy, disposition, supersededURL)
+}
+
+func assertOutcomeColumnsRoundTrip(
+	t *testing.T, writer string, got *TaskPR,
+	wantIsDraft bool, wantChangedFiles int, wantMergedBy, wantClosedBy, wantDisposition, wantSupersededURL string,
+) {
+	t.Helper()
+	if got == nil {
+		t.Fatalf("%s: row not found", writer)
+	}
+	if got.IsDraft == nil || *got.IsDraft != wantIsDraft {
+		t.Errorf("%s: IsDraft = %v, want %v", writer, got.IsDraft, wantIsDraft)
+	}
+	if got.ChangedFiles == nil || *got.ChangedFiles != wantChangedFiles {
+		t.Errorf("%s: ChangedFiles = %v, want %v", writer, got.ChangedFiles, wantChangedFiles)
+	}
+	if got.MergedByLogin == nil || *got.MergedByLogin != wantMergedBy {
+		t.Errorf("%s: MergedByLogin = %v, want %v", writer, got.MergedByLogin, wantMergedBy)
+	}
+	if got.ClosedByLogin == nil || *got.ClosedByLogin != wantClosedBy {
+		t.Errorf("%s: ClosedByLogin = %v, want %v", writer, got.ClosedByLogin, wantClosedBy)
+	}
+	if got.AutoMergeObservedAt == nil {
+		t.Errorf("%s: AutoMergeObservedAt = nil, want set", writer)
+	}
+	if got.Disposition == nil || *got.Disposition != wantDisposition {
+		t.Errorf("%s: Disposition = %v, want %v", writer, got.Disposition, wantDisposition)
+	}
+	if got.DispositionSupersededByURL == nil || *got.DispositionSupersededByURL != wantSupersededURL {
+		t.Errorf("%s: DispositionSupersededByURL = %v, want %v", writer, got.DispositionSupersededByURL, wantSupersededURL)
+	}
+	if got.DispositionRecordedAt == nil {
+		t.Errorf("%s: DispositionRecordedAt = nil, want set", writer)
 	}
 }

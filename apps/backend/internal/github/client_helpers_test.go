@@ -7,6 +7,24 @@ import (
 	"time"
 )
 
+// TestNewPRStatus_MarksOutcomeFieldsPopulatedNotClosureAttribution covers
+// AC-10: newPRStatus (the single convergence point for REST and gh CLI
+// single-PR paths) always marks the outcome-field group populated, since it
+// fetched a full pull request, but leaves closure attribution unpopulated —
+// neither REST caller can see the closing actor (AC-15).
+func TestNewPRStatus_MarksOutcomeFieldsPopulatedNotClosureAttribution(t *testing.T) {
+	status := newPRStatus(&PR{Number: 1}, nil, nil)
+	if !status.OutcomeFieldsPopulated {
+		t.Error("OutcomeFieldsPopulated = false, want true")
+	}
+	if status.ClosureAttributionPopulated {
+		t.Error("ClosureAttributionPopulated = true, want false")
+	}
+	if status.ClosedByLogin != "" {
+		t.Errorf("ClosedByLogin = %q, want empty", status.ClosedByLogin)
+	}
+}
+
 func TestGetPRFeedbackStartsIndependentRequestsConcurrently(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

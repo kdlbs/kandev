@@ -196,6 +196,7 @@ type ghPR struct {
 	MergeStateStatus    string                `json:"mergeStateStatus"`
 	Additions           int                   `json:"additions"`
 	Deletions           int                   `json:"deletions"`
+	ChangedFiles        int                   `json:"changedFiles"`
 	CreatedAt           time.Time             `json:"createdAt"`
 	UpdatedAt           time.Time             `json:"updatedAt"`
 	MergedAt            string                `json:"mergedAt"`
@@ -207,6 +208,17 @@ type ghPR struct {
 	Author              struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	// MergedBy decodes to a zero-value Login on gh's `null` for an unmerged
+	// PR — never a placeholder value.
+	MergedBy struct {
+		Login string `json:"login"`
+	} `json:"mergedBy"`
+	// AutoMergeRequest is a pointer: gh returns null when auto-merge was
+	// never armed. Any non-nil value means "armed at fetch time" — never
+	// "merged by auto-merge" (auto_merge is cleared once it fires).
+	AutoMergeRequest *struct {
+		EnabledAt string `json:"enabledAt"`
+	} `json:"autoMergeRequest"`
 }
 
 type ghRepository struct {
@@ -247,7 +259,7 @@ type ghIssue struct {
 func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	out, err := c.run(ctx, "pr", "view", fmt.Sprintf("%d", number),
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests,maintainerCanModify,headRepository,headRepositoryOwner")
+		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,changedFiles,mergedBy,autoMergeRequest,createdAt,updatedAt,mergedAt,closedAt,reviewRequests,maintainerCanModify,headRepository,headRepositoryOwner")
 	if err != nil {
 		if isNotFoundErr(err) {
 			return nil, &GitHubAPIError{
@@ -1289,6 +1301,9 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		MergeableState:      strings.ToLower(raw.MergeStateStatus),
 		Additions:           raw.Additions,
 		Deletions:           raw.Deletions,
+		ChangedFiles:        raw.ChangedFiles,
+		MergedByLogin:       raw.MergedBy.Login,
+		AutoMergeEnabled:    raw.AutoMergeRequest != nil,
 		RequestedReviewers:  convertGHRequestedReviewers(raw.ReviewRequests),
 		CreatedAt:           raw.CreatedAt,
 		UpdatedAt:           raw.UpdatedAt,

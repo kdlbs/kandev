@@ -161,22 +161,50 @@ func chunkRefs[T any](refs []T, chunkSize int) [][]T {
 	return out
 }
 
+// timelineActor is a GraphQL Actor's login, used by the closed-event
+// timeline selection to attribute who closed a PR.
+type timelineActor struct {
+	Login string `json:"login"`
+}
+
+// timelineClosedEventNode is one node of the `timelineItems(itemTypes:
+// CLOSED_EVENT)` selection. Actor is a pointer because GitHub can return a
+// null actor (e.g. a bot-deleted account), which must leave closure
+// attribution unpopulated rather than writing an empty login.
+type timelineClosedEventNode struct {
+	Actor *timelineActor `json:"actor"`
+}
+
 // batchedPRResult is the decoded shape of one aliased pullRequest block.
 type batchedPRResult struct {
-	State       string `json:"state"`
-	Title       string `json:"title"`
-	URL         string `json:"url"`
-	IsDraft     bool   `json:"isDraft"`
-	Mergeable   string `json:"mergeable"`
-	MergeStatus string `json:"mergeStateStatus"`
-	HeadRefName string `json:"headRefName"`
-	BaseRefName string `json:"baseRefName"`
-	HeadRefOid  string `json:"headRefOid"`
-	Additions   int    `json:"additions"`
-	Deletions   int    `json:"deletions"`
-	Author      struct {
+	State        string `json:"state"`
+	Title        string `json:"title"`
+	URL          string `json:"url"`
+	IsDraft      bool   `json:"isDraft"`
+	Mergeable    string `json:"mergeable"`
+	MergeStatus  string `json:"mergeStateStatus"`
+	HeadRefName  string `json:"headRefName"`
+	BaseRefName  string `json:"baseRefName"`
+	HeadRefOid   string `json:"headRefOid"`
+	Additions    int    `json:"additions"`
+	Deletions    int    `json:"deletions"`
+	ChangedFiles int    `json:"changedFiles"`
+	Author       struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	// MergedBy is a value (not a pointer) because GitHub always serializes
+	// the field for a PullRequest, using a zero-value login when there is no
+	// merger; the empty-login case is handled explicitly in
+	// convertBatchedPRResult rather than relying on a nil check.
+	MergedBy struct {
+		Login string `json:"login"`
+	} `json:"mergedBy"`
+	// AutoMergeRequest is a pointer: GitHub returns null when auto-merge was
+	// never armed. Any non-nil value means "armed at fetch time" — never
+	// "merged by auto-merge" (auto_merge is cleared once it fires).
+	AutoMergeRequest *struct {
+		EnabledAt string `json:"enabledAt"`
+	} `json:"autoMergeRequest"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	MergedAt  string    `json:"mergedAt"`
@@ -197,6 +225,14 @@ type batchedPRResult struct {
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+	// TimelineItems carries at most the single most-recent CLOSED_EVENT, so
+	// closed-by attribution reflects the latest closure even across a
+	// reopen-then-close cycle. closedBy has no equivalent on the REST pulls
+	// endpoint or the gh CLI's PR field set (AC-09, AC-15) — this GraphQL
+	// selection is the only source.
+	TimelineItems struct {
+		Nodes []timelineClosedEventNode `json:"nodes"`
+	} `json:"timelineItems"`
 }
 
 type batchedBranchPRNode struct {
@@ -370,13 +406,15 @@ func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
 // the batched and single-PR paths returning the same data.
 func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
-		`headRefName baseRefName headRefOid additions deletions ` +
-		`author { login } createdAt updatedAt mergedAt closedAt ` +
+		`headRefName baseRefName headRefOid additions deletions changedFiles ` +
+		`author { login } mergedBy { login } autoMergeRequest { enabledAt } ` +
+		`createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
 		fmt.Sprintf(`reviewThreads(first: %d) { totalCount nodes { isResolved } pageInfo { hasNextPage endCursor } } `,
 			graphQLReviewThreadPageSize) +
-		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
+		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ` +
+		`timelineItems(last: 1, itemTypes: CLOSED_EVENT) { nodes { ... on ClosedEvent { actor { login } } } }`
 }
 
 // buildBatchedBranchQuery emits one aliased pullRequests(headRefName:) block
@@ -401,26 +439,29 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		state = prStateMerged
 	}
 	pr := &PR{
-		Number:         number,
-		Title:          raw.Title,
-		URL:            raw.URL,
-		HTMLURL:        raw.URL,
-		State:          state,
-		HeadBranch:     raw.HeadRefName,
-		HeadSHA:        raw.HeadRefOid,
-		BaseBranch:     raw.BaseRefName,
-		AuthorLogin:    raw.Author.Login,
-		RepoOwner:      owner,
-		RepoName:       repo,
-		Draft:          raw.IsDraft,
-		Mergeable:      raw.Mergeable == "MERGEABLE",
-		MergeableState: strings.ToLower(raw.MergeStatus),
-		Additions:      raw.Additions,
-		Deletions:      raw.Deletions,
-		CreatedAt:      raw.CreatedAt,
-		UpdatedAt:      raw.UpdatedAt,
-		MergedAt:       parseTimePtr(raw.MergedAt),
-		ClosedAt:       parseTimePtr(raw.ClosedAt),
+		Number:           number,
+		Title:            raw.Title,
+		URL:              raw.URL,
+		HTMLURL:          raw.URL,
+		State:            state,
+		HeadBranch:       raw.HeadRefName,
+		HeadSHA:          raw.HeadRefOid,
+		BaseBranch:       raw.BaseRefName,
+		AuthorLogin:      raw.Author.Login,
+		RepoOwner:        owner,
+		RepoName:         repo,
+		Draft:            raw.IsDraft,
+		Mergeable:        raw.Mergeable == "MERGEABLE",
+		MergeableState:   strings.ToLower(raw.MergeStatus),
+		Additions:        raw.Additions,
+		Deletions:        raw.Deletions,
+		ChangedFiles:     raw.ChangedFiles,
+		MergedByLogin:    raw.MergedBy.Login,
+		AutoMergeEnabled: raw.AutoMergeRequest != nil,
+		CreatedAt:        raw.CreatedAt,
+		UpdatedAt:        raw.UpdatedAt,
+		MergedAt:         parseTimePtr(raw.MergedAt),
+		ClosedAt:         parseTimePtr(raw.ClosedAt),
 	}
 
 	reviewState := summarizeReviewState(raw.Reviews.Nodes)
@@ -434,6 +475,7 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 			unresolved++
 		}
 	}
+	closedByLogin, closureAttributionPopulated := closedEventActor(raw.TimelineItems.Nodes)
 	return &PRStatus{
 		PR:                               pr,
 		ReviewState:                      reviewState,
@@ -444,7 +486,22 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		ReviewCountsPopulated:            true,
 		UnresolvedReviewThreads:          unresolved,
 		UnresolvedReviewThreadsPopulated: true,
+		OutcomeFieldsPopulated:           true,
+		ClosedByLogin:                    closedByLogin,
+		ClosureAttributionPopulated:      closureAttributionPopulated,
 	}
+}
+
+// closedEventActor extracts the closed-event actor's login from a
+// `timelineItems(itemTypes: CLOSED_EVENT)` node list. Returns
+// populated=false when there is no node or the node's actor is null (e.g. a
+// bot-deleted account) — the caller must not write an empty login as if it
+// were an observation (AC-15).
+func closedEventActor(nodes []timelineClosedEventNode) (login string, populated bool) {
+	if len(nodes) == 0 || nodes[0].Actor == nil || nodes[0].Actor.Login == "" {
+		return "", false
+	}
+	return nodes[0].Actor.Login, true
 }
 
 // reviewNodesToSamples converts the GraphQL reviewNode shape to the shared

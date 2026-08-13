@@ -717,6 +717,54 @@ type taskPRSyncState struct {
 	requiredReviews                             *int
 	baseBranch, mergeableState, state           string
 	mergedAt, closedAt                          *time.Time
+	isDraft                                     *bool
+	changedFiles                                *int
+	mergedByLogin, closedByLogin                *string
+	autoMergeObservedAt                         *time.Time
+}
+
+// resolveTaskPROutcomeFields applies the populated/preserve dance for the
+// five outcome-attribution columns, split out of prepareTaskPRSyncState to
+// keep that function's complexity within the repo's lint limits (see the
+// cyclomatic-complexity suppression on SyncTaskPR below).
+//
+//   - is_draft / changed_files / merged_by_login follow
+//     status.OutcomeFieldsPopulated: populated writes the observed values
+//     (nil merged_by_login when upstream reports no merger, never ""),
+//     unpopulated preserves the stored values verbatim, including NULL
+//     (AC-12, AC-13).
+//   - closed_by_login follows status.ClosureAttributionPopulated the same
+//     way (AC-14, AC-15) — only the GraphQL path ever sets it.
+//   - auto_merge_observed_at is a latch: set once, on the first populating
+//     sync that observes auto-merge armed while the stored value is NULL,
+//     and never cleared or overwritten afterwards (AC-16, AC-17).
+func resolveTaskPROutcomeFields(tp *TaskPR, status *PRStatus) (
+	isDraft *bool, changedFiles *int, mergedByLogin, closedByLogin *string, autoMergeObservedAt *time.Time,
+) {
+	isDraft, changedFiles, mergedByLogin = tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin
+	if status.OutcomeFieldsPopulated {
+		draft := status.PR.Draft
+		files := status.PR.ChangedFiles
+		isDraft, changedFiles = &draft, &files
+		mergedByLogin = nil
+		if status.PR.MergedByLogin != "" {
+			login := status.PR.MergedByLogin
+			mergedByLogin = &login
+		}
+	}
+
+	closedByLogin = tp.ClosedByLogin
+	if status.ClosureAttributionPopulated {
+		login := status.ClosedByLogin
+		closedByLogin = &login
+	}
+
+	autoMergeObservedAt = tp.AutoMergeObservedAt
+	if status.OutcomeFieldsPopulated && status.PR.AutoMergeEnabled && tp.AutoMergeObservedAt == nil {
+		now := time.Now().UTC()
+		autoMergeObservedAt = &now
+	}
+	return isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt
 }
 
 // resolveTerminalMergeState keeps a row that already reached "merged" there.
@@ -789,11 +837,16 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 		nextMergeableState = "draft"
 	}
 	nextState, nextMergedAt, nextClosedAt := resolveTerminalMergeState(tp, status.PR)
+	nextIsDraft, nextChangedFiles, nextMergedByLogin, nextClosedByLogin, nextAutoMergeObservedAt :=
+		resolveTaskPROutcomeFields(tp, status)
 	return taskPRSyncState{
 		checksTotal: nextChecksTotal, checksPassing: nextChecksPassing,
 		unresolved: nextUnresolved, reviewCount: nextReviewCount, pendingReviewCount: nextPendingReviewCount,
 		requiredReviews: nextRequiredReviews, baseBranch: nextBaseBranch, mergeableState: nextMergeableState,
 		state: nextState, mergedAt: nextMergedAt, closedAt: nextClosedAt,
+		isDraft: nextIsDraft, changedFiles: nextChangedFiles,
+		mergedByLogin: nextMergedByLogin, closedByLogin: nextClosedByLogin,
+		autoMergeObservedAt: nextAutoMergeObservedAt,
 	}
 }
 
@@ -830,7 +883,8 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		tp.UnresolvedReviewThreads != next.unresolved ||
 		tp.BaseBranch != next.baseBranch ||
 		!timeEqual(tp.MergedAt, next.mergedAt) ||
-		!timeEqual(tp.ClosedAt, next.closedAt)
+		!timeEqual(tp.ClosedAt, next.closedAt) ||
+		taskPROutcomeFieldsChanged(tp, next)
 
 	tp.State = next.state
 	tp.PRTitle = status.PR.Title
@@ -848,6 +902,11 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.ChecksPassing = next.checksPassing
 	tp.UnresolvedReviewThreads = next.unresolved
 	tp.BaseBranch = next.baseBranch
+	tp.IsDraft = next.isDraft
+	tp.ChangedFiles = next.changedFiles
+	tp.MergedByLogin = next.mergedByLogin
+	tp.ClosedByLogin = next.closedByLogin
+	tp.AutoMergeObservedAt = next.autoMergeObservedAt
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
@@ -855,6 +914,7 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	if err := s.store.UpdateTaskPR(ctx, tp); err != nil {
 		return fmt.Errorf("update task PR: %w", err)
 	}
+	incTaskPROutcomeSync(status.OutcomeFieldsPopulated)
 
 	if changed && s.eventBus != nil {
 		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
@@ -863,6 +923,18 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		}
 	}
 	return nil
+}
+
+// taskPROutcomeFieldsChanged reports whether any of the five outcome fields
+// SyncTaskPR is about to write differs from the stored value. Split out of
+// SyncTaskPR's changed expression to keep that function within the repo's
+// complexity limits (see its cyclomatic-complexity suppression).
+func taskPROutcomeFieldsChanged(tp *TaskPR, next taskPRSyncState) bool {
+	return !boolPtrEqual(tp.IsDraft, next.isDraft) ||
+		!intPtrEqual(tp.ChangedFiles, next.changedFiles) ||
+		!stringPtrEqual(tp.MergedByLogin, next.mergedByLogin) ||
+		!stringPtrEqual(tp.ClosedByLogin, next.closedByLogin) ||
+		!timeEqual(tp.AutoMergeObservedAt, next.autoMergeObservedAt)
 }
 
 func (s *Service) fetchRequiredReviewsForTaskPR(ctx context.Context, tp *TaskPR, branch string) *int {

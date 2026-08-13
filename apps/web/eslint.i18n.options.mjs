@@ -1407,6 +1407,7 @@ export const i18nGuardFiles = [
   "components/github/pr-ci-popover.tsx",
   "components/github/pr-comments-section.tsx",
   "components/github/pr-detail-panel.tsx",
+  "components/github/pr-disposition-row.tsx",
   "components/github/pr-merge-button.tsx",
   "components/github/pr-mergeability-notice.tsx",
   "components/github/pr-mergeability-row.tsx",
