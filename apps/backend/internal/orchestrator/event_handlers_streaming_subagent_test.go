@@ -384,3 +384,136 @@ func TestSubagentContextRecordedThroughRealServiceAndRepository(t *testing.T) {
 	require.NotNil(t, row.TotalTokens)
 	require.Equal(t, int64(500), *row.TotalTokens)
 }
+
+// TestHandleToolUpdateEventFromCompletedExecutionStillRecordsSubagentContext
+// covers AC-1/AC-11: shouldDropCompletedExecutionStreamEvent correctly drops
+// a late frame for message purposes, but a subagent's final terminal
+// tool_update can be exactly that late frame — dropping it there too would
+// leave the durable row permanently unsettled with no status/token/duration
+// data, even though this frame carries all of it.
+func TestHandleToolUpdateEventFromCompletedExecutionStillRecordsSubagentContext(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	seedActiveTurn(t, svc, repo, "task1", "session1", "turn1")
+	recorder := &fakeSubagentContextRecorder{}
+	svc.subagentContexts = recorder
+	svc.markExecutionCompleted("session1", "exec-1")
+
+	terminalPayload := streams.NewSubagentTask("d", "p", "reviewer")
+	terminalPayload.SubagentTask().Status = "completed"
+	terminalPayload.SubagentTask().TotalTokens = 500
+	svc.handleToolUpdateEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID: "task1", SessionID: "session1", ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: "tool_update", ToolCallID: "tc-late", ToolStatus: agentEventComplete,
+			Normalized: terminalPayload,
+		},
+	})
+
+	require.Zero(t, messages.toolUpdateWrites,
+		"the completed-execution guard must still drop the message side")
+	requests := recorder.all()
+	require.Len(t, requests, 1,
+		"a subagent's terminal frame must still be recorded even after its execution is marked complete")
+	require.Equal(t, "tc-late", requests[0].ToolCallID)
+	require.Equal(t, agentEventComplete, requests[0].ToolStatus)
+}
+
+// TestHandleToolCallEventFromCompletedExecutionStillRecordsSubagentContext is
+// the tool_call-path counterpart: the very first recognizable frame for a
+// subagent can itself arrive after its execution is marked complete, and
+// dropping it there would mean the row never gets created at all (not just
+// unsettled) — a stronger violation of AC-1.
+func TestHandleToolCallEventFromCompletedExecutionStillRecordsSubagentContext(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	seedActiveTurn(t, svc, repo, "task1", "session1", "turn1")
+	recorder := &fakeSubagentContextRecorder{}
+	svc.subagentContexts = recorder
+	svc.markExecutionCompleted("session1", "exec-1")
+
+	svc.handleToolCallEvent(ctx, newSubagentTaskToolCallPayload(
+		"task1", "session1", "tc-late-call", "", "pending", streams.NewSubagentTask("d", "p", "reviewer")))
+
+	require.Zero(t, messages.toolCallWrites,
+		"the completed-execution guard must still drop the message side")
+	requests := recorder.all()
+	require.Len(t, requests, 1,
+		"a subagent's first recognizable frame must still be recorded even after its execution is marked complete")
+	require.Equal(t, "tc-late-call", requests[0].ToolCallID)
+}
+
+// TestHandleToolUpdateEventNilMessageCreatorDoesNotCreateTurn covers the
+// coderabbitai/getActiveTurnID finding: recording a subagent-context
+// observation must never itself start a turn as a side effect. With no
+// active turn seeded and messageCreator nil, a non-terminal tool_update
+// previously called the turn-CREATING getActiveTurnID purely to label the
+// subagent row, silently starting a durable turn for a session that never
+// asked for one.
+func TestHandleToolUpdateEventNilMessageCreatorDoesNotCreateTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = nil
+	recorder := &fakeSubagentContextRecorder{}
+	svc.subagentContexts = recorder
+
+	updatePayload := streams.NewSubagentTask("review the diff", "prompt", "security-reviewer")
+	svc.handleToolUpdateEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID: "task1", SessionID: "session1", ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: "tool_update", ToolCallID: "tc-1", ToolStatus: "in_progress",
+			Normalized: updatePayload,
+		},
+	})
+
+	requests := recorder.all()
+	require.Len(t, requests, 1)
+	require.Empty(t, requests[0].TurnID,
+		"no turn existed and none should have been created merely to label this row")
+	turns, err := repo.ListTurnsBySession(ctx, "session1")
+	require.NoError(t, err)
+	require.Empty(t, turns, "recording subagent context alone must not create a durable turn")
+}
+
+// TestHandleToolCallEventNilMessageCreatorDoesNotCreateTurn is the tool_call
+// counterpart: the new unconditional recordSubagentContextFromFrame call in
+// handleToolCallEvent must use the same non-creating turn lookup as the
+// tool_update path.
+func TestHandleToolCallEventNilMessageCreatorDoesNotCreateTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = nil
+	recorder := &fakeSubagentContextRecorder{}
+	svc.subagentContexts = recorder
+
+	svc.handleToolCallEvent(ctx, newSubagentTaskToolCallPayload(
+		"task1", "session1", "tc-1", "", "pending", streams.NewSubagentTask("d", "p", "reviewer")))
+
+	requests := recorder.all()
+	require.Len(t, requests, 1)
+	require.Empty(t, requests[0].TurnID,
+		"no turn existed and none should have been created merely to label this row")
+	turns, err := repo.ListTurnsBySession(ctx, "session1")
+	require.NoError(t, err)
+	require.Empty(t, turns, "recording subagent context alone must not create a durable turn")
+}
