@@ -86,7 +86,9 @@ recovery identity before lane entry makes it a no-op; an explicit command ordere
 remains final rather than being stopped by stale recovery intent. Recovery demand arriving while an
 attempt is still completing is retained as one pending wakeup and consumes the next bounded backoff
 after that attempt; the handoff between command-lane release and recovery bookkeeping cannot lose
-the only wakeup for a still-desired server.
+the only wakeup for a still-desired server. Crash-driven recovery also invalidates any ready-budget
+reset callback before it schedules the next backoff, including a callback already reading durable
+state, so stale Ready evidence cannot restore an obsolete retry budget.
 
 Browsers attach through a task-and-language route after task-owner authorization. An attachment
 receives the initialized server capabilities and then exchanges feature requests and document

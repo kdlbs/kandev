@@ -360,7 +360,9 @@ callback admission, stops timers that have not fired, and joins callbacks alread
 recovery command execution retains that owned lifecycle context. A recovery request received while
 an attempt is still marked running is coalesced and retained for the next bounded backoff; releasing
 the language command lane before callback bookkeeping completes cannot strand a keep-warm language
-in `error` or `off` without its remaining retry.
+in `error` or `off` without its remaining retry. New crash evidence invalidates a ready-budget reset
+even when its timer callback has already fired; a stale Ready read cannot reset attempts after the
+new recovery has consumed its backoff.
 
 Concurrent and retried controller shutdown calls wait for the same lifecycle-generation join. If
 one caller times out, a later caller must continue waiting rather than report success early. Timer

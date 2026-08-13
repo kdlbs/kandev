@@ -367,6 +367,10 @@ func (c *Controller) scheduleRecoveryLocked(key TaskLanguageKey) {
 		recovery.readyTimer.Stop()
 		recovery.readyTimer = nil
 	}
+	// A ready-budget reset may already have fired and be reading durable state.
+	// Invalidate that callback before scheduling from newer crash evidence so
+	// its stale Ready snapshot cannot erase the newly consumed retry budget.
+	recovery.readyTimerEpoch++
 	if recovery.timer != nil || recovery.attempts >= len(recoveryBackoffs) {
 		return
 	}

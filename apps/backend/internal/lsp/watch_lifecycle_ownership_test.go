@@ -312,6 +312,57 @@ func TestCloseJoinsFiredReadyReset(t *testing.T) {
 	<-fireDone
 }
 
+func TestCrashInvalidatesFiredReadyBudgetReset(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+		LastInitiator: InitiatorAutomatic,
+	})
+	scheduler := newFakeScheduler()
+	controller := newReconcileControllerWithScheduler(store, newReconcileRuntimes(), scheduler)
+	blockingStore := &afterReadBlockingStore{
+		Store: store, blockNext: true,
+		entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	controller.store = blockingStore
+	installTestLifecycle(controller)
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	controller.lifecycleMu.Lock()
+	controller.recoveries[key] = &recoveryState{attempts: 2}
+	controller.lifecycleMu.Unlock()
+	controller.scheduleReadyReset(key, 1)
+	readyReset := scheduler.next(t)
+	fireDone := make(chan struct{})
+	go func() {
+		readyReset.Fire()
+		close(fireDone)
+	}()
+	<-blockingStore.entered
+
+	if err := controller.observeRuntimeSnapshot(context.Background(), key, RuntimeSnapshot{
+		Language: "go", Generation: 1, Phase: PhaseError, ErrorCode: errorCodeProcessExited,
+	}); err != nil {
+		close(blockingStore.release)
+		<-fireDone
+		t.Fatal(err)
+	}
+	recoveryTimer := scheduler.next(t)
+	close(blockingStore.release)
+	<-fireDone
+
+	controller.lifecycleMu.Lock()
+	recovery := controller.recoveries[key]
+	attempts := recovery.attempts
+	controller.lifecycleMu.Unlock()
+	if recovery.timer != recoveryTimer || recoveryTimer.delay != 30*time.Second || attempts != 3 {
+		t.Fatalf("post-crash recovery: timer=%p delay=%s attempts=%d; want timer=%p delay=30s attempts=3",
+			recovery.timer, recoveryTimer.delay, attempts, recoveryTimer)
+	}
+}
+
 func TestCloseRetryWaitsForOriginalLifecycleJoin(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
@@ -544,4 +595,28 @@ func waitForWatchRemoval(t *testing.T, controller *Controller, key TaskLanguageK
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("watch did not exit")
+}
+
+type afterReadBlockingStore struct {
+	Store
+	mu        sync.Mutex
+	blockNext bool
+	entered   chan struct{}
+	release   chan struct{}
+}
+
+func (s *afterReadBlockingStore) GetTaskLSPLanguage(
+	ctx context.Context,
+	taskID, language string,
+) (*TaskLanguageState, bool, error) {
+	state, found, err := s.Store.GetTaskLSPLanguage(ctx, taskID, language)
+	s.mu.Lock()
+	block := s.blockNext
+	s.blockNext = false
+	s.mu.Unlock()
+	if block {
+		close(s.entered)
+		<-s.release
+	}
+	return state, found, err
 }

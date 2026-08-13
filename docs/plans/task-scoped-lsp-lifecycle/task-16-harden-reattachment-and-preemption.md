@@ -34,7 +34,8 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   an empty capacity ledger as ready after durable inventory could not be read.
 - Recovery and ready-budget-reset callbacks acquire lifecycle ownership before I/O, validate their
   timer generation, retain lifecycle context through command execution, cannot outlive Close, and
-  retain a recovery signal that arrives while an attempt is still completing.
+  retain a recovery signal that arrives while an attempt is still completing. New crash evidence
+  invalidates a fired ready-budget reset before it can commit stale Ready evidence.
 - Startup registers watches from post-reconcile rows, and watch loss cannot overwrite a current
   non-server phase.
 - Concurrent or retried Close calls share one lifecycle completion signal; recovery, ready-reset,
@@ -98,6 +99,8 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
 - A recovery signal arriving after the running command released its language lane but before the
   callback cleared `runningEpoch` was discarded, leaving keep-warm error state without the next
   bounded retry.
+- A fired five-minute ready reset could read Ready, then let a crash consume the next backoff, then
+  overwrite the retry attempt count with zero from its stale read.
 
 ## Verification
 
@@ -153,6 +156,9 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
 - The running-recovery lost-wakeup regression failed without a next timer, then passed 100
   race-enabled repetitions after concurrent recovery demand was retained for the next bounded
   backoff; the complete `internal/lsp` race package passed.
+- The fired-ready-reset/crash regression failed with a 30-second timer paired to an impossible zero
+  attempt count, then passed 100 race-enabled repetitions together with ready-reset cancellation,
+  epoch replacement, and normal five-minute budget-reset coverage.
 - The dependent backend race run passed LSP, agentctl LSP, gateway, task service, and SQLite. Its
   unrelated lifecycle package hit the existing SSH fake-server session-open timeout once; that
   isolated test immediately passed three race-enabled repetitions, and the preceding exact-head
