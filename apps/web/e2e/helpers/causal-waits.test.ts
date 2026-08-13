@@ -179,6 +179,23 @@ describe("watchWs().waitForEvent", () => {
     );
   });
 
+  it("does not match a request/response frame that echoes the same action", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    const pending = ws.waitForEvent("task.plan.get", { timeout: 30 });
+    socket.emit("framesent", { id: "r1", type: "request", action: "task.plan.get", payload: {} });
+    socket.emit("framereceived", {
+      id: "r1",
+      type: "response",
+      action: "task.plan.get",
+      payload: {},
+    });
+    await expect(pending).rejects.toThrow(
+      'watchWs.waitForEvent: no "task.plan.get" notification within 30ms',
+    );
+  });
+
   it("tolerates binary and malformed frames without settling", async () => {
     const { page, fake } = fakePage();
     const ws = watchWs(page);
@@ -205,7 +222,12 @@ describe("watchWs().waitForResponse", () => {
       action: "task.plan.get",
       payload: {},
     });
-    socket.emit("framereceived", { id: "req-1", type: "response", payload: { content: "# Plan" } });
+    socket.emit("framereceived", {
+      id: "req-1",
+      type: "response",
+      action: "task.plan.get",
+      payload: { content: "# Plan" },
+    });
     await expect(pending).resolves.toMatchObject({ id: "req-1", payload: { content: "# Plan" } });
   });
 
@@ -220,7 +242,14 @@ describe("watchWs().waitForResponse", () => {
       action: "task.plan.get",
       payload: {},
     });
-    socket.emit("framereceived", { id: "other", type: "response", payload: { unrelated: true } });
+    // Same action, different id: the gateway echoes `action` on replies, so id
+    // correlation is the only thing that keeps this from being a false match.
+    socket.emit("framereceived", {
+      id: "other",
+      type: "response",
+      action: "task.plan.get",
+      payload: { unrelated: true },
+    });
     await expect(pending).rejects.toThrow(
       'watchWs.waitForResponse: no reply to "task.plan.get" within 30ms',
     );
@@ -233,7 +262,12 @@ describe("watchWs().waitForResponse", () => {
     // An earlier, already-answered plan fetch must not satisfy a later wait.
     socket.emit("framesent", { id: "old", type: "request", action: "task.plan.get", payload: {} });
     const pending = ws.waitForResponse("task.plan.get", { timeout: 30 });
-    socket.emit("framereceived", { id: "old", type: "response", payload: { stale: true } });
+    socket.emit("framereceived", {
+      id: "old",
+      type: "response",
+      action: "task.plan.get",
+      payload: { stale: true },
+    });
     await expect(pending).rejects.toThrow(
       'watchWs.waitForResponse: no reply to "task.plan.get" within 30ms',
     );
@@ -253,6 +287,7 @@ describe("watchWs().waitForResponse", () => {
     socket.emit("framereceived", {
       id: "req-1",
       type: "error",
+      action: "task.plan.get",
       payload: { message: "plan not found" },
     });
     await expect(pending).rejects.toThrow(
@@ -272,7 +307,12 @@ describe("watchWs().waitForResponse", () => {
       action: "task.plan.get",
       payload: {},
     });
-    reconnected.emit("framereceived", { id: "req-2", type: "response", payload: { ok: true } });
+    reconnected.emit("framereceived", {
+      id: "req-2",
+      type: "response",
+      action: "task.plan.get",
+      payload: { ok: true },
+    });
     await expect(pending).resolves.toMatchObject({ id: "req-2" });
   });
 });

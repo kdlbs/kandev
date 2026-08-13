@@ -107,9 +107,14 @@ export async function waitForHttp(
  * A decoded gateway frame. The wire format is
  * `{id, type, action, payload, timestamp}`: client requests carry
  * `type: "request"`, server pushes carry `type: "notification"`, and replies
- * carry `type: "response"` / `"error"` with the originating request's `id`
- * and **no `action`** — which is why correlating a round trip needs
- * {@link WsWatcher.waitForResponse} rather than a plain action match.
+ * carry `type: "response"` / `"error"` echoing both the originating request's
+ * `id` and its `action`.
+ *
+ * The echoed `action` is not enough to identify *your* round trip: several
+ * `task.plan.get` requests can be in flight from different components, and a
+ * reply to one sent before you started waiting would satisfy an action-only
+ * match. {@link WsWatcher.waitForResponse} therefore correlates by `id`,
+ * which is also what makes its arm-before-you-act guarantee real.
  */
 export type WsFrame = {
   id?: string;
