@@ -115,8 +115,10 @@ describe("TasksPageClient MR hydration (AC12)", () => {
 
     expect(useWorkspaceMRsMock).toHaveBeenCalledWith("ws1");
     // The gated GitHub call is unaffected: contrast case proving the two
-    // hooks are wired differently on purpose.
-    expect(useWorkspacePRsMock).toHaveBeenCalledWith(null);
+    // hooks are wired differently on purpose. Exact-call-record equality
+    // (not toHaveBeenCalledWith, a presence check) so the assertion fails
+    // if a regression also calls the hook ungated.
+    expect(useWorkspacePRsMock.mock.calls).toEqual([[null]]);
   });
 
   it("calls useWorkspaceMRs with the workspace id when task details are on", () => {

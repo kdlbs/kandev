@@ -84,6 +84,11 @@ test.describe("mobile GitLab MR badge on the /tasks list rows", () => {
     test.setTimeout(120_000);
     const task = await seedTaskWithPRAndMR(apiClient, seedData, "Mobile tasks list MR badge task");
 
+    // Explicit, not assumed: tasks_list_show_details is a *bool PATCH field
+    // on the backend, so an unset field in the testPage fixture's settings
+    // reset leaves whatever a previous test in this worker persisted.
+    await apiClient.saveUserSettings({ tasks_list_show_details: false });
+
     await testPage.goto("/tasks");
     const row = testPage.getByTestId("tasks-list-row").filter({ hasText: task.title });
     await expect(row).toBeVisible({ timeout: 45_000 });
@@ -96,6 +101,11 @@ test.describe("mobile GitLab MR badge on the /tasks list rows", () => {
     await testPage.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
 
+    // Assert the companion PR badge too: seedTaskWithPRAndMR associates both,
+    // so the overflow check below is only informative when both actually
+    // rendered (a missing PR badge from a hydration race would otherwise
+    // silently narrow the layout assertion to a single-badge row).
+    await expect(row.getByTestId(`pr-task-icon-${task.id}`)).toBeVisible({ timeout: 15_000 });
     const icon = row.getByTestId(`mr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
 

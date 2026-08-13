@@ -107,6 +107,11 @@ test.describe("GitLab MR badge on the /tasks list rows", () => {
     const task = await seedBoardTask(apiClient, seedData, "Tasks list single MR badge task");
     await linkMR(apiClient, seedData, task.id, iid);
 
+    // Explicit, not assumed: tasks_list_show_details is a *bool PATCH field
+    // on the backend, so an unset field in the testPage fixture's settings
+    // reset leaves whatever a previous test in this worker persisted.
+    await apiClient.saveUserSettings({ tasks_list_show_details: false });
+
     await testPage.goto("/tasks");
     const row = testPage.getByTestId("tasks-list-row").filter({ hasText: task.title });
     await expect(row).toBeVisible({ timeout: 45_000 });
@@ -179,6 +184,11 @@ test.describe("GitLab MR badge on the /tasks list rows", () => {
       author_login: "test-user",
       state: "open",
     });
+
+    // Explicit, not assumed: tasks_list_show_details is a *bool PATCH field
+    // on the backend, so an unset field in the testPage fixture's settings
+    // reset leaves whatever a previous test in this worker persisted.
+    await apiClient.saveUserSettings({ tasks_list_show_details: false });
 
     await testPage.goto("/tasks");
     const row = testPage.getByTestId("tasks-list-row").filter({ hasText: task.title });
