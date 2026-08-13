@@ -103,11 +103,11 @@ needed because the existing translated labels and routes are reused.
 
 Passed.
 
-- Component regression coverage passed: `cd apps/web && pnpm test -- components/settings/agents/agent-profiles-section.test.tsx components/settings/installed-agent-card.test.tsx` (7 tests).
+- Component regression coverage passed: `cd apps/web && pnpm test -- components/settings/agents/agent-profiles-section.test.tsx components/settings/installed-agent-card.test.tsx` (8 tests).
 - Static checks passed: `cd apps/web && pnpm run typecheck`, the focused ESLint command from task 01, and `cd apps/web && pnpm run i18n:check` (with the repository's existing advisory catalog warnings).
 - Desktop managed E2E passed: `cd apps/web && pnpm e2e:run --project chromium tests/settings/agent-profile-layout.spec.ts` (2 tests).
 - Mobile managed E2E passed: `cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-agent-profile-layout.spec.ts` (1 test).
-- Review follow-up coverage passed for both setup routes: no saved agent uses the base setup route, while a saved agent with zero profiles uses `?mode=create`.
+- Review follow-up coverage passed for both setup routes, the saved-empty profile body guard, and the toolbar ordering invariant.
 
 ## Implementation Waves And Parallel Candidates
 

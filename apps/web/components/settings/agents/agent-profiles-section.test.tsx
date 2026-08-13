@@ -21,6 +21,8 @@ const AGENT = {
   profiles: [profile("p-1", "Alpha"), profile("p-2", "Beta")],
 } as unknown as Agent;
 
+const EMPTY_AGENT = { ...AGENT, profiles: [] } as unknown as Agent;
+
 // A minimal store: the component must read it at write time, so the test needs
 // real read-after-write semantics rather than a frozen snapshot.
 let storeState: {
@@ -204,8 +206,14 @@ describe("AgentProfilesSubList layout", () => {
     expect(screen.queryByTestId("new-profile-claude")).toBeNull();
   });
 
-  it("omits the profile body when the agent has no saved profiles", () => {
+  it("omits the profile body when no agent record exists", () => {
     render(<AgentProfilesSubList savedAgent={undefined} agentName="claude" />);
+
+    expect(screen.queryByTestId("agent-profiles-claude")).toBeNull();
+  });
+
+  it("omits the profile body when the saved agent has no profiles", () => {
+    render(<AgentProfilesSubList savedAgent={EMPTY_AGENT} agentName="claude" />);
 
     expect(screen.queryByTestId("agent-profiles-claude")).toBeNull();
   });

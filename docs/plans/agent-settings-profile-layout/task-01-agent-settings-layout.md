@@ -67,8 +67,8 @@ task/plan status in the same conversation.
 ## Results
 
 - `cd apps && pnpm install --frozen-lockfile` passed.
-- `cd apps/web && pnpm test -- components/settings/agents/agent-profiles-section.test.tsx components/settings/installed-agent-card.test.tsx` passed (2 files, 7 tests), including both setup-link routes.
+- `cd apps/web && pnpm test -- components/settings/agents/agent-profiles-section.test.tsx components/settings/installed-agent-card.test.tsx` passed (2 files, 8 tests), including both setup-link routes and both empty-body guards.
 - `cd apps/web && pnpm run typecheck` passed.
 - `cd apps/web && pnpm exec eslint app/settings/agents/page.tsx components/settings/agents/agent-profiles-section.tsx components/settings/installed-agent-card.tsx` passed.
 - `cd apps/web && pnpm run i18n:check` passed. It reported the repository's existing advisory catalog parity/unreferenced-key warnings; this change adds no locale keys.
-- Review follow-up added `apps/web/components/settings/installed-agent-card.test.tsx` to cover the no-record and saved-empty setup branches.
+- Review follow-up added setup-link coverage, the saved-empty profile-body guard, and removed a redundant toolbar-count assertion in the desktop E2E test.

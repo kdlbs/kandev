@@ -38,7 +38,6 @@ test.describe("Agent settings profile layout", () => {
 
     const actions = testPage.getByTestId("installed-agents-actions");
     await expect(actions).toBeVisible({ timeout: 15_000 });
-    await expect(actions.locator("[data-testid]")).toHaveCount(3);
     await expect(
       actions
         .locator("[data-testid]")
