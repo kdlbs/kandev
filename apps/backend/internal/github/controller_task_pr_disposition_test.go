@@ -154,6 +154,35 @@ func TestHttpSetTaskPRDisposition_RejectsURLWithoutSupersededDisposition(t *test
 	})
 }
 
+// TestHttpSetTaskPRDisposition_EmptySupersededURLTreatedAsAbsent covers the
+// spec's "Nil, empty, and error" rule: an empty superseded_by_url string is
+// absent, not an invalid URL, so it must not trip AC-24 (URL without
+// superseded disposition) or AC-25 (unparseable URL).
+func TestHttpSetTaskPRDisposition_EmptySupersededURLTreatedAsAbsent(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	tp := seedDispositionEndpointTaskPR(t, store, &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", Owner: "kdlbs", Repo: "kandev",
+		PRNumber: 100, PRURL: "https://github.com/kdlbs/kandev/pull/100", PRTitle: "t", State: "closed",
+	})
+	resp := dispositionPatch(t, router, "/api/v1/github/task-prs/"+tp.ID+"/disposition?workspace_id=ws-1", map[string]any{
+		"disposition":       "duplicate",
+		"superseded_by_url": "",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", resp.Code, resp.Body.String())
+	}
+	fromStore, err := store.GetTaskPRByID(context.Background(), tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if fromStore.Disposition == nil || *fromStore.Disposition != "duplicate" {
+		t.Fatalf("Disposition = %v, want duplicate", fromStore.Disposition)
+	}
+	if fromStore.DispositionSupersededByURL != nil {
+		t.Fatalf("DispositionSupersededByURL = %v, want nil (empty string treated as absent)", *fromStore.DispositionSupersededByURL)
+	}
+}
+
 // TestHttpSetTaskPRDisposition_RejectsUnparseableURL covers AC-25.
 func TestHttpSetTaskPRDisposition_RejectsUnparseableURL(t *testing.T) {
 	router, store := setupControllerStoreTest(t)
