@@ -3,9 +3,9 @@
  * Fail when user-visible UI copy contains a Unicode em dash.
  *
  * The check covers locale values, rendered web source strings, backend mock-agent
- * response strings, and backend shared page catalogs. Historical changelog
- * content is intentionally excluded because the changelog is generated release
- * history and must remain immutable.
+ * response strings, backend shared page catalogs, and published Markdown. Historical
+ * changelog content is intentionally excluded because the changelog is generated
+ * release history and must remain immutable.
  * Comments are ignored in source files so this remains a copy check rather than
  * a style check for developer prose.
  */
@@ -19,6 +19,7 @@ const WEB_ROOT = path.resolve(import.meta.dirname, "..");
 const REPO_ROOT = path.resolve(WEB_ROOT, "..", "..");
 const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx"]);
 const BACKEND_SOURCE_EXTENSIONS = new Set([".go"]);
+const PUBLIC_DOC_EXTENSIONS = new Set([".md", ".mdx"]);
 const IGNORED_DIRECTORIES = new Set(["dist", "e2e", "node_modules"]);
 const CODE_STATE = "code";
 const LINE_COMMENT_STATE = "line-comment";
@@ -194,6 +195,184 @@ export function findSourceViolations(source, file, root) {
     );
 }
 
+const PUBLIC_DOC_COMMENT_MARKERS = [
+  { start: "<!--", end: "-->" },
+  { start: "{/*", end: "*/" },
+];
+
+function readBacktickRun(source, index) {
+  let end = index;
+  while (source[end] === "`") end += 1;
+  return source.slice(index, end);
+}
+
+function findBacktickRun(source, run, start) {
+  let cursor = source.indexOf(run, start);
+  while (cursor >= 0) {
+    const before = source[cursor - 1];
+    const after = source[cursor + run.length];
+    if (before !== "`" && after !== "`") return cursor;
+    cursor = source.indexOf(run, cursor + 1);
+  }
+  return -1;
+}
+
+function readFence(line) {
+  const match = /^( {0,3})(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!match || (match[2][0] === "`" && match[3].includes("`"))) return null;
+  return { marker: match[2][0], length: match[2].length };
+}
+
+function isClosingFence(line, fence) {
+  const match = /^( {0,3})(`{3,}|~{3,})\s*$/.exec(line);
+  return Boolean(match && match[2][0] === fence.marker && match[2].length >= fence.length);
+}
+
+function findPublicDocComment(line, index) {
+  return PUBLIC_DOC_COMMENT_MARKERS.find(({ start }) => line.startsWith(start, index));
+}
+
+function maskPublicDocComment(line, index, endMarker) {
+  const end = line.indexOf(endMarker, index);
+  if (end < 0) {
+    return {
+      output: line.slice(index).replace(/[^\n]/g, " "),
+      nextIndex: line.length,
+      commentEnd: endMarker,
+      closed: false,
+    };
+  }
+
+  const endExclusive = end + endMarker.length;
+  return {
+    output: line.slice(index, endExclusive).replace(/[^\n]/g, " "),
+    nextIndex: endExclusive,
+    commentEnd: null,
+    closed: true,
+  };
+}
+
+function copyInlineCode(line, index, run) {
+  const end = findBacktickRun(line, run, index);
+  if (end < 0) {
+    return { output: line.slice(index), nextIndex: line.length, closed: false };
+  }
+
+  const endExclusive = end + run.length;
+  return { output: line.slice(index, endExclusive), nextIndex: endExclusive, closed: true };
+}
+
+function consumePublicDocToken(line, index, state) {
+  if (state.commentEnd) {
+    const consumed = maskPublicDocComment(line, index, state.commentEnd);
+    return {
+      ...consumed,
+      inlineCodeRun: null,
+      done: !consumed.closed,
+    };
+  }
+
+  if (state.inlineCodeRun) {
+    const consumed = copyInlineCode(line, index, state.inlineCodeRun);
+    return {
+      ...consumed,
+      commentEnd: null,
+      inlineCodeRun: consumed.closed ? null : state.inlineCodeRun,
+      done: !consumed.closed,
+    };
+  }
+
+  if (line[index] === "`") {
+    const run = readBacktickRun(line, index);
+    const consumed = copyInlineCode(line, index + run.length, run);
+    return {
+      output: line.slice(index, index + run.length) + consumed.output,
+      nextIndex: consumed.nextIndex,
+      commentEnd: null,
+      inlineCodeRun: consumed.closed ? null : run,
+      done: !consumed.closed,
+    };
+  }
+
+  const comment = findPublicDocComment(line, index);
+  if (comment) {
+    const consumed = maskPublicDocComment(line, index, comment.end);
+    return {
+      ...consumed,
+      inlineCodeRun: null,
+      done: !consumed.closed,
+    };
+  }
+
+  return {
+    output: line[index],
+    nextIndex: index + 1,
+    commentEnd: null,
+    inlineCodeRun: null,
+    done: false,
+  };
+}
+
+function maskPublicDocLine(line, state) {
+  let output = "";
+  let cursor = 0;
+  let currentState = state;
+
+  while (cursor < line.length) {
+    const consumed = consumePublicDocToken(line, cursor, currentState);
+    output += consumed.output;
+    currentState = {
+      commentEnd: consumed.commentEnd,
+      inlineCodeRun: consumed.inlineCodeRun,
+    };
+    if (consumed.done) return { output, ...currentState };
+    cursor = consumed.nextIndex;
+  }
+
+  return { output, ...currentState };
+}
+
+function stripPublicDocCommentsPreservingLines(source) {
+  let output = "";
+  let fence = null;
+  let state = { commentEnd: null, inlineCodeRun: null };
+
+  for (const line of source.split("\n")) {
+    if (fence) {
+      output += line;
+      if (isClosingFence(line, fence)) fence = null;
+    } else {
+      const openingFence = state.commentEnd || state.inlineCodeRun ? null : readFence(line);
+      if (openingFence) {
+        output += line;
+        fence = openingFence;
+        state = { commentEnd: null, inlineCodeRun: null };
+      } else {
+        const masked = maskPublicDocLine(line, state);
+        output += masked.output;
+        state = { commentEnd: masked.commentEnd, inlineCodeRun: masked.inlineCodeRun };
+      }
+    }
+    output += "\n";
+  }
+
+  return output.slice(0, -1);
+}
+
+function containsPublicDocEmDash(value) {
+  return value.includes(EM_DASH);
+}
+
+export function findPublicDocViolations(source, file, root) {
+  return stripPublicDocCommentsPreservingLines(source)
+    .split("\n")
+    .flatMap((line, index) =>
+      containsPublicDocEmDash(line)
+        ? [{ kind: "public-doc", file: relativePath(file, root), line: index + 1 }]
+        : [],
+    );
+}
+
 function listFiles(directory, predicate, files = []) {
   if (!fs.existsSync(directory)) return files;
 
@@ -245,6 +424,19 @@ function scanCatalogDirectory(directory, root, violations) {
   }
 }
 
+export function scanPublicDocsEmDashViolations({
+  docsRoot = path.join(REPO_ROOT, "docs", "public"),
+  root = REPO_ROOT,
+} = {}) {
+  const violations = [];
+  for (const file of listFiles(docsRoot, (candidate) =>
+    PUBLIC_DOC_EXTENSIONS.has(path.extname(candidate).toLowerCase()),
+  )) {
+    violations.push(...findPublicDocViolations(fs.readFileSync(file, "utf8"), file, root));
+  }
+  return violations;
+}
+
 export function scanUiEmDashViolations({ repoRoot = REPO_ROOT, webRoot = WEB_ROOT } = {}) {
   const violations = [];
   const sourceRoots = ["components", "app", "src", "hooks", "lib"].map((directory) =>
@@ -277,6 +469,13 @@ export function scanUiEmDashViolations({ repoRoot = REPO_ROOT, webRoot = WEB_ROO
     }
   }
 
+  violations.push(
+    ...scanPublicDocsEmDashViolations({
+      docsRoot: path.join(repoRoot, "docs", "public"),
+      root: repoRoot,
+    }),
+  );
+
   return violations;
 }
 
@@ -290,14 +489,14 @@ function formatViolation(violation) {
 function main() {
   const violations = scanUiEmDashViolations();
   if (violations.length > 0) {
-    console.error(`✗ ${violations.length} UI em dash violation(s):\n`);
+    console.error(`✗ ${violations.length} public-copy em dash violation(s):\n`);
     for (const violation of violations) console.error(formatViolation(violation));
     console.error("\nUse a period, colon, comma, semicolon, or parentheses in user-facing copy.");
     process.exitCode = 1;
     return;
   }
 
-  console.log("✓ no em dashes in UI strings or locale values.");
+  console.log("✓ no em dashes in public copy or locale values.");
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

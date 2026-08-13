@@ -790,7 +790,7 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 		t.Fatalf("expected nil move on empty, got %v err=%v", move, err)
 	}
 
-	move := &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-A", Position: 0}
+	move := &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-A", Position: 0, Actor: "agent"}
 	if err := repo.SetPendingMove(ctx, "s1", move); err != nil {
 		t.Fatalf("set pending: %v", err)
 	}
@@ -807,6 +807,9 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	}
 	if got == nil || got.WorkflowStepID != "step-B" {
 		t.Errorf("expected step-B after upsert, got %+v", got)
+	}
+	if got == nil || got.Actor != "agent" {
+		t.Errorf("expected agent actor after upsert, got %+v", got)
 	}
 
 	// Take again -> nil.

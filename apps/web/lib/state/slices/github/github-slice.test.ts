@@ -57,6 +57,7 @@ function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCI
     using_default_prompt: true,
     updated_at: "2026-06-18T10:00:00Z",
     pr_states: [],
+    pr_options: [],
     ...overrides,
   };
 }
@@ -388,5 +389,50 @@ describe("task CI automation options", () => {
     expect(state.saving["task-1"]).toBe(true);
     expect(state.errors["task-1"]).toBe("failed");
     expect(state.byTaskId["task-1"]).toEqual(options);
+  });
+
+  it("keeps newer CI options when delayed, equal, or unversioned updates arrive", () => {
+    const store = makeStore();
+    const newer = makeCIOptions({
+      auto_fix_enabled: true,
+      updated_at: "2026-06-18T10:01:00Z",
+    });
+    store.getState().setTaskCIAutomationOptions("task-1", newer);
+
+    store
+      .getState()
+      .setTaskCIAutomationOptions(
+        "task-1",
+        makeCIOptions({ auto_fix_enabled: false, updated_at: "2026-06-18T10:00:00Z" }),
+      );
+    store
+      .getState()
+      .setTaskCIAutomationOptions(
+        "task-1",
+        makeCIOptions({ auto_fix_enabled: false, updated_at: newer.updated_at }),
+      );
+    store
+      .getState()
+      .setTaskCIAutomationOptions(
+        "task-1",
+        makeCIOptions({ auto_fix_enabled: false, updated_at: "" }),
+      );
+
+    expect(store.getState().taskCIAutomation.byTaskId["task-1"]).toEqual(newer);
+  });
+
+  it("accepts a timestamped update after an unversioned initial value", () => {
+    const store = makeStore();
+    store
+      .getState()
+      .setTaskCIAutomationOptions(
+        "task-1",
+        makeCIOptions({ auto_fix_enabled: false, updated_at: "" }),
+      );
+    const timestamped = makeCIOptions({ auto_fix_enabled: true });
+
+    store.getState().setTaskCIAutomationOptions("task-1", timestamped);
+
+    expect(store.getState().taskCIAutomation.byTaskId["task-1"]).toEqual(timestamped);
   });
 });

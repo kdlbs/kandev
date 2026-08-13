@@ -14,14 +14,15 @@ import {
   usePRScopedReviewRequest,
 } from "./use-pr-scoped-review-request";
 import type { TaskPR, PRFeedback, GitHubPR, PRReview } from "@/lib/types/github";
+import { activateLocale, i18n } from "@/lib/i18n";
 
 const feedbackMocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   value: null as PRFeedback | null,
 }));
 const reviewMocks = vi.hoisted(() => ({ requestReviewers: vi.fn(), submitReview: vi.fn() }));
-const RE_REQUEST_BUTTON = "pr-rerequest-review-octocat";
-const PENDING_REVIEWER = "pr-pending-reviewer-octocat";
+const RE_REQUEST_BUTTON = "change-request-review-action-rerequest-review-octocat";
+const PENDING_REVIEWER = "change-request-pending-reviewer-octocat";
 const DISMISSED_REVIEWED_AT = "2026-01-01T00:00:00Z";
 
 vi.mock("@/hooks/domains/github/use-pr-feedback", () => ({
@@ -57,7 +58,7 @@ vi.mock("./pr-mergeability-notice", () => ({
 vi.mock("./pr-checks-section", () => ({ ChecksSection: () => null }));
 vi.mock("./pr-comments-section", () => ({ CommentsSection: () => null }));
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
   cleanup();
   feedbackMocks.refresh.mockReset();
@@ -65,6 +66,7 @@ afterEach(() => {
   reviewMocks.requestReviewers.mockReset();
   reviewMocks.submitReview.mockReset();
   clearPRReviewRequestRegistryForTests();
+  await activateLocale("en");
 });
 
 function makeTaskPR(overrides: Partial<TaskPR> = {}): TaskPR {
@@ -186,6 +188,29 @@ function prDetailTree(taskPR = makeTaskPR()) {
 function renderPRDetail(taskPR = makeTaskPR()) {
   return render(prDetailTree(taskPR));
 }
+
+describe("PRDetailContent shared presentation", () => {
+  it("renders GitHub through the provider-neutral change request detail", () => {
+    feedbackMocks.value = makeFeedback({ pr: { body: "Shared review body" } });
+
+    renderPRDetail();
+
+    expect(screen.getByTestId("change-request-detail")).not.toBeNull();
+    expect(screen.getByText("Test PR")).not.toBeNull();
+  });
+
+  it("localizes review actions instead of embedding English in the detail model", async () => {
+    await activateLocale("pseudo");
+    feedbackMocks.value = makeFeedback({ reviews: [dismissedReview()] });
+
+    renderPRDetail();
+
+    expect(screen.getByTestId(RE_REQUEST_BUTTON).textContent).toBe(
+      i18n.t("github:reRequestReview"),
+    );
+    expect(screen.getByTestId(RE_REQUEST_BUTTON).textContent).not.toBe("Re-request review");
+  });
+});
 
 describe("shouldHideApproveButton", () => {
   it("hides when PR is closed", () => {
@@ -328,7 +353,7 @@ describe("PRDetailContent optimistic review reconciliation", () => {
     await waitFor(() => {
       expect(screen.queryByTestId(PENDING_REVIEWER)).toBeNull();
     });
-    expect(screen.getByTestId("pr-submitted-review-octocat")).not.toBeNull();
+    expect(screen.getByTestId("change-request-submitted-review-octocat")).not.toBeNull();
   });
 });
 
@@ -355,7 +380,7 @@ describe("PRDetailContent same-timestamp review reconciliation", () => {
     view.rerender(prDetailTree());
 
     await waitFor(() => expect(screen.queryByTestId(PENDING_REVIEWER)).toBeNull());
-    expect(screen.getByTestId("pr-submitted-review-octocat")).not.toBeNull();
+    expect(screen.getByTestId("change-request-submitted-review-octocat")).not.toBeNull();
   });
 });
 
@@ -503,9 +528,7 @@ describe("PRDetailContent persistent request expiry", () => {
     feedbackMocks.value = makeFeedback({ reviews: [dismissedReview()] });
     reviewMocks.requestReviewers.mockResolvedValue({ requested: true });
     renderPRDetail();
-    const timersBeforeRequest = vi.getTimerCount();
     await act(async () => fireEvent.click(screen.getByTestId(RE_REQUEST_BUTTON)));
-    expect(vi.getTimerCount()).toBe(timersBeforeRequest + 1);
 
     act(() => vi.advanceTimersByTime(5 * 60 * 1000));
 

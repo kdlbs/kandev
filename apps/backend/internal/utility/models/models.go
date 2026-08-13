@@ -25,6 +25,15 @@ type UtilityAgent struct {
 	UpdatedAt           time.Time `json:"updated_at" db:"updated_at"`
 }
 
+// UsesDefaultProfile reports whether a built-in utility action has an explicit
+// inherited binding and therefore resolves through the global default. An
+// empty unconfigured row may be a stale binding from an older release that
+// erased its profile ID, so it must remain fail-closed.
+func UsesDefaultProfile(agent *UtilityAgent) bool {
+	return agent != nil && agent.Builtin && agent.AgentProfileID == "" &&
+		agent.ProfileBindingState == ProfileBindingInherit
+}
+
 // UtilityAgentCall represents a single invocation of a utility agent.
 type UtilityAgentCall struct {
 	ID             string     `json:"id" db:"id"`

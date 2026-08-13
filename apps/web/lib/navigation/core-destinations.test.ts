@@ -81,7 +81,24 @@ describe("navigation coverage guardrails", () => {
     ).toEqual([]);
   });
 
-  it("keeps the exemption list honest", () => {
+  it("keeps Home and Tasks in the mobile menu's primary section", () => {
+    // Settings, Office and plugin pages have neither kanban's brand link nor
+    // its View toggle — their nav sheet's Home and Tasks rows come from here.
+    // Kanban's drawer opts out at its call site via omitSections={["primary"]}.
+    const primary = resolveDestinations({
+      surface: "mobileMenu",
+      section: "primary",
+      ctx: NO_WORKSPACE_CONTEXT,
+    });
+
+    expect(ids(primary)).toEqual(["home", "tasks"]);
+  });
+
+  // Shape guard for whatever comes back into MOBILE_MENU_EXEMPTIONS: the list is
+  // empty today (the coverage test above is what carries the weight), so this
+  // asserts nothing until an entry is added — at which point it must name a real
+  // destination that genuinely has no mobileMenu surface, and say why.
+  it("holds any future exemption to naming a real destination and a reason", () => {
     for (const [id, reason] of Object.entries(MOBILE_MENU_EXEMPTIONS)) {
       const destination = APP_DESTINATIONS.find((entry) => entry.id === id);
       expect(destination, `${id} is exempt but is not a destination`).toBeTruthy();

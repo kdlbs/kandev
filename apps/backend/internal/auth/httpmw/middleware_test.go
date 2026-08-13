@@ -144,6 +144,30 @@ func TestEnabledModePATAuthenticates(t *testing.T) {
 	}
 }
 
+func TestEnabledModePATAuthenticatesPluginWebhook(t *testing.T) {
+	svc := newTestService(t, true)
+	setupAdmin(t, svc)
+	_, pat, err := svc.MintToken(context.Background(), userstore.DefaultUserID, "plugin-ui", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := newTestRouter(svc)
+	router.POST("/api/plugins/:id/webhooks/:key", func(c *gin.Context) {
+		if _, ok := authn.FromGin(c); !ok {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "no identity"})
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+
+	rec := doRequest(router, http.MethodPost, "/api/plugins/p1/webhooks/transcribe", func(r *http.Request) {
+		r.Header.Set("Authorization", "Bearer "+pat)
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authenticated plugin webhook: %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestEnabledModeAllowlistMatrix pins the pass/deny policy for every path
 // class from the plan's allowlist spec. 404 = middleware passed through
 // (route unregistered), 401 = middleware denied.
@@ -186,6 +210,22 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 		{
 			name: "github app webhook", method: http.MethodPost,
 			path: "/api/v1/github/app/registrations/reg1/webhook",
+		},
+		{
+			name: "github app manifest callback", method: http.MethodGet,
+			path: "/api/v1/github/app/registrations/reg1/manifest/callback",
+		},
+		{
+			name: "github app installation callback", method: http.MethodGet,
+			path: "/api/v1/github/app/registrations/reg1/install/callback",
+		},
+		{
+			name: "github app personal callback", method: http.MethodGet,
+			path: "/api/v1/github/app/registrations/reg1/personal/callback",
+		},
+		{
+			name: "github app callback wrong method", method: http.MethodPost,
+			path: "/api/v1/github/app/registrations/reg1/manifest/callback", blocked: true,
 		},
 
 		{name: "office without bearer", method: http.MethodGet, path: "/api/v1/office/tasks/t1", blocked: true},

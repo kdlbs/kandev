@@ -24,7 +24,10 @@ import { TaskDeleteConfirmDialog } from "../task-delete-confirm-dialog";
 import { TaskDetachTargetConfirmDialog } from "../task-detach-confirm-dialog";
 import { TaskRenameDialog } from "../task-rename-dialog";
 import { SidebarLinkDialogs } from "../task-session-sidebar-dialogs";
-import { useSidebarLinkActions } from "../task-session-sidebar-link-actions";
+import {
+  PluginTaskLinkActionSurfaceProvider,
+  useSidebarLinkActions,
+} from "../task-session-sidebar-link-actions";
 import { useSidebarTaskLinking } from "../task-session-sidebar-task-linking";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
@@ -342,56 +345,60 @@ function TaskSwitcherSurfaceContent({
         <SidebarFilterBar />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto p-2" data-testid="mobile-task-switcher-list">
-        <MobileTaskList
-          tasks={data.tasksWithRepositories}
-          workflows={data.workflows}
-          stepsByWorkflowId={data.stepsByWorkflowId}
-          activeTaskId={data.activeTaskId}
-          selectedTaskId={data.selectedTaskId}
-          onSelectTask={actions.handleSelectTask}
-          onEditTask={surfaceAction(presentation, onOpenChange, edit.handleEditTask)}
-          onRenameTask={surfaceAction(presentation, onOpenChange, rename.handleRenameTask)}
-          onCreateSubtask={onCreateSubtask}
-          onArchiveTask={surfaceAction(presentation, onOpenChange, actions.handleArchiveTask)}
-          onDeleteTask={surfaceAction(presentation, onOpenChange, actions.handleDeleteTask)}
-          onDetachTask={surfaceAction(presentation, onOpenChange, actions.handleDetachTask)}
-          onNestTask={actions.handleNestTask}
-          onLinkPullRequest={surfaceAction(
-            presentation,
-            onOpenChange,
-            linking.taskListHandlers.onLinkPullRequest,
-          )}
-          onLinkIssue={surfaceAction(
-            presentation,
-            onOpenChange,
-            linking.taskListHandlers.onLinkIssue,
-          )}
-          onLinkMergeRequest={surfaceAction(
-            presentation,
-            onOpenChange,
-            linking.taskListHandlers.onLinkMergeRequest,
-          )}
-          onLinkJiraTicket={surfaceAction(
-            presentation,
-            onOpenChange,
-            linking.taskListHandlers.onLinkJiraTicket,
-          )}
-          onLinkLinearIssue={surfaceAction(
-            presentation,
-            onOpenChange,
-            linking.taskListHandlers.onLinkLinearIssue,
-          )}
-          onLinkSentryIssue={surfaceAction(
-            presentation,
-            onOpenChange,
-            linking.taskListHandlers.onLinkSentryIssue,
-          )}
-          deletingTaskId={actions.deletingTaskId}
-          isLoading={data.tasksLoading}
-          loadError={data.archivedError ? t("sidebar:archivedLoadFailed") : null}
-          onRetryLoad={data.retryArchivedTasks}
-          retryLabel={t("sidebar:retry")}
-        />
+        <PluginTaskLinkActionSurfaceProvider
+          beforePluginRun={presentation === "drawer" ? () => onOpenChange(false) : undefined}
+        >
+          <MobileTaskList
+            tasks={data.tasksWithRepositories}
+            workflows={data.workflows}
+            stepsByWorkflowId={data.stepsByWorkflowId}
+            activeTaskId={data.activeTaskId}
+            selectedTaskId={data.selectedTaskId}
+            onSelectTask={actions.handleSelectTask}
+            onEditTask={surfaceAction(presentation, onOpenChange, edit.handleEditTask)}
+            onRenameTask={surfaceAction(presentation, onOpenChange, rename.handleRenameTask)}
+            onCreateSubtask={onCreateSubtask}
+            onArchiveTask={surfaceAction(presentation, onOpenChange, actions.handleArchiveTask)}
+            onDeleteTask={surfaceAction(presentation, onOpenChange, actions.handleDeleteTask)}
+            onDetachTask={surfaceAction(presentation, onOpenChange, actions.handleDetachTask)}
+            onNestTask={actions.handleNestTask}
+            onLinkPullRequest={surfaceAction(
+              presentation,
+              onOpenChange,
+              linking.taskListHandlers.onLinkPullRequest,
+            )}
+            onLinkIssue={surfaceAction(
+              presentation,
+              onOpenChange,
+              linking.taskListHandlers.onLinkIssue,
+            )}
+            onLinkMergeRequest={surfaceAction(
+              presentation,
+              onOpenChange,
+              linking.taskListHandlers.onLinkMergeRequest,
+            )}
+            onLinkJiraTicket={surfaceAction(
+              presentation,
+              onOpenChange,
+              linking.taskListHandlers.onLinkJiraTicket,
+            )}
+            onLinkLinearIssue={surfaceAction(
+              presentation,
+              onOpenChange,
+              linking.taskListHandlers.onLinkLinearIssue,
+            )}
+            onLinkSentryIssue={surfaceAction(
+              presentation,
+              onOpenChange,
+              linking.taskListHandlers.onLinkSentryIssue,
+            )}
+            deletingTaskId={actions.deletingTaskId}
+            isLoading={data.tasksLoading}
+            loadError={data.archivedError ? t("sidebar:archivedLoadFailed") : null}
+            onRetryLoad={data.retryArchivedTasks}
+            retryLabel={t("sidebar:retry")}
+          />
+        </PluginTaskLinkActionSurfaceProvider>
       </div>
     </>
   );

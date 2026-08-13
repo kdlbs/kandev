@@ -4,10 +4,9 @@ const CI = !!process.env.CI;
 
 export default defineConfig({
   testDir: "./tests",
-  // `fullyParallel: true` is required so `--shard=N/M` splits work at the test
-  // level (not the file level). With file-level sharding the suite was wildly
-  // unbalanced: largest shard ran 12 min, smallest 1.5 min, because spec files
-  // vary from 1 to 30+ tests. Test-level sharding flattens that distribution.
+  // `fullyParallel: true` keeps direct local `--shard=N/M` runs at test level.
+  // CI uses explicit duration-aware file manifests from e2e/scripts instead;
+  // this setting preserves the existing local debugging behavior.
   //
   // Concurrency is still capped by `workers: 1` below — only one test runs at a
   // time per shard process, preserving the worker-scoped backend invariant that
@@ -24,7 +23,7 @@ export default defineConfig({
   // the fixture's baseline env snapshot).
   fullyParallel: true,
   forbidOnly: CI,
-  failOnFlakyTests: !CI,
+  failOnFlakyTests: !CI || process.env.E2E_FAIL_ON_FLAKY === "1",
   retries: CI ? 2 : 0,
   workers: 1,
   timeout: 60_000,
@@ -96,13 +95,10 @@ export default defineConfig({
       testMatch: [/docker\/.*\.spec\.ts/, /ssh\/.*\.spec\.ts/],
       use: { ...devices["Desktop Chrome"] },
       timeout: 180_000,
-      // Per-test sharding: CI runs `--shard=N/6` to split this project's
-      // tests across runners. Playwright only shards at the test level
-      // when fullyParallel is true (otherwise sharding is by file, and
-      // since this project has a single spec file every test would land
-      // in shard 1). Each shard is its own process with its own backend,
-      // and workers:1 still serializes tests within a shard, so this is
-      // safe.
+      // Local `--shard=N/6` runs can still split this project at test level.
+      // CI uses explicit files from the duration-aware containers manifests.
+      // Each CI shard is its own process, and workers:1 still serializes tests
+      // within a shard, so the worker-scoped backend remains safe.
       fullyParallel: true,
     },
   ],

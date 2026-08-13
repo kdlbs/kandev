@@ -1,7 +1,26 @@
 import { test, expect } from "../../fixtures/test-base";
+import { expectElementsNotToIntersect } from "../../helpers/layout-assertions";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import type { MessageQueueSettingsValue } from "../../../lib/types/system";
+import {
+  MESSAGE_QUEUE_SETTINGS_PATH,
+  requestMessageQueueSettings,
+  restoreMessageQueueSettings,
+} from "../../helpers/message-queue-settings";
 
-test("mobile navigation reaches Message Queue with touch-safe shared settings layout", async ({
+let baseline: MessageQueueSettingsValue | undefined;
+
+test.beforeEach(async ({ apiClient }) => {
+  baseline = (await requestMessageQueueSettings(apiClient, "GET")).settings;
+});
+
+test.afterEach(async ({ apiClient }) => {
+  if (!baseline) return;
+  await restoreMessageQueueSettings(apiClient, baseline);
+  baseline = undefined;
+});
+
+test("mobile navigation reaches the Message Queue section with touch-safe shared settings layout", async ({
   testPage,
 }) => {
   const mobile = new MobileKanbanPage(testPage);
@@ -9,16 +28,14 @@ test("mobile navigation reaches Message Queue with touch-safe shared settings la
   await mobile.mobileMenuButton.click();
   const homeMenu = testPage.getByTestId("mobile-home-menu-card");
   await homeMenu.getByRole("link", { name: "Settings" }).click();
-  await testPage.getByTestId("settings-mobile-menu-button").click();
-
-  const menu = testPage.getByTestId("settings-mobile-menu");
-  await menu.getByRole("button", { name: "Expand General" }).click();
-  await menu.getByRole("link", { name: "Message Queue" }).click();
+  // Settings lands on the /settings index; the queue lives on Task behavior.
+  const index = testPage.getByTestId("settings-index");
+  await index.getByRole("link", { name: /^Task Behavior/ }).click();
 
   await expect(testPage).toHaveURL(
-    (url) => new URL(url).pathname === "/settings/general/message-queue",
+    (url) => new URL(url).pathname === "/settings/preferences/task-behavior",
   );
-  await expect(testPage.getByTestId("system-page-title")).toHaveText("Message Queue");
+  await expect(testPage.getByText("Message Queue").first()).toBeVisible();
 
   const input = testPage.getByTestId("message-queue-max-per-session");
   await expect(input).toBeVisible();
@@ -39,12 +56,35 @@ test("mobile navigation reaches Message Queue with touch-safe shared settings la
   );
   expect(nestedScrollOwners).toBe(0);
 
-  const current = await input.inputValue();
-  await input.fill(current === "23" ? "24" : "23");
+  if (!baseline) throw new Error("message queue settings baseline was not captured");
+  const toggle = testPage.getByTestId("message-queue-auto-merge-enabled");
+  const touchTarget = testPage.getByTestId("message-queue-auto-merge-touch-target");
+  await expect(toggle).toHaveAttribute("aria-checked", String(baseline.auto_merge_enabled));
+  const touchBox = await touchTarget.boundingBox();
+  expect(touchBox).not.toBeNull();
+  expect(touchBox!.width).toBeGreaterThanOrEqual(44);
+  expect(touchBox!.height).toBeGreaterThanOrEqual(44);
+
+  await toggle.tap();
   const saveBar = testPage.getByTestId("settings-floating-save");
   await expect(saveBar).toBeVisible();
-  const [inputAfterEdit, saveBox] = await Promise.all([input.boundingBox(), saveBar.boundingBox()]);
-  expect(inputAfterEdit).not.toBeNull();
-  expect(saveBox).not.toBeNull();
-  expect(inputAfterEdit!.y + inputAfterEdit!.height).toBeLessThan(saveBox!.y);
+  await expectElementsNotToIntersect(touchTarget, saveBar);
+  await saveBar.getByRole("button", { name: "Reset" }).tap();
+  await expect(toggle).toHaveAttribute("aria-checked", String(baseline.auto_merge_enabled));
+  await expect(saveBar).not.toBeVisible();
+
+  const expected = !baseline.auto_merge_enabled;
+  const saveResponse = testPage.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname === MESSAGE_QUEUE_SETTINGS_PATH,
+  );
+  await toggle.tap();
+  await saveBar.getByRole("button", { name: "Save changes" }).tap();
+  expect((await saveResponse).request().postDataJSON()).toEqual({ auto_merge_enabled: expected });
+  await testPage.reload();
+  await expect(testPage.getByTestId("message-queue-auto-merge-enabled")).toHaveAttribute(
+    "aria-checked",
+    String(expected),
+  );
 });

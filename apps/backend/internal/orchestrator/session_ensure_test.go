@@ -527,3 +527,152 @@ func TestResolveTaskAgentProfile_StepThenWorkflowThenWorkspace(t *testing.T) {
 		}
 	})
 }
+
+func TestEnsureSession_AutoStartFalsePreparesInsteadOfStarting(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-start"] = &wfmodels.WorkflowStep{
+		ID: "step-start",
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+		},
+	}
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+
+	seedTask := func(taskID string) {
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkflowID: "wf1", WorkspaceID: "ws1", WorkflowStepID: "step-start", Title: "T", Metadata: map[string]interface{}{"agent_profile_id": "profile1"}, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatalf("seed task %s: %v", taskID, err)
+		}
+		taskRepo.tasks[taskID] = &v1.Task{
+			ID:          taskID,
+			WorkspaceID: "ws1",
+			Metadata:    map[string]any{"agent_profile_id": "profile1"},
+		}
+	}
+
+	t.Run("control: no override starts on an auto-start step", func(t *testing.T) {
+		seedTask("task-start")
+		resp, err := svc.EnsureSession(ctx, "task-start")
+		if err != nil {
+			t.Fatalf("ensure session: %v", err)
+		}
+		if resp.Source != "created_start" {
+			t.Fatalf("Source = %q, want created_start", resp.Source)
+		}
+	})
+
+	t.Run("auto_start false prepares instead of starting", func(t *testing.T) {
+		seedTask("task-prepare")
+		falseVal := false
+		resp, err := svc.EnsureSession(ctx, "task-prepare", EnsureSessionOptions{AutoStart: &falseVal})
+		if err != nil {
+			t.Fatalf("ensure session: %v", err)
+		}
+		if resp.Source != "created_prepare" {
+			t.Fatalf("Source = %q, want created_prepare", resp.Source)
+		}
+		if resp.State != string(models.TaskSessionStateCreated) {
+			t.Fatalf("State = %q, want %q", resp.State, models.TaskSessionStateCreated)
+		}
+	})
+}
+
+func TestEnsureSession_AutoStartFalseNeverUpgradesPassthrough(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	stepGetter := newMockStepGetter()
+	// A step WITHOUT auto_start_agent forces the prepare path, where the
+	// passthrough upgrade would otherwise fire.
+	stepGetter.steps["step-plain"] = &wfmodels.WorkflowStep{ID: "step-plain"}
+	stepGetter.steps["step-start"] = &wfmodels.WorkflowStep{
+		ID: "step-start",
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{
+		isPassthrough: true,
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+
+	seedPassthroughTask := func(taskID, stepID string) {
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkflowID: "wf1", WorkspaceID: "ws1", WorkflowStepID: stepID, Title: "T", Metadata: map[string]interface{}{"agent_profile_id": "passthrough-profile"}, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatalf("seed task %s: %v", taskID, err)
+		}
+		taskRepo.tasks[taskID] = &v1.Task{
+			ID:          taskID,
+			WorkspaceID: "ws1",
+			Metadata:    map[string]any{"agent_profile_id": "passthrough-profile"},
+		}
+	}
+
+	t.Run("passthrough prepare without override still upgrades (existing behavior)", func(t *testing.T) {
+		seedPassthroughTask("ptask-upgrade", "step-plain")
+		resp, err := svc.EnsureSession(ctx, "ptask-upgrade")
+		if err != nil {
+			t.Fatalf("ensure session: %v", err)
+		}
+		// The passthrough prepare is eagerly upgraded into a full launch, so
+		// the session reaches STARTING (agent process started synchronously).
+		if resp.State != string(models.TaskSessionStateStarting) {
+			t.Fatalf("State = %q, want %q (eager passthrough upgrade)", resp.State, models.TaskSessionStateStarting)
+		}
+	})
+
+	t.Run("passthrough prepare with auto_start false stays prepared", func(t *testing.T) {
+		seedPassthroughTask("ptask-no-launch", "step-plain")
+		falseVal := false
+		resp, err := svc.EnsureSession(ctx, "ptask-no-launch", EnsureSessionOptions{AutoStart: &falseVal})
+		if err != nil {
+			t.Fatalf("ensure session: %v", err)
+		}
+		if resp.Source != "created_prepare" {
+			t.Fatalf("Source = %q, want created_prepare", resp.Source)
+		}
+		if resp.State != string(models.TaskSessionStateCreated) {
+			t.Fatalf("State = %q, want %q (override must not launch the passthrough agent)", resp.State, models.TaskSessionStateCreated)
+		}
+	})
+
+	t.Run("passthrough auto-start step with auto_start false stays prepared", func(t *testing.T) {
+		seedPassthroughTask("ptask-start-step", "step-start")
+		falseVal := false
+		resp, err := svc.EnsureSession(ctx, "ptask-start-step", EnsureSessionOptions{AutoStart: &falseVal})
+		if err != nil {
+			t.Fatalf("ensure session: %v", err)
+		}
+		if resp.Source != "created_prepare" {
+			t.Fatalf("Source = %q, want created_prepare", resp.Source)
+		}
+		if resp.State != string(models.TaskSessionStateCreated) {
+			t.Fatalf("State = %q, want %q (override must not launch the passthrough agent)", resp.State, models.TaskSessionStateCreated)
+		}
+	})
+}

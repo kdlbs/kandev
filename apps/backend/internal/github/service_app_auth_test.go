@@ -231,7 +231,7 @@ func TestServicePreparesImportAndRejectsWrongBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	if prepared.RegistrationID == "" || prepared.PublicBaseURL != "https://kandev.example" ||
-		prepared.SetupURL != prepared.InstallCallbackURL {
+		prepared.SetupURL != "" {
 		t.Fatalf("prepared import = %+v", prepared)
 	}
 	_, err = service.ImportAppRegistration(context.Background(), DefaultUserID, AppRegistrationImportRequest{

@@ -18,8 +18,17 @@ async function installFixture(page: Page) {
 }
 
 test.describe("Mobile Status drawer", () => {
+  test.beforeEach(async ({ apiClient }) => {
+    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      app_status_bar_enabled: true,
+    });
+  });
+
   test.afterEach(async ({ apiClient }) => {
     await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
+    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      app_status_bar_enabled: false,
+    });
   });
 
   test("keeps a single status signal compact", async ({ testPage, apiClient }) => {

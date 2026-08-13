@@ -15,11 +15,12 @@ from the in-app catalog, see the [Plugin marketplace](plugins-marketplace.md).
 For building a plugin, see [Authoring a plugin](plugins-authoring.md). For the
 manifest schema, see [Plugin manifest reference](plugins-manifest.md).
 
-Plugins are an operator-level, instance-wide capability — there is no
-per-user plugin access. They ship in the base product with no feature flag to
-turn on: **Settings > Plugins** is always available in the sidebar. Because
+Plugins are an operator-level, instance-wide capability, there is no
+per-user plugin access. Installing a plugin requires an administrator when
+authentication is enabled. They ship in the base product with no feature flag
+to turn on: **Settings > Plugins** is always available in the sidebar. Because
 loaded plugin code runs with backend privileges, install only plugins you
-trust — see [Security posture](#security-posture).
+trust, see [Security posture](#security-posture).
 
 ## Quick path
 
@@ -36,19 +37,19 @@ Kandev owns the whole process lifecycle: it extracts the package, spawns the
 binary, completes the go-plugin handshake, health-checks it (`Ping` every
 30s), and restarts it on crash or repeated health-check failure (backoff,
 max 5 attempts). There is no separate operator-managed plugin process to run
-or babysit — install a package and kandev does the rest.
+or babysit; install a package and kandev does the rest.
 
 A native UI bundle can register a nav item that renders as a top-level
 sidebar entry or, when it declares itself part of the Integrations section,
 alongside kandev's first-party integration links in the main sidebar's
-**Integrations** section — expect new entries to appear there once such a
+**Integrations** section: expect new entries to appear there once such a
 plugin is installed and active. Bundles can also inject components into
 host-defined slots, including **icon buttons in the chat composer toolbar**
 (beside the model picker, mic, and send button), so an active plugin can add
 its own action right where you message an agent. A bundle can also declare
 **keybindings** (user-overridable at **Settings > Keyboard Shortcuts**, with
 core shortcuts always winning on a conflict) and open host-owned **modal
-windows** from anywhere in its code — see [Authoring a
+windows** from anywhere in its code: see [Authoring a
 plugin](plugins-authoring.md) for both.
 
 ### Global Status contributions
@@ -82,12 +83,12 @@ Full-bleed routes that opt out of host topbar chrome own their Status trigger.
 
 ## Installing a plugin
 
-The easiest way to install is from the in-app catalog — **Settings > Plugins >
+The easiest way to install is from the in-app catalog: **Settings > Plugins >
 Browse**, then **Install** on a card (see the [Plugin
 marketplace](plugins-marketplace.md)). To install a plugin that is not in a
 configured catalog, open **Settings > Plugins** and click **Install plugin**.
 You can install from a URL (kandev downloads the tarball) or by uploading a
-`.tar.gz` file directly. No credentials are ever shown or copied — installing a
+`.tar.gz` file directly. No credentials are ever shown or copied; installing a
 plugin has nothing to reveal, unlike a webhook-secret/API-key registration
 flow.
 
@@ -111,7 +112,7 @@ Either path runs the same pipeline:
 1. Verify `checksums.txt` covers every other file in the tarball and every
    hash matches (always enforced).
 2. Check for `checksums.txt.sig`. Signature verification is not currently
-   wired up, so every package — signed or not — installs and is reported
+   wired up, so every package, signed or not, installs and is reported
    as unsigned today (see "Signed vs. unsigned packages" below).
 3. Parse and validate `manifest.yaml` **before any code runs**: schema, `id`
    pattern, the `categories` and UI-surface enums, and that
@@ -128,7 +129,7 @@ Either path runs the same pipeline:
    is not stored verbatim.
 
 A successful install that failed to spawn returns HTTP 201 with a
-`warning` field rather than failing outright — the package is installed,
+`warning` field rather than failing outright. The package is installed,
 just not yet running.
 
 Once installed, the plugin appears in the list with its category, a status
@@ -148,19 +149,19 @@ through the install endpoint. The **Sync** button in Settings > Plugins (and
 `POST /api/plugins/sync`) reconciles kandev's registry with what is actually
 on disk:
 
-- **A dropped directory** — `~/.kandev/plugins/<id>/<version>/manifest.yaml`
-  placed manually with no existing record — is validated and registered
+- **A dropped directory** (`~/.kandev/plugins/<id>/<version>/manifest.yaml`)
+  placed manually with no existing record is validated and registered
   with status **`disabled`**, never auto-enabled. Directory sideloads skip
   the checksum/integrity gate the URL/upload pipeline runs, so an operator
   must explicitly inspect and enable one. If more than one version
   directory exists for the same unregistered id, the lexically greatest
   version is registered and the others are reported as skipped.
-- **A dropped tarball** — any `*.tar.gz` sitting directly in
-  `~/.kandev/plugins/` — is run through the same verified install pipeline
+- **A dropped tarball** (any `*.tar.gz` sitting directly in
+  `~/.kandev/plugins/`) is run through the same verified install pipeline
   `POST /api/plugins/install` uses. On success the tarball file is deleted;
   on failure it is left in place and the failure is reported.
-- **A missing install** — a registered record whose `install_path` no
-  longer exists on disk — is stopped (if running) and marked `error`.
+- **A missing install** (a registered record whose `install_path` no
+  longer exists on disk) is stopped (if running) and marked `error`.
 
 At boot, kandev runs only the directory-sideload and missing-install steps
 (never the tarball-install step), as part of resuming plugins that were
@@ -180,7 +181,7 @@ binary an operator hasn't explicitly approved via install or Sync.
   so the row/detail immediately shows the replacement reason and keeps the
   plugin in `error`.
 - **Uninstall** stops the subprocess and deletes the plugin's package,
-  registration record, and all persisted state — there is no grace period.
+  registration record, and all persisted state; there is no grace period.
 
 When a plugin is in `error`, its declared events remain buffered in the bounded
 100-event/5-minute ring buffer. If that buffer overflows, kandev drops the
@@ -194,7 +195,7 @@ A plugin can declare `config_schema` in its manifest, generating a settings
 form at **Settings > Plugins > `<plugin>`** (also `GET /api/plugins/{id}/config`
 and `PATCH /api/plugins/{id}`). Fields marked `secret: true` or
 `format: "password"` (for example a GitHub PAT) are never returned in
-cleartext to the operator UI — reads show a masked placeholder, and
+cleartext to the operator UI. Reads show a masked placeholder, and
 resubmitting the form unchanged leaves the stored secret alone. The plugin
 process itself receives the real values via the `GetConfig` Host RPC.
 Saving config **restarts the running plugin** so it re-reads its config.
@@ -203,8 +204,8 @@ references rather than cleartext for secret fields.
 
 ![A plugin's settings page: a schema-driven form with a masked API-token field, a toggle, and a text field, above a Manifest card showing the plugin's id, version, signing status, and capabilities.](../screenshots/plugin-settings-page.png)
 
-A plugin can also render its own UI inline on this page — at the top, above the
-settings form — via the `plugin-settings` slot, for example a live
+A plugin can also render its own UI inline on this page, at the top, above the
+settings form, via the `plugin-settings` slot, for example a live
 integration-health card ("CLI installed ✅ v0.45.2", "API token ✅
 authenticated"). This is owner-scoped, so a plugin's card only ever appears on
 its own settings page. See [supported named
@@ -215,11 +216,11 @@ slots](plugins-authoring.md#supported-named-slots) in the authoring guide.
 
 ## Signed vs. unsigned packages
 
-Every package's `checksums.txt` is verified at install time — this integrity
+Every package's `checksums.txt` is verified at install time: this integrity
 gate is always enforced. Signing (`checksums.txt.sig`, an ed25519 signature
 over `checksums.txt`) is a separate, optional layer, and its verification
 hook is not currently wired up in the shipped product: no signature is
-cryptographically checked today, so every install — signed tarball or not —
+cryptographically checked today, so every install, signed tarball or not,
 is currently treated and reported as unsigned. A signed package installs
 identically to an unsigned one; signing is not required in v1.
 
@@ -234,7 +235,7 @@ identically to an unsigned one; signing is not required in v1.
     │   ├── manifest.yaml
     │   ├── server/plugin-<goos>-<goarch>[.exe]
     │   └── ui/bundle.js         # optional
-    └── data/                    # KANDEV_PLUGIN_DATA_DIR — shared across versions
+    └── data/                    # KANDEV_PLUGIN_DATA_DIR; shared across versions
 ```
 
 </details>
@@ -247,34 +248,35 @@ recorded and are cleared after successful recovery.
 ## Security posture
 
 - **Auth is the spawn relationship.** Kandev spawns the plugin subprocess
-  itself over a unix domain socket (macOS/Linux) or loopback TCP (Windows) —
-  never a routable network address — and secures it in both cases with the
+  itself over a unix domain socket (macOS/Linux) or loopback TCP (Windows),
+  never a routable network address, and secures it in both cases with the
   go-plugin handshake plus AutoMTLS. There is no `api_key`, `webhook_secret`,
   or HMAC signing anywhere in the contract.
 - **Capability-based access control.** A plugin can only call the Host RPCs
   it declared in its manifest: `state` gates the state RPCs, `secrets` gates
   the plugin-owned secret RPCs, and each read-only data accessor (tasks,
   sessions, workspaces, workflows, agent profiles, repositories) is gated
-  individually via `api_read:<resource>` and `api_write:<resource>` for the
-  implemented task/message Host writes. An undeclared capability returns gRPC
-  `PermissionDenied` with a message naming the missing capability, checked by
-  a server interceptor before the handler runs. `GetConfig` and `EmitEvent`
-  are the only ungated RPCs — a plugin can always read its own config
-  (secrets included) and emit events.
+  individually via `api_read:<resource>`. Task create/update and message send
+  are independently gated by `api_write:tasks` and `api_write:messages` and
+  use Kandev's first-party service paths. An undeclared capability returns
+  gRPC `PermissionDenied` with a message naming the missing capability,
+  checked before the handler runs. `GetConfig` and `EmitEvent` are the only
+  ungated RPCs: a plugin can always read its own config (secrets included)
+  and emit events.
 - **Native UI plugins run in-origin with full app-store access.** This is an
   accepted tradeoff, not an oversight: a plugin bundle shares the kandev
   React instance and Zustand store so it can build UI indistinguishable from
   first-party pages. In v1 only **active, operator-installed** plugins load;
   a failing bundle or `initialize` is caught and never breaks boot; slot
   components render behind error boundaries. Hard sandboxing (a worker or
-  realm boundary) is explicit future work — see below.
+  realm boundary) is explicit future work: see below.
 - **Package integrity is always checked; signing is optional.** See
   "Signed vs. unsigned packages" above.
 - **Curated marketplace, no auto-install.** The [Plugin
   marketplace](plugins-marketplace.md) adds one-click install from a catalog,
   but the official source is PR-curated (a plugin appears only after a
   maintainer approves it), install is always an explicit operator action, and
-  updates require an explicit click — there is no automatic discovery or
+  updates require an explicit click: there is no automatic discovery or
   background install. kandev collects no download or usage telemetry.
 
 Related: [Authoring a plugin](plugins-authoring.md), [Plugin manifest

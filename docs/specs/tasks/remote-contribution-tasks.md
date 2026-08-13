@@ -1,6 +1,7 @@
 ---
 status: approved
 created: 2026-08-04
+updated: 2026-08-12
 owner: product
 ---
 
@@ -13,6 +14,10 @@ they must manually reconstruct the target repository, contributor fork, head bra
 review association before an agent can make a useful change. Kandev should accept the remote change
 URL at task creation, prepare the contributor's exact branch, and push commits back to that branch
 without making `create_task_kandev` materially larger.
+
+The contributor can update or rewrite that branch after the task starts. Kandev keeps the task
+checkout as the user's working version. The provider remains authoritative for the published change.
+Kandev must preserve both versions and ask for user intent before one version replaces the other.
 
 ## What
 
@@ -29,8 +34,8 @@ without making `create_task_kandev` materially larger.
 - The task remains attached to the target repository. A versioned, non-secret contribution binding on
   that task-repository attachment identifies the existing change and its source repository and branch.
 - The prepared checkout starts at the provider-reported head SHA on the contributor's head branch.
-  `origin` continues to mean the target repository; a dedicated contribution remote points at the
-  source repository. Push operations for that attachment target the source branch without force.
+  `origin` continues to mean the target repository. A dedicated contribution remote points at the
+  source repository. Normal pushes target the source branch without force.
 - A same-repository change uses the target remote for both read and write. A fork change is accepted
   only when the provider reports that maintainers may update the source branch.
 - GitHub pull requests and GitLab merge requests are associated with the new task before agent launch,
@@ -41,8 +46,43 @@ without making `create_task_kandev` materially larger.
   server-authored contribution identity and branch guidance.
 - Ordinary repository URLs retain their current behavior, including default branch resolution,
   normal `origin` pushes, and new-PR creation.
+- Git status keeps two separate divergence concepts: `ahead`/`behind` compare the checkout with the
+  target base branch, while `remote_ahead`/`remote_behind` compare it with its configured upstream.
+  Push and pull affordances use the upstream-relative values; review scope and base-branch rebase
+  affordances continue to use the base-relative values.
+- For an associated contribution, Kandev compares the local HEAD and upstream snapshot with the
+  provider's current commit history using commit identity and ancestry evidence. It never infers
+  equivalence from commit message, author, timestamp, file statistics, or patch similarity.
+- The Changes panel uses provider evidence only from a pull request whose repository and normalized
+  head branch match the live checkout. Historical pull requests remain available in Review, but they
+  do not affect Changes after the checkout moves to another branch.
+- When the provider history no longer contains local HEAD, the Changes panel keeps the task version as
+  the primary version. A yellow warning icon in the Changes toolbar opens the available version
+  actions; the panel body does not repeat the warning. The current provider history remains collapsed
+  behind a **PR #<number> version** disclosure.
+- A diverged task keeps local edit, commit, amend, reset, and review actions available. Generic Pull is
+  unavailable because it requires a merge strategy. Push becomes an explicit **Replace PR branch**
+  action instead of a disabled control.
+- **Replace PR branch** requires a direct user action and an explicit destructive confirmation. The
+  confirmation identifies the selected repository and the current provider version. Kandev replaces
+  the remote branch only when its head still equals the confirmed provider head.
+- The managed replacement action uses an exact force-with-lease condition. If the provider head moves
+  after confirmation, Kandev changes neither version and asks the user to review the new state.
+- The user can select **Use PR version** instead. Kandev requires a clean working tree, creates a local
+  recovery branch at the current task HEAD, fetches the confirmed provider head, and resets the task
+  branch to that head. The result shows the recovery branch name.
+- Kandev exposes no replacement action through agent MCP tools or automatic Git operations. Generic
+  contribution force-push requests remain rejected. Direct terminal commands remain outside this UI
+  approval boundary.
+- A provider-ahead history that still contains local HEAD is a safe fast-forward case: the UI may offer
+  Pull, but must not label the existing local commits as unpushed work. A local-ahead history whose
+  tracked upstream equals the provider head may offer a normal Push for exactly `remote_ahead` commits.
 
-Decision: [ADR-2026-08-04-remote-contribution-bindings](../../decisions/2026-08-04-remote-contribution-bindings.md).
+Decisions:
+[ADR-2026-08-04-remote-contribution-bindings](../../decisions/2026-08-04-remote-contribution-bindings.md),
+[ADR-2026-08-10-remote-contribution-head-drift](../../decisions/2026-08-10-remote-contribution-head-drift.md),
+and
+[ADR-2026-08-12-local-first-contribution-replacement](../../decisions/2026-08-12-local-first-contribution-replacement.md).
 
 ## Data model
 
@@ -89,6 +129,16 @@ resolved workspace, returns the target repository input and validated contributi
 an association operation for the newly created task. Provider-specific API payloads do not cross that
 internal boundary.
 
+The user-facing WebSocket API adds two session-scoped actions:
+
+- `worktree.replace_contribution` accepts `session_id`, an optional repository scope, and
+  `expected_remote_head`. It replaces the contribution branch only when the exact lease matches.
+- `worktree.use_contribution` accepts the same identity fields. It creates a local recovery branch and
+  moves the clean task checkout to the confirmed provider head.
+
+Both actions return the existing Git operation result. `worktree.use_contribution` also returns the
+recovery branch name after a successful reset. Neither action appears in the agent MCP catalog.
+
 ## Permissions
 
 - Existing MCP authentication, workspace reachability, workflow, profile, and executor checks still
@@ -102,21 +152,31 @@ internal boundary.
   non-mutating push preflight with the executor's effective Git credentials before starting the agent.
 - GitLab uses the configured workspace connection for provider validation and the existing executor
   credential policy for Git transport. Self-hosted MR URLs must match the configured origin exactly.
+- A user with access to the task can invoke the replacement actions from the task UI. The gateway and
+  handler apply the existing session authorization before they access the execution.
+- Agents, MCP callers, and automatic Git operations cannot invoke the managed replacement actions.
 
 ## Failure modes
 
-| Condition | Observable behavior |
-|---|---|
-| URL is malformed, credential-bearing, or unsupported | Task creation fails before persistence with an argument error. |
-| Provider connection cannot read the change or source repository | Task creation fails before persistence with an authorization/not-found error that does not reveal cross-workspace data. |
-| Change is closed, merged, or has no live head | Task creation fails before persistence and explains that only open contributions are supported. |
-| Provider returns an invalid head/base ref or inconsistent target identity | Task creation fails closed before any Git command. |
-| Fork does not allow maintainer collaboration | Task creation fails before persistence with provider-specific remediation guidance. |
-| Task persists but the existing-change association fails | Kandev compensates the newly created task and returns failure; it does not launch an agent. |
-| Checkout SHA no longer matches the source branch during preparation | Launch fails without checking out or pushing a different revision; retry resolves fresh provider state. |
-| Effective Git credentials cannot dry-run a push to the source branch | The task remains durable, but the session does not start and exposes an actionable credential/collaboration error. |
-| Contribution binding is missing, malformed, or an unknown version | Runtime preparation and managed source-scope issuance fail closed. |
-| Agent attempts a normal create-PR action | Kandev reuses the existing association and does not open a second remote change. |
+| Condition                                                                                    | Observable behavior                                                                                                                      |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| URL is malformed, credential-bearing, or unsupported                                         | Task creation fails before persistence with an argument error.                                                                           |
+| Provider connection cannot read the change or source repository                              | Task creation fails before persistence with an authorization/not-found error that does not reveal cross-workspace data.                  |
+| Change is closed, merged, or has no live head                                                | Task creation fails before persistence and explains that only open contributions are supported.                                          |
+| Provider returns an invalid head/base ref or inconsistent target identity                    | Task creation fails closed before any Git command.                                                                                       |
+| Fork does not allow maintainer collaboration                                                 | Task creation fails before persistence with provider-specific remediation guidance.                                                      |
+| Task persists but the existing-change association fails                                      | Kandev compensates the newly created task and returns failure; it does not launch an agent.                                              |
+| Checkout SHA no longer matches the source branch during preparation                          | Launch fails without checking out or pushing a different revision; retry resolves fresh provider state.                                  |
+| Provider branch advances after launch and still contains local HEAD                          | Kandev identifies a provider-ahead fast-forward, shows the current provider history, and offers Pull instead of Push.                    |
+| Provider branch is rewritten after launch and no longer contains local HEAD                  | Kandev preserves the task version, shows a compact remote-change status, and offers user-controlled version choices.                     |
+| Provider head changes after the replacement confirmation opens                               | The exact lease fails. Kandev does not change the remote branch and refreshes the shown provider state.                                  |
+| Provider rejects the leased replacement                                                      | The task version remains unchanged. Kandev shows the provider or Git error.                                                              |
+| The user selects **Use PR version** with local file changes                                  | Kandev does not reset the checkout. It asks the user to commit or discard the file changes first.                                        |
+| The user selects **Use PR version** and the fetch does not match the confirmed provider head | Kandev does not create a recovery branch or reset the checkout. It refreshes the provider state.                                         |
+| Current provider commits cannot be loaded                                                    | Kandev does not assert that a rewrite occurred. It shows the provider error and derives Push/Pull only from available upstream evidence. |
+| Effective Git credentials cannot dry-run a push to the source branch                         | The task remains durable, but the session does not start and exposes an actionable credential/collaboration error.                       |
+| Contribution binding is missing, malformed, or an unknown version                            | Runtime preparation and managed source-scope issuance fail closed.                                                                       |
+| Agent attempts a normal create-PR action                                                     | Kandev reuses the existing association and does not open a second remote change.                                                         |
 
 ## Persistence guarantees
 
@@ -125,6 +185,13 @@ environments reconstruct the target checkout, contribution remote, upstream bran
 from the binding. Credential leases and preflight results are ephemeral and are recomputed on each
 launch or resume. A moved or deleted source branch causes a later launch to fail visibly rather than
 silently falling back to the target repository.
+
+The original contribution `head_sha` remains creation-time provenance. It is not changed after a
+provider rewrite. Live provider commits and Git status remain observed state. Drift detection does not
+reset, rebase, merge, or replace either version without a direct user action.
+
+A recovery branch created by **Use PR version** remains in the task repository across backend
+restarts. Kandev does not persist confirmation dialogs, provider snapshots, or replacement leases.
 
 ## Scenarios
 
@@ -162,6 +229,78 @@ GIVEN a contribution was resolved but its source branch moved before worktree pr
 WHEN Kandev prepares the task
 THEN preparation fails rather than checking out the new head or pushing from the stale SHA
 
+### Show a provider fast-forward safely
+
+GIVEN a running contribution task whose provider branch advances without rewriting local HEAD
+WHEN Kandev loads the current provider commits
+THEN the Changes panel treats the provider as ahead, does not mark the existing commits as local work
+to push, and offers Pull rather than Push
+
+### Keep a rewritten contribution local-first
+
+GIVEN a running contribution task whose provider branch is force-pushed and no longer contains local
+HEAD
+WHEN Kandev loads the current provider commits
+THEN the Changes panel keeps the task version primary, shows one warning icon in its toolbar, and offers
+**Replace PR branch**, **Use PR version**, and **PR #<number> version** from the warning menu
+AND each action explanation appears in an immediate tooltip on pointer hover
+AND the panel body does not repeat the warning
+
+### Ignore a historical pull request after the checkout changes branch
+
+GIVEN a task retains a merged pull request for an earlier branch
+AND a newer pull request exists for the current checked-out branch in the same repository
+WHEN Kandev computes the Changes relation and provider history
+THEN it uses only the newer pull request
+AND the historical pull request remains available in Review without producing a Changes warning
+
+### Replace the PR branch with the task version
+
+GIVEN a diverged contribution and a confirmed provider head
+WHEN the user confirms **Replace PR branch**
+THEN Kandev replaces the remote branch only when the exact provider-head lease still matches
+
+### Reject a stale replacement lease
+
+GIVEN the replacement confirmation names provider head A
+AND the provider branch advances to head B
+WHEN the user confirms **Replace PR branch**
+THEN Kandev leaves head B unchanged and shows the refreshed remote-change state
+
+### Use the current PR version with recovery
+
+GIVEN a diverged contribution with a clean working tree
+WHEN the user confirms **Use PR version**
+THEN Kandev creates a local recovery branch at the prior task HEAD and moves the task branch to the
+confirmed provider head
+
+### Preserve local file changes
+
+GIVEN a diverged contribution with staged, unstaged, or untracked file changes
+WHEN the user selects **Use PR version**
+THEN Kandev keeps the checkout unchanged and asks the user to commit or discard those changes
+
+### Provide the same choice on mobile
+
+GIVEN a diverged contribution on a phone viewport
+WHEN the user opens the Git actions menu
+THEN the user can replace the PR branch, use the PR version, or inspect the PR version without a desktop
+workflow
+
+### Keep ordinary local-ahead work pushable
+
+GIVEN a contribution checkout whose upstream equals the provider's current head
+AND the maintainer creates commits on top
+WHEN Kandev computes Git status
+THEN Push reports only the commits absent from the upstream and the provider commits are not duplicated
+
+### Avoid guessing when provider history is unavailable
+
+GIVEN Kandev cannot load the current provider commit list
+WHEN the Changes panel renders the checkout
+THEN it reports that provider history is unavailable, does not claim the branch was rewritten, and
+does not compare commits by message or patch similarity
+
 ### Preserve ordinary repository creation
 
 GIVEN an ordinary GitHub, GitLab, or provider-neutral repository URL
@@ -181,6 +320,11 @@ mentions pull and merge request URLs
 - Creating tasks from issues, review comments, or arbitrary commit URLs.
 - Azure DevOps or additional source-control providers.
 - Multiple remote contributions in one create call.
-- Force pushes, branch renames, retargeting, merging, or changing collaboration settings.
+- Automatic force pushes, branch renames, retargeting, merging, or collaboration-setting changes.
+- Automatic reset, rebase, merge, or remote replacement after provider drift.
+- Automatic replay or deduplication of task commits across rewritten provider history.
+- Bulk replacement across multiple repositories from one confirmation.
+- GitLab mobile or Changes-panel drift presentation until that surface supplies complete MR-head
+  evidence. The backend replacement operations remain provider-neutral.
 - Copying remote titles, bodies, comments, or diffs into trusted prompts.
 - Guaranteeing write access after credentials or provider permissions change during a running session.

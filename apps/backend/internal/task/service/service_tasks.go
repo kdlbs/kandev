@@ -809,6 +809,10 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		return s.resolveRepoInputID(ctx, workspaceID, repositoryID, baseBranch)
 	}
 
+	if repoInput.TrustedProviderDescriptor {
+		return s.resolveTrustedRemoteRepository(ctx, workspaceID, repoInput, baseBranch)
+	}
+
 	if effectiveRemoteURL(repoInput) != "" {
 		return s.resolveRepoInputRemote(ctx, workspaceID, repoInput, baseBranch)
 	}
@@ -863,6 +867,7 @@ func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspace
 		Provider:       repo.Provider,
 		ProviderRepoID: repo.ProviderRepoID,
 		ProviderHost:   repo.ProviderHost,
+		ProviderScope:  repo.ProviderScope,
 		ProviderOwner:  repo.ProviderOwner,
 		ProviderName:   repo.ProviderName,
 		DefaultBranch:  repo.DefaultBranch,
@@ -1105,6 +1110,59 @@ func (s *Service) resolveRepoInputRemote(
 	return repo.ID, baseBranch, repoCreated, nil
 }
 
+// resolveTrustedRemoteRepository persists a complete provider descriptor
+// supplied by an authorized plugin host. Unlike the built-in URL parser, this
+// path never guesses a provider or rebuilds CloneURL, preserving context paths
+// and allowing future provider IDs without host-specific branches.
+func (s *Service) resolveTrustedRemoteRepository(
+	ctx context.Context, workspaceID string, input TaskRepositoryInput, baseBranch string,
+) (string, string, bool, error) {
+	if err := validateTrustedRemoteRepository(input); err != nil {
+		return "", "", false, err
+	}
+	repo, created, err := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID:    workspaceID,
+		Provider:       input.Provider,
+		ProviderHost:   input.ProviderHost,
+		ProviderScope:  input.ProviderScope,
+		ProviderRepoID: input.ProviderRepoID,
+		ProviderOwner:  input.ProviderOwner,
+		ProviderName:   input.ProviderName,
+		RemoteURL:      strings.TrimSpace(input.RemoteURL),
+		DefaultBranch:  firstNonEmpty(input.DefaultBranch, input.BaseBranch),
+	})
+	if err != nil {
+		return "", "", false, err
+	}
+	if baseBranch == "" {
+		baseBranch = repo.DefaultBranch
+	}
+	return repo.ID, baseBranch, created, nil
+}
+
+func validateTrustedRemoteRepository(input TaskRepositoryInput) error {
+	if strings.TrimSpace(input.Provider) == "" || strings.TrimSpace(input.ProviderHost) == "" ||
+		strings.TrimSpace(input.ProviderRepoID) == "" || strings.TrimSpace(input.ProviderOwner) == "" ||
+		strings.TrimSpace(input.ProviderName) == "" || strings.TrimSpace(input.RemoteURL) == "" {
+		return errors.New("complete trusted remote repository descriptor is required")
+	}
+	if normalizeProviderHost(input.Provider, input.ProviderHost) == "" {
+		return errors.New("trusted remote repository provider_host must be an http or https origin without credentials")
+	}
+	if _, err := validateProviderScope(input.ProviderScope); err != nil {
+		return errors.New("trusted remote repository provider_scope is invalid")
+	}
+	parsed, _, err := normalizeRemoteRepositoryURL(input.RemoteURL)
+	if err != nil {
+		return err
+	}
+	if _, hasPassword := parsed.User.Password(); hasPassword ||
+		((parsed.Scheme == protocolHTTP || parsed.Scheme == protocolHTTPS) && parsed.User != nil) {
+		return errors.New("trusted remote repository remote_url must be credential-free")
+	}
+	return nil
+}
+
 func validateRemoteRepositoryMetadata(
 	input TaskRepositoryInput, provider, owner, name string,
 ) (string, error) {
@@ -1264,7 +1322,9 @@ func parseAzureSSHRemote(parts []string) (string, string, string, string, error)
 func (s *Service) probeProviderDefaultBranchIfMissing(
 	ctx context.Context, workspaceID, provider, owner, name string,
 ) string {
-	existing, lookupErr := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, githubProviderHost, owner, name)
+	existing, lookupErr := s.repoEntities.GetRepositoryByProviderIdentity(ctx, models.ProviderRepositoryIdentity{
+		WorkspaceID: workspaceID, Provider: provider, Host: githubProviderHost, Owner: owner, Name: name,
+	})
 	if lookupErr != nil {
 		s.logger.Warn("resolveRepoInput: failed to look up existing repo before probe",
 			zap.String("provider", provider),
@@ -1372,6 +1432,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err != nil {
 		return nil, err
 	}
+	oldWorkflowStepID := task.WorkflowStepID
 	var oldState *v1.TaskState
 	stateChanged := false
 
@@ -1426,6 +1487,16 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	// this snapshot was stale. Publish and return the row that actually won so
 	// callers never receive the provisional title or pending marker again.
 	task = s.reloadTaskAfterMutation(ctx, id, task, "update")
+	if req.WorkflowStepID != nil && oldWorkflowStepID != task.WorkflowStepID {
+		sessionID := ""
+		if session := s.resolvePrimaryOrActiveSession(ctx, id); session != nil {
+			sessionID = session.ID
+		}
+		// Generic task updates are a mutation boundary used by plugins and
+		// MCP. Record them as system-originated unless a dedicated move API
+		// supplied stronger provenance.
+		s.recordManualStepTransition(ctx, sessionID, oldWorkflowStepID, task.WorkflowStepID, wfmodels.StepTransitionTriggerTaskUpdate, wfmodels.StepTransitionActorSystem)
+	}
 
 	// Update task repositories if provided
 	if req.Repositories != nil {

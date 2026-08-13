@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/gitcredentials"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -320,6 +322,53 @@ func TestCredentialBrokerReadinessUsesExactResolveRoute(t *testing.T) {
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusNoContent || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("configured readiness response = %d headers=%v", response.Code, response.Header())
+	}
+}
+
+type exactPathCredentialResolver struct{}
+
+func (exactPathCredentialResolver) Supports(providerID string) bool { return providerID == "bitbucket" }
+
+func (exactPathCredentialResolver) Binding(context.Context, gitcredentials.Scope) (string, error) {
+	return "generation-1", nil
+}
+
+func (exactPathCredentialResolver) Resolve(context.Context, gitcredentials.Scope) (gitcredentials.Credential, error) {
+	return gitcredentials.Credential{Username: "x-token-auth", Password: "fresh-token"}, nil
+}
+
+type exactPathCredentialAuthorizer struct{}
+
+func (exactPathCredentialAuthorizer) AuthorizeGitCredential(context.Context, gitcredentials.Scope) error {
+	return nil
+}
+
+func TestCredentialBrokerResolvePreservesExactProviderPath(t *testing.T) {
+	router, controller := setupControllerTest(&stubClient{})
+	broker := gitcredentials.NewBroker(exactPathCredentialResolver{}, exactPathCredentialAuthorizer{})
+	scope := gitcredentials.Scope{
+		ProviderID: "bitbucket", WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1",
+		RepositoryID: "repository-1", Host: "bitbucket.example", Path: "/context/scm/ENG/widgets",
+	}
+	lease, err := broker.Issue(t.Context(), scope)
+	if err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+	controller.service.SetCredentialBroker(NewCredentialBrokerFromBroker(broker))
+	payload, err := json.Marshal(map[string]string{
+		"lease": lease.Token, "task_id": scope.TaskID, "session_id": scope.SessionID,
+		"repository_id": scope.RepositoryID, "owner": "context", "repo": "scm/ENG/widgets",
+		"host": scope.Host, "path": scope.Path,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/github/credentials/resolve", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
 	}
 }
 
@@ -1198,6 +1247,201 @@ func TestHttpTaskCIOptions_DefaultAndPatch(t *testing.T) {
 	}
 	if got.AutoFixPromptOverride != nil || !got.UsingDefaultPrompt {
 		t.Fatalf("expected reset to default prompt, got %+v", got)
+	}
+}
+
+// TestHttpPatchTaskCIOptions_TargetsOnePRWithoutAffectingSibling covers AC6:
+// a PATCH naming one linked PR's repository_id/pr_number sets the switch for
+// that PR only; a second linked PR's row is unchanged.
+func TestHttpPatchTaskCIOptions_TargetsOnePRWithoutAffectingSibling(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	ctx := context.Background()
+	for _, prNumber := range []int{1, 2} {
+		if err := store.CreateTaskPR(ctx, &TaskPR{
+			TaskID: "task-1", RepositoryID: "repo-1",
+			Owner: "acme", Repo: "widget", PRNumber: prNumber,
+			State: "open", CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("seed task pr #%d: %v", prNumber, err)
+		}
+	}
+
+	body := bytes.NewBufferString(`{"repository_id":"repo-1","pr_number":1,"auto_fix_enabled":true}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	opts1, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", 1)
+	if err != nil {
+		t.Fatalf("get PR 1 options: %v", err)
+	}
+	if !opts1.AutoFixEnabled {
+		t.Fatalf("PR 1 auto_fix_enabled = false, want true")
+	}
+	opts2, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", 2)
+	if err != nil {
+		t.Fatalf("get PR 2 options: %v", err)
+	}
+	if opts2.AutoFixEnabled {
+		t.Fatalf("PR 2 auto_fix_enabled = true, want unaffected false")
+	}
+}
+
+// TestHttpPatchTaskCIOptions_UnlinkedPRReturns400AndWritesNothing covers AC8.
+func TestHttpPatchTaskCIOptions_UnlinkedPRReturns400AndWritesNothing(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1",
+		Owner: "acme", Repo: "widget", PRNumber: 1,
+		State: "open", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed task pr: %v", err)
+	}
+
+	body := bytes.NewBufferString(`{"repository_id":"repo-1","pr_number":999,"auto_fix_enabled":true,"auto_fix_prompt_override":"must-not-persist"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	opts, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", 999)
+	if err != nil {
+		t.Fatalf("get unlinked PR options: %v", err)
+	}
+	if opts.AutoFixEnabled {
+		t.Fatal("PATCH for an unlinked PR wrote a row instead of writing nothing")
+	}
+	taskOptions, err := store.GetTaskCIOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get task options: %v", err)
+	}
+	if taskOptions.AutoFixPromptOverride != nil {
+		t.Fatalf("invalid PR identity partially updated task options: %+v", taskOptions)
+	}
+}
+
+// TestHttpPatchTaskCIOptions_PartialPRIdentityRejected pins the client error
+// for a patch that supplies only one side of the PR identity.
+func TestHttpPatchTaskCIOptions_PartialPRIdentityRejected(t *testing.T) {
+	for name, body := range map[string]string{
+		"repository only": `{"repository_id":"repo-1","auto_fix_enabled":true}`,
+		"PR number only":  `{"pr_number":1,"auto_fix_enabled":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			router, store := setupControllerStoreTest(t)
+			ctx := context.Background()
+			if err := store.CreateTaskPR(ctx, &TaskPR{
+				TaskID: "task-1", RepositoryID: "repo-1",
+				Owner: "acme", Repo: "widget", PRNumber: 1,
+				State: "open", CreatedAt: time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("seed task pr: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", bytes.NewBufferString(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+
+			opts, err := store.GetTaskPRAutomationOptions(ctx, "task-1", "repo-1", 1)
+			if err != nil {
+				t.Fatalf("get PR options: %v", err)
+			}
+			if opts.AutoFixEnabled {
+				t.Fatal("partial identity patch wrote a row instead of writing nothing")
+			}
+		})
+	}
+}
+
+func TestHttpTaskCIOptions_DeniesForeignWorkspaceReadAndUpdate(t *testing.T) {
+	store := newTestStore(t)
+	log := newControllerTestLogger()
+	svc := NewService(&stubClient{}, AuthMethodPAT, nil, store, nil, log)
+	svc.SetPromptResolver(staticPromptResolver{content: "resolved default prompt"})
+	svc.SetTaskIssueStore(&fakeTaskIssueStore{
+		task: &taskmodels.Task{ID: "task-foreign", WorkspaceID: "workspace-foreign"},
+	})
+	svc.SetWorkspaceAuthorizer(func(_ context.Context, workspaceID string) error {
+		if workspaceID != "workspace-foreign" {
+			t.Fatalf("authorized workspace = %q, want workspace-foreign", workspaceID)
+		}
+		return repoerrors.ErrWorkspaceNotFound
+	})
+	controller := NewController(svc, log)
+	router := gin.New()
+	controller.RegisterHTTPRoutes(router)
+
+	for _, method := range []string{http.MethodGet, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			var body io.Reader
+			if method == http.MethodPatch {
+				body = strings.NewReader(`{"auto_fix_enabled":true}`)
+			}
+			req := httptest.NewRequest(method, "/api/v1/github/tasks/task-foreign/ci-options", body)
+			req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{
+				UserID: "attacker", Role: authn.RoleMember,
+			}))
+			if method == http.MethodPatch {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, req)
+
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	options, err := store.GetTaskCIOptions(context.Background(), "task-foreign")
+	if err != nil {
+		t.Fatalf("get stored options: %v", err)
+	}
+	if options.AutoFixEnabled {
+		t.Fatal("foreign PATCH mutated task CI options")
+	}
+}
+
+func TestHttpTaskCIOptions_WorkspacelessTaskReturnsNotFound(t *testing.T) {
+	store := newTestStore(t)
+	log := newControllerTestLogger()
+	svc := NewService(&stubClient{}, AuthMethodPAT, nil, store, nil, log)
+	svc.SetTaskIssueStore(&fakeTaskIssueStore{
+		task: &taskmodels.Task{ID: "task-workspaceless"},
+	})
+	router := gin.New()
+	NewController(svc, log).RegisterHTTPRoutes(router)
+
+	for _, method := range []string{http.MethodGet, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			var body io.Reader
+			if method == http.MethodPatch {
+				body = strings.NewReader(`{"auto_fix_enabled":true}`)
+			}
+			req := httptest.NewRequest(method, "/api/v1/github/tasks/task-workspaceless/ci-options", body)
+			if method == http.MethodPatch {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, req)
+
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404: %s", response.Code, response.Body.String())
+			}
+			assertJSONError(t, response.Body.Bytes(), "task not found")
+		})
 	}
 }
 

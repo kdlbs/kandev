@@ -106,9 +106,15 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 		} else {
 			// User picked a different branch — switch the working tree.
 			step = beginStep("Checkout branch")
-			step.Command = fmt.Sprintf("git fetch origin %s && git checkout %s", effectiveBranch, effectiveBranch)
+			if req.RemoteSyncHandled {
+				step.Command = fmt.Sprintf("git checkout %s", effectiveBranch)
+			} else {
+				step.Command = fmt.Sprintf("git fetch origin %s && git checkout %s", effectiveBranch, effectiveBranch)
+			}
 			reportProgress(onProgress, step, stepIdx, totalSteps)
-			output, err := checkoutBranch(ctx, workspacePath, effectiveBranch, gitCredentialValues(req.Env))
+			output, err := checkoutBranch(
+				ctx, workspacePath, effectiveBranch, gitCredentialValues(req.Env), req.RemoteSyncHandled,
+			)
 			if err != nil {
 				errMsg := fmt.Sprintf("failed to checkout branch %q: %s", effectiveBranch, output)
 				completeStepError(&step, errMsg)
@@ -173,10 +179,16 @@ func readCurrentBranchForLocal(workDir string) string {
 // Best-effort fetch first so newly-created remote branches are visible, then
 // the checkout. If the local branch doesn't exist but the remote tracking
 // branch does (from the fetch), git creates a local branch tracking it.
-func checkoutBranch(ctx context.Context, workDir, branch string, sensitiveValues []string) (string, error) {
-	fetchCmd := subproc.NewGitCommand(ctx, "fetch", "origin", branch)
-	fetchCmd.Dir = workDir
-	fetchOut, fetchErr := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, fetchCmd)
+func checkoutBranch(
+	ctx context.Context, workDir, branch string, sensitiveValues []string, remoteSyncHandled bool,
+) (string, error) {
+	var fetchOut []byte
+	var fetchErr error
+	if !remoteSyncHandled {
+		fetchCmd := subproc.NewGitCommand(ctx, "fetch", "origin", branch)
+		fetchCmd.Dir = workDir
+		fetchOut, fetchErr = subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, fetchCmd)
+	}
 
 	cmd := subproc.NewGitCommand(ctx, "checkout", branch)
 	cmd.Dir = workDir

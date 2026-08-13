@@ -10,7 +10,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { MCPTaskAgentProfileDefault } from "@/lib/types/http";
 import { SettingsCard } from "./settings-card";
-import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { Trans, useTranslation } from "react-i18next";
 

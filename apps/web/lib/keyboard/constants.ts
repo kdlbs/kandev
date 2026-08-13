@@ -167,12 +167,6 @@ export const SHORTCUTS = {
     key: KEYS.F,
     modifiers: { ctrlOrCmd: true },
   },
-  // Cmd+Shift+M starts/stops voice input on the chat composer. The default
-  // is configurable per-user via the Voice Mode settings page.
-  VOICE_INPUT_TOGGLE: {
-    key: KEYS.M,
-    modifiers: { ctrlOrCmd: true, shift: true },
-  },
   // Ctrl+R opens the bash-style reverse-i-search overlay on the chat composer.
   // Defaults to plain Ctrl (not ctrlOrCmd) so the Mac browser refresh shortcut
   // Cmd+R keeps working out of the box.

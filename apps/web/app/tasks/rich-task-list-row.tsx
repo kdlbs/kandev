@@ -3,6 +3,7 @@
 import { IconAlertCircle, IconSubtask } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
 import { useTaskPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import type { Repository, Task } from "@/lib/types/http";
@@ -52,6 +53,7 @@ function PrimaryTaskLine({
           <PRTaskIcon taskId={task.id} />
         </span>
       )}
+      <RegisteredChangeRequestTaskIcon taskId={task.id} />
       <ArchivedBadge task={task} />
     </>
   );

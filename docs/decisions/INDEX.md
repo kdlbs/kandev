@@ -23,7 +23,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0015 | [Explicit completion signal for auto-advance](0015-explicit-completion-signal-for-auto-advance.md)                                  | proposed   | backend, frontend           | 2026-06-04 |
 | 0016 | [Read-only absolute file paths](0016-observed-external-file-reads.md)                                                               | accepted   | backend                     | 2026-06-14 |
 | 0017 | [Resource metrics sampling](0017-resource-metrics-sampling.md)                                                                      | accepted   | backend, frontend, protocol | 2026-06-14 |
-| 0018 | [Runtime settings overrides](0018-runtime-settings-overrides.md)                                                                    | accepted   | backend, frontend, cli      | 2026-06-14 |
+| 0018 | [Runtime settings overrides](0018-runtime-settings-overrides.md)                                                                    | accepted (amended 2026-08-11) | backend, frontend, cli | 2026-06-14 |
 | 0019 | [Restart supervisor owns backend restarts](0019-restart-supervisor.md)                                                              | accepted   | backend, frontend, cli      | 2026-06-14 |
 | 0020 | [Pi project MCP config injection](0020-pi-project-mcp-config-injection.md)                                                          | accepted   | backend                     | 2026-06-16 |
 | 0021 | [Go-served SPA with boot state](0021-go-served-spa-with-boot-state.md)                                                              | accepted   | backend, frontend, cli      | 2026-06-15 |
@@ -64,6 +64,10 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-23-post-commit-hook-aware-verification | [Post-Commit Hook-Aware Verification](2026-07-23-post-commit-hook-aware-verification.md) | superseded by 2026-07-26 | workflow | 2026-07-23 |
 | 2026-07-23-workspace-source-root-move-boundary | [Workspace Source Root Move Boundary](2026-07-23-workspace-source-root-move-boundary.md) | accepted | backend | 2026-07-23 |
 | 2026-07-24-operator-owned-agent-launcher-settings | [Operator-Owned Agent Launcher Settings](2026-07-24-operator-owned-agent-launcher-settings.md) | accepted | backend, frontend, protocol | 2026-07-24 |
+| 2026-08-05-plugin-native-integration-settings | [Plugins Contribute Native Integration Settings](2026-08-05-plugin-native-integration-settings.md) | accepted | frontend, protocol | 2026-08-05 |
+| 2026-08-06-plugin-code-host-dashboard-parity | [Code-Host Plugins Reuse Native Dashboard Primitives](2026-08-06-plugin-code-host-dashboard-parity.md) | accepted | frontend, protocol | 2026-08-06 |
+| 2026-08-10-plugin-change-request-mutations | [Route Native Change-Request Mutations Through Providers](2026-08-10-plugin-change-request-mutations.md) | accepted | frontend, protocol | 2026-08-10 |
+| 2026-08-12-plugin-localization-contract | [Host-Scoped Plugin Localization](2026-08-12-plugin-localization-contract.md) | accepted | frontend, protocol | 2026-08-12 |
 | 2026-07-18-turn-configuration-snapshots | [Attribute runtime configuration to turns](2026-07-18-turn-configuration-snapshots.md) | accepted | backend, frontend | 2026-07-18 |
 | 2026-07-22-gpg-signed-release-tags | [GPG-signed release tags](2026-07-22-gpg-signed-release-tags.md) | accepted | infra, workflow | 2026-07-22 |
 | 2026-07-19-reject-mcp-actions-on-raw-websocket | [Reject MCP Actions on the Raw WebSocket](2026-07-19-reject-mcp-actions-on-raw-websocket.md) | accepted | backend, protocol | 2026-07-19 |
@@ -93,6 +97,10 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-30-session-owned-mcp-observability | [Keep MCP Attachment Evidence Session Owned](2026-07-30-session-owned-mcp-observability.md) | accepted | backend, frontend, protocol, security | 2026-07-30 |
 | 2026-07-30-file-backed-diagnostic-bundles | [File-backed diagnostic bundles](2026-07-30-file-backed-diagnostic-bundles.md) | accepted | backend, frontend, infra, protocol, workflow | 2026-07-30 |
 | 2026-07-30-runtime-task-state-before-running-event | [Publish Task State Before Running Session State](2026-07-30-runtime-task-state-before-running-event.md) | accepted | backend, frontend, protocol, workflow | 2026-07-30 |
+| 2026-07-31-authenticated-plugin-actions | [Authenticated Plugin Actions](2026-07-31-authenticated-plugin-actions.md) | accepted | backend, frontend, protocol, security | 2026-07-31 |
+| 2026-07-31-plugin-repository-provider-extensions | [Plugin Repository Provider Extensions](2026-07-31-plugin-repository-provider-extensions.md) | accepted | frontend, backend, protocol | 2026-07-31 |
+| 2026-07-31-provider-neutral-git-credential-broker | [Provider-Neutral Git Credential Broker](2026-07-31-provider-neutral-git-credential-broker.md) | accepted | backend, protocol, security | 2026-07-31 |
+| 2026-08-01-bitbucket-initial-release-remains-unsigned | [Bitbucket Initial Release Remains Unsigned](2026-08-01-bitbucket-initial-release-remains-unsigned.md) | accepted | infra, workflow, security | 2026-08-01 |
 | 2026-07-31-npm-nightly-release-channel | [Publish deterministic npm-only nightlies](2026-07-31-npm-nightly-release-channel.md) | accepted (amended 2026-08-03) | workflow, backend, frontend, cli | 2026-07-31 |
 | 2026-07-31-isolate-manual-pr-review-content | [Isolate Manual PR Review Content](2026-07-31-isolate-manual-pr-review-content.md) | accepted | infra, workflow, security | 2026-07-31 |
 | 2026-07-31-agent-generated-task-titles | [Bind Agent Title Generation to Pending Tasks](2026-07-31-agent-generated-task-titles.md) | accepted | backend, frontend, protocol | 2026-07-31 |
@@ -107,6 +115,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-01-share-artifact-locale | [Shared-Task Artifacts Render in the Creator's Locale](2026-08-01-share-artifact-locale.md) | accepted | backend | 2026-08-01 |
 | 2026-08-01-gitlab-mr-lifecycle-notifications | [GitLab MR Lifecycle Notifications](2026-08-01-gitlab-mr-lifecycle-notifications.md) | accepted | backend, frontend | 2026-08-01 |
 | 2026-08-01-per-user-plugin-storage | [Host-Provided Per-User Plugin Storage](2026-08-01-per-user-plugin-storage.md) | accepted | backend, frontend, security | 2026-08-01 |
+| 2026-08-11-composer-access-authenticated-webhooks | [Composer Access and Authenticated Webhooks](2026-08-11-composer-access-authenticated-webhooks.md) | accepted | frontend, backend, protocol, security | 2026-08-11 |
 | 2026-08-01-plugin-task-panel-contributions | [Plugin Task Panel, Kanban Menu Action, and Card Indicator Contributions](2026-08-01-plugin-task-panel-contributions.md) | accepted | frontend | 2026-08-01 |
 | 2026-08-02-new-workspace-github-access-defaults | [Bootstrap New Workspaces From Host GitHub Access](2026-08-02-new-workspace-github-access-defaults.md) | accepted | backend, frontend, security | 2026-08-02 |
 | 2026-08-02-explicit-user-cancel-completion | [Explicit User Cancellation May Complete a Workflow Step](2026-08-02-explicit-user-cancel-completion.md) | accepted | workflow | 2026-08-02 |
@@ -143,4 +152,11 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-08-go-launcher-owns-all-launch-modes | [The Go Launcher Owns Every Entrypoint; apps/cli Is a Publish-Only Shim](2026-08-08-go-launcher-owns-all-launch-modes.md) | accepted | backend, cli, infra | 2026-08-08 |
 | 2026-08-09-bind-automation-mutations-to-event-targets | [Bind Automation Mutations to Event Targets](2026-08-09-bind-automation-mutations-to-event-targets.md) | accepted | backend, agentctl, protocol, security, workflow | 2026-08-09 |
 | 2026-08-09-exclusive-runtime-state-ownership | [Lock Runtime State Before Backend Startup](2026-08-09-exclusive-runtime-state-ownership.md) | accepted | backend, infra | 2026-08-09 |
+| 2026-08-10-duration-aware-e2e-sharding | [Duration-aware E2E sharding uses rolling `main` timings](2026-08-10-duration-aware-e2e-sharding.md) | accepted | infra, workflow | 2026-08-10 |
 | 2026-08-10-debug-launcher-profile-selection | [Keep Debug Launches on the Production Profile](2026-08-10-debug-launcher-profile-selection.md) | accepted | backend, frontend, cli | 2026-08-10 |
+| 2026-08-11-plugin-tools-through-kandev-mcp | [Route Plugin Agent Tools Through Kandev MCP](2026-08-11-plugin-tools-through-kandev-mcp.md) | accepted | backend, agentctl, protocol, plugins, security | 2026-08-11 |
+| 2026-08-10-remote-contribution-head-drift | [Separate Current Contribution and Local Checkout Histories](2026-08-10-remote-contribution-head-drift.md) | accepted (remote-action policy superseded) | backend, frontend, protocol, GitHub, GitLab | 2026-08-10 |
+| 2026-08-12-local-first-contribution-replacement | [Keep Remote Contribution Work Local-First](2026-08-12-local-first-contribution-replacement.md) | accepted | backend, frontend, protocol, security, GitHub, GitLab | 2026-08-12 |
+| 2026-08-11-user-owned-status-bar-visibility | [Make Status Bar Visibility a Portable User Preference](2026-08-11-user-owned-status-bar-visibility.md) | accepted | backend, frontend, protocol | 2026-08-11 |
+| 2026-08-12-built-in-utility-default-inheritance | [Built-in Utility Actions Inherit the Global Profile by Default](2026-08-12-built-in-utility-default-inheritance.md) | accepted | backend, frontend | 2026-08-12 |
+| 2026-08-10-no-em-dash-public-copy | [Keep Em Dashes Out of Public Copy](2026-08-10-no-em-dash-public-copy.md) | accepted | frontend, infra | 2026-08-10 |

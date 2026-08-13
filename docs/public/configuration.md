@@ -108,7 +108,7 @@ An external NATS URL moves event traffic across the configured network and can e
 | `docker.defaultNetwork` | `KANDEV_DOCKER_DEFAULTNETWORK` | `kandev-network` | Accepted compatibility field; not wired into current executor networking. |
 | `docker.volumeBasePath` | `KANDEV_DOCKER_VOLUMEBASEPATH` | `/var/lib/kandev/volumes` on Unix; `%LOCALAPPDATA%\kandev\volumes` on Windows | Accepted compatibility field; not wired into current executor volume placement. |
 
-The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon—it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](./docker.md) and [Executors](./executors.md).
+The Docker socket is effectively root-equivalent on many hosts. Do not publish it or assume `docker.tlsVerify` secures a TCP daemon; it currently does not. Configure TLS through a supported Docker endpoint/environment and validate it independently, or keep the daemon local. See [Docker](./docker.md) and [Executors](./executors.md).
 
 ### Core agent service
 
@@ -119,23 +119,23 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
-### Authentication, Office, Plugins, voice, and feature flags
+### Authentication, Office, Plugins, and feature flags
 
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
 | `auth.jwtSecret` | `KANDEV_AUTH_JWTSECRET` | generated value | Accepted and validated compatibility configuration; the current main HTTP product path does not use it as an authentication boundary. |
 | `auth.tokenDuration` | `KANDEV_AUTH_TOKENDURATION` | `3600` | Must be positive, but is not consumed by the current main HTTP product path. |
 | `office.jwtSigningKey` | `KANDEV_OFFICE_JWTSIGNINGKEY` | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts. |
-| `voice.openAIApiKey` | `KANDEV_VOICE_OPENAI_API_KEY` | empty | Server-side transcription fallback when browser speech recognition is unavailable. Empty disables the fallback and its endpoint returns unavailable. |
 | `features.office` | `KANDEV_FEATURES_OFFICE` | `false` in production | Experimental Office UI, routes, services, and automation. |
-| `features.app_status_bar` | `KANDEV_FEATURES_APP_STATUS_BAR` | `false` in production | Opt-in global connection/host-metrics/plugin surface: bottom bar on tablet/desktop and Status drawer on phones. Disabling it does not suppress active WebSocket connectivity warnings. |
 | `features.auth` | `KANDEV_FEATURES_AUTH` | `false` in production | Opt-in authentication and per-user workspaces. The first visitor after enabling completes setup and becomes the admin. |
 | `features.claude_background_prompt_handoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | `false` | High-risk experiment that lets Claude Code accept a new prompt after its foreground yields while adapter-attested background work remains active. Other providers keep the coarse busy gate. |
 | `features.claude_mid_turn_steering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | `false` | High-risk experiment that delivers a new prompt into a Claude turn that is still generating (mid-turn steering) instead of queuing it, for agents that advertise prompt queueing. Whether the agent folds the prompt into the running turn or runs it next is the agent's decision; other providers keep the coarse busy gate. |
 
 Do not infer security from `auth.jwtSecret`: setting it currently does not turn the local server into an authenticated public service. Office's JWT key has a narrower, active purpose. Store both active secrets and third-party API keys in your deployment secret manager; never commit them in `config.yaml`.
 
-The voice fallback sends audio to the configured OpenAI transcription service and incurs that provider's network, data-handling, and billing behavior. Browser-native speech recognition has its own browser/vendor behavior and does not use this server key.
+`voice.openAIApiKey` / `KANDEV_VOICE_OPENAI_API_KEY` was removed. Voice Mode is now the
+[Voice Mode plugin](https://github.com/kdlbs/kandev-plugin-voice), and its transcription key lives
+in that plugin's own settings. Kandev ignores the old key and no longer serves `/api/v1/transcribe`.
 
 ### Logging
 
@@ -287,12 +287,8 @@ debug:
 office:
   jwtSigningKey: ""
 
-voice:
-  openAIApiKey: ""
-
 features:
   office: false
-  app_status_bar: false
   auth: false
   claude_background_prompt_handoff: false
 ```
@@ -308,7 +304,6 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
 | `features.office` | `KANDEV_FEATURES_OFFICE` | off | Experimental autonomous-agent Office surfaces and automation. |
-| `features.appStatusBar` | `KANDEV_FEATURES_APP_STATUS_BAR` | off | Global status bar on tablet/desktop and Status drawer entry on phones. Enabling changes visibility only; urgent WebSocket connectivity warnings remain visible when it is off. |
 | `features.auth` | `KANDEV_FEATURES_AUTH` | off | Authentication and per-user workspaces for the whole install. |
 | `features.claudeBackgroundPromptHandoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | off | High-risk Claude Code experiment that exposes recognized background-only activity and admits a successor prompt. |
 | `features.claudeMidTurnSteering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | off | High-risk Claude Code experiment that delivers a prompt into a still-generating turn (mid-turn steering) instead of queuing it, for agents advertising prompt queueing. |
@@ -324,7 +319,7 @@ the rollout is complete, then remove the live flag and move its key and
 environment variable to the runtime registry's append-only retired identities.
 Plugins are part of the base product and are not a runtime toggle.
 
-The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; the App status bar, authentication, and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
+The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; authentication and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
 
 ## Credentials and product settings
 The **Unread Messages** preference in **Settings > General > Task Actions** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.
@@ -363,7 +358,7 @@ These variables are supported by specific runtime components but are not YAML fi
 | `KANDEV_MCP_LOG_FILE` | unset | File path for per-agentctl MCP debug logs. Logs tool names, arguments, session IDs, results for tool errors, and timings; invalid paths warn and disable this sink. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Enables OTLP/HTTP tracing for backend and agentctl spans; unset uses a no-op tracer. See the transport warning below. |
 
-Changing concurrency values trades process pressure against throughput and requires a restart. The queue environment value is also read at startup. Without that environment override, an admin can use **Settings > General > Message Queue** to save an install-wide limit that applies live. `0` means unlimited. Lowering the live limit does not prune existing rows; new admissions remain blocked until the pending count drops below the limit, while retries of already accepted work remain eligible.
+Changing concurrency values trades process pressure against throughput and requires a restart. The queue environment value is also read at startup. Under **Settings > Task Behavior > Message Queue**, an admin can save an install-wide capacity and independently control manual and automatic merging. All three values apply live and persist across restarts. `KANDEV_QUEUE_MAX_PER_SESSION` overrides and locks only capacity; neither merge switch has an environment override. `0` means unlimited. Lowering the live limit does not prune existing rows; new admissions remain blocked until the pending count drops below the limit, while retries of already accepted work remain eligible. The default-on automatic switch affects only later admissions and never bypasses capacity or sweeps existing rows.
 
 The current OTLP exporter strips an `http://` or `https://` prefix from the configured endpoint and always uses `WithInsecure()`. Treat this as implementation-bound cleartext transport: send it only to a trusted private collector over a protected network, not directly across an untrusted network. The service name is `kandev-agentctl`, and spans can include task/session/execution IDs plus raw agent-event JSON truncated to 8192 characters. That payload can contain prompts, files, and tool data. Use collector-side access controls and retention accordingly.
 
@@ -391,7 +386,7 @@ Startup validation currently enforces:
 - logging level/format; and
 - positive `repositoryDiscovery.maxDepth`.
 
-Other fields can pass configuration validation and still fail later—for example an unreachable NATS/PostgreSQL/Docker endpoint, unwritable log path, nonsensical timeout, or incompatible pool sizes. A field appearing in the schema does not prove its subsystem is available.
+Other fields can pass configuration validation and still fail later, for example an unreachable NATS/PostgreSQL/Docker endpoint, unwritable log path, nonsensical timeout, or incompatible pool sizes. A field appearing in the schema does not prove its subsystem is available.
 
 If a value appears ignored:
 
@@ -403,4 +398,4 @@ If a value appears ignored:
 
 Use `kandev --verbose` to surface startup errors. Do not use `--debug` merely to diagnose a YAML typo on an exposed machine; verbose logs are usually sufficient.
 
-Variables used only to assemble/test the runtime—such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces—are internal implementation contracts, not supported deployment configuration. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](./cli.md); end users should still let the installer set it.
+Variables used only to assemble/test the runtime: such as `KANDEV_WEB_DIST_DIR`, `KANDEV_DESKTOP_RUNTIME_DIR`, mock/E2E switches, supervisor socket/manifest values, and bootstrap nonces, are internal implementation contracts, not supported deployment configuration. `KANDEV_BUNDLE_DIR` is the narrow exception documented for installer/package integration in [CLI](./cli.md); end users should still let the installer set it.

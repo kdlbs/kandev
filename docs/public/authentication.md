@@ -5,9 +5,9 @@ description: "Enable opt-in authentication, manage users and invites, and use pe
 
 # Authentication & Users
 
-Kandev ships as a single-user local tool with authentication **disabled** — nothing changes for laptop installs. When several people share one Kandev server, enable authentication to give each person their own account and their own private workspaces.
+Kandev ships as a single-user local tool with authentication **disabled**: nothing changes for laptop installs. When several people share one Kandev server, enable authentication to give each person their own account and their own private workspaces.
 
-Authentication is a **runtime feature toggle** — the same system as the other feature flags — so there is no separate "Authentication" configuration page.
+Authentication is a **runtime feature toggle**: the same system as the other feature flags, so there is no separate "Authentication" configuration page.
 
 ## Quick checklist
 
@@ -20,7 +20,7 @@ Authentication is a **runtime feature toggle** — the same system as the other 
 ## What changes when authentication is on
 
 - Everyone signs in with email + password. Browser sessions last 30 days (sliding) and can be revoked from `Settings > Account`. The signed-in user is shown in the bottom-left of the sidebar, with a log-out menu.
-- **Workspaces become per-user.** You only see workspaces you own — including their tasks, sessions, repositories, terminals, previews, and live updates. Existing data is assigned to the admin created during setup.
+- **Workspaces become per-user.** You only see workspaces you own, including their tasks, sessions, repositories, terminals, previews, and live updates. Existing data is assigned to the admin created during setup.
 - Secrets are per-user. A **Global** secret is user-global across that user's workspaces; a **Workspace** secret belongs to one of their workspaces. With authentication disabled, Global is install-global. Executors and agent profiles remain shared across the instance, so they can reference Global secrets only; repositories may bind Global or same-workspace secrets.
 - Admins manage users and instance settings, but do **not** see other users' workspaces.
 - Programmatic clients (external MCP, scripts) authenticate with personal access tokens.
@@ -45,9 +45,9 @@ A server that listens on non-loopback interfaces with authentication disabled lo
 
 `Settings > System > Users` (admin only):
 
-- **Invite links** — mint a tokenized URL (`/invite?token=…`) and share it out of band. Optional pinned email, member or admin role, single use, 7-day default expiry. No email server needed.
-- **Direct creation** — create an account with a password yourself.
-- **Disable / role changes** — disabling a user immediately revokes their sessions and tokens. The last active admin cannot be demoted or disabled.
+- **Invite links**: mint a tokenized URL (`/invite?token=…`) and share it out of band. Optional pinned email, member or admin role, single use, 7-day default expiry. No email server needed.
+- **Direct creation**: create an account with a password yourself.
+- **Disable / role changes**: disabling a user immediately revokes their sessions and tokens. The last active admin cannot be demoted or disabled.
 
 Roles: `admin` (user management, authentication settings, destructive system operations, feature toggles) and `member` (everything else, scoped to their own workspaces).
 
@@ -67,13 +67,13 @@ External MCP clients (Claude Code, Cursor connecting to `/mcp`) must be configur
 
 ## What is isolated
 
-When authentication is on, everything in a workspace is private to its owner and returns "not found" to anyone else — even if they know the ID: workspaces, tasks, workflows, sessions, plans, walkthroughs, terminals, VS Code, port previews, git snapshots, Workspace secrets, repository bindings, **and the workspace's third-party integration settings (GitHub/GitLab/Jira/Linear/Sentry/Azure) and automations**. A user's Global secrets are also private to that user. Admins manage users but do not see other users' workspaces or secrets.
+When authentication is on, everything in a workspace is private to its owner and returns "not found" to anyone else, even if they know the ID: workspaces, tasks, workflows, sessions, plans, walkthroughs, terminals, VS Code, port previews, git snapshots, Workspace secrets, repository bindings, **and the workspace's third-party integration settings (GitHub/GitLab/Jira/Linear/Sentry/Azure) and automations**. A user's Global secrets are also private to that user. Admins manage users but do not see other users' workspaces or secrets.
 
 Shared across the instance (by design): executors, agent profiles, environments, editors, prompts, and system pages.
 
 ## Limitations
 
-- **Filesystem and agent credentials are not isolated.** Worktrees and repositories live under one `~/.kandev` tree owned by the OS user running the backend, and agent CLI logins (`gh auth`, `claude login`, provider API keys) authenticate as that OS user — so all app-users share the same on-disk agent credentials, and anyone with shell access to the server can read all files. Authentication isolates users' kandev *data* at the application layer, not the filesystem or per-user agent auth. For hard isolation of agent credentials, run a separate kandev instance per user (or use OS-level access control / sandboxed executors).
-- One owner per workspace — no sharing or team workspaces yet.
+- **Filesystem and agent credentials are not isolated.** Worktrees and repositories live under one `~/.kandev` tree owned by the OS user running the backend, and agent CLI logins (`gh auth`, `claude login`, provider API keys) authenticate as that OS user, so all app-users share the same on-disk agent credentials, and anyone with shell access to the server can read all files. Authentication isolates users' kandev *data* at the application layer, not the filesystem or per-user agent auth. For hard isolation of agent credentials, run a separate kandev instance per user (or use OS-level access control / sandboxed executors).
+- One owner per workspace, no sharing or team workspaces yet.
 - Local accounts only for now; the account model is ready for OIDC/SSO later.
 - Authentication does not replace TLS. Terminate HTTPS in front of Kandev (the session cookie is marked `Secure` when the request arrives over TLS or `X-Forwarded-Proto: https`).

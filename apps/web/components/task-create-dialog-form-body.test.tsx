@@ -118,6 +118,7 @@ function makeFs(): DialogFormState {
     prInfoByUrl: {
       info: () => undefined,
       loading: () => false,
+      settled: () => true,
       error: () => undefined,
       ensure: () => undefined,
       clear: () => undefined,
@@ -215,9 +216,9 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
     expect((last.linearImport as { disabled: boolean } | undefined)?.disabled).toBe(false);
   });
 
-  it("forwards onVoiceAutoSend to TaskFormInputs", () => {
+  it("forwards onComposerSubmit to TaskFormInputs", () => {
     taskFormInputsCalls.length = 0;
-    const onVoiceAutoSend = () => {};
+    const onComposerSubmit = () => true;
     render(
       <DialogPromptSection
         isSessionMode={false}
@@ -225,12 +226,12 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
         initialDescription=""
         fs={makeFs()}
         handleKeyDown={(() => {}) as never}
-        onVoiceAutoSend={onVoiceAutoSend}
+        onComposerSubmit={onComposerSubmit}
       />,
     );
 
     const last = taskFormInputsCalls.at(-1)!;
-    expect(last.onVoiceAutoSend).toBe(onVoiceAutoSend);
+    expect(last.onComposerSubmit).toBe(onComposerSubmit);
   });
 });
 

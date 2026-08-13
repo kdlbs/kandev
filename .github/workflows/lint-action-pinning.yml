@@ -30,6 +30,8 @@ on:
       - "scripts/release/publish-npm.test.mjs"
       - "scripts/release/update-scoop-bucket.sh"
       - "scripts/release/update-scoop-bucket.test.mjs"
+      - "scripts/release/retry-ghcr-command.sh"
+      - "scripts/release/retry-ghcr-command.test.sh"
   pull_request:
     branches: [main]
     paths:
@@ -59,6 +61,8 @@ on:
       - "scripts/release/publish-npm.test.mjs"
       - "scripts/release/update-scoop-bucket.sh"
       - "scripts/release/update-scoop-bucket.test.mjs"
+      - "scripts/release/retry-ghcr-command.sh"
+      - "scripts/release/retry-ghcr-command.test.sh"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -98,6 +102,9 @@ jobs:
 
       - name: Test runtime bundle contract
         run: bash scripts/release/runtime-bundle.test.sh
+
+      - name: Test GHCR retry helper
+        run: bash scripts/release/retry-ghcr-command.test.sh
 
       - name: Test npm release helpers
         run: node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs

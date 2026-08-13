@@ -47,7 +47,7 @@ func (r *SSHExecutor) resolvePrepareScript(req *ExecutorCreateRequest, workspace
 	}
 	script := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeySetupScript))
 	if script == "" {
-		script = DefaultPrepareScript("ssh")
+		script = DefaultPrepareScript(executorTypeSSH)
 	}
 	if script == "" {
 		return "", nil

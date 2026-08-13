@@ -2,6 +2,7 @@ import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
 import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
+import { reviewPanelId, type ReviewPanelTarget } from "./dockview-review-panel-id";
 import { TERMINAL_DEFAULT_ID } from "./layout-manager/constants";
 import { panelTitle } from "./layout-manager/panel-title";
 import {
@@ -33,6 +34,8 @@ type SimplePanelOpts = {
 function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts): void {
   focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
 }
+
+export { reviewPanelId };
 
 function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string): void {
   const browserPanel =
@@ -577,6 +580,39 @@ function buildReviewPanelActions(get: StoreGet) {
         title: panelTitle("mr-detail"),
         position: { referenceGroup: canonical?.group.id ?? centerGroupId },
         params: { mrKey },
+      });
+    },
+    addReviewPanel: (review: ReviewPanelTarget) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      const canonical = api.getPanel("pr-detail");
+      if (
+        canonical?.params?.providerId === review.providerId &&
+        canonical.params.connectionScope === review.connectionScope &&
+        canonical.params.repositoryId === review.repositoryId &&
+        String(canonical.params.changeRequestNumber) === String(review.changeRequestNumber)
+      ) {
+        canonical.api.setActive();
+        return;
+      }
+      const id = reviewPanelId(review);
+      const existing = api.getPanel(id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      focusOrAddPanel(api, {
+        id,
+        component: "review-detail",
+        title: review.title,
+        position: { referenceGroup: canonical?.group.id ?? centerGroupId },
+        params: {
+          providerId: review.providerId,
+          reviewKey: review.reviewKey,
+          connectionScope: review.connectionScope,
+          repositoryId: review.repositoryId,
+          changeRequestNumber: review.changeRequestNumber,
+        },
       });
     },
   };

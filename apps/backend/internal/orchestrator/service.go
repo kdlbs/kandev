@@ -161,6 +161,18 @@ type WorkflowStepGetter interface {
 	GetWorkflowMeta(ctx context.Context, workflowID string) (WorkflowMeta, error)
 }
 
+// StepHistoryRecorder persists an ADR 0015 session-step transition audit
+// row. Optional — when unset, the auto-advance and deferred move_task_kandev
+// transition paths record nothing. Errors are logged and swallowed by the
+// caller: the audit trail must never fail the transition it is recording.
+type StepHistoryRecorder interface {
+	CreateStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error
+}
+
+type asyncStepHistoryRecorder interface {
+	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
+}
+
 // AgentFamilyResolver maps a hand-written agent family reference onto the
 // canonical IDs of every agent that answers to it. Exactly one candidate
 // resolves the reference; none means it names no known agent; more than one
@@ -369,6 +381,12 @@ type Service struct {
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
+
+	// stepHistoryRecorder persists the ADR 0015 audit row for orchestrator
+	// step transitions: auto-advance (StepTransitionTriggerAutoComplete) and
+	// the deferred move_task_kandev path (StepTransitionTriggerManual).
+	// Optional.
+	stepHistoryRecorder StepHistoryRecorder
 
 	// Resolves the agent family names written in configure_session rules onto
 	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an
@@ -907,13 +925,23 @@ func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.Rep
 // only the persisted local path; clone credentials remain private to the
 // orchestrator executor pipeline.
 type RepositoryHostCloner interface {
-	EnsureRepositoryCloned(context.Context, *models.Repository) (string, error)
+	EnsureRepositoryClonedForSession(
+		context.Context, string, string, *models.Repository,
+	) (string, error)
 }
 
 // EnsureRepositoryCloned delegates host cloning through the executor's
 // authenticated clone pipeline.
 func (s *Service) EnsureRepositoryCloned(ctx context.Context, repository *models.Repository) (string, error) {
 	return s.executor.EnsureRepositoryCloned(ctx, repository)
+}
+
+// EnsureRepositoryClonedForSession delegates host cloning with exact task and
+// session scope for plugin repository credentials.
+func (s *Service) EnsureRepositoryClonedForSession(
+	ctx context.Context, taskID, sessionID string, repository *models.Repository,
+) (string, error) {
+	return s.executor.EnsureRepositoryClonedForSession(ctx, taskID, sessionID, repository)
 }
 
 // SetGitHubCredentialBroker configures renewable workspace GitHub credentials
@@ -1165,6 +1193,16 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.initWorkflowEngine()
 }
 
+// SetStepHistoryRecorder wires the ADR 0015 audit-trail writer for
+// auto-advance step transitions (engine and legacy on_turn_complete paths)
+// and the deferred move_task_kandev path (applyPendingMove). Optional.
+func (s *Service) SetStepHistoryRecorder(recorder StepHistoryRecorder) {
+	s.stepHistoryRecorder = recorder
+	// The transition store is created when the workflow step getter is wired.
+	// Rebuild it so queue-promotion paths receive the same recorder.
+	s.initWorkflowEngine()
+}
+
 // SetAgentFamilyResolver sets the collaborator that maps the agent family names
 // written in configure_session rules onto canonical agent IDs.
 //
@@ -1202,7 +1240,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted, s.stepHistoryRecorder)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	s.workflowEngine = engine.New(store, callbacks, s.engineOptions...)

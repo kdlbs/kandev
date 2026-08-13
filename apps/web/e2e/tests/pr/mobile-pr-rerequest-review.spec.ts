@@ -69,7 +69,7 @@ test.describe("mobile PR re-request review", () => {
     await expect(session.prTopbarButton()).toHaveCount(0);
 
     await testPage.getByRole("button", { name: "Review", exact: true }).tap();
-    const panel = testPage.getByTestId("mobile-pr-review-panel");
+    const panel = testPage.getByTestId("mobile-review-panel");
     await expect(panel).toBeVisible({ timeout: 15_000 });
     await assertLocatorWithinViewportX(panel, "mobile PR review panel");
 
@@ -177,10 +177,12 @@ test.describe("mobile PR re-request review", () => {
     const action = session.prReRequestReviewButton(REVIEWER);
     await expect(action).toBeVisible({ timeout: 15_000 });
 
-    await testPage.getByTestId("mobile-review-pr-selector-trigger").tap();
-    await testPage
-      .getByTestId(`mobile-review-pr-selector-item-${OWNER}-${REPO}-${SWITCH_SECOND_PR_NUMBER}`)
-      .tap();
+    await testPage.getByTestId("review-item-selector-trigger").tap();
+    const secondReview = testPage.getByRole("menuitemradio", {
+      name: new RegExp(`^PR ${SWITCH_SECOND_PR_NUMBER}\\b`),
+    });
+    await expect(secondReview).toBeVisible();
+    await secondReview.tap();
     await secondFeedbackRequested;
 
     await expect(action).toHaveCount(0);

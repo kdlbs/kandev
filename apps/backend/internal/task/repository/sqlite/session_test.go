@@ -645,6 +645,37 @@ func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestSetSessionMetadataKeyIfAbsentOrDifferentStepSQLiteReplacesOnlyStaleStep(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-step-claim", "session-step-claim", "turn-step-claim")
+	ctx := context.Background()
+
+	first := models.PendingStepCompletionSignal{StepID: "step-1", Summary: "first"}
+	stored, err := repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-1", first)
+	require.NoError(t, err)
+	require.True(t, stored, "an empty signal bag should be claimed")
+
+	second := models.PendingStepCompletionSignal{StepID: "step-2", Summary: "second"}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-2", second)
+	require.NoError(t, err)
+	require.True(t, stored, "a signal from an older step should be replaced")
+
+	third := models.PendingStepCompletionSignal{StepID: "step-2", Summary: "third"}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentOrDifferentStep(
+		ctx, "session-step-claim", models.SessionMetaKeyPendingStepCompletion, "step-2", third)
+	require.NoError(t, err)
+	require.False(t, stored, "a signal for the current step should keep the first payload")
+
+	session, err := repo.GetTaskSession(ctx, "session-step-claim")
+	require.NoError(t, err)
+	signal, ok := models.LoadPendingStepSignal(session.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "step-2", signal.StepID)
+	require.Equal(t, "second", signal.Summary)
+}
+
 func TestUpdateSessionContextWindowSQLiteCountsStrictUsageDrops(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -697,6 +728,16 @@ func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
 	}
 	if !strings.Contains(query, "jsonb_set") || !strings.Contains(query, "jsonb_extract_path") {
 		t.Fatalf("postgres write-once query must use JSONB set/existence operations: %s", query)
+	}
+}
+
+func TestSetSessionMetadataKeyIfAbsentOrDifferentStepQueryUsesPostgresJSONB(t *testing.T) {
+	query := setSessionMetadataKeyIfAbsentOrDifferentStepQuery(dialect.PGX)
+	if strings.Contains(query, "json_set") || strings.Contains(query, "json_extract") || strings.Contains(query, "json(?)") {
+		t.Fatalf("postgres step-aware claim query uses SQLite JSON functions: %s", query)
+	}
+	if !strings.Contains(query, "jsonb_set") || !strings.Contains(query, "jsonb_extract_path_text") || !strings.Contains(query, "IS DISTINCT FROM") {
+		t.Fatalf("postgres step-aware claim query must use atomic JSONB comparison: %s", query)
 	}
 }
 
@@ -944,10 +985,10 @@ func TestIncrementTaskSessionUsage_AccumulatesAcrossCalls(t *testing.T) {
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-usage", "sess-usage", "turn-usage")
 
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 100, 200, 50); err != nil {
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 100, 0, 200, 50); err != nil {
 		t.Fatalf("first increment: %v", err)
 	}
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 10, 20, 5); err != nil {
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-usage", 10, 0, 20, 5); err != nil {
 		t.Fatalf("second increment: %v", err)
 	}
 
@@ -967,7 +1008,7 @@ func TestIncrementTaskSessionUsage_AccumulatesAcrossCalls(t *testing.T) {
 // missing row (subscriber may race against session creation).
 func TestIncrementTaskSessionUsage_UnknownSessionNoError(t *testing.T) {
 	repo := newRepoForSessionTests(t)
-	if err := repo.IncrementTaskSessionUsage(context.Background(), "no-such", 1, 2, 3); err != nil {
+	if err := repo.IncrementTaskSessionUsage(context.Background(), "no-such", 1, 1, 2, 3); err != nil {
 		t.Errorf("expected no error for unknown session, got %v", err)
 	}
 }
@@ -976,7 +1017,7 @@ func TestIncrementTaskSessionUsage_UnknownSessionNoError(t *testing.T) {
 // orchestrator publishing a usage event before SessionID is set.
 func TestIncrementTaskSessionUsage_EmptySessionIDNoOp(t *testing.T) {
 	repo := newRepoForSessionTests(t)
-	if err := repo.IncrementTaskSessionUsage(context.Background(), "", 1, 2, 3); err != nil {
+	if err := repo.IncrementTaskSessionUsage(context.Background(), "", 1, 1, 2, 3); err != nil {
 		t.Errorf("empty session id should be a no-op, got %v", err)
 	}
 }
@@ -1042,19 +1083,19 @@ func TestMigrateSessionsAddCostColumns_BackfillsLegacySchema(t *testing.T) {
 	seedForMsgTest(t, repo, "task-mig", "sess-mig", "turn-mig")
 
 	// Precondition: this is the reported bug on a legacy schema.
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 2, 3); err == nil {
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 1, 2, 3); err == nil {
 		t.Fatal("expected missing-column error before backfill")
 	}
 
 	repo.migrateSessionsAddCostColumns()
 
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 2, 3); err != nil {
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 1, 1, 2, 3); err != nil {
 		t.Fatalf("IncrementTaskSessionUsage after backfill: %v", err)
 	}
 
 	// Idempotent: a second pass over a table that already has the columns is a no-op.
 	repo.migrateSessionsAddCostColumns()
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 10, 20, 30); err != nil {
+	if err := repo.IncrementTaskSessionUsage(ctx, "sess-mig", 10, 10, 20, 30); err != nil {
 		t.Fatalf("IncrementTaskSessionUsage after second pass: %v", err)
 	}
 }
@@ -1635,7 +1676,7 @@ func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID strin
 
 func assertReapedSession(t *testing.T, repo *Repository, sessionID string, reapedAfter time.Time) {
 	t.Helper()
-	if got := sessionState(t, repo, sessionID); got != "CANCELLED" {
+	if got := sessionState(t, repo, sessionID); got != sessionStateCancelled {
 		t.Errorf("%s = %q, want CANCELLED", sessionID, got)
 	}
 	errorMessage, completedAt, updatedAt := sessionCancellationMetadata(t, repo, sessionID)

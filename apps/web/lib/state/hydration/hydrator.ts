@@ -5,6 +5,7 @@ import {
   applyStoredQuickChatNames,
   reconcileQuickTerminalTabs,
 } from "@/lib/state/slices/ui/quick-chat-sync";
+import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
 /**
@@ -81,10 +82,18 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   mergeWithLoading(draft.notificationProviders, state.notificationProviders);
   if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
   if (state.sleepInhibition) deepMerge(draft.sleepInhibition, state.sleepInhibition);
-  if (state.userSettings && !draft.userSettings.loaded) {
+  if (state.userSettings && shouldHydrateUserSettings(draft.userSettings, state.userSettings)) {
     deepMerge(draft.userSettings, state.userSettings);
     bridgeSidebarViewsFromUserSettings(draft, state.userSettings);
   }
+}
+
+function shouldHydrateUserSettings(
+  current: Draft<AppState["userSettings"]>,
+  incoming: Partial<AppState["userSettings"]>,
+): boolean {
+  const order = compareUserSettingsRevisions(incoming.revision, current.revision);
+  return order === null ? !current.loaded : order >= 0;
 }
 
 function bridgeSidebarViewsFromUserSettings(

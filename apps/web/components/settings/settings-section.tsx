@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Separator } from "@kandev/ui/separator";
 import { useSettingsTargetRegistration } from "./settings-target-provider";
 
 type SettingsSectionProps = {
@@ -12,6 +13,13 @@ type SettingsSectionProps = {
   action?: ReactNode;
   children: ReactNode;
   discoveryTargetId?: string;
+  /**
+   * Rule the heading off from the body. For a section that *is* its page — the
+   * workspace Repositories and Workflows tabs, which have no page heading of
+   * their own — so it carries the same line under its title that the sibling
+   * tabs have under theirs.
+   */
+  divided?: boolean;
 };
 
 export function SettingsSection({
@@ -23,6 +31,7 @@ export function SettingsSection({
   action,
   children,
   discoveryTargetId,
+  divided = false,
 }: SettingsSectionProps) {
   const registerTarget = useSettingsTargetRegistration(discoveryTargetId);
   return (
@@ -43,6 +52,7 @@ export function SettingsSection({
         </div>
         {action && <div className="w-full shrink-0 sm:w-auto">{action}</div>}
       </div>
+      {divided && <Separator />}
       {children}
     </section>
   );

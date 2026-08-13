@@ -2,6 +2,7 @@ import { test, expect } from "../fixtures/test-base";
 import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 import { waitForSessionDone } from "../helpers/session";
+import { createSubmoduleReviewFixture } from "./review/submodule-review-helpers";
 
 type CommandAliasExpectation = {
   query: string;
@@ -129,12 +130,14 @@ test.describe("Command Panel", () => {
     await expect(dialog.locator("[cmdk-group-heading]")).toHaveText(["Settings"]);
     const option = commandOption(testPage, "Terminal Font Size");
     await expect(option).toBeVisible();
-    await expect(option.getByText("Settings › General › Terminal", { exact: true })).toBeVisible();
+    await expect(option.getByText("Settings › Terminal & Editors", { exact: true })).toBeVisible();
     await expect(option).toHaveAttribute("data-selected", "true");
     await input.press("Enter");
 
     await expect(dialog).not.toBeVisible();
-    await expect(testPage).toHaveURL(/\/settings\/general\/terminal#setting-terminal-font-size$/);
+    await expect(testPage).toHaveURL(
+      /\/settings\/preferences\/terminal-editors#setting-terminal-font-size$/,
+    );
     const target = testPage.locator('[data-settings-target="setting-terminal-font-size"]');
     await expect(target).toHaveAttribute("data-settings-target-highlight", "true");
     await expect(testPage.getByTestId("terminal-font-size-input")).toBeFocused();
@@ -227,6 +230,50 @@ test.describe("Command Panel", () => {
 
     // Should show empty state for file search
     await expect(dialog.getByText("Type to search files...")).toBeVisible();
+  });
+
+  test("Cmd+Shift+K finds root and submodule files", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(180_000);
+    const fixture = await createSubmoduleReviewFixture(
+      apiClient,
+      seedData,
+      backend.tmpDir,
+      "Submodule file search E2E",
+    );
+
+    try {
+      await testPage.goto(`/t/${fixture.taskId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 45_000 });
+      await fixture.waitForWorktree(apiClient);
+
+      await openFileSearch(testPage);
+      const dialog = commandDialog(testPage);
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
+      await dialog.getByRole("combobox").fill("README.md");
+
+      const groups = dialog.getByTestId("file-search-repo-group");
+      await expect(groups).toHaveCount(3, { timeout: 45_000 });
+      await expect(
+        dialog.locator('[data-testid="file-search-repo-group"][data-repository=""]'),
+      ).toBeVisible();
+      await expect(
+        dialog.locator('[data-testid="file-search-repo-group"][data-repository="vendor/outer"]'),
+      ).toBeVisible();
+      await expect(
+        dialog.locator(
+          '[data-testid="file-search-repo-group"][data-repository="vendor/outer/vendor/inner"]',
+        ),
+      ).toBeVisible();
+    } finally {
+      fixture.cleanup();
+    }
   });
 
   test("Cmd+K inline task search shows matching tasks", async ({

@@ -223,20 +223,10 @@ export const noLiteralStringOptions = {
 export const i18nGuardFiles = [
   // The i18n runtime itself.
   "lib/i18n/**/*.{ts,tsx}",
-  // Settings → General → Appearance, migrated end-to-end as the worked example:
-  // the page, the two sections it owns, and the settings chrome around them.
-  "app/settings/general/appearance/**/*.{ts,tsx}",
-  // Settings → General → Notifications; the shared settings chrome it renders
-  // is migrated with the page that owns it, not here.
-  "app/settings/general/notifications/**/*.{ts,tsx}",
-  // Settings → General → Secrets.
-  "app/settings/general/secrets/**/*.{ts,tsx}",
-  // Settings → General → Terminal; the shared settings chrome is migrated with
-  // the page that owns it, not here.
-  "app/settings/general/terminal/**/*.{ts,tsx}",
-  "components/app-sidebar/sections/settings/general-group.tsx",
+  // Settings → Preferences — Appearance, Notifications, Terminal & Editors and
+  // friends render straight from components/settings via the SPA route table.
+  "components/settings/app-status-bar-settings-card.tsx",
   "components/settings/general-settings.tsx",
-  "components/settings/general-nav.ts",
   "components/settings/language-settings.tsx",
   "components/settings/notification-events-table.tsx",
   "components/settings/notification-permission-section.tsx",
@@ -254,39 +244,36 @@ export const i18nGuardFiles = [
   "components/settings/startup-page-settings-card.tsx",
   "components/settings/system-metrics-settings-card.tsx",
   "components/settings/terminal-settings.tsx",
-  // Settings → General → Editors: the page, its state/section components, the
-  // custom-editor form, and the editable-card shell that form renders inside.
-  // `editable-card.tsx` is shared with repository-card.tsx, which is not
-  // migrated — the guard is per-file, so that stays unaffected.
-  "app/settings/general/editors/**/*.{ts,tsx}",
+  // Settings → Preferences → Terminal & Editors: the merged page, its
+  // state/section components, the custom-editor form, and the editable-card
+  // shell that form renders inside. `editable-card.tsx` is shared with
+  // repository-card.tsx, which is not migrated — the guard is per-file, so
+  // that stays unaffected.
   "components/settings/editable-card.tsx",
   "components/settings/editor-form.tsx",
   "components/settings/editors-settings-state.tsx",
   "components/settings/editors-settings.tsx",
   "components/settings/lsp-status-location-setting.tsx",
   "components/settings/lsp-language-options.ts",
-  // Settings → General → Sprites.
-  "app/settings/general/sprites/**/*.{ts,tsx}",
+  // Sprites.dev config, now a section on the Executors page.
   "components/settings/sprites-settings.tsx",
-  // Settings → General → Layouts: the page and the whole layouts component
-  // directory. `layout-editor-actions.ts` and `use-layout-settings.ts` hold no
+  // Settings → Preferences → Layouts: the whole layouts component directory.
+  // `layout-editor-actions.ts` and `use-layout-settings.ts` hold no
   // JSX, so `mode: "jsx-only"` never inspects them — the entries record that
   // they are migrated, but only the pseudo-locale can prove it stays that way.
-  "app/settings/general/layouts/**/*.{ts,tsx}",
   "components/settings/layouts/**/*.{ts,tsx}",
-  // Settings → General → Resource Metrics, Keyboard Shortcuts and Task Actions.
+  // Settings → Preferences → Appearance, Keyboard Shortcuts and Task behavior.
   // The pages render from general-settings.tsx (already listed above); these
-  // entries add the routes plus the per-setting cards those two pages own.
-  // Shortcut *names* still come from `lib/keyboard/shortcut-overrides.ts`, a
-  // registry shared with the un-migrated voice-mode page — deliberately not
-  // migrated here.
-  "app/settings/general/resource-metrics/**/*.{ts,tsx}",
-  "app/settings/general/keyboard-shortcuts/**/*.{ts,tsx}",
-  "app/settings/general/task-actions/**/*.{ts,tsx}",
+  // entries add the merged pages plus the per-setting cards those pages own.
+  // Shortcut *names* still come from `lib/keyboard/shortcut-overrides.ts`,
+  // which is deliberately not migrated here.
+  "components/settings/task-behavior-settings.tsx",
+  "components/settings/terminal-editors-settings.tsx",
   "components/settings/anchored-prompt-bar-settings.tsx",
   "components/settings/archive-confirmation-settings.tsx",
   "components/settings/keyboard-shortcuts-card.tsx",
   "components/settings/mcp-task-agent-profile-default-settings.tsx",
+  "components/settings/settings-menu-mode-card.tsx",
   "components/settings/unread-divider-settings.tsx",
   // Settings → Integrations → GitHub, connection and authentication half: the
   // page, the settings shell, the status/identity panels, the connection dialog
@@ -535,9 +522,8 @@ export const i18nGuardFiles = [
   // `status`, the routing `tier`, the permission `apply_method`, the watcher
   // `kind`, and every model/mode `id` — only their labels are copy, and those
   // travel as catalog keys and resolve at render.
-  "app/settings/agent/**/*.{ts,tsx}",
   "app/settings/agents/**/*.{ts,tsx}",
-  "components/app-sidebar/sections/settings/agents-group.tsx",
+  "components/settings/agents/**/*.{ts,tsx}",
   "components/settings/add-tui-agent-dialog.tsx",
   "components/settings/agent-login-dialog.tsx",
   "components/settings/agent-profile-delete-dialog.tsx",
@@ -595,7 +581,6 @@ export const i18nGuardFiles = [
   //     `/root/.cache/go-build` placeholder. All are interpolated as values so
   //     the pseudo-locale cannot turn them into dead pointers.
   //   - `StorageBusyResource.label`, which the backend renders.
-  "app/settings/system/storage/**/*.{ts,tsx}",
   "components/settings/system/storage/**/*.{ts,tsx}",
   "hooks/domains/system/use-storage-maintenance.ts",
   // The shell every System route renders. It takes title/description/actions as
@@ -726,7 +711,6 @@ export const i18nGuardFiles = [
   // same trap on its own dynamic route. `pnpm lint` is unchanged by the repair,
   // so these directories were always clean — just unguarded. See docs/i18n.md
   // ("An entry can be born dead").
-  "app/settings/workspace/[[]id[]]/workflows/**/*.{ts,tsx}",
   "app/settings/workspace/use-workflow-creation.ts",
   "app/settings/workspace/workspace-workflows-client.tsx",
   "app/settings/workspace/workspace-workflows-dialogs.tsx",
@@ -851,10 +835,9 @@ export const i18nGuardFiles = [
   //     backup filenames, and the `<data-dir>/backups/` placeholder — all
   //     interpolated as values so the pseudo-locale cannot turn them into dead
   //     pointers.
-  "app/settings/system/**/*.{ts,tsx}",
-  "components/app-sidebar/sections/settings/system-group.tsx",
   "components/settings/changelog-list.tsx",
   "components/settings/system/*.{ts,tsx}",
+  "components/settings/system/**/*.{ts,tsx}",
   "hooks/domains/system/use-desktop-updater.ts",
   "hooks/domains/system/use-kandev-restart.ts",
   "hooks/domains/system/use-self-update.ts",
@@ -885,11 +868,17 @@ export const i18nGuardFiles = [
   // can keep them that way.
   "components/app-sidebar/*.{ts,tsx}",
   "components/app-sidebar/sections/*.tsx",
-  "components/app-sidebar/sections/settings/account-group.tsx",
-  "components/app-sidebar/sections/settings/executors-group.tsx",
   "components/app-sidebar/sections/settings/settings-nav-primitives.tsx",
   "components/app-sidebar/sections/settings/settings-tree.tsx",
-  "components/app-sidebar/sections/settings/workspaces-group.tsx",
+  // The optional tree modes the menu grows under Workspaces, Agents and
+  // Executors. `settings-menu-node.tsx` is the only one with JSX; the three
+  // `.ts` entries hold branch data, expansion state and the store read, and
+  // carry catalog *keys* rather than copy — `mode: "jsx-only"` never inspects
+  // them, so the entries record that they were read, not that lint guards them.
+  "components/app-sidebar/sections/settings/settings-menu-branches.ts",
+  "components/app-sidebar/sections/settings/settings-menu-node.tsx",
+  "components/app-sidebar/sections/settings/use-settings-menu-branches.ts",
+  "components/app-sidebar/sections/settings/use-settings-menu-expansion.ts",
   "components/app-status-bar/**/*.{ts,tsx}",
   "components/theme-toggle.tsx",
   // The command palette's own copy. `group` doubles as the palette's Map key and
@@ -966,23 +955,23 @@ export const i18nGuardFiles = [
   // here to break; the name travels into the sentence as an interpolated value.
   "app/settings/workspace/page.tsx",
   "app/settings/workspace/[[]id[]]/page.tsx",
-  "app/settings/workspace/[[]id[]]/repositories/page.tsx",
   "app/settings/workspace/workspace-edit-client.tsx",
   "app/settings/workspace/workspace-not-found-card.tsx",
   "app/settings/workspace/workspace-repositories-client.tsx",
   "app/settings/workspace/workspace-repositories-dialog.tsx",
   "app/settings/workspace/workspaces-page-client.tsx",
+  "components/settings/workspaces/**/*.{ts,tsx}",
   "components/settings/repository-branch-template-help.tsx",
   "components/settings/repository-card.tsx",
   "components/settings/repository-copy-files-help.tsx",
   "components/settings/repository-custom-scripts.tsx",
   "components/settings/repository-delete-dialog.tsx",
   "components/settings/unsaved-indicator.tsx",
-  // Settings → External MCP, Prompts, Voice Mode and Utility Agents, plus the
-  // two Changelog cards. Four small routes in one entry group because none of
-  // them owns enough copy to be worth its own migration, and they share the
-  // `settings` namespace: two of the four already had their page title there
-  // (`settings:voiceMode`, `settings:utilityAgents`) and the other two in
+  // Settings → External MCP, Prompts and Utility Agents, plus the two
+  // Changelog cards. Small routes in one entry group because none of them owns
+  // enough copy to be worth its own migration, and they share the `settings`
+  // namespace: one already had its page title there
+  // (`settings:utilityAgents`) and the others in
   // `common` (`common:externalMcp`, `common:prompts`), all of which are reused
   // rather than twinned — `SEGMENT_LABEL_KEYS` in `settings-layout-client.tsx`
   // renders the same words as the breadcrumb on these very routes.
@@ -995,9 +984,8 @@ export const i18nGuardFiles = [
   // identifiers an external agent calls. Two unit tests pin the keys to the
   // catalog, because nothing else can.
   //
-  // Three more shapes here held copy no lint rule could see, all now migrated:
-  // `buildEngineOptions` in `voice-mode-settings.tsx` (a plain builder
-  // returning label/description object literals), `noteForStatus` in
+  // Two more shapes here held copy no lint rule could see, both now migrated:
+  // `noteForStatus` in
   // `inference-agent-status.tsx` (a non-JSX switch over the probe status), and
   // the `placeholder = "Select a model"` parameter default in
   // `model-combobox.tsx`, which had to move into the component body — a
@@ -1018,10 +1006,10 @@ export const i18nGuardFiles = [
   // of them holds any copy at all, but the next migration should not have to
   // rediscover which ones are live:
   //
-  //   - `app/settings/prompts/page.tsx` and `app/settings/voice-mode/page.tsx`
+  //   - `app/settings/prompts/page.tsx`
   //     are unreferenced. `SETTINGS_ROUTES` in `src/settings-routes.tsx` renders
-  //     `<PromptsSettings />` and `<VoiceModeSettings />` directly, so the SSR
-  //     prefetch in those pages never runs. `external-mcp` and `utility-agents`
+  //     `<PromptsSettings />` directly, so the SSR prefetch in that page never
+  //     runs. `external-mcp` and `utility-agents`
   //     go through their page, and are live.
   //   - `app/settings/changelog/page.tsx` is likewise unreferenced; the route
   //     table has its own `SettingsRedirect` to `/settings/system/updates`.
@@ -1059,17 +1047,12 @@ export const i18nGuardFiles = [
   //     whole of every generated snippet. All interpolated as values.
   //   - The `{{` prompt-template sigil and the `@name` chat mention token —
   //     both typed verbatim by the user, both interpolated.
-  //   - Wire values: the voice `engine` / `mode` / `whisper_web_model` unions
-  //     and the BCP-47 `language` tags, the `InferenceAgentStatus` probe
-  //     states, the `USE_DEFAULT` sentinel, and every agent/model id. Only
-  //     their labels are copy, and those travel as catalog keys.
-  //   - `~40 MB` / `~75 MB` / `~240 MB` in `WHISPER_MODELS`: download sizes in
-  //     binary units, not prose — the same call `storage-units.ts` made.
+  //   - Wire values: the `InferenceAgentStatus` probe states, the
+  //     `USE_DEFAULT` sentinel, and every agent/model id. Only their labels
+  //     are copy, and those travel as catalog keys.
   //   - Utility agent `name`, `description` and `prompt`, and custom prompt
   //     `name` / `content`. The builtins' text is authored by the backend and
   //     the rest is user data; a prompt body is also sent to the agent verbatim.
-  //   - `new Error("Voice settings require VoiceDraftProvider")`, a programming
-  //     error that can only fire in a broken render tree.
   //
   // Every key added here was audited against all 15 en catalogs for English that
   // already exists under another key. Twelve matched. Ten are the established
@@ -1098,17 +1081,15 @@ export const i18nGuardFiles = [
   // that key is named for the secrets dialog it belongs to; folding the prompts
   // dialog into it would leave a key whose name contradicts half its callers.
   //
-  // Still English and NOT ours: `CONFIGURABLE_SHORTCUTS.VOICE_INPUT_TOGGLE.label`
-  // ("Voice Input") from `lib/keyboard/shortcut-overrides.ts`, interpolated into
-  // the migrated `settings:voiceShortcutTitle` frame. It is the shared keyboard
-  // registry, owned by whoever migrates `lib/keyboard`; under the pseudo-locale
-  // it reads as an English word inside accented copy, which is the oracle's
-  // known weak spot rather than a miss here.
-  "app/settings/changelog/**/*.{ts,tsx}",
+  // Shortcut labels in `CONFIGURABLE_SHORTCUTS`
+  // (`lib/keyboard/shortcut-overrides.ts`) are still English and NOT ours:
+  // that is the shared keyboard registry, owned by whoever migrates
+  // `lib/keyboard`. Under the pseudo-locale they read as English words inside
+  // accented copy, which is the oracle's known weak spot rather than a miss
+  // here.
   "app/settings/external-mcp/**/*.{ts,tsx}",
   "app/settings/prompts/**/*.{ts,tsx}",
   "app/settings/utility-agents/**/*.{ts,tsx}",
-  "app/settings/voice-mode/**/*.{ts,tsx}",
   "components/settings/changelog-notification-card.tsx",
   "components/settings/changelog-settings.tsx",
   "components/settings/config-chat-agent-section.tsx",
@@ -1121,7 +1102,6 @@ export const i18nGuardFiles = [
   "components/settings/utility-agents-section.tsx",
   "components/settings/utility-dirty.ts",
   "components/settings/utility-sections.tsx",
-  "components/settings/voice-mode-settings.tsx",
   "lib/settings/external-mcp-tools.ts",
   // Configuration Chat. `ConfigChatProvider` mounts the FAB on EVERY /settings
   // route, so its `aria-label="Configuration Chat"` was the last text finding
@@ -1224,7 +1204,6 @@ export const i18nGuardFiles = [
   // escaped form is what proves an entry is live.
   "components/automations/*.{ts,tsx}",
   "components/automations/trigger-configs/*.tsx",
-  "app/settings/automations/page.tsx",
   "app/settings/workspace/[[]id[]]/automations/**/*.tsx",
   "hooks/domains/settings/use-automation-runs.ts",
   // Settings → Plugins, Settings → Account, and the plural
@@ -1419,6 +1398,8 @@ export const i18nGuardFiles = [
   "components/github/my-github/use-pr-statuses.ts",
   "components/github/pr-checks-section.tsx",
   "components/github/pr-ci-automation-controls.tsx",
+  "components/github/pr-ci-automation-prompt-dialog.tsx",
+  "components/github/pr-ci-automation-rows.tsx",
   "components/github/pr-ci-popover.tsx",
   "components/github/pr-comments-section.tsx",
   "components/github/pr-detail-panel.tsx",
@@ -1435,6 +1416,11 @@ export const i18nGuardFiles = [
   "components/gitlab/mr-files-section.tsx",
   "components/gitlab/mr-overview-section.tsx",
   "components/gitlab/mr-reviewer-control.tsx",
+  "components/gitlab/mr-status-chip.tsx",
+  "components/gitlab/mr-status-chip-drawer.tsx",
+  "components/gitlab/mr-status-chip-popover.tsx",
+  "components/gitlab/mr-status-chip-selection.ts",
+  "components/gitlab/mr-status-chip-trigger.tsx",
   "components/gitlab/mr-topbar-button.tsx",
   "components/gitlab/my-gitlab/issue-list.tsx",
   "components/gitlab/my-gitlab/list-toolbar.tsx",

@@ -13,10 +13,27 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
+const (
+	columnCreatedAt      = "created_at"
+	columnRepositoryID   = "repository_id"
+	columnStatus         = "status"
+	columnUpdatedAt      = "updated_at"
+	columnWorktreeBranch = "worktree_branch"
+	columnWorktreeID     = "worktree_id"
+	columnWorktreePath   = "worktree_path"
+	tableTaskEnvRepos    = "task_environment_repos"
+)
+
+// envRepoKey is the normalized repository-slot key: one row per
+// (repository, branch slug) pair within a task environment.
+func envRepoKey(repositoryID, branchSlug string) string {
+	return repositoryID + "\x00" + branchSlug
+}
+
 // rowForKey returns (creating if needed) the normalized repo target for a
 // (repository, branch slug) key in this task.
 func (t *taskWorktreeTargets) rowForKey(repositoryID, branchSlug string) *envRepoTarget {
-	key := repositoryID + "\x00" + branchSlug
+	key := envRepoKey(repositoryID, branchSlug)
 	if target, ok := t.byKey[key]; ok {
 		return target
 	}
@@ -52,10 +69,25 @@ func (t *taskWorktreeTargets) targetForWorktree(worktreeID string) *envRepoTarge
 // physical-worktree identity, which must agree everywhere).
 func (t *taskWorktreeTargets) mergeLegacyEnvRepo(row legacyEnvRepo) error {
 	target := t.rowForKey(row.repositoryID, row.branchSlug)
-	if err := target.claimWorktree(row.worktreeID, row.worktreePath, row.worktreeBranch, row.position, row.errorMessage, row.createdAt, row.updatedAt, worktreeRepoStatusActive); err != nil {
+	target.canonical = true
+	if err := target.claimWorktree(row.worktreeID, row.worktreePath, row.worktreeBranch, row.position, row.errorMessage, row.createdAt, row.updatedAt, row.status); err != nil {
 		return err
 	}
+	target.mergedAt = row.mergedAt
+	target.deletedAt = row.deletedAt
 	return target.mergeCreation(row.createdAt, row.updatedAt)
+}
+
+// canonicalOwnerForSlot returns the active canonical owner for a normalized
+// repository slot. Rows from collapsed environments are already re-homed into
+// this task target, so their original environment ID is not part of ownership.
+func (t *taskWorktreeTargets) canonicalOwnerForSlot(repositoryID, branchSlug string) *envRepoTarget {
+	target, ok := t.byKey[envRepoKey(repositoryID, branchSlug)]
+	if !ok || !target.canonical || target.worktreeID == "" ||
+		target.status == worktreeRepoStatusDeleted || target.deletedAt != nil {
+		return nil
+	}
+	return target
 }
 
 // mergeFlatEnv merges the deprecated flat worktree columns of the surviving
@@ -343,13 +375,13 @@ func (c *worktreeCutover) legacyWorktreeInventory() map[string]bool {
 		inventory[worktreeInventoryKey(wt.worktreeID, wt.worktreePath, wt.worktreeBranch)] = true
 	}
 	for _, row := range c.envRepos {
-		if row.worktreeID == "" {
+		if row.worktreeID == "" || row.status == worktreeRepoStatusDeleted || row.deletedAt != nil {
 			continue
 		}
 		inventory[worktreeInventoryKey(row.worktreeID, row.worktreePath, row.worktreeBranch)] = true
 	}
 	for _, env := range c.envs {
-		if env.worktreeID == "" || c.loserEnvIDs[env.id] || canonicalIDs[env.worktreeID] {
+		if env.worktreeID == "" || c.loserEnvIDs[env.id] || c.demotedFlatEnvironments[env.id] || canonicalIDs[env.worktreeID] {
 			continue
 		}
 		inventory[worktreeInventoryKey(env.worktreeID, env.worktreePath, env.worktreeBranch)] = true
@@ -379,12 +411,12 @@ func (r *Repository) checkShadowFinalSchema(tx *sqlx.Tx) error {
 	if err != nil {
 		return err
 	}
-	for _, legacy := range []string{"repository_id", "worktree_id", "worktree_path", "worktree_branch"} {
+	for _, legacy := range []string{columnRepositoryID, columnWorktreeID, columnWorktreePath, columnWorktreeBranch} {
 		if envColumns[legacy] {
 			return fmt.Errorf("cutover: task_environments_shadow still carries legacy column %s", legacy)
 		}
 	}
-	for _, required := range []string{"id", "task_id", "executor_type", "status", "workspace_path", "created_at", "updated_at"} {
+	for _, required := range []string{"id", "task_id", "executor_type", columnStatus, "workspace_path", columnCreatedAt, columnUpdatedAt} {
 		if !envColumns[required] {
 			return fmt.Errorf("cutover: task_environments_shadow missing final column %s", required)
 		}
@@ -394,9 +426,9 @@ func (r *Repository) checkShadowFinalSchema(tx *sqlx.Tx) error {
 	if err != nil {
 		return err
 	}
-	for _, required := range []string{"id", "task_environment_id", "repository_id", "branch_slug",
-		"worktree_id", "worktree_path", "worktree_branch", "position", "error_message",
-		"status", "created_at", "updated_at", "merged_at", "deleted_at"} {
+	for _, required := range []string{"id", "task_environment_id", columnRepositoryID, "branch_slug",
+		columnWorktreeID, columnWorktreePath, columnWorktreeBranch, "position", "error_message",
+		columnStatus, columnCreatedAt, columnUpdatedAt, "merged_at", "deleted_at"} {
 		if !repoColumns[required] {
 			return fmt.Errorf("cutover: task_environment_repos_shadow missing final column %s", required)
 		}
@@ -491,8 +523,8 @@ func (r *Repository) cutoverRenamePostgresConstraints(tx *sqlx.Tx) error {
 		constraintType   string
 	}{
 		{"task_environments", "task_environments_task_id_fkey", "task_environments_shadow_task_id_fkey", "f"},
-		{"task_environment_repos", "task_environment_repos_task_environment_id_fkey", "task_environment_repos_shadow_task_environment_id_fkey", "f"},
-		{"task_environment_repos", "task_environment_repos_env_repo_branch_key", "task_environment_repos_shadow_task_environment_id_", "u"},
+		{tableTaskEnvRepos, "task_environment_repos_task_environment_id_fkey", "task_environment_repos_shadow_task_environment_id_fkey", "f"},
+		{tableTaskEnvRepos, "task_environment_repos_env_repo_branch_key", "task_environment_repos_shadow_task_environment_id_", "u"},
 	}
 	for _, rename := range renames {
 		var constraintName string

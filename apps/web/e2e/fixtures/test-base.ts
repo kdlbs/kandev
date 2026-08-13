@@ -215,6 +215,10 @@ export const test = backendFixture.extend<
       kanban_view_mode: "",
       // Keep startup routing deterministic for tests that open bare home.
       startup_page: "task_overview",
+      // Reset to the default (off). Prevent-auto-start tests flip this via
+      // saveUserSettings; without this reset it would leak into unrelated
+      // tests running later in the same worker.
+      prevent_auto_start_agent_on_open: false,
       // Reset to the default (off). Anchored-bar tests flip this via
       // saveUserSettings; without this reset it would leak into unrelated
       // tests running later in the same worker.
@@ -337,6 +341,9 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
     sidebar_draft: null,
     saved_layouts: [],
+    // Status-surface specs opt in from their local beforeEach hooks; unrelated
+    // tests start from the portable setting's default-off state.
+    app_status_bar_enabled: false,
     lsp_auto_start_languages: [],
     lsp_auto_install_languages: [],
     lsp_server_configs: {},

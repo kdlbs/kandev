@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
 )
 
 // sqliteRepository persists queued messages and pending moves.
@@ -80,10 +81,20 @@ func (r *sqliteRepository) initSchema() error {
 		workflow_id      TEXT NOT NULL DEFAULT '',
 		workflow_step_id TEXT NOT NULL DEFAULT '',
 		step_position    INTEGER NOT NULL DEFAULT 0,
-		queued_at        TIMESTAMP NOT NULL
+		queued_at        TIMESTAMP NOT NULL,
+		actor            TEXT NOT NULL DEFAULT ''
 	);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Existing installations may have the pre-audit shape; fresh installs
+	// already get the column from CREATE TABLE above, so this replays as a
+	// duplicate-column error there.
+	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN actor TEXT NOT NULL DEFAULT ''`); alterErr != nil && !db.IsDuplicateColumnError(alterErr) {
+		return alterErr
+	}
+	return nil
 }
 
 // Insert appends a new entry at the tail of the session's FIFO queue.
@@ -1308,6 +1319,52 @@ func (r *sqliteRepository) MergeIntoAbove(ctx context.Context, sessionID, source
 	return &merged, nil
 }
 
+// AutoMergeIntoAbove folds one exact source into its immediate compatible
+// predecessor in one transaction. Missing or incompatible candidates are
+// successful skips and leave storage unchanged.
+func (r *sqliteRepository) AutoMergeIntoAbove(ctx context.Context, sessionID, sourceID string) (*QueuedMessage, bool, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin automatic merge tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	source, err := readMergeSource(ctx, r, tx, sessionID, sourceID)
+	if errors.Is(err, ErrEntryNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position)
+	if errors.Is(err, ErrNoMergeTarget) {
+		return source, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	values, compatible := buildAutoMergedEntry(target, source)
+	if !compatible {
+		return source, false, nil
+	}
+	if err := applyMergeWrites(ctx, r, tx, target, source, values.content, values.attachments, values.metadata, sessionID); err != nil {
+		if errors.Is(err, ErrEntryNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	target.Content = values.content
+	target.Attachments = values.attachments
+	target.Metadata = values.metadata
+	return target, true, nil
+}
+
 // ReorderEntries atomically rewrites the FIFO positions of the session's
 // visible pending entries to match orderedIDs. Reserved in-flight lifecycle
 // rows keep their place in the sequence; visible rows are interleaved in the
@@ -1733,16 +1790,17 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 		move.QueuedAt = time.Now().UTC()
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO pending_moves (id, session_id, task_id, workflow_id, workflow_step_id, step_position, queued_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO pending_moves (id, session_id, task_id, workflow_id, workflow_step_id, step_position, queued_at, actor)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			task_id = excluded.task_id,
 			workflow_id = excluded.workflow_id,
 			workflow_step_id = excluded.workflow_step_id,
 			step_position = excluded.step_position,
-			queued_at = excluded.queued_at
+			queued_at = excluded.queued_at,
+			actor = excluded.actor
 	`),
-		uuid.New().String(), sessionID, move.TaskID, move.WorkflowID, move.WorkflowStepID, move.Position, move.QueuedAt,
+		uuid.New().String(), sessionID, move.TaskID, move.WorkflowID, move.WorkflowStepID, move.Position, move.QueuedAt, move.Actor,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert pending move: %w", err)
@@ -1756,11 +1814,12 @@ func (r *sqliteRepository) GetPendingMove(ctx context.Context, sessionID string)
 		taskID, workflowID, workflowStepID string
 		position                           int
 		queuedAt                           time.Time
+		actor                              string
 	)
 	if err := r.ro.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT task_id, workflow_id, workflow_step_id, step_position, queued_at
+		SELECT task_id, workflow_id, workflow_step_id, step_position, queued_at, actor
 		FROM pending_moves WHERE session_id = ?
-	`), sessionID).Scan(&taskID, &workflowID, &workflowStepID, &position, &queuedAt); err != nil {
+	`), sessionID).Scan(&taskID, &workflowID, &workflowStepID, &position, &queuedAt, &actor); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -1772,6 +1831,7 @@ func (r *sqliteRepository) GetPendingMove(ctx context.Context, sessionID string)
 		WorkflowStepID: workflowStepID,
 		Position:       position,
 		QueuedAt:       queuedAt,
+		Actor:          actor,
 	}, nil
 }
 
@@ -1787,11 +1847,12 @@ func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string
 		taskID, workflowID, workflowStepID string
 		position                           int
 		queuedAt                           time.Time
+		actor                              string
 	)
 	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT task_id, workflow_id, workflow_step_id, step_position, queued_at
+		SELECT task_id, workflow_id, workflow_step_id, step_position, queued_at, actor
 		FROM pending_moves WHERE session_id = ?
-	`), sessionID).Scan(&taskID, &workflowID, &workflowStepID, &position, &queuedAt); err != nil {
+	`), sessionID).Scan(&taskID, &workflowID, &workflowStepID, &position, &queuedAt, &actor); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -1809,6 +1870,7 @@ func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string
 		WorkflowStepID: workflowStepID,
 		Position:       position,
 		QueuedAt:       queuedAt,
+		Actor:          actor,
 	}, nil
 }
 

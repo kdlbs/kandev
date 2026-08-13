@@ -9,7 +9,10 @@ let saveContributor: SettingsSaveContributor | null = null;
 let currentRole: "admin" | "member" | undefined;
 const MAXIMUM_LABEL = "Maximum messages per session";
 const MERGE_TOGGLE_LABEL = "Enable queued message merging";
+const AUTO_MERGE_TOGGLE_LABEL = "Automatically merge consecutive messages";
 const EFFECTIVE_VALUE_ID = "message-queue-effective-value";
+const ARIA_PRESSED = "aria-pressed";
+const SAVE_FAILED = "save failed";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   fetchMessageQueueSettings: (...args: unknown[]) => fetchSettingsMock(...args),
@@ -51,16 +54,35 @@ vi.mock("@kandev/ui/switch", () => ({
 
 import { MessageQueueSettings } from "./message-queue-settings";
 
-function response(
-  configured = 10,
-  effective = configured,
-  source: MessageQueueSettingsResponse["effective"]["source"] = "default",
-  locked = false,
-  mergeEnabled = true,
-): MessageQueueSettingsResponse {
+type ResponseOverrides = {
+  configured?: number;
+  effective?: number;
+  source?: MessageQueueSettingsResponse["effective"]["source"];
+  locked?: boolean;
+  mergeEnabled?: boolean;
+  autoMergeEnabled?: boolean;
+};
+
+function response(overrides: ResponseOverrides = {}): MessageQueueSettingsResponse {
+  const configured = overrides.configured ?? 10;
+  const effective = overrides.effective ?? configured;
+  const source = overrides.source ?? "default";
+  const locked = overrides.locked ?? false;
+  const mergeEnabled = overrides.mergeEnabled ?? true;
+  const autoMergeEnabled = overrides.autoMergeEnabled ?? true;
   return {
-    settings: { max_per_session: configured, merge_enabled: mergeEnabled },
-    effective: { max_per_session: effective, source, locked, merge_enabled: mergeEnabled },
+    settings: {
+      max_per_session: configured,
+      merge_enabled: mergeEnabled,
+      auto_merge_enabled: autoMergeEnabled,
+    },
+    effective: {
+      max_per_session: effective,
+      source,
+      locked,
+      merge_enabled: mergeEnabled,
+      auto_merge_enabled: autoMergeEnabled,
+    },
   };
 }
 
@@ -74,6 +96,10 @@ function requireContributor(): SettingsSaveContributor {
 
 function mergeToggle(): HTMLElement {
   return screen.getByRole("button", { name: MERGE_TOGGLE_LABEL });
+}
+
+function autoMergeToggle(): HTMLElement {
+  return screen.getByRole("button", { name: AUTO_MERGE_TOGGLE_LABEL });
 }
 
 beforeEach(() => {
@@ -110,7 +136,9 @@ describe("MessageQueueSettings — per-session limit", () => {
   });
 
   it("explains unlimited mode and keeps a mobile-safe single-column surface", async () => {
-    fetchSettingsMock.mockResolvedValueOnce(response(0, 0, "setting"));
+    fetchSettingsMock.mockResolvedValueOnce(
+      response({ configured: 0, effective: 0, source: "setting" }),
+    );
     render(<MessageQueueSettings />);
 
     const input = await screen.findByLabelText(MAXIMUM_LABEL);
@@ -123,7 +151,9 @@ describe("MessageQueueSettings — per-session limit", () => {
   });
 
   it("stages an admin edit until the shared contributor saves it", async () => {
-    updateSettingsMock.mockResolvedValueOnce(response(25, 25, "setting"));
+    updateSettingsMock.mockResolvedValueOnce(
+      response({ configured: 25, effective: 25, source: "setting" }),
+    );
     render(<MessageQueueSettings />);
     const input = await screen.findByLabelText(MAXIMUM_LABEL);
 
@@ -154,7 +184,9 @@ describe("MessageQueueSettings — per-session limit", () => {
   });
 
   it("shows the effective environment value and locks editing", async () => {
-    fetchSettingsMock.mockResolvedValueOnce(response(25, 50, "environment", true));
+    fetchSettingsMock.mockResolvedValueOnce(
+      response({ configured: 25, effective: 50, source: "environment", locked: true }),
+    );
     render(<MessageQueueSettings />);
 
     const input = await screen.findByLabelText(MAXIMUM_LABEL);
@@ -164,7 +196,9 @@ describe("MessageQueueSettings — per-session limit", () => {
     expect(screen.getByTestId("message-queue-source").textContent).toBe("Environment");
     expect(screen.getByText(/KANDEV_QUEUE_MAX_PER_SESSION/)).toBeTruthy();
   });
+});
 
+describe("MessageQueueSettings — permissions and recovery", () => {
   it("keeps members read-only while showing the setting", async () => {
     currentRole = "member";
     render(<MessageQueueSettings />);
@@ -186,14 +220,14 @@ describe("MessageQueueSettings — per-session limit", () => {
   });
 
   it("reports save failure and keeps the draft dirty", async () => {
-    updateSettingsMock.mockRejectedValueOnce(new Error("save failed"));
+    updateSettingsMock.mockRejectedValueOnce(new Error(SAVE_FAILED));
     render(<MessageQueueSettings />);
     const input = await screen.findByLabelText(MAXIMUM_LABEL);
     fireEvent.change(input, { target: { value: "20" } });
     const contributor = requireContributor();
 
     await act(async () => {
-      await expect(contributor.save(contributor.revision)).rejects.toThrow("save failed");
+      await expect(contributor.save(contributor.revision)).rejects.toThrow(SAVE_FAILED);
     });
 
     expect(screen.getByText("Failed to save message queue settings.")).toBeTruthy();
@@ -201,7 +235,9 @@ describe("MessageQueueSettings — per-session limit", () => {
   });
 
   it("discards a draft back to the authoritative configured value", async () => {
-    fetchSettingsMock.mockResolvedValueOnce(response(12, 12, "setting"));
+    fetchSettingsMock.mockResolvedValueOnce(
+      response({ configured: 12, effective: 12, source: "setting" }),
+    );
     render(<MessageQueueSettings />);
     const input = await screen.findByLabelText(MAXIMUM_LABEL);
     fireEvent.change(input, { target: { value: "30" } });
@@ -214,12 +250,23 @@ describe("MessageQueueSettings — per-session limit", () => {
   });
 });
 
+describe("MessageQueueSettings — card surface", () => {
+  it("fills the available page width like the other settings boxes", async () => {
+    fetchSettingsMock.mockResolvedValueOnce(response());
+    render(<MessageQueueSettings />);
+
+    const root = await screen.findByTestId("message-queue-settings");
+    expect(root.className).toContain("w-full");
+    expect(root.className).not.toMatch(/\bmax-w-/);
+  });
+});
+
 describe("MessageQueueSettings — merge toggle", () => {
   it("is enabled by default and shows its limitations notice", async () => {
     render(<MessageQueueSettings />);
     await screen.findByLabelText(MAXIMUM_LABEL);
 
-    expect(mergeToggle().getAttribute("aria-pressed")).toBe("true");
+    expect(mergeToggle().getAttribute(ARIA_PRESSED)).toBe("true");
     expect(
       screen.getByText(/Lets you fold a queued message into the message directly above it/),
     ).toBeTruthy();
@@ -232,7 +279,7 @@ describe("MessageQueueSettings — merge toggle", () => {
   });
 
   it("stages a toggle change and PATCHes merge_enabled without touching max_per_session", async () => {
-    updateSettingsMock.mockResolvedValueOnce(response(10, 10, "default", false, false));
+    updateSettingsMock.mockResolvedValueOnce(response({ mergeEnabled: false }));
     render(<MessageQueueSettings />);
     await screen.findByLabelText(MAXIMUM_LABEL);
 
@@ -246,11 +293,13 @@ describe("MessageQueueSettings — merge toggle", () => {
 
     expect(updateSettingsMock).toHaveBeenCalledWith({ merge_enabled: false });
     await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
-    expect(mergeToggle().getAttribute("aria-pressed")).toBe("false");
+    expect(mergeToggle().getAttribute(ARIA_PRESSED)).toBe("false");
   });
 
   it("sends both fields in one PATCH when max_per_session and merge_enabled are both dirty", async () => {
-    updateSettingsMock.mockResolvedValueOnce(response(25, 25, "setting", false, false));
+    updateSettingsMock.mockResolvedValueOnce(
+      response({ configured: 25, effective: 25, source: "setting", mergeEnabled: false }),
+    );
     render(<MessageQueueSettings />);
     const input = await screen.findByLabelText(MAXIMUM_LABEL);
 
@@ -267,7 +316,9 @@ describe("MessageQueueSettings — merge toggle", () => {
   });
 
   it("stays editable for admins even when max_per_session is environment-locked", async () => {
-    fetchSettingsMock.mockResolvedValueOnce(response(25, 50, "environment", true, true));
+    fetchSettingsMock.mockResolvedValueOnce(
+      response({ configured: 25, effective: 50, source: "environment", locked: true }),
+    );
     render(<MessageQueueSettings />);
     await screen.findByLabelText(MAXIMUM_LABEL);
 
@@ -283,7 +334,7 @@ describe("MessageQueueSettings — merge toggle", () => {
   });
 
   it("discards a toggle change back to the authoritative value", async () => {
-    fetchSettingsMock.mockResolvedValueOnce(response(10, 10, "default", false, true));
+    fetchSettingsMock.mockResolvedValueOnce(response());
     render(<MessageQueueSettings />);
     await screen.findByLabelText(MAXIMUM_LABEL);
     fireEvent.click(mergeToggle());
@@ -291,7 +342,128 @@ describe("MessageQueueSettings — merge toggle", () => {
 
     act(() => contributor.discard());
 
-    expect(mergeToggle().getAttribute("aria-pressed")).toBe("true");
+    expect(mergeToggle().getAttribute(ARIA_PRESSED)).toBe("true");
     expect(saveContributor?.isDirty).toBe(false);
+  });
+});
+
+describe("MessageQueueSettings — automatic merge toggle", () => {
+  it("is on by default and explains separate-message fallback", async () => {
+    render(<MessageQueueSettings />);
+
+    const toggle = await screen.findByRole("button", { name: AUTO_MERGE_TOGGLE_LABEL });
+    expect(toggle.getAttribute(ARIA_PRESSED)).toBe("true");
+    expect(screen.getByText(/stays as a separate queued message/)).toBeTruthy();
+    const touchTarget = screen.getByTestId("message-queue-auto-merge-touch-target");
+    expect(touchTarget.className).toContain("min-h-11");
+    expect(touchTarget.className).toContain("min-w-11");
+  });
+
+  it("saves only auto_merge_enabled when it is the only changed draft", async () => {
+    updateSettingsMock.mockResolvedValueOnce(response({ autoMergeEnabled: false }));
+    render(<MessageQueueSettings />);
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    fireEvent.click(autoMergeToggle());
+    const contributor = requireContributor();
+
+    await act(async () => contributor.save(contributor.revision));
+
+    expect(updateSettingsMock).toHaveBeenCalledWith({ auto_merge_enabled: false });
+    await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
+  });
+
+  it("saves capacity, manual merge, and automatic merge in one PATCH", async () => {
+    updateSettingsMock.mockResolvedValueOnce(
+      response({
+        configured: 25,
+        effective: 25,
+        source: "setting",
+        mergeEnabled: false,
+        autoMergeEnabled: false,
+      }),
+    );
+    render(<MessageQueueSettings />);
+    const input = await screen.findByLabelText(MAXIMUM_LABEL);
+    fireEvent.change(input, { target: { value: "25" } });
+    fireEvent.click(mergeToggle());
+    fireEvent.click(autoMergeToggle());
+    const contributor = requireContributor();
+
+    await act(async () => contributor.save(contributor.revision));
+
+    expect(updateSettingsMock).toHaveBeenCalledWith({
+      max_per_session: 25,
+      merge_enabled: false,
+      auto_merge_enabled: false,
+    });
+  });
+
+  it("stays editable for admins under a capacity environment lock", async () => {
+    fetchSettingsMock.mockResolvedValueOnce(
+      response({ configured: 25, effective: 50, source: "environment", locked: true }),
+    );
+    render(<MessageQueueSettings />);
+    await screen.findByLabelText(MAXIMUM_LABEL);
+
+    expect(autoMergeToggle()).toHaveProperty("disabled", false);
+  });
+
+  it("is read-only for members", async () => {
+    currentRole = "member";
+    render(<MessageQueueSettings />);
+    await screen.findByLabelText(MAXIMUM_LABEL);
+
+    expect(autoMergeToggle()).toHaveProperty("disabled", true);
+  });
+
+  it("discards back to the authoritative automatic-merge value", async () => {
+    render(<MessageQueueSettings />);
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    fireEvent.click(autoMergeToggle());
+    const contributor = requireContributor();
+
+    act(() => contributor.discard());
+
+    expect(autoMergeToggle().getAttribute(ARIA_PRESSED)).toBe("true");
+    expect(saveContributor?.isDirty).toBe(false);
+  });
+
+  it("does not overwrite a newer local toggle change when a save resolves", async () => {
+    let resolveSave: (value: MessageQueueSettingsResponse) => void = () => {};
+    updateSettingsMock.mockReturnValueOnce(
+      new Promise<MessageQueueSettingsResponse>((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    render(<MessageQueueSettings />);
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    fireEvent.click(autoMergeToggle());
+    const submittedContributor = requireContributor();
+    let savePromise: Promise<void> = Promise.resolve();
+
+    act(() => {
+      savePromise = Promise.resolve(submittedContributor.save(submittedContributor.revision));
+    });
+    fireEvent.click(autoMergeToggle());
+    resolveSave(response({ source: "setting", autoMergeEnabled: false }));
+    await act(async () => savePromise);
+
+    expect(autoMergeToggle().getAttribute(ARIA_PRESSED)).toBe("true");
+    expect(saveContributor?.isDirty).toBe(true);
+  });
+
+  it("keeps a failed automatic-merge draft dirty and reports the error", async () => {
+    updateSettingsMock.mockRejectedValueOnce(new Error(SAVE_FAILED));
+    render(<MessageQueueSettings />);
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    fireEvent.click(autoMergeToggle());
+    const contributor = requireContributor();
+
+    await act(async () => {
+      await expect(contributor.save(contributor.revision)).rejects.toThrow(SAVE_FAILED);
+    });
+
+    expect(screen.getByText("Failed to save message queue settings.")).toBeTruthy();
+    expect(saveContributor?.isDirty).toBe(true);
   });
 });
