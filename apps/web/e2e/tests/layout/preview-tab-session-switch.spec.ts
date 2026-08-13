@@ -6,6 +6,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { KanbanPage } from "../../pages/kanban-page";
+import { dwell } from "../../helpers/causal-waits";
 
 const FILE_A = "alpha.ts";
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -180,9 +181,13 @@ test.describe("Preview tab survives session switch", () => {
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskA.id), {
       timeout: 15_000,
     });
-    // Wait for layout to stabilize after fromJSON restore
     await expect(testPage.locator(".dv-dockview")).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(1_000);
+    await dwell(
+      testPage,
+      1_000,
+      "negative-assertion",
+      "the count assertion below auto-retries, so it already covers a slow restore; what it cannot cover is a duplicate tab appearing after it first sees one, and a tab that must never be added publishes nothing to wait on",
+    );
 
     // File tab should be restored (preview or pinned — the file was open)
     const fileTab = testPage.locator(".dv-default-tab").filter({ hasText: FILE_A });

@@ -52,6 +52,43 @@ export async function getDockviewGroupWidth(page: Page, panelId: string): Promis
   }, panelId);
 }
 
+/** Read the dockview container's live pixel width. */
+export async function getDockviewContainerWidth(page: Page): Promise<number> {
+  return page.evaluate(() =>
+    Math.round(document.querySelector(".dv-dockview")?.getBoundingClientRect().width ?? -1),
+  );
+}
+
+/**
+ * Wait for a `setViewportSize` to have reached dockview's layout, by watching
+ * the container width move off the value it had before.
+ *
+ * Column widths are recomputed inside the same layout pass that resizes the
+ * container, so this is the anchor a width assertion needs after a viewport
+ * change: measured across five scenarios (auto shrink and grow, manual-width
+ * shrink and grow, over-cap re-clamp), the container and the right column
+ * reached their final widths **in the same frame** every time, 3-11ms after
+ * the viewport call resolved. Nothing moved again in the following 2.5s.
+ *
+ * That co-settling is what makes the container a valid proxy, and it is the
+ * assumption to re-measure if column sizing ever moves behind a debounce.
+ * Without it there is nothing else to wait for: a column whose width must
+ * *not* change across the viewport change has no event of its own, and
+ * polling its value would be satisfied instantly by the width it already has.
+ */
+export async function waitForDockviewViewportResize(
+  page: Page,
+  previousContainerWidth: number,
+  timeout = 5_000,
+): Promise<void> {
+  await expect
+    .poll(() => getDockviewContainerWidth(page), {
+      timeout,
+      message: `dockview container never resized away from ${previousContainerWidth}px`,
+    })
+    .not.toBe(previousContainerWidth);
+}
+
 /** Read the live pixel width of a dockview group by group ID. */
 export async function getDockviewGroupWidthById(page: Page, groupId: string): Promise<number> {
   return page.evaluate((id) => {
