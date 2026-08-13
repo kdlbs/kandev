@@ -1,7 +1,7 @@
 ---
 id: "16-harden-reattachment-and-preemption"
 title: "Harden task-host reattachment and terminal preemption"
-status: in_progress
+status: completed
 wave: 8
 depends_on: ["15-harden-shared-environment-recovery"]
 plan: "plan.md"
@@ -50,9 +50,31 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
 
 ## Verification
 
-In progress on 2026-08-12. Focused red/green regressions and the non-race package suites for task
-service, lifecycle, agentctl LSP, and backend app have passed. Final race, frontend build/lint,
-Windows cross-build, documentation validation, exact-base CI, and immutable-head reviews remain.
+Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
+
+- `go test -race -count=1 ./internal/lsp ./internal/agent/runtime/lifecycle
+  ./internal/agentctl/server/lsp ./internal/gateway/websocket` passed.
+- `go test -race -count=20 ./internal/task/service -run
+  '^TestServiceTerminalMutationCancelsActiveTaskLSPAdmission$'` passed. The full task-service race
+  package also exercised the changed path; one broad run exceeded the package timeout while waiting
+  in unrelated SQLite schema setup, so the deterministic changed-path race test was repeated twenty
+  times instead of weakening the package timeout.
+- Both GitHub backend package-shard selections, 291 packages total, passed locally under `-race`.
+- The four focused frontend reconnect, task-subscription, and browser-lease files passed all 36
+  tests; `pnpm run typecheck` and changed-file ESLint with zero warnings passed.
+- `pnpm run build:vite`, the public-docs validator (60 tests), i18n checks, and i18n ratchet passed.
+- The production Playwright scenarios for concurrent same-task access and explicit restart/stop
+  generation behavior passed against rebuilt production artifacts.
+- The agentctl LSP package cross-compiled for Windows amd64. GitHub's native Windows containment
+  check passed the selected-root junction and hostile-UNC tests after the test was updated to use a
+  real pinned root handle.
+- Commit hooks passed architecture, formatting, changed-code Go/Web lint, i18n, public-copy, and
+  Conventional Commit checks.
+- Independent review findings for root identity, browser lease recovery, workspace refresh ordering,
+  detached task-host recovery, startup capacity adoption, terminal preemption, task subscription
+  readiness, asynchronous capacity promotion, and E2E strength were reproduced and closed with
+  deterministic regressions. PR-wide exact-head CI and read-only review remain delivery gates rather
+  than implementation-task acceptance criteria.
 
 ## Files
 
