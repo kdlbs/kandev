@@ -54,18 +54,17 @@ test("closes its listener when backend config setup fails after listening", asyn
   try {
     await expect(
       startHTTPGitFixture(root, "config-write-failure", {
+        onListening: (listeningServer) => {
+          server = listeningServer;
+        },
         writeBackendGitConfig: () => {
           throw new Error("config write failed");
-        },
-        closeServer: async (closingServer) => {
-          server = closingServer;
-          await closeTestServer(closingServer);
         },
       }),
     ).rejects.toThrow("config write failed");
 
     expect(server).toBeDefined();
-    expect(server!.listening).toBe(false);
+    expect(server?.listening).toBe(false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
