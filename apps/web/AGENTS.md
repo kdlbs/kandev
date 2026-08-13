@@ -292,9 +292,9 @@ plugin leaks a stale registration.
   `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering
   and own-tab echo suppression via a per-tab `writerId`.
 - **`host.ui.RichTextEditor`/`RichTextReadOnly`** (`components/editors/tiptap/rich-text-editor.tsx`): narrow Plan-panel-tiptap wrappers; update `PLUGIN-API.md` before widening props beyond `{ taskId, value, onChange, placeholder, className, testId }` / `{ value, className, testId }`.
+
 ## Testing notes
 
-- jsdom secure cookies need cookie-setter interception; Radix Tooltip tests use
-  keyboard focus, while Playwright covers pointer hover with `locator.hover()`.
+- jsdom secure cookies need cookie-setter interception; Radix Tooltip tests use keyboard focus, while Playwright covers pointer hover with `locator.hover()`.
 - Scope terminal selectors to the active panel/container; mobile and dockview may
   mount multiple instances, so shared helpers must not use global selectors.
