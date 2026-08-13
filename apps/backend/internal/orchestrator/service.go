@@ -627,12 +627,14 @@ type Service struct {
 	// completeTurnForSession. handleCompleteStreamEvent reads this snapshot
 	// (on both the terminal and non-terminal path) instead of trusting live
 	// active-turn state or the terminal-execution marker: agent.ready is
-	// published synchronously and closes the turn before the complete-stream
-	// frame for the same completion is published (see publishPromptUsage's doc
-	// comment), so both of those alternatives can already find the turn gone
-	// or stale by the time this runs. Entries are consumed on read and expire
-	// after the same grace window as completedExecutions so an unread entry
-	// cannot grow the map unbounded.
+	// published before the complete-stream frame for the same completion
+	// (see markReadyTurn's doc comment for the ordering guarantee and its
+	// NATS-deployment caveat), so both of those alternatives can already
+	// find the turn gone or stale by the time this runs. Entries are
+	// consumed on read and expire after the same grace window as
+	// completedExecutions so an unread entry cannot grow the map unbounded.
+	// This map is per-process — see markReadyTurn's doc comment for why a
+	// horizontally-scaled NATS deployment can miss cross-instance.
 	readyTurnMarks sync.Map
 
 	// readyTurnMarksZeroGen is readyTurnMarks' sibling for promptGeneration==0

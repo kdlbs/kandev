@@ -1357,15 +1357,31 @@ func readyTurnZeroGenKey(sessionID, executionID string) string {
 // markReadyTurn records the turn ID handleAgentReady confirmed for
 // (sessionID, executionID, promptGeneration), just before completeTurnForSession
 // closes it and removes it from activeTurns. handleCompleteEventMarkState
-// (lifecycle package) publishes agent.ready synchronously and closes the turn
-// before the complete-stream frame for the same completion is processed on
-// EVERY transport, including promptGeneration==0 (generation-less)
-// completions — so this mark is required there too, not skippable. Because
-// generation-less completions share one key per (session, execution) with no
-// generation to disambiguate them, they queue FIFO in readyTurnMarksZeroGen
-// instead of the single-slot readyTurnMarks map: ready and complete-stream
-// for the same completion are strictly ordered per execution, so pending
+// (lifecycle package) publishes agent.ready and closes the turn before the
+// complete-stream frame for the same completion is published, on EVERY
+// transport, including promptGeneration==0 (generation-less) completions —
+// so this mark is required there too, not skippable. Because generation-less
+// completions share one key per (session, execution) with no generation to
+// disambiguate them, they queue FIFO in readyTurnMarksZeroGen instead of the
+// single-slot readyTurnMarks map: ready and complete-stream for the same
+// completion are published strictly in that order per execution, so pending
 // marks and pending completions correlate 1:1 in arrival order.
+//
+// This ordering is airtight on the default in-memory event bus, where
+// Publish delivers to a subject's subscriber synchronously before returning
+// (see internal/events/bus/memory.go), so markReadyTurn has always run by
+// the time the complete-stream frame is dispatched. It is best-effort, not
+// guaranteed, on a NATS-backed bus (opt-in via cfg.NATS.URL): AgentReady and
+// the agent.stream.* wildcard are different subjects — the former
+// queue-subscribed (one of possibly several orchestrator instances), the
+// latter broadcast to all — so core NATS pub/sub gives no cross-subject or
+// cross-instance ordering guarantee, and this in-memory map is itself
+// per-process. A miss under NATS is not a regression: it falls back to
+// exactly the live-lookup/terminal-marker resolution this mechanism
+// supplements, i.e. the same turn_id quality this PR would have without the
+// fast path. Closing that gap for real (persisted marks, or session-affine
+// routing so one instance owns both subjects for a session) is tracked
+// separately — see the PR #2606 review thread for the follow-up.
 func (s *Service) markReadyTurn(sessionID, executionID string, promptGeneration uint64, turnID string) {
 	if sessionID == "" || executionID == "" || turnID == "" {
 		return
@@ -2025,17 +2041,18 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 
 	// The generation-keyed (or generation-less FIFO) mark handleAgentReady
 	// recorded for THIS exact completion is always the first choice, on both
-	// the terminal and non-terminal paths: agent.ready is published
-	// synchronously and closes the turn before the complete-stream frame for
-	// the same completion is processed (see markReadyTurn's doc comment), so
-	// by the time either fallback below runs the turn is already gone from
-	// live state. A miss means this completion never went through
-	// handleAgentReady's synchronous ready path (e.g. an error/interrupt that
-	// completed the execution directly) — fall back to whichever snapshot the
-	// branch has: terminalMarker.turnID (captured by markTerminalExecution at
-	// agent.completed, valid here only because terminalCompleteStream is
-	// true — see markTerminalExecution) for terminal completions, or a live
-	// active-turn lookup for non-terminal ones.
+	// the terminal and non-terminal paths: agent.ready is published before
+	// the complete-stream frame for the same completion, and on the default
+	// in-memory event bus that ordering is airtight — see markReadyTurn's
+	// doc comment for the NATS-deployment caveat, where a miss degrades to
+	// exactly the fallback below rather than to something worse. A miss also
+	// means this completion never went through handleAgentReady's ready path
+	// (e.g. an error/interrupt that completed the execution directly) — fall
+	// back to whichever snapshot the branch has: terminalMarker.turnID
+	// (captured by markTerminalExecution at agent.completed, valid here only
+	// because terminalCompleteStream is true — see markTerminalExecution)
+	// for terminal completions, or a live active-turn lookup for
+	// non-terminal ones.
 	promptUsageTurnID, ok := s.takeReadyTurnMark(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration)
 	if !ok {
 		if terminalCompleteStream {

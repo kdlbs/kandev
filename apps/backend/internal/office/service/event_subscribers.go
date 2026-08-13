@@ -565,7 +565,6 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 	provider := resolveProvider(*data)
 	costEvent := buildCostEvent(*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution)
 
-
 	if err := s.repo.CreateCostEvent(ctx, costEvent); err != nil {
 		if errors.Is(err, sqlite.ErrDuplicateUsageEvent) {
 			s.recordCostEventDropped(costDropReasonDuplicate, data.TaskID)

@@ -17,12 +17,9 @@ import (
 // exists, and the migration replays cleanly on a second boot. Skips unless
 // KANDEV_TEST_POSTGRES_DSN is set.
 //
-// office_cost_events.task_id has a FOREIGN KEY REFERENCES tasks(id)
-// (base.go's createExtensionTables); SQLite defers FK existence checking so
-// the SQLite-only migration test doesn't need a `tasks` table, but Postgres
-// enforces it at CREATE TABLE time. The task repository must initialize
-// first, mirroring production boot order — see
-// internal/office/repository/sqlite/workflow_test.go for the same pattern.
+// The test inserts a cost event row that references a task_id, so the tasks
+// table must exist first — initialize via taskrepo, mirroring production boot
+// order (see internal/office/repository/sqlite/workflow_test.go).
 func TestPostgresCostEventContractMigration(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	ctx := context.Background()

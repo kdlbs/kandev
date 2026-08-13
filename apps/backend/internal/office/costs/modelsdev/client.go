@@ -51,7 +51,14 @@ type Client struct {
 	index    map[string]shared.ModelPricing
 	info     map[string]ModelInfo
 	loadedAt time.Time
-	cacheBuf []byte // raw on-disk JSON (parsed lazily on miss)
+	// catalogGen increments on every catalogue install (warmFromDisk or
+	// refreshPhysical). CatalogVersion()'s RFC3339 string only has
+	// one-second resolution, so two installs landing in the same
+	// wall-clock second would report the same version — cacheIfVersionCurrent
+	// uses this counter instead, so it can't mistake a fresher install for
+	// the one a caller snapshotted.
+	catalogGen uint64
+	cacheBuf   []byte // raw on-disk JSON (parsed lazily on miss)
 }
 
 // ModelInfo holds non-pricing metadata from models.dev for a model.
@@ -194,10 +201,10 @@ func (c *Client) LookupForModelWithVersion(ctx context.Context, modelID string) 
 		return pricing, version, true
 	}
 
-	buf, bufVersion := c.snapshotBufferAndVersion()
+	buf, bufVersion, bufGen := c.snapshotBufferAndVersion()
 	if len(buf) > 0 {
 		if pricing, ok = lookupInDataset(buf, key); ok {
-			c.cacheIfVersionCurrent(key, pricing, bufVersion)
+			c.cacheIfVersionCurrent(key, pricing, bufGen)
 			c.maybeRefresh(ctx)
 			return pricing, bufVersion, true
 		}
@@ -208,33 +215,36 @@ func (c *Client) LookupForModelWithVersion(ctx context.Context, modelID string) 
 }
 
 // cacheIfVersionCurrent stores pricing into the index under key, but only if
-// the catalogue is still the one snapshotVersion was captured from. Without
-// this guard, a Refresh landing between the caller's snapshotBufferAndVersion
-// call and this write would let a stale rate get written into the NEW index
-// — refreshPhysical rebuilds c.index from the new buffer and replaces the
-// map wholesale under c.mu — so a later, unrelated lookup for the same key
-// would then read old rates paired with the new catalogue version, the exact
+// the catalogue is still the one snapshotGen was captured from. Without this
+// guard, a Refresh landing between the caller's snapshotBufferAndVersion call
+// and this write would let a stale rate get written into the NEW index —
+// refreshPhysical rebuilds c.index from the new buffer and replaces the map
+// wholesale under c.mu — so a later, unrelated lookup for the same key would
+// then read old rates paired with the new catalogue version, the exact
 // provenance lie LookupForModelWithVersion exists to prevent
-// (docs/kandev/TODOS.md P1). The returned (pricing, bufVersion) pair for
-// THIS call is unaffected either way, since both were derived from the same
-// buf snapshot.
-func (c *Client) cacheIfVersionCurrent(key string, pricing shared.ModelPricing, snapshotVersion string) {
+// (docs/kandev/TODOS.md P1). Compares catalogGen rather than the RFC3339
+// version string: the string only has one-second resolution, so two installs
+// landing in the same wall-clock second would otherwise compare equal and
+// defeat this guard. The returned (pricing, bufVersion) pair for THIS call is
+// unaffected either way, since both were derived from the same buf snapshot.
+func (c *Client) cacheIfVersionCurrent(key string, pricing shared.ModelPricing, snapshotGen uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.catalogVersionLocked() != snapshotVersion {
+	if c.catalogGen != snapshotGen {
 		return
 	}
 	c.index[key] = pricing
 }
 
-// snapshotBufferAndVersion returns the cache buffer and its catalogue
-// version together under one lock, so a caller that parses buf afterward
-// can report the version that actually produced it rather than whatever
-// version happens to be current by the time the parse finishes.
-func (c *Client) snapshotBufferAndVersion() ([]byte, string) {
+// snapshotBufferAndVersion returns the cache buffer, its catalogue version
+// string, and its generation counter together under one lock, so a caller
+// that parses buf afterward can report the version that actually produced
+// it (and guard a delayed write with the generation) rather than whatever
+// is current by the time the parse finishes.
+func (c *Client) snapshotBufferAndVersion() ([]byte, string, uint64) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.cacheBuf, c.catalogVersionLocked()
+	return c.cacheBuf, c.catalogVersionLocked(), c.catalogGen
 }
 
 // warmFromDisk reads the cache file into cacheBuf so subsequent
@@ -264,6 +274,7 @@ func (c *Client) warmFromDisk(ctx context.Context) {
 	c.mu.Lock()
 	c.cacheBuf = buf
 	c.loadedAt = stat.ModTime()
+	c.catalogGen++
 	c.mu.Unlock()
 	if time.Since(stat.ModTime()) >= c.ttl {
 		c.startBackgroundRefresh(context.WithoutCancel(ctx))
@@ -398,6 +409,7 @@ func (c *Client) refreshPhysical(ctx context.Context) error {
 	c.index = newIndex
 	c.info = newInfo
 	c.loadedAt = time.Now().UTC()
+	c.catalogGen++
 	c.mu.Unlock()
 	return nil
 }
