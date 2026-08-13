@@ -213,7 +213,7 @@ timestamp columns are nullable" and its own table contradicted it two rows later
 |---|---|---|
 | `id` | TEXT PK | Row identity. |
 | `task_id` | TEXT NOT NULL | FK to `tasks(id)` `ON DELETE CASCADE`. |
-| `repository_id` | TEXT NOT NULL | FK to `repositories(id)`. Never empty. |
+| `repository_id` | TEXT NOT NULL | FK to `repositories(id)` `ON DELETE CASCADE`. Never empty. The `ON DELETE` clause is stated rather than left to the implementation, for the same reason it is stated on `task_id`: `repositories` itself declares `FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE` and `DELETE FROM workspaces` is a live production path, so repository rows **are** removed in ordinary operation even though nothing hard-deletes them directly. A bare FK (dialect default `NO ACTION`) would make workspace deletion begin failing the moment any ledger row referenced one of that workspace's repositories, which is a regression this feature would introduce into an existing user-facing operation. |
 | `workspace_id` | TEXT NOT NULL | Denormalized from the task, for extract scoping. **Refreshed on every persisted evaluation** — it is not write-once and not rank-guarded, because it is an identity attribute of the task rather than evidence about delivery. A task moved between workspaces is picked up because `tasks.updated_at` is a due source (see **Sweep selection predicate**). |
 | `delivery_outcome` | TEXT NULL | `pr_merge \| direct_commit \| no_delivery_observed \| unknown`. `NULL` means never evaluated. |
 | `delivery_basis` | TEXT NULL | The evidence class that produced the outcome. See **Basis vocabulary**. |
@@ -223,7 +223,7 @@ timestamp columns are nullable" and its own table contradicted it two rows later
 | `reached_default_basis` | TEXT NULL | How that observation was made. See **Basis vocabulary**. |
 | `reached_default_ref` | TEXT NULL | The commit SHA or pull/merge request URL that carried the observation. |
 | `observed_branch_commits` | INTEGER NULL | Monotonic high-water mark of `ahead`. See **Ordering, idempotency, concurrency**. |
-| `first_classified_at` | TIMESTAMP NULL | When a non-`NULL` `delivery_outcome` was first written. Write-once. |
+| `first_classified_at` | TIMESTAMP NULL | When a non-`NULL` `delivery_outcome` was first written. Write-once. **Its instant is the one the evaluation began reading its inputs at**, the same source as `last_evaluated_at`, and it is fixed here for the same comparability reason this document gives for `reached_default_at`: a timestamp column whose source varies between implementations cannot be compared across rows. |
 | `last_evaluated_at` | TIMESTAMP NOT NULL | Advances on every persisted evaluation, including no-change evaluations. **Its value is the instant the evaluation began reading its inputs, never the instant the upsert committed** — see **Sweep selection predicate**, "Which instant `last_evaluated_at` records". |
 | `evaluation_seq` | INTEGER NOT NULL | Monotonic per row; incremented on every persisted evaluation. |
 | `created_at` | TIMESTAMP NOT NULL | |
