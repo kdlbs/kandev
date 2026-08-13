@@ -44,11 +44,14 @@ test.describe("Create task dependency selector on mobile", () => {
     await expect(settingLabel).toContainText("Depends on");
     const settingRow = dialog.getByTestId("task-create-dependency-setting-row");
     const settingRowBox = await settingRow.boundingBox();
+    const settingLabelBox = await settingLabel.boundingBox();
     const selectorContainer = dialog.getByTestId("task-create-dependency-selector-container");
     const selectorContainerBox = await selectorContainer.boundingBox();
     expect(settingRowBox).not.toBeNull();
+    expect(settingLabelBox).not.toBeNull();
     expect(selectorContainerBox).not.toBeNull();
-    expect(Math.abs(selectorContainerBox!.y - settingRowBox!.y)).toBeLessThanOrEqual(2);
+    expect(Math.abs(selectorContainerBox!.x - settingLabelBox!.x)).toBeLessThanOrEqual(2);
+    expect(selectorContainerBox!.y).toBeGreaterThan(settingLabelBox!.y);
     const settingInfo = dialog.getByTestId("task-create-dependency-setting-info");
     const settingInfoBox = await settingInfo.boundingBox();
     expect(settingInfoBox).not.toBeNull();

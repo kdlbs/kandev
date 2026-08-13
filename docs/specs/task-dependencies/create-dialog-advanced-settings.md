@@ -27,9 +27,9 @@ place for dependency selection and future less-common options.
   multiple-predecessor behavior.
 - Show the dependency selector with a muted `Depends on` label and a contextual
   help control that explains the dependency wait and automatic-start behavior.
-- Keep the label and selector on one horizontal row. On desktop, constrain the
-  selector to a compact width and align it to the right of the setting row; on
-  narrow screens, let it use the available row width.
+- Keep the label and selector in the same setting column. On desktop, render
+  advanced settings as a two-column option grid so each row can hold two
+  settings; on narrow screens, collapse the grid to one column.
 - Keep the dependency selector's `blockedBy` state and disabled behavior
   unchanged. Collapsing the section must not clear a selected dependency, and
   reopening the section must show the same selector value.
@@ -88,9 +88,10 @@ place for dependency selection and future less-common options.
 - The task-create form remains the outer scroll owner when the collapsible is
   closed or expanded. The dependency command list remains the inner scroll
   owner while its picker is open.
-- The expanded content is full width on narrow screens, with the label and
-  selector sharing one row, and must not introduce document-level horizontal
-  overflow.
+- The expanded content uses a responsive option grid. On desktop, each row can
+  contain two settings, and each setting keeps its label/help and selector in
+  the same column. On narrow screens, the grid collapses to one column and
+  must not introduce document-level horizontal overflow.
 - State, selection logic, candidate filtering, and payload behavior are shared
   across desktop and mobile. Only the disclosure geometry and touch
   presentation are responsive.

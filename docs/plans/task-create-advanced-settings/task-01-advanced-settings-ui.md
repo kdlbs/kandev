@@ -24,10 +24,10 @@ selector semantics, and payload path.
   test identity, and a mobile hitbox of at least 44 CSS pixels.
 - The dependency selector is absent while collapsed and appears inside the
   expanded content with the existing `No dependency` default, icon, picker,
-  task rows, info help, and multi-selection behavior. The expanded selector has
-  a localized `Depends on` label with contextual help on the left in the same
-  row. The selector is compact and right-aligned on desktop, while retaining
-  the available row width on narrow screens.
+  task rows, info help, and multi-selection behavior. The expanded content uses
+  a two-column desktop option grid, with the localized `Depends on` label and
+  contextual help stacked above the selector in the same column. The grid
+  collapses to one column on narrow screens.
 - Collapsing and reopening the section does not clear selected predecessor IDs.
 - Workflow visibility, workflow locking, agent/executor behavior, and the
   existing `blockedBy` to `blocked_by` payload path remain unchanged.

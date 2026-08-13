@@ -76,16 +76,24 @@ test.describe("Task-create dependency selector", () => {
       await expect(
         advancedSettings.getByTestId("task-create-dependency-setting-label"),
       ).toContainText("Depends on");
+      const settingGrid = advancedSettings.getByTestId("task-create-advanced-settings-grid");
+      const settingGridBox = await settingGrid.boundingBox();
       const settingRow = advancedSettings.getByTestId("task-create-dependency-setting-row");
       const settingRowBox = await settingRow.boundingBox();
+      const settingLabel = advancedSettings.getByTestId("task-create-dependency-setting-label");
+      const settingLabelBox = await settingLabel.boundingBox();
       const selectorContainer = advancedSettings.getByTestId(
         "task-create-dependency-selector-container",
       );
       const selectorContainerBox = await selectorContainer.boundingBox();
+      expect(settingGridBox).not.toBeNull();
       expect(settingRowBox).not.toBeNull();
+      expect(settingLabelBox).not.toBeNull();
       expect(selectorContainerBox).not.toBeNull();
-      expect(selectorContainerBox!.width).toBeLessThan(settingRowBox!.width);
-      expect(Math.abs(selectorContainerBox!.y - settingRowBox!.y)).toBeLessThanOrEqual(2);
+      expect(settingRowBox!.width).toBeLessThan(settingGridBox!.width * 0.75);
+      expect(selectorContainerBox!.width).toBeLessThan(settingGridBox!.width * 0.75);
+      expect(Math.abs(selectorContainerBox!.x - settingLabelBox!.x)).toBeLessThanOrEqual(2);
+      expect(selectorContainerBox!.y).toBeGreaterThan(settingLabelBox!.y);
       const settingInfo = advancedSettings.getByTestId("task-create-dependency-setting-info");
       await settingInfo.hover();
       await expect(testPage.locator('[data-slot="tooltip-content"]:visible').last()).toContainText(
