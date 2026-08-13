@@ -22,7 +22,8 @@ store contract, or translated copy.
   - Use the canonical `useResponsiveBreakpoint` hook and its
     `isFullDesktop` value, which maps to viewport widths of at least 1024px.
   - Render compact icon-only Duplicate and Delete buttons inline on full
-    desktop widths, retaining translated accessible names.
+    desktop widths, retaining translated accessible names and showing the same
+    translated action names in hover/focus tooltips.
   - Keep the existing three-dots menu as the only action presentation below
     that boundary, including compact desktop, tablet, and mobile.
   - Reuse `useProfileDuplicate`, `setConfirmOpen`, and
@@ -53,7 +54,8 @@ store contract, or translated copy.
   and the user can duplicate the seeded profile without opening a menu.
   **File:** `apps/web/e2e/tests/settings/agent-profile-duplicate.spec.ts`.
   **What to verify:** Assert the inline controls and absence of the overflow
-  trigger, activate Duplicate, and verify the copied row and model.
+  trigger, verify both tooltips on hover, activate Duplicate, and verify the
+  copied row and model.
 
 - **Scenario:** A 900px tablet-width profile row keeps both actions in the
   overflow menu and does not overflow its viewport.
@@ -121,3 +123,7 @@ Passed.
   fresh full-desktop screenshot. The screenshot shows compact 28px action
   buttons centered in the profile row; the old visible labels are absent while
   translated accessible names remain.
+- The tooltip refinement was verified with focus assertions in the component
+  suite and hover assertions in the desktop E2E flow. Both tooltips reuse the
+  existing translated Duplicate and Delete labels; the mobile overflow path is
+  unchanged.

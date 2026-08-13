@@ -13,7 +13,8 @@ spec: "../../specs/agents/settings-profile-layout.md"
 ## Acceptance
 
 - Desktop E2E proves that a full desktop profile row exposes Duplicate and
-  Delete inline and duplicates the seeded profile through the direct button.
+  Delete inline, shows both action tooltips on hover, and duplicates the seeded
+  profile through the direct button.
 - Tablet-width E2E proves that inline controls are absent, the overflow menu
   contains both actions, and the document remains horizontally contained.
 - Mobile E2E keeps the touch-based overflow path, proves inline controls are
@@ -71,6 +72,9 @@ runs, started from cleaned E2E artifact directories, and left no failure
 artifacts. Desktop coverage proves the compact icon-only inline path, the 900px
 tablet fixture proves the overflow path and document containment, and the
 mobile coverage keeps the touch menu and 44px trigger check.
+
+The desktop flow also verifies that hovering the icon-only Duplicate and Delete
+buttons exposes their matching translated action names.
 
 Three fresh synthetic PR screenshots were captured and visually inspected for
 full desktop, tablet, and mobile states. They were compressed, validated

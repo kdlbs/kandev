@@ -13,8 +13,8 @@ spec: "../../specs/agents/settings-profile-layout.md"
 ## Acceptance
 
 - Full desktop profile rows show compact icon-only Duplicate and Delete buttons
-  inline, with translated accessible names and no visible profile-actions
-  overflow trigger.
+  inline, with translated accessible names, matching hover/focus tooltips, and
+  no visible profile-actions overflow trigger.
 - Compact desktop, tablet, and mobile profile rows keep the existing
   three-dots menu as the only action presentation, with both actions inside it.
 - Duplicate and Delete use the existing mutation hook, confirmation dialog,
@@ -69,6 +69,7 @@ status and the parent plan only after all listed checks pass.
 
 The responsive boundary uses the canonical `isFullDesktop` value. Full-desktop
 actions are compact icon-only buttons with translated accessible names and
-profile-scoped test IDs; the overflow trigger and menu actions retain separate
+profile-scoped test IDs. Each inline button has a tooltip using the same
+translated action label; the overflow trigger and menu actions retain separate
 stable IDs. Both presentations call the same duplicate hook and delete
 confirmation callback.

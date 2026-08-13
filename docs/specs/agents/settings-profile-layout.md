@@ -37,7 +37,8 @@ to associate with the agent it changes.
 - On a full desktop viewport (at least 1024px wide), each profile row shows
   compact icon-only **Duplicate** and **Delete** action buttons directly in the
   row action area. The buttons retain translated accessible names, are small
-  and vertically centered, and the row does not show the three-dots
+  and vertically centered. Hovering or focusing either button shows a tooltip
+  with its translated action name, and the row does not show the three-dots
   profile-actions trigger at this width.
 - Below the full desktop boundary, including compact desktop, tablet, and
   mobile viewports, each profile row keeps the three-dots profile-actions
@@ -68,7 +69,8 @@ to associate with the agent it changes.
 - **GIVEN** a profile row in a viewport at least 1024px wide, **WHEN** the user
   views the row, **THEN** compact icon-only **Duplicate** and **Delete** buttons
   with translated accessible names are visible inline, vertically centered,
-  and the three-dots profile-actions trigger is absent.
+  and the three-dots profile-actions trigger is absent. Hovering or focusing an
+  inline button shows a tooltip with the matching translated action name.
 - **GIVEN** a profile row in a viewport narrower than 1024px, **WHEN** the user
   opens the profile-actions trigger, **THEN** the overflow menu contains
   **Duplicate** and **Delete**, and no inline action buttons are rendered.

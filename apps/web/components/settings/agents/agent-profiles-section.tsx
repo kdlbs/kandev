@@ -12,6 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import Link from "@/components/routing/app-link";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -120,28 +121,38 @@ function ProfileRowInlineActions({
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1" data-testid={`profile-actions-inline-${profile.id}`}>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className="cursor-pointer"
-        data-testid={`duplicate-profile-inline-${profile.id}`}
-        onClick={onDuplicate}
-        aria-label={t("agents:duplicate")}
-      >
-        <IconCopy className="h-4 w-4" />
-      </Button>
-      <Button
-        type="button"
-        variant="destructive"
-        size="icon"
-        className="cursor-pointer"
-        data-testid={`delete-profile-inline-${profile.id}`}
-        onClick={onConfirmDelete}
-        aria-label={t("agents:delete")}
-      >
-        <IconTrash className="h-4 w-4" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="cursor-pointer"
+            data-testid={`duplicate-profile-inline-${profile.id}`}
+            onClick={onDuplicate}
+            aria-label={t("agents:duplicate")}
+          >
+            <IconCopy className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">{t("agents:duplicate")}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="destructive"
+            size="icon"
+            className="cursor-pointer"
+            data-testid={`delete-profile-inline-${profile.id}`}
+            onClick={onConfirmDelete}
+            aria-label={t("agents:delete")}
+          >
+            <IconTrash className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">{t("agents:delete")}</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

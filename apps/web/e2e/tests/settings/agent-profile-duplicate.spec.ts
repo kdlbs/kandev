@@ -39,6 +39,10 @@ test.describe("Agent profile duplicate", () => {
       await expect(deleteButton).toHaveAccessibleName("Delete");
       await expect(deleteButton).toHaveText("");
       await expect(deleteButton).toHaveAttribute("data-size", "icon");
+      await duplicate.hover();
+      await expect(testPage.getByRole("tooltip", { name: "Duplicate" })).toBeVisible();
+      await deleteButton.hover();
+      await expect(testPage.getByRole("tooltip", { name: "Delete" })).toBeVisible();
       await duplicate.click();
 
       // Backend state: the copy is a new row with the source's model. The
