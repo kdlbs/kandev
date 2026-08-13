@@ -32,7 +32,6 @@ import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
 import { JiraImportBar } from "@/components/jira/jira-import-bar";
 import { LinearImportBar } from "@/components/linear/linear-import-bar";
-import { VoiceInputButton } from "@/components/task/chat/voice-input-button";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
@@ -361,11 +360,12 @@ type TaskFormInputsProps = {
     onImport: (issue: LinearIssue) => void;
   };
   /**
-   * Called after a non-empty voice transcript was inserted into the description
-   * when the user has voice auto-send enabled. The dialog wires this to a
-   * programmatic form submit so dictation can create the task hands-free.
+   * Submits the form the way the native submit control does, for a plugin
+   * composer action that finished producing text (dictation, for instance).
+   * The dialog wires this to its own submit handler, so validation, gating
+   * and error handling stay native.
    */
-  onVoiceAutoSend?: () => boolean | Promise<boolean>;
+  onComposerSubmit?: () => boolean | Promise<boolean>;
 };
 
 // eslint-disable-next-line max-lines-per-function
@@ -621,7 +621,7 @@ function useDescriptionInput(
   const [description, setDescription] = useState(initialDescription);
   const descriptionRef = useRef(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Caret offset to restore after a non-typed value mutation (e.g. voice
+  // Caret offset to restore after a non-typed value mutation (e.g. a plugin
   // transcript splice). Consumed inside useLayoutEffect so the cursor lands
   // before the next paint and the user sees no jump.
   const pendingCursorRef = useRef<number | null>(null);
@@ -707,10 +707,6 @@ type FormInputsToolbarProps = {
   isUtilityConfigured?: boolean;
   jiraImport?: TaskFormInputsProps["jiraImport"];
   linearImport?: TaskFormInputsProps["linearImport"];
-  voice?: {
-    onTranscript: (text: string) => void;
-    onAutoSend?: () => void;
-  };
   pluginActions?: React.ReactNode;
 };
 
@@ -722,7 +718,6 @@ function FormInputsToolbar({
   isUtilityConfigured,
   jiraImport,
   linearImport,
-  voice,
   pluginActions,
 }: FormInputsToolbarProps) {
   return (
@@ -749,16 +744,7 @@ function FormInputsToolbar({
           onImport={linearImport.onImport}
         />
       )}
-      {pluginActions}
-      {voice && (
-        <div className="ml-auto flex items-center">
-          <VoiceInputButton
-            onTranscript={voice.onTranscript}
-            onAutoSend={voice.onAutoSend}
-            disabled={disabled}
-          />
-        </div>
-      )}
+      <div className="ml-auto flex items-center">{pluginActions}</div>
     </div>
   );
 }
@@ -897,7 +883,7 @@ function DraggingOverlay({ isDragging }: { isDragging: boolean }) {
   );
 }
 
-// The input coordinates existing attachment, mention, voice, and plugin controls in one field.
+// The input coordinates existing attachment, mention and plugin controls in one field.
 // eslint-disable-next-line max-lines-per-function
 export const TaskFormInputs = memo(function TaskFormInputs({
   workspaceId,
@@ -915,7 +901,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   isUtilityConfigured,
   jiraImport,
   linearImport,
-  onVoiceAutoSend,
+  onComposerSubmit,
   taskId = null,
 }: TaskFormInputsProps) {
   const { t } = useTranslation();
@@ -951,10 +937,6 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   });
   const { handleChange, handleKeyDown } = useTextareaHandlers(mention, onKeyDown);
   const { fileInputRef, handleAttachClick, handleFileInputChange } = useFileInputClick(addFiles);
-  const voiceBinding = useMemo(
-    () => ({ onTranscript: insertAtCursor, onAutoSend: onVoiceAutoSend }),
-    [insertAtCursor, onVoiceAutoSend],
-  );
   const pluginActions = useCreationComposerPluginActions({
     isSessionMode,
     taskId,
@@ -963,7 +945,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     descriptionRef,
     textareaRef,
     insertAtCursor,
-    submit: onVoiceAutoSend,
+    submit: onComposerSubmit,
   });
 
   return (
@@ -1003,7 +985,6 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           isUtilityConfigured={isUtilityConfigured}
           jiraImport={jiraImport}
           linearImport={linearImport}
-          voice={voiceBinding}
           pluginActions={pluginActions}
         />
         <HiddenFileInput inputRef={fileInputRef} onChange={handleFileInputChange} />

@@ -287,6 +287,7 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     prInfoByUrl: {
       info: () => undefined,
       loading: () => false,
+      settled: () => true,
       error: () => undefined,
       ensure: () => undefined,
       clear: () => undefined,

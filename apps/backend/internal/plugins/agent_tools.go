@@ -19,6 +19,8 @@ import (
 
 const maxAgentToolResultBytes = 1 << 20
 
+const agentToolOutcomeError = "error"
+
 type AgentToolInvocationContext struct {
 	InvocationID string
 	TaskID       string
@@ -136,7 +138,7 @@ func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName strin
 		}
 		outcome := "success"
 		if err != nil {
-			outcome = "error"
+			outcome = agentToolOutcomeError
 		} else if result != nil && result.IsError {
 			outcome = "tool_error"
 		}

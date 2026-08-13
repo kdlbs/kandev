@@ -8,6 +8,7 @@ import {
   buildKanbanCardMenuEntries,
   useKanbanCardMoveTargets,
 } from "@/components/kanban-card-menu-items";
+import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
@@ -285,6 +286,7 @@ function useKanbanCardMenus({
   | "onArchive"
   | "onMove"
 >) {
+  const pluginLinkActions = useTaskPluginLinkActions(task.id, task.repositories ?? []);
   // Plugins load asynchronously and can be disabled/uninstalled at runtime;
   // re-render on any registry change so a menu action a plugin registers
   // after this card already mounted still appears, and one whose plugin was
@@ -324,6 +326,7 @@ function useKanbanCardMenus({
         ? () => dialogs.setShowDetachConfirm(true)
         : undefined,
     ...buildLinkDialogHandlers(externalLinkAvailability, dialogs),
+    pluginLinkActions,
   };
 
   const pluginMenuContext = buildPluginMenuContext(task, workspaceId, presentation);

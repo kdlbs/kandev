@@ -27,6 +27,8 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+const workspaceDependenciesProviderName = "workspace_dependencies"
+
 type storageComposition struct {
 	handler           *storagepkg.Handler
 	runtime           *storagepkg.Runtime
@@ -361,7 +363,7 @@ func workspaceDependencyCleanupAdapter(
 	settings *storagepkg.SettingsStore,
 	factory workspaceFactory,
 ) storagepkg.CleanupProvider {
-	return namedCleanupProvider{name: "workspace_dependencies", cleanup: func(ctx context.Context) (map[string]any, error) {
+	return namedCleanupProvider{name: workspaceDependenciesProviderName, cleanup: func(ctx context.Context) (map[string]any, error) {
 		current, err := settings.GetSettings(ctx)
 		if err != nil || !current.Workspaces.DependencyCleanupEnabled {
 			return nil, err

@@ -89,11 +89,13 @@ kandev service logs -f
 
 Add `--system` to both commands for a system service.
 
-## Message queue capacity
+## Message queue settings
 
-Open **Settings > General > Message Queue** to set the install-wide number of pending messages allowed in each session. The default is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting, so a queue at or above the new limit rejects new work until messages run or are removed. Delivery retries for work accepted before the change are not discarded by the lower cap.
+Open **Settings > Task Behavior > Message Queue** to manage install-wide queue behavior. The default capacity is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting, so a queue at or above the new limit rejects new work until messages run or are removed. Delivery retries for work accepted before the change are not discarded by the lower cap.
 
-`KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence than the saved setting. A valid environment value makes the UI field read-only; zero or a negative value means unlimited. Invalid text is logged and ignored in favor of the saved setting or default. Environment changes require a backend restart, while UI changes do not.
+`KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence than the saved capacity. A valid environment value makes only that field read-only; zero or a negative value means unlimited. Invalid text is logged and ignored in favor of the saved setting or default. Environment changes require a backend restart, while UI changes do not.
+
+**Automatically merge consecutive messages** is on by default. Capacity is checked before any fold, so a full queue still rejects a compatible message. After admission, a new row folds only into its immediate pending predecessor when both rows have the same strict source and compatible task, model, mode, metadata, attachments, and references. Any mismatch or combined limit leaves the new row separate. The earlier row survives and its ID is returned. Turning the switch on does not compact existing rows. This setting is independent from **Enable queued message merging**, which controls the manual queue action.
 
 To recover capacity in one session, expand its queue chip in the task workbench. **Remove** deletes one visible pending row and **Clear all** deletes all visible pending rows, including user-, agent-, workflow-, and server-origin work. After removal, merge, or drain, displayed positions immediately compact to `#1` through `#N`; durable FIFO ordering is unchanged. A row already reserved for delivery is hidden and is not cancelled by either action.
 

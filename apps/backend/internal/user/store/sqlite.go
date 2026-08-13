@@ -614,7 +614,6 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
-		"voice_mode":                               settings.VoiceMode,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
 	})
 }
@@ -636,58 +635,6 @@ func scanUser(scanner interface{ Scan(dest ...any) error }) (*models.User, error
 		return nil, err
 	}
 	return user, nil
-}
-
-// defaultVoiceModeSettings returns the baseline VoiceMode configuration for
-// users with no saved preferences. Mirrored on the frontend; keep in sync.
-func defaultVoiceModeSettings() models.VoiceModeSettings {
-	return models.VoiceModeSettings{
-		Enabled:         true,
-		Engine:          "auto",
-		Language:        "auto",
-		Mode:            "toggle",
-		AutoSend:        false,
-		WhisperWebModel: "base",
-	}
-}
-
-// storedVoiceMode is the on-disk JSON shape — uses *bool for `enabled` so we
-// can distinguish "absent" (older rows written before the toggle existed —
-// must default to true) from "explicitly false" (user disabled the feature).
-type storedVoiceMode struct {
-	Enabled         *bool  `json:"enabled"`
-	Engine          string `json:"engine"`
-	Language        string `json:"language"`
-	Mode            string `json:"mode"`
-	AutoSend        bool   `json:"auto_send"`
-	WhisperWebModel string `json:"whisper_web_model"`
-}
-
-// mergeVoiceModeDefaults fills in zero/missing fields on a stored VoiceMode
-// payload so older user rows (written before VoiceMode existed) still produce
-// usable settings instead of empty strings the frontend would reject.
-func mergeVoiceModeDefaults(stored *storedVoiceMode) models.VoiceModeSettings {
-	out := defaultVoiceModeSettings()
-	if stored == nil {
-		return out
-	}
-	if stored.Enabled != nil {
-		out.Enabled = *stored.Enabled
-	}
-	if stored.Engine != "" {
-		out.Engine = stored.Engine
-	}
-	if stored.Language != "" {
-		out.Language = stored.Language
-	}
-	if stored.Mode != "" {
-		out.Mode = stored.Mode
-	}
-	if stored.WhisperWebModel != "" {
-		out.WhisperWebModel = stored.WhisperWebModel
-	}
-	out.AutoSend = stored.AutoSend
-	return out
 }
 
 // defaultUserSettings returns the baseline settings for a user with no saved
@@ -725,7 +672,6 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarTaskPrefs:                  normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarEnabled:               false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
-		VoiceMode:                         defaultVoiceModeSettings(),
 		KanbanHiddenStepIDs:               map[string][]string{},
 	}
 }
@@ -808,7 +754,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
 		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
-		VoiceMode                         *storedVoiceMode                    `json:"voice_mode"`
 		KanbanHiddenStepIDs               json.RawMessage                     `json:"kanban_hidden_step_ids"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
@@ -929,7 +874,6 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.TerminalFontFamily = payload.TerminalFontFamily
 	settings.TerminalFontSize = payload.TerminalFontSize
-	settings.VoiceMode = mergeVoiceModeDefaults(payload.VoiceMode)
 	settings.SystemMetricsDisplay = payload.SystemMetricsDisplay
 	if payload.AppStatusBarEnabled != nil {
 		settings.AppStatusBarEnabled = *payload.AppStatusBarEnabled

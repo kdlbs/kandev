@@ -88,6 +88,23 @@ func TestGitHubCredentialHelperRejectsRepositoryScopeMismatch(t *testing.T) {
 	}
 }
 
+func TestGitHubCredentialHelperRejectsRepositoryPathCaseMismatch(t *testing.T) {
+	env := githubCredentialTestEnv("https://broker.example/resolve")
+	env[envGitHubCredentialOwner] = "Team"
+	env[envGitHubCredentialRepo] = "Repo"
+	err := runGitHubCredentialHelper(
+		context.Background(),
+		[]string{"get"},
+		strings.NewReader("protocol=https\nhost=github.com\npath=team/repo.git\n\n"),
+		io.Discard,
+		lookupEnv(env),
+		http.DefaultClient,
+	)
+	if err == nil || !strings.Contains(err.Error(), "does not match credential lease scope") {
+		t.Fatalf("runGitHubCredentialHelper() error = %v, want case-sensitive scope mismatch", err)
+	}
+}
+
 func TestGitHubCredentialHelperRequiresCompleteScope(t *testing.T) {
 	for name, input := range map[string]string{
 		"protocol": "host=github.com\npath=acme/widgets.git\n\n",
@@ -132,6 +149,33 @@ func TestGitHubCredentialHelperSelectsRepositoryLease(t *testing.T) {
 	}
 	if got.Lease != "backend-lease" || got.RepositoryID != "repo-2" {
 		t.Fatalf("selected broker scope = %+v", got)
+	}
+}
+
+func TestGitHubCredentialHelperPreservesExactProviderPath(t *testing.T) {
+	var got githubBrokerResolveRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		_, _ = io.WriteString(w, `{"username":"x-token-auth","password":"fresh-token"}`)
+	}))
+	t.Cleanup(server.Close)
+	env := githubCredentialTestEnv(server.URL)
+	env[envGitHubCredentialScopes] = `[
+		{"lease":"opaque-lease","task_id":"task-1","session_id":"session-1","repository_id":"repo-1","owner":"context","repo":"scm/ENG/widgets","host":"bitbucket.example","path":"/context/scm/ENG/widgets"}
+	]`
+
+	err := runGitHubCredentialHelper(
+		context.Background(), []string{"get"},
+		strings.NewReader("protocol=https\nhost=bitbucket.example\npath=context/scm/ENG/widgets\n\n"),
+		io.Discard, lookupEnv(env), server.Client(),
+	)
+	if err != nil {
+		t.Fatalf("runGitHubCredentialHelper() error = %v", err)
+	}
+	if got.Path != "/context/scm/ENG/widgets" {
+		t.Fatalf("broker path = %q, want exact provider path", got.Path)
 	}
 }
 

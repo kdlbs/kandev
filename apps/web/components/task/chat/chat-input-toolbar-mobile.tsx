@@ -7,7 +7,6 @@ import { ModeSelector } from "@/components/task/mode-selector";
 import { SessionsDropdown } from "@/components/task/sessions-dropdown";
 import { TokenUsageDisplay } from "@/components/task/chat/token-usage-display";
 import { EnhancePromptButton } from "@/components/enhance-prompt-button";
-import { VoiceInputButton } from "./voice-input-button";
 import { ChatInputPluginActions } from "./chat-input-plugin-actions";
 import { ContextPopover } from "./context-popover";
 import { ImplementPlanButton } from "./implement-plan-button";
@@ -56,8 +55,6 @@ type MobileToolbarProps = {
   onCancel: () => void | Promise<void>;
   onSubmit: () => void;
   submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
-  onVoiceTranscript?: (text: string) => void;
-  onVoiceAutoSend?: () => void;
   composerCapability?: PluginComposerCapability;
   composerSurface?: "task-chat" | "quick-chat";
 };
@@ -186,13 +183,6 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
             submittable={!props.isDisabled && props.hasContent}
             disabledReason={props.submitDisabledReason}
             composer={props.composerCapability}
-          />
-        )}
-        {props.onVoiceTranscript && (
-          <VoiceInputButton
-            onTranscript={props.onVoiceTranscript}
-            onAutoSend={props.onVoiceAutoSend}
-            disabled={props.isDisabled}
           />
         )}
         <SubmitButton

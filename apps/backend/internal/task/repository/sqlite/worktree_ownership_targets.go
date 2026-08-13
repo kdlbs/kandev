@@ -13,6 +13,17 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
+const (
+	columnCreatedAt      = "created_at"
+	columnRepositoryID   = "repository_id"
+	columnStatus         = "status"
+	columnUpdatedAt      = "updated_at"
+	columnWorktreeBranch = "worktree_branch"
+	columnWorktreeID     = "worktree_id"
+	columnWorktreePath   = "worktree_path"
+	tableTaskEnvRepos    = "task_environment_repos"
+)
+
 // envRepoKey is the normalized repository-slot key: one row per
 // (repository, branch slug) pair within a task environment.
 func envRepoKey(repositoryID, branchSlug string) string {
@@ -400,12 +411,12 @@ func (r *Repository) checkShadowFinalSchema(tx *sqlx.Tx) error {
 	if err != nil {
 		return err
 	}
-	for _, legacy := range []string{"repository_id", "worktree_id", "worktree_path", "worktree_branch"} {
+	for _, legacy := range []string{columnRepositoryID, columnWorktreeID, columnWorktreePath, columnWorktreeBranch} {
 		if envColumns[legacy] {
 			return fmt.Errorf("cutover: task_environments_shadow still carries legacy column %s", legacy)
 		}
 	}
-	for _, required := range []string{"id", "task_id", "executor_type", "status", "workspace_path", "created_at", "updated_at"} {
+	for _, required := range []string{"id", "task_id", "executor_type", columnStatus, "workspace_path", columnCreatedAt, columnUpdatedAt} {
 		if !envColumns[required] {
 			return fmt.Errorf("cutover: task_environments_shadow missing final column %s", required)
 		}
@@ -415,9 +426,9 @@ func (r *Repository) checkShadowFinalSchema(tx *sqlx.Tx) error {
 	if err != nil {
 		return err
 	}
-	for _, required := range []string{"id", "task_environment_id", "repository_id", "branch_slug",
-		"worktree_id", "worktree_path", "worktree_branch", "position", "error_message",
-		"status", "created_at", "updated_at", "merged_at", "deleted_at"} {
+	for _, required := range []string{"id", "task_environment_id", columnRepositoryID, "branch_slug",
+		columnWorktreeID, columnWorktreePath, columnWorktreeBranch, "position", "error_message",
+		columnStatus, columnCreatedAt, columnUpdatedAt, "merged_at", "deleted_at"} {
 		if !repoColumns[required] {
 			return fmt.Errorf("cutover: task_environment_repos_shadow missing final column %s", required)
 		}
@@ -512,8 +523,8 @@ func (r *Repository) cutoverRenamePostgresConstraints(tx *sqlx.Tx) error {
 		constraintType   string
 	}{
 		{"task_environments", "task_environments_task_id_fkey", "task_environments_shadow_task_id_fkey", "f"},
-		{"task_environment_repos", "task_environment_repos_task_environment_id_fkey", "task_environment_repos_shadow_task_environment_id_fkey", "f"},
-		{"task_environment_repos", "task_environment_repos_env_repo_branch_key", "task_environment_repos_shadow_task_environment_id_", "u"},
+		{tableTaskEnvRepos, "task_environment_repos_task_environment_id_fkey", "task_environment_repos_shadow_task_environment_id_fkey", "f"},
+		{tableTaskEnvRepos, "task_environment_repos_env_repo_branch_key", "task_environment_repos_shadow_task_environment_id_", "u"},
 	}
 	for _, rename := range renames {
 		var constraintName string

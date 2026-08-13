@@ -99,12 +99,12 @@ vi.mock("@/components/task-create-dialog-selectors", async () => {
     descriptionValueRef,
     initialDescription,
     onDescriptionChange,
-    onVoiceAutoSend,
+    onComposerSubmit,
   }: {
     descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
     initialDescription: string;
     onDescriptionChange: (hasContent: boolean) => void;
-    onVoiceAutoSend?: () => void;
+    onComposerSubmit?: () => void;
   }) {
     const valueRef = React.useRef(initialDescription);
     const [value, setValue] = React.useState(initialDescription);
@@ -137,13 +137,15 @@ vi.mock("@/components/task-create-dialog-selectors", async () => {
         "button",
         {
           type: "button",
-          "aria-label": "Voice input",
+          // Stands in for a plugin composer action: insert text, then ask the
+          // dialog to submit the native way.
+          "aria-label": "Plugin composer action",
           onClick: () => {
-            updateValue("voice transcript");
-            onVoiceAutoSend?.();
+            updateValue("dictated prompt");
+            onComposerSubmit?.();
           },
         },
-        "Voice",
+        "Plugin action",
       ),
     );
   }
@@ -272,16 +274,16 @@ describe("NewSessionDialog", () => {
     );
   });
 
-  it("auto-sends a transcript inserted into a blank composer", async () => {
+  it("submits text a plugin composer action inserted into a blank composer", async () => {
     render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+    fireEvent.click(screen.getByRole("button", { name: "Plugin composer action" }));
 
     await waitFor(() => expect(mockLaunchSession).toHaveBeenCalledTimes(1));
     expect(mockBuildStartRequest).toHaveBeenCalledWith(
       "task-1",
       "profile-1",
-      expect.objectContaining({ prompt: "voice transcript" }),
+      expect.objectContaining({ prompt: "dictated prompt" }),
     );
   });
 

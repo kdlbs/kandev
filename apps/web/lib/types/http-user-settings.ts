@@ -1,5 +1,4 @@
 import type { WorkspaceId } from "./ids";
-import type { VoiceModeSettings } from "./http-voice";
 
 export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
 export type StartupPage = "task_overview" | "last_task";
@@ -104,7 +103,6 @@ export type UserSettings = {
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
-  voice_mode?: VoiceModeSettings;
   kanban_hidden_step_ids?: Record<string, string[]>;
   revision?: number;
   updated_at: string;
@@ -169,6 +167,5 @@ export type UserSettingsUpdatePayload = {
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
-  voice_mode?: VoiceModeSettings;
   kanban_hidden_step_ids?: Record<string, string[]>;
 };

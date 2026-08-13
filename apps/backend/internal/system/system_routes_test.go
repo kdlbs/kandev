@@ -158,14 +158,17 @@ func (s *queueSettingsRawStore) Save(_ context.Context, _ string, value []byte) 
 }
 
 type queueSettingsTarget struct {
-	max          int
-	mergeEnabled bool
+	max              int
+	mergeEnabled     bool
+	autoMergeEnabled bool
 }
 
-func (t *queueSettingsTarget) MaxPerSession() int     { return t.max }
-func (t *queueSettingsTarget) SetMaxPerSession(n int) { t.max = n }
-func (t *queueSettingsTarget) MergeEnabled() bool     { return t.mergeEnabled }
-func (t *queueSettingsTarget) SetMergeEnabled(v bool) { t.mergeEnabled = v }
+func (t *queueSettingsTarget) MaxPerSession() int         { return t.max }
+func (t *queueSettingsTarget) SetMaxPerSession(n int)     { t.max = n }
+func (t *queueSettingsTarget) MergeEnabled() bool         { return t.mergeEnabled }
+func (t *queueSettingsTarget) SetMergeEnabled(v bool)     { t.mergeEnabled = v }
+func (t *queueSettingsTarget) AutoMergeEnabled() bool     { return t.autoMergeEnabled }
+func (t *queueSettingsTarget) SetAutoMergeEnabled(v bool) { t.autoMergeEnabled = v }
 
 type systemSleepRawStore struct {
 	raw   []byte
