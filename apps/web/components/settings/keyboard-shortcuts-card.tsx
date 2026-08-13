@@ -231,6 +231,21 @@ function buildConflictLabels(groups: ShortcutConflictGroup[]): Map<string, strin
 
 const CONFIGURABLE_SHORTCUT_IDS = Object.keys(CONFIGURABLE_SHORTCUTS) as ConfigurableShortcutId[];
 
+function useShortcutConflictLabels(
+  pluginEntries: ShortcutEntry[],
+  overrides: StoredShortcutOverrides,
+  translate: NonNullable<Parameters<typeof coreShortcutEntries>[0]>,
+) {
+  return useMemo(() => {
+    const allEntries = [...coreShortcutEntries(translate), ...pluginEntries];
+    const resolved = allEntries.map((entry) => ({
+      entry,
+      shortcut: resolveShortcutEntry(entry, overrides),
+    }));
+    return buildConflictLabels(findShortcutConflicts(resolved, isMac()));
+  }, [pluginEntries, overrides, translate]);
+}
+
 export function KeyboardShortcutsCard({
   overrides,
   baselineOverrides = {},
@@ -247,15 +262,7 @@ export function KeyboardShortcutsCard({
   const shortcuts = resolveAllShortcuts(overrides);
   const baselineShortcuts = resolveAllShortcuts(baselineOverrides);
 
-  const allEntries = useMemo(() => [...coreShortcutEntries(), ...pluginEntries], [pluginEntries]);
-
-  const conflictLabels = useMemo(() => {
-    const resolved = allEntries.map((entry) => ({
-      entry,
-      shortcut: resolveShortcutEntry(entry, overrides),
-    }));
-    return buildConflictLabels(findShortcutConflicts(resolved, isMac()));
-  }, [allEntries, overrides]);
+  const conflictLabels = useShortcutConflictLabels(pluginEntries, overrides, t);
 
   const handleChange = useCallback(
     (id: string, shortcut: KeyboardShortcut) => {
