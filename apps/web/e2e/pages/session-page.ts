@@ -82,6 +82,11 @@ export class SessionPage {
   async togglePortForwardingPreference(): Promise<void> {
     await this.addPanelButton().click();
     await expect(this.portForwardingMenuItem).toBeVisible();
+    // The menu item is rendered before the session's agentctl launcher is
+    // ready, but it is disabled until port forwarding can actually work.
+    // Waiting for enabled avoids force-clicking a no-op during that startup
+    // window, which otherwise leaves the top-bar control absent.
+    await expect(this.portForwardingMenuItem).toBeEnabled({ timeout: 30_000 });
     const enabling = (await this.portForwardingMenuItem.getAttribute("aria-checked")) !== "true";
     await this.portForwardingMenuItem.click({ force: true });
     if (enabling) {
