@@ -152,6 +152,10 @@ func (h *Handlers) handleAskParentQuestion(ctx context.Context, msg *ws.Message)
 		}
 	}
 
+	// The hard pause cancels the agent turn's request context. Keep delivery
+	// operations independent of that cancellation so the parent still receives
+	// the durable question after the child has been paused.
+	deliveryCtx := context.WithoutCancel(ctx)
 	parentPrompt := formatParentQuestionPrompt(questionID, target.parentTask, target.childTask, req.Questions, req.Context)
 	parentMetadata := map[string]interface{}{
 		models.MetaKeyParentQuestionID:       questionID,
@@ -162,8 +166,8 @@ func (h *Handlers) handleAskParentQuestion(ctx context.Context, msg *ws.Message)
 		"sender_task_title":                  target.childTask.Title,
 		senderSessionIDKey:                   target.childSession.ID,
 	}
-	if _, dispatchErr := h.dispatchTaskMessage(ctx, target.parentTask.ID, target.parentSession, parentPrompt, parentMetadata, false, false); dispatchErr != nil {
-		_ = h.taskSvc.DeleteMessage(ctx, question.ID)
+	if _, dispatchErr := h.dispatchTaskMessage(deliveryCtx, target.parentTask.ID, target.parentSession, parentPrompt, parentMetadata, false, false); dispatchErr != nil {
+		_ = h.taskSvc.DeleteMessage(deliveryCtx, question.ID)
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to send question to direct parent: "+dispatchErr.Error(), nil)
 	}
 

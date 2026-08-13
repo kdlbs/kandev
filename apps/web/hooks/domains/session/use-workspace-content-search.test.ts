@@ -52,7 +52,7 @@ describe("useWorkspaceContentSearch request lifecycle", () => {
     await act(async () => vi.runAllTimersAsync());
 
     expect(mockSearchWorkspaceContent).toHaveBeenCalledWith(mockClient, "session-1", "needle", 50);
-    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(3);
+    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(8);
     expect(result.current.results).toEqual(results);
     expect(result.current.isSearching).toBe(false);
   });
@@ -164,7 +164,7 @@ describe("useWorkspaceContentSearch validation and failures", () => {
     mockSearchWorkspaceContent
       .mockResolvedValueOnce({ results: [primary] })
       .mockResolvedValueOnce({ results: [primary, extra] })
-      .mockResolvedValueOnce({ results: [primary, extra] });
+      .mockResolvedValue({ results: [primary, extra] });
     const { result } = renderHook(() =>
       useWorkspaceContentSearch({
         enabled: true,
@@ -221,7 +221,7 @@ describe("useWorkspaceContentSearch stale responses", () => {
     await act(async () => resolveFirst?.({ results: firstResults }));
     await act(async () => vi.runAllTimersAsync());
 
-    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(4);
+    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(9);
     expect(result.current.results).toEqual(secondResults);
     expect(result.current.isSearching).toBe(false);
   });

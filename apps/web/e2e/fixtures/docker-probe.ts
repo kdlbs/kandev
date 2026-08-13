@@ -70,6 +70,37 @@ function buildImage(tag: string, dockerfile: string): void {
   }
 }
 
+function listScopedKandevContainers(scope: string): string[] | null {
+  const list = spawnSync(
+    "docker",
+    [
+      "ps",
+      "-aq",
+      "--filter",
+      "label=kandev.managed=true",
+      "--filter",
+      `label=kandev.e2e.run=${scope}`,
+    ],
+    { encoding: "utf8" },
+  );
+  if (list.status !== 0) return null;
+  return list.stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function removeContainerIDs(ids: string[]): void {
+  if (ids.length > 0) spawnSync("docker", ["rm", "-f", ...ids], { stdio: "ignore" });
+}
+
+function discardMissingContainerIDs(pendingIDs: Set<string>): void {
+  for (const id of pendingIDs) {
+    const inspected = spawnSync("docker", ["inspect", id], { stdio: "ignore" });
+    if (inspected.status !== 0) pendingIDs.delete(id);
+  }
+}
+
 /**
  * Remove only containers owned by this E2E process. Never use a daemon-wide
  * kandev.managed=true sweep: another shard can share the Docker daemon.
@@ -98,31 +129,26 @@ export async function removeScopedKandevContainers(scope = E2E_DOCKER_SCOPE): Pr
   const deadline = Date.now() + SCOPED_CONTAINER_CLEANUP_TIMEOUT_MS;
   let emptyPolls = 0;
   let lastIDs: string[] = [];
+  const pendingIDs = new Set<string>();
 
   while (Date.now() < deadline) {
-    const list = spawnSync(
-      "docker",
-      [
-        "ps",
-        "-aq",
-        "--filter",
-        "label=kandev.managed=true",
-        "--filter",
-        `label=kandev.e2e.run=${scope}`,
-      ],
-      { encoding: "utf8" },
-    );
-    if (list.status === 0) {
-      lastIDs = list.stdout
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (lastIDs.length === 0) {
+    const currentIDs = listScopedKandevContainers(scope);
+    if (currentIDs) {
+      lastIDs = currentIDs;
+      for (const id of lastIDs) pendingIDs.add(id);
+      removeContainerIDs(lastIDs);
+
+      // `docker ps` can stop reporting a container while the daemon is still
+      // completing `rm -f`. Verify every ID we observed with inspect before
+      // declaring the scope empty, otherwise the next test can see the old
+      // container during that removal window.
+      discardMissingContainerIDs(pendingIDs);
+
+      if (lastIDs.length === 0 && pendingIDs.size === 0) {
         emptyPolls += 1;
         if (emptyPolls >= 2) return;
       } else {
         emptyPolls = 0;
-        spawnSync("docker", ["rm", "-f", ...lastIDs], { stdio: "ignore" });
       }
     }
 
@@ -130,7 +156,7 @@ export async function removeScopedKandevContainers(scope = E2E_DOCKER_SCOPE): Pr
   }
 
   throw new Error(
-    `timed out removing process-scoped Kandev containers: ${lastIDs.join(", ") || "docker unavailable"}`,
+    `timed out removing process-scoped Kandev containers: ${[...pendingIDs, ...lastIDs].join(", ") || "docker unavailable"}`,
   );
 }
 

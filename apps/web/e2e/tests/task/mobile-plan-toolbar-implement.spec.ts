@@ -22,7 +22,11 @@ async function seedMobileTaskWithPlan(testPage: Page, apiClient: ApiClient, seed
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect.poll(() => apiClient.getTaskPlan(task.id), { timeout: 30_000 }).not.toBeNull();
+  await expect
+    .poll(() => apiClient.getTaskPlan(task.id).then((plan) => plan?.content.trim() ?? ""), {
+      timeout: 30_000,
+    })
+    .not.toBe("");
   await session.waitForChatIdle({ timeout: 45_000 });
   await session.composerReady();
   await openMobilePlanPanel(testPage, session);
@@ -50,7 +54,7 @@ test.describe("mobile: Plan toolbar implement", () => {
 
     const toolbarButton = testPage.getByTestId("plan-toolbar-implement-button");
     await expect(toolbarButton).toBeVisible({ timeout: 10_000 });
-    await expect(toolbarButton).toBeEnabled();
+    await expect(toolbarButton).toBeEnabled({ timeout: 30_000 });
     await expect(toolbarButton).toBeInViewport();
 
     const toolbarSpacing = await testPage

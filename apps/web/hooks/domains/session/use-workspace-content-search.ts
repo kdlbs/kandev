@@ -6,8 +6,8 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceContent } from "@/lib/ws/workspace-files";
 
 const CONTENT_SEARCH_DEBOUNCE_MS = 250;
-const CONTENT_SEARCH_RETRY_ATTEMPTS = 3;
-const CONTENT_SEARCH_RETRY_DELAY_MS = 250;
+const CONTENT_SEARCH_RETRY_ATTEMPTS = 8;
+const CONTENT_SEARCH_RETRY_DELAY_MS = 500;
 const CONTENT_SEARCH_LIMIT_PER_REPO = 50;
 const MAX_CONTENT_SEARCH_CODE_POINTS = 200;
 
