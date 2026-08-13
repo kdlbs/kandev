@@ -218,3 +218,51 @@ func TestAssociatePRWithTaskExplicitLinkRestoresDetachedAssociation(t *testing.T
 		t.Fatalf("published events = %d, want one restoration update", eventBus.publishedCount())
 	}
 }
+
+// TestAssociatePRWithTaskExplicitLinkOnAlreadyMergedDetachedPRPopulatesOutcomeFields
+// is the detached -> merged -> relink regression: a PR that was detached
+// while open, then merged upstream while nobody was watching, then relinked
+// via the explicit URL flow (a GetPR-based, populating fetch) must not
+// surface with merged_at set and merged_by_login left NULL from before the
+// detach (AC-36). RestoreTaskPR previously updated only lifecycle/display
+// columns and left the five outcome fields untouched.
+func TestAssociatePRWithTaskExplicitLinkOnAlreadyMergedDetachedPRPopulatesOutcomeFields(t *testing.T) {
+	svc, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+	row := &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "demo",
+		PRNumber: 5, PRURL: "https://github.com/acme/demo/pull/5", PRTitle: "old", HeadBranch: "old",
+		BaseBranch: "main", State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, row); err != nil {
+		t.Fatalf("create PR: %v", err)
+	}
+	if _, _, err := store.DetachTaskPR(ctx, row.ID); err != nil {
+		t.Fatalf("detach PR: %v", err)
+	}
+
+	mergedAt := time.Now().UTC()
+	mergedPR := &PR{
+		Number: 5, RepoOwner: "acme", RepoName: "demo", HTMLURL: "https://github.com/acme/demo/pull/5",
+		Title: "merged while detached", HeadBranch: "old", BaseBranch: "main", AuthorLogin: "bob",
+		State: prStateMerged, MergedAt: &mergedAt,
+		Draft: false, ChangedFiles: 12, MergedByLogin: "carlosflorencio",
+	}
+	associated, err := svc.associatePRWithTask(ctx, row.WorkspaceID, row.TaskID, row.RepositoryID, mergedPR, true, true)
+	if err != nil {
+		t.Fatalf("explicitly associate PR: %v", err)
+	}
+	if associated == nil || associated.MergedAt == nil {
+		t.Fatalf("associated = %+v, want merged with a timestamp", associated)
+	}
+	if associated.MergedByLogin == nil || *associated.MergedByLogin != "carlosflorencio" {
+		t.Errorf("merged_by_login = %v, want %q (AC-36 requires non-NULL once merged_at is set)",
+			associated.MergedByLogin, "carlosflorencio")
+	}
+	if associated.IsDraft == nil || *associated.IsDraft != false {
+		t.Errorf("is_draft = %v, want false observed, not NULL", associated.IsDraft)
+	}
+	if associated.ChangedFiles == nil || *associated.ChangedFiles != 12 {
+		t.Errorf("changed_files = %v, want 12 observed, not NULL", associated.ChangedFiles)
+	}
+}

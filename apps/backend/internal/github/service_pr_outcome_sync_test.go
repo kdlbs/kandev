@@ -240,6 +240,57 @@ func TestSyncTaskPR_AutoMergeObservedAtLatchesOnceAndNeverClears(t *testing.T) {
 	}
 }
 
+// TestUpdateTaskPR_AutoMergeLatchIsAtomicUnderConcurrentStaleWrites is the
+// deterministic regression for the race SyncTaskPR's own read-then-write
+// shape can't rule out: two syncs can both read AutoMergeObservedAt as NULL
+// (neither has observed the other's write yet) and independently compute
+// their own "now" timestamp before either writes. This drives
+// store.UpdateTaskPR directly with two such stale in-memory TaskPR copies —
+// SyncTaskPR always re-reads fresh at the top of each call, so it cannot
+// itself reproduce two readers racing off the same NULL snapshot — and
+// asserts the SQL-level COALESCE(auto_merge_observed_at, ?) means whichever
+// write actually lands first wins, with the second writer's differing
+// timestamp silently discarded rather than overwriting it.
+func TestUpdateTaskPR_AutoMergeLatchIsAtomicUnderConcurrentStaleWrites(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	base := &TaskPR{
+		TaskID: "task-latch-race", Owner: "owner", Repo: "repo", PRNumber: 1,
+		PRURL: "https://github.com/owner/repo/pull/1", PRTitle: "Initial",
+		HeadBranch: "feat", BaseBranch: "main", State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, base); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	// Two independent in-memory copies of the same row, both taken while
+	// AutoMergeObservedAt was still NULL — simulating two syncs that raced
+	// off the same stale snapshot and each computed their own timestamp.
+	writerA := *base
+	firstObservedAt := time.Now().UTC()
+	writerA.AutoMergeObservedAt = &firstObservedAt
+
+	writerB := *base
+	secondObservedAt := firstObservedAt.Add(time.Minute)
+	writerB.AutoMergeObservedAt = &secondObservedAt
+
+	if err := store.UpdateTaskPR(ctx, &writerA); err != nil {
+		t.Fatalf("UpdateTaskPR (writer A, lands first): %v", err)
+	}
+	if err := store.UpdateTaskPR(ctx, &writerB); err != nil {
+		t.Fatalf("UpdateTaskPR (writer B, lands second, stale nil-based timestamp): %v", err)
+	}
+
+	got, err := store.GetTaskPRByID(ctx, base.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if got.AutoMergeObservedAt == nil || !got.AutoMergeObservedAt.Equal(firstObservedAt) {
+		t.Fatalf("AutoMergeObservedAt = %v, want the first writer's timestamp %v preserved, not the second writer's %v",
+			got.AutoMergeObservedAt, firstObservedAt, secondObservedAt)
+	}
+}
+
 // TestSyncTaskPR_OutcomeFieldChangePublishesEvent covers AC-18: a sync that
 // changes only an outcome field (no legacy field change) still publishes
 // github.task_pr.updated, and an unchanged sync publishes nothing.

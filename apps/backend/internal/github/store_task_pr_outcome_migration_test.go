@@ -187,3 +187,58 @@ func requireOutcomeActivationOnce(t *testing.T, db *sqlx.DB) string {
 	}
 	return val
 }
+
+// TestAddTaskPROutcomeColumns_NonDuplicateErrorAbortsRatherThanSwallows is
+// the regression for AC-03's fail-loud branch, which the migration replay
+// tests above never exercise (they only ever see the tolerated
+// duplicate-column case). Deliberately omitting github_task_prs entirely
+// makes tableColumns' PRAGMA table_info read return zero rows without an
+// error (SQLite does not error on a missing table there), so
+// addTaskPROutcomeColumns proceeds to `ALTER TABLE github_task_prs ADD
+// COLUMN ...`, which fails with "no such table" — a genuine non-duplicate
+// error distinct from the one dbutil.IsDuplicateColumnError tolerates.
+func TestAddTaskPROutcomeColumns_NonDuplicateErrorAbortsRatherThanSwallows(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "no-github-task-prs-table.db")
+	dbConn, err := dbutil.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = dbConn.Close() })
+	db := sqlx.NewDb(dbConn, "sqlite3")
+
+	store := &Store{db: db, ro: db}
+	err = store.addTaskPROutcomeColumns()
+	if err == nil {
+		t.Fatal("addTaskPROutcomeColumns: want error against a database missing github_task_prs, got nil")
+	}
+	if dbutil.IsDuplicateColumnError(err) {
+		t.Fatalf("addTaskPROutcomeColumns misclassified a missing-table error as duplicate-column: %v", err)
+	}
+}
+
+// TestActivateTaskPROutcomeTracking_WriteFailureAbortsRatherThanSwallows is
+// the companion regression for the activation-instant write (spec: Failure
+// modes — "kandev_meta write fails during activation: Startup aborts").
+// Pre-creating kandev_meta with a key column that carries no UNIQUE/PRIMARY
+// KEY constraint leaves EnsureMetaTable's CREATE TABLE IF NOT EXISTS a
+// no-op (the table already exists), so WriteMetaKeyIfAbsent's `INSERT ...
+// ON CONFLICT(key) DO NOTHING` fails outright — SQLite requires the
+// conflict target to match a real constraint — which is a genuine,
+// non-swallowed write failure.
+func TestActivateTaskPROutcomeTracking_WriteFailureAbortsRatherThanSwallows(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "malformed-kandev-meta.db")
+	dbConn, err := dbutil.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = dbConn.Close() })
+	db := sqlx.NewDb(dbConn, "sqlite3")
+	if _, err := db.Exec(`CREATE TABLE kandev_meta (key TEXT)`); err != nil {
+		t.Fatalf("seed malformed kandev_meta: %v", err)
+	}
+
+	store := &Store{db: db, ro: db}
+	if err := store.activateTaskPROutcomeTracking(); err == nil {
+		t.Fatal("activateTaskPROutcomeTracking: want error against a malformed kandev_meta table, got nil")
+	}
+}

@@ -1867,17 +1867,30 @@ func (s *Store) DetachTaskPR(ctx context.Context, associationID string) (*TaskPR
 
 // RestoreTaskPR clears a detached tombstone for an explicit link action and
 // refreshes the persisted fields available from the fetched GitHub PR.
-func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, pr *PR) (*TaskPR, error) {
+// RestoreTaskPR clears detached_at and refreshes lifecycle fields plus the
+// five outcome-attribution fields on a relinked association. The caller
+// resolves isDraft/changedFiles/mergedByLogin/closedByLogin/
+// autoMergeObservedAt via resolveTaskPROutcomeFields before calling this —
+// a relink from a non-populating source must preserve the row's existing
+// values here, not zero them, so this store method takes the already-
+// resolved values rather than deciding populated-ness itself (AC-11).
+func (s *Store) RestoreTaskPR(
+	ctx context.Context, taskID, repositoryID string, pr *PR,
+	isDraft *bool, changedFiles *int, mergedByLogin, closedByLogin *string, autoMergeObservedAt *time.Time,
+) (*TaskPR, error) {
 	if pr == nil {
 		return nil, errors.New("restore task PR: missing PR data")
 	}
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE github_task_prs SET owner = ?, repo = ?, pr_url = ?, pr_title = ?,
 			head_branch = ?, base_branch = ?, author_login = ?, state = ?, mergeable_state = ?,
-			additions = ?, deletions = ?, merged_at = ?, closed_at = ?, detached_at = NULL, updated_at = ?
+			additions = ?, deletions = ?, merged_at = ?, closed_at = ?, detached_at = NULL, updated_at = ?,
+			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
+			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?)
 		 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
 		pr.RepoOwner, pr.RepoName, pr.HTMLURL, pr.Title, pr.HeadBranch, pr.BaseBranch, pr.AuthorLogin,
 		pr.State, pr.MergeableState, pr.Additions, pr.Deletions, pr.MergedAt, pr.ClosedAt, time.Now().UTC(),
+		isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt,
 		taskID, repositoryID, pr.Number); err != nil {
 		return nil, err
 	}
@@ -2049,6 +2062,15 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 // never clobber the disposition, and lets a disposition PATCH never revert
 // a freshly-synced state. UpdateTaskPRDisposition is the disposition
 // writer's exclusive counterpart and names no sync-owned column.
+// UpdateTaskPR writes auto_merge_observed_at through a SQL-level
+// COALESCE(auto_merge_observed_at, ?) rather than a direct SET. The Go-side
+// latch check in resolveTaskPROutcomeFields (tp.AutoMergeObservedAt == nil)
+// reads a snapshot that can be stale by the time this statement executes —
+// two concurrent syncs can both observe NULL and each compute their own
+// "now" timestamp. COALESCE evaluates the row's *current* value at
+// UPDATE-execution time, inside this single statement, so whichever write
+// actually lands first wins atomically and the second's differing timestamp
+// is silently discarded instead of overwriting it (AC-16/AC-17).
 func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 	tp.UpdatedAt = time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, `
@@ -2058,7 +2080,7 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 			additions = ?, deletions = ?, pr_title = ?, base_branch = ?,
 			merged_at = ?, closed_at = ?, last_synced_at = ?, updated_at = ?,
 			is_draft = ?, changed_files = ?, merged_by_login = ?, closed_by_login = ?,
-			auto_merge_observed_at = ?
+			auto_merge_observed_at = COALESCE(auto_merge_observed_at, ?)
 		WHERE id = ?`,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState,
 		tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,

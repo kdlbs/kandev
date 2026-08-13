@@ -336,7 +336,18 @@ func (s *Service) associatePRWithTask(
 	}
 	if existing != nil {
 		if existing.DetachedAt != nil && restoreDetached {
-			restored, restoreErr := s.store.RestoreTaskPR(ctx, taskID, repositoryID, pr)
+			// Same populated/preserve resolution as the fresh-insert branch
+			// below: a relinked detached PR must not surface merged_at set
+			// with merged_by_login left at whatever it was before detach
+			// (AC-36). existing is the pre-restore row, so its stored
+			// values are exactly what resolveTaskPROutcomeFields should
+			// preserve when this restore isn't from a populating fetch.
+			isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt :=
+				resolveTaskPROutcomeFields(existing, &PRStatus{PR: pr, OutcomeFieldsPopulated: outcomeFieldsPopulated})
+			restored, restoreErr := s.store.RestoreTaskPR(
+				ctx, taskID, repositoryID, pr,
+				isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt,
+			)
 			if restoreErr != nil || restored == nil {
 				return restored, restoreErr
 			}
