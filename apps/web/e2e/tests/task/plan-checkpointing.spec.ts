@@ -3,6 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 
 // ---------------------------------------------------------------------------
 // Overview
@@ -323,6 +324,10 @@ test.describe("Plan checkpointing — rewind UI", () => {
   }) => {
     test.setTimeout(120_000);
 
+    // Attach before the first navigation so the capture sees the websocket
+    // from the moment it opens.
+    const traffic = attachGatewayTrafficCapture(testPage);
+
     const script = planWriteScript([{ content: "Agent wrote this" }]);
     const { session } = await seedTaskAndWaitForIdle(
       testPage,
@@ -331,6 +336,10 @@ test.describe("Plan checkpointing — rewind UI", () => {
       "Checkpoint author switch",
       script,
     );
+    const planUpdatesBeforeEdit = () =>
+      traffic.frames.filter((frame) => frame.action === "task.plan.update").length;
+    const planUpdatesAtStart = planUpdatesBeforeEdit();
+
     await openPlanPanel(session);
     await expect(session.planPanel.getByText("Agent wrote this", { exact: false })).toBeVisible({
       timeout: 10_000,
@@ -342,8 +351,15 @@ test.describe("Plan checkpointing — rewind UI", () => {
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await testPage.keyboard.press(`${modifier}+a`);
     await testPage.keyboard.type("User overwrote it");
-    // Wait past autosave debounce + short settle time.
-    await testPage.waitForTimeout(2_000);
+    // Autosave is debounced, but the debounce firing is observable: the save
+    // travels as a `task.plan.update` frame on the gateway socket. Wait for
+    // that frame rather than for a budget chosen to outlast the debounce.
+    await expect
+      .poll(planUpdatesBeforeEdit, {
+        timeout: 15_000,
+        message: "plan autosave never sent a task.plan.update frame",
+      })
+      .toBeGreaterThan(planUpdatesAtStart);
 
     await session.openRewind();
     await expectRevisionCount(session, 2);

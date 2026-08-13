@@ -409,8 +409,10 @@ test.describe("sidebar scrolling", () => {
       });
       await expect(navigationDialog).toBeVisible();
 
-      // Let the old 60-frame sidebar reveal budget expire while the settings
-      // blocker keeps the task sidebar out of the DOM.
+      // Time-based on purpose: the regression under test is a frame-count
+      // reveal budget expiring while the sidebar is absent from the DOM. The
+      // budget's expiry is the event, and nothing renders to signal it, so it
+      // has to be waited out rather than observed.
       await testPage.waitForTimeout(1_500);
       await navigationDialog.getByRole("button", { name: "Discard and leave" }).click();
 

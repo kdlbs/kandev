@@ -28,6 +28,9 @@ test.describe("Create task workspace repository picker on mobile", () => {
     await expect(selectedElsewhere.getByTestId("already-added-repository-marker")).toBeVisible();
     await selectedElsewhere.tap();
     await expect(repositoryChips.nth(1)).toContainText("E2E Repo");
+    // Time-based on purpose: this asserts a negative (a tap must not leave a
+    // hover tooltip behind on touch). Nothing is rendered to wait for, so the
+    // only meaningful check is to outlast Radix's open delay first.
     await testPage.waitForTimeout(300);
     await expect(testPage.getByRole("tooltip")).toBeHidden();
     await assertNoDocumentHorizontalOverflow(testPage, "repository picker selection");
