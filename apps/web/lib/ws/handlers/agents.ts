@@ -230,6 +230,27 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
         },
       }));
     },
+    // Full settings record for one agent (e.g. a custom TUI agent's MCP
+    // strategy changed). Distinct from "agent.updated", which is a runtime
+    // status ping keyed by {agentId, status} and feeds state.agents.
+    "agent.settings.updated": (message) => {
+      const incoming = message.payload?.agent;
+      if (!incoming?.id) return;
+      store.setState((state) => {
+        const exists = state.settingsAgents.items.some((a) => a.id === incoming.id);
+        if (!exists) return state;
+        return {
+          ...state,
+          settingsAgents: {
+            items: state.settingsAgents.items.map((a) =>
+              // Preserve the locally normalized profiles: this event carries
+              // agent-level settings, and the profile list has its own events.
+              a.id === incoming.id ? { ...a, ...incoming, profiles: a.profiles } : a,
+            ),
+          },
+        };
+      });
+    },
     "agent.profile.created": (message) => {
       store.setState((state) => ({
         ...state,

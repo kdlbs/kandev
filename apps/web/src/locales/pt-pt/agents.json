@@ -127,8 +127,6 @@
   "mcpStrategyHelp": "O Kandev pode disponibilizar a este agente as suas próprias ferramentas (definir o título da tarefa, colocar uma questão ao utilizador, atualizar o plano, marcar um passo como concluído). Para isso, tem de escrever a configuração MCP no formato que a sua CLI lê, por isso escolha o que corresponde. Escolher o formato errado falha silenciosamente: a configuração é escrita, a CLI ignora-a e não é apresentado qualquer erro. Deixe desativado se o comando não for um agente de programação compatível com MCP.",
   "mcpStrategyNone": "Desativado: sem ferramentas do Kandev",
   "mcpStrategyOption": "{{name}}: {{mechanism}}",
-  "mcpToolsDescription": "Dê a este agente acesso às ferramentas de tarefas e sessões do próprio Kandev, injetando o servidor MCP de cada sessão na CLI encapsulada.",
-  "mcpToolsTitle": "Ferramentas MCP do Kandev",
   "model": "Modelo",
   "modelHeading": "Modelo",
   "modelOptionsAuthenticationRequired": "Inicie sessão neste agente para carregar as opções do modelo.",

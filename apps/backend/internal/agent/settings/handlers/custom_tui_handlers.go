@@ -128,8 +128,18 @@ func (h *Handlers) httpUpdateCustomTUIAgentMCP(c *gin.Context) {
 	// The agent's supports_mcp and tui_config both changed; refresh the agent
 	// list so open settings tabs show the MCP editor appearing or disappearing
 	// without a reload.
+	//
+	// ActionAgentSettingsUpdated, not ActionAgentUpdated: the latter is a
+	// runtime status ping shaped {agentId, status} feeding a different store
+	// slice, so sending an agent record on it inserts {id: undefined} into the
+	// runtime list instead of updating settings.
+	//
+	//ws:global agent settings are not workspace-scoped — the agents list is a
+	// global settings surface, so every connected client's copy is stale after
+	// this change. Matches the sibling agent.profile.* and agent.available.updated
+	// broadcasts in this package.
 	if h.hub != nil {
-		notification, _ := ws.NewNotification(ws.ActionAgentUpdated, gin.H{"agent": resp})
+		notification, _ := ws.NewNotification(ws.ActionAgentSettingsUpdated, gin.H{"agent": resp})
 		h.hub.Broadcast(notification)
 	}
 

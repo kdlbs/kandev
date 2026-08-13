@@ -27,7 +27,6 @@ import { SettingsRedirect } from "@/src/settings-route-helpers";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
 import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
-import { CustomTUIMcpCard } from "./custom-tui-mcp-card";
 
 const defaultMcpConfig: NonNullable<DraftProfile["mcp_config"]> = {
   enabled: false,
@@ -458,11 +457,6 @@ function AgentSetupForm({
         onDelete={handleDeleteAgent}
       />
       <Separator />
-      <CustomTUIMcpCard
-        agent={savedAgent}
-        onAgentUpdated={upsertAgent}
-        onToastError={onToastError}
-      />
       <ProfilesCard
         displayName={displayName}
         isCreateMode={isCreateMode}

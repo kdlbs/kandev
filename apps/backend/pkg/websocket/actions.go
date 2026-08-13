@@ -253,6 +253,12 @@ const (
 	ActionAgentProfileCreated = "agent.profile.created"
 	ActionAgentProfileUpdated = "agent.profile.updated"
 
+	// ActionAgentSettingsUpdated carries a full agent settings record
+	// (dto.AgentDTO) after a settings-side change such as a custom TUI agent's
+	// MCP strategy. Distinct from ActionAgentUpdated, which is a runtime status
+	// ping keyed by {agentId, status} and feeds a different store slice.
+	ActionAgentSettingsUpdated = "agent.settings.updated"
+
 	// Permission request actions (agent -> user -> agent)
 	ActionPermissionRequested = "permission.requested" // Agent requesting permission
 	ActionPermissionRespond   = "permission.respond"   // User responding to permission request

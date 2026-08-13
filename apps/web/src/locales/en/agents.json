@@ -139,8 +139,6 @@
   "mcpStrategyHelp": "Kandev can hand this agent its own tools (set task title, ask the user a question, update the plan, mark a step complete). To do that it must write MCP config in the format your CLI reads, so pick the one that matches. Choosing the wrong format fails silently: the config is written, the CLI ignores it, and no error is shown. Leave this off if the command is not an MCP-capable coding agent.",
   "mcpStrategyNone": "Off: no Kandev tools",
   "mcpStrategyOption": "{{name}}: {{mechanism}}",
-  "mcpToolsDescription": "Give this agent access to Kandev's own task and session tools by injecting the per-session MCP server into the wrapped CLI.",
-  "mcpToolsTitle": "Kandev MCP tools",
   "model": "Model",
   "modelHeading": "Model",
   "modelRequiredForAllProfiles": "Model is required for all profiles.",

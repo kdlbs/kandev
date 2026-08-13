@@ -179,11 +179,12 @@ func (c *Controller) SetCustomTUIAgentMCPStrategy(ctx context.Context, agentID, 
 
 // reregisterCustomTUIAgent rebuilds the registry entry from the agent's stored
 // tui_config. The strategy is baked into the TUIAgent at construction, so a
-// changed strategy needs a new instance rather than a mutation.
+// changed strategy needs a new instance rather than a mutation. The swap is
+// atomic: Unregister + Register would leave a window in which a launching
+// session sees no entry for this agent ID.
 func (c *Controller) reregisterCustomTUIAgent(agent *models.Agent) error {
 	cfg := agent.TUIConfig
-	_ = c.agentRegistry.Unregister(agent.Name)
-	return c.agentRegistry.RegisterCustomTUIAgent(registry.CustomTUIAgentSpec{
+	return c.agentRegistry.ReplaceCustomTUIAgent(registry.CustomTUIAgentSpec{
 		Slug:           agent.Name,
 		DisplayName:    cfg.DisplayName,
 		Command:        cfg.Command,
