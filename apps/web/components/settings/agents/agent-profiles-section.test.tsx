@@ -100,7 +100,7 @@ vi.mock("@/components/settings/agent-profile-delete-dialog", () => ({
     ) : null,
 }));
 
-import { ProfileRow } from "./agent-profiles-section";
+import { AgentProfilesSubList, ProfileRow } from "./agent-profiles-section";
 
 function renderRows() {
   return render(
@@ -189,5 +189,24 @@ describe("ProfileRow duplicate", () => {
     fireEvent.click(row.querySelector('[data-testid="duplicate-profile-p-1"]')!);
 
     await waitFor(() => expect(mocks.duplicateAgentProfileAction).toHaveBeenCalledWith("p-1"));
+  });
+});
+
+describe("AgentProfilesSubList layout", () => {
+  beforeEach(() => cleanup());
+  afterEach(() => cleanup());
+
+  it("renders profile rows without the count or create action", () => {
+    render(<AgentProfilesSubList savedAgent={AGENT} agentName="claude" />);
+
+    expect(screen.queryByText("2 profiles", { exact: true })).toBeNull();
+    expect(screen.getAllByTestId("agent-profile-row")).toHaveLength(2);
+    expect(screen.queryByTestId("new-profile-claude")).toBeNull();
+  });
+
+  it("omits the profile body when the agent has no saved profiles", () => {
+    render(<AgentProfilesSubList savedAgent={undefined} agentName="claude" />);
+
+    expect(screen.queryByTestId("agent-profiles-claude")).toBeNull();
   });
 });

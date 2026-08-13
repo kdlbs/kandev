@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconCopy, IconDotsVertical, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconCopy, IconDotsVertical, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -24,18 +24,14 @@ import type { Agent, AgentProfile } from "@/lib/types/http";
 import { RecordDot } from "@/components/settings/record-dot";
 import { DisabledBadge } from "@/components/settings/record-badges";
 
-function agentSetupHref(agentName: string): string {
-  return `/settings/agents/${encodeURIComponent(agentName)}?mode=create`;
-}
-
 function profileHref(agentName: string, profileId: string): string {
   return `/settings/agents/${encodeURIComponent(agentName)}/profiles/${encodeURIComponent(profileId)}`;
 }
 
 /**
- * An agent's profiles inside its group card on the Agents page: a contrasted
- * body with a count, a prominent "New profile" action, and one clickable row
- * per profile (no agent branding — the group header already names the agent).
+ * An agent's profiles inside its group card on the Agents page: one clickable
+ * row per profile (no agent branding or duplicate creation controls because
+ * the group header already names the agent and owns its action).
  */
 export function AgentProfilesSubList({
   savedAgent,
@@ -44,35 +40,18 @@ export function AgentProfilesSubList({
   savedAgent: Agent | undefined;
   agentName: string;
 }) {
-  const { t } = useTranslation();
-  const profiles = savedAgent?.profiles ?? [];
+  if (!savedAgent || savedAgent.profiles.length === 0) return null;
+
   return (
     <div
-      className="border-t border-border/70 bg-background p-3 space-y-2"
+      className="border-t border-border/70 bg-background p-3"
       data-testid={`agent-profiles-${agentName}`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium text-muted-foreground">
-          {profiles.length === 0
-            ? t("agents:noProfilesYet")
-            : t("agents:profileCount", { count: profiles.length })}
-        </span>
-        <Button size="sm" className="cursor-pointer" asChild>
-          <Link href={agentSetupHref(agentName)} data-testid={`new-profile-${agentName}`}>
-            <IconPlus className="h-4 w-4 mr-2" />
-            {t("agents:newProfile")}
-          </Link>
-        </Button>
+      <div className="grid gap-2">
+        {savedAgent.profiles.map((profile) => (
+          <ProfileRow key={profile.id} agent={savedAgent} profile={profile} />
+        ))}
       </div>
-      {/* Narrowed on `savedAgent` rather than on `profiles.length`: the rows
-          need the agent itself, and only this check proves it is there. */}
-      {savedAgent && savedAgent.profiles.length > 0 && (
-        <div className="grid gap-2">
-          {savedAgent.profiles.map((profile) => (
-            <ProfileRow key={profile.id} agent={savedAgent} profile={profile} />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
