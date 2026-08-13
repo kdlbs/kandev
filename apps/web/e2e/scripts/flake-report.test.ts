@@ -137,6 +137,12 @@ describe("flake history", () => {
     };
 
     expect(readHistory(write("bad.json", "{"))).toBeUndefined();
+    // A partial entry would make `median` return NaN and the trend table throw.
+    const partial = JSON.stringify({
+      version: 1,
+      entries: [entry(), { runId: "9", branch: "main", recordedAt: "2026-08-10T10:00:00.000Z" }],
+    });
+    expect(readHistory(write("partial.json", partial))?.entries).toEqual([entry()]);
     expect(readHistory(write("v9.json", '{"version":9,"entries":[]}'))).toBeUndefined();
     expect(readHistory(path.join(directory, "missing.json"))).toBeUndefined();
     expect(readHistory(write("ok.json", '{"version":1,"entries":[]}'))).toEqual({

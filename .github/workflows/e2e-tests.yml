@@ -806,6 +806,14 @@ jobs:
 
       # The flake trend is carried run to run as an artifact: find the newest
       # `main` run that published one and use it as this run's baseline.
+      #
+      # This deliberately queries `status=completed`, not the `status=success`
+      # the timing-profile lookup uses, and the asymmetry is the point. A
+      # timing profile is only trustworthy from a run where everything passed,
+      # but flake data is most interesting from runs that did not: restricting
+      # to `success` would drop the history of every run that had a failure,
+      # which is the opposite of what a flake trend is for. Do not "fix" this
+      # to match the other lookup.
       - name: Locate latest main flake history
         id: flake-history-run
         if: always()

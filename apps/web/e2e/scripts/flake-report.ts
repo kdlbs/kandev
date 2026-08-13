@@ -84,13 +84,33 @@ export function appendHistoryEntry(
   return { version: FLAKE_HISTORY_VERSION, entries: [entry, ...kept].slice(0, limit) };
 }
 
+/**
+ * Every field the baseline, trend table, and offender table read. A partial
+ * entry is worse than a missing one: an absent `ratePerThousand` makes `median`
+ * return `NaN`, which serializes to `null` and reads as a real measurement, and
+ * an absent `sha` throws in the trend table.
+ */
+function isUsableEntry(value: unknown): value is FlakeHistoryEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as Partial<FlakeHistoryEntry>;
+  return (
+    typeof entry.runId === "string" &&
+    typeof entry.sha === "string" &&
+    typeof entry.flaky === "number" &&
+    typeof entry.unexpected === "number" &&
+    typeof entry.executed === "number" &&
+    typeof entry.ratePerThousand === "number" &&
+    Array.isArray(entry.flakyTests)
+  );
+}
+
 export function readHistory(filePath: string | undefined): FlakeHistory | undefined {
   if (!filePath || !fs.existsSync(filePath)) return undefined;
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as Partial<FlakeHistory>;
     if (parsed.version !== FLAKE_HISTORY_VERSION || !Array.isArray(parsed.entries))
       return undefined;
-    return { version: FLAKE_HISTORY_VERSION, entries: parsed.entries };
+    return { version: FLAKE_HISTORY_VERSION, entries: parsed.entries.filter(isUsableEntry) };
   } catch {
     // A corrupt baseline must not take the reporting step down with it.
     return undefined;

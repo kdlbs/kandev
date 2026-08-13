@@ -24,6 +24,13 @@ export type TimingAttachment = {
 
 export type TimingObservation = {
   key: string;
+  /**
+   * Playwright's test id for this execution. `key` deliberately drops repeat
+   * identity so timings stay comparable across runs, but `--repeat-each`
+   * gives every repetition its own test id at retry 0, so anything counting
+   * executions has to group on this instead. Absent in older blobs.
+   */
+  testId?: string;
   project: string;
   file: string;
   title: string;
@@ -268,6 +275,7 @@ function parseTestEndEvent(
   const expectedStatus = parseTimingStatus(test.expectedStatus);
   return {
     ...descriptor,
+    testId: asString(test.testId) || undefined,
     retry: state.retries.get(resultId) ?? 0,
     status: parseTimingStatus(result.status),
     expectedStatus: expectedStatus === "unknown" ? undefined : expectedStatus,

@@ -6,10 +6,15 @@ import { computeOutcome, summarizeObservations, type TestOutcome } from "./retry
 import { parseBlobReports, type ShardMetadata } from "./e2e-timings";
 import type { TimingObservation } from "./e2e-timings";
 
-const parityFixtureDir = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "__fixtures__/playwright-parity",
-);
+const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixtures__");
+const parityFixtureDir = path.join(fixturesDir, "playwright-parity");
+const repeatEachFixtureDir = path.join(fixturesDir, "repeat-each-parity");
+
+function playwrightStats(directory: string): Record<string, number> {
+  return JSON.parse(
+    fs.readFileSync(path.join(directory, "playwright-stats.json"), "utf8"),
+  ) as Record<string, number>;
+}
 
 function observation(overrides: Partial<TimingObservation>): TimingObservation {
   return {
@@ -180,17 +185,15 @@ describe("retry summary", () => {
     const tally = (outcome: TestOutcome) =>
       summary.tests.filter((test) => test.outcome === outcome).length;
 
-    const playwrightStats = JSON.parse(
-      fs.readFileSync(path.join(parityFixtureDir, "playwright-stats.json"), "utf8"),
-    ) as Record<string, number>;
+    const stats = playwrightStats(parityFixtureDir);
 
     expect({
       expected: tally("expected"),
       unexpected: tally("unexpected"),
       flaky: tally("flaky"),
       skipped: tally("skipped"),
-    }).toEqual(playwrightStats);
-    expect(summary.flake.flaky).toBe(playwrightStats.flaky);
+    }).toEqual(stats);
+    expect(summary.flake.flaky).toBe(stats.flaky);
     expect(summary.flake.flakyTests).toEqual([
       "chromium::tests/outcomes.spec.ts::flakes once then passes",
       "chromium::tests/outcomes.spec.ts::flakes twice then passes",
@@ -208,6 +211,40 @@ describe("retry summary", () => {
       "is expected to fail and does": "expected",
       "is expected to fail but passes": "unexpected",
     });
+  });
+
+  // `--repeat-each` is the flag used to verify de-flaking work, so undercounting
+  // here would be undercounting exactly when the number is being relied on.
+  it("counts every --repeat-each repetition as its own execution", () => {
+    const summary = summarizeObservations(
+      parseBlobReports(repeatEachFixtureDir),
+      "2026-08-13T10:00:00.000Z",
+    );
+    const stats = playwrightStats(repeatEachFixtureDir);
+
+    expect(summary.flake.executed).toBe(4);
+    expect(summary.flake.flaky).toBe(stats.flaky);
+    expect(summary.tests.map((test) => test.statuses)).toEqual([
+      ["passed"],
+      ["passed"],
+      ["failed", "passed"],
+      ["failed", "passed"],
+    ]);
+    // All four repetitions share one project/file/title; only the test id splits them.
+    expect(new Set(summary.tests.map((test) => test.key)).size).toBe(1);
+    expect(new Set(summary.tests.map((test) => test.testId)).size).toBe(4);
+  });
+
+  it("still collapses a repeated report copy of the same execution", () => {
+    const observations = parseBlobReports(repeatEachFixtureDir);
+
+    const summary = summarizeObservations(
+      [...observations, ...observations.map((observation) => ({ ...observation }))],
+      "2026-08-13T10:00:00.000Z",
+    );
+
+    expect(summary.flake.executed).toBe(4);
+    expect(summary.tests.map((test) => test.attempts)).toEqual([1, 1, 2, 2]);
   });
 
   it("compares planned and actual shard durations and keeps plan health counters", () => {
