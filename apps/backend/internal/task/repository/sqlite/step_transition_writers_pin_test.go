@@ -30,7 +30,7 @@ import (
 // verbatim) — narrow the detection below rather than registering it.
 var registeredStepMutators = []string{
 	"insertTaskTx",
-	"UpdateTask",
+	"updateTaskTx",
 	"UpdateTaskIfWorkflowStepHasCapacity",
 	"PromoteQueuedTaskIfWorkflowStepHasCapacity",
 	"RestoreTaskMessageRollbackIfSessionState",
