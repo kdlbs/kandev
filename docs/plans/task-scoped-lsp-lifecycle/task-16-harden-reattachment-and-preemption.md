@@ -33,7 +33,8 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
 - Startup inventory failure becomes a sticky fail-closed controller error; controls never observe
   an empty capacity ledger as ready after durable inventory could not be read.
 - Recovery and ready-budget-reset callbacks acquire lifecycle ownership before I/O, validate their
-  timer generation, retain lifecycle context through command execution, and cannot outlive Close.
+  timer generation, retain lifecycle context through command execution, cannot outlive Close, and
+  retain a recovery signal that arrives while an attempt is still completing.
 - Startup registers watches from post-reconcile rows, and watch loss cannot overwrite a current
   non-server phase.
 - Concurrent or retried Close calls share one lifecycle completion signal; recovery, ready-reset,
@@ -94,6 +95,9 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   reactivate the retired generation, and let reconciliation launch above the configured cap.
 - A fired recovery inspected state and the task host outside the language lane; after explicit Start
   reached generation 2 Ready, that stale Disabled snapshot stopped generation 2 back to Off.
+- A recovery signal arriving after the running command released its language lane but before the
+  callback cleared `runningEpoch` was discarded, leaving keep-warm error state without the next
+  bounded retry.
 
 ## Verification
 
@@ -146,6 +150,13 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
 - The fired-recovery/explicit-Start regression failed with generation 2 stopped by stale recovery,
   then passed 20 race-enabled repetitions with recovery epoch validation, state reload, inspection,
   host recovery, and relaunch held inside one controller-owned language command.
+- The running-recovery lost-wakeup regression failed without a next timer, then passed 100
+  race-enabled repetitions after concurrent recovery demand was retained for the next bounded
+  backoff; the complete `internal/lsp` race package passed.
+- The dependent backend race run passed LSP, agentctl LSP, gateway, task service, and SQLite. Its
+  unrelated lifecycle package hit the existing SSH fake-server session-open timeout once; that
+  isolated test immediately passed three race-enabled repetitions, and the preceding exact-head
+  GitHub backend suite was green.
 - `go test -count=1 ./...` passed across the complete backend after the callback-ownership repair;
   changed-code `golangci-lint` reported zero issues and the architecture linter passed.
 - Commit hooks passed architecture, formatting, changed-code Go/Web lint, i18n, public-copy, and

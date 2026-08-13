@@ -83,7 +83,10 @@ still represents a server-bearing generation; `off`, `queued`, `waiting_for_task
 A fired recovery owns the `(task_id, language)` command lane for its complete epoch revalidation,
 durable-state reload, runtime inspection or task-host recovery, and optional relaunch. Canceling its
 recovery identity before lane entry makes it a no-op; an explicit command ordered after lane entry
-remains final rather than being stopped by stale recovery intent.
+remains final rather than being stopped by stale recovery intent. Recovery demand arriving while an
+attempt is still completing is retained as one pending wakeup and consumes the next bounded backoff
+after that attempt; the handoff between command-lane release and recovery bookkeeping cannot lose
+the only wakeup for a still-desired server.
 
 Browsers attach through a task-and-language route after task-owner authorization. An attachment
 receives the initialized server capabilities and then exchanges feature requests and document

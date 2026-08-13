@@ -242,6 +242,37 @@ func TestFiredRecoveryDoesNotStopNewerExplicitStart(t *testing.T) {
 	}
 }
 
+func TestRecoverySignalDuringRunningAttemptSchedulesNextBackoff(t *testing.T) {
+	scheduler := newFakeScheduler()
+	controller := newReconcileControllerWithScheduler(
+		newMemoryLSPStore(), newReconcileRuntimes(), scheduler,
+	)
+	installTestLifecycle(controller)
+	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	recovery := &recoveryState{attempts: 1, timerEpoch: 1, runningEpoch: 1}
+	controller.recoveries[key] = recovery
+
+	// A watch update can request recovery after the running command releases
+	// its lane but before runRecovery clears runningEpoch. That signal must be
+	// retained even when the current attempt itself converged.
+	controller.scheduleRecovery(key)
+	controller.finishRecoveryAttempt(key, recovery, 1, false)
+
+	controller.lifecycleMu.Lock()
+	timer := recovery.timer
+	runningEpoch := recovery.runningEpoch
+	controller.lifecycleMu.Unlock()
+	if timer == nil || runningEpoch != 0 {
+		t.Fatalf("recovery after concurrent signal: timer=%v running epoch=%d", timer, runningEpoch)
+	}
+	scheduled := scheduler.next(t)
+	if timer != scheduled || scheduled.delay != 5*time.Second {
+		t.Fatalf("next recovery = %p at %s, want %p at 5s", timer, scheduled.delay, scheduled)
+	}
+}
+
 func TestCloseJoinsFiredReadyReset(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{

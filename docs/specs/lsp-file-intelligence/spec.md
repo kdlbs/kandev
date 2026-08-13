@@ -357,7 +357,10 @@ never auto-restarted or timed out.
 Recovery and ready-budget-reset timer callbacks acquire controller-lifecycle ownership before any
 store or runtime access and validate their current timer epoch. Controller shutdown cancels
 callback admission, stops timers that have not fired, and joins callbacks already in flight;
-recovery command execution retains that owned lifecycle context.
+recovery command execution retains that owned lifecycle context. A recovery request received while
+an attempt is still marked running is coalesced and retained for the next bounded backoff; releasing
+the language command lane before callback bookkeeping completes cannot strand a keep-warm language
+in `error` or `off` without its remaining retry.
 
 Concurrent and retried controller shutdown calls wait for the same lifecycle-generation join. If
 one caller times out, a later caller must continue waiting rather than report success early. Timer

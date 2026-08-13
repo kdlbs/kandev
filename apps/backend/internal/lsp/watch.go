@@ -35,6 +35,7 @@ type recoveryState struct {
 	timer           ScheduledTimer
 	timerEpoch      uint64
 	runningEpoch    uint64
+	retryPending    bool
 	readyTimer      ScheduledTimer
 	readyTimerEpoch uint64
 }
@@ -366,8 +367,11 @@ func (c *Controller) scheduleRecoveryLocked(key TaskLanguageKey) {
 		recovery.readyTimer.Stop()
 		recovery.readyTimer = nil
 	}
-	if recovery.timer != nil || recovery.runningEpoch != 0 ||
-		recovery.attempts >= len(recoveryBackoffs) {
+	if recovery.timer != nil || recovery.attempts >= len(recoveryBackoffs) {
+		return
+	}
+	if recovery.runningEpoch != 0 {
+		recovery.retryPending = true
 		return
 	}
 	delay := recoveryBackoffs[recovery.attempts]
@@ -393,6 +397,8 @@ func (c *Controller) finishRecoveryAttempt(
 	if current != expected || current.timerEpoch != epoch || current.runningEpoch != epoch {
 		return
 	}
+	retry = retry || current.retryPending
+	current.retryPending = false
 	current.runningEpoch = 0
 	if retry {
 		c.scheduleRecoveryLocked(key)
