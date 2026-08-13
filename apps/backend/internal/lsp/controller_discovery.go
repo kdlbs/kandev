@@ -262,13 +262,17 @@ func (c *Controller) scheduleDiscoveryRetry(taskID string) {
 	if scheduler == nil {
 		scheduler = realScheduler{}
 	}
-	retry.timer = scheduler.AfterFunc(delay, func() { c.runDiscoveryRetry(taskID, epoch) })
+	retry.timer = scheduler.AfterFunc(delay, func() { c.runDiscoveryRetry(taskID, retry, epoch) })
 }
 
-func (c *Controller) runDiscoveryRetry(taskID string, epoch uint64) {
+func (c *Controller) runDiscoveryRetry(
+	taskID string,
+	expected *discoveryRetryState,
+	epoch uint64,
+) {
 	c.lifecycleMu.Lock()
 	retry := c.discoveryRetries[taskID]
-	if retry == nil || retry.timer == nil || retry.timerEpoch != epoch ||
+	if retry != expected || retry.timer == nil || retry.timerEpoch != epoch ||
 		c.lifecycleCtx == nil || c.lifecycleCtx.Err() != nil || c.lifecycleCancel == nil {
 		c.lifecycleMu.Unlock()
 		return

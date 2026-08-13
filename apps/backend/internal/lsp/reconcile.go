@@ -36,12 +36,7 @@ func (c *Controller) reconcileAllWithInventory(
 	if err != nil {
 		return nil, false, err
 	}
-	sort.Slice(states, func(i, j int) bool {
-		if states[i].TaskID != states[j].TaskID {
-			return states[i].TaskID < states[j].TaskID
-		}
-		return states[i].Language < states[j].Language
-	})
+	sortTaskLanguageStates(states)
 	// Durable generations that may still own a process reserve capacity before
 	// any fallible task-host lookup. A transient startup inspection failure must
 	// not open an admission slot for a duplicate server.
@@ -67,7 +62,22 @@ func (c *Controller) reconcileAllWithInventory(
 			reconcileErrors = append(reconcileErrors, startErr)
 		}
 	}
-	return states, true, errors.Join(reconcileErrors...)
+	reconcileErr := errors.Join(reconcileErrors...)
+	currentStates, err := c.store.ListAllTaskLSPLanguages(ctx)
+	if err != nil {
+		return nil, false, errors.Join(reconcileErr, err)
+	}
+	sortTaskLanguageStates(currentStates)
+	return currentStates, true, reconcileErr
+}
+
+func sortTaskLanguageStates(states []TaskLanguageState) {
+	sort.Slice(states, func(i, j int) bool {
+		if states[i].TaskID != states[j].TaskID {
+			return states[i].TaskID < states[j].TaskID
+		}
+		return states[i].Language < states[j].Language
+	})
 }
 
 // ReconcileTask converges durable languages for one real task. It is an

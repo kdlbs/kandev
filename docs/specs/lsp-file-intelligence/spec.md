@@ -322,6 +322,11 @@ empty capacity ledger or start a background retry behind apparently usable contr
 successful inventory read, every possibly-live generation is reserved before fallible runtime
 inspection begins.
 
+Startup registers watches from a post-reconciliation durable inventory. A watch failure may record
+`task_host_watch_lost` only if the current row still has a server-bearing phase and nonzero
+generation; a stale pre-reconcile row must not replace `off`, `queued`, `waiting_for_task`, or
+`unsupported` state.
+
 An unexpected process or task-host stream failure keeps the desired policy and attempts automatic
 recovery after 1, 5, and 30 seconds. A generation that remains ready for five minutes resets that
 budget. After three failed recoveries, the phase stays `error` with explicit Restart available;
@@ -332,6 +337,12 @@ Recovery and ready-budget-reset timer callbacks acquire controller-lifecycle own
 store or runtime access and validate their current timer epoch. Controller shutdown cancels
 callback admission, stops timers that have not fired, and joins callbacks already in flight;
 recovery command execution retains that owned lifecycle context.
+
+Concurrent and retried controller shutdown calls wait for the same lifecycle-generation join. If
+one caller times out, a later caller must continue waiting rather than report success early. Timer
+validity includes an immutable registration identity as well as its local epoch, preventing a
+committed callback from a deleted recovery/discovery entry from consuming a replacement entry that
+reused the same epoch value.
 
 An explicit Start or Restart begins a new user-requested recovery epoch and therefore resets any
 exhausted automatic retry budget for that task/language. A delayed task-host watch snapshot cannot

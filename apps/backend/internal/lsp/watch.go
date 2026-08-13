@@ -54,6 +54,7 @@ func (c *Controller) StartReconciler(ctx context.Context) error {
 	startupReady := make(chan struct{})
 	c.lifecycleCtx = workerCtx
 	c.lifecycleCancel = cancel
+	c.lifecycleDone = make(chan struct{})
 	c.startupReady = startupReady
 	c.startupComplete = false
 	c.startupErr = nil
@@ -106,42 +107,51 @@ func (c *Controller) waitForStartup(ctx context.Context) error {
 func (c *Controller) Close(ctx context.Context) error {
 	c.lifecycleMu.Lock()
 	cancel := c.lifecycleCancel
-	if cancel == nil {
-		c.lifecycleMu.Unlock()
-		return nil
-	}
-	c.lifecycleCancel = nil
-	cancel()
-	for key, watch := range c.watches {
-		watch.cancel()
-		delete(c.watches, key)
-	}
-	for key, recovery := range c.recoveries {
-		stopRecoveryTimers(recovery)
-		delete(c.recoveries, key)
-	}
-	for taskID, retry := range c.discoveryRetries {
-		if retry.timer != nil {
-			retry.timer.Stop()
+	done := c.lifecycleDone
+	if cancel != nil {
+		if done == nil {
+			done = make(chan struct{})
+			c.lifecycleDone = done
 		}
-		delete(c.discoveryRetries, taskID)
+		c.lifecycleCancel = nil
+		cancel()
+		for key, watch := range c.watches {
+			watch.cancel()
+			delete(c.watches, key)
+		}
+		for key, recovery := range c.recoveries {
+			stopRecoveryTimers(recovery)
+			delete(c.recoveries, key)
+		}
+		for taskID, retry := range c.discoveryRetries {
+			if retry.timer != nil {
+				retry.timer.Stop()
+			}
+			delete(c.discoveryRetries, taskID)
+		}
+		go c.finishLifecycle(done)
 	}
 	c.lifecycleMu.Unlock()
-
-	done := make(chan struct{})
-	go func() {
-		c.lifecycleWG.Wait()
-		close(done)
-	}()
+	if done == nil {
+		return nil
+	}
 	select {
 	case <-done:
-		c.lifecycleMu.Lock()
-		c.lifecycleCtx = nil
-		c.lifecycleMu.Unlock()
 		return nil
 	case <-ctx.Done():
 		return context.Cause(ctx)
 	}
+}
+
+func (c *Controller) finishLifecycle(done chan struct{}) {
+	c.lifecycleWG.Wait()
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.lifecycleDone != done {
+		return
+	}
+	c.lifecycleCtx = nil
+	close(done)
 }
 
 func (c *Controller) completeStartup(states []TaskLanguageState, startupErr error) {
@@ -222,13 +232,45 @@ func (c *Controller) watchTaskLanguage(
 		return
 	}
 	if err != nil {
-		state, _, stateErr := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
-		if stateErr == nil {
-			settings, _ := c.loadSettings(ctx, key.TaskID)
-			snapshot, _ := c.transition(ctx, *state, settings, PhaseError, "task_host_watch_lost", err.Error())
-			c.scheduleDesiredRecovery(key, snapshot)
-		}
+		snapshot, _ := c.recordWatchLoss(ctx, key, err)
+		c.scheduleDesiredRecovery(key, snapshot)
 	}
+}
+
+func (c *Controller) recordWatchLoss(
+	ctx context.Context,
+	key TaskLanguageKey,
+	watchErr error,
+) (*LanguageSnapshot, error) {
+	for range 5 {
+		state, _, err := c.store.GetTaskLSPLanguage(ctx, key.TaskID, key.Language)
+		if err != nil {
+			return nil, err
+		}
+		if !phaseHasServer(state.Phase) || state.Generation == 0 {
+			return nil, nil
+		}
+		settings, err := c.loadSettings(ctx, key.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		expected := state.Revision
+		state.Phase = PhaseError
+		state.ErrorCode = "task_host_watch_lost"
+		state.ErrorMessage = watchErr.Error()
+		state.LastTransitionAt = c.clock()
+		updated, err := c.store.CompareAndUpdateTaskLSPLanguage(ctx, *state, expected)
+		if errors.Is(err, ErrRevisionConflict) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		c.publishState(ctx, *updated, nil)
+		snapshot := c.languageSnapshot(*updated, settings, nil)
+		return &snapshot, nil
+	}
+	return nil, ErrRevisionConflict
 }
 
 func (c *Controller) watchIsCurrent(key TaskLanguageKey, watch *taskLanguageWatch) bool {
@@ -330,10 +372,14 @@ func (c *Controller) scheduleRecovery(key TaskLanguageKey) {
 	}
 	recovery.timerEpoch++
 	epoch := recovery.timerEpoch
-	recovery.timer = scheduler.AfterFunc(delay, func() { c.runRecovery(key, epoch) })
+	recovery.timer = scheduler.AfterFunc(delay, func() { c.runRecovery(key, recovery, epoch) })
 }
 
-func (c *Controller) runRecovery(key TaskLanguageKey, epoch uint64) {
+func (c *Controller) runRecovery(
+	key TaskLanguageKey,
+	expected *recoveryState,
+	epoch uint64,
+) {
 	ctx, done, ok := c.beginLifecycleCallback()
 	if !ok {
 		return
@@ -342,7 +388,7 @@ func (c *Controller) runRecovery(key TaskLanguageKey, epoch uint64) {
 
 	c.lifecycleMu.Lock()
 	recovery := c.recoveries[key]
-	if recovery == nil || recovery.timer == nil || recovery.timerEpoch != epoch ||
+	if recovery != expected || recovery.timer == nil || recovery.timerEpoch != epoch ||
 		c.lifecycleCtx != ctx || ctx.Err() != nil {
 		c.lifecycleMu.Unlock()
 		return
@@ -451,11 +497,15 @@ func (c *Controller) scheduleReadyReset(key TaskLanguageKey, generation uint64) 
 	recovery.readyTimerEpoch++
 	epoch := recovery.readyTimerEpoch
 	recovery.readyTimer = scheduler.AfterFunc(readyRecoveryReset, func() {
-		c.runReadyReset(key, generation, epoch)
+		c.runReadyReset(key, recovery, generation, epoch)
 	})
 }
 
-func (c *Controller) runReadyReset(key TaskLanguageKey, generation, epoch uint64) {
+func (c *Controller) runReadyReset(
+	key TaskLanguageKey,
+	expected *recoveryState,
+	generation, epoch uint64,
+) {
 	ctx, done, ok := c.beginLifecycleCallback()
 	if !ok {
 		return
@@ -464,7 +514,7 @@ func (c *Controller) runReadyReset(key TaskLanguageKey, generation, epoch uint64
 
 	c.lifecycleMu.Lock()
 	current := c.recoveries[key]
-	if current == nil || current.readyTimer == nil || current.readyTimerEpoch != epoch {
+	if current != expected || current.readyTimer == nil || current.readyTimerEpoch != epoch {
 		c.lifecycleMu.Unlock()
 		return
 	}
@@ -475,7 +525,7 @@ func (c *Controller) runReadyReset(key TaskLanguageKey, generation, epoch uint64
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
 	current = c.recoveries[key]
-	if err == nil && current != nil && current.readyTimerEpoch == epoch &&
+	if err == nil && current == expected && current.readyTimerEpoch == epoch &&
 		state.Generation == generation && state.Phase == PhaseReady {
 		current.attempts = 0
 	}

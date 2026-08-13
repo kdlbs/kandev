@@ -63,6 +63,11 @@ with that error until backend restart; it never exposes an empty ledger as ready
 behind a speculative retry. Once inventory succeeds, all possibly-live generations are reserved
 before later per-runtime inspection errors can occur.
 
+Startup watch registration uses the durable rows read after reconciliation, never the stale rows
+that preceded convergence. A watch failure can replace state only while the current durable phase
+still represents a server-bearing generation; `off`, `queued`, `waiting_for_task`, and
+`unsupported` remain authoritative without a task-host watch.
+
 Browsers attach through a task-and-language route after task-owner authorization. An attachment
 receives the initialized server capabilities and then exchanges feature requests and document
 notifications through the task-host multiplexer. Request IDs are namespaced by attachment and
@@ -129,6 +134,12 @@ performing store, task-host, or command-lane work and revalidates its timer epoc
 the lifecycle while callback admission is locked, stops pending timers, and joins callbacks that
 already fired. Recovery commands keep the lifecycle context instead of detaching from it, so no
 timer callback can outlive a successful controller shutdown.
+
+All concurrent and retried shutdown callers wait on one lifecycle-generation completion signal.
+A caller timeout does not make later shutdown calls report success while owned work is still
+running. Recovery, ready-reset, and discovery timers also capture their immutable registration
+object in addition to an epoch, so a delayed callback from a deleted registration cannot consume a
+replacement registration whose local epoch restarted at the same number.
 
 Task stop, archive, and delete cancel recovery and stop every language namespace owned by that
 task. Cleanup of a borrowing task cannot terminate another task's host or language slots. When a

@@ -143,6 +143,7 @@ type Controller struct {
 	lifecycleMu      sync.Mutex
 	lifecycleCtx     context.Context
 	lifecycleCancel  context.CancelFunc
+	lifecycleDone    chan struct{}
 	startupReady     chan struct{}
 	startupComplete  bool
 	startupErr       error

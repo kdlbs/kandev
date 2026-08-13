@@ -34,6 +34,10 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   an empty capacity ledger as ready after durable inventory could not be read.
 - Recovery and ready-budget-reset callbacks acquire lifecycle ownership before I/O, validate their
   timer generation, retain lifecycle context through command execution, and cannot outlive Close.
+- Startup registers watches from post-reconcile rows, and watch loss cannot overwrite a current
+  non-server phase.
+- Concurrent or retried Close calls share one lifecycle completion signal; recovery, ready-reset,
+  and discovery callbacks validate immutable registration identity across map deletion/recreation.
 
 ## TDD Evidence
 
@@ -65,6 +69,10 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   readiness gate retained the authoritative error.
 - Fired recovery and ready-budget-reset timers outlived Controller Close before callback admission,
   epoch validation, and owned recovery commands were joined to the controller lifecycle.
+- Startup used pre-reconcile rows to create watches after rows had converged to non-server phases;
+  the resulting watch loss could replace `waiting_for_task` with an error and schedule recovery.
+- A timed-out Close made later Close calls return success before owned callbacks joined, and deleted
+  timer entries could reuse epoch one so delayed callbacks consumed their replacements.
 
 ## Verification
 
@@ -97,6 +105,9 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
   real pinned root handle.
 - The sticky startup-inventory failure and fired recovery/reset callback ownership regressions
   passed 20 race-enabled repetitions; the complete `internal/lsp` race package passed once.
+- Post-reconcile watch selection, non-server watch-loss preservation, shared Close joining, and
+  recovery/ready/discovery registration-identity regressions each failed before their production
+  repairs, then passed 20 race-enabled repetitions together.
 - `go test -count=1 ./...` passed across the complete backend after the callback-ownership repair;
   changed-code `golangci-lint` reported zero issues and the architecture linter passed.
 - Commit hooks passed architecture, formatting, changed-code Go/Web lint, i18n, public-copy, and
