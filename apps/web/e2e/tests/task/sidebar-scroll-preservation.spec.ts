@@ -24,22 +24,32 @@ test.describe("sidebar scrolling", () => {
     const appSidebar = testPage.getByTestId("app-sidebar");
     const taskSidebar = testPage.getByTestId("task-sidebar");
     const scrollRoot = taskSidebar.locator("[data-slot='scroll-area']");
-    await expect(taskSidebar.getByText("No tasks yet.")).toBeVisible();
+    const emptyMessage = taskSidebar.locator("[data-slot='task-switcher-empty-state']");
+    await expect(emptyMessage).toHaveText("No tasks yet.");
 
     await expect
       .poll(() => scrollRoot.evaluate((element) => getComputedStyle(element).backgroundColor))
       .toBe("rgba(0, 0, 0, 0)");
 
-    const [navigationBox, taskSidebarBox] = await Promise.all([
-      appSidebar.locator("nav").boundingBox(),
-      taskSidebar.boundingBox(),
-    ]);
+    const [navigationBox, taskSidebarBox, tasksTitleBox, emptyMessageBox, emptyPaddingLeft] =
+      await Promise.all([
+        appSidebar.locator("nav").boundingBox(),
+        taskSidebar.boundingBox(),
+        tasksToggle.locator("span").first().boundingBox(),
+        emptyMessage.boundingBox(),
+        emptyMessage.evaluate((element) => parseFloat(getComputedStyle(element).paddingLeft)),
+      ]);
     expect(navigationBox).not.toBeNull();
     expect(taskSidebarBox).not.toBeNull();
+    expect(tasksTitleBox).not.toBeNull();
+    expect(emptyMessageBox).not.toBeNull();
     expect(taskSidebarBox!.x).toBeCloseTo(navigationBox!.x, 0);
     expect(taskSidebarBox!.x + taskSidebarBox!.width).toBeCloseTo(
       navigationBox!.x + navigationBox!.width,
       0,
+    );
+    expect(Math.abs(emptyMessageBox!.x + emptyPaddingLeft - tasksTitleBox!.x)).toBeLessThanOrEqual(
+      0.5,
     );
   });
 
