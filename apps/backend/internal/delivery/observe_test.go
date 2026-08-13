@@ -70,6 +70,37 @@ func TestCandidates_ExcludesMissingRepositoryAndTask(t *testing.T) {
 	}
 }
 
+// TestCandidates_ExcludesMissingTask covers spec "Candidate pairs", "Why
+// condition 3 exists": a github_task_prs row whose task_id matches no tasks
+// row — a hard-deleted task the GitHub task-deleted subscriber did not
+// prune the provider row for — is excluded from candidacy and counted via
+// MissingTask, never attempted, exactly parallel to the MissingRepository
+// case above but reachable only through condition 3 (task_sessions has no
+// FK to tasks either, but the spec's own example is a provider row).
+func TestCandidates_ExcludesMissingTask(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-real", "ws-1")
+	seedGitHubStore(t, db)
+	now := time.Now().UTC()
+	seedGitHubPR(t, db, "pr-orphan", "task-ghost", "repo-real", "acme", "widgets",
+		1, "https://gh/1", "main", &now, nil)
+
+	ctx := context.Background()
+	result, err := repo.Candidates(ctx)
+	if err != nil {
+		t.Fatalf("Candidates: %v", err)
+	}
+	for _, p := range result.Pairs {
+		if p.TaskID == "task-ghost" {
+			t.Fatalf("orphaned-task pair must not be a candidate, got %+v", p)
+		}
+	}
+	if result.MissingTask != 1 {
+		t.Fatalf("MissingTask = %d, want 1", result.MissingTask)
+	}
+}
+
 func TestCandidates_TaskWithNoRepositoryProducesNoRow(t *testing.T) {
 	repo, db := newTestRepo(t)
 	seedWorkspace(t, db, "ws-1")

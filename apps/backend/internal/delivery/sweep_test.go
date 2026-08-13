@@ -3,6 +3,7 @@ package delivery_test
 import (
 	"context"
 	"database/sql"
+	"expvar"
 	"testing"
 	"time"
 
@@ -10,6 +11,24 @@ import (
 
 	"github.com/kandev/kandev/internal/delivery"
 )
+
+// readExpvarInt reads a package-level expvar.Int published by
+// internal/delivery/metrics.go, following the same convention as
+// internal/office/scheduler/metrics_vars_test.go. These are process-global
+// and never reset between tests, so callers must compare a before/after
+// delta rather than an absolute value.
+func readExpvarInt(t *testing.T, name string) int64 {
+	t.Helper()
+	v := expvar.Get(name)
+	if v == nil {
+		t.Fatalf("expvar %q not published", name)
+	}
+	iv, ok := v.(*expvar.Int)
+	if !ok {
+		t.Fatalf("expvar %q is not an *expvar.Int", name)
+	}
+	return iv.Value()
+}
 
 func TestSelectDuePairs_NoLedgerRowIsUnconditionallyDue(t *testing.T) {
 	repo, db := newTestRepo(t)
@@ -260,6 +279,123 @@ func TestRunPass_EndToEnd(t *testing.T) {
 	after := readLedgerRow(t, db, "task-1", "repo-1")
 	if after.EvaluationSeq != 1 {
 		t.Fatalf("evaluation_seq after second pass = %d, want still 1 (not re-selected, nothing moved and reached_default_at unset only matters after 24h)", after.EvaluationSeq)
+	}
+}
+
+// TestRunPass_OrphanedProviderRowMissingTaskExcludedFromUpsert covers spec
+// "Candidate pairs" / "Scenarios": a github_task_prs row whose task_id
+// matches no tasks row is excluded from candidacy before ever reaching the
+// upsert — no ledger row is written for it, on this pass or a second one
+// with nothing changed, which is what keeps
+// delivery_ledger_write_errors_total at its documented healthy resting
+// value of 0 rather than climbing forever on a foreign-key failure.
+func TestRunPass_OrphanedProviderRowMissingTaskExcludedFromUpsert(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedGitHubStore(t, db)
+	now := time.Now().UTC()
+	seedGitHubPR(t, db, "pr-orphan", "task-ghost", "repo-1", "acme", "widgets",
+		1, "https://gh/1", "main", &now, nil)
+
+	sweep := delivery.NewSweep(repo, nil, nil)
+	sweep.RunPass(context.Background())
+
+	if countLedgerRows(t, db, "task-ghost", "repo-1") != 0 {
+		t.Fatal("no ledger row must be written for a pair excluded by a missing task row")
+	}
+
+	// A second pass with nothing changed must not attempt the upsert either.
+	sweep.RunPass(context.Background())
+	if countLedgerRows(t, db, "task-ghost", "repo-1") != 0 {
+		t.Fatal("second pass must not write a ledger row for the still-orphaned pair")
+	}
+}
+
+// countLedgerRows returns the number of task_delivery_ledger rows for a
+// pair — used where the pair is expected to have none, since readLedgerRow
+// fails the test on no rows.
+func countLedgerRows(t *testing.T, db *sqlx.DB, taskID, repositoryID string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRowxContext(context.Background(), db.Rebind(`
+		SELECT COUNT(*) FROM task_delivery_ledger WHERE task_id = ? AND repository_id = ?
+	`), taskID, repositoryID).Scan(&n); err != nil {
+		t.Fatalf("count ledger rows: %v", err)
+	}
+	return n
+}
+
+// TestRunPass_MissingLedgerTableCountsWriteErrorsAndReachesEveryCandidate
+// covers spec "Scenarios § Idempotency, ordering and concurrency": with the
+// ledger table itself missing, every candidate is treated as due (the
+// SelectDuePairs fallback, already covered by
+// TestSelectDuePairs_MissingLedgerTableFallsBackToEveryNonFrozenCandidate),
+// and this test covers what happens next — each due pair's Upsert then
+// fails against the missing table, write_errors_total increments once per
+// pair (never evaluation_errors_total, since every input read before the
+// upsert still succeeds), and the pass reaches its LAST candidate rather
+// than aborting after the first failure.
+func TestRunPass_MissingLedgerTableCountsWriteErrorsAndReachesEveryCandidate(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-1", "ws-1")
+	seedTask(t, db, "task-2", "ws-1")
+	seedTaskRepository(t, db, "tr-1", "task-1", "repo-1")
+	seedTaskRepository(t, db, "tr-2", "task-2", "repo-1")
+
+	if _, err := db.Exec(`DROP TABLE task_delivery_ledger`); err != nil {
+		t.Fatalf("drop ledger table: %v", err)
+	}
+
+	writeErrorsBefore := readExpvarInt(t, "delivery_ledger_write_errors_total")
+	evalErrorsBefore := readExpvarInt(t, "delivery_ledger_evaluation_errors_total")
+
+	sweep := delivery.NewSweep(repo, nil, nil)
+	sweep.RunPass(context.Background())
+
+	writeErrorsDelta := readExpvarInt(t, "delivery_ledger_write_errors_total") - writeErrorsBefore
+	evalErrorsDelta := readExpvarInt(t, "delivery_ledger_evaluation_errors_total") - evalErrorsBefore
+
+	if writeErrorsDelta != 2 {
+		t.Fatalf("write_errors_total delta = %d, want 2 (both candidates reached and failed their upsert)", writeErrorsDelta)
+	}
+	if evalErrorsDelta != 0 {
+		t.Fatalf("evaluation_errors_total delta = %d, want 0 (input reads succeed; only the upsert fails)", evalErrorsDelta)
+	}
+}
+
+// TestRunPass_SnapshotQueryErrorAbandonsEvaluationNoColumnWritten covers
+// spec "Scenarios § Idempotency, ordering and concurrency": an input-query
+// failure abandons the evaluation entirely — no column is written,
+// including last_evaluated_at — evaluation_errors_total increments,
+// evaluations_total does not, and the pair is still due on the next pass.
+// SnapshotsForPair is the representative case: unlike ProvidersForPair, it
+// applies no missing-table tolerance, so dropping its table is a clean,
+// deterministic way to force the real (non-tolerated) query error
+// evaluatePair's four early-return branches exist to handle.
+func TestRunPass_SnapshotQueryErrorAbandonsEvaluationNoColumnWritten(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-1", "ws-1")
+	seedTaskRepository(t, db, "tr-1", "task-1", "repo-1")
+
+	if _, err := db.Exec(`DROP TABLE task_session_git_snapshots`); err != nil {
+		t.Fatalf("drop task_session_git_snapshots: %v", err)
+	}
+
+	evalErrorsBefore := readExpvarInt(t, "delivery_ledger_evaluation_errors_total")
+
+	sweep := delivery.NewSweep(repo, nil, nil)
+	sweep.RunPass(context.Background())
+
+	if delta := readExpvarInt(t, "delivery_ledger_evaluation_errors_total") - evalErrorsBefore; delta != 1 {
+		t.Fatalf("evaluation_errors_total delta = %d, want 1", delta)
+	}
+	if countLedgerRows(t, db, "task-1", "repo-1") != 0 {
+		t.Fatal("no ledger row must be written when the snapshot query fails")
 	}
 }
 
