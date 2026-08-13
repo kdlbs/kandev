@@ -152,6 +152,40 @@ Dispatch the workflow with `fail_on_flaky=true` to set
 `failOnFlakyTests: true` for a diagnostic run. Normal PR runs retain the
 existing two-retry policy while the summary makes retry groups visible.
 
+### Flake rate and trend
+
+CI retries hide flakes: with `retries: 2` and `failOnFlakyTests: false`, a test
+that fails and then passes never fails the build. The **E2E flake rate** section
+of the `e2e-report` job summary makes that number visible without downloading
+anything. It reports, for the run:
+
+- the flake count, the number of executed tests, and the rate per 1000;
+- the baseline (median of the last 10 recorded runs) and the change against it;
+- every flaky test by name, with its attempt statuses and how many of the last
+  10 recorded runs it flaked in;
+- the trend table and the repeat offenders across that window.
+
+A "flaky" test is Playwright's own verdict, not "passed after a retry":
+`computeOutcome` in `e2e/scripts/retry-summary.ts` mirrors Playwright's
+`computeTestCaseOutcome`, so an interrupted-then-passed test and a `test.fail()`
+test are classified the way Playwright classifies them. The report cross-checks
+its count against `stats.flaky` in the merged Playwright JSON report for the
+same run and prints **MISMATCH** plus a workflow warning if the two disagree.
+
+The trend is carried between runs as the `e2e-flake-history` artifact (90 days,
+capped at 50 entries, newest first). `e2e-report` looks for the newest completed
+`main` run that published one, uses it as the baseline, appends this run's entry,
+and re-uploads it. There is no external service; a missing or unreadable baseline
+just makes the run seed a fresh trend.
+
+To render the report locally against a blob report directory:
+
+```bash
+cd apps/web
+pnpm exec tsx e2e/scripts/retry-summary.ts --input <blob-dir> --output /tmp/retry-summary.json
+pnpm exec tsx e2e/scripts/flake-report.ts --summary /tmp/retry-summary.json
+```
+
 ### `pnpm e2e:run` — the managed runner (build + run + teardown)
 
 `e2e/scripts/run-e2e.sh` (aliased as `pnpm e2e:run`) handles the build, the run, and cleanup so you don't have to assemble the steps by hand. It **auto-selects docker vs host**, runs **N shards concurrently**, enforces strict WS accounting by default (`KANDEV_E2E_WS_ASSERT=1`, matching CI), and never leaves root-owned artifacts behind.
@@ -224,7 +258,8 @@ The SSH executor specifically has no mock controller. Tests use a real Docker-ho
 - `e2e` — a 14-entry matrix executing the generated normal manifests.
 - `e2e-containers` — a 6-entry matrix executing the generated container
   manifests and requiring Docker.
-- `e2e-report` — merges blob reports and publishes timing/retry artifacts.
+- `e2e-report` — merges blob reports, publishes timing/retry artifacts, and
+  writes the flake rate and its trend to the job summary.
 
 The build job uploads `e2e-shard-manifests` for the current run. Both cohorts
 upload blob reports that `e2e-report` merges into a single HTML artifact.

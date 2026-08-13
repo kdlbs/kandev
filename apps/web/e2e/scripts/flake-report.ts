@@ -206,7 +206,7 @@ function headlineLines(entry: FlakeHistoryEntry, baseline: Baseline, check: Cros
     const deltaRate =
       Math.round((entry.ratePerThousand - baseline.medianRatePerThousand) * 100) / 100;
     lines.push(
-      `- Baseline (median of last ${baseline.runs} recorded runs): ${baseline.medianFlaky} flaky, ${baseline.medianRatePerThousand} per 1000`,
+      `- Baseline (median of last ${baseline.runs} recorded ${baseline.runs === 1 ? "run" : "runs"}): ${baseline.medianFlaky} flaky, ${baseline.medianRatePerThousand} per 1000`,
       `- Change vs baseline: ${signed(deltaFlaky)} flaky, ${signed(deltaRate)} per 1000`,
     );
   } else {

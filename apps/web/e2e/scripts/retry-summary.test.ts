@@ -1,7 +1,15 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { computeOutcome, summarizeObservations } from "./retry-summary";
-import type { ShardMetadata } from "./e2e-timings";
+import { computeOutcome, summarizeObservations, type TestOutcome } from "./retry-summary";
+import { parseBlobReports, type ShardMetadata } from "./e2e-timings";
 import type { TimingObservation } from "./e2e-timings";
+
+const parityFixtureDir = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "__fixtures__/playwright-parity",
+);
 
 function observation(overrides: Partial<TimingObservation>): TimingObservation {
   return {
@@ -149,6 +157,57 @@ describe("retry summary", () => {
 
     expect(summary.flake.executed).toBe(9);
     expect(summary.flake.ratePerThousand).toBe(111.11);
+  });
+
+  it("ignores a blob report that was parsed twice instead of inventing retries", () => {
+    const attempt = observation({ key: "chromium::tests/a.spec.ts::a", status: "passed" });
+
+    const summary = summarizeObservations([attempt, { ...attempt }], "2026-08-10T10:02:00.000Z");
+
+    expect(summary.tests[0]?.attempts).toBe(1);
+    expect(summary.tests[0]?.outcome).toBe("expected");
+    expect(summary.flake).toMatchObject({ flaky: 0, executed: 1 });
+  });
+
+  // The whole point of the flake rate is that it is Playwright's number. This
+  // parses a real blob report and asserts our totals against the `stats` block
+  // Playwright itself produced from that same blob; see the fixture's README.
+  it("reproduces Playwright's own per-outcome totals for a recorded run", () => {
+    const summary = summarizeObservations(
+      parseBlobReports(parityFixtureDir),
+      "2026-08-13T10:00:00.000Z",
+    );
+    const tally = (outcome: TestOutcome) =>
+      summary.tests.filter((test) => test.outcome === outcome).length;
+
+    const playwrightStats = JSON.parse(
+      fs.readFileSync(path.join(parityFixtureDir, "playwright-stats.json"), "utf8"),
+    ) as Record<string, number>;
+
+    expect({
+      expected: tally("expected"),
+      unexpected: tally("unexpected"),
+      flaky: tally("flaky"),
+      skipped: tally("skipped"),
+    }).toEqual(playwrightStats);
+    expect(summary.flake.flaky).toBe(playwrightStats.flaky);
+    expect(summary.flake.flakyTests).toEqual([
+      "chromium::tests/outcomes.spec.ts::flakes once then passes",
+      "chromium::tests/outcomes.spec.ts::flakes twice then passes",
+    ]);
+
+    // Totals alone are not enough: misreading `expectedStatus` swaps the two
+    // `test.fail()` tests between expected and unexpected and leaves every
+    // total identical, so pin each test's verdict as well.
+    expect(Object.fromEntries(summary.tests.map((test) => [test.title, test.outcome]))).toEqual({
+      "always passes": "expected",
+      "flakes once then passes": "flaky",
+      "flakes twice then passes": "flaky",
+      "always fails": "unexpected",
+      "is skipped": "skipped",
+      "is expected to fail and does": "expected",
+      "is expected to fail but passes": "unexpected",
+    });
   });
 
   it("compares planned and actual shard durations and keeps plan health counters", () => {

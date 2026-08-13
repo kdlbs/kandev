@@ -183,16 +183,20 @@ export function summarizeObservations(
   generatedAt = new Date().toISOString(),
   options: RetrySummaryOptions = {},
 ): RetrySummary {
-  const grouped = new Map<string, TimingObservation[]>();
+  // Keyed by retry index so a blob report that is present twice (`merge-reports`
+  // unpacks `report.jsonl` next to the `report.zip` it read) cannot inflate the
+  // attempt count or turn a clean pass into a phantom retry. A test only ever
+  // produces one result per retry index.
+  const grouped = new Map<string, Map<number, TimingObservation>>();
   for (const observation of observations) {
-    const existing = grouped.get(observation.key) ?? [];
-    existing.push(observation);
+    const existing = grouped.get(observation.key) ?? new Map<number, TimingObservation>();
+    existing.set(observation.retry, observation);
     grouped.set(observation.key, existing);
   }
 
   const tests = [...grouped.values()]
     .map((attempts) => {
-      const ordered = [...attempts].sort((left, right) => left.retry - right.retry);
+      const ordered = [...attempts.values()].sort((left, right) => left.retry - right.retry);
       const finalAttempt = ordered.at(-1)!;
       const errors = ordered.flatMap((attempt) => attempt.errors);
       const statuses = ordered.map((attempt) => attempt.status);

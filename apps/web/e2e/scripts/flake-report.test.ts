@@ -216,6 +216,13 @@ describe("flake report markdown", () => {
 
     expect(report).toContain("- Flaky tests this run: **5** of 2000 executed (**2.5** per 1000)");
     expect(report).toContain("- Baseline (median of last 3 recorded runs): 2 flaky, 1 per 1000");
+    expect(
+      renderFlakeReport(summary(), current, history.slice(0, 1), {
+        status: "match",
+        ours: 5,
+        theirs: 5,
+      }),
+    ).toContain("- Baseline (median of last 1 recorded run): 3 flaky, 1.5 per 1000");
     expect(report).toContain("- Change vs baseline: +3 flaky, +1.5 per 1000");
     expect(report).toContain(
       "- Playwright cross-check: **match** (5 flaky in both retry-summary and the merged report)",
