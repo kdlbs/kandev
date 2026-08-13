@@ -65,6 +65,7 @@ function makeAutomation(overrides: Partial<TaskMRAutomationOptions> = {}): TaskM
     prompt_on_closed: false,
     review_reviewer_username: "",
     updated_at: "",
+    mr_options: [],
     mr_states: [],
     ...overrides,
   };
