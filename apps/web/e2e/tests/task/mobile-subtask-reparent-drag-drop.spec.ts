@@ -23,10 +23,10 @@ async function touchDragRowToNestZone(
     type: "touchStart",
     touchPoints: [{ x: startX, y: startY }],
   });
-  // Time-based on purpose: dnd-kit's TouchSensor arms a 250ms activation
-  // timer on touchStart and only starts the drag if the touch is still held
-  // when it fires. Nothing renders while that timer runs, so it has to be
-  // waited out rather than observed.
+  // deliberate-sleep(library-timer): dnd-kit's TouchSensor arms a 250ms
+  // activation timer on touchStart and only starts the drag if the touch is
+  // still held when it fires. Nothing renders while that timer runs, so it has
+  // to be waited out rather than observed.
   await page.waitForTimeout(350);
   await cdp.send("Input.dispatchTouchEvent", {
     type: "touchMove",

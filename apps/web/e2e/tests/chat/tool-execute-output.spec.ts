@@ -182,9 +182,9 @@ test.describe("shell command output", () => {
     await expect.poll(() => requestCount, { timeout: 4_000 }).toBe(2);
     await expect(chat.getByText("final running transcript")).toBeVisible();
     await expect(chat.getByText("Exit code 0")).toBeVisible();
-    // Time-based on purpose: this asserts that *no further* fetches occur
-    // after the stream completes. A negative like this has no event to wait
-    // on, so it needs a real dwell past the polling interval to be meaningful.
+    // deliberate-sleep(negative-assertion): asserts that *no further* fetches
+    // occur after the stream completes. A negative like this has no event to
+    // wait on, so it needs a real dwell past the polling interval.
     await testPage.waitForTimeout(1_250);
     expect(requestCount).toBe(2);
   });

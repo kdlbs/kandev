@@ -110,10 +110,11 @@ async function touchDragTo(
     ) ?? "";
 
   await source.dispatchEvent("pointerdown", down);
-  // Time-based on purpose: PointerSensor arms on pointerdown and only activates
-  // once a later move clears its distance constraint. Nothing is rendered in
-  // between, so there is no DOM signal to wait for — just let React commit the
-  // pointerdown before the activating move lands in the same task.
+  // deliberate-sleep(library-timer): dnd-kit's PointerSensor arms on
+  // pointerdown and only activates once a later move clears its distance
+  // constraint. Nothing is rendered in between, so there is no DOM signal to
+  // wait for; this just lets React commit the pointerdown before the
+  // activating move lands in the same task.
   await page.waitForTimeout(100);
   await page.dispatchEvent("body", "pointermove", { ...down, clientX: end.x, clientY: end.y });
 

@@ -48,9 +48,9 @@ async function expectStaysUnstarted(
   const deadline = Date.now() + 6_000;
   while (Date.now() < deadline) {
     expect(await sessionCount(apiClient, taskId), `${label} must not be started`).toBe(0);
-    // Polling interval for the dwell described above, not a settle: the
-    // assertion is that nothing starts during the window, so the loop has to
-    // keep sampling across it rather than wait for any single event.
+    // deliberate-sleep(poll-interval): interval for the dwell described above,
+    // not a settle. The assertion is that nothing starts during the window, so
+    // the loop has to keep sampling across it rather than await one event.
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 }

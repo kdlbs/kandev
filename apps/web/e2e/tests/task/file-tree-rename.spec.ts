@@ -151,9 +151,9 @@ test.describe("File tree inline rename", () => {
     const input = await startRenameViaContextMenu(testPage, node);
     await input.press("ControlOrMeta+A");
     await input.fill("blur-final.ts");
-    // Time-based on purpose: the product itself gates blur-commit on a ~400ms
-    // timer after isRenaming flips. That timer is the thing being waited for
-    // and it publishes nothing to observe, so the wait has to outlast it.
+    // deliberate-sleep(product-timer): the product gates blur-commit on a
+    // ~400ms timer after isRenaming flips. That timer is the thing being waited
+    // for and it publishes nothing to observe, so the wait has to outlast it.
     await testPage.waitForTimeout(500);
     // Click another file to blur the input. The other node also belongs to
     // the tree, so we don't lose tree-container focus state.

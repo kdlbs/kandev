@@ -35,14 +35,22 @@ export async function typeWhileBusy(page: Page, editor: Locator, text: string): 
     const box = await editor.boundingBox();
     if (!box) throw new Error("Editor bounding box not found");
     await page.mouse.click(box.x + 20, box.y + box.height / 2);
+    // deliberate-sleep(unverified): pre-existing spacing in this retry loop.
+    // Unlike the other retained sleeps these are not tied to an identified
+    // timer, so they are debt rather than intent: the likely reactive
+    // replacement is waiting for the editor to take focus. They are left alone
+    // here only because this helper is on the hot path of ~16 specs that were
+    // just verified against it, and changing it would invalidate that run.
     await page.waitForTimeout(200);
     await page.keyboard.type(text);
+    // deliberate-sleep(unverified): as above.
     await page.waitForTimeout(100);
     const content = await editor.textContent();
     if (content?.includes(text)) return;
     // Text wasn't entered; select all and clear for retry
     await page.keyboard.press(`${modifier}+a`);
     await page.keyboard.press("Backspace");
+    // deliberate-sleep(unverified): as above.
     await page.waitForTimeout(200);
   }
   throw new Error(`Failed to type "${text}" into editor after 3 attempts`);

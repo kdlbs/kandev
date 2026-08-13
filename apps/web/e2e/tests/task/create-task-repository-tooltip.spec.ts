@@ -45,10 +45,10 @@ test.describe("Create task repository tooltip", () => {
 
     const tooltip = testPage.getByRole("tooltip").filter({ hasText: longRepoDir });
     expect(await trigger.evaluate((element) => element.matches(":hover"))).toBe(true);
-    // Time-based on purpose: this asserts a negative (selecting from the menu
-    // must not leave a tooltip open even though the trigger is still hovered).
-    // There is no event for a tooltip that must never open, so the only way to
-    // give a regression room to appear is to wait out Radix's open delay.
+    // deliberate-sleep(negative-assertion): selecting from the menu must not
+    // leave a tooltip open even though the trigger is still hovered. There is
+    // no event for a tooltip that must never open, so the only way to give a
+    // regression room to appear is to wait out Radix's open delay.
     await testPage.waitForTimeout(300);
     await expect(tooltip).toBeHidden();
 
