@@ -209,7 +209,19 @@ jobs:
 
           node scripts/run-i18n-ratchet.mjs --base "${BASE_SHA}"
 
+      # Deliberately run under the variable that broke the suite, so a
+      # regression fails here instead of only in a container. React exports
+      # `act()` from its development build alone, `vitest.config.ts` pins
+      # `NODE_ENV=test` to force that build, and this image sets no NODE_ENV of
+      # its own — so without this line CI would pass with the pin deleted while
+      # every `render()` throws `TypeError: React.act is not a function` for
+      # anyone whose shell inherits the runtime image's `NODE_ENV=production`
+      # (`Dockerfile`). That gap is exactly how the breakage went unnoticed.
+      # Scoped to this step: `pnpm install` above must keep seeing devDependencies
+      # through its own resolution, not through `apps/.npmrc`'s `production=false`.
       - name: Run tests
+        env:
+          NODE_ENV: production
         run: pnpm --filter @kandev/web test
 
       - name: Build

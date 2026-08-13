@@ -155,11 +155,13 @@ describe("mergeCommits", () => {
     const local = [makeLocal("aaa1111", "local pushed"), makeLocal("bbb2222", "local only")];
     const pr = [makePRFull("aaa1111fff", "local pushed"), makePRFull("ddd4444", "external")];
     const result = mergeCommits(local, pr);
-    // unpushed first, then pushed (local matched + PR-only)
+    // Unpushed first, then the provider timeline newest-first. The shared
+    // local row stays in its provider position and the provider-only row is
+    // explicitly marked as current PR history.
     expect(result).toHaveLength(3);
     expect(result[0]).toMatchObject({ commit_sha: "bbb2222", pushed: false });
-    expect(result[1]).toMatchObject({ commit_sha: "aaa1111", pushed: true });
-    expect(result[2]).toMatchObject({ commit_sha: "ddd4444", pushed: true });
+    expect(result[1]).toMatchObject({ commit_sha: "ddd4444", pushed: true });
+    expect(result[2]).toMatchObject({ commit_sha: "aaa1111", pushed: true });
   });
 
   it("propagates committed_at from local commits", () => {

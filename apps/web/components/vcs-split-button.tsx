@@ -12,7 +12,10 @@ import {
 import { Button } from "@kandev/ui/button";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useRemoteContributionRelation } from "@/hooks/domains/session/use-remote-contribution-relation";
-import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
+import {
+  remoteContributionActionPolicy,
+  remoteContributionActionReasonKey,
+} from "@/hooks/domains/session/remote-contribution-relation";
 import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import type { TaskPR } from "@/lib/types/github";
@@ -24,6 +27,7 @@ import {
   buildRemoteContributionResolutionTarget,
   useRemoteContributionResolution,
   useRemoteContributionResolutionConfirmation,
+  type RemoteContributionResolutionTarget,
 } from "@/components/task/use-remote-contribution-resolution";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import { VcsSplitButtonContent } from "./vcs-split-button-parts";
@@ -257,6 +261,59 @@ function useVcsContributionState(sessionId: string | null) {
   return { ...contribution, remoteActionPolicy, ...resolutionState };
 }
 
+type VcsResolutionActions = Pick<
+  ReturnType<typeof useVcsContributionState>["resolution"],
+  "requestReplace" | "requestUse"
+>;
+
+export function buildVcsSplitCallbacks({
+  openCommitDialog,
+  openPRDialog,
+  handlePull,
+  handlePush,
+  handleRebase,
+  handleMerge,
+  resolution,
+  resolutionTarget,
+  selectedPR,
+  openExternalLinkFn,
+}: {
+  openCommitDialog: (repo?: string) => void;
+  openPRDialog: (repo?: string) => void;
+  handlePull: (repo?: string) => void;
+  handlePush: (force?: boolean, repo?: string) => void;
+  handleRebase: (repo?: string) => void;
+  handleMerge: (repo?: string) => void;
+  resolution: VcsResolutionActions;
+  resolutionTarget: RemoteContributionResolutionTarget | null;
+  selectedPR: Pick<TaskPR, "pr_url"> | null;
+  openExternalLinkFn?: typeof openExternalLink;
+}) {
+  const openLink = openExternalLinkFn ?? openExternalLink;
+  return {
+    onCommit: (repo?: string) => openCommitDialog(repo),
+    onPR: (repo?: string) => openPRDialog(repo),
+    onPull: handlePull,
+    onPush: handlePush,
+    onRebase: handleRebase,
+    onMerge: handleMerge,
+    onReplaceContribution: (repo?: string) => {
+      if (resolutionTarget && resolutionTarget.repo === repo) {
+        resolution.requestReplace(resolutionTarget);
+      }
+    },
+    onUseContribution: (repo?: string) => {
+      if (resolutionTarget && resolutionTarget.repo === repo) {
+        resolution.requestUse(resolutionTarget);
+      }
+    },
+    onViewContribution: (repo?: string) => {
+      if (resolutionTarget?.repo !== repo || !selectedPR?.pr_url) return;
+      void openLink(selectedPR.pr_url).catch(() => undefined);
+    },
+  };
+}
+
 const VcsSplitButton = memo(function VcsSplitButton({
   sessionId,
   baseBranch,
@@ -287,6 +344,8 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const pullCount = git.pullBehind;
   const isDisabled = git.isLoading || !sessionId;
   const showContributionResolution = relation.action === "diverged_replace";
+  const pushDisabledReasonKey = remoteContributionActionReasonKey(relation, "push");
+  const pullDisabledReasonKey = remoteContributionActionReasonKey(relation, "pull");
   const primaryAction = determinePrimaryAction(
     uncommittedFileCount,
     aheadCount,
@@ -306,6 +365,17 @@ const VcsSplitButton = memo(function VcsSplitButton({
     handleRebase,
   });
   const showDivergencePills = primaryAction !== "commit";
+  const callbacks = buildVcsSplitCallbacks({
+    openCommitDialog,
+    openPRDialog,
+    handlePull,
+    handlePush,
+    handleRebase,
+    handleMerge,
+    resolution,
+    resolutionTarget,
+    selectedPR,
+  });
 
   return (
     <VcsSplitButtonContent
@@ -320,6 +390,8 @@ const VcsSplitButton = memo(function VcsSplitButton({
       aheadCount={aheadCount}
       pushDisabled={remoteActionPolicy.pushDisabled}
       pullDisabled={remoteActionPolicy.pullDisabled}
+      pushDisabledReason={pushDisabledReasonKey ? t(pushDisabledReasonKey) : undefined}
+      pullDisabledReason={pullDisabledReasonKey ? t(pullDisabledReasonKey) : undefined}
       showContributionResolution={showContributionResolution}
       replaceDisabled={remoteActionPolicy.replaceDisabled}
       useDisabled={remoteActionPolicy.useDisabled}
@@ -330,28 +402,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
       buttonSize={buttonSize}
       className={className}
       showDivergencePills={showDivergencePills}
-      callbacks={{
-        onCommit: (repo) => openCommitDialog(repo),
-        onPR: (repo) => openPRDialog(repo),
-        onPull: handlePull,
-        onPush: handlePush,
-        onRebase: handleRebase,
-        onMerge: handleMerge,
-        onReplaceContribution: (repo) => {
-          if (resolutionTarget && resolutionTarget.repo === repo) {
-            resolution.requestReplace(resolutionTarget);
-          }
-        },
-        onUseContribution: (repo) => {
-          if (resolutionTarget && resolutionTarget.repo === repo) {
-            resolution.requestUse(resolutionTarget);
-          }
-        },
-        onViewContribution: (repo) => {
-          if (resolutionTarget?.repo !== repo || !selectedPR?.pr_url) return;
-          void openExternalLink(selectedPR.pr_url).catch(() => undefined);
-        },
-      }}
+      callbacks={callbacks}
       resolution={resolution}
       resolutionTarget={resolutionTarget}
       confirmResolution={confirmResolution}

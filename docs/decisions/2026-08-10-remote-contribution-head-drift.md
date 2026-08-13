@@ -1,6 +1,7 @@
 # ADR-2026-08-10-remote-contribution-head-drift: Separate Current Contribution and Local Checkout Histories
 
-**Status:** accepted (remote-action policy superseded by 2026-08-12-local-first-contribution-replacement)
+**Status:** accepted (remote-action policy superseded by 2026-08-12, provider-error presentation
+amended by 2026-08-13)
 **Date:** 2026-08-10
 **Area:** backend, frontend, protocol, GitHub, GitLab
 
@@ -10,6 +11,10 @@ The local-first replacement policy in
 [ADR-2026-08-12](2026-08-12-local-first-contribution-replacement.md) supersedes this record's decision
 to block all remote actions after divergence. The history-classification and non-destructive detection
 rules remain active.
+
+[ADR-2026-08-13](2026-08-13-provider-history-changes-enrichment.md) amends the provider-error
+presentation. Provider loading remains part of the confidence model for remote actions. A failed
+provider read no longer creates a warning in the Changes panel.
 
 A remote-contribution task starts from the provider-reported head SHA and tracks the contributor's
 source branch. After the task starts, the contributor can advance or rewrite that branch. The local
