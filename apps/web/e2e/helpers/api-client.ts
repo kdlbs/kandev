@@ -1479,6 +1479,7 @@ export class ApiClient {
   async mockGitHubAssociateTaskPR(data: {
     task_id: string;
     workspace_id?: string;
+    repository_id?: string;
     owner: string;
     repo: string;
     pr_number: number;
