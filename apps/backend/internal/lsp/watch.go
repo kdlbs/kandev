@@ -32,13 +32,14 @@ func (realScheduler) AfterFunc(delay time.Duration, callback func()) ScheduledTi
 }
 
 type recoveryState struct {
-	attempts        int
-	timer           ScheduledTimer
-	timerEpoch      uint64
-	runningEpoch    uint64
-	retryPending    bool
-	readyTimer      ScheduledTimer
-	readyTimerEpoch uint64
+	attempts          int
+	timer             ScheduledTimer
+	timerEpoch        uint64
+	runningEpoch      uint64
+	retryPending      bool
+	readyTimer        ScheduledTimer
+	readyTimerEpoch   uint64
+	readyReadFailures int
 }
 
 type taskLanguageWatch struct {
@@ -276,6 +277,14 @@ func (c *Controller) recordWatchLossAndSchedule(
 				return nil, nil
 			}
 			snapshot, err := c.recordWatchLoss(workCtx, key, watchErr)
+			if err != nil {
+				// A transient durable-store failure must not remove the only
+				// task-host watch without leaving bounded reconciliation work.
+				if workCtx.Err() == nil && c.failedWatchCanPublish(key, watch) {
+					c.scheduleRecovery(key)
+				}
+				return snapshot, err
+			}
 			c.scheduleDesiredRecovery(key, snapshot)
 			return snapshot, err
 		},
@@ -424,6 +433,7 @@ func (c *Controller) scheduleRecoveryLocked(key TaskLanguageKey) {
 	// Invalidate that callback before scheduling from newer crash evidence so
 	// its stale Ready snapshot cannot erase the newly consumed retry budget.
 	recovery.readyTimerEpoch++
+	recovery.readyReadFailures = 0
 	if recovery.timer != nil || recovery.attempts >= len(recoveryBackoffs) {
 		return
 	}
@@ -591,6 +601,16 @@ func (c *Controller) scheduleReadyReset(key TaskLanguageKey, generation uint64) 
 		recovery = &recoveryState{}
 		c.recoveries[key] = recovery
 	}
+	recovery.readyReadFailures = 0
+	c.scheduleReadyResetTimerLocked(key, recovery, generation, readyRecoveryReset)
+}
+
+func (c *Controller) scheduleReadyResetTimerLocked(
+	key TaskLanguageKey,
+	recovery *recoveryState,
+	generation uint64,
+	delay time.Duration,
+) {
 	if recovery.timer != nil {
 		recovery.timer.Stop()
 		recovery.timer = nil
@@ -604,7 +624,7 @@ func (c *Controller) scheduleReadyReset(key TaskLanguageKey, generation uint64) 
 	}
 	recovery.readyTimerEpoch++
 	epoch := recovery.readyTimerEpoch
-	recovery.readyTimer = scheduler.AfterFunc(readyRecoveryReset, func() {
+	recovery.readyTimer = scheduler.AfterFunc(delay, func() {
 		c.runReadyReset(key, recovery, generation, epoch)
 	})
 }
@@ -641,6 +661,7 @@ func (c *Controller) runReadyReset(
 				workCtx, key.TaskID, key.Language,
 			)
 			if err != nil {
+				c.rearmReadyResetAfterReadFailure(key, expected, generation, epoch)
 				return nil, err
 			}
 			c.lifecycleMu.Lock()
@@ -649,9 +670,31 @@ func (c *Controller) runReadyReset(
 			if current == expected && current.readyTimerEpoch == epoch &&
 				state.Generation == generation && state.Phase == PhaseReady {
 				current.attempts = 0
+				current.readyReadFailures = 0
 			}
 			return nil, nil
 		},
+	)
+}
+
+func (c *Controller) rearmReadyResetAfterReadFailure(
+	key TaskLanguageKey,
+	expected *recoveryState,
+	generation, epoch uint64,
+) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	current := c.recoveries[key]
+	if current != expected || current.readyTimerEpoch != epoch || current.readyTimer != nil ||
+		c.lifecycleCtx == nil || c.lifecycleCtx.Err() != nil {
+		return
+	}
+	backoffIndex := min(current.readyReadFailures, len(recoveryBackoffs)-1)
+	if current.readyReadFailures < len(recoveryBackoffs) {
+		current.readyReadFailures++
+	}
+	c.scheduleReadyResetTimerLocked(
+		key, current, generation, recoveryBackoffs[backoffIndex],
 	)
 }
 

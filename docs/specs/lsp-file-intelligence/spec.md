@@ -346,13 +346,20 @@ language may be promoted until absence is proved.
 Startup registers watches from a post-reconciliation durable inventory. A watch failure may record
 `task_host_watch_lost` only if the current row still has a server-bearing phase and nonzero
 generation; a stale pre-reconcile row must not replace `off`, `queued`, `waiting_for_task`, or
-`unsupported` state.
+`unsupported` state. If that controller-local error cannot be persisted, the still-current failed
+watch leaves the normal bounded recovery sequence armed rather than disappearing without future
+work. A replacement watch's initial snapshot may replay the current task-host revision; that equal
+high-water snapshot is accepted only to heal `task_host_watch_lost`, while older observations and
+equal observations in every other state remain stale.
 
 An unexpected process or task-host stream failure keeps the desired policy and attempts automatic
 recovery after 1, 5, and 30 seconds. A generation that remains ready for five minutes resets that
 budget. After three failed recoveries, the phase stays `error` with explicit Restart available;
 there is no unbounded crash loop. An initialize request that remains alive is not a crash and is
-never auto-restarted or timed out.
+never auto-restarted or timed out. A transient durable-state read failure at the five-minute reset
+does not consume a recovery attempt or discard the reset; the read retries after 1, 5, then at most
+every 30 seconds until the current epoch can be confirmed or newer lifecycle evidence invalidates
+it.
 
 Recovery and ready-budget-reset timer callbacks acquire controller-lifecycle ownership before any
 store or runtime access and validate their current timer epoch. Controller shutdown cancels

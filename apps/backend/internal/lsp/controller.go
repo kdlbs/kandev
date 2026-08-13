@@ -707,7 +707,14 @@ func staleRuntimeObservation(state TaskLanguageState, runtime RuntimeSnapshot) b
 		return false
 	}
 	if runtime.Incarnation == state.RuntimeIncarnation {
-		return runtime.Revision <= state.RuntimeRevision
+		if runtime.Revision != state.RuntimeRevision {
+			return runtime.Revision < state.RuntimeRevision
+		}
+		// Watch loss is controller-local evidence, not a newer task-host
+		// observation. A replacement subscription starts by replaying the
+		// task host's current snapshot, so accept that equal high-water mark
+		// once to heal the controller-local error.
+		return state.Phase != PhaseError || state.ErrorCode != errorCodeTaskHostWatchLost
 	}
 	if runtime.RuntimeStartedAt.IsZero() || state.RuntimeStartedAt == nil {
 		return false

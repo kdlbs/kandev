@@ -450,6 +450,33 @@ func TestNewTaskHostIncarnationReplacesOldHighWaterAndRejectsLateWatch(t *testin
 	}
 }
 
+func TestWatchLossCanBeHealedByCurrentRuntimeRevision(t *testing.T) {
+	store := newMemoryLSPStore()
+	startedAt := time.Unix(100, 0).UTC()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseError, Generation: 1,
+		ErrorCode: errorCodeTaskHostWatchLost, ErrorMessage: "watch disconnected",
+		RuntimeIncarnation: "task-host-a", RuntimeRevision: 7, RuntimeStartedAt: &startedAt,
+		LastInitiator: InitiatorAutomatic,
+	})
+	controller := newTestController(
+		&fakeControllerTasks{}, store, &fakeLSPSettings{}, &fakeLSPRuntimes{},
+	)
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	if err := controller.observeRuntimeSnapshot(context.Background(), key, RuntimeSnapshot{
+		Language: "go", Generation: 1, Phase: PhaseReady,
+		Revision: 7, Incarnation: "task-host-a", RuntimeStartedAt: startedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	state := storedLSPState(t, store, key.TaskID, key.Language)
+	if state.Phase != PhaseReady || state.ErrorCode != "" || state.RuntimeRevision != 7 {
+		t.Fatalf("current runtime replay did not heal watch loss: %#v", state)
+	}
+}
+
 func TestProcessCleanupFailureRetainsCapacityWithoutRecovery(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{

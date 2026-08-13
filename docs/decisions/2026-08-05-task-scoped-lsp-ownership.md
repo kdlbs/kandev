@@ -91,7 +91,11 @@ reset callback before it schedules the next backoff, including a callback alread
 state, so stale Ready evidence cannot restore an obsolete retry budget. Ready-reset callbacks and
 watch-loss persistence plus scheduling are ordered on the same owned language command lane; the
 durable error transition and its selected backoff therefore form one ordering boundary relative to
-budget reset.
+budget reset. A failed watch whose durable error write fails still leaves bounded reconciliation
+work, while a transient ready-reset read failure re-arms that reset on a 1/5/30-second capped
+cadence without consuming a process-recovery attempt. Because watch loss is controller-local rather
+than newer task-host evidence, the replacement subscription may replay the equal current runtime
+revision once to heal `task_host_watch_lost`; the runtime high-water rule remains strict otherwise.
 
 Browsers attach through a task-and-language route after task-owner authorization. An attachment
 receives the initialized server capabilities and then exchanges feature requests and document

@@ -36,7 +36,9 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
   timer generation, retain lifecycle context through command execution, cannot outlive Close, and
   retain a recovery signal that arrives while an attempt is still completing. New crash evidence
   invalidates a fired ready-budget reset before it can commit stale Ready evidence; fired resets and
-  watch-loss persistence/scheduling share the owned per-language command lane.
+  watch-loss persistence/scheduling share the owned per-language command lane. Transient watch-loss
+  writes and ready-reset reads retain future work, and an equal current-runtime replay can heal only
+  the controller-local watch-loss error.
 - Startup registers watches from post-reconcile rows, and watch loss cannot overwrite a current
   non-server phase.
 - Concurrent or retried Close calls share one lifecycle completion signal; recovery, ready-reset,
@@ -105,6 +107,11 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
 - In the inverse split ordering, crash state could persist before the stale reset committed while
   recovery scheduling ran afterward, producing a one-second retry from an unreset budget; watch-loss
   state updates could bypass the language lane in the same way.
+- A transient failure persisting `task_host_watch_lost` removed the failed watch without scheduling
+  recovery; a transient read failure in a fired five-minute reset discarded the only reset timer.
+- A replacement task-host watch replayed the same runtime revision, which the normal high-water
+  filter rejected and therefore could leave the controller-local watch-loss error permanently
+  visible while the server was ready.
 
 ## Verification
 
@@ -166,6 +173,12 @@ Completed on 2026-08-13 after rebasing onto `origin/main`. Verification results:
 - The inverse error-persist/reset/schedule ordering and watch-loss lane regressions failed before
   ready-reset and watch-loss work joined the owned language lane, then passed 100 race-enabled
   repetitions with the broader recovery and controller-close suite.
+- Watch-loss persistence failure and ready-reset read failure regressions both failed without a
+  successor timer, then passed with bounded recovery, replacement-watch registration without a new
+  process generation, and capped 1/5/30-second reset-read retries. A queued crash cancels the
+  transient-read retry and retains its own selected recovery backoff. Equal-current-revision replay
+  also failed to heal `task_host_watch_lost`, then passed without weakening older-revision or
+  unrelated equal-revision rejection.
 - The dependent backend race run passed LSP (including 20 complete-package repetitions), agentctl
   LSP, gateway, lifecycle, task service, and SQLite. An earlier unrelated lifecycle run hit the
   existing SSH fake-server session-open timeout once; that isolated test immediately passed three
