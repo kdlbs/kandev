@@ -25,6 +25,9 @@ import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dia
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { cn } from "@/lib/utils";
 
+// Keep stable empty fallbacks here. Creating a fresh array/object in a store
+// selector makes Object.is report a change on every read and can cause a
+// render loop, which previously blanked the dependency chip.
 const NO_TASKS: KanbanState["tasks"] = [];
 const NO_SNAPSHOTS: Record<string, { tasks?: KanbanState["tasks"] }> = {};
 
@@ -39,6 +42,8 @@ function useBoardTasks(): KanbanState["tasks"] {
   const boardTasks = useAppStore((state) => state.kanban?.tasks ?? NO_TASKS);
   const snapshots = useAppStore((state) => state.kanbanMulti?.snapshots ?? NO_SNAPSHOTS);
 
+  // The home route hydrates its swimlanes into kanbanMulti.snapshots and can
+  // leave kanban.tasks empty, so both slices must supply picker candidates.
   return useMemo(() => {
     const byId = new Map<string, KanbanState["tasks"][number]>();
     for (const task of boardTasks) byId.set(task.id, task);
@@ -148,6 +153,7 @@ function DependencyPickerContent({
           <CommandGroup>
             <CommandItem
               value="__no_dependency__"
+              forceMount
               onSelect={() => {
                 onChange([]);
                 setOpen(false);

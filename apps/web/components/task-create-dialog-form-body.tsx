@@ -355,10 +355,6 @@ function renderWorkflowSection({
   return null;
 }
 
-export const WorkflowSection = memo(function WorkflowSection(props: WorkflowSectionProps) {
-  return renderWorkflowSection(props);
-});
-
 type WorkflowDependencySectionProps = WorkflowSectionProps & {
   blockedBy: string[];
   onBlockedByChange: (next: string[]) => void;

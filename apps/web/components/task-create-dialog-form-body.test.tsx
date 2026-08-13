@@ -5,7 +5,6 @@ import {
   CreateEditSelectors,
   DialogPromptSection,
   WorkflowDependencySection,
-  WorkflowSection,
 } from "./task-create-dialog-form-body";
 import type { DialogFormState, TaskFormInputsHandle } from "./task-create-dialog-types";
 
@@ -45,7 +44,7 @@ const workflow = { id: "wf-1", name: "Development" };
 
 function renderWorkflowSection(effectiveWorkflowId: string | null) {
   return render(
-    <WorkflowSection
+    <WorkflowDependencySection
       isCreateMode={true}
       isTaskStarted={false}
       workflows={[workflow]}
@@ -53,11 +52,13 @@ function renderWorkflowSection(effectiveWorkflowId: string | null) {
       effectiveWorkflowId={effectiveWorkflowId}
       onWorkflowChange={() => {}}
       agentProfiles={[]}
+      blockedBy={[]}
+      onBlockedByChange={() => {}}
     />,
   );
 }
 
-describe("WorkflowSection", () => {
+describe("WorkflowDependencySection workflow rendering", () => {
   it("keeps the selector reachable when no effective workflow is selected", () => {
     renderWorkflowSection(null);
 
@@ -65,9 +66,10 @@ describe("WorkflowSection", () => {
   });
 
   it("does not show redundant selector for a selected single workflow without overrides", () => {
-    const { container } = renderWorkflowSection("wf-1");
+    renderWorkflowSection("wf-1");
 
-    expect(container.textContent).toBe("");
+    expect(screen.queryByRole("button", { name: /workflow selector wf-1/i })).toBeNull();
+    expect(screen.getByTestId("task-create-dependencies-trigger")).toBeTruthy();
   });
 });
 

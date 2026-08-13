@@ -109,6 +109,7 @@ describe("TaskCreateDependencies", () => {
     fireEvent.change(search, { target: { value: "Beta" } });
     expect(within(picker).getByText(BETA_TITLE)).toBeTruthy();
     expect(within(picker).queryByText(ALPHA_TITLE)).toBeNull();
+    expect(within(picker).getByTestId("task-create-no-dependency")).toBeTruthy();
 
     const info = within(picker).getByTestId("task-create-dependency-info");
     expect(info.getAttribute("aria-label")).toBe(INFO_LABEL);
