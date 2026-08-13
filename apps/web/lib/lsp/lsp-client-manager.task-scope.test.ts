@@ -135,6 +135,43 @@ describe("task-scoped LSP attachment", () => {
   });
 });
 
+describe("task-scoped LSP lease cleanup", () => {
+  it("releases a session's document references before dropping its final lease", async () => {
+    const releaseA = lspClientManager.connect(TASK_ID, "session-a", LANGUAGE);
+    const releaseB = lspClientManager.connect(TASK_ID, "session-b", LANGUAGE);
+    const socket = FakeWebSocket.instances[0];
+    socket.open();
+    socket.emitMessage(
+      JSON.stringify({
+        status: "attached",
+        language: LANGUAGE,
+        generation: 4,
+        workspaceUri: WORKSPACE_URI,
+        workspaceFolders: [],
+        serverCapabilities: { textDocumentSync: 1 },
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(lspClientManager.getStatus(TASK_ID, LANGUAGE).state).toBe("ready"),
+    );
+
+    const document = {
+      uri: "file:///workspace/Shared.ts",
+      languageId: LANGUAGE,
+      text: "export const shared = true;",
+    };
+    lspClientManager.openDocument("session-a", LANGUAGE, document);
+    lspClientManager.openDocument("session-b", LANGUAGE, document);
+    releaseA();
+    lspClientManager.closeDocument("session-b", LANGUAGE, document.uri);
+
+    expect(
+      socket.sent.filter((frame) => JSON.parse(frame).method === "textDocument/didClose"),
+    ).toHaveLength(1);
+    releaseB();
+  });
+});
+
 describe("task-scoped LSP reconnect", () => {
   it("preserves every session lease across a browser transport generation", async () => {
     vi.useFakeTimers();

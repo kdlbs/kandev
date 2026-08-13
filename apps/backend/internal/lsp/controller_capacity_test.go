@@ -210,21 +210,47 @@ func TestCloseCancelsAndJoinsQueuedCapacityPromotion(t *testing.T) {
 	if queued, err := controller.Start(context.Background(), "queued", "kotlin", origin); err != nil || queued.Phase != PhaseQueued {
 		t.Fatalf("queued=%#v error=%v", queued, err)
 	}
-	host.startEntered = make(chan struct{})
-	host.startRelease = make(chan struct{})
+	queuedKey := TaskLanguageKey{TaskID: "queued", Language: "kotlin"}
+	blockerEntered := make(chan struct{})
+	blockerRelease := make(chan struct{})
+	blockerReleased := false
+	defer func() {
+		if !blockerReleased {
+			close(blockerRelease)
+		}
+	}()
+	blockerDone := make(chan error, 1)
+	go func() {
+		_, err := controller.commands.submitExclusive(
+			context.Background(), queuedKey, ActionReconcile,
+			func(context.Context) (*LanguageSnapshot, error) {
+				close(blockerEntered)
+				<-blockerRelease
+				return nil, nil
+			},
+		)
+		blockerDone <- err
+	}()
+	<-blockerEntered
 	if _, err := controller.Stop(context.Background(), "first", "go", origin); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-host.startEntered:
-	case <-time.After(time.Second):
-		t.Fatal("queued promotion did not begin")
+	if !commandQueuedWithin(controller, queuedKey, time.Second) {
+		t.Fatal("owned promotion was not queued behind detached command")
 	}
 
 	closeCtx, closeCancel := context.WithTimeout(context.Background(), time.Second)
 	defer closeCancel()
 	if err := controller.Close(closeCtx); err != nil {
 		t.Fatalf("Close did not cancel and join queued promotion: %v", err)
+	}
+	if controller.capacity.Active() != 0 {
+		t.Fatalf("active capacity after canceled queued promotion = %d", controller.capacity.Active())
+	}
+	close(blockerRelease)
+	blockerReleased = true
+	if err := <-blockerDone; err != nil {
+		t.Fatalf("detached blocker: %v", err)
 	}
 }
 

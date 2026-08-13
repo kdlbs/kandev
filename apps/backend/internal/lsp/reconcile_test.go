@@ -205,7 +205,7 @@ func TestReconcileStopsDisabledOrphanAndRebuildsActualCapacity(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
 		TaskID: "disabled", Language: "kotlin", Policy: PolicyDisabled,
-		DetectionState: DetectionComplete, Phase: PhaseOff, Generation: 2,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 3,
 		LastInitiator: InitiatorUser,
 	})
 	for _, taskID := range []string{"live-a", "live-b"} {

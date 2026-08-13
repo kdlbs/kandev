@@ -48,9 +48,11 @@ must treat an active task LSP runtime as owned background work.
 Loss of the backend's in-memory task-host handle is not proof that the physical host is absent.
 Both read and ensure paths first perform an executor-specific, existing-only reattachment that may
 not launch, resume, or provision resources. Only an authoritative not-found result permits a new
-task host. Backend startup reconciles and adopts live runtime generations into capacity before
-controls, settings work, attachments, or discovery can launch competing work; error snapshots count
-as possibly live unless their evidence proves process absence.
+task host. Backend startup reserves every durable generation that may still own a process before
+any fallible task-host inspection and before controls, settings work, attachments, or discovery can
+launch competing work. Reconciliation releases a reservation only after the task host proves that
+runtime absent; inspection failures and error snapshots remain capacity-bearing unless their
+evidence proves process absence.
 
 Browsers attach through a task-and-language route after task-owner authorization. An attachment
 receives the initialized server capabilities and then exchanges feature requests and document
@@ -109,8 +111,9 @@ cache or an absolute task-host `PATH`; project-controlled binaries remain forbid
 Releasing capacity atomically reserves the next queued task/language slot, then dispatches that
 promotion as controller-lifecycle-owned work. The Stop or cleanup that freed a slot never waits for
 another task's installer or process launch. Cancellation or failure before promotion begins returns
-the reservation exactly once and considers the next queued entry; controller shutdown cancels and
-joins any promotion already running.
+the reservation exactly once and considers the next queued entry. Controller shutdown removes
+owned promotion work still queued behind detached request commands and joins any promotion already
+running.
 
 Task stop, archive, and delete cancel recovery and stop every language namespace owned by that
 task. Cleanup of a borrowing task cannot terminate another task's host or language slots. When a
@@ -134,9 +137,12 @@ process-tree proof. Non-terminal commands retain ordered per-language serializat
 
 Browser connection generations do not own attachment intent. The frontend manager retains a stable
 task/language/session lease registry and rebuilds a replacement transport from every live lease, so
-one session cannot disappear when another session wins reconnect. Task event subscriptions expose
-their server acknowledgement; the task LSP view performs an authoritative refresh after that ACK,
-closing the gap between initial HTTP hydration and live event registration.
+one session cannot disappear when another session wins reconnect. Open-document references retain
+their originating session, and the final lease release drains that session's document references
+before removing its routing membership; another live session therefore cannot retain an upstream
+document that nobody owns. Task event subscriptions expose their server acknowledgement; the task
+LSP view performs an authoritative refresh after that ACK, closing the gap between initial HTTP
+hydration and live event registration.
 
 Workspace configuration publication and live application are one serialized per-task transition.
 No earlier refresh may apply its folders, attachment roots, or snapshot after a later desired

@@ -28,6 +28,7 @@ export type OpenDocument = {
   version: number;
   languageId: string;
   refCount: number;
+  sessionRefCounts: Map<string, number>;
   text: string;
 };
 

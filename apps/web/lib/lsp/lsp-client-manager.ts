@@ -440,6 +440,7 @@ class LSPClientManager {
     const existing = conn.openDocuments.get(documentUri);
     if (existing) {
       existing.refCount++;
+      existing.sessionRefCounts.set(sessionId, (existing.sessionRefCounts.get(sessionId) ?? 0) + 1);
       if (document.repo) this.addRepositorySubpath(conn, document.repo);
       return;
     }
@@ -449,6 +450,7 @@ class LSPClientManager {
       version: 1,
       languageId: document.languageId,
       refCount: 1,
+      sessionRefCounts: new Map([[sessionId, 1]]),
       text: document.text,
     });
     conn.rpc.sendNotification("textDocument/didOpen", {
@@ -538,15 +540,40 @@ class LSPClientManager {
     if (!conn?.initialized || !conn.rpc) return;
     const canonicalUri = canonicalFileUri(documentUri);
     if (!canonicalUri) return;
-    const document = conn.openDocuments.get(canonicalUri);
+    this.releaseDocumentReferences(conn, sessionId, canonicalUri, 1);
+  }
+
+  private releaseDocumentReferences(
+    conn: ManagedLspConnection,
+    sessionId: string,
+    documentUri: string,
+    requestedCount: number,
+  ): void {
+    if (!conn.rpc) return;
+    const document = conn.openDocuments.get(documentUri);
     if (!document) return;
-    document.refCount--;
+    const sessionRefCount = document.sessionRefCounts.get(sessionId) ?? 0;
+    if (sessionRefCount === 0) return;
+    const releasedCount = Math.min(requestedCount, sessionRefCount);
+    if (releasedCount === sessionRefCount) document.sessionRefCounts.delete(sessionId);
+    else document.sessionRefCounts.set(sessionId, sessionRefCount - releasedCount);
+    document.refCount -= releasedCount;
     if (document.refCount > 0) return;
 
-    conn.openDocuments.delete(canonicalUri);
+    conn.openDocuments.delete(documentUri);
     conn.rpc.sendNotification("textDocument/didClose", {
-      textDocument: { uri: canonicalUri },
+      textDocument: { uri: documentUri },
     });
+  }
+
+  private releaseSessionDocuments(conn: ManagedLspConnection, sessionId: string): void {
+    if (!conn.initialized || !conn.rpc) return;
+    for (const [documentUri, document] of conn.openDocuments) {
+      const sessionRefCount = document.sessionRefCounts.get(sessionId) ?? 0;
+      if (sessionRefCount > 0) {
+        this.releaseDocumentReferences(conn, sessionId, documentUri, sessionRefCount);
+      }
+    }
   }
 
   private addRepositorySubpath(conn: ManagedLspConnection, repository: string): void {
@@ -582,9 +609,11 @@ class LSPClientManager {
   private releaseLease(leases: LspLeaseSet, sessionId: string): void {
     if (this.leaseSets.get(leases.key) !== leases) return;
     const sessionRefs = (leases.sessionRefCounts.get(sessionId) ?? 0) - 1;
-    if (sessionRefs <= 0) leases.sessionRefCounts.delete(sessionId);
-    else leases.sessionRefCounts.set(sessionId, sessionRefs);
     const conn = this.connections.get(leases.key);
+    if (sessionRefs <= 0) {
+      if (conn) this.releaseSessionDocuments(conn, sessionId);
+      leases.sessionRefCounts.delete(sessionId);
+    } else leases.sessionRefCounts.set(sessionId, sessionRefs);
     if (conn?.sessionId === sessionId && !leases.sessionRefCounts.has(sessionId)) {
       conn.sessionId = leases.sessionRefCounts.keys().next().value ?? sessionId;
     }

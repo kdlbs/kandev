@@ -315,6 +315,12 @@ func TestStartupSnapshotFailureSchedulesDeadTaskHostRecovery(t *testing.T) {
 		t.Fatal("startup reconcile unexpectedly accepted a dead task host")
 	}
 	t.Cleanup(func() { _ = controller.Close(context.Background()) })
+	if controller.capacity.Active() != 1 {
+		t.Fatalf(
+			"capacity after ambiguous startup snapshot = %d, want retained live-generation slot",
+			controller.capacity.Active(),
+		)
+	}
 
 	timer := scheduler.next(t)
 	if timer.delay != time.Second {

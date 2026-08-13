@@ -14,9 +14,9 @@ type reconcileCandidate struct {
 	settings TaskSettings
 }
 
-// ReconcileAll adopts every proven-live task-host generation before it admits
-// any missing desired server. This ordering rebuilds real capacity without a
-// backend restart creating duplicate imports.
+// ReconcileAll reserves every durable generation that may still own a process
+// before it admits any missing desired server. Inspection proves which
+// reservations remain live or can be released without creating duplicates.
 func (c *Controller) ReconcileAll(ctx context.Context) error {
 	if err := c.waitForStartup(ctx); err != nil {
 		return err
@@ -35,6 +35,14 @@ func (c *Controller) reconcileAll(ctx context.Context) error {
 		}
 		return states[i].Language < states[j].Language
 	})
+	// Durable generations that may still own a process reserve capacity before
+	// any fallible task-host lookup. A transient startup inspection failure must
+	// not open an admission slot for a duplicate server.
+	for _, state := range states {
+		if stateMayHaveProcess(state) {
+			c.capacity.Adopt(TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}, state.Generation)
+		}
+	}
 	missing := make([]reconcileCandidate, 0)
 	var reconcileErrors []error
 	for _, state := range states {
@@ -266,6 +274,11 @@ func (c *Controller) reconcileAbsentRuntime(
 	settings TaskSettings,
 	desired bool,
 ) (*reconcileCandidate, error) {
+	c.releaseCapacity(
+		ctx,
+		TaskLanguageKey{TaskID: state.TaskID, Language: state.Language},
+		state.Generation,
+	)
 	if desired {
 		return &reconcileCandidate{state: state, settings: settings}, nil
 	}
@@ -356,6 +369,13 @@ func (c *Controller) stopReconciledRuntime(
 		TaskLanguageKey{TaskID: state.TaskID, Language: state.Language},
 		generation,
 	)
+	if state.Generation != generation {
+		c.releaseCapacity(
+			ctx,
+			TaskLanguageKey{TaskID: state.TaskID, Language: state.Language},
+			state.Generation,
+		)
+	}
 	_, err = c.updateState(ctx, state.TaskID, state.Language, func(next *TaskLanguageState) {
 		next.Phase = PhaseOff
 		if runtime != nil {

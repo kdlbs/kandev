@@ -145,7 +145,10 @@ and obscure the actual task-level work that is still running.
   without starting/resuming a task host and are reconsidered when a slot is released. Slot release
   reserves the next entry atomically and promotes it asynchronously under controller lifecycle, so
   stopping one task never waits for another task's installer or launch. A canceled promotion returns
-  its reservation exactly once and advances the queue.
+  its reservation exactly once and advances the queue. Startup reserves every persisted generation
+  that may still own a process before fallible runtime inspection; inspection frees it only after
+  authoritative absence, while a confirmed stop releases the matching durable/runtime identity. A
+  transient recovery error therefore cannot make admission exceed the configured cap.
 - Binary discovery, managed installation, and execution retain existing task-host trust
   boundaries. Kandev never executes a server from a repository or relative `PATH` entry. Managed
   npm/release binaries live under the task host's `~/.kandev/lsp-servers`; `gopls` uses the task
@@ -308,7 +311,9 @@ one transition is active coalesce. Non-terminal different commands linearize in 
 Explicit Stop, Disabled policy, and terminal task cleanup interrupt an accepted Start/install so
 shutdown never waits indefinitely behind startup; the terminal transition is the final desired
 state and process-tree proof. A restart first proves the old generation stopped, then admits one new
-monotonic generation. Retrying the same task-host command after a transport timeout is idempotent.
+monotonic generation. Lifecycle-owned work queued behind a detached request is removed and releases
+its reservation when controller shutdown cancels it; already-running lifecycle work remains joined.
+Retrying the same task-host command after a transport timeout is idempotent.
 
 An unexpected process or task-host stream failure keeps the desired policy and attempts automatic
 recovery after 1, 5, and 30 seconds. A generation that remains ready for five minutes resets that
@@ -513,6 +518,9 @@ task-environment cleanup merely because a browser remains connected.
 - **GIVEN** task A releases a capacity slot while queued task B has a slow installer, **WHEN** A's
   Stop completes, **THEN** A returns after its own durable stop proof without waiting for B; B's
   promotion remains controller-owned and cancellation cannot leak its reserved slot.
+- **GIVEN** startup cannot inspect a persisted generation that may still be alive, **WHEN** another
+  task requests Start, **THEN** the ambiguous generation keeps its capacity reservation until
+  authoritative absence or a confirmed stop prevents over-admission.
 - **GIVEN** an SSH, Sprites, Remote Docker, unknown, or missing environment, **WHEN** Start is
   requested, **THEN** status is unsupported and no capacity, execution, installer, or process is
   acquired.
@@ -531,6 +539,9 @@ task-environment cleanup merely because a browser remains connected.
 - **GIVEN** two sessions share one task/language connection and its browser transport closes,
   **WHEN** either session establishes the replacement transport, **THEN** both live session leases
   rebind and continue routing through one upstream generation.
+- **GIVEN** two sessions reference one document, **WHEN** one session releases its final attachment
+  lease before its editor cleanup runs, **THEN** that session's document references are drained
+  before routing membership and the remaining session can close the final upstream document.
 - **GIVEN** initial task-LSP HTTP hydration completes before the task WebSocket subscription ACK,
   **WHEN** lifecycle state changes in that interval, **THEN** a post-ACK authoritative refresh
   converges the view even if the event itself was not delivered.

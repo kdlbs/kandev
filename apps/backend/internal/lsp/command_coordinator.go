@@ -128,8 +128,7 @@ func (c *commandCoordinator) submitCommand(
 	c.mu.Unlock()
 
 	if owned {
-		<-batch.done
-		return batch.result.snapshot, batch.result.err
+		return c.waitForOwnedCommand(ctx, key, lane, batch)
 	}
 	select {
 	case <-batch.done:
@@ -137,6 +136,52 @@ func (c *commandCoordinator) submitCommand(
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+func (c *commandCoordinator) waitForOwnedCommand(
+	ctx context.Context,
+	key TaskLanguageKey,
+	lane *commandLane,
+	batch *commandBatch,
+) (*LanguageSnapshot, error) {
+	select {
+	case <-batch.done:
+		return batch.result.snapshot, batch.result.err
+	case <-ctx.Done():
+	}
+	cause := context.Cause(ctx)
+	if c.cancelQueuedCommand(key, lane, batch, cause) {
+		return nil, cause
+	}
+	// Running controller-owned callbacks remain joined during shutdown. They
+	// receive the canceled lifecycle context and publish their result before the
+	// controller can finish closing.
+	<-batch.done
+	return batch.result.snapshot, batch.result.err
+}
+
+func (c *commandCoordinator) cancelQueuedCommand(
+	key TaskLanguageKey,
+	lane *commandLane,
+	batch *commandBatch,
+	cause error,
+) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lanes[key] != lane || lane.running == batch {
+		return false
+	}
+	for index, queued := range lane.queued {
+		if queued != batch {
+			continue
+		}
+		batch.cancel()
+		batch.result.err = cause
+		close(batch.done)
+		lane.queued = append(lane.queued[:index], lane.queued[index+1:]...)
+		return true
+	}
+	return false
 }
 
 func cancelCommandLane(lane *commandLane) {
