@@ -4,24 +4,7 @@ import viteConfig from "./vite.config";
 
 if (process.env.DEBUG === "1") process.env.DEBUG = "";
 
-/**
- * Pin the mode instead of inheriting it. Vitest only *defaults* this
- * (`process.env.NODE_ENV ??= "test"`) and then hands the value straight to the
- * worker pool, so an ambient `NODE_ENV` wins — and the Kandev runtime image
- * exports `NODE_ENV=production` (`Dockerfile`), which every agent and container
- * dev shell inherits.
- *
- * That is not a cosmetic difference. `react/index.js` picks its build from this
- * variable, and `cjs/react.production.js` does not export `act`; testing-library's
- * act-compat shim then falls back to the deprecated `react-dom/test-utils`, whose
- * production build calls `React.act` and throws `TypeError: React.act is not a
- * function` on the first `render()`. Every component and hook suite died there —
- * 178 of 268 tests — while CI stayed green, because CI's image sets no NODE_ENV.
- *
- * Set here rather than in the `test` script so a bare `pnpm vitest run <file>`
- * and IDE runners are covered too; that single-file path is how the breakage was
- * found. `vitest-environment.test.tsx` fails by name if this is ever removed.
- */
+// Pins NODE_ENV=test — see apps/web/AGENTS.md "Testing notes" for why this is load-bearing.
 process.env.NODE_ENV = "test";
 
 const configuredMaxWorkers = process.env.VITEST_MAX_WORKERS?.trim();

@@ -3,27 +3,8 @@ import * as React from "react";
 
 import { initI18nForTests, loadAllLocalesForTests } from "./lib/i18n";
 
-/**
- * Fail with the diagnosis instead of the symptom.
- *
- * `act` is exported only by React's development build. Without it,
- * `@testing-library/react`'s act-compat shim quietly falls back to the
- * deprecated `react-dom/test-utils`, whose production build calls `React.act`
- * and throws `TypeError: React.act is not a function` from inside
- * `node_modules` on the first `render()` — in every suite at once, naming
- * nothing that would lead you to the cause. That read as an environment quirk
- * for as long as it went unfixed.
- *
- * `vitest.config.ts` pins `NODE_ENV=test`, which is the known cause. This guard
- * stays because it turns that failure into one legible line. It does not
- * replace the `render()` case in `vitest-environment.test.tsx`: this check only
- * sees the `react` that *this file* resolves, so a duplicated instance or an
- * alias handing testing-library a different copy can leave `act` present here
- * and missing where it is called. Only rendering catches that.
- *
- * A namespace import is deliberate — a named `import { act }` fails differently
- * against the CJS production build, which is the case being diagnosed.
- */
+// Guards against `react` production build or duplicate copy — both make `act` unavailable;
+// vitest.config.ts pins NODE_ENV=test for the common case. Namespace import is deliberate.
 if (typeof React.act !== "function") {
   throw new Error(
     `React.act is unavailable, so no test can render. React only exports act() from its ` +
