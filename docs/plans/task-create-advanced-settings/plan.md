@@ -30,10 +30,12 @@ not change the backend, API client, persistence, or WebSocket contracts.
 - Render a semantic trigger with localized `Advanced settings` copy, muted
   styling, a very subtle text size, a direction indicator, `aria-expanded`,
   and a mobile hitbox of at least 44 CSS pixels.
-- Render the existing `TaskCreateDependencies` as the first child of the
-  advanced content below a localized `Depends on` label with contextual help.
-  Keep the content wrapper ready for future sibling controls without introducing
-  a speculative registry or new state shape.
+- Render the existing `TaskCreateDependencies` in a single row with the
+  localized `Depends on` label and contextual help on the left. Keep the
+  selector full width within the available narrow-screen space, but constrain
+  and right-align it on desktop. Keep the content wrapper ready for future
+  sibling controls without introducing a speculative registry or new state
+  shape.
 - Preserve the dependency selector's `value`, `onChange`, and disabled props.
 
 ### Dialog placement

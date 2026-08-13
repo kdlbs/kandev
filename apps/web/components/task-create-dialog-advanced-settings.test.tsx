@@ -86,6 +86,11 @@ describe("TaskCreateAdvancedSettings", () => {
     expect(screen.getByTestId("task-create-dependency-setting-label").textContent).toContain(
       "Depends on",
     );
+    const row = screen.getByTestId("task-create-dependency-setting-row");
+    const selectorContainer = screen.getByTestId("task-create-dependency-selector-container");
+    expect(row.className).toContain("items-center");
+    expect(selectorContainer.className).toContain("md:max-w-sm");
+    expect(selectorContainer.parentElement).toBe(row);
     const info = screen.getByTestId("task-create-dependency-setting-info");
     expect(info.getAttribute("aria-label")).toBe("About task dependencies");
 

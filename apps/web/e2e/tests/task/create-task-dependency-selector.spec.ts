@@ -76,6 +76,16 @@ test.describe("Task-create dependency selector", () => {
       await expect(
         advancedSettings.getByTestId("task-create-dependency-setting-label"),
       ).toContainText("Depends on");
+      const settingRow = advancedSettings.getByTestId("task-create-dependency-setting-row");
+      const settingRowBox = await settingRow.boundingBox();
+      const selectorContainer = advancedSettings.getByTestId(
+        "task-create-dependency-selector-container",
+      );
+      const selectorContainerBox = await selectorContainer.boundingBox();
+      expect(settingRowBox).not.toBeNull();
+      expect(selectorContainerBox).not.toBeNull();
+      expect(selectorContainerBox!.width).toBeLessThan(settingRowBox!.width);
+      expect(Math.abs(selectorContainerBox!.y - settingRowBox!.y)).toBeLessThanOrEqual(2);
       const settingInfo = advancedSettings.getByTestId("task-create-dependency-setting-info");
       await settingInfo.hover();
       await expect(testPage.locator('[data-slot="tooltip-content"]:visible').last()).toContainText(

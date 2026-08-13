@@ -42,6 +42,13 @@ test.describe("Create task dependency selector on mobile", () => {
     await expect(advancedTrigger).toHaveAttribute("aria-expanded", "true");
     const settingLabel = dialog.getByTestId("task-create-dependency-setting-label");
     await expect(settingLabel).toContainText("Depends on");
+    const settingRow = dialog.getByTestId("task-create-dependency-setting-row");
+    const settingRowBox = await settingRow.boundingBox();
+    const selectorContainer = dialog.getByTestId("task-create-dependency-selector-container");
+    const selectorContainerBox = await selectorContainer.boundingBox();
+    expect(settingRowBox).not.toBeNull();
+    expect(selectorContainerBox).not.toBeNull();
+    expect(Math.abs(selectorContainerBox!.y - settingRowBox!.y)).toBeLessThanOrEqual(2);
     const settingInfo = dialog.getByTestId("task-create-dependency-setting-info");
     const settingInfoBox = await settingInfo.boundingBox();
     expect(settingInfoBox).not.toBeNull();

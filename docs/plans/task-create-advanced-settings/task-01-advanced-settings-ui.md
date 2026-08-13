@@ -25,7 +25,9 @@ selector semantics, and payload path.
 - The dependency selector is absent while collapsed and appears inside the
   expanded content with the existing `No dependency` default, icon, picker,
   task rows, info help, and multi-selection behavior. The expanded selector has
-  a localized `Depends on` label with contextual help.
+  a localized `Depends on` label with contextual help on the left in the same
+  row. The selector is compact and right-aligned on desktop, while retaining
+  the available row width on narrow screens.
 - Collapsing and reopening the section does not clear selected predecessor IDs.
 - Workflow visibility, workflow locking, agent/executor behavior, and the
   existing `blockedBy` to `blocked_by` payload path remain unchanged.
