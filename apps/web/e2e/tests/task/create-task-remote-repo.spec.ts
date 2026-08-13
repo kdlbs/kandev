@@ -47,7 +47,23 @@ async function openCreateDialog(testPage: Page, kanban: KanbanPage): Promise<voi
   await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 }
 
-async function waitForCreateDialogAgent(testPage: Page, kanban: KanbanPage): Promise<void> {
+async function waitForBackendAgentProfile(apiClient: ApiClient): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { agents } = await apiClient.listAgents();
+        return agents.some((agent) => (agent.profiles ?? []).length > 0);
+      },
+      { timeout: 30_000, message: "seeded agent profile available from the backend" },
+    )
+    .toBe(true);
+}
+
+async function waitForCreateDialogAgent(
+  testPage: Page,
+  kanban: KanbanPage,
+  apiClient: ApiClient,
+): Promise<void> {
   const selector = testPage.getByTestId("agent-profile-selector");
   const emptyState = testPage.getByTestId("agent-profile-empty-state");
   const status = async () => {
@@ -56,20 +72,28 @@ async function waitForCreateDialogAgent(testPage: Page, kanban: KanbanPage): Pro
     return "loading";
   };
 
-  let firstStatus: string;
-  try {
-    await expect.poll(status, { timeout: 20_000 }).toMatch(/selector|empty/);
-    firstStatus = await status();
-  } catch {
-    firstStatus = "loading";
-  }
-  if (firstStatus !== "selector") {
-    // A transient failed / empty settings fetch can be terminal for this
-    // dialog instance. Reload once so the E2E fixture gets the same retry a
-    // user gets from reopening the page, then require the selector to finish
-    // loading.
-    await testPage.reload();
-    await openCreateDialog(testPage, kanban);
+  // The worker fixture has already seeded a profile, but the first browser
+  // settings request can still complete with an empty response during backend
+  // startup. Reopen the dialog after the API is known to be ready so the
+  // terminal "No agents found" state cannot strand this scenario.
+  await waitForBackendAgentProfile(apiClient);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let currentStatus = "loading";
+    try {
+      await expect.poll(status, { timeout: 20_000 }).toMatch(/selector|empty/);
+      currentStatus = await status();
+    } catch {
+      // Reload below to re-drive the settings fetch.
+    }
+    if (currentStatus === "selector") {
+      await expect(selector).toBeEnabled({ timeout: 30_000 });
+      return;
+    }
+    if (attempt < 2) {
+      await waitForBackendAgentProfile(apiClient);
+      await testPage.reload();
+      await openCreateDialog(testPage, kanban);
+    }
   }
 
   await expect(selector).toBeVisible({ timeout: 30_000 });
@@ -205,7 +229,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
 
     const kanban = new KanbanPage(testPage);
     await openCreateDialog(testPage, kanban);
-    await waitForCreateDialogAgent(testPage, kanban);
+    await waitForCreateDialogAgent(testPage, kanban, apiClient);
     await clickRemoteMode(testPage);
 
     await pickRepoInChip(testPage, "mock-user/alpha");
