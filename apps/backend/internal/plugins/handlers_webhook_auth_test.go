@@ -254,6 +254,25 @@ func TestFlattenHeaders_StripsPATBearerCaseInsensitively(t *testing.T) {
 	}
 }
 
+// TestServiceSessionCookieName_ReflectsWiredBridge pins the seam the
+// flattenHeaders tests above cannot reach: they pass the cookie name in
+// directly, so they stay green no matter what Service.sessionCookieName()
+// actually resolves to at runtime. Because stripSessionCookie no-ops on an
+// empty name, a wired bridge reporting "" would silently forward every
+// authenticated caller's kandev_session cookie to the plugin subprocess.
+func TestServiceSessionCookieName_ReflectsWiredBridge(t *testing.T) {
+	_, svc := newTestRouter(t)
+
+	if got := svc.sessionCookieName(); got != "" {
+		t.Fatalf("sessionCookieName() = %q with no bridge wired, want %q", got, "")
+	}
+
+	svc.SetAuthLoginBridge(&fakeBridge{})
+	if got := svc.sessionCookieName(); got != "kandev_session" {
+		t.Fatalf("sessionCookieName() = %q after wiring the bridge, want the bridge's own name", got)
+	}
+}
+
 // TestFlattenHeaders_NoSessionCookieNameSkipsStripping pins that an empty
 // sessionCookieName (no auth bridge wired — auth disabled entirely, so no
 // session cookie is ever minted) relays the Cookie header unchanged.

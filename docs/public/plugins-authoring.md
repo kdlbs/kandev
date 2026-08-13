@@ -837,6 +837,10 @@ repackaging.
   runs; a `public: true` webhook is not — Kandev cannot verify you actually
   authenticate its caller, so validate method, signature, timestamp, replay
   protection, and body before side effects on any webhook you mark public.
+  "Authenticated" here means only that the caller presented a valid Kandev session
+  or PAT: any signed-in user reaches a non-public webhook, not just an admin and
+  not only the user a request concerns. Enforce your own per-user or per-role rules
+  in the handler if the endpoint needs them.
 - **Bundling React:** use host.React, host.jsx, and host.ui; a second React or
   Radix copy breaks shared contexts and portals.
 - **Shipping the wrong binary name:** every declared executable must be under
