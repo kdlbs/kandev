@@ -126,8 +126,19 @@ test.describe("Workflow step prompt autocomplete", () => {
     // Select the first non-"none" option (skip "No profile override").
     // `count()` is a one-shot read, not an auto-retrying assertion, so gate on
     // the listbox being populated before counting instead of sleeping first.
+    //
+    // Visibility of the *first* option is not that gate: "No profile override"
+    // is static markup and is already there while the settings bootstrap is
+    // still loading profiles, so a count() taken on it reads 1 and skips the
+    // test. Poll the count itself, which is the thing the branch below reads.
     const options = testPage.getByRole("option");
     await expect(options.first()).toBeVisible({ timeout: 5_000 });
+    await expect
+      .poll(() => options.count(), { timeout: 5_000 })
+      .toBeGreaterThan(1)
+      // A workspace with genuinely no profiles is a legitimate skip, so this
+      // stays tolerant; the poll only removes the race with a slow bootstrap.
+      .catch(() => undefined);
     const optionCount = await options.count();
     // Need at least 2 options (none + at least one profile)
     if (optionCount < 2) {

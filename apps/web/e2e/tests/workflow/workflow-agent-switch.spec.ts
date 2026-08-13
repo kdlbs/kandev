@@ -42,31 +42,32 @@ async function waitForSessionEnvironmentId(
   agentProfileId: string,
   timeoutMs = 30_000,
 ) {
-  let environmentId: string | null | undefined;
+  let environmentId = "";
   let details = "";
   await expect
     .poll(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(taskId);
-        // Captured on every attempt so the failure message below describes the
-        // last observed state rather than requiring an extra request.
+        // Captured on every attempt so the failure below describes the last
+        // observed state rather than requiring an extra request.
         details = sessions
           .map((s) => `${s.id}:${s.agent_profile_id}:${s.state}:${s.task_environment_id ?? "none"}`)
           .join(", ");
-        environmentId = sessions.find(
-          (s) => s.agent_profile_id === agentProfileId,
-        )?.task_environment_id;
-        return Boolean(environmentId);
+        environmentId =
+          sessions.find((s) => s.agent_profile_id === agentProfileId)?.task_environment_id ?? "";
+        return environmentId !== "";
       },
       {
         timeout: timeoutMs,
         message: `session for profile ${agentProfileId} did not get environment id`,
       },
     )
-    .toBe(true);
-  if (!environmentId) {
-    throw new Error(`session for profile ${agentProfileId} did not get environment id: ${details}`);
-  }
+    .toBe(true)
+    .catch((err: Error) => {
+      // expect.poll's own message reports only the final polled value, so the
+      // captured session states have to be re-thrown here to reach the log.
+      throw new Error(`${err.message}; last observed sessions: ${details}`);
+    });
   return environmentId;
 }
 
@@ -78,24 +79,35 @@ async function pollSessionsForEnvironmentInheritance(
   timeoutMs = 30_000,
 ) {
   let latestSessions: Awaited<ReturnType<typeof pollSessions>> = [];
+  let lastRequestError: unknown;
   // Returns the last observed sessions either way: callers assert on the
   // inheritance themselves, so a timeout here must not throw.
   await expect
     .poll(
       async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        latestSessions = sessions;
-        const sourceSession = sessions.find((s) => s.agent_profile_id === sourceProfileId);
-        const targetSession = sessions.find((s) => s.agent_profile_id === targetProfileId);
-        return Boolean(
-          sourceSession?.task_environment_id &&
-          targetSession?.task_environment_id === sourceSession.task_environment_id,
-        );
+        try {
+          const { sessions } = await apiClient.listTaskSessions(taskId);
+          lastRequestError = undefined;
+          latestSessions = sessions;
+          const sourceSession = sessions.find((s) => s.agent_profile_id === sourceProfileId);
+          const targetSession = sessions.find((s) => s.agent_profile_id === targetProfileId);
+          return Boolean(
+            sourceSession?.task_environment_id &&
+            targetSession?.task_environment_id === sourceSession.task_environment_id,
+          );
+        } catch (err) {
+          // Retry a transient request failure, but remember the last one: the
+          // blanket catch below is meant to tolerate "inheritance not visible
+          // yet", not to turn a dead endpoint into an empty session list.
+          lastRequestError = err;
+          return false;
+        }
       },
       { timeout: timeoutMs },
     )
     .toBe(true)
     .catch(() => undefined);
+  if (lastRequestError) throw lastRequestError;
   return latestSessions;
 }
 

@@ -435,6 +435,29 @@ test.describe("Session tab management — primary session persistence", () => {
       })
       .toBeGreaterThan(taskUpdatesAtMove);
 
+    // Observing the frame only proves the gateway delivered it, not that the
+    // handler under test ran. Both assertions below are already true before the
+    // move, so asserting in that gap would pass against the pre-move DOM and
+    // miss the regression entirely. Wait for the handler's own effect on the
+    // store -- the task's step in `kanban.tasks` -- before asserting.
+    await testPage.waitForFunction(
+      ({ taskId, stepId }) => {
+        const store = (
+          window as Window & {
+            __KANDEV_E2E_STORE__?: {
+              getState: () => { kanban: { tasks: Array<{ id: string; workflowStepId: string }> } };
+            };
+          }
+        ).__KANDEV_E2E_STORE__;
+        if (!store) throw new Error("E2E store bridge missing");
+        return (
+          store.getState().kanban.tasks.find((t) => t.id === taskId)?.workflowStepId === stepId
+        );
+      },
+      { taskId: task.id, stepId: otherStep.id },
+      { timeout: 15_000 },
+    );
+
     // Star must still be on session #2 (would jump back to #1 before the kanban.ts fix).
     await expect(starInTab(session, session2Id)).toBeVisible({ timeout: 5_000 });
     await expect(starInTab(session, session1Id)).not.toBeVisible();
