@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
-import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
@@ -24,47 +23,6 @@ function initializeRepository(directory: string, gitEnv: NodeJS.ProcessEnv): Git
   fs.mkdirSync(directory, { recursive: true });
   execSync("git init -b main", { cwd: directory, env: gitEnv });
   return new GitHelper(directory, gitEnv);
-}
-
-/**
- * Content search is intentionally a one-shot request. Re-drive it while the
- * task's repositories finish registering with the workspace process manager.
- */
-async function waitForRepositoryGroups({
-  page,
-  input,
-  groups,
-  query,
-  expectedCount,
-  timeout,
-}: {
-  page: Page;
-  input: Locator;
-  groups: Locator;
-  query: string;
-  expectedCount: number;
-  timeout: number;
-}): Promise<void> {
-  const deadline = Date.now() + timeout;
-  let lastError: Error | undefined;
-
-  while (Date.now() < deadline) {
-    const attemptTimeout = Math.min(5_000, deadline - Date.now());
-    try {
-      await expect(groups).toHaveCount(expectedCount, { timeout: attemptTimeout });
-      return;
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-    }
-
-    if (Date.now() >= deadline) break;
-    await input.fill("");
-    await page.waitForTimeout(50);
-    await input.fill(query);
-  }
-
-  if (lastError) throw lastError;
-  throw new Error(`Expected ${expectedCount} content-search repository groups`);
 }
 
 test("@search keeps workspace modes out of non-task routes", async ({ testPage }) => {
@@ -142,14 +100,7 @@ test("@search searches all task repositories and opens the selected match", asyn
   await input.fill(SEARCH_TERM);
 
   const groups = dialog.getByTestId("content-search-repo-group");
-  await waitForRepositoryGroups({
-    page: testPage,
-    input,
-    groups,
-    query: SEARCH_TERM,
-    expectedCount: 2,
-    timeout: 30_000,
-  });
+  await expect(groups).toHaveCount(2, { timeout: 30_000 });
   await expect(
     dialog.locator(
       `[data-testid="content-search-repo-group"][data-repository="${EXTRA_REPOSITORY_NAME}"]`,
