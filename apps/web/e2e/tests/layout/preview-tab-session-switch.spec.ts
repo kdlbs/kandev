@@ -10,11 +10,33 @@ import { KanbanPage } from "../../pages/kanban-page";
 const FILE_A = "alpha.ts";
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
+async function waitForWorkspaceFile(
+  apiClient: ApiClient,
+  sessionId: string,
+  filename: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        try {
+          const response = await apiClient.wsRequest<{
+            root?: { children?: Array<{ path?: string }> } | null;
+          }>("workspace.tree.get", { session_id: sessionId, path: "", depth: 1 });
+          return response.root?.children?.some((child) => child.path === filename) ?? false;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 30_000, message: `Waiting for ${filename} in the task workspace` },
+    )
+    .toBe(true);
+}
+
 async function openFileInPreview(page: Page, session: SessionPage, filename: string) {
   await session.clickTab("Files");
   await expect(session.files).toBeVisible({ timeout: 10_000 });
   const fileRow = session.files.getByText(filename);
-  await expect(fileRow).toBeVisible({ timeout: 15_000 });
+  await expect(fileRow).toBeVisible({ timeout: 30_000 });
   await fileRow.click();
   // Retry click if preview tab didn't appear (executor may need a moment)
   const previewTab = page.getByTestId("preview-tab-file-editor");
@@ -72,6 +94,12 @@ test.describe("Preview tab survives session switch", () => {
       path.join(backend.tmpDir, "repos", "e2e-repo"),
       makeGitEnv(backend.tmpDir),
     );
+    // The repository is worker-scoped and Git specs may leave it on another
+    // branch. Establish the fixture base before seeding the file so Task A's
+    // workspace and the file browser resolve the same commit.
+    git.exec("git checkout -f main");
+    git.exec("git reset --hard main");
+    git.exec("git clean -fd");
     git.createFile(FILE_A, "// alpha content");
     git.stageAll();
     git.commit("seed alpha");
@@ -97,6 +125,9 @@ test.describe("Preview tab survives session switch", () => {
         { timeout: 30_000, message: "Waiting for Task A session to finish" },
       )
       .toBe(true);
+
+    if (!taskA.session_id) throw new Error("Task A did not return a session_id");
+    await waitForWorkspaceFile(apiClient, taskA.session_id, FILE_A);
 
     // Create Task B and wait for it to complete
     const taskB = await apiClient.createTaskWithAgent(

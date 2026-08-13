@@ -696,7 +696,10 @@ test.describe("Git Changes Panel", () => {
     await firstCommitRow.hover();
     const resetButton = firstCommitRow.getByRole("button", { name: "Reset to this commit" });
     await expect(resetButton).toBeVisible({ timeout: 5_000 });
-    await resetButton.click();
+    // The action is rendered inside a group-hover span. Keep the row hovered
+    // for the user-facing check above, then bypass the CSS interception race
+    // if the hover slot disappears during React's status refresh.
+    await resetButton.click({ force: true });
 
     // Confirm the reset in the dialog
     const resetDialog = testPage.getByRole("dialog");
@@ -1707,6 +1710,8 @@ test.describe("Git Changes Panel", () => {
     const useInfo = driftMenu.getByRole("img", { name: /Use the current PR version/ });
     await useInfo.hover();
     await expect(openTooltip).toContainText("Use the current PR version");
+    await testPage.mouse.move(0, 0);
+    await expect(openTooltip).toBeHidden({ timeout: 5_000 });
     await driftMenu.getByTestId("header-replace-pr-branch").click();
     const resolutionDialog = testPage.getByTestId("remote-contribution-resolution-dialog");
     await expect(resolutionDialog).toBeVisible();
