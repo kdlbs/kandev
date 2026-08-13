@@ -130,10 +130,12 @@ uses the `10m` default. Kandev reads this environment variable when the backend
 starts, so restart the backend after changing it. The setting applies to Local,
 Worktree, Docker, Sprites, and SSH launches.
 
-The shared launch deadline is the configured preparation timeout plus a fixed
+Runtime launch phases use the configured preparation timeout plus a fixed
 five-minute allowance for runtime creation and `agentctl` readiness. With the
-default, the shared launch limit is `15m`. This setting is environment-only; it
-is not read from YAML, the database, or Settings.
+default, each launch-phase limit is `15m`. Preparation scripts use a separate
+context, so earlier work such as Sprite uploads does not reduce their full
+`10m` preparation budget. This setting is environment-only; it is not read from
+YAML, the database, or Settings.
 
 ### Authentication, Office, Plugins, and feature flags
 

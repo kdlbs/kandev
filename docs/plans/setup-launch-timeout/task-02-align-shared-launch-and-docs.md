@@ -12,8 +12,9 @@ spec: "../../specs/platform/setup-launch-timeout.md"
 
 ## Acceptance
 
-- Shared execution creation can cross 60 seconds and remains bounded by
-  `AgentLaunchTimeout`.
+- Environment resolution does not consume the runtime launch-phase budget.
+- Each runtime launch phase remains bounded by `AgentLaunchTimeout`, while a
+  preparation script receives the full independent `SetupScriptTimeout`.
 - Manager shutdown and per-caller cancellation keep their existing coalescing
   behavior, and a deadline releases the activity lease.
 - Public configuration and executor docs describe the one environment variable
@@ -51,14 +52,19 @@ Task 01.
 
 ## Output contract
 
-Report the RED 90-second virtual-time regression, shared-launch change, public
+Report the RED 90-second virtual-time regression, launch-phase change, public
 documentation updates, exact verification results, residual risks, and update
 this task plus `plan.md` status.
 
 ## Results
 
-- Replaced the fixed shared execution-creation deadline with the setup timeout plus the fixed five-minute launch allowance, preserving caller cancellation and manager-stop behavior.
+- Replaced the fixed shared execution-creation deadline with a deadline-free
+  coalescing context plus fresh runtime launch-phase contexts derived from the
+  setup timeout. Preparation contexts keep the full setup budget after
+  pre-setup work, while caller cancellation and manager-stop behavior remain
+  intact.
 - RED verification first demonstrated that a setup operation extending past the old 60-second deadline was cancelled; the regression now passes with the new launch budget.
 - Documented the environment variable, duration parsing, executor coverage, launch allowance, restart requirement, and unchanged setup failure semantics in the public executor/configuration docs.
-- Verification: `cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/task/handlers ./internal/mcp/handlers` passed with 4,268 tests across 4 packages.
+- Verification: `cd apps/backend && go test -count=1 ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/task/handlers ./internal/mcp/handlers` passed with 4,587 tests across 4 packages.
 - Focused lifecycle regressions passed under `go test -race`; `git diff --check` passed.
+- Host-mode Docker launch E2E passed 12 tests with one pre-existing `fixme` skipped, and the Alpine BusyBox preparation test passed three consecutive repetitions without retries.

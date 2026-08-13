@@ -178,6 +178,10 @@ type LaunchResult struct {
 // the nonce is passed via env var, agentctl generates its own token,
 // and the backend retrieves it via POST /auth/handshake.
 func (cm *ContainerManager) LaunchContainer(ctx context.Context, config ContainerConfig) (*LaunchResult, error) {
+	baseCtx := preparationContext(ctx)
+	launchCtx, launchCancel := withLaunchPhaseTimeout(baseCtx)
+	defer launchCancel()
+
 	// Generate bootstrap nonce (NOT the auth token — agentctl generates that)
 	nonce, err := generateBootstrapNonce()
 	if err != nil {
@@ -185,7 +189,7 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	}
 	config.BootstrapNonce = nonce
 
-	containerID, containerIP, controlHost, controlPort, err := cm.createAndStartContainer(ctx, config)
+	containerID, containerIP, controlHost, controlPort, err := cm.createAndStartContainer(launchCtx, config)
 	if err != nil {
 		return nil, err
 	}
@@ -194,20 +198,22 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	ctl := agentctl.NewControlClient(controlHost, controlPort, cm.logger)
 
 	// Wait for agentctl to be healthy
-	if err := cm.waitForHealth(ctx, ctl); err != nil {
+	if err := cm.waitForHealth(baseCtx, ctl); err != nil {
 		cm.removeContainerBestEffort(containerID)
 		return nil, fmt.Errorf("agentctl health check failed: %w", err)
 	}
 
 	// Perform handshake: nonce → token
-	authToken, err := ctl.Handshake(ctx, nonce)
+	handshakeCtx, handshakeCancel := withLaunchPhaseTimeout(baseCtx)
+	defer handshakeCancel()
+	authToken, err := ctl.Handshake(handshakeCtx, nonce)
 	if err != nil {
 		cm.removeContainerBestEffort(containerID)
 		return nil, fmt.Errorf("agentctl handshake failed: %w", err)
 	}
 
 	// Create instance and client
-	client, err := cm.createInstanceAndClient(ctx, ctl, config, containerID, containerIP)
+	client, err := cm.createInstanceAndClient(handshakeCtx, ctl, config, containerID, containerIP)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +341,7 @@ func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.Con
 	const retryDelay = 500 * time.Millisecond
 
 	launchTimeout := constants.AgentLaunchTimeout
-	healthCtx, cancel := context.WithTimeout(ctx, launchTimeout)
+	healthCtx, cancel := withLaunchPhaseTimeout(preparationContext(ctx))
 	defer cancel()
 
 	var lastErr error
@@ -517,7 +523,7 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
   fi
 fi
 if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
-  timeout --signal=TERM --kill-after=1s ` + prepareTimeout + ` sh -c 'eval "$KANDEV_PREPARE_SCRIPT"'
+	  timeout -s TERM -k 1s ` + prepareTimeout + ` sh -c 'eval "$KANDEV_PREPARE_SCRIPT"'
   prep_rc=$?
   if [ "$prep_rc" -ne 0 ]; then
     echo "[kandev-bootstrap] prepare script failed (exit $prep_rc); starting agentctl anyway so the host can connect and the user can debug via Executor Settings" >&2

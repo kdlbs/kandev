@@ -12,8 +12,9 @@ Issue #2574 exposes two competing deadlines. Repository setup can continue past
 the lifecycle manager's one-minute shared-launch limit, so runtime creation
 receives an expired context and reports an `agentctl` readiness error. The
 repair first creates one process-start setup-timeout policy and applies it to
-all prepare paths. It then derives every shared launch deadline from that
-policy and documents the operator contract.
+all prepare paths. It then derives runtime launch-phase deadlines from that
+policy, keeps preparation in an independent context, and documents the
+operator contract.
 
 ## Backend
 
@@ -41,15 +42,15 @@ policy and documents the operator contract.
   a timeout remains non-fatal, then give `agentctl` readiness the derived
   launch budget. Preserve caller cancellation and the last health error.
 
-### Shared launch deadline
+### Launch-phase deadlines
 
-- Replace `coalescedExecutionCreationTimeout` in
-  `apps/backend/internal/agent/runtime/lifecycle/manager_execution.go` with
-  `constants.AgentLaunchTimeout`. Keep `context.WithoutCancel` and manager-stop
-  cancellation so one short-lived caller cannot end a launch needed by another
-  caller.
-- Update comments and timeout assertions that still describe a 60-second
-  shared launch.
+- Keep the coalesced manager context independent of the launch-phase deadline
+  so environment resolution cannot consume the runtime launch budget.
+- Start a fresh `constants.AgentLaunchTimeout` context after environment
+  resolution, and let each runtime give its setup script an independent
+  `constants.SetupScriptTimeout` context.
+- Update comments and timeout assertions that still describe a single shared
+  wall-clock launch.
 
 ## Tests
 
@@ -57,13 +58,13 @@ policy and documents the operator contract.
   **File:** `apps/backend/internal/common/constants/timeouts_test.go`
   **How:** table-driven unit tests for empty, valid, malformed, zero, and
   negative values.
-- **What:** a shared execution can cross the old one-minute boundary and still
-  complete.
-  **File:** `apps/backend/internal/agent/runtime/lifecycle/manager_execution_test.go`
-  **How:** `testing/synctest` regression that completes after 90 virtual seconds
-  and before `constants.AgentLaunchTimeout`.
-- **What:** a blocked shared execution ends at the derived launch deadline and
-  releases its activity lease.
+- **What:** coalesced environment preparation can cross the old one-minute
+  boundary without consuming the runtime launch-phase budget.
+  **File:** `apps/backend/internal/agent/runtime/lifecycle/execution_context_test.go`
+  **How:** `testing/synctest` advances virtual time through preparation, then
+  verifies a fresh launch-phase deadline and an independent setup deadline.
+- **What:** a blocked runtime launch phase ends at the derived launch deadline
+  and releases its activity lease.
   **File:** `apps/backend/internal/agent/runtime/lifecycle/manager_execution_test.go`
   **How:** update the existing manager-deadline `testing/synctest` assertion.
 - **What:** local prepare scripts and Docker bootstrap readiness use the common
@@ -72,15 +73,18 @@ policy and documents the operator contract.
   `container_health_test.go` beside `container.go`.
   **How:** focused context-deadline tests with virtual time or a short injected
   context. Do not add a real 10-minute test.
-- **What:** existing launch waiters use the derived agent-launch value.
+- **What:** existing launch phases use the derived agent-launch value while
+  preparation retains its full independent setup value.
   **Files:** existing backend tests that assert `constants.AgentLaunchTimeout`.
   **How:** run the affected package tests after the constant change.
 
 ## Verification Results
 
 - Task 01: `cd apps/backend && go test ./internal/common/constants ./internal/agent/runtime/lifecycle ./internal/backendapp` passed with 1,844 tests across 3 packages.
-- Task 02: `cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/task/handlers ./internal/mcp/handlers` passed with 4,268 tests across 4 packages.
-- Focused lifecycle regressions passed under `go test -race`, covering setup-script timeout, container health timeout, and shared launch deadline behavior.
+- Task 02: `cd apps/backend && go test -count=1 ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/task/handlers ./internal/mcp/handlers` passed with 4,587 tests across 4 packages.
+- Focused lifecycle regressions passed under `go test -race`, covering setup-script timeout, container health timeout, independent launch/preparation contexts, and launch-phase deadline behavior.
+- The host-mode Docker launch E2E suite passed 12 tests with one pre-existing `fixme` skipped; the Alpine BusyBox preparation test passed three consecutive repetitions without retries.
+- The web typecheck, E2E fixture Prettier check, focused Go vet, public-doc validation, and public-doc validation tests passed.
 - `git diff --check` passed.
 
 ## Implementation Waves And Parallel Candidates
@@ -95,15 +99,16 @@ Execution is sequential because Task 02 depends on the common policy from Task
 
 Update `docs/public/configuration.md` with the exact environment variable,
 duration syntax, fallback behavior, restart requirement, and derived 15-minute
-default launch limit. Update `docs/public/executors.md` to state that prepare
-scripts use the common setup limit while their fatal or non-fatal behavior
-remains runtime-specific.
+default launch-phase limit. Update `docs/public/executors.md` to state that
+prepare scripts use the common setup limit while their fatal or non-fatal
+behavior remains runtime-specific.
 
 ## Risks
 
-- Docker runs its prepare script before `agentctl`, so readiness waiting is the
-  only host-side boundary that can stop a hung bootstrap.
+- Docker runs its prepare script before `agentctl`, so the bootstrap timeout and
+  readiness phase are separate boundaries that can stop a hung launch.
 - The setup timeout is process-global. Tests must not depend on changing the
   environment after package initialization.
-- A longer correct deadline delays failure for a truly blocked runtime. The
-  derived 15-minute bound and activity-lease regression keep that case finite.
+- A longer correct launch-phase deadline delays failure for a truly blocked
+  runtime. The derived 15-minute phase bound and activity-lease regression keep
+  that case finite.

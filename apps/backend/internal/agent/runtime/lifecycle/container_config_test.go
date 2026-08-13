@@ -145,7 +145,7 @@ func TestBuildContainerConfigBoundsPrepareScriptBeforeAgentctl(t *testing.T) {
 
 	script := got.Entrypoint[2]
 	want := fmt.Sprintf(
-		"timeout --signal=TERM --kill-after=1s %s sh -c",
+		"timeout -s TERM -k 1s %s sh -c",
 		"600s",
 	)
 	if !strings.Contains(script, want) {

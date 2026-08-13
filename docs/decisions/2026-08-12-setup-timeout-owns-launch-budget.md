@@ -27,8 +27,9 @@ default.
 
 All repository and executor prepare paths use that setup value. The internal
 agent-launch limit is derived as the setup value plus a fixed five-minute
-allowance. Every shared execution-creation path uses the derived limit instead
-of defining another deadline.
+allowance. Shared execution creation does not start that timer while resolving
+the environment. Each runtime launch phase starts a fresh derived deadline,
+while the preparation script receives a separate setup context.
 
 The environment variable is the only new public setting. No compatibility
 alias is needed because this setting has not shipped. Cleanup limits and
@@ -36,10 +37,10 @@ runtime-specific fatal or non-fatal setup behavior do not change.
 
 ## Consequences
 
-- A setup script can use its documented budget without a shorter shared-launch
-  deadline ending the session first.
+- A setup script can use its documented budget without earlier uploads,
+  environment resolution, or runtime preparation consuming it.
 - One operator value keeps setup and launch limits in a valid order.
-- The default maximum shared launch grows to 15 minutes. A truly blocked launch
+- The default launch-phase limit is 15 minutes. A truly blocked launch phase
   therefore takes longer to fail than it did under the accidental one-minute
   limit.
 - The fixed five-minute allowance is internal. A future product setting may
@@ -59,9 +60,9 @@ and restore the original failure.
 Rejected because setup limits would remain inconsistent across repository,
 local, Docker, Sprite, and SSH paths.
 
-### Remove the shared launch deadline
+### Remove launch-phase deadlines
 
-Rejected because a blocked runtime call could hold the activity lease forever.
+Rejected because a blocked runtime phase could hold the activity lease forever.
 
 ### Add YAML or Settings UI configuration now
 

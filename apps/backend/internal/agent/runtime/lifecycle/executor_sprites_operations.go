@@ -229,7 +229,7 @@ func (r *SpritesExecutor) runPrepareScript(
 		return nil
 	}
 
-	stepCtx, cancel := context.WithTimeout(ctx, constants.SetupScriptTimeout)
+	stepCtx, cancel := context.WithTimeout(preparationContext(ctx), constants.SetupScriptTimeout)
 	defer cancel()
 
 	r.logger.Debug("running prepare script")

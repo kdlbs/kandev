@@ -87,7 +87,7 @@ Keep working prepare scripts noninteractive and idempotent. Kandev resolves supp
 
 The common preparation limit is configured through
 `KANDEV_TASK_PREPARATION_TIMEOUT`; see [Configuration](./configuration.md#setup-and-launch-timing)
-for duration syntax, fallback behavior, and the derived shared launch limit.
+for duration syntax, fallback behavior, and the derived launch-phase limit.
 
 Two current preparation exceptions are easy to miss:
 

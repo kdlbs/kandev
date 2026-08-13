@@ -162,6 +162,7 @@ func (r *DockerExecutor) HealthCheck(_ context.Context) error {
 }
 
 func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (instance *ExecutorInstance, err error) {
+	baseCtx := preparationContext(ctx)
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
 		return nil, err
 	}
@@ -174,11 +175,11 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		defer reportCreateInstanceProgress(req, &err)()
 	}
 
-	if reconnected, ok := r.tryReconnect(ctx, dockerClient, req); ok {
+	if reconnected, ok := r.tryReconnect(baseCtx, dockerClient, req); ok {
 		return reconnected, nil
 	}
 
-	r.seedSessionDir(ctx, req)
+	r.seedSessionDir(baseCtx, req)
 
 	containerCfg, err := r.buildContainerLaunchConfig(req)
 	if err != nil {
@@ -189,7 +190,7 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		return nil, fmt.Errorf("failed to launch container: %w", err)
 	}
 
-	containerIP, _ := dockerClient.GetContainerIP(ctx, result.ContainerID)
+	containerIP, _ := dockerClient.GetContainerIP(baseCtx, result.ContainerID)
 	r.logger.Info("docker instance created",
 		zap.String("instance_id", req.InstanceID),
 		zap.String("container_id", result.ContainerID),

@@ -23,11 +23,12 @@ hidden session-launch deadline expires first.
   change requires a restart.
 - The timeout applies to repository setup scripts and executor-profile prepare
   scripts on Local, Worktree, Docker, Sprite, and SSH launches.
-- A shared session launch remains active for the setup timeout plus a fixed
-  five-minute allowance. The allowance covers repository preparation, runtime
-  creation, and `agentctl` readiness.
-- The shared launch remains bounded. Manager shutdown still cancels it, and one
-  caller leaving does not cancel work that another caller still needs.
+- Runtime launch phases use the setup timeout plus a fixed five-minute
+  allowance. Each launch-phase context starts when that phase begins.
+- Preparation scripts use their own setup context. Runtime setup work such as
+  Sprite uploads does not reduce the preparation-script budget.
+- Manager shutdown still cancels a shared launch, and one caller leaving does
+  not cancel work that another caller still needs.
 - A setup-script failure keeps the runtime-specific behavior documented in
   [Executors](../../public/executors.md). This change does not make a non-fatal
   setup failure fatal.
@@ -41,7 +42,7 @@ Decision: [ADR-2026-08-12-setup-timeout-owns-launch-budget](../../decisions/2026
 | `KANDEV_TASK_PREPARATION_TIMEOUT` is absent | Kandev uses 10 minutes. |
 | The value is invalid, zero, or negative | Kandev uses 10 minutes. |
 | A setup script reaches the configured limit | Kandev stops the script and reports the existing runtime-specific setup failure. |
-| Runtime creation does not finish within the derived launch limit | The launch fails with a deadline error and releases its activity lease. |
+| A runtime launch phase does not finish within its derived launch limit | The launch fails with a deadline error and releases its activity lease. |
 | The backend stops during launch | Manager cancellation stops the shared launch. |
 
 ## Scenarios
@@ -58,9 +59,9 @@ Decision: [ADR-2026-08-12-setup-timeout-owns-launch-budget](../../decisions/2026
 - **GIVEN** a setup script that exceeds the configured limit, **WHEN** the limit
   expires, **THEN** Kandev stops the script and preserves that runtime's current
   fatal or non-fatal setup-failure behavior.
-- **GIVEN** runtime creation blocks after setup, **WHEN** the derived launch
-  limit expires, **THEN** the launch returns a deadline error and releases the
-  manager activity lease.
+- **GIVEN** a runtime launch phase blocks after setup, **WHEN** its derived
+  launch limit expires, **THEN** the launch returns a deadline error and
+  releases the manager activity lease.
 - **GIVEN** two callers wait for one shared launch, **WHEN** one caller cancels,
   **THEN** the launch continues for the remaining caller until it completes,
   the manager stops, or the derived launch limit expires.

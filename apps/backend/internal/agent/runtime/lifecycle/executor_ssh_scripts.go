@@ -153,7 +153,7 @@ func (r *SSHExecutor) runPrepareScript(ctx context.Context, client *ssh.Client, 
 		return fmt.Errorf("ssh: prepare script environment: %w", err)
 	}
 	r.report(req.OnProgress, "Running prepare script", PrepareStepRunning, "")
-	stepCtx, cancel := context.WithTimeout(ctx, constants.SetupScriptTimeout)
+	stepCtx, cancel := context.WithTimeout(preparationContext(ctx), constants.SetupScriptTimeout)
 	defer cancel()
 	shell := sshShellForRemote(req.Metadata, platform)
 	command := WrapLoginShell(shell, sshScriptWithEnvironment(script))
