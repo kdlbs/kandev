@@ -39,6 +39,7 @@ import { TaskMRLinkDialog } from "./task-mr-link-dialog";
 import { MRAutomationControls } from "./mr-automation-controls";
 import { MRCIPopover } from "./mr-ci-popover";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { reviewItemId } from "@/components/task/review-selection";
 import { mrTaskKey } from "./mr-detail-panel";
 import { useTranslation } from "react-i18next";
 import { MRStatusIcon } from "./mr-task-icon";
@@ -73,7 +74,15 @@ export function openMobileMRReview(
   sessionId: string,
   mr: TaskMR,
 ) {
-  setReview(sessionId, mrTaskKey(mr));
+  setReview(
+    sessionId,
+    reviewItemId({
+      providerId: "gitlab",
+      connectionScope: mr.host,
+      repositoryId: mr.repository_id || mr.project_path,
+      changeRequestNumber: mr.mr_iid,
+    }),
+  );
 }
 
 export function openDesktopMRReview(

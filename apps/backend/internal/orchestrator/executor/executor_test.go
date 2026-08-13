@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -2571,9 +2572,9 @@ func TestRepositoryCloneURL(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "bitbucket repo",
+			name: "plugin provider without persisted clone URL fails closed",
 			repo: &models.Repository{Provider: "bitbucket", ProviderOwner: "acme", ProviderName: "app"},
-			want: "https://bitbucket.org/acme/app.git",
+			want: "",
 		},
 		{
 			name: "unknown provider returns empty",
@@ -2616,15 +2617,38 @@ type recordingAuthenticatedCloner struct {
 	workspaceID string
 	provider    string
 	password    string
+	request     repoclone.GitCredentialRequest
 }
 
-func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedForProvider(
-	_ context.Context, workspaceID, _, provider, _, _, _, _, _ string,
+type sessionScopedWorkspaceAuth interface {
+	ensureClonedWithWorkspaceAuthForSession(
+		context.Context, string, string, *models.Repository, string,
+	) (string, error)
+}
+
+func TestExecutorExposesSessionScopedWorkspaceClone(t *testing.T) {
+	t.Parallel()
+
+	exec := &Executor{}
+	if _, supported := any(exec).(sessionScopedWorkspaceAuth); !supported {
+		t.Fatal("Executor does not expose a session-scoped workspace clone operation")
+	}
+}
+
+func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedWithCredentialRequest(
+	_ context.Context, request repoclone.GitCredentialRequest, _, _ string,
 ) (string, error) {
 	c.normalCalls++
-	c.workspaceID = workspaceID
-	c.provider = provider
+	c.workspaceID = request.WorkspaceID
+	c.provider = request.Provider
+	c.request = request
 	return "/repos/normal", nil
+}
+
+func (c *recordingAuthenticatedCloner) RefreshWorkspaceRepositoryWithCredentialRequest(
+	context.Context, repoclone.GitCredentialRequest, string, string, string,
+) error {
+	return nil
 }
 
 func (c *recordingAuthenticatedCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
@@ -2676,11 +2700,25 @@ func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), github, "https://github.com/acme/api.git"); err != nil {
 		t.Fatal(err)
 	}
+	bitbucket := &models.Repository{
+		ID: "repository-3", WorkspaceID: "workspace-3", Provider: "bitbucket",
+		ProviderHost: "https://bitbucket.org", ProviderOwner: "acme", ProviderName: "api",
+	}
+	if _, err := exec.ensureClonedWithWorkspaceAuthForSession(
+		context.Background(), "task-3", "session-3", bitbucket,
+		"https://bitbucket.org/acme/api.git",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if cloner.request.TaskID != "task-3" || cloner.request.SessionID != "session-3" ||
+		cloner.request.RepositoryID != "repository-3" {
+		t.Fatalf("plugin clone scope = %+v", cloner.request)
+	}
 	azureSSH := "git@ssh.dev.azure.com:v3/acme/Platform/api"
 	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), azure, azureSSH); err != nil {
 		t.Fatal(err)
 	}
-	if cloner.normalCalls != 2 || cloner.authCalls != 1 {
+	if cloner.normalCalls != 3 || cloner.authCalls != 1 {
 		t.Fatalf("non-Azure-HTTPS providers must use ordinary cloning: %+v", cloner)
 	}
 	if cloner.workspaceID != "workspace-1" || cloner.provider != "azure_devops" {

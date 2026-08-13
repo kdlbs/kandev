@@ -22,6 +22,54 @@ type Plugin interface {
 	HandleWebhook(ctx context.Context, req *WebhookRequest) (*WebhookResponse, error)
 }
 
+// ActionHandler is an optional browser-action extension. Keeping it separate
+// from Plugin preserves source compatibility for plugins that only handle
+// events and public webhooks.
+type ActionHandler interface {
+	HandleAction(context.Context, *PluginActionRequest) (*PluginActionResponse, error)
+}
+
+// EntityReferenceSearcher is an optional manifest-owned composer source.
+type EntityReferenceSearcher interface {
+	SearchEntityReferences(context.Context, *SearchEntityReferencesRequest) (*SearchEntityReferencesResponse, error)
+}
+
+// EntityReferenceAuthorizer is an optional live authorization extension for
+// canonical composer references.
+type EntityReferenceAuthorizer interface {
+	AuthorizeEntityReference(context.Context, *AuthorizeEntityReferenceRequest) (*AuthorizeEntityReferenceResponse, error)
+}
+
+// EntityReferenceHandler is the convenient optional extension for plugins
+// that own a complete reference source. The narrower interfaces above remain
+// available so the transport can return a precise unsupported error per RPC.
+type EntityReferenceHandler interface {
+	EntityReferenceSearcher
+	EntityReferenceAuthorizer
+}
+
+// GitCredentialResolver is an optional provider-neutral credential resolver.
+// Returned credentials are transient and must never be logged or persisted.
+type GitCredentialResolver interface {
+	ResolveGitCredential(context.Context, *ResolveGitCredentialRequest) (*ResolveGitCredentialResponse, error)
+}
+
+// GitCredentialBinder is an optional companion to GitCredentialResolver. It
+// provides a non-secret opaque revision for an exact provider lease scope.
+// Generic provider leases require this extension so credential rotation and
+// disconnect invalidate an already-issued helper lease without a secret read.
+type GitCredentialBinder interface {
+	GetGitCredentialBinding(context.Context, *GitCredentialBindingRequest) (*GitCredentialBindingResponse, error)
+}
+
+// GitCredentialHandler is the complete provider-neutral Git credential
+// extension. It keeps existing resolvers source-compatible while allowing
+// hosts to fail closed when a generic provider lacks binding support.
+type GitCredentialHandler interface {
+	GitCredentialResolver
+	GitCredentialBinder
+}
+
 // AgentToolPlugin is an optional extension implemented by plugins that
 // declare agent_tools in their manifest. Keeping it separate from Plugin
 // preserves source compatibility for existing plugins.

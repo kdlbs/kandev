@@ -512,7 +512,6 @@
   "thisWorkspaceUsesOneCredentialFor": "Esta área de trabalho usa uma credencial para a sincronização de repositórios, as vigilâncias, as tarefas em segundo plano e o acesso ao GitHub dos agentes geridos. As credenciais dos perfis de executor podem continuar a ter precedência.",
   "titleIssues": "Issues",
   "titlePullRequests": "Pull requests",
-  "togglePrEventPromptAutomation": "Alternar a automatização de prompts de eventos de PR",
   "typeACustomQueryFirst": "Escreva primeiro uma consulta personalizada",
   "typeOwnerRepoToSearch": "Escreva {{format}} para pesquisar",
   "unableToLoadTheCurrentTask": "Não foi possível carregar a definição atual de acesso das tarefas.",

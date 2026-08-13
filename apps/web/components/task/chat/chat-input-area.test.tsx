@@ -27,6 +27,10 @@ vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => (
   AzureDevOpsTaskPullRequestChip: () => null,
 }));
 
+vi.mock("@/components/integrations/registered-change-request-status", () => ({
+  RegisteredChangeRequestStatus: () => null,
+}));
+
 vi.mock("@/components/task/share/share-button", () => ({
   ShareButton: () => null,
   shareableSessionStateClient: () => false,

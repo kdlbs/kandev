@@ -1,7 +1,7 @@
 # ADR-2026-08-10-no-em-dash-public-copy: Keep Em Dashes Out of Public Copy
 
-**Status:** accepted  
-**Date:** 2026-08-10  
+**Status:** accepted
+**Date:** 2026-08-10
 **Area:** frontend, infra
 
 ## Context

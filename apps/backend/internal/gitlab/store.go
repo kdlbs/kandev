@@ -247,10 +247,10 @@ func (s *Store) createTables() error {
 // TABLE above (which is a no-op on an existing table).
 func (s *Store) migrateTaskMRAutomationFields() error {
 	columns := []struct{ name, ddl string }{
-		{"detailed_merge_status", "TEXT NOT NULL DEFAULT ''"},
-		{"reviewer_count", "INTEGER NOT NULL DEFAULT 0"},
-		{"unapproved_reviewers", "INTEGER NOT NULL DEFAULT 0"},
-		{"unresolved_discussions", "INTEGER NOT NULL DEFAULT 0"},
+		{"detailed_merge_status", sqlTextDefaultEmpty},
+		{"reviewer_count", sqlIntegerDefaultZero},
+		{"unapproved_reviewers", sqlIntegerDefaultZero},
+		{"unresolved_discussions", sqlIntegerDefaultZero},
 	}
 	return addMissingColumns(s, "gitlab_task_mrs", columns)
 }
@@ -367,13 +367,13 @@ func (s *Store) migrateWatchColumns() error {
 		name string
 		ddl  string
 	}{
-		{"repository_id", "TEXT NOT NULL DEFAULT ''"},
-		{"base_branch", "TEXT NOT NULL DEFAULT ''"},
+		{"repository_id", sqlTextDefaultEmpty},
+		{"base_branch", sqlTextDefaultEmpty},
 		{"max_inflight_tasks", "INTEGER"},
-		{"last_error", "TEXT NOT NULL DEFAULT ''"},
-		{"last_error_at", "DATETIME"},
+		{"last_error", sqlTextDefaultEmpty},
+		{"last_error_at", sqlDateTime},
 		{"generation", "INTEGER NOT NULL DEFAULT 1"},
-		{"deleting", "BOOLEAN NOT NULL DEFAULT 0"},
+		{"deleting", sqlBooleanDefaultFalse},
 	}
 	for _, table := range []string{"gitlab_review_watches", "gitlab_issue_watches"} {
 		existing, err := s.tableColumns(table)

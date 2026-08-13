@@ -1,5 +1,6 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 import type { SettingsMenuNode } from "./settings-menu-branches";
 
@@ -76,6 +77,7 @@ describe("useSettingsMenuBranches integration visibility", () => {
   });
 
   afterEach(() => {
+    pluginRegistry.unregisterPlugin("plugin-bitbucket");
     // Restore the file-scoped mock state so no test inherits the previous one's
     // toggles.
     hideDisabled.value = false;
@@ -127,6 +129,29 @@ describe("useSettingsMenuBranches integration visibility", () => {
     integrationEnabled.github = true;
 
     expect(listedIntegrations()).toContain("github");
+  });
+
+  it("adds and revokes registered provider integrations reactively", () => {
+    pluginRegistry.forPlugin("plugin-bitbucket").registerIntegrationSettings({
+      id: "bitbucket",
+      label: "Bitbucket",
+      description: "Configure Bitbucket.",
+      icon: () => null,
+      Component: () => null,
+    });
+    const { result } = renderHook(() => useSettingsMenuBranches("accordion"));
+    const integrations = result.current[WORKSPACES_HREF]?.children?.[0].children?.find((node) =>
+      node.href?.endsWith("/integrations"),
+    );
+
+    expect(integrations?.children?.some((node) => node.href?.endsWith("/bitbucket"))).toBe(true);
+
+    act(() => pluginRegistry.unregisterPlugin("plugin-bitbucket"));
+
+    const refreshed = result.current[WORKSPACES_HREF]?.children?.[0].children?.find((node) =>
+      node.href?.endsWith("/integrations"),
+    );
+    expect(refreshed?.children?.some((node) => node.href?.endsWith("/bitbucket"))).toBe(false);
   });
 
   it("leaves the flat menu without branches at all, whatever the toggles say", () => {

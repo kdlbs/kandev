@@ -14,10 +14,7 @@ import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
 
 const AUTO_FIX_BADGE_TESTID = "pr-status-auto-fix-chip";
-
-const testConstants = vi.hoisted(() => ({
-  defaultCIFixPrompt: "Default CI fix prompt",
-}));
+const testConstants = vi.hoisted(() => ({ defaultCIFixPrompt: "Default CI fix prompt" }));
 
 const responsiveMock = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "compactDesktop" | "desktop",
@@ -257,6 +254,7 @@ describe("PRStatusChip mobile branch", () => {
 
     const drawer = document.querySelector(DRAWER_SELECTOR);
     expect(drawer).not.toBeNull();
+    expect(drawer?.className).toContain("max-h-[80dvh]");
     // Inner popover body + close button render inside the drawer.
     expect(document.querySelector("[data-testid='pr-topbar-popover-inner']")).not.toBeNull();
     expect(document.querySelector("[data-testid='pr-status-chip-drawer-close']")).not.toBeNull();

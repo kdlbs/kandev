@@ -68,6 +68,22 @@ describe("buildWorkspacesBranch", () => {
     );
   });
 
+  it("appends registered provider integrations using the native workspace route", () => {
+    const IntegrationIcon = () => null;
+    const [workspace] = buildWorkspacesBranch(WORKSPACES, null, undefined, [
+      { id: "bitbucket", label: "Bitbucket", icon: IntegrationIcon },
+    ]);
+    const integration = integrationsTabOf(workspace.children ?? [])?.children?.find(
+      (node) => node.key === `workspace:${WORKSPACE_ID}:integrations:bitbucket`,
+    );
+
+    expect(integration).toMatchObject({
+      href: `/settings/workspaces/${WORKSPACE_ID}/integrations/bitbucket`,
+      label: { text: "Bitbucket" },
+      icon: IntegrationIcon,
+    });
+  });
+
   it("gives every tab and every integration its own mark", () => {
     const [workspace] = buildWorkspacesBranch(WORKSPACES);
     const tabs = workspace.children ?? [];

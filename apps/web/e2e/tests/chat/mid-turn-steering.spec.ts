@@ -5,6 +5,9 @@ import type { ApiClient } from "../../helpers/api-client";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
+import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+
+registerSeparateQueueRows(test);
 
 // End-to-end coverage for the mid-turn steering composer contract
 // (docs/specs/platform/mid-turn-steering.md). CONTRIBUTING.md requires Playwright

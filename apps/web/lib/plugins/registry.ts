@@ -11,50 +11,52 @@
  * methods) — this is what `host.ts` passes into a plugin's `initialize()`.
  */
 import { useSyncExternalStore } from "react";
+import { i18n } from "@/lib/i18n";
 import type {
   NavItem,
+  IntegrationSettingsRegistration,
   PluginRegistry,
-  PluginTaskFilterRegistrationKey,
   PluginRouteOptions,
+  PluginTranslationCatalogs,
+  RepositoryProviderRegistration,
+  ReviewProviderRegistration,
   SlotComponent,
+  TaskActionRegistration,
   TaskFilterRegistration,
   TaskMenuActionRegistration,
   TaskPanelRegistration,
   WsHandler,
 } from "./types";
 import type { ComponentType } from "react";
+import { pluginSlotOrderingId, taskActionKey } from "./registry-normalization";
+import {
+  wrapRepositoryProviderLifecycle,
+  wrapReviewProviderLifecycle,
+} from "./registry-provider-lifecycle";
+import { PluginWorkLifecycle } from "./registry-work-lifecycle";
+import { PluginProviderOwnership } from "./registry-provider-ownership";
+import { registerPluginTranslations, unregisterPluginTranslations } from "./plugin-translations";
+import type {
+  PluginIntegrationSettingsRegistration,
+  PluginKeybindingHandler,
+  PluginLifecycleSnapshot,
+  PluginLifecycleStatus,
+  PluginNavRegistration,
+  PluginRepositoryProviderRegistration,
+  PluginReviewProviderRegistration,
+  PluginRouteRegistration,
+  PluginSlotRegistration,
+  PluginTaskActionRegistration,
+  PluginTaskFilterRegistration,
+  PluginTaskMenuActionRegistration,
+  PluginTaskPanelRegistration,
+  RouteRegistration,
+} from "./registry-registration-types";
+export * from "./registry-registration-types";
 
 interface Owned<T> {
   pluginId: string;
   value: T;
-}
-
-/** A handler bound via `PluginRegistry.registerKeybinding`. */
-export interface PluginKeybindingHandler {
-  /** Plugin-local keybinding id (matches `ui.keybindings[].id`). */
-  id: string;
-  handler: (event: KeyboardEvent) => void;
-}
-
-export interface RouteRegistration {
-  path: string;
-  Component: ComponentType;
-  options?: PluginRouteOptions;
-}
-
-/** Route registration plus the owning pluginId — what `getRoutes()` returns. */
-export interface PluginRouteRegistration extends RouteRegistration {
-  pluginId: string;
-}
-
-/**
- * Nav item plus the owning pluginId — what `getNavRegistrations()` returns.
- * Navigation needs the owner because `NavItem.id` is plugin-local: two plugins
- * may register the same id, and the navigation manifest builds its React keys
- * from it (`lib/navigation/plugin-destinations.ts`).
- */
-export interface PluginNavRegistration extends NavItem {
-  pluginId: string;
 }
 
 interface SlotRegistration {
@@ -64,50 +66,21 @@ interface SlotRegistration {
   Component: SlotComponent;
 }
 
-/** Slot component plus its stable registry identity and owning plugin. */
-export interface PluginSlotRegistration {
-  registrationId: string;
-  orderingId: string;
-  pluginId: string;
-  Component: SlotComponent;
-}
-
 interface WsHandlerRegistration {
   action: string;
   handler: WsHandler;
 }
 
-/** Task panel registration plus the owning pluginId — what `getTaskPanels()` returns. */
-export interface PluginTaskPanelRegistration extends TaskPanelRegistration {
-  pluginId: string;
-}
-
-/** Task menu action registration plus the owning pluginId. */
-export interface PluginTaskMenuActionRegistration extends TaskMenuActionRegistration {
-  pluginId: string;
-}
-
-/** Task filter registration plus the owning pluginId. */
-export interface PluginTaskFilterRegistration extends TaskFilterRegistration {
-  pluginId: string;
-}
-
-/** Stable UI/state identity for plugin-local task filter ids. */
-export function pluginTaskFilterRegistrationKey(
-  registration: Pick<PluginTaskFilterRegistration, "pluginId" | "id">,
-): PluginTaskFilterRegistrationKey {
-  return `${registration.pluginId}:${registration.id}`;
-}
-
-/** Host-owned lifecycle states used to reconcile registrations with UI state. */
-export type PluginLifecycleStatus = "loading" | "ready" | "failed" | "removed";
-
-/** A generation-fenced lifecycle snapshot; never exposed through PluginRegistry. */
-export interface PluginLifecycleSnapshot {
-  status: PluginLifecycleStatus;
-  generation: number;
-}
-
+const CORE_INTEGRATION_SETTINGS_IDS = new Set([
+  "azure-devops",
+  "github",
+  "gitlab",
+  "jira",
+  "linear",
+  "sentry",
+  "slack",
+]);
+const INTEGRATION_SETTINGS_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 function removeByPlugin<T>(list: Owned<T>[], pluginId: string): Owned<T>[] {
   return list.filter((entry) => entry.pluginId !== pluginId);
 }
@@ -115,10 +88,16 @@ function removeByPlugin<T>(list: Owned<T>[], pluginId: string): Owned<T>[] {
 class PluginRegistryStore {
   private routes: Owned<RouteRegistration>[] = [];
   private settingsRoutes: Owned<RouteRegistration>[] = [];
+  private integrationSettings = new Map<string, Owned<IntegrationSettingsRegistration>>();
   private navItems: Owned<NavItem>[] = [];
   private slotComponents: Owned<SlotRegistration>[] = [];
   private wsHandlers: Owned<WsHandlerRegistration>[] = [];
   private keybindingHandlers: Owned<PluginKeybindingHandler>[] = [];
+  private repositoryProviders = new Map<string, Owned<RepositoryProviderRegistration>>();
+  private taskActions = new Map<string, Owned<TaskActionRegistration>>();
+  private reviewProviders = new Map<string, Owned<ReviewProviderRegistration>>();
+  private providerOwnership = new PluginProviderOwnership();
+  private workLifecycle = new PluginWorkLifecycle();
   private taskPanels: Owned<TaskPanelRegistration>[] = [];
   private taskMenuActions: Owned<TaskMenuActionRegistration>[] = [];
   private taskFilters: Owned<TaskFilterRegistration>[] = [];
@@ -137,6 +116,10 @@ class PluginRegistryStore {
   private declaredKeybindingIds = new Map<string, Set<string>>();
   private listeners = new Set<() => void>();
   private version = 0;
+
+  constructor() {
+    i18n.on("languageChanged", () => this.notify());
+  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -180,6 +163,30 @@ class PluginRegistryStore {
 
   registerSettingsRoute(pluginId: string, path: string, Component: ComponentType): void {
     this.settingsRoutes.push({ pluginId, value: { path, Component } });
+    this.notify();
+  }
+
+  registerIntegrationSettings(
+    pluginId: string,
+    integration: IntegrationSettingsRegistration,
+  ): void {
+    if (!INTEGRATION_SETTINGS_ID_PATTERN.test(integration.id)) {
+      throw new Error(
+        `[plugins] integration settings id "${integration.id}" must be a URL-safe slug`,
+      );
+    }
+    if (CORE_INTEGRATION_SETTINGS_IDS.has(integration.id)) {
+      throw new Error(
+        `[plugins] integration settings id "${integration.id}" is reserved by the host`,
+      );
+    }
+    const existing = this.integrationSettings.get(integration.id);
+    if (existing) {
+      throw new Error(
+        `[plugins] integration settings "${integration.id}" is already owned by "${existing.pluginId}"`,
+      );
+    }
+    this.integrationSettings.set(integration.id, { pluginId, value: integration });
     this.notify();
   }
 
@@ -265,21 +272,86 @@ class PluginRegistryStore {
     this.declaredKeybindingIds.set(pluginId, new Set(ids));
   }
 
+  /**
+   * Supplies manifest-backed repository provider declarations for a plugin.
+   * Kept separate from `forPlugin` so older boot payloads/plugins retain their
+   * existing routes, slots, websocket handlers, and keybindings during the
+   * additive contract rollout.
+   */
+  setDeclaredRepositoryProviderIds(pluginId: string, ids: string[]): void {
+    this.providerOwnership.setDeclarations(pluginId, ids);
+  }
+
+  registerRepositoryProvider(pluginId: string, provider: RepositoryProviderRegistration): void {
+    this.providerOwnership.claim(pluginId, provider.id);
+    if (this.repositoryProviders.has(provider.id)) {
+      throw new Error(`[plugins] repository provider "${provider.id}" is already registered`);
+    }
+    this.repositoryProviders.set(provider.id, {
+      pluginId,
+      value: this.withRepositoryProviderLifecycle(pluginId, provider),
+    });
+    this.notify();
+  }
+
+  registerTaskAction(pluginId: string, action: TaskActionRegistration): void {
+    const key = taskActionKey(pluginId, action.id);
+    if (this.taskActions.has(key)) {
+      throw new Error(
+        `[plugins] task action "${action.id}" is already registered by "${pluginId}"`,
+      );
+    }
+    this.taskActions.set(key, { pluginId, value: action });
+    this.notify();
+  }
+
+  registerReviewProvider(pluginId: string, provider: ReviewProviderRegistration): void {
+    this.providerOwnership.claim(pluginId, provider.id);
+    if (this.reviewProviders.has(provider.id)) {
+      throw new Error(`[plugins] review provider "${provider.id}" is already registered`);
+    }
+    this.reviewProviders.set(provider.id, {
+      pluginId,
+      value: this.withReviewProviderLifecycle(pluginId, provider),
+    });
+    this.notify();
+  }
+
+  registerTranslations(pluginId: string, catalogs: PluginTranslationCatalogs): void {
+    registerPluginTranslations(pluginId, catalogs);
+    this.notify();
+  }
+
   /** Bulk-revoke every registration owned by `pluginId` (disable/uninstall). */
   unregisterPlugin(pluginId: string): void {
     const before = this.totalCount();
     this.routes = removeByPlugin(this.routes, pluginId);
     this.settingsRoutes = removeByPlugin(this.settingsRoutes, pluginId);
+    this.integrationSettings.forEach((entry, id) => {
+      if (entry.pluginId === pluginId) this.integrationSettings.delete(id);
+    });
     this.navItems = removeByPlugin(this.navItems, pluginId);
     this.slotComponents = removeByPlugin(this.slotComponents, pluginId);
     this.wsHandlers = removeByPlugin(this.wsHandlers, pluginId);
     this.keybindingHandlers = removeByPlugin(this.keybindingHandlers, pluginId);
+    this.repositoryProviders.forEach((entry, id) => {
+      if (entry.pluginId === pluginId) this.repositoryProviders.delete(id);
+    });
+    this.taskActions.forEach((entry, id) => {
+      if (entry.pluginId === pluginId) this.taskActions.delete(id);
+    });
+    this.reviewProviders.forEach((entry, id) => {
+      if (entry.pluginId === pluginId) this.reviewProviders.delete(id);
+    });
+    const removedTranslations = unregisterPluginTranslations(pluginId);
+    this.abortPluginWork(pluginId);
+    this.providerOwnership.releasePlugin(pluginId);
     this.taskPanels = removeByPlugin(this.taskPanels, pluginId);
     this.taskMenuActions = removeByPlugin(this.taskMenuActions, pluginId);
     this.taskFilters = removeByPlugin(this.taskFilters, pluginId);
     this.pluginNames.delete(pluginId);
     this.declaredKeybindingIds.delete(pluginId);
-    if (this.totalCount() !== before) this.notify();
+    if (removedTranslations || this.totalCount() !== before) this.notify();
   }
 
   getRoutes(): PluginRouteRegistration[] {
@@ -293,6 +365,18 @@ class PluginRegistryStore {
 
   getSettingsRoutes(): RouteRegistration[] {
     return this.settingsRoutes.map((entry) => entry.value);
+  }
+
+  getIntegrationSettings(): PluginIntegrationSettingsRegistration[] {
+    return Array.from(this.integrationSettings.values()).map((entry) => ({
+      ...entry.value,
+      pluginId: entry.pluginId,
+    }));
+  }
+
+  getIntegrationSetting(id: string): PluginIntegrationSettingsRegistration | undefined {
+    const entry = this.integrationSettings.get(id);
+    return entry ? { ...entry.value, pluginId: entry.pluginId } : undefined;
   }
 
   /**
@@ -360,6 +444,40 @@ class PluginRegistryStore {
     )?.value.handler;
   }
 
+  /** Every active repository provider in registration order. */
+  getRepositoryProviders(): PluginRepositoryProviderRegistration[] {
+    return Array.from(this.repositoryProviders.values()).map((entry) => ({
+      ...entry.value,
+      pluginId: entry.pluginId,
+    }));
+  }
+
+  /** The active owner and lifecycle-wrapped provider for `providerId`, if any. */
+  getRepositoryProvider(providerId: string): PluginRepositoryProviderRegistration | undefined {
+    const entry = this.repositoryProviders.get(providerId);
+    return entry ? { ...entry.value, pluginId: entry.pluginId } : undefined;
+  }
+
+  /** Active task actions, optionally filtered by their target menu placement. */
+  getTaskActions(placement?: TaskActionRegistration["placement"]): PluginTaskActionRegistration[] {
+    return Array.from(this.taskActions.values())
+      .filter((entry) => !placement || entry.value.placement === placement)
+      .map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
+  }
+
+  /** Active review providers in deterministic display order. */
+  getReviewProviders(): PluginReviewProviderRegistration[] {
+    return Array.from(this.reviewProviders.values())
+      .map((entry) => ({ ...entry.value, pluginId: entry.pluginId }))
+      .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  }
+
+  /** The active owner and lifecycle-wrapped review provider for `providerId`, if any. */
+  getReviewProvider(providerId: string): PluginReviewProviderRegistration | undefined {
+    const entry = this.reviewProviders.get(providerId);
+    return entry ? { ...entry.value, pluginId: entry.pluginId } : undefined;
+  }
+
   /** Every registered task panel, in registration order. */
   getTaskPanels(): PluginTaskPanelRegistration[] {
     return this.taskPanels.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
@@ -391,28 +509,62 @@ class PluginRegistryStore {
   forPlugin(pluginId: string, pluginName?: string): PluginRegistry {
     if (pluginName) this.pluginNames.set(pluginId, pluginName);
     return {
+      registerTranslations: (catalogs) => this.registerTranslations(pluginId, catalogs),
       registerRoute: (path, Component, options) =>
         this.registerRoute(pluginId, path, Component, options),
       registerNavItem: (item) => this.registerNavItem(pluginId, item),
       registerSettingsRoute: (path, Component) =>
         this.registerSettingsRoute(pluginId, path, Component),
+      registerIntegrationSettings: (integration) =>
+        this.registerIntegrationSettings(pluginId, integration),
       registerComponent: (slot, Component) => this.registerComponent(pluginId, slot, Component),
       registerWsHandler: (action, handler) => this.registerWsHandler(pluginId, action, handler),
       registerKeybinding: (id, handler) => this.registerKeybinding(pluginId, id, handler),
+      registerRepositoryProvider: (provider) => this.registerRepositoryProvider(pluginId, provider),
+      registerTaskAction: (action) => this.registerTaskAction(pluginId, action),
+      registerReviewProvider: (provider) => this.registerReviewProvider(pluginId, provider),
       registerTaskPanel: (registration) => this.registerTaskPanel(pluginId, registration),
       registerTaskMenuAction: (registration) => this.registerTaskMenuAction(pluginId, registration),
       registerTaskFilter: (registration) => this.registerTaskFilter(pluginId, registration),
     };
   }
 
+  private withRepositoryProviderLifecycle(
+    pluginId: string,
+    provider: RepositoryProviderRegistration,
+  ): RepositoryProviderRegistration {
+    return wrapRepositoryProviderLifecycle(provider, (signal, operation) =>
+      this.workLifecycle.run(pluginId, signal, operation),
+    );
+  }
+
+  private withReviewProviderLifecycle(
+    pluginId: string,
+    provider: ReviewProviderRegistration,
+  ): ReviewProviderRegistration {
+    return wrapReviewProviderLifecycle(
+      provider,
+      (signal, operation) => this.workLifecycle.run(pluginId, signal, operation),
+      (unsubscribe) => this.workLifecycle.trackSubscription(pluginId, unsubscribe),
+    );
+  }
+
+  private abortPluginWork(pluginId: string): void {
+    this.workLifecycle.abort(pluginId);
+  }
+
   private totalCount(): number {
     return (
       this.routes.length +
       this.settingsRoutes.length +
+      this.integrationSettings.size +
       this.navItems.length +
       this.slotComponents.length +
       this.wsHandlers.length +
       this.keybindingHandlers.length +
+      this.repositoryProviders.size +
+      this.taskActions.size +
+      this.reviewProviders.size +
       this.taskPanels.length +
       this.taskMenuActions.length +
       this.taskFilters.length
@@ -440,10 +592,6 @@ class PluginRegistryStore {
     this.pluginLifecycles.set(pluginId, { status, generation });
     this.notify();
   }
-}
-
-function pluginSlotOrderingId(pluginId: string, slot: string, ordinal: number): string {
-  return `plugin:${encodeURIComponent(pluginId)}:${encodeURIComponent(slot)}:${ordinal}`;
 }
 
 export const pluginRegistry = new PluginRegistryStore();

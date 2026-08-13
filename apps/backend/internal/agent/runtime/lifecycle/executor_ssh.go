@@ -84,7 +84,7 @@ func NewSSHExecutor(
 		agentctlResolver: resolver,
 		secretStore:      secretStore,
 		agentList:        agentList,
-		logger:           log.WithFields(zap.String("runtime", "ssh")),
+		logger:           log.WithFields(zap.String("runtime", executorTypeSSH)),
 		sessions:         make(map[string]*sshSessionState),
 	}
 	executor.brokerPreflight = executor.preflightGitHubCredentialBroker

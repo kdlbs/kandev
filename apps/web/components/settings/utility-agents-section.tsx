@@ -57,23 +57,23 @@ export function mergeRefreshedUtilityAgents(
   });
 }
 
+export function updateBuiltinProfileDraft(agent: UtilityAgent, value: string): UtilityAgent {
+  const inherit = value === "" || value === USE_DEFAULT;
+  return {
+    ...agent,
+    agent_profile_id: inherit ? "" : value,
+    profile_binding_state: inherit ? "inherit" : "explicit",
+    enabled: true,
+  };
+}
+
 function updateBuiltinDraft(
   agent: UtilityAgent,
   value: string,
   setAgents: React.Dispatch<React.SetStateAction<UtilityAgent[]>>,
 ) {
-  const inherit = value === USE_DEFAULT;
   setAgents((prev) =>
-    prev.map((item) =>
-      item.id === agent.id
-        ? {
-            ...item,
-            agent_profile_id: inherit ? "" : value,
-            profile_binding_state: inherit ? "inherit" : "explicit",
-            enabled: true,
-          }
-        : item,
-    ),
+    prev.map((item) => (item.id === agent.id ? updateBuiltinProfileDraft(item, value) : item)),
   );
 }
 

@@ -277,6 +277,22 @@ func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Utilit
 	return err
 }
 
+func (r *sqliteRepository) NormalizeEmptyBuiltinBinding(ctx context.Context, id string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE utility_agents
+		SET profile_binding_state = ?, updated_at = ?
+		WHERE id = ? AND builtin = 1 AND agent_profile_id = '' AND profile_binding_state = ?
+	`), models.ProfileBindingInherit, time.Now().UTC(), id, models.ProfileBindingUnconfigured)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
+}
+
 func (r *sqliteRepository) DeleteAgent(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM utility_agents WHERE id = ? AND builtin = 0`), id)
 	return err

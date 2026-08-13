@@ -24,7 +24,14 @@ const (
 )
 
 const (
+	automationAuthorLoginKey   = "author_login"
+	automationBaseBranchKey    = "base_branch"
+	automationBodyKey          = "body"
+	automationHeadBranchKey    = "head_branch"
+	automationHTMLURLKey       = "html_url"
+	automationRepoKey          = "repo"
 	defaultBranchMain          = "main"
+	exampleGitHubPRURL         = "https://github.com/acme/api/pull/7"
 	exampleRepositoryOwner     = "org/repo"
 	placeholderRepositoryOwner = "Repository (owner/name)"
 	triggerCategoryGitHub      = "github"

@@ -354,11 +354,23 @@ func TestResolveGitDir(t *testing.T) {
 // different namespaces and equality checks fail. On Linux this is a no-op.
 func canonicalTempDir(t *testing.T) string {
 	t.Helper()
-	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	resolved, err := filepath.EvalSymlinks(trustedTempDir(t))
 	if err != nil {
 		t.Fatalf("eval temp dir: %v", err)
 	}
 	return resolved
+}
+
+// trustedTempDir makes fixture permissions independent of the caller's umask.
+// Local-repository production code intentionally rejects shared-writable parent
+// directories, while Go's t.TempDir uses mode 0777 before applying that umask.
+func trustedTempDir(t *testing.T) string {
+	t.Helper()
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatalf("chmod trusted temp dir: %v", err)
+	}
+	return directory
 }
 
 // TestResolveGitDirWithin_RejectsEscapedGitdir exercises the security-critical
@@ -678,15 +690,15 @@ func newDiscoveryService(t *testing.T, root string) *Service {
 
 // stubRemoteLister captures the call args and returns canned branches/err.
 type stubRemoteLister struct {
-	branches    []Branch
-	err         error
-	calls       int
-	workspaceID string
+	branches []Branch
+	err      error
+	calls    int
+	source   RemoteBranchSource
 }
 
-func (s *stubRemoteLister) ListRepoBranches(_ context.Context, workspaceID, _, _ string) ([]Branch, error) {
+func (s *stubRemoteLister) ListRepoBranches(_ context.Context, source RemoteBranchSource) ([]Branch, error) {
 	s.calls++
-	s.workspaceID = workspaceID
+	s.source = source
 	return s.branches, s.err
 }
 
@@ -727,8 +739,8 @@ func TestListBranches_RoutesProviderRepoToRemoteLister(t *testing.T) {
 	if lister.calls != 1 {
 		t.Fatalf("remote lister calls = %d, want 1", lister.calls)
 	}
-	if lister.workspaceID != "ws-1" {
-		t.Fatalf("remote lister workspace = %q, want ws-1", lister.workspaceID)
+	if lister.source.WorkspaceID != "ws-1" || lister.source.Provider != "github" || lister.source.Owner != "owner" || lister.source.Name != "repo" {
+		t.Fatalf("remote lister source = %+v", lister.source)
 	}
 	if len(got) != 2 || got[0].Name != "main" || got[1].Name != "develop" {
 		t.Fatalf("unexpected branches: %+v", got)

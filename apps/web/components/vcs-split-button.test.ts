@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { t } from "@/lib/i18n";
-import { determinePrimaryAction } from "./vcs-split-button";
+import { determinePrimaryAction, hasOpenChangeRequest } from "./vcs-split-button";
 
 /**
  * The VCS tooltips used to build their plural by hand:
@@ -40,6 +40,42 @@ describe("vcs split-button count-bearing copy", () => {
   it("keeps the divergence aria-labels count-invariant, as the shipped English was", () => {
     expect(t("integrations:commitsAheadAriaLabel", { value: 1 })).toBe("1 commits ahead");
     expect(t("integrations:commitsBehindAriaLabel", { value: 2 })).toBe("2 commits behind");
+  });
+});
+
+describe("hasOpenChangeRequest", () => {
+  it("recognizes a registered provider review as the native task change request", () => {
+    expect(
+      hasOpenChangeRequest(undefined, [
+        {
+          providerId: "bitbucket",
+          reviewKey: "workspace/repo#42",
+          title: "Fix auth",
+          url: "https://bitbucket.test/pull-requests/42",
+          connectionScope: "https://bitbucket.test",
+          repositoryId: "repository-1",
+          changeRequestNumber: 42,
+          state: "OPEN",
+        },
+      ]),
+    ).toBe(true);
+  });
+
+  it("does not treat merged or closed reviews as open", () => {
+    expect(
+      hasOpenChangeRequest("closed", [
+        {
+          providerId: "bitbucket",
+          reviewKey: "workspace/repo#42",
+          title: "Fix auth",
+          url: "https://bitbucket.test/pull-requests/42",
+          connectionScope: "https://bitbucket.test",
+          repositoryId: "repository-1",
+          changeRequestNumber: 42,
+          state: "MERGED",
+        },
+      ]),
+    ).toBe(false);
   });
 });
 

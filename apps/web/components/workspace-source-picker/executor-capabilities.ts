@@ -39,8 +39,8 @@ function hasProviderRepositoryLocator(repository: SavedRepositoryIdentity): bool
   if (!provider || !repository.provider_owner?.trim() || !repository.provider_name?.trim()) {
     return false;
   }
-  if (provider === "gitlab" && !repository.provider_host?.trim()) return false;
-  return provider === "github" || provider === "gitlab" || provider === "bitbucket";
+  if (repository.provider_host?.trim()) return true;
+  return provider === "github" || provider === "gitlab";
 }
 
 function hasSafeRemoteURL(remoteURL: string | undefined): boolean {

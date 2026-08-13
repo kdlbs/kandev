@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/azuredevops"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
+	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/jira"
@@ -104,6 +105,9 @@ type Services struct {
 	// registry, event delivery, health monitoring). Always constructed
 	// (non-nil) when initialization succeeds.
 	Plugins *plugins.Service
+	// GitCredentials is the shared provider-neutral lease broker used by the
+	// GitHub HTTP endpoint and task executor helper leases.
+	GitCredentials *gitcredentials.Broker
 	// Mentions owns the provider registry shared by # search and submission authorization.
 	Mentions *MentionComponents
 	// Auth is the opt-in authentication service (mode state machine, sessions,

@@ -101,11 +101,11 @@ func TestStorageCleanupProvidersIncludeWorkspaceDependencyCleanup(t *testing.T) 
 	}
 	providers := storageCleanupProviders(settings, workspaceFactory, nil, nil, nil)
 	for _, provider := range providers {
-		if provider.Name() == "workspace_dependencies" {
+		if provider.Name() == workspaceDependenciesProviderName {
 			return
 		}
 	}
-	t.Fatal("storage cleanup providers did not include workspace_dependencies")
+	t.Fatalf("storage cleanup providers did not include %s", workspaceDependenciesProviderName)
 }
 
 func TestWorkspaceDependencyCleanupProviderIsDefaultOff(t *testing.T) {
@@ -118,7 +118,7 @@ func TestWorkspaceDependencyCleanupProviderIsDefaultOff(t *testing.T) {
 	}
 	var dependencyProvider storagepkg.CleanupProvider
 	for _, provider := range storageCleanupProviders(settings, workspaceFactory, nil, nil, nil) {
-		if provider.Name() == "workspace_dependencies" {
+		if provider.Name() == workspaceDependenciesProviderName {
 			dependencyProvider = provider
 			break
 		}
@@ -667,7 +667,7 @@ func TestStorageCleanupProvidersIncludesQuarantineProvider(t *testing.T) {
 	if providers[0].Name() != "quarantine" {
 		t.Fatalf("first provider = %q, want quarantine", providers[0].Name())
 	}
-	if providers[1].Name() != "workspaces" || providers[2].Name() != "workspace_dependencies" || providers[3].Name() != "go_cache" {
+	if providers[1].Name() != "workspaces" || providers[2].Name() != workspaceDependenciesProviderName || providers[3].Name() != "go_cache" {
 		t.Fatalf("provider order = %q, %q, %q, want workspaces, workspace_dependencies, go_cache", providers[1].Name(), providers[2].Name(), providers[3].Name())
 	}
 }

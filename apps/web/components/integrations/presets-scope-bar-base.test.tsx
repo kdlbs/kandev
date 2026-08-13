@@ -1,7 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { IconInbox } from "@tabler/icons-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { IntegrationScopeBar, type IntegrationScopeBarProps } from "./presets-scope-bar-base";
+import {
+  IntegrationScopeBar,
+  type IntegrationScopeBarProps,
+  type ScopePreset,
+} from "./presets-scope-bar-base";
 
 let lastMenuItemSelectEvent: Event | null = null;
 
@@ -230,5 +234,27 @@ describe("IntegrationScopeBar saved defaults", () => {
 
     expect(onDeleteSaved).toHaveBeenCalledWith("saved-b");
     expect(lastMenuItemSelectEvent?.defaultPrevented).toBe(true);
+  });
+
+  it("uses a host icon when a plugin preset does not provide one", () => {
+    const presets = [{ value: "open", label: "Open", group: "inbox" }] as unknown as ScopePreset[];
+
+    expect(() =>
+      render(
+        <IntegrationScopeBar
+          testId="scope"
+          savedMenuTestId="saved"
+          kinds={[{ value: "pr", label: "Pull requests" }]}
+          selected={{ kind: "pr", source: "preset", id: "open" }}
+          onSelect={vi.fn()}
+          presetsByKind={() => presets}
+          savedPresets={[]}
+          onDeleteSaved={vi.fn()}
+          canSaveCurrent={false}
+          onSaveCurrent={vi.fn()}
+        />,
+      ),
+    ).not.toThrow();
+    expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
   });
 });
