@@ -3,6 +3,7 @@ package backendapp
 import (
 	"errors"
 
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	authservice "github.com/kandev/kandev/internal/auth"
@@ -66,19 +67,20 @@ type Repositories struct {
 }
 
 type Services struct {
-	Task         *taskservice.Service
-	User         *userservice.Service
-	Editor       *editorservice.Service
-	Notification *notificationservice.Service
-	Prompts      *promptservice.Service
-	Utility      *utilityservice.Service
-	Workflow     *workflowservice.Service
-	GitHub       *github.Service
-	GitLab       *gitlab.Service
-	AzureDevOps  *azuredevops.Service
-	Jira         *jira.Service
-	Linear       *linear.Service
-	Sentry       *sentry.Service
+	ManagedRuntimeSelections managedruntime.SelectionStore
+	Task                     *taskservice.Service
+	User                     *userservice.Service
+	Editor                   *editorservice.Service
+	Notification             *notificationservice.Service
+	Prompts                  *promptservice.Service
+	Utility                  *utilityservice.Service
+	Workflow                 *workflowservice.Service
+	GitHub                   *github.Service
+	GitLab                   *gitlab.Service
+	AzureDevOps              *azuredevops.Service
+	Jira                     *jira.Service
+	Linear                   *linear.Service
+	Sentry                   *sentry.Service
 	// WorkflowSync keeps workspace workflows in sync with definition files
 	// in a configured GitHub repository. Nil when GitHub is unavailable.
 	WorkflowSync *workflowsync.Service

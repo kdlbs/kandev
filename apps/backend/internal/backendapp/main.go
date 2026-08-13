@@ -362,6 +362,7 @@ func startServices( //nolint:cyclop
 		log.Error("Failed to initialize services", zap.Error(err))
 		return false
 	}
+	agentRegistry.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	if services.Workflow != nil {
 		addCleanup(services.Workflow.Close)
 	}
@@ -446,7 +447,17 @@ func startAgentInfrastructure(
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
-	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, repos.AgentSettings, agentRegistry, userSecretStore, services.Task.TaskBaseBranches)
+	lifecycleMgr, err := provideLifecycleManager(
+		ctx,
+		cfg,
+		log,
+		eventBus,
+		repos.AgentSettings,
+		agentRegistry,
+		userSecretStore,
+		services.Task.TaskBaseBranches,
+		services.ManagedRuntimeSelections,
+	)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
@@ -767,6 +778,7 @@ func startGatewayAndServe(
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
 	}))
+	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
@@ -1078,6 +1090,14 @@ func initOfficeServices(
 		cfg, repos, services, orchestratorSvc, eventBus,
 		agentctlBinaryPath, cfgLoader, cfgWriter, log,
 	)
+
+	// Task dependencies are a core Kanban relationship, not an Office feature.
+	// The task_blockers table physically lives in the Office repository's DDL but
+	// sits in the same database, so wire the store BEFORE the Office early return
+	// below. Wiring it after left a Kanban-only install with no dependency store
+	// at all: blocked_by on create failed and list_related_tasks reported nothing.
+	services.Task.SetBlockerRepository(repos.Office)
+
 	if !cfg.Features.Office {
 		log.Info("Office feature disabled; Office services skipped while global run scheduling remains enabled")
 		return runProcessorSvc, true
@@ -1105,8 +1125,9 @@ func initOfficeServices(
 	// its own delivery code.
 	wireRuntimeSkillDeployer(lifecycleMgr, agentRegistry, repos.Office, services.Office, cfg.ResolvedHomeDir(), log)
 
-	// Wire office-owned repositories into the task service for cross-package operations.
-	services.Task.SetBlockerRepository(repos.Office)
+	// Wire office-owned repositories into the task service for cross-package
+	// operations. The blocker repository is wired above, before the Office gate,
+	// because task dependencies are not Office-only.
 	services.Task.SetCommentRepository(repos.Office)
 
 	// Build feature-package services and wire all inter-service dependencies.

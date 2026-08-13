@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -159,6 +160,9 @@ type Manager struct {
 	// managedGoCache provides the opt-in GOCACHE for host-local executions.
 	// System storage wiring installs it after settings persistence is ready.
 	managedGoCache ManagedGoCacheEnvironmentProvider
+	// managedRuntimeSelections supplies exact versions for host-local managed
+	// npm runtimes. Remote/container runtimes intentionally do not consult it.
+	managedRuntimeSelections managedruntime.SelectionReader
 
 	activityCoordinator *activity.Coordinator
 	activityMu          sync.Mutex
@@ -177,6 +181,12 @@ type ManagedGoCacheEnvironmentProvider interface {
 // SetManagedGoCacheEnvironmentProvider wires install-wide managed cache settings.
 func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEnvironmentProvider) {
 	m.managedGoCache = provider
+}
+
+// SetManagedRuntimeSelectionStore wires the install-wide exact-version
+// resolver used by standalone managed-agent launches.
+func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
+	m.managedRuntimeSelections = store
 }
 
 // SetActivityCoordinator wires the install-wide host-resource activity gate.

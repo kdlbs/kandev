@@ -304,6 +304,9 @@ export type TaskFormInputsHandle = {
 };
 
 export type DialogFormState = {
+  /** Predecessor task IDs chosen in the dialog's "Depends on" selector. */
+  blockedBy: string[];
+  setBlockedBy: (v: string[]) => void;
   taskName: string;
   setTaskName: (v: string) => void;
   hasTitle: boolean;
@@ -479,6 +482,8 @@ export type SubmitHandlersDeps = {
   repositoryLocalPath: string;
   /** When true, the task is created with no repositories (repo-less mode). */
   noRepository: boolean;
+  /** Predecessor task IDs to link at creation time. */
+  blockedBy?: string[];
   /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
   workspacePath: string;
   /**

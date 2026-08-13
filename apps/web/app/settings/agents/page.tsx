@@ -53,8 +53,8 @@ type InstalledAgentsSectionProps = {
   resolveRuntimeUpdate: (name: string) => RuntimeUpdate | undefined;
   installJobs: Record<string, InstallJob>;
   updateJobs: Record<string, AgentUpdateJob>;
-  previewUpdate: (name: string) => Promise<AgentUpdatePreview>;
-  startUpdate: (name: string) => Promise<AgentUpdateJob>;
+  previewUpdate: (name: string, targetVersion?: string) => Promise<AgentUpdatePreview>;
+  startUpdate: (name: string, targetVersion: string) => Promise<AgentUpdateJob>;
   setTuiDialogOpen: (open: boolean) => void;
   handleRescan: () => Promise<void>;
 };

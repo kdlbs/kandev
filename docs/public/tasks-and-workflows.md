@@ -228,6 +228,75 @@ The preference only gates opening a task. Choosing **Start agent** (or a
 workflow step transition) always starts the agent as usual, and a failed or
 interrupted session still shows its recovery actions.
 
+## Task dependencies
+
+A task can declare that it **depends on** one or more other tasks. This is a
+peer relationship and is separate from the parent/child subtask hierarchy: a
+subtask says "B is part of A", a dependency says "B cannot start until A
+finishes". The two can be combined freely, including a dependency between a
+task and its own child.
+
+Dependencies form a graph, not just a line. A task can wait on several
+predecessors and can itself block several dependents. A link that would close a
+cycle is rejected when you try to create it, and the offending path is shown so
+you can see which link to drop.
+
+### Declare dependencies
+
+Dependencies are declared in the **New Task** dialog under **Depends on**, or
+by an agent over MCP. There is deliberately no editor in the open task: a
+dependency records how the work was planned, so the surfaces that display it
+stay read-only. To change one after the fact, use the MCP tools or delete and
+recreate the task.
+
+### What blocked means
+
+A task with at least one unfinished predecessor is **blocked**. Blocked tasks
+show a badge on their Kanban card and a dependency chip in the status row above
+the chat box, next to the pull request chip. The chip reports both directions,
+the tasks this one waits on and the tasks waiting on it, and each entry links
+to that task.
+
+While a task is blocked, no automated path starts it. That covers workflow
+**On Enter** auto-start, promotion out of a WIP queue, integration watchers,
+and dependency resolution itself. You can still press **Start agent**
+yourself; a manual start is an explicit override, not an error.
+
+### Chains that run themselves
+
+A task created with dependencies and an agent start request does not launch
+immediately. It records the start as an intent, and Kandev launches it once
+every predecessor has completed successfully. Setting that up along a path
+produces a chain:
+
+1. Create task A normally.
+2. Create task B with **Depends on** set to A.
+3. Create task C with **Depends on** set to B.
+
+Starting A is the only manual step. When A completes, B starts. When B
+completes, C starts. A is never restarted.
+
+Auto-start grants eligibility, never a bypass. If a task's dependencies have
+resolved but the target step is at its WIP limit, the task stays queued and
+launches when the queue promotes it, exactly as any other queued task would.
+
+### When a predecessor does not succeed
+
+Only successful completion resolves a dependency. A predecessor that ends in
+**Failed** or **Cancelled** leaves its dependents blocked, and the blocked
+reason names the failed task rather than reporting a generic wait. The chain
+stops there and waits for you. Kandev never retries a failed predecessor on its
+own and never quietly drops the link.
+
+Three things clear it, all of them deliberate: retry the predecessor until it
+succeeds, remove the link over MCP, or start the dependent manually.
+
+An **archived** predecessor is treated as unfinished, not as failed and not as
+resolved, so archiving a task does not release the work waiting on it.
+**Deleting** a task does remove its links in both directions, and any dependent
+that was waiting only on it becomes unblocked. That dependent is not started:
+deletion is not success.
+
 ## Find and organize tasks
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Kandev remembers the last selected view in that browser on the current device. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.
@@ -409,9 +478,9 @@ Revision history is not an immutable record of every autosave. Consecutive write
 | One versioned task plan               | Available      | Available in Office-specific surfaces where enabled |
 | Multiple named task documents         | Not exposed    | In-progress Office capability                       |
 | Task label editor and label filters   | Not exposed    | In-progress Office capability                       |
-| Blocked-by / blocking property editor | Not exposed    | In-progress Office capability                       |
+| Blocked-by / blocking property editor | Set at task creation or over MCP; read-only afterwards | In-progress Office capability |
 
-Stored related-task data can include blocker relationships, but regular Kanban has no blocker editor or blocker filter. Use workflow gates, direct-child completion, and explicit messages for supported Kanban coordination. Do not treat Office's named documents, labels, or blocker UI as a stable public contract yet.
+Regular Kanban reads and enforces blocker relationships (see [Task dependencies](#task-dependencies)) but has no blocker filter and no in-place editor: dependencies are declared when the task is created or over MCP. Office additionally exposes named documents, labels, and its own blocker property editor. Do not treat those Office surfaces as a stable public contract yet.
 
 ## Archive, unarchive, and delete
 

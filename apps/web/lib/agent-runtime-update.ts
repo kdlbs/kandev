@@ -1,5 +1,16 @@
-import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
+import type {
+  AgentUpdateJob,
+  AgentUpdateOperation,
+  AgentUpdatePreview,
+  AgentUpdateVersion,
+} from "@/lib/api";
 import { t } from "@/lib/i18n";
+
+const MAX_VISIBLE_RUNTIME_VERSIONS = 10;
+
+export function latestRuntimeVersions(versions: AgentUpdateVersion[]): AgentUpdateVersion[] {
+  return versions.slice(0, MAX_VISIBLE_RUNTIME_VERSIONS);
+}
 
 export type RuntimeVersionPair = {
   /** Display copy — localized, and therefore never compared. */
@@ -28,6 +39,34 @@ export function resolveRuntimeVersionPair(
   return { currentVersion, hasCurrentVersion: Boolean(reported), targetVersion, versionsMatch };
 }
 
+export function resolveRuntimeActiveVersion(
+  preview: AgentUpdatePreview,
+  job?: AgentUpdateJob,
+): string | undefined {
+  return job?.active_version ?? preview.active_version;
+}
+
+export function resolveRuntimeOperation(
+  preview: AgentUpdatePreview | null,
+  job?: AgentUpdateJob,
+): AgentUpdateOperation | undefined {
+  return job?.operation ?? preview?.operation;
+}
+
+export function runtimeOperationLabelKey(operation: AgentUpdateOperation | undefined): string {
+  switch (operation) {
+    case "rollback":
+      return "agents:rollBackRuntime";
+    case "repair":
+      return "agents:repairRuntime";
+    case "up_to_date":
+      return "agents:upToDateRuntime";
+    case "update":
+    default:
+      return "agents:updateRuntime";
+  }
+}
+
 export function canApproveAgentRuntimeUpdate({
   preview,
   job,
@@ -45,12 +84,16 @@ export function canApproveAgentRuntimeUpdate({
   starting: boolean;
   installInFlight: boolean;
 }): boolean {
-  const { currentVersion, hasCurrentVersion, targetVersion } = resolveRuntimeVersionPair(
+  const { hasCurrentVersion, targetVersion, versionsMatch } = resolveRuntimeVersionPair(
     preview,
     job,
   );
+  const operation = resolveRuntimeOperation(preview, job);
+  const operationAllowsApproval = operation
+    ? operation !== "up_to_date"
+    : hasCurrentVersion && !versionsMatch;
   return (
-    Boolean(preview && hasCurrentVersion && targetVersion && currentVersion !== targetVersion) &&
+    Boolean(preview && targetVersion && operationAllowsApproval) &&
     !previewError &&
     !loading &&
     !updateInFlight &&

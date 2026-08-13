@@ -3,7 +3,7 @@ import {
   isIssueWatchFromMetadata,
   issueFieldsFromMetadata,
 } from "@/lib/metadata-utils";
-import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { KanbanState, TaskDependencyRef } from "@/lib/state/slices/kanban/types";
 import type {
   ForegroundActivity,
   TaskPendingAction,
@@ -68,6 +68,11 @@ export type TaskLike = {
   wip_admitted?: boolean;
   queued_for_step_id?: string | null;
   queued_at?: string | null;
+  blocked?: boolean;
+  blocked_reason?: string | null;
+  depends_on?: TaskDependencyRef[] | null;
+  blocks?: TaskDependencyRef[] | null;
+  start_when_unblocked?: boolean;
   metadata?: Record<string, unknown> | null;
   archived_at?: string | null;
   status_summary?: TaskStatusSummary | null;
@@ -132,6 +137,37 @@ function pickWorkspaceFolders(source: TaskLike): KanbanTask["workspaceFolders"] 
  * leave them out of sync again (cf. sidebar filter regressions where the HTTP
  * snapshot derived `isPRReview` but the WS handler didn't).
  */
+/**
+ * dependencyProjection normalizes the derived dependency fields.
+ *
+ * A payload that carries NO dependency key at all leaves them undefined rather
+ * than defaulting to "no edges". Most `task.updated` publishers are lightweight
+ * and omit them, and inventing empty arrays here is destructive twice over: the
+ * event can insert the task into the board store before boot hydration runs, and
+ * hydration then keeps the "fresher" WS copy — permanently erasing the edges and
+ * blanking the dependency chip. When the keys ARE present (every boot payload and
+ * list read computes them), an empty list is a real "no edges".
+ */
+function dependencyProjection(
+  source: TaskLike,
+): Partial<
+  Pick<KanbanTask, "blocked" | "blockedReason" | "dependsOn" | "blocks" | "startWhenUnblocked">
+> {
+  const mentionsDependencies =
+    source.blocked !== undefined ||
+    source.depends_on !== undefined ||
+    source.blocks !== undefined ||
+    source.start_when_unblocked !== undefined;
+  if (!mentionsDependencies) return {};
+  return {
+    blocked: source.blocked ?? false,
+    blockedReason: source.blocked_reason ?? undefined,
+    dependsOn: source.depends_on ?? [],
+    blocks: source.blocks ?? [],
+    startWhenUnblocked: source.start_when_unblocked ?? false,
+  };
+}
+
 export function toKanbanTask(source: TaskLike): KanbanTask {
   return {
     id: pickId(source),
@@ -166,6 +202,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     wipAdmitted: source.wip_admitted,
     queuedForStepId: source.queued_for_step_id,
     queuedAt: source.queued_at,
+    ...dependencyProjection(source),
     statusSummary: source.status_summary,
     metadata: source.metadata,
     isArchived: source.archived_at != null,

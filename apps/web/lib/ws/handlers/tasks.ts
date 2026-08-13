@@ -6,6 +6,7 @@ import { cleanupTaskStorage } from "@/lib/local-storage";
 import { removeRecentTask } from "@/lib/recent-tasks";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask } from "@/lib/kanban/map-task";
+import { preserveOmittedDependencyFields } from "@/lib/ws/handlers/task-dependencies";
 import { isNewerStatusSummary } from "@/lib/task-status-summary";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
@@ -132,6 +133,7 @@ function mergeTaskUpdate(
     payloadKey: "status_summary",
     taskField: "statusSummary",
   });
+  preserveOmittedDependencyFields(existing, merged, payload);
   return merged;
 }
 

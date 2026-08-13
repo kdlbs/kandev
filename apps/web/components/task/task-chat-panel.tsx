@@ -170,6 +170,13 @@ type TaskChatPanelProps = {
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId?: string | null;
   taskId?: string | null;
+  /**
+   * Task this panel belongs to, independent of whether it has a session yet.
+   * Only the status row uses it, so a task with no session still shows its
+   * dependency and autopilot chips. `taskId` above stays session-gated because
+   * it also drives plan mode, the composer, and read tracking.
+   */
+  statusTaskId?: string | null;
   onOpenFile?: (path: string) => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
@@ -193,6 +200,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
   taskId: taskIdHint = null,
+  statusTaskId = null,
   onOpenFile,
   showRequestChangesTooltip = false,
   onRequestChangesTooltipDismiss,
@@ -414,6 +422,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         lastPromptScrollDirection={scrollDirection}
         showScrollToStart={showScrollToStartButton}
         onScrollToStart={scrollToStart}
+        statusTaskId={statusTaskId ?? taskIdHint}
       />
     </PanelRoot>
   );
@@ -479,6 +488,7 @@ type ChatFooterProps = {
   lastPromptScrollDirection: "up" | "down";
   showScrollToStart: boolean;
   onScrollToStart: () => void;
+  statusTaskId: string | null;
 };
 
 function ChatFooter({
@@ -498,6 +508,7 @@ function ChatFooter({
   lastPromptScrollDirection,
   showScrollToStart,
   onScrollToStart,
+  statusTaskId,
 }: ChatFooterProps) {
   const { t } = useTranslation();
   if (isArchived) {
@@ -524,6 +535,7 @@ function ChatFooter({
       lastPromptScrollDirection={lastPromptScrollDirection}
       showScrollToStart={showScrollToStart}
       onScrollToStart={onScrollToStart}
+      statusTaskId={statusTaskId}
     />
   );
 }

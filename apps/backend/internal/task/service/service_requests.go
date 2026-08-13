@@ -79,6 +79,16 @@ type CreateTaskRequest struct {
 	ProjectID              string   `json:"project_id,omitempty"`
 	Labels                 string   `json:"labels,omitempty"`
 	BlockedBy              []string `json:"blocked_by,omitempty"`
+
+	// StartWhenUnblocked records the requested agent start as a deferred launch
+	// intent that dependency resolution consumes, instead of launching now.
+	//
+	// nil means "derive from the request's start intent": a create that asked to
+	// start an agent AND declared BlockedBy is describing a chain step, not a
+	// task to run immediately. Automated callers pass start_agent=true by habit,
+	// so deriving is what makes an agent-built chain run in order rather than
+	// launching every step at once.
+	StartWhenUnblocked *bool `json:"start_when_unblocked,omitempty"`
 }
 
 // UpdateTaskRequest contains the data for updating a task

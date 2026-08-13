@@ -95,6 +95,12 @@ const (
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
 	MetaKeyDeferredLaunch    = "deferred_launch"
+	// DeferredLaunchStartWhenUnblockedKey marks a deferred launch intent as
+	// belonging to a task dependency chain rather than to WIP overflow. The
+	// record itself is identical; the flag lets dependency resolution recognise
+	// its own intents and keeps a WIP-only intent from being read as a chain
+	// step (and vice versa).
+	DeferredLaunchStartWhenUnblockedKey = "start_when_unblocked"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
 	// Centralised here so the set/read sites can't drift apart.
@@ -754,6 +760,45 @@ type ChildCompletionRow struct {
 	WorkflowStepID       string       `json:"workflow_step_id" db:"workflow_step_id"`
 	TerminalWorkflowStep bool         `json:"terminal_workflow_step"` // computed by annotateTerminalChildSteps, not a DB column
 	UpdatedAt            time.Time    `json:"updated_at" db:"updated_at"`
+}
+
+// HasStartWhenUnblockedIntent reports whether a task's deferred launch intent
+// belongs to a dependency chain rather than to WIP overflow.
+//
+// The two share one record; DeferredLaunchStartWhenUnblockedKey is what tells
+// them apart. Defined here, next to the key, so the DTO layer, the task service
+// and the orchestrator cannot drift on what counts as a chain intent.
+func HasStartWhenUnblockedIntent(task *Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	raw, ok := task.Metadata[MetaKeyDeferredLaunch]
+	if !ok {
+		return false
+	}
+	launch, ok := raw.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	flag, ok := launch[DeferredLaunchStartWhenUnblockedKey].(bool)
+	return ok && flag
+}
+
+// DropWIPDeferredLaunch removes a deferred launch record that only existed
+// because the task was waiting on WIP capacity.
+//
+// Every WIP admission point calls this instead of deleting the key outright.
+// An admitted task has nothing left to wait for as far as WIP is concerned, so
+// its overflow record is stale. A start-when-unblocked intent is NOT stale in
+// that situation: it is waiting on a predecessor, not on capacity, and the two
+// share this one metadata record. Deleting it on admission silently unmakes
+// every dependency chain, because admission happens at create time for any task
+// entering a step with room.
+func DropWIPDeferredLaunch(task *Task) {
+	if task == nil || task.Metadata == nil || HasStartWhenUnblockedIntent(task) {
+		return
+	}
+	delete(task.Metadata, MetaKeyDeferredLaunch)
 }
 
 // IsTerminalTaskState reports whether a task state means no further child work

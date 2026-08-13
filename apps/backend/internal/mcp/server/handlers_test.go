@@ -68,6 +68,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 		"parent_id", "workspace_id", "workflow_id", "workflow_step_id", "workspace_mode",
 		"title", "prompt", "autopilot", "agent_profile_id", "executor_profile_id", "start_agent",
 		"repository_id", "local_path", "repository_url", "base_branch", "external_id",
+		"blocked_by", "start_when_unblocked",
 	}, propertyNames(props), "unexpected change to the advertised create_task_kandev schema")
 	assert.NotContains(t, props, "description", "legacy alias must not increase the advertised schema")
 	assert.Contains(t, tool.Tool.Description, "'prompt' is the sub-agent's initial prompt")

@@ -18,6 +18,7 @@ import {
   type ExternalLinkProvider,
 } from "@/components/task/task-external-link-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
+import type { TaskDependencyRef } from "@/lib/state/slices/kanban/types";
 import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
@@ -80,6 +81,12 @@ export interface Task {
   wipAdmitted?: boolean;
   queuedForStepId?: string;
   queuedForStepTitle?: string;
+  /** Derived dependency state — see TaskDependencyRef in the kanban slice. */
+  blocked?: boolean;
+  blockedReason?: string;
+  dependsOn?: TaskDependencyRef[];
+  blocks?: TaskDependencyRef[];
+  startWhenUnblocked?: boolean;
   queuedAt?: string;
   issueUrl?: string;
   issueNumber?: number;

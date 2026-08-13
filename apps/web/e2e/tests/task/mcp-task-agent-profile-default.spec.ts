@@ -7,7 +7,7 @@ test.describe("MCP-created task agent profile default", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
     const workflow = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
       (candidate) => candidate.id === seedData.workflowId,
@@ -79,7 +79,12 @@ test.describe("MCP-created task agent profile default", () => {
     );
 
     await testPage.goto(`/t/${parent.id}`);
-    await new SessionPage(testPage).waitForLoad();
+    const parentSession = new SessionPage(testPage);
+    await parentSession.waitForLoad();
+    // The MCP call is part of the parent agent turn. Wait for the scripted
+    // turn to finish before polling the task list, otherwise a busy CI worker
+    // can spend the whole assertion window before the call is dispatched.
+    await parentSession.waitForChatIdle({ timeout: 120_000 });
 
     const parentSessions = await apiClient.listTaskSessions(parent.id);
     expect(parentSessions.sessions[0]?.agent_profile_id).toBe(seedData.agentProfileId);
@@ -92,7 +97,7 @@ test.describe("MCP-created task agent profile default", () => {
           subtaskId = tasks.find((task) => task.title === subtaskTitle)?.id;
           return subtaskId;
         },
-        { timeout: 60_000, message: "Omitted-profile MCP subtask should be created" },
+        { timeout: 30_000, message: "Omitted-profile MCP subtask should be created" },
       )
       .toBeTruthy();
 
@@ -102,7 +107,7 @@ test.describe("MCP-created task agent profile default", () => {
           const { sessions } = await apiClient.listTaskSessions(subtaskId!);
           return sessions[0]?.agent_profile_id;
         },
-        { timeout: 30_000, message: "MCP subtask should start with the workspace profile" },
+        { timeout: 60_000, message: "MCP subtask should start with the workspace profile" },
       )
       .toBe(workspaceProfile.id);
 

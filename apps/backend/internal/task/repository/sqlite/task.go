@@ -169,7 +169,7 @@ func runnerProjection(alias string) string {
 func (r *Repository) CreateTask(ctx context.Context, task *models.Task) error {
 	if task.WorkflowStepID != "" && task.QueuedForStepID == "" && !task.IsEphemeral {
 		task.WIPAdmitted = true
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		models.DropWIPDeferredLaunch(task)
 	}
 	return r.createTask(ctx, task, "", 0)
 }
@@ -202,7 +202,7 @@ func (r *Repository) CreateTaskWithWorkflowStepAdmission(
 		task.WIPAdmitted = !task.IsEphemeral
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		models.DropWIPDeferredLaunch(task)
 		return r.CreateTask(ctx, task)
 	}
 
@@ -248,7 +248,7 @@ func (r *Repository) applyAdmissionPlacement(
 		task.WIPAdmitted = true
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		models.DropWIPDeferredLaunch(task)
 	case feederStepID == "":
 		task.WorkflowStepID = targetStepID
 		task.WIPAdmitted = false

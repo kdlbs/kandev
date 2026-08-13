@@ -19,6 +19,21 @@ export type KanbanStepEvents = {
   on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
 };
 
+/**
+ * One end of a dependency edge. Carries title and state so the dependency chip
+ * and blocked badge render without fetching each related task.
+ *
+ * `status` is the resolution verdict and is only meaningful on `dependsOn`
+ * entries: "resolved" (finished successfully), "failed" (FAILED/CANCELLED —
+ * halts the chain), or "pending" (anything else, including archived).
+ */
+export type TaskDependencyRef = {
+  id: string;
+  title?: string;
+  state?: TaskStatus;
+  status?: "resolved" | "failed" | "pending";
+};
+
 export type KanbanState = {
   workflowId: string | null;
   steps: Array<{
@@ -104,6 +119,19 @@ export type KanbanState = {
     wipAdmitted?: boolean;
     queuedForStepId?: string;
     queuedAt?: string;
+    /**
+     * Task dependencies. Derived on the backend per read (never stored), so
+     * these arrive fresh on every boot payload and task.updated event.
+     */
+    blocked?: boolean;
+    /** "pending" | "failed" | "unknown"; absent when not blocked. */
+    blockedReason?: string;
+    /** Direct predecessors — the tasks this one is waiting on. Not transitive. */
+    dependsOn?: TaskDependencyRef[];
+    /** Direct dependents — the tasks waiting on this one. Not transitive. */
+    blocks?: TaskDependencyRef[];
+    /** A launch intent is waiting on dependency resolution. */
+    startWhenUnblocked?: boolean;
     isPRReview?: boolean;
     isIssueWatch?: boolean;
     metadata?: Record<string, unknown> | null;

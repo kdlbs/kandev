@@ -58,6 +58,7 @@ type FormResetters = {
   setGitHubUrlError: (v: string | null) => void;
   setFreshBranchEnabled: (v: boolean) => void;
   setCurrentLocalBranch: (v: string) => void;
+  setBlockedBy: (v: string[]) => void;
 };
 
 type FormResetEffectsArgs = {
@@ -271,6 +272,9 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   // mode and reopening for a different task would land in None mode again.
   resetters.setNoRepository(false);
   resetters.setWorkspacePath("");
+  // The dialog stays mounted between opens, so without this the previous
+  // create's predecessor selection reappears on the next one.
+  resetters.setBlockedBy([]);
 }
 
 /** Hook to manage draft persistence for task creation dialog */
@@ -319,6 +323,15 @@ function useDraftPersistence(
 function useWorkflowAgentProfileState() {
   const [workflowAgentProfileId, setWorkflowAgentProfileId] = useState("");
   return { workflowAgentProfileId, setWorkflowAgentProfileId };
+}
+
+/**
+ * Predecessor task IDs selected in the dialog. Dependencies are declared at
+ * creation time (or later via MCP); nothing edits them from the task view.
+ */
+function useTaskDependencyState() {
+  const [blockedBy, setBlockedBy] = useState<string[]>([]);
+  return { blockedBy, setBlockedBy };
 }
 
 function useFreshBranchState() {
@@ -453,6 +466,7 @@ export function useDialogFormState(
   const repos = useRepositoriesState();
   const remoteRepos = useRemoteReposState();
   const freshBranch = useFreshBranchState();
+  const dependencies = useTaskDependencyState();
   const branchesByUrl = useBranchesByURL(workspaceId);
   const prInfoByUrl = usePRInfoByURL(workspaceId);
 
@@ -467,6 +481,7 @@ export function useDialogFormState(
     prevOpenRef: form.prevOpenRef,
     lockedWorkflow,
     resetters: {
+      setBlockedBy: dependencies.setBlockedBy,
       setTaskName: form.setTaskName,
       setHasTitle: form.setHasTitle,
       setHasDescription: form.setHasDescription,
@@ -521,6 +536,7 @@ export function useDialogFormState(
     ...repos,
     ...remoteRepos,
     ...freshBranch,
+    ...dependencies,
     branchesByUrl,
     prInfoByUrl,
     clearDraft,

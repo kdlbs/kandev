@@ -80,11 +80,20 @@ export async function seedMultiPRReviewTask(
         patch: `@@ -0,0 +1 @@\n+${pr.marker}`,
       },
     ]);
-    await apiClient.associateGitHubTaskPR({
+    await apiClient.mockGitHubAssociateTaskPR({
       workspace_id: seedData.workspaceId,
       task_id: task.id,
       repository_id: seedData.repositoryId,
+      owner: REVIEW_OWNER,
+      repo: repositoryName,
+      pr_number: pr.number,
       pr_url: `https://github.com/${REVIEW_OWNER}/${repositoryName}/pull/${pr.number}`,
+      pr_title: pr.title,
+      head_branch: pr.branch,
+      base_branch: "main",
+      author_login: "reviewer",
+      additions: 1,
+      deletions: 0,
     });
   }
 

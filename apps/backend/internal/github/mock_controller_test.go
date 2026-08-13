@@ -311,17 +311,21 @@ func TestMockControllerAddRepoFilesRequiresOwnerAndRepo(t *testing.T) {
 
 func TestBuildTaskPRFromRequestCopiesWorkspaceID(t *testing.T) {
 	req := &associateTaskPRRequest{
-		TaskID:      "task-1",
-		WorkspaceID: "ws-1",
-		Owner:       "testorg",
-		Repo:        "testrepo",
-		PRNumber:    103,
+		TaskID:       "task-1",
+		WorkspaceID:  "ws-1",
+		RepositoryID: "repo-1",
+		Owner:        "testorg",
+		Repo:         "testrepo",
+		PRNumber:     103,
 	}
 
 	tp := buildTaskPRFromRequest(req, time.Now().UTC())
 
 	if tp.WorkspaceID != "ws-1" {
 		t.Fatalf("WorkspaceID = %q, want ws-1", tp.WorkspaceID)
+	}
+	if tp.RepositoryID != "repo-1" {
+		t.Fatalf("RepositoryID = %q, want repo-1", tp.RepositoryID)
 	}
 }
 

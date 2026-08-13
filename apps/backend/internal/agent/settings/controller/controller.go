@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/discovery"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
@@ -51,24 +52,25 @@ var (
 )
 
 type Controller struct {
-	repo            store.Repository
-	discovery       *discovery.Registry
-	agentRegistry   *registry.Registry
-	sessionChecker  SessionChecker
-	watcherDeps     WatcherDependencyChecker
-	routingTierDeps RoutingTierDependencyChecker
-	automationDeps  AutomationDependencyChecker
-	utilityDeps     UtilityDependencyChecker
-	mcpService      *mcpconfig.Service
-	modelCache      *modelfetcher.Cache
-	hostUtility     hostUtilityProvider
-	jobStore        *JobStore
-	updateJobStore  *AgentUpdateJobStore
-	runtimeUpdater  RuntimeUpdater
-	maintenance     *maintenanceCoordinator
-	hub             JobBroadcaster
-	logger          *logger.Logger
-	secretStore     secrets.SecretStore
+	repo                     store.Repository
+	discovery                *discovery.Registry
+	agentRegistry            *registry.Registry
+	sessionChecker           SessionChecker
+	watcherDeps              WatcherDependencyChecker
+	routingTierDeps          RoutingTierDependencyChecker
+	automationDeps           AutomationDependencyChecker
+	utilityDeps              UtilityDependencyChecker
+	mcpService               *mcpconfig.Service
+	modelCache               *modelfetcher.Cache
+	hostUtility              hostUtilityProvider
+	jobStore                 *JobStore
+	updateJobStore           *AgentUpdateJobStore
+	runtimeUpdater           RuntimeUpdater
+	managedRuntimeSelections managedruntime.SelectionStore
+	maintenance              *maintenanceCoordinator
+	hub                      JobBroadcaster
+	logger                   *logger.Logger
+	secretStore              secrets.SecretStore
 }
 
 // SetSecretStore wires the metadata-only validator used by shared agent
@@ -251,6 +253,13 @@ func (c *Controller) SetRuntimeUpdater(updater RuntimeUpdater) {
 	c.initializeUpdateJobStore()
 }
 
+// SetManagedRuntimeSelectionStore wires the install-wide active-version
+// persistence used by previews, jobs, and the available-agent catalogue.
+func (c *Controller) SetManagedRuntimeSelectionStore(store managedruntime.SelectionStore) {
+	c.managedRuntimeSelections = store
+	c.initializeUpdateJobStore()
+}
+
 // SetJobBroadcaster initializes the install job store with a WS broadcaster
 // for streaming install progress. Called once during handler registration.
 // If unset (hub == nil), the streaming install API returns
@@ -301,6 +310,7 @@ func (c *Controller) initializeUpdateJobStore() {
 		c.runtimeUpdater,
 		c.maintenance,
 		c.BroadcastAvailableAgents,
+		c.managedRuntimeSelections,
 	)
 }
 

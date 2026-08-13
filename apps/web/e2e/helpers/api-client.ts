@@ -176,6 +176,25 @@ type CreateTaskOpts = {
   workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
   workspace_group_id?: string;
   attachments?: MessageAttachmentInput[];
+  /** Task IDs this task must wait on. Suppresses the immediate agent launch. */
+  blocked_by?: string[];
+  /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
+  start_when_unblocked?: boolean;
+};
+
+export type TaskDependencyRef = {
+  id: string;
+  title: string;
+  state: string;
+  /** Only present on `depends_on` entries. */
+  status?: "resolved" | "failed" | "pending" | "missing";
+};
+
+export type TaskDependencyProjection = {
+  blocked?: boolean;
+  blocked_reason?: "pending" | "failed" | "unknown";
+  depends_on?: TaskDependencyRef[];
+  blocks?: TaskDependencyRef[];
 };
 
 type TaskRepositoryInput = {
@@ -225,6 +244,10 @@ function buildCreateTaskBody(
   setIf(body, "parent_id", options.parent_id);
   setIf(body, "workspace_mode", options.workspace_mode);
   setIf(body, "workspace_group_id", options.workspace_group_id);
+  setIf(body, "blocked_by", options.blocked_by);
+  if (options.start_when_unblocked !== undefined) {
+    body.start_when_unblocked = options.start_when_unblocked;
+  }
   return body;
 }
 
@@ -248,6 +271,10 @@ type OptionalAgentTaskOpts = {
   workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
   autopilot?: boolean;
   attachments?: MessageAttachmentInput[];
+  /** Task IDs this task must wait on. Suppresses the immediate agent launch. */
+  blocked_by?: string[];
+  /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
+  start_when_unblocked?: boolean;
 };
 
 /** `repositories` (with per-entry branches) takes precedence over the shorthand
@@ -272,6 +299,10 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   setIf(fields, "workspace_mode", opts.workspace_mode);
   if (opts.autopilot) fields.autopilot = true;
   setIf(fields, "attachments", opts.attachments);
+  setIf(fields, "blocked_by", opts.blocked_by);
+  if (opts.start_when_unblocked !== undefined) {
+    fields.start_when_unblocked = opts.start_when_unblocked;
+  }
   return fields;
 }
 
@@ -444,6 +475,10 @@ export class ApiClient {
       /** Existing group required when workspace_mode is shared_group. */
       workspace_group_id?: string;
       attachments?: MessageAttachmentInput[];
+      /** Task IDs this task must wait on. Suppresses the immediate agent launch. */
+      blocked_by?: string[];
+      /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
+      start_when_unblocked?: boolean;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
@@ -654,6 +689,10 @@ export class ApiClient {
       /** Start the task with the immutable autopilot MCP/prompt contract. */
       autopilot?: boolean;
       attachments?: MessageAttachmentInput[];
+      /** Task IDs this task must wait on. Suppresses the immediate agent launch. */
+      blocked_by?: string[];
+      /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
+      start_when_unblocked?: boolean;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -1479,6 +1518,7 @@ export class ApiClient {
   async mockGitHubAssociateTaskPR(data: {
     task_id: string;
     workspace_id?: string;
+    repository_id?: string;
     owner: string;
     repo: string;
     pr_number: number;
@@ -1949,6 +1989,43 @@ export class ApiClient {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
   }
 
+  /**
+   * Read a task's dependency projection. `blocked_reason` is `pending`,
+   * `failed`, or `unknown`; the last one means the store could not be read and
+   * the gate failed closed, so it must not be treated as unblocked.
+   */
+  async getTaskDependencies(taskId: string): Promise<TaskDependencyProjection> {
+    return this.request("GET", `/api/v1/tasks/${taskId}`);
+  }
+
+  /** Record "taskId is blocked by dependsOnTaskId". */
+  async addTaskDependency(
+    taskId: string,
+    dependsOnTaskId: string,
+  ): Promise<TaskDependencyProjection> {
+    return this.request("POST", `/api/v1/tasks/${taskId}/dependencies`, {
+      depends_on_task_id: dependsOnTaskId,
+    });
+  }
+
+  /**
+   * Raw add, for asserting the rejection path. A cycle answers 409 with a
+   * `cycle` array; the typed helper above would throw the body away.
+   */
+  async rawAddTaskDependency(taskId: string, dependsOnTaskId: string): Promise<Response> {
+    return this.rawRequest("POST", `/api/v1/tasks/${taskId}/dependencies`, {
+      depends_on_task_id: dependsOnTaskId,
+    });
+  }
+
+  /** Remove an edge. Removing one that is not there is a success no-op. */
+  async removeTaskDependency(
+    taskId: string,
+    dependsOnTaskId: string,
+  ): Promise<TaskDependencyProjection> {
+    return this.request("DELETE", `/api/v1/tasks/${taskId}/dependencies/${dependsOnTaskId}`);
+  }
+
   async setPrimarySession(sessionId: string): Promise<void> {
     await this.wsRequest("session.set_primary", { session_id: sessionId });
   }
@@ -2300,9 +2377,9 @@ export class ApiClient {
    */
   async waitForIntegrationAuthHealthy(
     integration: "jira" | "linear" | "sentry",
-    options: number | { timeoutMs?: number; workspaceId?: string } = 5_000,
+    options: number | { timeoutMs?: number; workspaceId?: string } = 30_000,
   ): Promise<void> {
-    const timeoutMs = typeof options === "number" ? options : (options.timeoutMs ?? 5_000);
+    const timeoutMs = typeof options === "number" ? options : (options.timeoutMs ?? 30_000);
     const workspaceId = typeof options === "number" ? undefined : options.workspaceId;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {

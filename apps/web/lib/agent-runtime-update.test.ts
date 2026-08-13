@@ -1,7 +1,25 @@
 import { afterEach, describe, expect, it } from "vitest";
 import i18n from "i18next";
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
-import { canApproveAgentRuntimeUpdate, resolveRuntimeVersionPair } from "./agent-runtime-update";
+import {
+  canApproveAgentRuntimeUpdate,
+  latestRuntimeVersions,
+  resolveRuntimeActiveVersion,
+  resolveRuntimeOperation,
+  resolveRuntimeVersionPair,
+  runtimeOperationLabelKey,
+} from "./agent-runtime-update";
+
+describe("latestRuntimeVersions", () => {
+  it("limits the selector to the ten newest options", () => {
+    const versions = Array.from({ length: 12 }, (_, index) => ({
+      version: `1.0.${12 - index}`,
+      latest: index === 0,
+    }));
+
+    expect(latestRuntimeVersions(versions)).toEqual(versions.slice(0, 10));
+  });
+});
 
 const preview = (overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePreview => ({
   agent_name: "claude-acp",
@@ -46,6 +64,26 @@ describe("resolveRuntimeVersionPair", () => {
   });
 });
 
+describe("resolveRuntimeActiveVersion", () => {
+  it("uses the successful job activation snapshot", () => {
+    expect(
+      resolveRuntimeActiveVersion(
+        preview({ active_version: "0.62.0" }),
+        job({ status: "succeeded", active_version: "0.63.0" }),
+      ),
+    ).toBe("0.63.0");
+  });
+
+  it("keeps the preview selection when activation fails", () => {
+    expect(
+      resolveRuntimeActiveVersion(
+        preview({ active_version: "0.62.0" }),
+        job({ status: "failed", active_version: "0.62.0" }),
+      ),
+    ).toBe("0.62.0");
+  });
+});
+
 describe("canApproveAgentRuntimeUpdate", () => {
   const ready = {
     preview: preview(),
@@ -60,6 +98,7 @@ describe("canApproveAgentRuntimeUpdate", () => {
   it.each([
     ["differing versions", ready, true],
     ["equal versions", { ...ready, preview: preview({ target_version: "0.62.0" }) }, false],
+    ["up-to-date operation", { ...ready, preview: preview({ operation: "up_to_date" }) }, false],
     ["missing current version", { ...ready, preview: preview({ current_version: "" }) }, false],
     ["missing target version", { ...ready, preview: preview({ target_version: "" }) }, false],
     ["loading preview", { ...ready, loading: true }, false],
@@ -74,6 +113,26 @@ describe("canApproveAgentRuntimeUpdate", () => {
     ],
   ])("returns %s = %s", (_name, state, expected) => {
     expect(canApproveAgentRuntimeUpdate(state)).toBe(expected);
+  });
+
+  it("allows a repair when the backend says the observed version is unknown", () => {
+    expect(
+      canApproveAgentRuntimeUpdate({
+        ...ready,
+        preview: preview({ current_version: "", operation: "repair" }),
+      }),
+    ).toBe(true);
+  });
+
+  it("uses operation state instead of translated labels", () => {
+    const state = preview({ operation: "rollback" });
+    expect(resolveRuntimeOperation(state)).toBe("rollback");
+    expect(
+      resolveRuntimeOperation(preview({ operation: "update" }), job({ operation: "repair" })),
+    ).toBe("repair");
+    expect(runtimeOperationLabelKey("rollback")).toBe("agents:rollBackRuntime");
+    expect(runtimeOperationLabelKey("repair")).toBe("agents:repairRuntime");
+    expect(runtimeOperationLabelKey("up_to_date")).toBe("agents:upToDateRuntime");
   });
 });
 

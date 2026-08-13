@@ -481,7 +481,7 @@ func (s *Service) MoveTaskWithOptions(
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
 		if !opts.PreserveDeferredLaunch {
-			delete(task.Metadata, models.MetaKeyDeferredLaunch)
+			models.DropWIPDeferredLaunch(task)
 		}
 	}
 	if err := s.syncTaskStateForWorkflowMove(ctx, task, oldStepID, workflowStepID); err != nil {

@@ -153,6 +153,11 @@ func provideOrchestrator(
 	// boot payload and task.updated events.
 	taskSvc.SetForegroundActivityProvider(orchestratorSvc)
 
+	// Task dependencies gate every automated launch and drive chain advancement.
+	// Wired unconditionally: dependencies are a core Kanban relationship, not an
+	// Office feature.
+	orchestratorSvc.SetTaskDependencyReader(taskSvc)
+
 	// Let the task service stamp status_summary.queued_prompt_count on task
 	// list/snapshot payloads (initial-load backstop for the sidebar badge; the
 	// status-summary projector keeps the field live between loads).

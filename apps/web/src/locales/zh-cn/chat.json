@@ -63,6 +63,7 @@
   "noRepositoriesAvailableInWorkspace": "此工作区中没有可用仓库",
   "noRepository": "无仓库",
   "optional": "（可选）",
+  "pinQueuedMessages": "固定消息队列",
   "providerQuotaModel": "模型：{{model}}",
   "providerQuotaProviderFallback": "提供商",
   "providerQuotaReset": "容量将于 {{resetAt}} 恢复。",
@@ -135,5 +136,6 @@
   "transientRetryAttempt": "第 {{attempt}} 次，共 {{maxAttempts}} 次",
   "transientRetryProviderModel": "{{provider}} · {{model}}",
   "transientRetryProvider": "服务商：{{provider}}",
-  "transientRetryModel": "模型：{{model}}"
+  "transientRetryModel": "模型：{{model}}",
+  "unpinQueuedMessages": "取消固定消息队列"
 }

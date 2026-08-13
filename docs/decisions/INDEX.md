@@ -83,7 +83,8 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-22-runtime-mutable-task-workspace-sources | [Runtime-Mutable Task Workspace Sources](2026-07-22-runtime-mutable-task-workspace-sources.md) | accepted (amended by 2026-07-27) | backend, frontend, protocol | 2026-07-22 |
 | 2026-07-24-opt-in-authentication | [Opt-in Authentication and Per-User Workspace Scoping](2026-07-24-opt-in-authentication.md) | accepted | backend, frontend, protocol, security | 2026-07-24 |
 | 2026-07-24-semantic-notification-events | [Semantic notification events come from domain occurrences](2026-07-24-semantic-notification-events.md) | accepted | backend, frontend, desktop | 2026-07-24 |
-| 2026-07-26-user-managed-agent-runtime-updates | [User-Managed Agent Runtime Updates](2026-07-26-user-managed-agent-runtime-updates.md) | accepted | backend, frontend, protocol | 2026-07-26 |
+| 2026-07-26-user-managed-agent-runtime-updates | [User-Managed Agent Runtime Updates](2026-07-26-user-managed-agent-runtime-updates.md) | superseded by 2026-08-12-validated-managed-runtime-version-selection | backend, frontend, protocol | 2026-07-26 |
+| 2026-08-12-validated-managed-runtime-version-selection | [Validate and Persist Managed Runtime Version Selection](2026-08-12-validated-managed-runtime-version-selection.md) | accepted | backend, frontend, protocol | 2026-08-12 |
 | 2026-07-26-single-session-model-switching | [Single-Session Model Switching](2026-07-26-single-session-model-switching.md) | accepted (amended 2026-07-27) | workflow, infra | 2026-07-26 |
 | 2026-07-27-task-git-credential-policy | [Separate GitHub Automation From Task Git Credential Policy](2026-07-27-task-git-credential-policy.md) | accepted | backend, frontend, security | 2026-07-27 |
 | 2026-07-27-spa-failure-containment-and-deployment-recovery | [SPA Failure Containment and Deployment Recovery](2026-07-27-spa-failure-containment-and-deployment-recovery.md) | accepted | frontend | 2026-07-27 |
@@ -160,4 +161,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-11-user-owned-status-bar-visibility | [Make Status Bar Visibility a Portable User Preference](2026-08-11-user-owned-status-bar-visibility.md) | accepted | backend, frontend, protocol | 2026-08-11 |
 | 2026-08-12-built-in-utility-default-inheritance | [Built-in Utility Actions Inherit the Global Profile by Default](2026-08-12-built-in-utility-default-inheritance.md) | superseded by 2026-08-12-empty-utility-bindings-inherit-default | backend, frontend | 2026-08-12 |
 | 2026-08-12-empty-utility-bindings-inherit-default | [Empty Built-in Utility Bindings Inherit the Default](2026-08-12-empty-utility-bindings-inherit-default.md) | accepted | backend, frontend | 2026-08-12 |
+| 2026-08-12-setup-timeout-owns-launch-budget | [One Setup Timeout Owns Launch Budgets](2026-08-12-setup-timeout-owns-launch-budget.md) | accepted | backend | 2026-08-12 |
 | 2026-08-10-no-em-dash-public-copy | [Keep Em Dashes Out of Public Copy](2026-08-10-no-em-dash-public-copy.md) | accepted | frontend, infra | 2026-08-10 |

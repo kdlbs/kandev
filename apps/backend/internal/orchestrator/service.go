@@ -388,6 +388,11 @@ type Service struct {
 	// Optional.
 	stepHistoryRecorder StepHistoryRecorder
 
+	// Reads task dependency state for the auto-start gate and the
+	// dependency-resolution reaction. Nil-safe: when unset, no task has
+	// dependencies so nothing is gated.
+	dependencyReader TaskDependencyReader
+
 	// Resolves the agent family names written in configure_session rules onto
 	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an
 	// exact string comparison.
@@ -1653,6 +1658,11 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
+	// Chains whose predecessor completed while the process was down: the
+	// dependencies_resolved event is in-memory and is not replayed, so without
+	// this sweep a chain stalls silently across a restart. Runs after the WIP
+	// reconciler so an admitted-by-promotion task is already eligible.
+	s.reconcileDependencyLaunchesOnStartup(ctx)
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {

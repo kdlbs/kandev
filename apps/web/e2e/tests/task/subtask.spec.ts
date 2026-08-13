@@ -233,7 +233,10 @@ test.describe("Subtask basics", () => {
       const autopilotHeight = await dialog
         .getByTestId("autopilot-toggle-row")
         .evaluate((element) => Math.round(element.getBoundingClientRect().height));
-      expect(autopilotHeight).toBe(contextHeight);
+      // Bounding boxes are rounded to CSS pixels. Allow the one-pixel
+      // difference produced by fractional layout at different viewport
+      // scales while still checking that the rows remain aligned.
+      expect(Math.abs(autopilotHeight - contextHeight)).toBeLessThanOrEqual(1);
       await expect(dialog.getByTestId("autopilot-info")).not.toBeFocused();
       await expect(dialog.getByTestId("subtask-prompt-input")).toBeFocused();
       await expect(

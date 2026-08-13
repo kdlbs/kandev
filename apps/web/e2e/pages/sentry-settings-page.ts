@@ -23,8 +23,8 @@ export class SentrySettingsPage {
     this.addSaveButton = page.getByRole("button", { name: "Save changes" });
   }
 
-  async goto() {
-    await this.page.goto("/settings/integrations/sentry");
+  async goto(workspaceId: string) {
+    await this.page.goto(`/settings/workspaces/${workspaceId}/integrations/sentry`);
     // The "Add instance" button renders whenever no form is open — present in
     // both the empty and populated states, so it is a reliable ready signal.
     await this.addInstanceButton.waitFor({ state: "visible" });

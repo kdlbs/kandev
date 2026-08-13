@@ -186,6 +186,7 @@ function useSubmitHandlersWiring({
     repositoryLocalPath,
     noRepository: fs.noRepository,
     workspacePath: fs.workspacePath,
+    blockedBy: fs.blockedBy,
   });
 }
 
