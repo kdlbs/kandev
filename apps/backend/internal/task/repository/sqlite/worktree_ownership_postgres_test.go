@@ -72,6 +72,33 @@ func TestCutoverPostgres_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	}
 }
 
+// TestCutoverPostgres_OrphanedSessionWorktreeUsesFlatOwner proves PostgreSQL
+// uses the shared recoverable-orphan classification during cutover.
+func TestCutoverPostgres_OrphanedSessionWorktreeUsesFlatOwner(t *testing.T) {
+	db := openLegacyPostgres(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-pg-orphan", taskID: "task-pg-orphan", repoID: "repo-pg-orphan", sessionID: "sess-pg-orphan"}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacyFlatEnv(t, db, seed, "wt-pg-orphan", "/tasks/pg-orphan/current", "feature/current", now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-pg-orphan", seed.repoID, "",
+		"/tasks/pg-orphan/stale", "feature/stale", "active", now)
+	deleteLegacySession(t, db, seed.sessionID)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("postgres cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeID != "wt-pg-orphan" ||
+		env.Repos[0].WorktreePath != "/tasks/pg-orphan/current" ||
+		env.Repos[0].WorktreeBranch != "feature/current" {
+		t.Fatalf("normalized postgres repos = %+v", env.Repos)
+	}
+}
+
 func TestCutoverPostgres_CanonicalRepoSupersedesDivergentFlatOwner(t *testing.T) {
 	db := openLegacyPostgres(t)
 	now := time.Now().UTC().Truncate(time.Second)

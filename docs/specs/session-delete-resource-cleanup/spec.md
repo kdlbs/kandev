@@ -124,6 +124,14 @@ owners. A higher-precedence task-owned source for the same repository and
 branch slot, either a canonical repository row or the surviving flat
 environment row, remains the owner even when a terminal reference carries a
 different physical `worktree_id`.
+Legacy session-worktree rows can also outlive their referenced session in
+databases written by older releases. An orphaned row is historical evidence
+when it is marked deleted or when its exact non-empty physical `worktree_id` is
+already represented by a non-deleted canonical repository row or surviving
+flat environment. The higher-precedence task-owned source remains authoritative
+and the orphan does not prevent cutover. An active orphan with no matching
+higher-precedence physical identity remains irreconcilable because the cutover
+cannot recover its task or environment owner, so startup fails closed.
 
 A non-deleted canonical repository row also takes precedence over deprecated
 flat fields for the same normalized task-owned repository slot: the repository
@@ -247,6 +255,12 @@ remain the authorization boundary for physical cleanup.
   sessions do not block migration when a higher-precedence task-owned source
   exists for the same repository and branch slot. The higher-precedence source
   remains authoritative.
+- An orphaned legacy session-worktree row does not block migration when it is
+  deleted history or its exact non-empty physical `worktree_id` is already
+  represented by a non-deleted canonical repository row or the surviving flat
+  environment. The orphan contributes no ownership or metadata.
+- An active orphaned session-worktree row with no higher-precedence source for
+  the same physical `worktree_id` remains irreconcilable and fails closed.
 - A legacy session row that repeats a higher-precedence physical `worktree_id`
   cannot block migration solely because its path or branch metadata is stale,
   including when the session is resumable. The higher-precedence repository or
@@ -339,6 +353,18 @@ remain the authorization boundary for physical cleanup.
   the surviving flat environment's repository slot, **WHEN** the new binary
   starts, **THEN** the flat environment remains the owner and the cutover
   completes.
+- **GIVEN** a legacy session-worktree row references a missing session and the
+  same non-empty `worktree_id` is owned by a surviving flat environment or a
+  non-deleted canonical repository row, **WHEN** the new binary starts,
+  **THEN** the task-owned source remains authoritative, the orphan contributes
+  no metadata, and the cutover completes without manual database edits.
+- **GIVEN** a deleted legacy session-worktree row references a missing session,
+  **WHEN** the new binary starts, **THEN** the row is treated as historical
+  evidence and does not block the cutover.
+- **GIVEN** an active legacy session-worktree row references a missing session
+  and no higher-precedence source carries its physical `worktree_id`, **WHEN**
+  the new binary starts, **THEN** startup fails closed and the complete legacy
+  schema and data remain unchanged.
 - **GIVEN** `task_environments` already has the normalized schema but a stale
   `task_session_worktrees` table remains from an intermediate build, **WHEN**
   the new binary starts, **THEN** the cutover preserves normalized environment
