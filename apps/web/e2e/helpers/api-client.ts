@@ -2420,20 +2420,27 @@ export class ApiClient {
     integration: "jira" | "linear" | "sentry",
     workspaceId?: string,
   ): Promise<boolean> {
-    if (integration === "sentry") {
-      const path = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
+    try {
+      if (integration === "sentry") {
+        const path = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
+        const res = await this.rawRequest("GET", path);
+        if (!res.ok || res.status !== 200) return false;
+        const body = (await res.json()) as {
+          instances?: Array<{ hasSecret?: boolean; lastOk?: boolean }>;
+        };
+        return (body.instances ?? []).some((i) => Boolean(i.hasSecret) && Boolean(i.lastOk));
+      }
+      const path = await this.withActiveWorkspace(`/api/v1/${integration}/config`, workspaceId);
       const res = await this.rawRequest("GET", path);
       if (!res.ok || res.status !== 200) return false;
-      const body = (await res.json()) as {
-        instances?: Array<{ hasSecret?: boolean; lastOk?: boolean }>;
-      };
-      return (body.instances ?? []).some((i) => Boolean(i.hasSecret) && Boolean(i.lastOk));
+      const cfg = (await res.json()) as { hasSecret?: boolean; lastOk?: boolean };
+      return Boolean(cfg.hasSecret) && Boolean(cfg.lastOk);
+    } catch {
+      // The auth-health probe runs while a worker backend can be restarting.
+      // Treat a refused connection like any other not-yet-healthy response so
+      // the bounded poll can observe the recovered backend.
+      return false;
     }
-    const path = await this.withActiveWorkspace(`/api/v1/${integration}/config`, workspaceId);
-    const res = await this.rawRequest("GET", path);
-    if (!res.ok || res.status !== 200) return false;
-    const cfg = (await res.json()) as { hasSecret?: boolean; lastOk?: boolean };
-    return Boolean(cfg.hasSecret) && Boolean(cfg.lastOk);
   }
 
   // --- Azure DevOps Mock Control ---
