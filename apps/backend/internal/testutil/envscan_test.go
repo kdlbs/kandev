@@ -65,6 +65,27 @@ func read() string { return os.Getenv("BAR") }
 	}
 }
 
+// TestUncoveredEnvReadsUncoveredLookupEnv pins the os.LookupEnv half of the
+// classifier. Neither guarded package reads the environment that way today, so
+// dropping LookupEnv from isEnvRead would leave every other test in this file
+// and both live package guards green while silently narrowing the scan.
+func TestUncoveredEnvReadsUncoveredLookupEnv(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import "os"
+
+func read() (string, bool) { return os.LookupEnv("BAR") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil)
+	if len(messages) != 1 {
+		t.Fatalf("expected exactly one uncovered-name message, got %v", messages)
+	}
+	if !strings.Contains(messages[0], "BAR") {
+		t.Fatalf("message %q does not name the uncovered variable", messages[0])
+	}
+}
+
 func TestUncoveredEnvReadsUnresolvableIdentifier(t *testing.T) {
 	fileSet, file := parseSnippet(t, `package example
 
