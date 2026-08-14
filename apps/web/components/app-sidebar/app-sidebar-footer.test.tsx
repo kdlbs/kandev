@@ -512,6 +512,11 @@ describe("AppSidebarFooter plugin footer capacity and overflow", () => {
     // without this, a component rendering nothing at all would still pass
     // the two absence checks below.
     expect(screen.getByRole("button", { name: "Stats" })).not.toBeNull();
+    // Soleness, not just presence: no plugin button exists either, so Stats
+    // is the *only* manifest button (spec.md:789's middle clause) — without
+    // this, a component that rendered Stats alongside a stray plugin button
+    // would still pass the Stats-presence check above.
+    expect(document.querySelectorAll('[data-testid^="sidebar-plugin:"]')).toHaveLength(0);
     expect(screen.queryByTestId(OVERFLOW_TRIGGER_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(overflowMenuTestIds.content)).toBeNull();
   });

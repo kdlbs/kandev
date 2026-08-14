@@ -13,6 +13,7 @@ import {
 } from "@tabler/icons-react";
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
 import type { DestinationIcon } from "@/lib/navigation/types";
+import { MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "@/lib/navigation/plugin-footer-budget";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -192,13 +193,12 @@ function SidebarFooterDialogs({
 }
 
 /**
- * Inline budget for plugin `insights`-section destinations in the desktop
- * sidebar footer. Exported so conformance tests derive their expectations
- * from it rather than hard-coding the digit — see spec.md#Why-3, which also
- * states this is a layout constant, not a contract with plugin authors, and
- * may move without renegotiating that spec.
+ * Re-exported so existing unit-test imports from this module keep working —
+ * the value itself lives in `plugin-footer-budget.ts` (see that module's
+ * doc comment) so Playwright specs, which run outside the React tree, can
+ * import it too without pulling in this file's JSX/React dependencies.
  */
-export const MAX_INLINE_PLUGIN_FOOTER_ITEMS = 3;
+export { MAX_INLINE_PLUGIN_FOOTER_ITEMS };
 
 type InsightDestinations = ReturnType<typeof useStaticDestinations>;
 
