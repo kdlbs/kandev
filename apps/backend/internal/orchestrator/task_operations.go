@@ -563,6 +563,10 @@ func (s *Service) StartCreatedSession(
 	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
 	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive, autoStart, attachments)
 
+	// The task is running now, so any pending "start it later" intent is spent.
+	// See consumeDeferredLaunchOnStart for why the predicate is the start itself.
+	s.consumeDeferredLaunchOnStart(ctx, taskID)
+
 	// Ensure a PR watch exists so the poller can detect PRs created by the agent.
 	// PrepareTaskSession may have already created one, but if that goroutine failed
 	// or hadn't completed, this guarantees coverage.
@@ -1045,6 +1049,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
+
+	// The task is running now, so any pending "start it later" intent is spent.
+	// See consumeDeferredLaunchOnStart for why the predicate is the start itself.
+	s.consumeDeferredLaunchOnStart(ctx, taskID)
 
 	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
