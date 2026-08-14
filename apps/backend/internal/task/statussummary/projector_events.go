@@ -8,7 +8,6 @@ import (
 	"github.com/kandev/kandev/internal/events"
 )
 
-
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
 	switch eventType {
 	case events.TaskUpdated:
