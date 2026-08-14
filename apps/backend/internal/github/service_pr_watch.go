@@ -946,13 +946,34 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
 
+	return s.persistAndPublishTaskPRSync(ctx, tp, changed, status.OutcomeFieldsPopulated)
+}
+
+// persistAndPublishTaskPRSync writes the reconciled sync state and, on
+// change, publishes github.task_pr.updated. It re-reads the row after the
+// write rather than publishing tp directly: tp.AutoMergeObservedAt is
+// computed from THIS call's own (possibly stale-by-the-time-of-write) read
+// at the top of SyncTaskPR, but UpdateTaskPR persists it through
+// COALESCE(auto_merge_observed_at, ?), so a concurrent sync that lands its
+// own write in the gap between this call's read and its write can leave the
+// column holding a DIFFERENT, earlier timestamp than tp carries in memory.
+// Publishing tp unmodified would then broadcast a value that never matches
+// what a subsequent read of the row returns (codex [P2]). Split out of
+// SyncTaskPR to keep that function within the repo's complexity limits and
+// to make the re-read-before-publish behavior directly testable.
+func (s *Service) persistAndPublishTaskPRSync(ctx context.Context, tp *TaskPR, changed, outcomeFieldsPopulated bool) error {
 	if err := s.store.UpdateTaskPR(ctx, tp); err != nil {
 		return fmt.Errorf("update task PR: %w", err)
 	}
-	incTaskPROutcomeSync(status.OutcomeFieldsPopulated)
+	incTaskPROutcomeSync(outcomeFieldsPopulated)
 
 	if changed && s.eventBus != nil {
-		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
+		published, err := s.store.GetTaskPRByID(ctx, tp.ID)
+		if err != nil {
+			s.logger.Debug("failed to re-read task PR before publishing", zap.Error(err))
+			published = tp
+		}
+		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", published)
 		if err := s.eventBus.Publish(ctx, events.GitHubTaskPRUpdated, event); err != nil {
 			s.logger.Debug("failed to publish task PR updated event", zap.Error(err))
 		}

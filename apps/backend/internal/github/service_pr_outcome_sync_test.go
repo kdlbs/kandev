@@ -291,6 +291,75 @@ func TestUpdateTaskPR_AutoMergeLatchIsAtomicUnderConcurrentStaleWrites(t *testin
 	}
 }
 
+// TestPersistAndPublishTaskPRSync_PublishesReReadValueNotStaleInMemoryOne is
+// the deterministic regression for codex [P2]. SyncTaskPR computes
+// tp.AutoMergeObservedAt from its OWN top-of-call read, but UpdateTaskPR
+// persists that field through COALESCE(auto_merge_observed_at, ?), so a
+// concurrent sync landing its own write in the gap between this call's read
+// and its write can leave the column holding a different, earlier timestamp
+// than tp carries in memory. Reproducing the exact interleaving would need
+// real goroutines racing a synchronous function with no injectable pause
+// point, which is nondeterministic; this instead drives the extracted
+// persistAndPublishTaskPRSync helper directly with a manufactured "stale"
+// tp (as if this call's read happened before a concurrent write it never
+// observed) after seeding the DB with a different, already-persisted value
+// (the concurrent write). The bug: publishing tp unmodified would broadcast
+// the stale value, not what a fresh read returns.
+func TestPersistAndPublishTaskPRSync_PublishesReReadValueNotStaleInMemoryOne(t *testing.T) {
+	svc, store, eb := setupSyncTest(t)
+	ctx := context.Background()
+
+	tp := &TaskPR{
+		TaskID: "task-p2-race", Owner: "owner", Repo: "repo", PRNumber: 1,
+		PRURL: "https://github.com/owner/repo/pull/1", PRTitle: "p2 race",
+		HeadBranch: "feat", BaseBranch: "main", State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, tp); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	// Simulate a concurrent sync that already landed its own write: the DB
+	// now holds persistedAt, set while our own in-memory tp (below) still
+	// reflects the pre-race NULL it read moments earlier.
+	concurrentWriter := *tp
+	persistedAt := time.Now().UTC()
+	concurrentWriter.AutoMergeObservedAt = &persistedAt
+	if err := store.UpdateTaskPR(ctx, &concurrentWriter); err != nil {
+		t.Fatalf("simulate concurrent writer: %v", err)
+	}
+
+	// Our own call's stale view: computed from a read taken before the
+	// concurrent writer's timestamp above landed.
+	staleTP := *tp
+	staleObservedAt := persistedAt.Add(-time.Minute)
+	staleTP.AutoMergeObservedAt = &staleObservedAt
+
+	if err := svc.persistAndPublishTaskPRSync(ctx, &staleTP, true, true); err != nil {
+		t.Fatalf("persistAndPublishTaskPRSync: %v", err)
+	}
+
+	got, err := store.GetTaskPRByID(ctx, tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if got.AutoMergeObservedAt == nil || !got.AutoMergeObservedAt.Equal(persistedAt) {
+		t.Fatalf("persisted AutoMergeObservedAt = %v, want the concurrent writer's %v preserved by COALESCE",
+			got.AutoMergeObservedAt, persistedAt)
+	}
+
+	if eb.publishedCount() != 1 {
+		t.Fatalf("published events = %d, want 1", eb.publishedCount())
+	}
+	published, ok := eb.events[0].Data.(*TaskPR)
+	if !ok {
+		t.Fatalf("published event data = %T, want *TaskPR", eb.events[0].Data)
+	}
+	if published.AutoMergeObservedAt == nil || !published.AutoMergeObservedAt.Equal(persistedAt) {
+		t.Fatalf("published AutoMergeObservedAt = %v, want the re-read persisted value %v, not the stale in-memory %v",
+			published.AutoMergeObservedAt, persistedAt, staleObservedAt)
+	}
+}
+
 // TestSyncTaskPR_OutcomeFieldChangePublishesEvent covers AC-18: a sync that
 // changes only an outcome field (no legacy field change) still publishes
 // github.task_pr.updated, and an unchanged sync publishes nothing.
