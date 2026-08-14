@@ -67,6 +67,7 @@ type subagentContextRow struct {
 	taskSessionID    string
 	taskID           string
 	turnID           sql.NullString
+	agentExecutionID string
 	parentToolCallID sql.NullString
 	subagentType     sql.NullString
 	description      sql.NullString
@@ -89,12 +90,12 @@ func getSubagentContextRow(t *testing.T, repo *Repository, sessionID, toolCallID
 	t.Helper()
 	row := &subagentContextRow{}
 	err := repo.db.QueryRow(repo.db.Rebind(`
-		SELECT id, task_session_id, task_id, turn_id, parent_tool_call_id, subagent_type, description,
+		SELECT id, task_session_id, task_id, turn_id, agent_execution_id, parent_tool_call_id, subagent_type, description,
 			agent_id, child_session_id, model, agent_status, tool_status, is_async,
 			total_tokens, tool_use_count, duration_ms, source, observed_at, settled_at, updated_at
 		FROM task_session_subagents WHERE task_session_id = ? AND tool_call_id = ?
 	`), sessionID, toolCallID).Scan(
-		&row.id, &row.taskSessionID, &row.taskID, &row.turnID, &row.parentToolCallID, &row.subagentType, &row.description,
+		&row.id, &row.taskSessionID, &row.taskID, &row.turnID, &row.agentExecutionID, &row.parentToolCallID, &row.subagentType, &row.description,
 		&row.agentID, &row.childSessionID, &row.model, &row.agentStatus, &row.toolStatus, &row.isAsync,
 		&row.totalTokens, &row.toolUseCount, &row.durationMs, &row.source, &row.observedAt, &row.settledAt, &row.updatedAt,
 	)
@@ -735,5 +736,192 @@ func TestSubagentContextBackfillStatementFailureLogsWarnWithMigrationName(t *tes
 	}
 	if !found {
 		t.Fatalf("no WARN log carrying migration name %q found among %d entries", "task_session_subagents.backfill", len(entries))
+	}
+}
+
+// TestSubagentContextBackfillDoesNotRescanWhenBackfillThroughEmpty is SR45's
+// named discriminating test: the activation guard must be a row-EXISTENCE
+// check on both kandev_meta keys, not a value-non-empty check. AC-24f makes
+// the empty string a legitimate, present value for backfill_through (no
+// message matched the predicate at activation time) — a value-non-empty
+// guard would misread that row as "not yet activated" and re-scan on every
+// later boot, exactly the per-boot cost AC-23a forbids. This test activates
+// with zero messages present (so backfill_through is written as ”) and
+// then proves a second runMigrations() call, after a message now exists,
+// still does not backfill it.
+func TestSubagentContextBackfillDoesNotRescanWhenBackfillThroughEmpty(t *testing.T) {
+	repo, db := newSubagentMigrationTestRepo(t)
+	seedForMsgTest(t, repo, "task-empty-guard", "session-empty-guard", "turn-empty-guard")
+
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("first runMigrations (activates with no messages): %v", err)
+	}
+	backfillThrough, ok := readMetaKey(t, db, "subagent_context_backfill_through")
+	if !ok {
+		t.Fatal("subagent_context_backfill_through must be present after activation")
+	}
+	if backfillThrough != "" {
+		t.Fatalf("subagent_context_backfill_through = %q, want empty string (no messages existed at activation)", backfillThrough)
+	}
+
+	ts := time.Date(2026, 8, 5, 20, 0, 0, 0, time.UTC)
+	seedSubagentMessage(t, repo, "msg-empty-guard", "session-empty-guard", "task-empty-guard", "turn-empty-guard",
+		"tc-empty-guard", "", "completed", map[string]interface{}{"status": "completed"}, ts, ts)
+
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("second runMigrations (a later boot, message now exists): %v", err)
+	}
+	if count := countSubagentContextRows(t, repo, "session-empty-guard", "tc-empty-guard"); count != 0 {
+		t.Fatalf("row count after second boot = %d, want 0: an empty-string backfill_through is a PRESENT row and must not re-trigger the scan", count)
+	}
+}
+
+// TestSubagentContextExecutionIdentityShapeHoldsOnFreshDatabase covers AC-33
+// clause 6: a brand-new database reaches the end-state shape directly via
+// initSubagentContextSchema (CREATE TABLE IF NOT EXISTS already includes
+// agent_execution_id and the 3-column key), and the migration still writes
+// subagent_context_execution_since for it rather than treating "nothing to
+// rebuild" as "nothing to activate".
+func TestSubagentContextExecutionIdentityShapeHoldsOnFreshDatabase(t *testing.T) {
+	repo, db := newSubagentMigrationTestRepo(t)
+
+	holds, err := repo.subagentContextExecutionShapeHolds()
+	if err != nil {
+		t.Fatalf("subagentContextExecutionShapeHolds: %v", err)
+	}
+	if !holds {
+		t.Fatal("subagentContextExecutionShapeHolds = false on a fresh database, want true")
+	}
+
+	since, ok := readMetaKey(t, db, "subagent_context_execution_since")
+	if !ok {
+		t.Fatal("subagent_context_execution_since must be present once the shape holds")
+	}
+	if _, err := time.Parse(time.RFC3339, since); err != nil {
+		t.Fatalf("subagent_context_execution_since = %q, not RFC3339: %v", since, err)
+	}
+}
+
+// TestSubagentContextExecutionIdentitySelfHealsMissingKey covers AC-33b's
+// fourth reachable state: a shape migration that committed on an earlier
+// boot, whose execution_since write then failed before that boot finished.
+// Deleting only the key (leaving the already-correct shape untouched) must
+// be enough for the NEXT boot to write it — proving the gate is a genuine
+// schema observation, not recreateTable's fired boolean, which would see
+// "nothing fired" on this boot (the shape already holds) and stay silent
+// forever.
+func TestSubagentContextExecutionIdentitySelfHealsMissingKey(t *testing.T) {
+	repo, db := newSubagentMigrationTestRepo(t)
+
+	if _, ok := readMetaKey(t, db, "subagent_context_execution_since"); !ok {
+		t.Fatal("subagent_context_execution_since must be present after initial construction")
+	}
+	if _, err := db.Exec(`DELETE FROM kandev_meta WHERE key = 'subagent_context_execution_since'`); err != nil {
+		t.Fatalf("simulate prior boot's failed key write: %v", err)
+	}
+
+	repo.migrateSubagentContextExecutionIdentity()
+
+	since, ok := readMetaKey(t, db, "subagent_context_execution_since")
+	if !ok {
+		t.Fatal("subagent_context_execution_since must be re-written on the next boot without a rebuild")
+	}
+	if _, err := time.Parse(time.RFC3339, since); err != nil {
+		t.Fatalf("subagent_context_execution_since = %q, not RFC3339: %v", since, err)
+	}
+}
+
+// TestSubagentContextExecutionIdentityMigratesLegacyShape covers AC-33
+// clauses 1-5: a database built before Amendment 1 (no agent_execution_id
+// column, the old 2-column UNIQUE key) is rebuilt to the new shape, its
+// pre-existing row survives with the 'unknown' sentinel (never NULL, never
+// dropped), and only after that rebuild is schema-observed to hold does
+// execution_since get written.
+func TestSubagentContextExecutionIdentityMigratesLegacyShape(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "subagent-context-legacy-shape.db")
+	dbConn, err := dbutil.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS kandev_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("create kandev_meta: %v", err)
+	}
+
+	repo := &Repository{db: db, ro: db, migrate: dbutil.NewMigrateLogger(db, nil)}
+	if err := repo.initSchema(); err != nil {
+		t.Fatalf("initSchema: %v", err)
+	}
+
+	// Roll the table back to its pre-Amendment-1 legacy shape, matching the
+	// pre-migration DDL, with one pre-existing row.
+	if _, err := db.Exec(`DROP TABLE task_session_subagents`); err != nil {
+		t.Fatalf("drop task_session_subagents: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE task_session_subagents (
+			id                  TEXT PRIMARY KEY,
+			task_session_id     TEXT NOT NULL,
+			task_id             TEXT NOT NULL,
+			turn_id             TEXT,
+			tool_call_id        TEXT NOT NULL,
+			parent_tool_call_id TEXT,
+			subagent_type       TEXT,
+			description         TEXT,
+			agent_id            TEXT,
+			child_session_id    TEXT,
+			model               TEXT,
+			agent_status        TEXT,
+			tool_status         TEXT,
+			is_async            INTEGER NOT NULL DEFAULT 0,
+			total_tokens        INTEGER,
+			tool_use_count      INTEGER,
+			duration_ms         INTEGER,
+			source              TEXT NOT NULL DEFAULT 'live',
+			observed_at         TIMESTAMP NOT NULL,
+			settled_at          TIMESTAMP,
+			updated_at          TIMESTAMP NOT NULL,
+			UNIQUE (task_session_id, tool_call_id)
+		)
+	`); err != nil {
+		t.Fatalf("recreate legacy task_session_subagents: %v", err)
+	}
+	legacyObserved := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_subagents (id, task_session_id, task_id, tool_call_id, model, observed_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`), "row-legacy", "session-legacy", "task-legacy", "tc-legacy", "legacy-model", legacyObserved, legacyObserved); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM kandev_meta WHERE key = 'subagent_context_execution_since'`); err != nil {
+		t.Fatalf("reset execution_since key: %v", err)
+	}
+
+	repo.migrateSubagentContextExecutionIdentity()
+
+	holds, err := repo.subagentContextExecutionShapeHolds()
+	if err != nil {
+		t.Fatalf("subagentContextExecutionShapeHolds: %v", err)
+	}
+	if !holds {
+		t.Fatal("subagentContextExecutionShapeHolds = false after migrating a legacy shape, want true")
+	}
+
+	var executionID, model string
+	if err := db.QueryRow(db.Rebind(`
+		SELECT agent_execution_id, model FROM task_session_subagents WHERE id = ?
+	`), "row-legacy").Scan(&executionID, &model); err != nil {
+		t.Fatalf("read migrated legacy row: %v", err)
+	}
+	if executionID != "unknown" {
+		t.Errorf("agent_execution_id = %q, want unknown (pre-existing row must survive with the sentinel)", executionID)
+	}
+	if model != "legacy-model" {
+		t.Errorf("model = %q, want legacy-model preserved", model)
+	}
+
+	if _, ok := readMetaKey(t, db, "subagent_context_execution_since"); !ok {
+		t.Fatal("subagent_context_execution_since must be written once the rebuilt shape is observed to hold")
 	}
 }

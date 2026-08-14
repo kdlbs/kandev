@@ -363,6 +363,98 @@ func TestUpsertSubagentContextNestedParentToolCallID(t *testing.T) {
 	}
 }
 
+// TestUpsertSubagentContextDefaultsExecutionIDToUnknown covers AC-31: an
+// empty ExecutionID is not stored verbatim as "", it stores the reserved
+// 'unknown' sentinel so the column is never NULL and never blank.
+func TestUpsertSubagentContextDefaultsExecutionIDToUnknown(t *testing.T) {
+	repo := newSubagentContextTestRepo(t, "task-exec-default", "session-exec-default", "turn-exec-default")
+	ctx := context.Background()
+	ts := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
+
+	if err := repo.UpsertSubagentContext(ctx, &models.SubagentContext{
+		TaskSessionID: "session-exec-default", TaskID: "task-exec-default", ToolCallID: "tc-exec-default",
+		Source: "live", ObservedAt: ts, UpdatedAt: ts,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	row := mustGetSubagentContext(t, repo, "session-exec-default", "tc-exec-default")
+	if row.AgentExecutionID != "unknown" {
+		t.Errorf("agent_execution_id = %q, want unknown", row.AgentExecutionID)
+	}
+}
+
+// TestUpsertSubagentContextStoresExecutionIDVerbatim covers AC-30: a
+// non-empty ExecutionID is stored exactly as given, not normalized or
+// truncated.
+func TestUpsertSubagentContextStoresExecutionIDVerbatim(t *testing.T) {
+	repo := newSubagentContextTestRepo(t, "task-exec-verbatim", "session-exec-verbatim", "turn-exec-verbatim")
+	ctx := context.Background()
+	ts := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
+
+	if err := repo.UpsertSubagentContext(ctx, &models.SubagentContext{
+		TaskSessionID: "session-exec-verbatim", TaskID: "task-exec-verbatim", ToolCallID: "tc-exec-verbatim",
+		AgentExecutionID: "exec-abc-123", Source: "live", ObservedAt: ts, UpdatedAt: ts,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	row := mustGetSubagentContext(t, repo, "session-exec-verbatim", "tc-exec-verbatim")
+	if row.AgentExecutionID != "exec-abc-123" {
+		t.Errorf("agent_execution_id = %q, want exec-abc-123", row.AgentExecutionID)
+	}
+}
+
+// TestUpsertSubagentContextCrossExecutionToolCallIDDoesNotClobber covers
+// AC-32, the maintainer-found defect Amendment 1 fixes: two different agent
+// process executions can legitimately reuse the same tool_call_id (a fresh
+// ACP session numbering its tool calls from 1 again). Before
+// agent_execution_id joined the upsert/unique key, the second execution's
+// frame would silently overwrite the first execution's row instead of
+// creating its own.
+func TestUpsertSubagentContextCrossExecutionToolCallIDDoesNotClobber(t *testing.T) {
+	repo := newSubagentContextTestRepo(t, "task-cross-exec", "session-cross-exec", "turn-cross-exec")
+	ctx := context.Background()
+	firstObserved := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
+	secondObserved := firstObserved.Add(time.Hour)
+
+	if err := repo.UpsertSubagentContext(ctx, &models.SubagentContext{
+		TaskSessionID: "session-cross-exec", TaskID: "task-cross-exec", ToolCallID: "tc-shared",
+		AgentExecutionID: "exec-first", Model: sp("model-first"),
+		Source: "live", ObservedAt: firstObserved, UpdatedAt: firstObserved,
+	}); err != nil {
+		t.Fatalf("first execution upsert: %v", err)
+	}
+	if err := repo.UpsertSubagentContext(ctx, &models.SubagentContext{
+		TaskSessionID: "session-cross-exec", TaskID: "task-cross-exec", ToolCallID: "tc-shared",
+		AgentExecutionID: "exec-second", Model: sp("model-second"),
+		Source: "live", ObservedAt: secondObserved, UpdatedAt: secondObserved,
+	}); err != nil {
+		t.Fatalf("second execution upsert: %v", err)
+	}
+
+	rows, err := repo.ListSubagentContextsBySession(ctx, "session-cross-exec")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("row count = %d, want 2 (one per execution, same tool_call_id must not clobber)", len(rows))
+	}
+
+	byExecution := map[string]*models.SubagentContext{}
+	for _, row := range rows {
+		byExecution[row.AgentExecutionID] = row
+	}
+	first, ok := byExecution["exec-first"]
+	if !ok || first.Model == nil || *first.Model != "model-first" {
+		t.Errorf("exec-first row = %+v, want model-first preserved", first)
+	}
+	second, ok := byExecution["exec-second"]
+	if !ok || second.Model == nil || *second.Model != "model-second" {
+		t.Errorf("exec-second row = %+v, want model-second preserved", second)
+	}
+}
+
 // TestUpsertSubagentContextCascadeDeletesWithSession covers AC-16: deleting
 // the parent session removes its subagent context rows.
 func TestUpsertSubagentContextCascadeDeletesWithSession(t *testing.T) {

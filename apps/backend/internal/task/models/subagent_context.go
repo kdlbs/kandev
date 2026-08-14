@@ -14,6 +14,13 @@ type SubagentContext struct {
 	TaskSessionID string
 	TaskID        string
 	ToolCallID    string
+	// AgentExecutionID identifies the agent process execution that produced
+	// this observation. Part of the row's identity key alongside
+	// TaskSessionID/ToolCallID (AC-30) so a late frame from an earlier,
+	// already-completed execution never clobbers a later execution's row
+	// (AC-32). "unknown" is the reserved sentinel for "no execution identity
+	// available" (AC-31) — never empty, never a Go zero-value placeholder.
+	AgentExecutionID string
 
 	TurnID           *string
 	ParentToolCallID *string

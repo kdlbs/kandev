@@ -830,6 +830,7 @@ func (s *Service) recordSubagentContextFromFrame(ctx context.Context, payload *l
 		TurnID:           turnID,
 		ToolCallID:       payload.Data.ToolCallID,
 		ParentToolCallID: payload.Data.ParentToolCallID,
+		ExecutionID:      payload.ExecutionID,
 		ToolStatus:       payload.Data.ToolStatus,
 		Payload:          subagentTask,
 		ObservedAt:       time.Now().UTC(),

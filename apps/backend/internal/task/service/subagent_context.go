@@ -20,6 +20,12 @@ type RecordSubagentContextRequest struct {
 	TurnID           string
 	ToolCallID       string
 	ParentToolCallID string
+	// ExecutionID identifies the agent process execution that emitted this
+	// frame (Amendment 1). Empty means no execution identity was available;
+	// the repository stores the 'unknown' sentinel (AC-31) for it, and this
+	// service increments unknown_execution when that happens on a persisted
+	// write (AC-26).
+	ExecutionID string
 	// ToolStatus is the ACP tool-call status of the launching Task call.
 	// Terminality (AC-11) keys off this field only; Payload.Status
 	// ("agent_status" — the child's own report) is stored verbatim and never
@@ -83,6 +89,7 @@ func (s *Service) RecordSubagentContext(ctx context.Context, req RecordSubagentC
 		TaskSessionID:    req.TaskSessionID,
 		TaskID:           req.TaskID,
 		ToolCallID:       req.ToolCallID,
+		AgentExecutionID: req.ExecutionID,
 		TurnID:           nilIfEmpty(req.TurnID),
 		ParentToolCallID: nilIfEmpty(req.ParentToolCallID),
 		SubagentType:     nilIfEmpty(req.Payload.SubagentType),
@@ -116,6 +123,9 @@ func (s *Service) RecordSubagentContext(ctx context.Context, req RecordSubagentC
 		return
 	}
 	subagentContextTotal.Add("persisted", 1)
+	if req.ExecutionID == "" {
+		subagentContextTotal.Add("unknown_execution", 1)
+	}
 }
 
 // nilIfEmpty turns the payload's "" (absent) into NULL, so COUNT(model)

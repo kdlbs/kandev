@@ -125,6 +125,98 @@ func TestPostgresSubagentContextSchemaAndBackfill(t *testing.T) {
 	if !parsed.Equal(createdAt) {
 		t.Errorf("subagent_context_backfill_through = %v, want %v", parsed, createdAt)
 	}
+
+	holds, err := repo.subagentContextExecutionShapeHolds()
+	if err != nil {
+		t.Fatalf("subagentContextExecutionShapeHolds: %v", err)
+	}
+	if !holds {
+		t.Fatal("subagentContextExecutionShapeHolds = false on postgres, want true")
+	}
+	var executionSince string
+	if err := db.Get(&executionSince, db.Rebind(`SELECT value FROM kandev_meta WHERE key = ?`), "subagent_context_execution_since"); err != nil {
+		t.Fatalf("read subagent_context_execution_since: %v", err)
+	}
+	if _, err := time.Parse(time.RFC3339, executionSince); err != nil {
+		t.Fatalf("subagent_context_execution_since = %q, not RFC3339: %v", executionSince, err)
+	}
+}
+
+// TestPostgresSubagentContextExecutionIdentityMigratesLegacyShape is the
+// PostgreSQL counterpart to
+// TestSubagentContextExecutionIdentityMigratesLegacyShape: a database built
+// before Amendment 1 (no agent_execution_id column, the old 2-column UNIQUE
+// constraint under whatever name Postgres assigned it) is migrated to the
+// new shape, its pre-existing row survives with the 'unknown' sentinel, and
+// execution_since is written only once that shape is schema-observed to
+// hold (AC-33, AC-19).
+func TestPostgresSubagentContextExecutionIdentityMigratesLegacyShape(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS kandev_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("create kandev_meta: %v", err)
+	}
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+
+	// Roll the table back to its pre-Amendment-1 legacy shape: drop the
+	// column the migration adds and swap the 3-column key for the old
+	// 2-column one, under a name the migration must discover dynamically
+	// rather than assume.
+	if _, err := db.Exec(`ALTER TABLE task_session_subagents DROP CONSTRAINT task_session_subagents_session_exec_tool_key`); err != nil {
+		t.Fatalf("drop new unique constraint: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE task_session_subagents DROP COLUMN agent_execution_id`); err != nil {
+		t.Fatalf("drop agent_execution_id: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE task_session_subagents ADD CONSTRAINT task_session_subagents_legacy_key UNIQUE (task_session_id, tool_call_id)`); err != nil {
+		t.Fatalf("add legacy unique constraint: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM kandev_meta WHERE key = 'subagent_context_execution_since'`); err != nil {
+		t.Fatalf("reset execution_since key: %v", err)
+	}
+
+	seedPostgresForMsgTest(t, db, "task-pg-legacy", "session-pg-legacy", "turn-pg-legacy")
+	legacyObserved := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_subagents (id, task_session_id, task_id, tool_call_id, model, source, observed_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 'live', ?, ?)
+	`), "row-pg-legacy", "session-pg-legacy", "task-pg-legacy", "tc-pg-legacy", "legacy-model", legacyObserved, legacyObserved); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	repo.migrateSubagentContextExecutionIdentity()
+
+	holds, err := repo.subagentContextExecutionShapeHolds()
+	if err != nil {
+		t.Fatalf("subagentContextExecutionShapeHolds: %v", err)
+	}
+	if !holds {
+		t.Fatal("subagentContextExecutionShapeHolds = false after migrating a legacy shape, want true")
+	}
+
+	var executionID, model string
+	if err := db.Get(&executionID, db.Rebind(`SELECT agent_execution_id FROM task_session_subagents WHERE id = ?`), "row-pg-legacy"); err != nil {
+		t.Fatalf("read migrated legacy row's agent_execution_id: %v", err)
+	}
+	if err := db.Get(&model, db.Rebind(`SELECT model FROM task_session_subagents WHERE id = ?`), "row-pg-legacy"); err != nil {
+		t.Fatalf("read migrated legacy row's model: %v", err)
+	}
+	if executionID != "unknown" {
+		t.Errorf("agent_execution_id = %q, want unknown (pre-existing row must survive with the sentinel)", executionID)
+	}
+	if model != "legacy-model" {
+		t.Errorf("model = %q, want legacy-model preserved", model)
+	}
+
+	var executionSince string
+	if err := db.Get(&executionSince, db.Rebind(`SELECT value FROM kandev_meta WHERE key = ?`), "subagent_context_execution_since"); err != nil {
+		t.Fatalf("subagent_context_execution_since must be written once the migrated shape is observed to hold: %v", err)
+	}
+	if _, err := time.Parse(time.RFC3339, executionSince); err != nil {
+		t.Fatalf("subagent_context_execution_since = %q, not RFC3339: %v", executionSince, err)
+	}
 }
 
 // TestPostgresUpsertSubagentContextConflictBehavior verifies the upsert's
@@ -263,11 +355,11 @@ func TestPostgresSubagentContextBackfillJSONHelpers(t *testing.T) {
 
 // TestPostgresSubagentContextHealthCountsAgreeAfterLiveWrites is the
 // PostgreSQL counterpart to TestSubagentContextHealthCountsAgreeAfterLiveWrites:
-// AC-28's message-side query uses SQLite's json_extract in the spec's
-// illustrative form, which does not exist on PostgreSQL — subagentMessageCount
-// builds the dialect-appropriate expression instead, and this test proves that
-// expression actually agrees with the context-side count on PostgreSQL, not
-// just on SQLite (AC-19).
+// AC-28's shortfall/excess anti-joins and AC-29's max-observed-since use
+// SQLite's json_extract in the spec's illustrative form, which does not exist
+// on PostgreSQL — jsonKey builds the dialect-appropriate expression instead,
+// and this test proves the resulting queries actually agree on PostgreSQL,
+// not just on SQLite (AC-19).
 func TestPostgresSubagentContextHealthCountsAgreeAfterLiveWrites(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS kandev_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`); err != nil {
@@ -279,26 +371,48 @@ func TestPostgresSubagentContextHealthCountsAgreeAfterLiveWrites(t *testing.T) {
 	}
 	seedPostgresForMsgTest(t, db, "task-pg-health", "session-pg-health", "turn-pg-health")
 	ctx := context.Background()
-	ts := time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC)
+	since := time.Date(2026, 8, 12, 8, 0, 0, 0, time.UTC)
+	ts := since.Add(time.Hour)
 
+	var latest time.Time
 	for i, toolCallID := range []string{"tc-pg-health-1", "tc-pg-health-2", "tc-pg-health-3"} {
+		observedAt := ts.Add(time.Duration(i) * time.Minute)
+		latest = observedAt
 		seedSubagentMessage(t, repo, "msg-pg-health-"+toolCallID, "session-pg-health", "task-pg-health", "turn-pg-health",
 			toolCallID, "", "completed", map[string]interface{}{"status": "completed"},
-			ts.Add(time.Duration(i)*time.Minute), ts.Add(time.Duration(i)*time.Minute))
+			observedAt, observedAt)
 		if err := repo.UpsertSubagentContext(ctx, &models.SubagentContext{
 			TaskSessionID: "session-pg-health", TaskID: "task-pg-health", ToolCallID: toolCallID,
-			Source: "live", ObservedAt: ts.Add(time.Duration(i) * time.Minute), UpdatedAt: ts.Add(time.Duration(i) * time.Minute),
+			Source: "live", ObservedAt: observedAt, UpdatedAt: observedAt,
 		}); err != nil {
 			t.Fatalf("UpsertSubagentContext %s: %v", toolCallID, err)
 		}
 	}
 
-	messageCount := subagentMessageCount(t, repo)
-	contextCount := subagentContextCount(t, repo)
-	if messageCount != contextCount {
-		t.Fatalf("message count = %d, context count = %d; want equal after live writes", messageCount, contextCount)
+	shortfall, err := repo.subagentContextShortfall(since)
+	if err != nil {
+		t.Fatalf("subagentContextShortfall: %v", err)
 	}
-	if messageCount != 3 {
-		t.Fatalf("message count = %d, want 3", messageCount)
+	if shortfall != 0 {
+		t.Fatalf("shortfall = %d, want 0 after every message got a live context row", shortfall)
+	}
+
+	excess, err := repo.subagentContextExcess(since)
+	if err != nil {
+		t.Fatalf("subagentContextExcess: %v", err)
+	}
+	if excess != 0 {
+		t.Fatalf("excess = %d, want 0 when every context row is accounted for by a message", excess)
+	}
+
+	maxObserved, ok, err := repo.subagentContextMaxObservedSince(since)
+	if err != nil {
+		t.Fatalf("subagentContextMaxObservedSince: %v", err)
+	}
+	if !ok {
+		t.Fatal("subagentContextMaxObservedSince: want a value, got none")
+	}
+	if !maxObserved.Equal(latest) {
+		t.Fatalf("subagentContextMaxObservedSince = %v, want %v (the last live write)", maxObserved, latest)
 	}
 }

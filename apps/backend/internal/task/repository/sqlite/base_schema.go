@@ -623,6 +623,15 @@ func (r *Repository) initSessionSchema() error {
 // DEFAULT: an unreported value must store NULL, never 0 (75% of observed
 // invocations report none of them). turn_id carries no FOREIGN KEY so a turn
 // deletion never silently deletes the fan-out record it measured.
+//
+// agent_execution_id carries DEFAULT 'unknown' (AC-31's reserved sentinel for
+// "no execution identity available") so every row has one, and is part of the
+// UNIQUE key (task_session_id, agent_execution_id, tool_call_id) — a late
+// frame from an earlier, already-completed execution creates/updates its own
+// row instead of clobbering a later execution's (AC-32). A DB that predates
+// this column reaches the same shape via
+// migrateSubagentContextExecutionIdentity (subagent_context_execution_migration.go),
+// per AC-33.
 func (r *Repository) initSubagentContextSchema() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_session_subagents (
@@ -631,6 +640,7 @@ func (r *Repository) initSubagentContextSchema() error {
 		task_id             TEXT NOT NULL,
 		turn_id             TEXT,
 		tool_call_id        TEXT NOT NULL,
+		agent_execution_id  TEXT NOT NULL DEFAULT 'unknown',
 		parent_tool_call_id TEXT,
 		subagent_type       TEXT,
 		description         TEXT,
@@ -647,7 +657,7 @@ func (r *Repository) initSubagentContextSchema() error {
 		observed_at         TIMESTAMP NOT NULL,
 		settled_at          TIMESTAMP,
 		updated_at          TIMESTAMP NOT NULL,
-		UNIQUE (task_session_id, tool_call_id),
+		UNIQUE (task_session_id, agent_execution_id, tool_call_id),
 		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 	);
 

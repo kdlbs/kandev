@@ -342,122 +342,15 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 
+	// AC-33c: the shape migration (add agent_execution_id, widen the UNIQUE
+	// key) and its execution_since key write must be attempted BEFORE the
+	// backfill in the same pass — the backfill's INSERT references the new
+	// column and conflict target. Both live in
+	// subagent_context_execution_migration.go / subagent_context_backfill.go.
+	r.migrateSubagentContextExecutionIdentity()
 	r.migrateSubagentContextBackfill()
 
 	return nil
-}
-
-// migrateSubagentContextBackfill recovers task_session_subagents history from
-// existing task_session_messages rows whose metadata.normalized.kind is
-// "subagent_task" (AC-21), and publishes the two write-once kandev_meta
-// activation keys that let a consumer distinguish "zero fan-out" from
-// "unmeasured, before capture began" (AC-24, AC-25). See
-// docs/specs/subagent-context-persistence/spec.md § Backfill.
-//
-// All three statements go through r.migrate.Apply, whose swallow-plus-WARN
-// contract (internal/db/migratelog.go:33) is what AC-20 is written against —
-// a failure here must never abort boot, only log. Apply takes no bind args,
-// so the capture-since timestamp is inlined via fmt.Sprintf rather than
-// passed as a query parameter.
-//
-// runMigrations() (and therefore this function) runs on every boot, not just
-// the first — it's one of initSchema()'s steps, and initSchema() runs on
-// every NewWithDB. The backfill INSERT...SELECT below, and its companion
-// MAX() query for subagent_context_backfill_through, both filter on
-// json_extract(metadata,'$.normalized.kind') with no supporting index
-// (ensureMessageMetadataIndexes only indexes tool_call_id and pending_id),
-// so each is a full scan of task_session_messages. AC-23a is explicit that
-// this scan is "a real, accepted one-time cost ... taken once" — ON CONFLICT
-// DO NOTHING makes the resulting rows idempotent, but does nothing to avoid
-// re-running the scan itself. subagentContextBackfillActivated is the guard
-// that makes it actually run once: a single indexed point lookup on
-// kandev_meta's primary key, skipping the whole function on every boot after
-// the first successful one.
-func (r *Repository) migrateSubagentContextBackfill() {
-	if r.subagentContextBackfillActivated() {
-		return
-	}
-
-	postgres := dialect.IsPostgres(r.db.DriverName())
-
-	meta := func(path string) string { return jsonKey(postgres, "m.metadata", path) }
-	nullable := func(expr string) string { return "NULLIF(" + expr + ", '')" }
-	subagentText := func(field string) string { return nullable(meta("normalized.subagent_task." + field)) }
-	subagentInt := func(field string) string { return jsonInt(postgres, "m.metadata", "normalized.subagent_task", field) }
-
-	toolCallID := meta("tool_call_id")
-	toolStatusRaw := meta("status")
-	terminal := "(" + toolStatusRaw + " IN ('complete','completed','success','error','failed','cancelled'))"
-	predicate := `
-			` + meta("normalized.kind") + ` = 'subagent_task'
-			AND m.task_id IS NOT NULL AND m.task_id != ''
-			AND ` + toolCallID + ` IS NOT NULL AND ` + toolCallID + ` != ''`
-
-	r.migrate.Apply("task_session_subagents.backfill", `
-		INSERT INTO task_session_subagents (
-			id, task_session_id, task_id, turn_id, tool_call_id, parent_tool_call_id,
-			subagent_type, description, agent_id, child_session_id, model,
-			agent_status, tool_status, is_async, total_tokens, tool_use_count,
-			duration_ms, source, observed_at, settled_at, updated_at
-		)
-		SELECT
-			m.id,
-			m.task_session_id,
-			m.task_id,
-			NULLIF(m.turn_id, ''),
-			`+toolCallID+`,
-			`+nullable(meta("parent_tool_call_id"))+`,
-			`+subagentText("subagent_type")+`,
-			`+subagentText("description")+`,
-			`+subagentText("agent_id")+`,
-			`+subagentText("child_session_id")+`,
-			`+subagentText("model")+`,
-			`+subagentText("status")+`,
-			`+nullable(toolStatusRaw)+`,
-			`+jsonBoolToInt(postgres, "m.metadata", "normalized.subagent_task", "is_async")+`,
-			`+subagentInt("total_tokens")+`,
-			`+subagentInt("tool_use_count")+`,
-			`+subagentInt("duration_ms")+`,
-			'backfill',
-			m.created_at,
-			(CASE WHEN `+terminal+` THEN m.updated_at ELSE NULL END),
-			m.updated_at
-		FROM task_session_messages m
-		WHERE`+predicate+`
-		ON CONFLICT (task_session_id, tool_call_id) DO NOTHING
-	`)
-
-	r.migrate.Apply("kandev_meta.subagent_context_capture_since", fmt.Sprintf(
-		`INSERT INTO kandev_meta (key, value) VALUES ('subagent_context_capture_since', '%s') ON CONFLICT(key) DO NOTHING`,
-		time.Now().UTC().Format(time.RFC3339),
-	))
-
-	r.migrate.Apply("kandev_meta.subagent_context_backfill_through", `
-		INSERT INTO kandev_meta (key, value)
-		SELECT 'subagent_context_backfill_through', COALESCE((
-			SELECT `+rfc3339Timestamp(postgres, "MAX(m.created_at)")+`
-			FROM task_session_messages m
-			WHERE`+predicate+`
-		), '')
-		ON CONFLICT(key) DO NOTHING
-	`)
-}
-
-// subagentContextBackfillActivated reports whether
-// migrateSubagentContextBackfill has already completed successfully on this
-// database, via a single indexed point lookup on kandev_meta's primary key.
-// A missing key — including "kandev_meta doesn't exist yet", which cannot
-// happen in production (persistence.Provide creates it before any repository
-// runs) but can happen in a test that constructs a Repository directly —
-// reports not-activated, so the backfill still gets its chance to run and
-// its own swallow-and-WARN failure contract (AC-20) is unchanged.
-func (r *Repository) subagentContextBackfillActivated() bool {
-	var value string
-	err := r.db.QueryRow(
-		r.db.Rebind(`SELECT value FROM kandev_meta WHERE key = ?`),
-		"subagent_context_capture_since",
-	).Scan(&value)
-	return err == nil
 }
 
 // clearRecoveredAgentErrors repairs sessions whose stored agent failure was
@@ -601,18 +494,6 @@ func jsonBoolToInt(postgres bool, column, parent, key string) string {
 	// TEXT literal via IN never matches (SQLite orders INTEGER < TEXT by
 	// storage class), so the extracted value must be cast to TEXT first.
 	return "(CASE WHEN CAST(" + extracted + " AS TEXT) IN ('1', 'true') THEN 1 ELSE 0 END)"
-}
-
-// rfc3339Timestamp renders a timestamp expression (a column or an aggregate
-// like MAX(m.created_at)) as an RFC3339 UTC string. Every timestamp this
-// repository writes is already a UTC wall-clock instant with no zone suffix
-// (see the spec's Column-level normalization rules), so both dialects only
-// need to reformat, never convert zones.
-func rfc3339Timestamp(postgres bool, expression string) string {
-	if postgres {
-		return `to_char(` + expression + `, 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`
-	}
-	return `strftime('%Y-%m-%dT%H:%M:%SZ', ` + expression + `)`
 }
 
 // ensureImproveKandevWorkflowTemplateUniqueness removes the broad index from
