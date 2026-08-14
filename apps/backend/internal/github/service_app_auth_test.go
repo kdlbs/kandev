@@ -15,13 +15,16 @@ type rateLimitSeedClient struct {
 
 func (c *rateLimitSeedClient) FetchRateLimit(context.Context) error {
 	c.calls++
-	c.tracker.Record(RateSnapshot{
-		Resource:  ResourceCore,
-		Remaining: 4321,
-		Limit:     5000,
-		ResetAt:   time.Now().Add(time.Hour).UTC(),
-		UpdatedAt: time.Now().UTC(),
-	})
+	now := time.Now().UTC()
+	for _, snapshot := range []RateSnapshot{
+		{Resource: ResourceCore, Remaining: 4321, Limit: 5000},
+		{Resource: ResourceGraphQL, Remaining: 4322, Limit: 5000},
+		{Resource: ResourceSearch, Remaining: 29, Limit: 30},
+	} {
+		snapshot.ResetAt = now.Add(time.Hour)
+		snapshot.UpdatedAt = now
+		c.tracker.Record(snapshot)
+	}
 	return nil
 }
 
@@ -97,6 +100,47 @@ func TestWorkspaceAuthStatusSeedsRateLimitOncePerCachedCredential(t *testing.T) 
 	}
 	if client.calls != 2 {
 		t.Fatalf("FetchRateLimit calls after forced refresh = %d, want 2", client.calls)
+	}
+}
+
+func TestWorkspaceAuthStatusCompletesPartialRateLimitSeed(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "workspace-partial-rate-limit")
+	connection := &WorkspaceConnection{
+		WorkspaceID:          "workspace-partial-rate-limit",
+		Source:               ConnectionSourceGHCLI,
+		GitHubHost:           defaultGitHubHost,
+		Login:                "octocat",
+		Status:               ConnectionStatusActive,
+		CredentialGeneration: 1,
+	}
+	if err := store.UpsertWorkspaceConnection(context.Background(), connection); err != nil {
+		t.Fatalf("seed workspace connection: %v", err)
+	}
+
+	tracker := NewRateTracker(nil, nil)
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Remaining: 4999, Limit: 5000,
+		ResetAt: time.Now().Add(time.Hour).UTC(), UpdatedAt: time.Now().UTC(),
+	})
+	client := &rateLimitSeedClient{MockClient: NewMockClient(), tracker: tracker}
+	service := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	service.resolver = NewCredentialResolver(testConnectionReader{
+		workspaces: map[string]*WorkspaceConnection{connection.WorkspaceID: connection},
+	}, nil)
+	service.resolver.SetAutomationProvider(rateLimitAutomationProvider{client: client, tracker: tracker})
+
+	status, err := service.GetWorkspaceAuthStatus(
+		context.Background(), connection.WorkspaceID, DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("GetWorkspaceAuthStatus: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("FetchRateLimit calls = %d, want 1 for a partial tracker", client.calls)
+	}
+	if status.RateLimit == nil || status.RateLimit.GraphQL == nil || status.RateLimit.Search == nil {
+		t.Fatalf("rate limit = %+v, want all seeded buckets", status.RateLimit)
 	}
 }
 

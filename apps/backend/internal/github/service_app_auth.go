@@ -527,7 +527,8 @@ func (s *Service) seedWorkspaceRateLimit(
 	resolved *ResolvedCredential,
 	force bool,
 ) {
-	if resolved == nil || resolved.RateTracker == nil || (!force && len(resolved.RateTracker.All()) > 0) {
+	if resolved == nil || resolved.RateTracker == nil ||
+		(!force && hasCompleteRateLimitSnapshot(resolved.RateTracker)) {
 		return
 	}
 	fetcher, ok := resolved.Client.(RateLimitFetcher)
@@ -539,6 +540,17 @@ func (s *Service) seedWorkspaceRateLimit(
 	if err := fetcher.FetchRateLimit(seedCtx); err != nil && s.logger != nil {
 		s.logger.Debug("seed workspace GitHub rate limit failed", zap.Error(err))
 	}
+}
+
+func hasCompleteRateLimitSnapshot(tracker *RateTracker) bool {
+	if tracker == nil {
+		return false
+	}
+	all := tracker.All()
+	_, hasCore := all[ResourceCore]
+	_, hasGraphQL := all[ResourceGraphQL]
+	_, hasSearch := all[ResourceSearch]
+	return hasCore && hasGraphQL && hasSearch
 }
 
 func (s *Service) workspacePersonalConnection(

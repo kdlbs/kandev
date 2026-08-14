@@ -89,6 +89,7 @@ type CredentialResolver struct {
 	legacyGit   legacyTransportCredentialFactory
 	ghToken     ghAccountTokenResolver
 	now         func() time.Time
+	rateTracker *RateTracker
 
 	mu              sync.Mutex
 	cache           map[credentialCacheKey]credentialCacheEntry
@@ -123,6 +124,10 @@ func (r *CredentialResolver) SetLegacyTransportFactory(factory legacyTransportCr
 	if factory != nil {
 		r.legacyGit = factory
 	}
+}
+
+func (r *CredentialResolver) SetRateTracker(tracker *RateTracker) {
+	r.rateTracker = tracker
 }
 
 func (r *CredentialResolver) SetInstallationProvider(provider installationCredentialProvider) {
@@ -431,6 +436,11 @@ func (r *CredentialResolver) resolveLegacy(
 		(purpose == CredentialPurposeGitTransport && strings.TrimSpace(credential) == "") {
 		return nil, ErrGitHubNotConfigured
 	}
+	tracker := r.rateTracker
+	if tracker == nil {
+		tracker = NewRateTracker(nil, nil)
+	}
+	wireRateTracker(client, tracker)
 	login, _ := client.GetAuthenticatedUser(ctx)
 	return &ResolvedCredential{
 		Client:       client,
@@ -441,7 +451,7 @@ func (r *CredentialResolver) resolveLegacy(
 			Source: ConnectionSourceLegacyShared,
 			Login:  login,
 		},
-		RateTracker: NewRateTracker(nil, nil),
+		RateTracker: tracker,
 	}, nil
 }
 
