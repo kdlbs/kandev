@@ -96,6 +96,16 @@ describe("workspace GitHub authentication", () => {
     expect(call?.[1]).toMatchObject({ cache: "no-store" });
   });
 
+  it("requests a fresh rate-limit snapshot when requested", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ workspace_id: workspaceID }));
+
+    await fetchGitHubStatus(workspaceID, { cache: "no-store" }, true);
+
+    expect(lastCallUrl()).toBe(
+      "http://api.test/api/v1/github/status?workspace_id=workspace%2Fone&refresh_rate_limit=true",
+    );
+  });
+
   it("selects an exact named CLI account", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ workspace_id: "workspace one" }));
 

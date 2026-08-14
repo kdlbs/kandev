@@ -4,7 +4,101 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
+
+type rateLimitSeedClient struct {
+	*MockClient
+	tracker *RateTracker
+	calls   int
+}
+
+func (c *rateLimitSeedClient) FetchRateLimit(context.Context) error {
+	c.calls++
+	c.tracker.Record(RateSnapshot{
+		Resource:  ResourceCore,
+		Remaining: 4321,
+		Limit:     5000,
+		ResetAt:   time.Now().Add(time.Hour).UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+	return nil
+}
+
+type rateLimitAutomationProvider struct {
+	client  Client
+	tracker *RateTracker
+}
+
+func (p rateLimitAutomationProvider) ResolveAutomation(
+	context.Context,
+	*WorkspaceConnection,
+	ResolveCredentialRequest,
+) (*ResolvedCredential, error) {
+	return &ResolvedCredential{
+		Client:       p.client,
+		Capabilities: allTokenCapabilities(),
+		Principal: AuthPrincipal{
+			Kind:   AuthPrincipalHuman,
+			Source: ConnectionSourceGHCLI,
+			Login:  "octocat",
+		},
+		RateTracker: p.tracker,
+	}, nil
+}
+
+func TestWorkspaceAuthStatusSeedsRateLimitOncePerCachedCredential(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "workspace-rate-limit")
+	connection := &WorkspaceConnection{
+		WorkspaceID:          "workspace-rate-limit",
+		Source:               ConnectionSourceGHCLI,
+		GitHubHost:           defaultGitHubHost,
+		Login:                "octocat",
+		Status:               ConnectionStatusActive,
+		CredentialGeneration: 1,
+	}
+	if err := store.UpsertWorkspaceConnection(context.Background(), connection); err != nil {
+		t.Fatalf("seed workspace connection: %v", err)
+	}
+
+	tracker := NewRateTracker(nil, nil)
+	client := &rateLimitSeedClient{MockClient: NewMockClient(), tracker: tracker}
+	service := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	service.resolver = NewCredentialResolver(testConnectionReader{
+		workspaces: map[string]*WorkspaceConnection{connection.WorkspaceID: connection},
+	}, nil)
+	service.resolver.SetAutomationProvider(rateLimitAutomationProvider{client: client, tracker: tracker})
+
+	for i := 0; i < 2; i++ {
+		status, err := service.GetWorkspaceAuthStatus(context.Background(), connection.WorkspaceID, DefaultUserID)
+		if err != nil {
+			t.Fatalf("GetWorkspaceAuthStatus call %d: %v", i+1, err)
+		}
+		if status.RateLimit == nil || status.RateLimit.Core == nil {
+			t.Fatalf("call %d rate limit = %+v, want seeded core snapshot", i+1, status.RateLimit)
+		}
+		if status.RateLimit.Core.Remaining != 4321 {
+			t.Errorf("call %d remaining = %d, want 4321", i+1, status.RateLimit.Core.Remaining)
+		}
+	}
+	if client.calls != 1 {
+		t.Fatalf("FetchRateLimit calls = %d, want 1 for cached credential", client.calls)
+	}
+
+	status, err := service.RefreshWorkspaceRateLimit(
+		context.Background(), connection.WorkspaceID, DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("RefreshWorkspaceRateLimit: %v", err)
+	}
+	if status.RateLimit == nil || status.RateLimit.Core == nil {
+		t.Fatalf("forced refresh rate limit = %+v, want seeded core snapshot", status.RateLimit)
+	}
+	if client.calls != 2 {
+		t.Fatalf("FetchRateLimit calls after forced refresh = %d, want 2", client.calls)
+	}
+}
 
 func TestAppAuthRegistryHotAddsAndInvalidatesRegistrationsIndependently(t *testing.T) {
 	store := newTestStore(t)

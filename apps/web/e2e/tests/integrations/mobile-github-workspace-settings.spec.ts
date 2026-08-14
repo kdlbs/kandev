@@ -55,11 +55,14 @@ test.describe("GitHub workspace settings on mobile", () => {
     await rateLimitHelp.tap();
     const rateLimitDrawer = testPage.getByRole("dialog", { name: "GitHub API limits" });
     await expect(rateLimitDrawer).toContainText(
-      "API rate limit: 4,321 of 5,000 requests remaining",
+      "API rate limit: 3,210 of 5,000 requests remaining",
     );
     await expect(rateLimitDrawer).toContainText(
-      "GraphQL query limit: 4,900 of 5,000 points remaining",
+      "GraphQL query limit: 4,789 of 5,000 points remaining",
     );
+    await prCapture.screenshot("mobile-github-rate-limit-drawer", {
+      caption: "GitHub API rate limits refresh in the mobile drawer",
+    });
     await testPage.keyboard.press("Escape");
 
     await automation.getByRole("button", { name: "Change connection" }).tap();

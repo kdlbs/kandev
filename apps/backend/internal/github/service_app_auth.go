@@ -5,7 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
+
+	"go.uber.org/zap"
 )
+
+const workspaceRateLimitSeedTimeout = 5 * time.Second
 
 type githubAppRuntime struct {
 	registrationID       string
@@ -445,6 +450,23 @@ func (s *Service) GetWorkspaceAuthStatus(
 	ctx context.Context,
 	workspaceID, userID string,
 ) (*WorkspaceAuthStatus, error) {
+	return s.getWorkspaceAuthStatus(ctx, workspaceID, userID, false)
+}
+
+// RefreshWorkspaceRateLimit returns the workspace status after fetching a
+// fresh GitHub rate-limit snapshot for the resolved automation credential.
+func (s *Service) RefreshWorkspaceRateLimit(
+	ctx context.Context,
+	workspaceID, userID string,
+) (*WorkspaceAuthStatus, error) {
+	return s.getWorkspaceAuthStatus(ctx, workspaceID, userID, true)
+}
+
+func (s *Service) getWorkspaceAuthStatus(
+	ctx context.Context,
+	workspaceID, userID string,
+	refreshRateLimit bool,
+) (*WorkspaceAuthStatus, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
@@ -492,11 +514,31 @@ func (s *Service) GetWorkspaceAuthStatus(
 	status.Automation.Actor = principalPointer(automation.Principal)
 	status.Automation.Capabilities = automation.Capabilities
 	status.Automation.MissingCapabilities = missingGitHubCapabilities(automation.Capabilities)
+	s.seedWorkspaceRateLimit(ctx, automation, refreshRateLimit)
 	status.Automation.RateLimit = rateLimitInfoForTracker(automation.RateTracker)
 	status.RateLimit = status.Automation.RateLimit
 
 	s.populateEffectivePersonalActors(ctx, workspaceID, userID, status)
 	return status, nil
+}
+
+func (s *Service) seedWorkspaceRateLimit(
+	ctx context.Context,
+	resolved *ResolvedCredential,
+	force bool,
+) {
+	if resolved == nil || resolved.RateTracker == nil || (!force && len(resolved.RateTracker.All()) > 0) {
+		return
+	}
+	fetcher, ok := resolved.Client.(RateLimitFetcher)
+	if !ok {
+		return
+	}
+	seedCtx, cancel := context.WithTimeout(ctx, workspaceRateLimitSeedTimeout)
+	defer cancel()
+	if err := fetcher.FetchRateLimit(seedCtx); err != nil && s.logger != nil {
+		s.logger.Debug("seed workspace GitHub rate limit failed", zap.Error(err))
+	}
 }
 
 func (s *Service) workspacePersonalConnection(
