@@ -19,12 +19,14 @@ export function GitHubAccessHelp({
   title,
   description,
   content,
+  icon,
   onOpen,
 }: {
   label: string;
   title: string;
   description: string;
   content?: ReactNode;
+  icon?: ReactNode;
   onOpen?: () => void;
 }) {
   const usesTouchDrawer = useTouchDrawer();
@@ -43,7 +45,7 @@ export function GitHubAccessHelp({
       aria-expanded={usesTouchDrawer ? open : undefined}
       aria-label={label}
     >
-      <IconInfoCircle className="h-4 w-4" />
+      {icon ?? <IconInfoCircle className="h-4 w-4" />}
     </Button>
   );
   const trigger = usesTouchDrawer ? (

@@ -18,6 +18,12 @@ test.describe("GitHub workspace settings on mobile", () => {
     ]);
     await stubGitHubRateLimits(testPage, workspaceId);
     await testPage.goto(`/settings/workspaces/${workspaceId}/integrations/github`);
+    const accessCard = testPage.getByTestId("github-workspace-access-card");
+    const accessContent = accessCard.locator('[data-slot="card-content"]');
+    const accessContentPaddingTop = await accessContent.evaluate(
+      (element) => getComputedStyle(element).paddingTop,
+    );
+    expect(Number.parseFloat(accessContentPaddingTop)).toBeLessThan(24);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
       "Inherit executor Git credentials",
@@ -50,6 +56,9 @@ test.describe("GitHub workspace settings on mobile", () => {
     await testPage.keyboard.press("Escape");
     const rateLimitHelp = automation.getByRole("button", { name: "Show GitHub API limits" });
     await expect(rateLimitHelp).toBeVisible();
+    await expect(rateLimitHelp.getByTestId("github-rate-limit-icon")).toHaveClass(
+      /tabler-icon-gauge/,
+    );
     const rateLimitHelpBox = await rateLimitHelp.boundingBox();
     expect(rateLimitHelpBox?.height).toBeGreaterThanOrEqual(44);
     await rateLimitHelp.tap();
