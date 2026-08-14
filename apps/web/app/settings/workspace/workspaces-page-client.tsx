@@ -204,7 +204,7 @@ export function WorkspacesPageClient() {
             <WorkspaceListItem key={workspace.id} workspace={workspace} />
           ))}
 
-          {items.length === 0 && (
+          {orderedItems.length === 0 && (
             <Card>
               <CardContent className="py-8 text-center">
                 <p className="text-sm text-muted-foreground">

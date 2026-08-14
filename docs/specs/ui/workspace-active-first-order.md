@@ -1,5 +1,5 @@
 ---
-status: building
+status: shipped
 created: 2026-08-14
 owner: Kandev
 ---

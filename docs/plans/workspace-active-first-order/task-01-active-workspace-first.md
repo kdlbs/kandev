@@ -86,5 +86,5 @@ Verification:
 - `git diff --check`: passed.
 
 The initial RED runs failed on the intended active-order assertions. No
-blockers or known risks remain; the spec is marked `building` pending PR
-review and merge.
+blockers or known risks remain; the spec is marked `shipped` after review
+triage.
