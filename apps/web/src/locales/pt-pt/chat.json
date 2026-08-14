@@ -58,6 +58,7 @@
   "noRepositoriesAvailableInWorkspace": "Não há repositórios disponíveis nesta área de trabalho",
   "noRepository": "Sem repositório",
   "optional": "(opcional)",
+  "pinQueuedMessages": "Afixar fila de mensagens",
   "providerQuotaModel": "Modelo: {{model}}",
   "providerQuotaProviderFallback": "Fornecedor",
   "providerQuotaReset": "A capacidade é reposta {{resetAt}}.",
@@ -135,5 +136,6 @@
   "transientRetryAttempt": "Tentativa {{attempt}} de {{maxAttempts}}",
   "transientRetryProviderModel": "{{provider}} · {{model}}",
   "transientRetryProvider": "Fornecedor: {{provider}}",
-  "transientRetryModel": "Modelo: {{model}}"
+  "transientRetryModel": "Modelo: {{model}}",
+  "unpinQueuedMessages": "Desafixar fila de mensagens"
 }

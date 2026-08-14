@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { stubGitHubRateLimits } from "./github-rate-limit-fixture";
+import { dwell } from "../../helpers/causal-waits";
 
 type ReviewWatchesResponse = {
   watches: Array<{ id: string; enabled: boolean }>;
@@ -210,7 +211,12 @@ test.describe("GitHub workspace settings", () => {
     expect(executorBox).not.toBeNull();
     expect(executorBox!.y - (managedBox!.y + managedBox!.height)).toBeLessThanOrEqual(9);
     await dialog.getByRole("radio", { name: "Inherit executor Git credentials" }).click();
-    await testPage.waitForTimeout(300);
+    await dwell(
+      testPage,
+      300,
+      "unverified",
+      "settling the radio selection's render before the capture below; no timer was identified behind the number, and the capture itself is a no-op unless CAPTURE_PR_ASSETS is set",
+    );
     await prCapture.screenshot("desktop-task-git-access-dialog", {
       caption: "Task Git access is configured alongside the workspace connection",
     });

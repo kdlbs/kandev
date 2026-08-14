@@ -748,6 +748,11 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	}
 
 	metadata := cloneMetadata(task.Metadata)
+	initialRuntimeConfig, hasInitialRuntimeConfig := models.LoadInitialSessionRuntimeConfig(task.Metadata)
+	delete(metadata, models.MetaKeyInitialSessionRuntimeConfig)
+	delete(metadata, models.MetaKeyInitialSessionRuntimeConfigProfileID)
+	initialRuntimeConfigProfileID := models.LoadInitialSessionRuntimeConfigProfileID(task.Metadata)
+	_, hasAtomicInitialRuntimeSeed := e.repo.(initialRuntimeSeedTaskSessionCreator)
 	var repositoryID string
 	var baseBranch string
 
@@ -792,6 +797,9 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 			metadata = make(map[string]interface{})
 		}
 		metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+		if hasInitialRuntimeConfig && initialRuntimeConfigProfileID == agentProfileID && !hasAtomicInitialRuntimeSeed {
+			metadata[models.SessionMetaKeyRuntimeConfigOverrides] = initialRuntimeConfig
+		}
 	}
 
 	// Create agent session in database. WorkspacePath is propagated from task
@@ -831,11 +839,17 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		session.ExecutorID = execConfig.ExecutorID
 	}
 
-	if err := e.repo.CreateTaskSession(ctx, session); err != nil {
+	var createErr error
+	if atomicCreator, ok := e.repo.(initialRuntimeSeedTaskSessionCreator); ok {
+		createErr = atomicCreator.CreateTaskSessionWithInitialRuntimeSeed(ctx, session)
+	} else {
+		createErr = e.repo.CreateTaskSession(ctx, session)
+	}
+	if createErr != nil {
 		e.logger.Error("failed to persist agent session",
 			zap.String("task_id", task.ID),
-			zap.Error(err))
-		return "", err
+			zap.Error(createErr))
+		return "", createErr
 	}
 
 	// Set primary flag only for the first session (no existing primary).
@@ -971,7 +985,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 			zap.Error(err))
 	}
 
-	allRepos, err := e.resolveAllRepoInfo(ctx, task.ID)
+	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1374,7 +1388,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if err != nil {
 		return nil, execConfig, err
 	}
-	if err := e.configureGitHubCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
+	if err := e.configureGitCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
 		return nil, execConfig, err
 	}
 	if err := e.applyGitCredentialSnapshot(ctx, req, session); err != nil {
@@ -1452,6 +1466,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			WorktreeBranchPrefix:   info.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: info.WorktreeBranchTemplate,
 			PullBeforeWorktree:     info.PullBeforeWorktree,
+			RemoteSyncHandled:      info.RemoteSyncHandled,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
@@ -1518,6 +1533,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
+		req.RemoteSyncHandled = repoInfo.RemoteSyncHandled
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
 			if req.UseWorktree {

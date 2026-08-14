@@ -195,6 +195,18 @@ type StartStepResolver interface {
 	ResolveFirstStep(ctx context.Context, workflowID string) (string, error)
 }
 
+// StepHistoryRecorder persists an ADR 0015 session-step transition audit
+// row. Optional — when unset, MoveTaskWithOptions records nothing. Errors
+// are logged and swallowed by the caller: the audit trail must never fail
+// the move it is recording.
+type StepHistoryRecorder interface {
+	CreateStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) error
+}
+
+type asyncStepHistoryRecorder interface {
+	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
+}
+
 var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
@@ -291,6 +303,7 @@ type Service struct {
 	workspaceBootstrapper       WorkspaceBootstrapper
 	workflowStepGetter          WorkflowStepGetter
 	startStepResolver           StartStepResolver
+	stepHistoryRecorder         StepHistoryRecorder
 	prTaskResolver              PRTaskResolver
 	quickChatDir                string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher               *branchFetcher
@@ -299,11 +312,15 @@ type Service struct {
 	remoteBranchLister          RemoteBranchLister
 	repoCloneLocation           RepoCloneLocation
 	blockers                    BlockerRepository
-	comments                    CommentRepository
-	secretStore                 secrets.SecretStore
-	workspaceSecretDeleter      WorkspaceSecretDeleter
-	baseBranchPusher            AgentBaseBranchPusher
-	runtimeOverridesMu          sync.Mutex
+	// dependencyEdgeMu serializes validate-then-insert for dependency edges so
+	// two concurrent adds cannot each pass a cycle walk that predates the
+	// other's insert and commit a cycle between them.
+	dependencyEdgeMu       sync.Mutex
+	comments               CommentRepository
+	secretStore            secrets.SecretStore
+	workspaceSecretDeleter WorkspaceSecretDeleter
+	baseBranchPusher       AgentBaseBranchPusher
+	runtimeOverridesMu     sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -506,6 +523,12 @@ func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 	s.startStepResolver = resolver
 }
 
+// SetStepHistoryRecorder wires the ADR 0015 audit-trail writer for manual
+// step transitions (MoveTaskWithOptions). Optional.
+func (s *Service) SetStepHistoryRecorder(recorder StepHistoryRecorder) {
+	s.stepHistoryRecorder = recorder
+}
+
 // SetPRTaskResolver wires the GitHub PR→task resolver for PR-number search.
 // Optional — when unset, search by PR number is a no-op.
 func (s *Service) SetPRTaskResolver(resolver PRTaskResolver) {
@@ -518,16 +541,29 @@ func (s *Service) SetQuickChatDir(dir string) {
 	s.quickChatDir = dir
 }
 
-// RemoteBranchLister fetches branches from a provider's remote (e.g. GitHub
-// API) without needing a local clone. Used by ListBranches so a repo that is
+// RemoteBranchSource is the host-verified identity of a provider-backed
+// workspace repository. Callers must derive it from persisted repository data.
+type RemoteBranchSource struct {
+	WorkspaceID          string
+	Provider             string
+	ProviderHost         string
+	ProviderScope        string
+	ProviderRepositoryID string
+	Owner                string
+	Name                 string
+	RemoteURL            string
+	DefaultBranch        string
+}
+
+// RemoteBranchLister fetches branches from a provider's remote API without
+// needing a local clone. Used by ListBranches so a repo that is
 // registered as remote ("Remote" badge in the UI) can serve branches before
 // or even without the orchestrator finishing its clone.
 type RemoteBranchLister interface {
-	ListRepoBranches(ctx context.Context, workspaceID, owner, repo string) ([]Branch, error)
+	ListRepoBranches(ctx context.Context, source RemoteBranchSource) ([]Branch, error)
 }
 
-// SetRemoteBranchLister wires the remote branch source. Currently only GitHub
-// is plumbed; other providers can be added by extending the adapter.
+// SetRemoteBranchLister wires the provider-neutral remote branch source.
 func (s *Service) SetRemoteBranchLister(lister RemoteBranchLister) {
 	s.remoteBranchLister = lister
 }

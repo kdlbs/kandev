@@ -10,4 +10,7 @@ const (
 	// MaxAttachmentCount is the maximum number of attachments accepted for one
 	// message.
 	MaxAttachmentCount = 10
+	// MaxContextFilesPerMessage is the maximum number of context-file
+	// descriptors retained when compatible queued messages are folded.
+	MaxContextFilesPerMessage = 200
 )

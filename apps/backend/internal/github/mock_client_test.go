@@ -70,6 +70,23 @@ func TestMockClient_AddPR_GetPR(t *testing.T) {
 	}
 }
 
+func TestMockClient_PRCommitsFailuresAreConsumed(t *testing.T) {
+	m := NewMockClient()
+	m.AddPRCommits("owner", "repo", 7, []PRCommitInfo{{SHA: "commit-1"}})
+	m.SetPRCommitsFailures("owner", "repo", 7, 1)
+
+	if _, err := m.ListPRCommits(context.Background(), "owner", "repo", 7); err == nil {
+		t.Fatal("expected the queued PR commit failure")
+	}
+	commits, err := m.ListPRCommits(context.Background(), "owner", "repo", 7)
+	if err != nil {
+		t.Fatalf("expected the next PR commit request to succeed: %v", err)
+	}
+	if len(commits) != 1 || commits[0].SHA != "commit-1" {
+		t.Fatalf("unexpected commits after retry: %+v", commits)
+	}
+}
+
 func TestMockClient_AddIssueGetIssueAndReset(t *testing.T) {
 	m := NewMockClient()
 	ctx := context.Background()

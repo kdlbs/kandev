@@ -18,10 +18,12 @@ type inMemorySecretStore struct {
 var _ secrets.SecretStore = (*inMemorySecretStore)(nil)
 var _ secrets.ScopedSecretStore = (*inMemorySecretStore)(nil)
 
+// newInMemorySecretStore returns an empty in-memory secret store for testing.
 func newInMemorySecretStore() *inMemorySecretStore {
 	return &inMemorySecretStore{store: make(map[string]*secrets.SecretWithValue)}
 }
 
+// Create stores the secret, returning the injected error when set.
 func (s *inMemorySecretStore) Create(_ context.Context, secret *secrets.SecretWithValue) error {
 	if s.err != nil {
 		return s.err
@@ -33,6 +35,7 @@ func (s *inMemorySecretStore) Create(_ context.Context, secret *secrets.SecretWi
 	return nil
 }
 
+// Get returns the stored secret for the given ID, or an error when absent.
 func (s *inMemorySecretStore) Get(_ context.Context, id string) (*secrets.Secret, error) {
 	if sw, ok := s.store[id]; ok {
 		return &sw.Secret, nil
@@ -40,6 +43,7 @@ func (s *inMemorySecretStore) Get(_ context.Context, id string) (*secrets.Secret
 	return nil, fmt.Errorf("not found")
 }
 
+// Reveal returns the plaintext value for the given ID, or an error when absent.
 func (s *inMemorySecretStore) Reveal(_ context.Context, id string) (string, error) {
 	if sw, ok := s.store[id]; ok {
 		return sw.Value, nil
@@ -47,15 +51,23 @@ func (s *inMemorySecretStore) Reveal(_ context.Context, id string) (string, erro
 	return "", fmt.Errorf("not found")
 }
 
+// Update is a no-op for the in-memory store.
 func (s *inMemorySecretStore) Update(_ context.Context, _ string, _ *secrets.UpdateSecretRequest) error {
 	return nil
 }
+
+// Delete is a no-op for the in-memory store.
 func (s *inMemorySecretStore) Delete(_ context.Context, _ string) error { return nil }
+
+// List returns no items for the in-memory store.
 func (s *inMemorySecretStore) List(_ context.Context) ([]*secrets.SecretListItem, error) {
 	return nil, nil
 }
+
+// Close is a no-op for the in-memory store.
 func (s *inMemorySecretStore) Close() error { return nil }
 
+// ListScoped returns stored secrets filtered by the requested scope and workspace.
 func (s *inMemorySecretStore) ListScoped(_ context.Context, opts secrets.SecretListOptions) ([]*secrets.SecretListItem, error) {
 	items := make([]*secrets.SecretListItem, 0, len(s.store))
 	for _, stored := range s.store {
@@ -77,6 +89,7 @@ func (s *inMemorySecretStore) ListScoped(_ context.Context, opts secrets.SecretL
 	return items, nil
 }
 
+// GetForWorkspace returns the secret when it is global or belongs to the given workspace.
 func (s *inMemorySecretStore) GetForWorkspace(_ context.Context, id, workspaceID string) (*secrets.Secret, error) {
 	secret, err := s.Get(context.Background(), id)
 	if err != nil {
@@ -88,6 +101,7 @@ func (s *inMemorySecretStore) GetForWorkspace(_ context.Context, id, workspaceID
 	return secret, nil
 }
 
+// RevealGlobal reveals a global secret's value, rejecting workspace-scoped secrets.
 func (s *inMemorySecretStore) RevealGlobal(ctx context.Context, id string) (string, error) {
 	secret, err := s.Get(ctx, id)
 	if err != nil {
@@ -99,6 +113,7 @@ func (s *inMemorySecretStore) RevealGlobal(ctx context.Context, id string) (stri
 	return s.Reveal(ctx, id)
 }
 
+// RevealForWorkspace reveals a secret's value after confirming workspace access.
 func (s *inMemorySecretStore) RevealForWorkspace(ctx context.Context, id, workspaceID string) (string, error) {
 	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
 		return "", err
@@ -106,6 +121,7 @@ func (s *inMemorySecretStore) RevealForWorkspace(ctx context.Context, id, worksp
 	return s.Reveal(ctx, id)
 }
 
+// DeleteWorkspaceSecrets removes all secrets belonging to the given workspace.
 func (s *inMemorySecretStore) DeleteWorkspaceSecrets(_ context.Context, workspaceID string) error {
 	for id, stored := range s.store {
 		if stored.Scope == secrets.ScopeWorkspace && stored.WorkspaceID == workspaceID {
@@ -115,6 +131,7 @@ func (s *inMemorySecretStore) DeleteWorkspaceSecrets(_ context.Context, workspac
 	return nil
 }
 
+// TestPersistAuthToken verifies persistAuthToken stores the instance auth token as a secret, records its ID in execution metadata, and no-ops when the token or store is absent.
 func TestPersistAuthToken(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 
@@ -202,6 +219,7 @@ func TestPersistAuthToken(t *testing.T) {
 	})
 }
 
+// TestPersistRuntimeSecrets verifies persistRuntimeSecrets stores the auth token and bootstrap nonce as secrets and records both IDs so they can be revealed later.
 func TestPersistRuntimeSecrets(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	store := newInMemorySecretStore()

@@ -24,9 +24,13 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
-// errKey is the JSON field used for error responses from the E2E endpoints.
-const errKey = "error"
-const statusKey = "status"
+const (
+	// errKey is the JSON field used for error responses from the E2E endpoints.
+	errKey            = "error"
+	statusKey         = "status"
+	e2eResetSourceKey = "source"
+	e2eResetTypeKey   = "type"
+)
 
 // registerE2EResetRoutes registers the E2E test-only endpoints.
 // The endpoints are available when KANDEV_MOCK_AGENT is "true" or "only" (dev/E2E modes).
@@ -668,7 +672,7 @@ func handleE2EAutomationManualTrigger(svc *automation.Service, log *logger.Logge
 		}
 
 		// Build manual trigger data matching the production path.
-		data, _ := json.Marshal(map[string]string{"source": "manual"})
+		data, _ := json.Marshal(map[string]string{e2eResetSourceKey: "manual"})
 		triggerID := ""
 		if len(a.Triggers) > 0 {
 			triggerID = a.Triggers[0].ID
@@ -750,7 +754,7 @@ func handleE2EAddTrigger(svc *automation.Service, log *logger.Logger) gin.Handle
 		c.JSON(http.StatusCreated, gin.H{
 			"id":            t.ID,
 			"automation_id": t.AutomationID,
-			"type":          t.Type,
+			e2eResetTypeKey: t.Type,
 			"enabled":       t.Enabled,
 		})
 	}

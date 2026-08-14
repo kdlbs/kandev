@@ -89,8 +89,8 @@ async function seedTaskWithTwoPRs(args: SeedTaskArgs): Promise<string> {
     repo: "api",
     pr_number: 100,
     pr_url: `https://github.com/${OWNER}/api/pull/100`,
-    pr_title: "Follow-up mobile PR",
-    head_branch: "feat/mobile-follow-up",
+    pr_title: "PR events mobile PR",
+    head_branch: "feat/mobile-pr-events",
     base_branch: "main",
     author_login: "test-user",
     state: "open",
@@ -111,6 +111,73 @@ async function openTask(testPage: import("@playwright/test").Page, taskId: strin
 }
 
 test.describe("mobile PR CI chip drawer", () => {
+  test("keeps grouped PR event automations usable without tray overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithPRAndTodos({
+      apiClient,
+      seedData,
+      title: "Mobile PR event automation tray",
+      prOverrides: {
+        checks_state: "pending",
+        checks_total: 4,
+        checks_passing: 0,
+        review_state: "pending",
+        review_count: 0,
+        pending_review_count: 1,
+      },
+    });
+    await apiClient.updateTaskCIAutomationOptions(taskId, {
+      auto_fix_enabled: true,
+      auto_merge_enabled: true,
+      prompt_on_review_requested: true,
+      prompt_on_merged: true,
+      prompt_on_closed: true,
+    });
+    const session = await openTask(testPage, taskId);
+    const chip = session.prStatusChip();
+
+    await expect(chip).toBeVisible({ timeout: 15_000 });
+    await expect(chip.getByTestId("pr-status-auto-fix-chip")).toContainText("Auto-fix 0/10");
+    await expect(chip.getByTestId("pr-status-auto-merge-chip")).toHaveText("Auto-merge");
+    await expect(chip.getByTestId("pr-status-pr-events-chip")).toHaveText("PR events 3/3");
+    await expect(chip.getByTestId("pr-status-pr-events-chip")).toHaveCount(1);
+
+    const statusBar = session.activeChat().getByTestId("chat-status-bar");
+    await expect(statusBar).toHaveCSS("flex-wrap", "wrap");
+    expect(
+      await statusBar.evaluate((element) => {
+        const bar = element.getBoundingClientRect();
+        return Array.from(element.children).every((child) => {
+          const rect = child.getBoundingClientRect();
+          return rect.left >= bar.left - 1 && rect.right <= bar.right + 1;
+        });
+      }),
+    ).toBe(true);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await prCapture.screenshot("mobile-pr-pr-events-automation-tray", {
+      caption: "Grouped PR event automation badge in the mobile composer tray",
+    });
+
+    await session.tapPRStatusChip();
+    const drawer = session.prStatusChipDrawer();
+    await expect(
+      drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }),
+    ).toBeVisible();
+    await expect(drawer.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
+    await expect(drawer.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
+    await expect(drawer.getByRole("switch", { name: "PR merged" })).toBeVisible();
+    await expect(drawer.getByRole("switch", { name: "PR closed without merging" })).toBeVisible();
+  });
+
   test("tapping the todo indicator beside the CI chip opens the todo list", async ({
     testPage,
     apiClient,

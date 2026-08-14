@@ -41,6 +41,11 @@ test.describe("Task creation: custom prompt autocomplete", () => {
     await expect(dialog).toBeVisible();
 
     const textarea = testPage.getByTestId("task-description-input");
+    // A draft can be restored by the dialog after the storage cleanup above
+    // if the previous dialog-close save is still settling. This scenario is
+    // specifically about inserting into an empty composer, so establish that
+    // user-visible starting state before typing the mention.
+    await textarea.fill("");
     await textarea.click();
     await textarea.pressSequentially("@e2e-bu");
 

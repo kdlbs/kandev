@@ -391,11 +391,12 @@ jobs:
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
-      # Required for the docker pull below to succeed even if the kandev-ci
-      # package is private on GHCR. The `e2e` / `e2e-report` jobs above don't
-      # need this because GitHub's `container:` integration handles auth
-      # implicitly using GITHUB_TOKEN.
+      # The kandev-ci image is public, so fork PRs can pull it anonymously.
+      # Their read-only GITHUB_TOKEN can still be rejected by GHCR during an
+      # explicit login because it belongs to the base repository, not the
+      # contributor's fork. Keep authenticated pulls for trusted runs.
       - name: Log in to GHCR
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -579,7 +580,10 @@ jobs:
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
     # `runtime` tag — no Go needed for merging blob reports.
     container: ghcr.io/kdlbs/kandev-ci:runtime-latest
-    timeout-minutes: 5
+    # 8 min (was 5) — the merge now also emits the JSON report used to
+    # cross-check the flake count, and the flake baseline lookup walks recent
+    # main runs looking for a published history artifact.
+    timeout-minutes: 8
     # Container jobs default to `sh`; pin to bash.
     defaults:
       run:
@@ -789,7 +793,119 @@ jobs:
         # embeds the absolute testDir in each blob and refuses to merge
         # reports recorded with different test directories — passing the
         # config makes it normalize against the config's `testDir` instead.
-        run: npx playwright merge-reports --config e2e/playwright.config.ts --reporter=html ./e2e/blob-reports
+        #
+        # The `json` reporter is Playwright's own verdict on the run: its
+        # `stats.flaky` counts `TestCase.outcome() === "flaky"`. The flake report
+        # below cross-checks our blob-derived count against it, so a parser bug
+        # cannot quietly move the trended number. `merge-reports` unpacks
+        # `report.jsonl` next to each `report.zip` it reads, so this must stay
+        # after the blob-parsing steps above.
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: e2e/merged-report.json
+        run: npx playwright merge-reports --config e2e/playwright.config.ts --reporter=html,json ./e2e/blob-reports
+
+      # The flake trend is carried run to run as an artifact: find the newest
+      # `main` run that published one and use it as this run's baseline.
+      #
+      # This deliberately queries `status=completed`, not the `status=success`
+      # the timing-profile lookup uses, and the asymmetry is the point. A
+      # timing profile is only trustworthy from a run where everything passed,
+      # but flake data is most interesting from runs that did not: restricting
+      # to `success` would drop the history of every run that had a failure,
+      # which is the opposite of what a flake trend is for. Do not "fix" this
+      # to match the other lookup.
+      - name: Locate latest main flake history
+        id: flake-history-run
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const api = async (url) => {
+            const response = await fetch(url, {
+              headers: {
+                accept: "application/vnd.github+json",
+                authorization: "Bearer " + process.env.GH_TOKEN,
+              },
+            });
+            if (!response.ok) throw new Error(url + " -> " + response.status);
+            return response.json();
+          };
+
+          (async () => {
+            const base = process.env.GITHUB_API_URL + "/repos/" + process.env.GITHUB_REPOSITORY;
+            const runs = await api(
+              base + "/actions/workflows/e2e-tests.yml/runs?branch=main&status=completed&per_page=15",
+            );
+            for (const run of runs.workflow_runs ?? []) {
+              const artifacts = await api(base + "/actions/runs/" + run.id + "/artifacts?per_page=100");
+              const found = (artifacts.artifacts ?? []).some(
+                (artifact) => artifact.name === "e2e-flake-history" && !artifact.expired,
+              );
+              if (found) {
+                fs.appendFileSync(process.env.GITHUB_OUTPUT, "run_id=" + run.id + "\n");
+                console.log("Using flake history from main run " + run.id + ".");
+                return;
+              }
+            }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, "run_id=\n");
+            console.log("No main run has published a flake history yet; this run seeds the trend.");
+          })().catch((error) => {
+            console.log("::warning::Unable to locate a flake history baseline: " + error.message);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, "run_id=\n");
+          });
+          NODE
+
+      - name: Download previous flake history
+        if: always() && steps.flake-history-run.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-flake-history
+          path: e2e/previous-flake-history
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.flake-history-run.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Write E2E flake report
+        if: always()
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+          if [[ ! -f e2e/retry-summary.json ]]; then
+            echo "No retry summary was produced; skipping the flake report."
+            exit 0
+          fi
+          history_args=()
+          if [[ -f "$GITHUB_WORKSPACE/e2e/previous-flake-history/flake-history.json" ]]; then
+            history_args=(--history "$GITHUB_WORKSPACE/e2e/previous-flake-history/flake-history.json")
+          fi
+          playwright_args=()
+          if [[ -f e2e/merged-report.json ]]; then
+            playwright_args=(--playwright-json e2e/merged-report.json)
+          fi
+          pnpm exec tsx e2e/scripts/flake-report.ts \
+            --summary e2e/retry-summary.json \
+            --output e2e/flake-history.json \
+            "${history_args[@]}" \
+            "${playwright_args[@]}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --branch "$GITHUB_REF_NAME" \
+            --sha "$GITHUB_SHA"
+
+      - name: Upload flake history
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-flake-history
+          path: apps/web/e2e/flake-history.json
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Upload merged report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

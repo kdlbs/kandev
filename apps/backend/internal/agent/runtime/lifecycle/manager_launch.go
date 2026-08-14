@@ -17,9 +17,11 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/mcp/plugintools"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -310,11 +312,13 @@ func (m *Manager) resolveProfileLaunchTokens(profileInfo *AgentProfileInfo) (cli
 	return cliFlagTokens, commandPrefixTokens, nil
 }
 
-// buildAgentCommand builds the agent command strings for the execution.
-// Returns both the initial command and the continue command (for one-shot agents like Amp).
-// Returns an error when a configured command_prefix cannot be resolved, so a
-// configured profile fails closed instead of launching unwrapped.
-func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent, preferNative bool) (agentCommands, error) {
+func (m *Manager) buildAgentCommandWithContext(
+	ctx context.Context,
+	req *LaunchRequest,
+	profileInfo *AgentProfileInfo,
+	agentConfig agents.Agent,
+	preferNative bool,
+) (agentCommands, error) {
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)
@@ -334,6 +338,11 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		model = req.ModelOverride
 	}
 	cliFlagTokens = appendRouteOverrideFlags(cliFlagTokens, req)
+	runtime := models.ExecutorType(req.ExecutorType).Runtime()
+	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(ctx, runtime, agentConfig)
+	if err != nil {
+		return agentCommands{}, err
+	}
 	// Only pass SessionID (for --resume flag) if the agent supports recovery.
 	// Agents with CanRecover=false (e.g. Auggie) use history context injection instead.
 	sessionID := req.ACPSessionID
@@ -341,14 +350,15 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		sessionID = ""
 	}
 	cmdOpts := agents.CommandOptions{
-		Model:               model,
-		SessionID:           sessionID,
-		AutoApprove:         autoApprove,
-		PermissionValues:    permissionValues,
-		CLIFlagTokens:       cliFlagTokens,
-		CommandPrefixTokens: commandPrefixTokens,
-		Runtime:             models.ExecutorType(req.ExecutorType).Runtime(),
-		PreferNativeBinary:  preferNative,
+		Model:                 model,
+		SessionID:             sessionID,
+		AutoApprove:           autoApprove,
+		PermissionValues:      permissionValues,
+		CLIFlagTokens:         cliFlagTokens,
+		CommandPrefixTokens:   commandPrefixTokens,
+		Runtime:               runtime,
+		PreferNativeBinary:    preferNative,
+		ManagedRuntimeVersion: managedRuntimeVersion,
 	}
 	args := m.commandBuilder.BuildCommandArgs(agentConfig, cmdOpts)
 	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, cmdOpts)
@@ -356,6 +366,29 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		return agentCommands{}, err
 	}
 	return newAgentCommands(args, continueArgs), nil
+}
+
+func (m *Manager) resolveManagedRuntimeVersion(
+	ctx context.Context,
+	runtime agentruntime.Runtime,
+	agentConfig agents.Agent,
+) (string, error) {
+	if runtime != agentruntime.RuntimeStandalone || m.managedRuntimeSelections == nil {
+		return "", nil
+	}
+	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return "", nil
+	}
+	spec := managed.ManagedNPMRuntime()
+	selection, found, err := m.managedRuntimeSelections.Get(ctx, agentConfig.ID(), spec.Package)
+	if err != nil {
+		return "", fmt.Errorf("resolve active managed runtime version for %s: %w", agentConfig.ID(), err)
+	}
+	if !found || selection.Package != spec.Package {
+		return "", nil
+	}
+	return selection.Version, nil
 }
 
 func validateBuiltAgentCommands(args, continueArgs []string) error {
@@ -712,11 +745,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		RemoteContributions:            remoteContributions,
 	}
 
-	if err := resumeRemoteInstancePreflight(ctx, rt, execReq); err != nil {
+	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
+	defer launchCancel()
+	if err := resumeRemoteInstancePreflight(launchCtx, rt, execReq); err != nil {
 		return nil, nil, nil, err
 	}
 
-	execInstance, err := rt.CreateInstance(ctx, execReq)
+	execInstance, err := rt.CreateInstance(launchCtx, execReq)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
 	}
@@ -830,6 +865,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:   req.WorktreeBranchTicket,
 		PullBeforeWorktree:     req.PullBeforeWorktree,
+		RemoteSyncHandled:      req.RemoteSyncHandled,
 		TaskDirName:            req.TaskDirName,
 		RepoName:               req.RepoName,
 		BranchSlug:             req.BranchSlug,
@@ -860,6 +896,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				WorktreeBranchTemplate: r.WorktreeBranchTemplate,
 				WorktreeBranchTicket:   r.WorktreeBranchTicket,
 				PullBeforeWorktree:     r.PullBeforeWorktree,
+				RemoteSyncHandled:      r.RemoteSyncHandled,
 				RepoSetupScript:        setup,
 				BranchSlug:             r.BranchSlug,
 				BranchIdentitySlug:     r.BranchIdentitySlug,
@@ -1049,7 +1086,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 		}
 		preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execution.MetadataSnapshot())
-		cmds, err := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
+		cmds, err := m.buildAgentCommandWithContext(sharedCtx, req, profileInfo, agentConfig, preferNative)
 		if err != nil {
 			return nil, err
 		}
@@ -1225,7 +1262,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// Build the in-memory AgentExecution from the runtime instance. Extracted
 	// to keep launchInternal under the cyclomatic-complexity budget.
-	execution, err := m.buildExecutionFromInstance(req, execReq, execInstance, rt, profileInfo, agentConfig, prepResult)
+	execution, err := m.buildExecutionFromInstance(ctx, req, execReq, execInstance, rt, profileInfo, agentConfig, prepResult)
 	if err != nil {
 		// Command resolution failed (e.g. a configured command_prefix could not
 		// be tokenised). The execution isn't built yet, so stop the runtime
@@ -1270,6 +1307,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 // into an in-memory *AgentExecution ready for Add. Pulled out of launchInternal
 // to keep the orchestration loop's cyclomatic complexity within the linter budget.
 func (m *Manager) buildExecutionFromInstance(
+	ctx context.Context,
 	req *LaunchRequest,
 	execReq *ExecutorCreateRequest,
 	execInstance *ExecutorInstance,
@@ -1292,7 +1330,7 @@ func (m *Manager) buildExecutionFromInstance(
 	// promoteWorkspaceExecution's call site rather than re-deriving from the
 	// requested ExecutorType.
 	preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execReq.Metadata)
-	cmds, err := m.buildAgentCommand(req, profileInfo, agentConfig, preferNative)
+	cmds, err := m.buildAgentCommandWithContext(ctx, req, profileInfo, agentConfig, preferNative)
 	if err != nil {
 		return nil, err
 	}
@@ -1615,6 +1653,22 @@ func (m *Manager) SetMcpProvidersForSession(ctx context.Context, sessionID strin
 		return fmt.Errorf("set MCP providers for session %s: %w", sessionID, err)
 	}
 	return nil
+}
+
+// SetPluginToolsForAllExecutions pushes a complete revisioned catalog to each
+// live agentctl. One unavailable execution does not prevent the others from
+// converging; stale delivery is rejected by agentctl's snapshot revision.
+func (m *Manager) SetPluginToolsForAllExecutions(ctx context.Context, snapshot plugintools.Snapshot) error {
+	var refreshErr error
+	for _, execution := range m.ListExecutions() {
+		if execution == nil || execution.agentctl == nil {
+			continue
+		}
+		if err := execution.agentctl.SetPluginTools(ctx, snapshot); err != nil {
+			refreshErr = errors.Join(refreshErr, fmt.Errorf("refresh execution %s plugin tools: %w", execution.ID, err))
+		}
+	}
+	return refreshErr
 }
 
 // resolveApprovalPolicyAndDisplayName resolves the approval policy and agent display name

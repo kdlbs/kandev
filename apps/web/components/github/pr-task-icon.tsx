@@ -5,54 +5,31 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
-import { useTaskBadgeTooltip } from "@/hooks/use-task-badge-tooltip";
+import { useChangeRequestTaskTooltipState } from "@/components/integrations/use-change-request-task-tooltip-state";
+import {
+  CHANGE_REQUEST_STATUS_COLORS,
+  CHANGE_REQUEST_STATUS_RANK,
+  getChangeRequestAggregateStatusColor,
+} from "@/components/integrations/change-request-task-status-color";
 import type { TaskPR } from "@/lib/types/github";
 import { derivePRTaskStatusSummary, PRTaskStatusSummary } from "./pr-task-status-summary";
 
-const MUTED_FOREGROUND = "text-muted-foreground";
-const PURPLE_500 = "text-purple-500";
-const RED_500 = "text-red-500";
-const YELLOW_500 = "text-yellow-500";
-const SKY_400 = "text-sky-400";
-const EMERALD_400 = "text-emerald-400";
-const GREEN_500 = "text-green-500";
+const MUTED_FOREGROUND = CHANGE_REQUEST_STATUS_COLORS.muted;
+const PURPLE_500 = CHANGE_REQUEST_STATUS_COLORS.merged;
+const RED_500 = CHANGE_REQUEST_STATUS_COLORS.danger;
+const YELLOW_500 = CHANGE_REQUEST_STATUS_COLORS.warning;
+const SKY_400 = CHANGE_REQUEST_STATUS_COLORS.review;
+const EMERALD_400 = CHANGE_REQUEST_STATUS_COLORS.ready;
+const GREEN_500 = CHANGE_REQUEST_STATUS_COLORS.passing;
 
 /** Maps the task-level PR projection to the same visual language as live PRs. */
 export function getPRAggregateStatusColor(state: string | null | undefined): string {
-  switch (state?.toLowerCase()) {
-    case "merged":
-      return PURPLE_500;
-    case "closed":
-    case "failure":
-      return RED_500;
-    case "pending":
-      return YELLOW_500;
-    case "awaiting_review":
-      return SKY_400;
-    case "ready":
-      return EMERALD_400;
-    case "passing":
-      return GREEN_500;
-    case "draft":
-    case "blocked":
-    case "neutral":
-    case "open":
-    default:
-      return MUTED_FOREGROUND;
-  }
+  return getChangeRequestAggregateStatusColor(state);
 }
 
-const STATUS_RANK: Record<string, number> = {
-  // Higher = more attention-worthy. Drives the aggregated icon color when a
-  // task has multiple PRs (we surface the worst state).
-  [RED_500]: 5,
-  [YELLOW_500]: 4,
-  [SKY_400]: 3,
-  [EMERALD_400]: 2,
-  [GREEN_500]: 1,
-  [PURPLE_500]: 0,
-  [MUTED_FOREGROUND]: 0,
-};
+// Higher = more attention-worthy. Drives the aggregated icon color when a
+// task has multiple PRs (we surface the worst state).
+const STATUS_RANK = CHANGE_REQUEST_STATUS_RANK;
 
 function hasExplicitPRChecksPassed(pr: TaskPR): boolean {
   return pr.checks_state === "success";
@@ -180,7 +157,7 @@ export function aggregatePRStatusColor(prs: TaskPR[]): string {
   if (prs.length === 0) return MUTED_FOREGROUND;
   const open = prs.filter((p) => p.state === "open");
   const target = open.length > 0 ? open : prs;
-  let bestColor = MUTED_FOREGROUND;
+  let bestColor: string = MUTED_FOREGROUND;
   let bestRank = -1;
   for (const pr of target) {
     const color = getPRStatusColor(pr);
@@ -246,7 +223,7 @@ export function PRTaskIcon({ taskId }: { taskId: string }) {
 
 function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
   const { t } = useTranslation();
-  const tooltip = useTaskBadgeTooltip();
+  const tooltip = useChangeRequestTaskTooltipState();
   const readyToMerge = isPRReadyToMerge(pr);
   const summary = derivePRTaskStatusSummary(pr, readyToMerge);
   return (
@@ -282,7 +259,7 @@ function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
 
 function MultiPRIcon({ taskId, prs }: { taskId: string; prs: TaskPR[] }) {
   const { t } = useTranslation();
-  const tooltip = useTaskBadgeTooltip();
+  const tooltip = useChangeRequestTaskTooltipState();
   const aggregateColor = aggregatePRStatusColor(prs);
   const allReady = areAllOpenPRsReadyToMerge(prs);
   const summaries = prs.map((pr) => derivePRTaskStatusSummary(pr, isPRReadyToMerge(pr)));

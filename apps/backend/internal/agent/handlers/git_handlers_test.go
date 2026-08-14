@@ -121,6 +121,8 @@ func TestGitMutationHandlersForwardRequestsAndReturnResults(t *testing.T) {
 	}{
 		{name: "pull", path: "/api/v1/git/pull", request: GitPullRequest{SessionID: "s", Rebase: true, Repo: "repo"}, invoke: (*GitHandlers).wsPull, assertBody: expectGitBody("rebase", true)},
 		{name: "push", path: "/api/v1/git/push", request: GitPushRequest{SessionID: "s", Force: true, SetUpstream: true, Repo: "repo"}, invoke: (*GitHandlers).wsPush, assertBody: expectGitBody("force", true)},
+		{name: "replace contribution", path: "/api/v1/git/contribution/replace", request: GitContributionRequest{SessionID: "s", ExpectedRemoteHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Repo: "repo"}, invoke: (*GitHandlers).wsReplaceContribution, assertBody: expectGitBody("expected_remote_head", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
+		{name: "use contribution", path: "/api/v1/git/contribution/use", request: GitContributionRequest{SessionID: "s", ExpectedRemoteHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Repo: "repo"}, invoke: (*GitHandlers).wsUseContribution, assertBody: expectGitBody("expected_remote_head", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")},
 		{name: "commit", path: "/api/v1/git/commit", request: GitCommitRequest{SessionID: "s", Message: "message", StageAll: true, Repo: "repo"}, invoke: (*GitHandlers).wsCommit, assertBody: expectGitBody("message", "message")},
 		{name: "rebase", path: "/api/v1/git/rebase", request: GitRebaseRequest{SessionID: "s", BaseBranch: "main", Repo: "repo"}, invoke: (*GitHandlers).wsRebase, assertBody: expectGitBody("base_branch", "main")},
 		{name: "merge", path: "/api/v1/git/merge", request: GitMergeRequest{SessionID: "s", BaseBranch: "main", Repo: "repo"}, invoke: (*GitHandlers).wsMerge, assertBody: expectGitBody("base_branch", "main")},
@@ -164,6 +166,37 @@ func TestGitMutationHandlersForwardRequestsAndReturnResults(t *testing.T) {
 			}
 			tt.assertBody(t, body)
 		})
+	}
+}
+
+func TestGitUseContributionReturnsRecoveryBranch(t *testing.T) {
+	h, server := gitHandlerServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"success":true,
+			"operation":"use_remote_contribution",
+			"recovery_branch":"kandev/recovery-123"
+		}`))
+	})
+	defer server.Close()
+
+	msg, err := ws.NewRequest("id", "action", GitContributionRequest{
+		SessionID:          "s",
+		ExpectedRemoteHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Repo:               "repo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := h.wsUseContribution(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var result client.GitOperationResult
+	if err := json.Unmarshal(response.Payload, &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result.RecoveryBranch != "kandev/recovery-123" {
+		t.Errorf("RecoveryBranch = %q, want %q", result.RecoveryBranch, "kandev/recovery-123")
 	}
 }
 
@@ -297,6 +330,10 @@ func TestGitMutationHandlersRejectInvalidRequestsBeforeLookup(t *testing.T) {
 		{name: "discard malformed", action: ws.ActionWorktreeDiscard, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsDiscard, want: "invalid payload"},
 		{name: "diff malformed", action: ws.ActionSessionCommitDiff, body: json.RawMessage(`{invalid`), invoke: (*GitHandlers).wsCommitDiff, want: "invalid payload"},
 		{name: "push session", action: ws.ActionWorktreePush, body: GitPushRequest{}, invoke: (*GitHandlers).wsPush, want: "session_id is required"},
+		{name: "replace contribution session", action: ws.ActionWorktreeReplaceContribution, body: GitContributionRequest{}, invoke: (*GitHandlers).wsReplaceContribution, want: "session_id is required"},
+		{name: "use contribution session", action: ws.ActionWorktreeUseContribution, body: GitContributionRequest{}, invoke: (*GitHandlers).wsUseContribution, want: "session_id is required"},
+		{name: "replace contribution expected head", action: ws.ActionWorktreeReplaceContribution, body: GitContributionRequest{SessionID: "s"}, invoke: (*GitHandlers).wsReplaceContribution, want: "expected_remote_head is required"},
+		{name: "use contribution expected head", action: ws.ActionWorktreeUseContribution, body: GitContributionRequest{SessionID: "s"}, invoke: (*GitHandlers).wsUseContribution, want: "expected_remote_head is required"},
 		{name: "rebase base", action: ws.ActionWorktreeRebase, body: GitRebaseRequest{SessionID: "s"}, invoke: (*GitHandlers).wsRebase, want: "base_branch is required"},
 		{name: "merge base", action: ws.ActionWorktreeMerge, body: GitMergeRequest{SessionID: "s"}, invoke: (*GitHandlers).wsMerge, want: "base_branch is required"},
 		{name: "abort operation", action: ws.ActionWorktreeAbort, body: GitAbortRequest{SessionID: "s", Operation: "cherry-pick"}, invoke: (*GitHandlers).wsAbort, want: "operation must be"},

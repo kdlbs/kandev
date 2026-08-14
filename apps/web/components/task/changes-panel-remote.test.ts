@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeCommits } from "./changes-panel";
+import { mergeCommits, separateCommitHistories } from "./changes-panel";
 
 const PR_DATE = "2026-03-29T00:00:00Z";
 const SHARED_SHA = "ccc3333";
@@ -23,6 +23,41 @@ function makePR(sha: string, message = "msg") {
 }
 
 describe("mergeCommits source provenance", () => {
+  it("places provider-only commits newest first before shared history", () => {
+    const local = [makeLocal(SHARED_SHA, "shared")];
+    const provider = [
+      {
+        ...makePR("old1111", "old provider"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: WIDGET_REPO,
+      },
+      {
+        ...makePR(SHARED_SHA, "shared provider"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: WIDGET_REPO,
+      },
+      {
+        ...makePR("new9999", "new provider"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: WIDGET_REPO,
+      },
+    ];
+
+    const result = mergeCommits(local, provider);
+
+    expect(result.map((commit) => commit.commit_sha)).toEqual(["new9999", SHARED_SHA, "old1111"]);
+    expect(result[0]).toMatchObject({ presentation: "current_pr", pushed: true });
+    expect(result[1]).toMatchObject({ commit_message: "shared" });
+    expect(result[1].presentation).toBeUndefined();
+    expect(result[2]).toMatchObject({ presentation: "current_pr", pushed: true });
+  });
+
   it("marks PR-only commits as remote with explicitly unavailable stats", () => {
     const pr = {
       ...makePR(SHARED_SHA, "external fix"),
@@ -66,7 +101,9 @@ describe("mergeCommits source provenance", () => {
       },
     ]);
   });
+});
 
+describe("mergeCommits repository identity", () => {
   it("does not deduplicate equal SHAs from different repositories", () => {
     const local = [{ ...makeLocal(SHARED_SHA, "local"), repository_name: "widget-a" }];
     const pr = {
@@ -118,9 +155,93 @@ describe("mergeCommits source provenance", () => {
       detailTarget: { source: "github", repo: "widget-b" },
     });
   });
+
+  it("orders provider-only commits before shared commits within each repository", () => {
+    const local = [
+      { ...makeLocal("shared-a", "shared a"), repository_name: "widget-a", pushed: true },
+      { ...makeLocal("shared-b", "shared b"), repository_name: "widget-b", pushed: true },
+    ];
+    const provider = [
+      {
+        ...makePR("old-a", "old a"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-a",
+        repository_name: "widget-a",
+      },
+      {
+        ...makePR("shared-a", "shared a provider"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-a",
+        repository_name: "widget-a",
+      },
+      {
+        ...makePR("new-a", "new a"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-a",
+        repository_name: "widget-a",
+      },
+      {
+        ...makePR("shared-b", "shared b provider"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-b",
+        repository_name: "widget-b",
+      },
+    ];
+
+    const result = mergeCommits(local, provider);
+
+    expect(
+      result
+        .filter((commit) => commit.repository_name === "widget-a")
+        .map((commit) => commit.commit_sha),
+    ).toEqual(["new-a", "shared-a", "old-a"]);
+  });
 });
 
-describe("mergeCommits repository identity", () => {
+describe("separateCommitHistories", () => {
+  it("preserves rewritten provider and checkout rows without deduplication", () => {
+    const local = [makeLocal("old1111", "same message"), makeLocal("old2222", "local work")];
+    const provider = [
+      {
+        ...makePR("new1111", "same message"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: WIDGET_REPO,
+      },
+      {
+        ...makePR("new3333", "provider work"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: WIDGET_REPO,
+      },
+    ];
+
+    const result = separateCommitHistories(local, provider);
+
+    expect(result.providerCommits.map((commit) => commit.commit_sha)).toEqual([
+      "new3333",
+      "new1111",
+    ]);
+    expect(result.localCommits.map((commit) => commit.commit_sha)).toEqual(["old1111", "old2222"]);
+    expect(result.providerCommits.every((commit) => commit.presentation === "current_pr")).toBe(
+      true,
+    );
+    expect(result.localCommits.every((commit) => commit.presentation === "local_checkout")).toBe(
+      true,
+    );
+    expect(result.localCommits.every((commit) => commit.pushed === false)).toBe(true);
+  });
+
   it("does not create a PR-only target without complete provenance", () => {
     const pr = {
       ...makePR(SHARED_SHA, "remote"),
@@ -159,5 +280,54 @@ describe("mergeCommits repository identity", () => {
       repository_name: WIDGET_REPO,
       detailTarget: { source: "github", repo: WIDGET_REPO },
     });
+  });
+});
+
+describe("repository-scoped provider history", () => {
+  it("reverses provider history independently for each repository", () => {
+    const repositoryLabel = "shared-label";
+    const provider = [
+      {
+        ...makePR("old-a", "old a"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-a",
+        repository_name: repositoryLabel,
+      },
+      {
+        ...makePR("old-b", "old b"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-b",
+        repository_name: repositoryLabel,
+      },
+      {
+        ...makePR("new-a", "new a"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-a",
+        repository_name: repositoryLabel,
+      },
+      {
+        ...makePR("new-b", "new b"),
+        stats_available: false,
+        workspace_id: WORKSPACE_ID,
+        owner: "acme",
+        repo: "widget-b",
+        repository_name: repositoryLabel,
+      },
+    ];
+
+    const result = separateCommitHistories([], provider);
+
+    expect(result.providerCommits.map((commit) => commit.commit_sha)).toEqual([
+      "new-a",
+      "old-a",
+      "new-b",
+      "old-b",
+    ]);
   });
 });

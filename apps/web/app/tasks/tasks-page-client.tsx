@@ -533,7 +533,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
   // for every workspace. The AppSidebar's TaskSessionSidebar now hydrates that
   // same slice for its own MR badges and, having already fetched, will not
   // refetch, so gating here would blank its badges on every client-side
-  // navigation into /tasks.
+  // navigation into /tasks. See spec "Hydration ownership".
   useWorkspaceMRs(s.activeWorkspaceId);
   useForegroundRefresh(() => s.fetchTasks(true), Boolean(s.activeWorkspaceId), s.activeWorkspaceId);
   const { handleSortChange, handleGroupChange } = useTasksListPreferenceSync({

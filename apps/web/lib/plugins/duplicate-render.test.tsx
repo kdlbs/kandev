@@ -4,6 +4,7 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { loadPlugins } from "./host";
 import { pluginRegistry } from "./registry";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { ActivePlugin, PluginHostApi, PluginRegistry } from "./types";
 
 /** No-op `host.toast`; these specs exercise lifecycle, never notifications. */
@@ -30,14 +31,33 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     React,
     jsx: React.createElement,
     store: { getState: () => ({}) as never, setState: () => {}, subscribe: () => () => {} },
-    api: { fetch: async () => new Response(), baseUrl: "" },
-    ui: {},
+    context: {
+      getActiveWorkspaceId: () => undefined,
+      subscribeActiveWorkspace: () => () => {},
+      getTaskCreationContext: () => null,
+      subscribeTaskCreationContext: () => () => {},
+      resolveRepositoryId: () => undefined,
+    },
+    api: {
+      fetch: async () => new Response(),
+      invokeAction: async <TResponse,>() => undefined as TResponse,
+      baseUrl: "",
+    },
+    i18n: {
+      locale: "en",
+      t: (key) => key,
+      useTranslation: () => ({ locale: "en", t: (key) => key }),
+    },
+    ui: {} as PluginHostApi["ui"],
+    useResponsiveBreakpoint,
     theme: "light",
     onThemeChange: () => () => {},
     navigate: () => {},
     openModal: () => ({ close: () => {} }),
+    openTaskLinkDialog: () => ({ close: () => {} }),
+    openTaskReview: () => {},
     toast: NOOP_TOAST,
-    utils: { cn: () => "", formatRelativeTime: () => "" },
+    utils: { cn: () => "", generateUUID: () => "uuid", formatRelativeTime: () => "" },
     storage: {
       get: async () => undefined,
       set: async () => ({ updatedAt: "" }),

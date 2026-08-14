@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -14,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
+	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/secrets"
 )
 
@@ -254,6 +257,212 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	return &result, nil
 }
 
+type DuplicateProfileRequest struct {
+	ID string
+}
+
+// DuplicateProfile creates an independent copy of an existing profile. The
+// copy keeps every configuration field (model, mode, config options, CLI
+// flags, env vars, launcher prefix, auto-approve flags, enabled state, MCP
+// config) under a fresh row named "<source> Copy", so a user can start a
+// variant from a working profile without re-entering it. Runtime state is
+// intentionally not copied: the copy starts idle with no pause reason,
+// last-run timestamp, or consecutive-failure count. No in-use checks apply —
+// a brand-new row cannot be referenced by sessions, watchers, automations,
+// or routing tiers yet.
+//
+// The copy is committed in one repository transaction (row + MCP config), so
+// a failure leaves no partial profile and a disabled source never becomes
+// briefly selectable.
+//
+// The source profile and MCP row are read up front, then the repository
+// re-verifies those revisions inside the transaction; a concurrent writer
+// between the reads and the insert aborts with a retryable error, so the
+// copy always reflects one consistent snapshot of the source.
+func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileRequest) (*dto.AgentProfileDTO, error) {
+	source, err := c.repo.GetAgentProfile(ctx, req.ID)
+	if err != nil {
+		if isProfileNotFoundErr(err) {
+			return nil, ErrAgentProfileNotFound
+		}
+		return nil, err
+	}
+	// Office-scoped profiles are owned by the workspace-scoped office API
+	// surface and hidden from this instance-level settings surface (the UI
+	// filters them via filterGlobalProfiles). Refuse to duplicate them here so
+	// the endpoint cannot read or clone another workspace's configuration;
+	// 404 keeps the existence of office profiles hidden.
+	if source.WorkspaceID != "" {
+		return nil, ErrAgentProfileNotFound
+	}
+	for attempt := 0; ; attempt++ {
+		// A source without an MCP row leaves the copy without one: the
+		// default-config semantics and boot EnsureDefaultMcpConfig cover
+		// MCP-supporting agents.
+		var sourceMcp *models.AgentProfileMcpConfig
+		sourceMcp, err = c.repo.GetAgentProfileMcpConfig(ctx, source.ID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			sourceMcp = nil
+		}
+		clone := duplicateClone(source)
+		var mcpCopy *models.AgentProfileMcpConfig
+		if sourceMcp != nil {
+			mcpCopy = &models.AgentProfileMcpConfig{
+				Enabled: sourceMcp.Enabled,
+				Servers: cloneStringInterfaceMap(sourceMcp.Servers),
+				Meta:    cloneStringInterfaceMap(sourceMcp.Meta),
+			}
+		}
+		err = c.repo.DuplicateAgentProfile(ctx, store.DuplicateAgentProfileInput{
+			Source:    source,
+			SourceMcp: sourceMcp,
+			Profile:   clone,
+			McpConfig: mcpCopy,
+		})
+		if err == nil {
+			result := toProfileDTO(clone)
+			return &result, nil
+		}
+		// A source deleted between the snapshot read and the transaction is a
+		// deterministic 404, not a retryable race: the copy has nothing to
+		// reflect, so surface it immediately instead of re-reading the source
+		// up to maxDuplicateRetries times.
+		if errors.Is(err, store.ErrSourceProfileNotFound) {
+			return nil, ErrAgentProfileNotFound
+		}
+		if !isRetryableDuplicateErr(err) || attempt >= maxDuplicateRetries {
+			return nil, err
+		}
+		source, err = c.repo.GetAgentProfile(ctx, req.ID)
+		if err != nil {
+			if isProfileNotFoundErr(err) {
+				return nil, ErrAgentProfileNotFound
+			}
+			return nil, err
+		}
+	}
+}
+
+// maxDuplicateRetries bounds the number of re-attempts after a concurrent
+// source change. One retry covers the common single-writer race; the cap
+// prevents a hot loop under sustained concurrent edits.
+const maxDuplicateRetries = 2
+
+// isRetryableDuplicateErr reports whether a duplicate attempt failed because
+// the source changed concurrently (revision mismatch or a WAL snapshot-isolation
+// busy error on the write) rather than deterministically. A deleted source is
+// intentionally absent: DuplicateProfile maps ErrSourceProfileNotFound to 404
+// before consulting this set.
+func isRetryableDuplicateErr(err error) bool {
+	return errors.Is(err, store.ErrProfileChanged) ||
+		strings.Contains(err.Error(), "database is locked") ||
+		strings.Contains(err.Error(), "database table is locked")
+}
+
+// duplicateClone builds the copy row from the source profile. Runtime state
+// is intentionally not copied: the copy starts idle with no pause reason,
+// last-run timestamp, or consecutive-failure count.
+func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
+	return &models.AgentProfile{
+		AgentID:                    source.AgentID,
+		Name:                       strings.TrimSpace(source.Name) + " Copy",
+		AgentDisplayName:           source.AgentDisplayName,
+		Model:                      source.Model,
+		FallbackModel:              strings.TrimSpace(source.FallbackModel),
+		AutoFallback:               source.AutoFallback,
+		Mode:                       source.Mode,
+		ConfigOptions:              profileconfig.SanitizeConfigOptions(cloneStringMap(source.ConfigOptions)),
+		AllowIndexing:              source.AllowIndexing,
+		AutoApprove:                source.AutoApprove,
+		CLIPassthrough:             source.CLIPassthrough,
+		CLIFlags:                   cloneCLIFlags(source.CLIFlags),
+		EnvVars:                    cloneEnvVars(source.EnvVars),
+		CommandPrefix:              source.CommandPrefix,
+		UserModified:               true,
+		Enabled:                    source.Enabled,
+		WorkspaceID:                source.WorkspaceID,
+		Role:                       source.Role,
+		Icon:                       source.Icon,
+		ReportsTo:                  source.ReportsTo,
+		SkillIDs:                   source.SkillIDs,
+		DesiredSkills:              source.DesiredSkills,
+		MaxConcurrentSessions:      source.MaxConcurrentSessions,
+		CooldownSec:                source.CooldownSec,
+		SkipIdleRuns:               source.SkipIdleRuns,
+		FailureThreshold:           cloneIntPtr(source.FailureThreshold),
+		ExecutorPreference:         source.ExecutorPreference,
+		BudgetMonthlyCents:         source.BudgetMonthlyCents,
+		Settings:                   source.Settings,
+		Permissions:                source.Permissions,
+		DangerouslySkipPermissions: source.DangerouslySkipPermissions,
+		CustomPrompt:               source.CustomPrompt,
+	}
+}
+
+// isProfileNotFoundErr reports whether err means "no live profile row with
+// that ID". The sqlite store surfaces it as sql.ErrNoRows from GetAgentProfile
+// and as an "agent profile not found" message from the update/delete paths;
+// fakes and future stores may use either shape.
+func isProfileNotFoundErr(err error) bool {
+	return errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "agent profile not found")
+}
+
+// cloneCLIFlags returns a copy of the profile's CLI flag list so the
+// duplicated profile never shares slice memory with the source.
+func cloneCLIFlags(in []models.CLIFlag) []models.CLIFlag {
+	out := make([]models.CLIFlag, len(in))
+	copy(out, in)
+	return out
+}
+
+// cloneEnvVars returns a copy of the profile's env-var list (secret
+// references included) so the duplicated profile never shares slice memory
+// with the source.
+func cloneEnvVars(in []models.ProfileEnvVar) []models.ProfileEnvVar {
+	out := make([]models.ProfileEnvVar, len(in))
+	copy(out, in)
+	return out
+}
+
+// cloneStringMap returns a shallow copy of a string map, preserving nil so a
+// source with no config options stays nil on the copy.
+func cloneStringMap(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// cloneStringInterfaceMap returns a shallow copy of a string-keyed interface
+// map (used for MCP servers/meta), preserving nil.
+func cloneStringInterfaceMap(in map[string]interface{}) map[string]interface{} {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// cloneIntPtr returns a copy of an int pointer so the duplicated profile never
+// aliases the source's field, preserving nil.
+func cloneIntPtr(in *int) *int {
+	if in == nil {
+		return nil
+	}
+	v := *in
+	return &v
+}
+
 func (c *Controller) validateGlobalSecretRefs(ctx context.Context, envVars []dto.ProfileEnvVarDTO) error {
 	if c.secretStore == nil {
 		return nil
@@ -312,7 +521,11 @@ func validateCommandPrefix(prefix string) error {
 func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (*dto.AgentProfileDTO, error) {
 	profile, err := c.repo.GetAgentProfile(ctx, id)
 	if err != nil {
-		if strings.Contains(err.Error(), "agent profile not found") {
+		// The read path reports a missing (or already soft-deleted) row as
+		// sql.ErrNoRows, not as the "agent profile not found" message the
+		// update/delete paths use, so this has to go through the helper that
+		// knows both shapes or the sentinel is never returned.
+		if isProfileNotFoundErr(err) {
 			return nil, ErrAgentProfileNotFound
 		}
 		return nil, err
@@ -327,7 +540,7 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 		return nil, err
 	}
 	if err := c.repo.DeleteAgentProfile(ctx, id); err != nil {
-		if strings.Contains(err.Error(), "agent profile not found") {
+		if isProfileNotFoundErr(err) {
 			return nil, ErrAgentProfileNotFound
 		}
 		return nil, err
@@ -574,6 +787,7 @@ func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentD
 			Description:     agent.TUIConfig.Description,
 			CommandArgs:     agent.TUIConfig.CommandArgs,
 			WaitForTerminal: agent.TUIConfig.WaitForTerminal,
+			MCPStrategy:     agent.TUIConfig.MCPStrategy,
 		}
 	}
 	return result

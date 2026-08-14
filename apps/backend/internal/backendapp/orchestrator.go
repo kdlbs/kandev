@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/gitcredentials"
 	githubpkg "github.com/kandev/kandev/internal/github"
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
@@ -66,6 +67,7 @@ func provideOrchestrator(
 	repoCloner *repoclone.Cloner,
 	promptSvc *promptservice.Service,
 	githubSvc *githubpkg.Service,
+	gitCredentialBroker *gitcredentials.Broker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
 		return nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
@@ -95,13 +97,17 @@ func provideOrchestrator(
 	if err != nil {
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
-	maxPerSession := resolveQueueMaxPerSession(pool, log)
-	mergeEnabled := resolveQueueMergeEnabled(pool, log)
+	queueSettings := resolveQueueSettings(pool, log).Effective
+	maxPerSession := queueSettings.MaxPerSession
+	mergeEnabled := queueSettings.MergeEnabled
+	autoMergeEnabled := queueSettings.AutoMergeEnabled
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
 	msgQueue.SetMergeEnabled(mergeEnabled)
+	msgQueue.SetAutoMergeEnabled(autoMergeEnabled)
 	log.Info("Message queue initialized",
 		zap.Int("max_per_session", maxPerSession),
-		zap.Bool("merge_enabled", mergeEnabled))
+		zap.Bool("merge_enabled", mergeEnabled),
+		zap.Bool("auto_merge_enabled", autoMergeEnabled))
 	if taskSvc.AttachmentService() == nil && taskSvc.AttachmentRepository() != nil {
 		attachmentSvc, attachmentErr := taskservice.NewAttachmentService(
 			taskSvc.AttachmentRepository(), cfg.ResolvedHomeDir(), taskSvc.AuthorizeWorkspaceAccess, log,
@@ -111,15 +117,17 @@ func provideOrchestrator(
 		}
 		taskSvc.SetAttachmentService(attachmentSvc)
 	}
+	if attachmentSvc := taskSvc.AttachmentService(); attachmentSvc != nil {
+		attachmentSvc.SetTaskAuthorizer(taskSvc.AuthorizeTaskAccess)
+	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	if gitCredentialBroker != nil {
+		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
+	}
 	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
-		orchestratorSvc.SetGitHubCredentialBroker(
-			githubExecutorCredentialLeaseAdapter{service: githubSvc},
-			githubCredentialBrokerEndpoint(cfg),
-		)
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
@@ -148,6 +156,11 @@ func provideOrchestrator(
 	// boot payload and task.updated events.
 	taskSvc.SetForegroundActivityProvider(orchestratorSvc)
 
+	// Task dependencies gate every automated launch and drive chain advancement.
+	// Wired unconditionally: dependencies are a core Kanban relationship, not an
+	// Office feature.
+	orchestratorSvc.SetTaskDependencyReader(taskSvc)
+
 	// Let the task service stamp status_summary.queued_prompt_count on task
 	// list/snapshot payloads (initial-load backstop for the sidebar badge; the
 	// status-summary projector keeps the field live between loads).
@@ -172,8 +185,16 @@ func provideOrchestrator(
 		taskSvc.PublishTaskUpdated(ctx, task)
 	})
 
-	// Wire workflow step getter for prompt building
+	// Wire workflow step getter for prompt building. The recorder is wired
+	// first: SetStepHistoryRecorder's own initWorkflowEngine() call is a
+	// no-op while workflowStepGetter is still nil, so the store/engine only
+	// get built once, by SetWorkflowStepGetter below, instead of twice.
 	if workflowSvc != nil {
+		// Wire the ADR 0015 audit-trail writer for auto-advance step
+		// transitions. workflowSvc.CreateStepTransition already matches
+		// orchestrator.StepHistoryRecorder structurally, so no adapter is
+		// needed.
+		orchestratorSvc.SetStepHistoryRecorder(workflowSvc)
 		orchestratorSvc.SetWorkflowStepGetter(&orchestratorWorkflowStepGetterAdapter{svc: workflowSvc})
 	}
 
@@ -217,13 +238,12 @@ func provideOrchestrator(
 	return orchestratorSvc, msgCreator, nil
 }
 
-type githubCredentialLeaseService interface {
-	IssueGitHubCredentialLease(context.Context, githubpkg.CredentialLeaseRequest) (*githubpkg.CredentialLease, error)
+type githubCredentialPolicyService interface {
 	DescribeTaskGitCredentialPolicy(context.Context, string) (githubpkg.TaskGitCredentialPolicy, error)
 }
 
 type githubExecutorCredentialPolicyAdapter struct {
-	service githubCredentialLeaseService
+	service githubCredentialPolicyService
 }
 
 func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
@@ -239,27 +259,6 @@ func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
 		WorkspaceMethod: policy.WorkspaceMethod,
 		WorkspaceActor:  policy.WorkspaceActor,
 	}, nil
-}
-
-type githubExecutorCredentialLeaseAdapter struct {
-	service githubCredentialLeaseService
-}
-
-func (a githubExecutorCredentialLeaseAdapter) IssueGitHubCredentialLease(
-	ctx context.Context,
-	request executorpkg.GitHubCredentialLeaseRequest,
-) (executorpkg.GitHubCredentialLease, error) {
-	lease, err := a.service.IssueGitHubCredentialLease(ctx, githubpkg.CredentialLeaseRequest{
-		WorkspaceID: request.WorkspaceID, TaskID: request.TaskID, SessionID: request.SessionID,
-		RepositoryID: request.RepositoryID, Owner: request.Owner, Repo: request.Repo, Host: request.Host,
-	})
-	if err != nil {
-		return executorpkg.GitHubCredentialLease{}, err
-	}
-	if lease == nil {
-		return executorpkg.GitHubCredentialLease{}, errors.New("GitHub credential broker returned no lease")
-	}
-	return executorpkg.GitHubCredentialLease{Token: lease.Token}, nil
 }
 
 func githubCredentialBrokerEndpoint(cfg *config.Config) string {
@@ -289,6 +288,12 @@ func resolveQueueMergeEnabled(pool *db.Pool, log *logger.Logger) bool {
 	return resolveQueueSettings(pool, log).Effective.MergeEnabled
 }
 
+// resolveQueueAutoMergeEnabled honors the persisted automatic merge setting,
+// defaulting to enabled when unset or invalid.
+func resolveQueueAutoMergeEnabled(pool *db.Pool, log *logger.Logger) bool {
+	return resolveQueueSettings(pool, log).Effective.AutoMergeEnabled
+}
+
 // resolveQueueSettings loads the persisted message queue settings — falling
 // back to defaults when unset, invalid, or the store is unavailable — and
 // resolves them against the KANDEV_QUEUE_MAX_PER_SESSION environment
@@ -313,8 +318,9 @@ func resolveQueueSettings(pool *db.Pool, log *logger.Logger) queuesettings.Resol
 		return queuesettings.Resolution{Response: queuesettings.Response{
 			Settings: queuesettings.DefaultSettings(),
 			Effective: queuesettings.Effective{
-				MaxPerSession: messagequeue.DefaultMaxPerSession,
-				MergeEnabled:  true,
+				MaxPerSession:    messagequeue.DefaultMaxPerSession,
+				MergeEnabled:     true,
+				AutoMergeEnabled: true,
 			},
 		}}
 	}
@@ -602,7 +608,7 @@ func (a *utilityDepsAdapter) ListUtilityAgentsByAgentProfile(ctx context.Context
 	}
 	for _, agent := range agents {
 		if agent != nil && (agent.AgentProfileID == profileID ||
-			(agent.ProfileBindingState == utilitymodels.ProfileBindingInherit && defaultProfileID == profileID)) {
+			(utilitymodels.UsesDefaultProfile(agent) && defaultProfileID == profileID)) {
 			refs = append(refs, agentsettingscontroller.UtilityAgentReference{ID: agent.ID, Name: agent.Name})
 		}
 	}
@@ -615,15 +621,6 @@ func (a *utilityDepsAdapter) ClearUtilityAgentProfileBindings(ctx context.Contex
 	}
 	if err := a.svc.ClearAgentProfileBindings(ctx, profileID); err != nil {
 		return err
-	}
-	if a.userSvc != nil {
-		defaultProfileID, err := a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
-		if err != nil {
-			return err
-		}
-		if defaultProfileID == profileID {
-			return a.svc.ClearInheritedProfileBindings(ctx)
-		}
 	}
 	return nil
 }
@@ -959,7 +956,11 @@ type repositoryResolverAdapter struct {
 func (a *repositoryResolverAdapter) ResolveForReview(
 	ctx context.Context, workspaceID, provider, owner, name, defaultBranch string,
 ) (string, string, error) {
-	providerHost := "https://" + defaultProviderHostname(provider)
+	hostname, err := defaultProviderHostname(provider)
+	if err != nil {
+		return "", "", err
+	}
+	providerHost := "https://" + hostname
 	existing, err := a.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, provider, providerHost, owner, name)
 	if err != nil {
 		return "", "", fmt.Errorf("lookup repository by provider info: %w", err)
@@ -996,14 +997,14 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 	return repo.ID, baseBranch, nil
 }
 
-func defaultProviderHostname(provider string) string {
+func defaultProviderHostname(provider string) (string, error) {
 	switch strings.ToLower(provider) {
 	case "gitlab":
-		return "gitlab.com"
-	case "bitbucket":
-		return "bitbucket.org"
+		return "gitlab.com", nil
+	case gitCredentialGitHubProviderID, "":
+		return gitCredentialGitHubHost, nil
 	default:
-		return "github.com"
+		return "", fmt.Errorf("unsupported review repository provider %q", provider)
 	}
 }
 
@@ -1053,7 +1054,7 @@ func (a *repositoryResolverAdapter) persistDetectedDefaultBranch(
 	}); err != nil {
 		a.logger.Warn("failed to persist detected default branch",
 			zap.String("repository_id", repo.ID),
-			zap.String("branch", detected),
+			zap.String(branchFieldKey, detected),
 			zap.Error(err))
 	}
 	return detected

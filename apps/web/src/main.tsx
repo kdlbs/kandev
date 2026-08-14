@@ -2,7 +2,6 @@ import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import "@/app/globals.css";
 import { setOnUnauthorized } from "@/lib/api/client";
-import { PluginModalHost } from "@/components/plugins/plugin-modal-host";
 import { useAppStoreApi, StateProvider } from "@/components/state-provider";
 import { PluginBootBridge } from "@/lib/plugins/plugin-boot-bridge";
 import { preloadLocale } from "@/lib/i18n";
@@ -46,7 +45,6 @@ function AppBody({ payload }: { payload: BootPayload }) {
   return (
     <>
       <PluginBootBridge plugins={payload.plugins} />
-      <PluginModalHost />
       <AppShell>
         <RouteErrorBoundary>
           <SpaRoutes routeData={payload.routeData} />

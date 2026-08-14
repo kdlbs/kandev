@@ -225,6 +225,7 @@ func buildLifecycleLaunchRequest(
 		WorktreeBranchTemplate:        req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:          req.WorktreeBranchTicket,
 		PullBeforeWorktree:            req.PullBeforeWorktree,
+		RemoteSyncHandled:             req.RemoteSyncHandled,
 		TaskDirName:                   req.TaskDirName,
 		RepoName:                      req.RepoName,
 		BranchSlug:                    req.BranchSlug,
@@ -283,6 +284,7 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 			WorktreeBranchTemplate: r.WorktreeBranchTemplate,
 			WorktreeBranchTicket:   r.WorktreeBranchTicket,
 			PullBeforeWorktree:     r.PullBeforeWorktree,
+			RemoteSyncHandled:      r.RemoteSyncHandled,
 			RepoSetupScript:        r.RepoSetupScript,
 			RepoCleanupScript:      r.RepoCleanupScript,
 			CopyFiles:              r.CopyFiles,
@@ -753,8 +755,13 @@ func wrapGitHubTaskIssueStoreError(err error) error {
 }
 
 // ProcessOnTurnStart forwards to the orchestrator service.
-func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
+func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error) {
 	return w.svc.ProcessOnTurnStart(ctx, taskID, sessionID)
+}
+
+// QueueUserPrompt forwards a prompt that must wait for workflow admission.
+func (w *orchestratorWrapper) QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error {
+	return w.svc.QueueUserPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
 }
 
 // StepRequiresCompletionSignal forwards to the orchestrator service.

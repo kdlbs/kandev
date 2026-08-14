@@ -31,16 +31,18 @@ type fakeOrchestrator struct {
 
 	queue *messagequeue.Service
 
-	promptCalls       []promptCall
-	startCreatedCalls []startCreatedCall
-	resumeCalls       int
-	turnStartCalls    []turnStartCall
-	onTurnStart       func(context.Context, string, string) error
-	interruptCalls    []interruptCall
-	launchCalls       []*orchestrator.LaunchSessionRequest
-	launchErr         error
-	renameCalls       []renameCall
-	renameErr         error
+	promptCalls             []promptCall
+	startCreatedCalls       []startCreatedCall
+	resumeCalls             int
+	turnStartCalls          []turnStartCall
+	onTurnStart             func(context.Context, string, string) error
+	turnStartResult         orchestrator.ProcessOnTurnStartResult
+	interruptCalls          []interruptCall
+	launchCalls             []*orchestrator.LaunchSessionRequest
+	launchErr               error
+	launchResponseProfileID string
+	renameCalls             []renameCall
+	renameErr               error
 
 	// Configurable: error returned by PromptTask. Cleared after first call so
 	// the retry-after-resume path can succeed on the second call.
@@ -99,12 +101,18 @@ func (f *fakeOrchestrator) LaunchSession(_ context.Context, req *orchestrator.La
 	if f.launchErr != nil {
 		return nil, f.launchErr
 	}
-	return &orchestrator.LaunchSessionResponse{
+	response := &orchestrator.LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
 		SessionID: "spawned-sess-1",
 		State:     "STARTING",
-	}, nil
+	}
+	profileID := req.AgentProfileID
+	if f.launchResponseProfileID != "" {
+		profileID = f.launchResponseProfileID
+	}
+	response.AgentProfileID = profileID
+	return response, nil
 }
 
 func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
@@ -142,15 +150,20 @@ func (f *fakeOrchestrator) ResumeTaskSession(_ context.Context, _, _ string) (*e
 	return &executor.TaskExecution{}, nil
 }
 
-func (f *fakeOrchestrator) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
+func (f *fakeOrchestrator) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error) {
 	f.mu.Lock()
 	f.turnStartCalls = append(f.turnStartCalls, turnStartCall{taskID: taskID, sessionID: sessionID})
 	fn := f.onTurnStart
 	f.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, taskID, sessionID)
+		return f.turnStartResult, fn(ctx, taskID, sessionID)
 	}
-	return nil
+	return f.turnStartResult, nil
+}
+
+func (f *fakeOrchestrator) QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error {
+	_, err := f.queue.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, model, messagequeue.QueuedByUser, planMode, nil, metadata)
+	return err
 }
 
 func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
@@ -500,6 +513,30 @@ func TestHandleMessageTask_IdleSiblingSession_PinsTargetSession(t *testing.T) {
 	senderMessages, err := svc.ListMessages(ctx, primary.ID)
 	require.NoError(t, err)
 	assert.Empty(t, senderMessages, "sender's own session must not receive the message")
+}
+
+func TestHandleMessageTask_QueuesPromptWhenOnTurnStartQueuesTask(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.turnStartResult = orchestrator.ProcessOnTurnStartResult{Queued: true}
+
+	payload := senderPayload(target.ID, "wait for admission", sender.ID)
+	payload["session_id"] = session.ID
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, "queued", out["status"])
+	assert.Equal(t, session.ID, out["session_id"])
+	assert.Empty(t, orch.promptCalls, "a queued turn-start transition must not send immediately")
+	status := orch.queue.GetStatus(context.Background(), session.ID)
+	require.Len(t, status.Entries, 1)
+	assert.Contains(t, status.Entries[0].Content, "wait for admission")
 }
 
 func TestHandleMessageTask_SessionIDWrongTask_Rejected(t *testing.T) {

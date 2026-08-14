@@ -46,7 +46,7 @@ func TestResolveAndBindReportsOccupiedPort(t *testing.T) {
 	port := occupied.Addr().(*net.TCPAddr).Port
 
 	mgr := NewTunnelManager(lifecycleMgr, log)
-	_, _, _, err = mgr.resolveAndBind("session:1", "session", port)
+	_, _, _, err = mgr.resolveAndBind("session", port)
 	if err == nil {
 		t.Fatal("resolveAndBind() = nil, want occupied-port error")
 	}

@@ -13,7 +13,7 @@ import {
   IconShieldQuestion,
 } from "@tabler/icons-react";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
-import { TaskPRIcon, TaskMRIcon } from "@/components/task/task-item-badges";
+import { TaskContributionIcons } from "./task-contribution-icons";
 import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { TaskItemStatsRow } from "./task-item-stats-row";
@@ -33,6 +33,8 @@ import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
 import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
+import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
 
 type DiffStats = {
   additions: number;
@@ -95,6 +97,8 @@ type TaskItemProps = {
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
+  /** Destination-resident WIP queue status, separate from queued prompts. */
+  wipQueue?: WipQueueStatus;
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
@@ -323,6 +327,7 @@ function TaskItemContent({
   updatedAt,
   prInfo,
   queuedCount,
+  wipQueue,
   issueInfo,
   agentErrorMessage,
 }: {
@@ -339,6 +344,7 @@ function TaskItemContent({
   updatedAt?: string;
   prInfo?: { number: number; state: string; aggregateState?: string };
   queuedCount?: number;
+  wipQueue?: WipQueueStatus;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
 }) {
@@ -360,8 +366,8 @@ function TaskItemContent({
             className="h-3 w-3 shrink-0 text-muted-foreground/60"
           />
         )}
-        <TaskPRIcon taskId={taskId} prInfo={prInfo} />
-        <TaskMRIcon taskId={taskId} />
+        <TaskContributionIcons taskId={taskId} prInfo={prInfo} />
+        {taskId ? <RegisteredChangeRequestTaskIcon taskId={taskId} /> : null}
         {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
         {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
         {isRemoteExecutor && (
@@ -389,6 +395,7 @@ function TaskItemContent({
         prInfo={prInfo}
         primarySessionId={primarySessionId}
         queuedCount={queuedCount}
+        wipQueue={wipQueue}
       />
     </div>
   );
@@ -449,6 +456,7 @@ export const TaskItem = memo(function TaskItem({
   repositories,
   prInfo,
   queuedCount,
+  wipQueue,
   issueInfo,
   isPinned,
   agentErrorMessage,
@@ -497,6 +505,7 @@ export const TaskItem = memo(function TaskItem({
         updatedAt={updatedAt}
         prInfo={prInfo}
         queuedCount={queuedCount}
+        wipQueue={wipQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
       />

@@ -135,7 +135,7 @@ test.describe("GitLab MR badge on the sidebar and the /tasks list", () => {
   }) => {
     test.setTimeout(120_000);
     // The badge only renders on this row in the rich ("show details") mode —
-    // PrimaryTaskLine is given showPullRequest={false} otherwise.
+    // PrimaryTaskLine is given showContributions={false} otherwise.
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       enable_preview_on_click: false,

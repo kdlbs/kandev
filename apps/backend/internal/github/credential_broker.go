@@ -2,29 +2,22 @@ package github
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/kandev/kandev/internal/gitcredentials"
 )
 
-const (
-	defaultCredentialLeaseTTL       = 12 * time.Hour
-	credentialLeaseBytes            = 32
-	maxCredentialLeasesPerWorkspace = 10_000
-	gitHubTokenUsername             = "x-access-token"
-)
+const gitHubTokenUsername = "x-access-token"
 
 var (
-	ErrCredentialLeaseInvalid = errors.New("GitHub credential lease is invalid")
-	ErrCredentialLeaseExpired = errors.New("GitHub credential lease is expired")
-	ErrCredentialLeaseRevoked = errors.New("GitHub credential lease was revoked")
-	ErrCredentialLeaseLimit   = errors.New("GitHub credential lease limit reached")
-	ErrCredentialScopeDenied  = errors.New("GitHub credential scope denied")
+	ErrCredentialLeaseInvalid = gitcredentials.ErrLeaseInvalid
+	ErrCredentialLeaseExpired = gitcredentials.ErrLeaseExpired
+	ErrCredentialLeaseRevoked = gitcredentials.ErrLeaseRevoked
+	ErrCredentialLeaseLimit   = gitcredentials.ErrLeaseLimit
+	ErrCredentialScopeDenied  = gitcredentials.ErrScopeDenied
 )
 
 // BrokerScopeAuthorizer verifies task/workspace/repository ownership. It is
@@ -60,6 +53,7 @@ type BrokerCredentialRequest struct {
 	Owner        string
 	Repo         string
 	Host         string
+	Path         string
 }
 
 type BrokerCredential struct {
@@ -69,32 +63,11 @@ type BrokerCredential struct {
 	Principal AuthPrincipal `json:"principal"`
 }
 
-type credentialLeaseRecord struct {
-	WorkspaceID             string
-	TaskID                  string
-	SessionID               string
-	RepositoryID            string
-	Owner                   string
-	Repo                    string
-	Host                    string
-	CredentialGeneration    int64
-	AppRegistrationID       string
-	AppCredentialGeneration int64
-	TTL                     time.Duration
-	ExpiresAt               time.Time
-}
-
-// CredentialBroker exchanges opaque, task-scoped leases for renewable
-// automation credentials. Only lease hashes and non-secret scope metadata are
-// retained; raw leases and GitHub tokens are never persisted in the broker.
+// CredentialBroker is GitHub's compatibility adapter over the generic
+// broker. GitHub-specific connection and App-generation checks stay in its
+// resolver; lease mechanics live in internal/gitcredentials.
 type CredentialBroker struct {
-	connections workspaceConnectionReader
-	resolver    *CredentialResolver
-	authorizer  BrokerScopeAuthorizer
-
-	mu     sync.Mutex
-	leases map[[sha256.Size]byte]credentialLeaseRecord
-	now    func() time.Time
+	broker *gitcredentials.Broker
 }
 
 func NewCredentialBroker(
@@ -102,75 +75,151 @@ func NewCredentialBroker(
 	resolver *CredentialResolver,
 	authorizer BrokerScopeAuthorizer,
 ) *CredentialBroker {
-	return &CredentialBroker{
-		connections: connections,
-		resolver:    resolver,
-		authorizer:  authorizer,
-		leases:      make(map[[sha256.Size]byte]credentialLeaseRecord),
-		now:         time.Now,
+	provider := &gitHubCredentialProvider{connections: connections, resolver: resolver}
+	return &CredentialBroker{broker: gitcredentials.NewBroker(provider, gitHubScopeAuthorizer{authorizer: authorizer})}
+}
+
+// NewCredentialBrokerFromBroker binds GitHub's existing HTTP controller to a
+// provider-neutral broker composed by backendapp.
+func NewCredentialBrokerFromBroker(broker *gitcredentials.Broker) *CredentialBroker {
+	return &CredentialBroker{broker: broker}
+}
+
+// GitCredentialResolver exposes GitHub's live connection and generation
+// checks as one provider-neutral resolver. Returned credentials retain their
+// GitHub-specific formatting while generic lease state stays outside this pkg.
+func (s *Service) GitCredentialResolver() gitcredentials.Resolver {
+	if s == nil {
+		return nil
 	}
+	return &gitHubCredentialProvider{connections: s.store, resolver: s.resolver}
 }
 
 func (b *CredentialBroker) Issue(ctx context.Context, req CredentialLeaseRequest) (*CredentialLease, error) {
-	if err := validateCredentialLeaseScope(
-		req.WorkspaceID, req.TaskID, req.SessionID, req.RepositoryID, req.Owner, req.Repo, req.Host,
-	); err != nil {
-		return nil, err
-	}
-	if b == nil || b.connections == nil || b.resolver == nil || b.authorizer == nil {
+	if b == nil || b.broker == nil {
 		return nil, ErrGitHubNotConfigured
 	}
-	if err := b.authorizer.AuthorizeGitHubRepository(
-		ctx, req.WorkspaceID, req.TaskID, req.SessionID, req.RepositoryID, req.Owner, req.Repo,
-	); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCredentialScopeDenied, err)
-	}
-	connection, appCredentialGeneration, err := b.issueConnection(ctx, req.WorkspaceID)
+	lease, err := b.broker.Issue(ctx, gitcredentials.Scope{
+		ProviderID: githubProviderName, WorkspaceID: req.WorkspaceID, TaskID: req.TaskID, SessionID: req.SessionID,
+		RepositoryID: req.RepositoryID, Host: req.Host, Path: githubCredentialPath(req.Owner, req.Repo), TTL: req.TTL,
+	})
 	if err != nil {
 		return nil, err
 	}
-	ttl := req.TTL
-	if ttl <= 0 || ttl > defaultCredentialLeaseTTL {
-		ttl = defaultCredentialLeaseTTL
-	}
-	raw := make([]byte, credentialLeaseBytes)
-	if _, err := rand.Read(raw); err != nil {
-		return nil, fmt.Errorf("create GitHub credential lease: %w", err)
-	}
-	token := base64.RawURLEncoding.EncodeToString(raw)
-	hash := sha256.Sum256([]byte(token))
-	now := b.now()
-	expiresAt := now.UTC().Add(ttl)
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.sweepExpiredLocked(now)
-	if len(b.leases) >= maxCredentialLeasesPerWorkspace &&
-		b.workspaceLeaseCountLocked(req.WorkspaceID) >= maxCredentialLeasesPerWorkspace {
-		return nil, fmt.Errorf("%w for workspace %s", ErrCredentialLeaseLimit, req.WorkspaceID)
-	}
-	b.leases[hash] = credentialLeaseRecord{
-		WorkspaceID:             req.WorkspaceID,
-		TaskID:                  req.TaskID,
-		SessionID:               req.SessionID,
-		RepositoryID:            req.RepositoryID,
-		Owner:                   strings.ToLower(req.Owner),
-		Repo:                    strings.ToLower(req.Repo),
-		Host:                    strings.ToLower(req.Host),
-		CredentialGeneration:    connection.CredentialGeneration,
-		AppRegistrationID:       connection.AppRegistrationID,
-		AppCredentialGeneration: appCredentialGeneration,
-		TTL:                     ttl,
-		ExpiresAt:               expiresAt,
-	}
-	return &CredentialLease{Token: token, ExpiresAt: expiresAt}, nil
+	return &CredentialLease{Token: lease.Token, ExpiresAt: lease.ExpiresAt}, nil
 }
 
-func (b *CredentialBroker) issueConnection(
-	ctx context.Context,
-	workspaceID string,
-) (*WorkspaceConnection, int64, error) {
-	connection, err := b.connections.GetWorkspaceConnection(ctx, workspaceID)
+func (b *CredentialBroker) Resolve(ctx context.Context, req BrokerCredentialRequest) (*BrokerCredential, error) {
+	if b == nil || b.broker == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+	path := req.Path
+	if strings.TrimSpace(path) == "" {
+		path = githubCredentialPath(req.Owner, req.Repo)
+	}
+	credential, err := b.broker.Redeem(ctx, gitcredentials.Redemption{
+		Lease: req.Lease, TaskID: req.TaskID, SessionID: req.SessionID, RepositoryID: req.RepositoryID,
+		Host: req.Host, Path: path,
+	})
+	if err != nil {
+		return nil, err
+	}
+	principal, _ := credential.Metadata.(AuthPrincipal)
+	return &BrokerCredential{
+		Username: credential.Username, Password: credential.Password, ExpiresAt: credential.ExpiresAt, Principal: principal,
+	}, nil
+}
+
+func (b *CredentialBroker) RevokeTask(taskID string) {
+	if b != nil && b.broker != nil {
+		b.broker.RevokeTask(taskID)
+	}
+}
+
+func (b *CredentialBroker) RevokeSession(sessionID string) {
+	if b != nil && b.broker != nil {
+		b.broker.RevokeSession(sessionID)
+	}
+}
+
+func (b *CredentialBroker) RevokeWorkspace(workspaceID string) {
+	if b != nil && b.broker != nil {
+		b.broker.RevokeWorkspace(workspaceID)
+	}
+}
+
+func (b *CredentialBroker) ActiveLeaseCount() int {
+	if b == nil || b.broker == nil {
+		return 0
+	}
+	return b.broker.ActiveLeaseCount()
+}
+
+type gitHubScopeAuthorizer struct{ authorizer BrokerScopeAuthorizer }
+
+func (a gitHubScopeAuthorizer) AuthorizeGitCredential(ctx context.Context, scope gitcredentials.Scope) error {
+	if a.authorizer == nil {
+		return ErrGitHubNotConfigured
+	}
+	owner, repo, err := githubOwnerRepo(scope.Path)
+	if err != nil {
+		return err
+	}
+	return a.authorizer.AuthorizeGitHubRepository(
+		ctx, scope.WorkspaceID, scope.TaskID, scope.SessionID, scope.RepositoryID, owner, repo,
+	)
+}
+
+type gitHubCredentialProvider struct {
+	connections workspaceConnectionReader
+	resolver    *CredentialResolver
+}
+
+func (*gitHubCredentialProvider) Supports(providerID string) bool {
+	return strings.EqualFold(strings.TrimSpace(providerID), githubProviderName)
+}
+
+func (p *gitHubCredentialProvider) Binding(ctx context.Context, scope gitcredentials.Scope) (string, error) {
+	if !strings.EqualFold(scope.Host, defaultGitHubHost) {
+		return "", fmt.Errorf("%w: unsupported host", ErrCredentialScopeDenied)
+	}
+	connection, appGeneration, err := p.issueConnection(ctx, scope.WorkspaceID)
+	if err != nil {
+		return "", err
+	}
+	return githubCredentialBindingFor(connection, appGeneration)
+}
+
+func (p *gitHubCredentialProvider) Resolve(ctx context.Context, scope gitcredentials.Scope) (gitcredentials.Credential, error) {
+	if p == nil || p.resolver == nil {
+		return gitcredentials.Credential{}, ErrGitHubNotConfigured
+	}
+	owner, repo, err := githubOwnerRepo(scope.Path)
+	if err != nil {
+		return gitcredentials.Credential{}, err
+	}
+	resolved, err := p.resolver.Resolve(ctx, ResolveCredentialRequest{
+		WorkspaceID: scope.WorkspaceID, Purpose: CredentialPurposeGitTransport, RepoOwner: owner, RepoName: repo,
+	})
+	if err != nil {
+		return gitcredentials.Credential{}, err
+	}
+	if resolved == nil || strings.TrimSpace(resolved.credential) == "" {
+		return gitcredentials.Credential{}, ErrCredentialLeaseRevoked
+	}
+	if resolved.Principal.Kind == AuthPrincipalApp && !resolved.Capabilities[CapabilityGitRead] {
+		return gitcredentials.Credential{}, fmt.Errorf("%w: %s", ErrGitHubCapabilityDenied, CapabilityGitRead)
+	}
+	return gitcredentials.Credential{
+		Username: gitHubTokenUsername, Password: resolved.credential, ExpiresAt: resolved.ExpiresAt, Metadata: resolved.Principal,
+	}, nil
+}
+
+func (p *gitHubCredentialProvider) issueConnection(ctx context.Context, workspaceID string) (*WorkspaceConnection, int64, error) {
+	if p == nil || p.connections == nil || p.resolver == nil {
+		return nil, 0, ErrGitHubNotConfigured
+	}
+	connection, err := p.connections.GetWorkspaceConnection(ctx, workspaceID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("load GitHub workspace connection: %w", err)
 	}
@@ -186,226 +235,42 @@ func (b *CredentialBroker) issueConnection(
 	if strings.TrimSpace(connection.AppRegistrationID) == "" {
 		return nil, 0, ErrGitHubNotConfigured
 	}
-	generation, err := b.resolver.appCredentialGeneration(connection.AppRegistrationID)
+	generation, err := p.resolver.appCredentialGeneration(connection.AppRegistrationID)
 	if err != nil {
 		return nil, 0, err
 	}
 	return connection, generation, nil
 }
 
-func (b *CredentialBroker) Resolve(
-	ctx context.Context,
-	req BrokerCredentialRequest,
-) (*BrokerCredential, error) {
-	if b == nil || b.connections == nil || b.resolver == nil || b.authorizer == nil {
-		return nil, ErrGitHubNotConfigured
-	}
-	if strings.TrimSpace(req.Lease) == "" {
-		return nil, ErrCredentialLeaseInvalid
-	}
-	record, err := b.loadLease(req)
-	if err != nil {
-		return nil, err
-	}
-	if err := b.authorizeLease(ctx, record); err != nil {
-		return nil, err
-	}
-	credential, err := b.resolveLeaseCredential(ctx, record)
-	if err != nil {
-		return nil, err
-	}
-	if err := b.validateLeaseConnection(ctx, record); err != nil {
-		return nil, err
-	}
-	if !b.renewLease(req.Lease) {
-		return nil, ErrCredentialLeaseRevoked
-	}
-	return credential, nil
+type githubCredentialBinding struct {
+	CredentialGeneration    int64  `json:"credential_generation"`
+	AppRegistrationID       string `json:"app_registration_id"`
+	AppCredentialGeneration int64  `json:"app_credential_generation"`
 }
 
-func (b *CredentialBroker) loadLease(req BrokerCredentialRequest) (credentialLeaseRecord, error) {
-	hash := sha256.Sum256([]byte(req.Lease))
-	now := b.now()
-	b.mu.Lock()
-	record, ok := b.leases[hash]
-	b.sweepExpiredLocked(now)
-	b.mu.Unlock()
-	if !ok {
-		return credentialLeaseRecord{}, ErrCredentialLeaseInvalid
+func githubCredentialBindingFor(connection *WorkspaceConnection, appGeneration int64) (string, error) {
+	if connection == nil {
+		return "", ErrGitHubNotConfigured
 	}
-	if !record.ExpiresAt.After(now) {
-		return credentialLeaseRecord{}, ErrCredentialLeaseExpired
-	}
-	if !credentialLeaseMatches(record, req) {
-		return credentialLeaseRecord{}, ErrCredentialScopeDenied
-	}
-	return record, nil
-}
-
-func (b *CredentialBroker) authorizeLease(ctx context.Context, record credentialLeaseRecord) error {
-	if err := b.authorizer.AuthorizeGitHubRepository(
-		ctx, record.WorkspaceID, record.TaskID, record.SessionID,
-		record.RepositoryID, record.Owner, record.Repo,
-	); err != nil {
-		return fmt.Errorf("%w: %v", ErrCredentialScopeDenied, err)
-	}
-	return b.validateLeaseConnection(ctx, record)
-}
-
-func (b *CredentialBroker) validateLeaseConnection(
-	ctx context.Context,
-	record credentialLeaseRecord,
-) error {
-	connection, err := b.connections.GetWorkspaceConnection(ctx, record.WorkspaceID)
-	if err != nil {
-		return fmt.Errorf("load GitHub workspace connection: %w", err)
-	}
-	if connection == nil || connection.Status != ConnectionStatusActive ||
-		connection.CredentialGeneration != record.CredentialGeneration ||
-		connection.AppRegistrationID != record.AppRegistrationID {
-		return ErrCredentialLeaseRevoked
-	}
-	if record.AppRegistrationID != "" {
-		generation, generationErr := b.resolver.appCredentialGeneration(record.AppRegistrationID)
-		if generationErr != nil || generation != record.AppCredentialGeneration {
-			return ErrCredentialLeaseRevoked
-		}
-	}
-	return nil
-}
-
-func (b *CredentialBroker) resolveLeaseCredential(
-	ctx context.Context,
-	record credentialLeaseRecord,
-) (*BrokerCredential, error) {
-	resolved, err := b.resolver.Resolve(ctx, ResolveCredentialRequest{
-		WorkspaceID: record.WorkspaceID,
-		Purpose:     CredentialPurposeGitTransport,
-		RepoOwner:   record.Owner,
-		RepoName:    record.Repo,
+	encoded, err := json.Marshal(githubCredentialBinding{
+		CredentialGeneration: connection.CredentialGeneration, AppRegistrationID: connection.AppRegistrationID,
+		AppCredentialGeneration: appGeneration,
 	})
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("encode GitHub credential binding: %w", err)
 	}
-	if resolved.CredentialGeneration != record.CredentialGeneration ||
-		resolved.AppRegistrationID != record.AppRegistrationID ||
-		resolved.AppCredentialGeneration != record.AppCredentialGeneration || resolved.credential == "" {
-		return nil, ErrCredentialLeaseRevoked
-	}
-	// Credential-helper get requests do not distinguish fetch from push. Read
-	// is the minimum transport capability; GitHub enforces write permission if
-	// the returned installation token is subsequently used for a push.
-	if resolved.Principal.Kind == AuthPrincipalApp && !resolved.Capabilities[CapabilityGitRead] {
-		return nil, fmt.Errorf("%w: %s", ErrGitHubCapabilityDenied, CapabilityGitRead)
-	}
-	return &BrokerCredential{
-		Username:  gitHubTokenUsername,
-		Password:  resolved.credential,
-		ExpiresAt: resolved.ExpiresAt,
-		Principal: resolved.Principal,
-	}, nil
+	return string(encoded), nil
 }
 
-func (b *CredentialBroker) renewLease(rawLease string) bool {
-	hash := sha256.Sum256([]byte(rawLease))
-	now := b.now()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	record, ok := b.leases[hash]
-	if !ok || !record.ExpiresAt.After(now) {
-		return false
-	}
-	ttl := record.TTL
-	if ttl <= 0 || ttl > defaultCredentialLeaseTTL {
-		ttl = defaultCredentialLeaseTTL
-	}
-	record.ExpiresAt = now.UTC().Add(ttl)
-	b.leases[hash] = record
-	return true
+func githubCredentialPath(owner, repo string) string {
+	return "/" + strings.Trim(strings.TrimSpace(owner), "/") + "/" + strings.Trim(strings.TrimSpace(repo), "/") + ".git"
 }
 
-func (b *CredentialBroker) sweepExpiredLocked(now time.Time) {
-	for hash, record := range b.leases {
-		if !record.ExpiresAt.After(now) {
-			delete(b.leases, hash)
-		}
+func githubOwnerRepo(path string) (string, string, error) {
+	trimmed := strings.TrimSuffix(strings.Trim(path, "/"), ".git")
+	owner, repo, found := strings.Cut(trimmed, "/")
+	if !found || owner == "" || repo == "" || strings.Contains(repo, "/") {
+		return "", "", fmt.Errorf("%w: GitHub repository path is invalid", ErrCredentialScopeDenied)
 	}
-}
-
-func (b *CredentialBroker) workspaceLeaseCountLocked(workspaceID string) int {
-	count := 0
-	for _, record := range b.leases {
-		if record.WorkspaceID == workspaceID {
-			count++
-		}
-	}
-	return count
-}
-
-func (b *CredentialBroker) RevokeTask(taskID string) {
-	if b == nil {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for hash, record := range b.leases {
-		if record.TaskID == taskID {
-			delete(b.leases, hash)
-		}
-	}
-}
-
-func (b *CredentialBroker) RevokeSession(sessionID string) {
-	if b == nil {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for hash, record := range b.leases {
-		if record.SessionID == sessionID {
-			delete(b.leases, hash)
-		}
-	}
-}
-
-func (b *CredentialBroker) RevokeWorkspace(workspaceID string) {
-	if b == nil {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for hash, record := range b.leases {
-		if record.WorkspaceID == workspaceID {
-			delete(b.leases, hash)
-		}
-	}
-}
-
-func validateCredentialLeaseScope(workspaceID, taskID, sessionID, repositoryID, owner, repo, host string) error {
-	for name, value := range map[string]string{
-		"workspace":  workspaceID,
-		"task":       taskID,
-		"session":    sessionID,
-		"repository": repositoryID,
-		"owner":      owner,
-		"repo":       repo,
-		"host":       host,
-	} {
-		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("%w: %s is required", ErrCredentialLeaseInvalid, name)
-		}
-	}
-	if !strings.EqualFold(host, defaultGitHubHost) {
-		return fmt.Errorf("%w: unsupported host", ErrCredentialScopeDenied)
-	}
-	return nil
-}
-
-func credentialLeaseMatches(record credentialLeaseRecord, req BrokerCredentialRequest) bool {
-	return record.TaskID == req.TaskID &&
-		record.SessionID == req.SessionID &&
-		record.RepositoryID == req.RepositoryID &&
-		strings.EqualFold(record.Owner, req.Owner) &&
-		strings.EqualFold(record.Repo, req.Repo) &&
-		strings.EqualFold(record.Host, req.Host)
+	return owner, repo, nil
 }

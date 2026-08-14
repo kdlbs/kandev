@@ -106,12 +106,14 @@ tool. Config and Office sessions never receive the title tool.
 
 ### Choose the profile for tasks created by agents
 
-Open **Settings → General → Task Actions → Profile for Tasks Created by Agents** to choose which agent profile Kandev assigns when an agent calls a Kandev MCP tool that creates a task without choosing `agent_profile_id`. The profile determines the agent, model, and setup used when the new task starts:
+Open **Settings → General → Task Actions → Profile for Tasks Created by Agents** to choose which agent profile Kandev assigns when an agent calls `create_task_kandev` without choosing `agent_profile_id`. The preference covers new tasks and subtasks, and it also controls the effective model, mode, and dynamic options used by the first session:
 
-- **Current task profile** is useful when follow-up work needs the same model and agent setup as the task creating it. It preserves compatibility with existing behavior and is selected by default. Kandev first inherits the parent or calling task profile, then checks the workflow step or workflow default, and finally checks the target workspace's **Default Agent Profile**. This option can unintentionally reuse a more expensive profile.
-- **Workspace default profile** is useful when you want agent-created tasks to use your standard workspace model and cost policy. It skips the parent and calling task profiles. Kandev still uses the workflow step or workflow default first, then the **Default Agent Profile** from the workspace that will own the new task.
+- **Creating session profile** is useful when follow-up work needs the same live setup. For a session-bound task-mode call, Kandev uses the verified creating session's profile and its effective model, mode, and dynamic options, including changes made during that session. A workflow launch profile wins first. When no workflow profile wins, the creating session profile is used. This option can reuse a more expensive setup.
+- **Workspace default profile** is useful when you want agent-created tasks to follow a consistent workspace cost policy. It skips the creating session and source, parent, or current task profiles. Kandev uses the workflow launch profile first, then the **Default Agent Profile** from the workspace that will own the new task. It does not copy the creating session's model, mode, or dynamic options. If neither source supplies a profile, task creation fails.
 
-Select an option, then choose **Save changes**. The only affected Kandev MCP tool is `create_task_kandev`; the preference covers both new tasks and subtasks when the call omits `agent_profile_id`. It does not affect `spawn_session_kandev`, because that tool adds a session to the current task instead of creating a task. It also does not affect tasks you create in the UI. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. An explicit `agent_profile_id` in the tool call always overrides the saved preference. The one case where an explicit `agent_profile_id` does not run is a task that lands on a workflow step: the step's launch profile (its pinned profile, or the workflow default when unpinned) is what the agent starts with, and the created task records that profile. A task lands on a step whenever its workflow has steps, using the start step when `workflow_step_id` is omitted. If **Workspace default profile** is selected and neither the workflow nor the target workspace supplies a profile, task creation fails without creating the task, including when `start_agent=false`.
+Select an option, then choose **Save changes**. Workflow-selected profiles always win when the new task lands on a workflow step. Away from a workflow step, an explicit `agent_profile_id` wins and prevents creator-session runtime inheritance. The only affected Kandev MCP tool is `create_task_kandev`. `spawn_session_kandev` adds a session to the current task, so it does not use this preference. Tasks you create in the UI are not affected.
+
+External MCP calls have no verified creating session. With **Creating session profile**, those calls keep the compatibility fallback to the parent task when one exists, then workflow and target-workspace defaults. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. A resolved profile and runtime seed are stored even when `start_agent=false`, so a later manual start uses the same decision.
 
 ### Navigate long chat transcripts
 
@@ -129,7 +131,7 @@ For a compact reminder while you read later replies, enable **Show anchored
 prompt bar** in the same settings section. On desktop, it pins a shortened
 copy of your latest prompt below the session tabs once you've scrolled past
 it further down the transcript. It stays hidden while you're browsing earlier
-history above your prompt, even though the prompt itself is out of view —
+  history above your prompt, even though the prompt itself is out of view.
 use **Scroll to last prompt** to jump back to it instead. Expand the bar for
 longer prompts, or use its scroll action to return to the full prompt; the
 expanded view is capped at 40% of the transcript panel's height so it stays
@@ -207,6 +209,94 @@ background** after its foreground yields while a recognized async subagent,
 immediately and the child may continue streaming. Other providers and
 foreground-generating Claude turns retain the coarse queueing behavior.
 
+### Prevent auto-start on open
+
+Under **Settings → General → Task actions**, the **Prevent auto-start on open**
+preference is off by default. When enabled, opening a task never launches or
+resumes its agent on its own; it shows the **Start agent** button instead. The
+preference applies in two situations:
+
+- **Opening a task in the final step of its workflow.** The task opens with a
+  prepared session and the agent stays stopped until you select **Start agent**.
+  Opening the same task with the preference off keeps the workflow step's
+  normal auto-start behavior.
+- **Opening a task whose agent was stopped by a Kandev restart.** The session
+  is recovered and shown stopped instead of being resumed automatically. Select
+  **Start agent** to resume it.
+
+The preference only gates opening a task. Choosing **Start agent** (or a
+workflow step transition) always starts the agent as usual, and a failed or
+interrupted session still shows its recovery actions.
+
+## Task dependencies
+
+A task can declare that it **depends on** one or more other tasks. This is a
+peer relationship and is separate from the parent/child subtask hierarchy: a
+subtask says "B is part of A", a dependency says "B cannot start until A
+finishes". The two can be combined freely, including a dependency between a
+task and its own child.
+
+Dependencies form a graph, not just a line. A task can wait on several
+predecessors and can itself block several dependents. A link that would close a
+cycle is rejected when you try to create it, and the offending path is shown so
+you can see which link to drop.
+
+### Declare dependencies
+
+Dependencies are declared in the **New Task** dialog under **Depends on**, or
+by an agent over MCP. There is deliberately no editor in the open task: a
+dependency records how the work was planned, so the surfaces that display it
+stay read-only. To change one after the fact, use the MCP tools or delete and
+recreate the task.
+
+### What blocked means
+
+A task with at least one unfinished predecessor is **blocked**. Blocked tasks
+show a badge on their Kanban card and a dependency chip in the status row above
+the chat box, next to the pull request chip. The chip reports both directions,
+the tasks this one waits on and the tasks waiting on it, and each entry links
+to that task.
+
+While a task is blocked, no automated path starts it. That covers workflow
+**On Enter** auto-start, promotion out of a WIP queue, integration watchers,
+and dependency resolution itself. You can still press **Start agent**
+yourself; a manual start is an explicit override, not an error.
+
+### Chains that run themselves
+
+A task created with dependencies and an agent start request does not launch
+immediately. It records the start as an intent, and Kandev launches it once
+every predecessor has completed successfully. Setting that up along a path
+produces a chain:
+
+1. Create task A normally.
+2. Create task B with **Depends on** set to A.
+3. Create task C with **Depends on** set to B.
+
+Starting A is the only manual step. When A completes, B starts. When B
+completes, C starts. A is never restarted.
+
+Auto-start grants eligibility, never a bypass. If a task's dependencies have
+resolved but the target step is at its WIP limit, the task stays queued and
+launches when the queue promotes it, exactly as any other queued task would.
+
+### When a predecessor does not succeed
+
+Only successful completion resolves a dependency. A predecessor that ends in
+**Failed** or **Cancelled** leaves its dependents blocked, and the blocked
+reason names the failed task rather than reporting a generic wait. The chain
+stops there and waits for you. Kandev never retries a failed predecessor on its
+own and never quietly drops the link.
+
+Three things clear it, all of them deliberate: retry the predecessor until it
+succeeds, remove the link over MCP, or start the dependent manually.
+
+An **archived** predecessor is treated as unfinished, not as failed and not as
+resolved, so archiving a task does not release the work waiting on it.
+**Deleting** a task does remove its links in both directions, and any dependent
+that was waiting only on it becomes unblocked. That dependent is not started:
+deletion is not success.
+
 ## Find and organize tasks
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Kandev remembers the last selected view in that browser on the current device. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.
@@ -214,7 +304,7 @@ On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and
 Under **Settings → General → Appearance → Startup Page**, choose **Task overview** (the default) or **Last visited task**. The latter resumes the most recently opened task in the current workspace on that device when Kandev starts or you open bare Home. It does not change an explicit task or workflow link. Home navigation and a task's Back action always return to the task overview; when there is no matching local recent task, Kandev opens the overview instead.
 
 - Search matches tasks without changing their state.
-- The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**. In Kanban/Pipeline, each workflow lane has a **Columns** menu to hide individual steps — unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. On phones, open the menu drawer to change columns for the focused workflow.
+- The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**. In Kanban/Pipeline, each workflow lane has a **Columns** menu to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. On phones, open the menu drawer to change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
 - **List** can group by **State**, **Workflow**, **Repository**, or **None**.
 - **List** can sort by updated time, created time, or title in either direction.
@@ -251,17 +341,22 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 | **Allow manual move**     | Allows dragging a task into this step. Treat it as workflow UX, not as a security or approval boundary.                                                                                          |
 | **Show in command panel** | Includes tasks in this step in the default, empty-search **Cmd+K** task list. Typed task search currently searches every step and can also return archived tasks, regardless of this setting.    |
 | **Auto-archive**          | Archives inactive tasks after the configured number of hours. Enabling it starts at 24 hours; the minimum is 1.                                                                                  |
-| **WIP limit**             | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited. Overflow remains visible as queued cards; manual moves into a full step are still rejected. |
-| **Pull from**             | Optional one-hop feeder step. When capacity opens or eligible work arrives in the feeder, Kandev promotes queued work from the destination first, then the feeder. A full feeder rejects new overflow creation. |
+| **WIP limit**             | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited. Overflow remains visible as queued cards; manual moves into a full step succeed and queue there. |
+| **Pull from**             | Optional one-hop feeder step. When capacity opens or eligible work arrives in the feeder, Kandev promotes queued work from the destination first, then the feeder. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
 
 The WIP check also applies when a task is created. It runs for an explicit
 `workflow_step_id` and for the workflow's resolved start step, and the
 admission check is atomic. When a limited step is full, the task is still
 created and visible: it is queued in that step when no feeder is configured,
 or placed in the configured feeder and tagged for the destination. Queued
-tasks do not start sessions or consume destination WIP until promoted. If the
-configured feeder is also full, creation returns a conflict. Ephemeral tasks
-are not counted.
+tasks do not start sessions or consume destination WIP until promoted. If you
+manually move a task, or an automatic transition sends it to a full limited
+step, it queues in that destination instead of using the feeder. The Kanban
+column shows the admitted count and limit, then a **Queued** section. The task
+sidebar shows a queue icon whose tooltip gives the task's position in that
+destination queue. If the configured
+feeder is also full, creation returns a conflict. Ephemeral tasks are not
+counted.
 
 Integration watchers use the same admission rule. For example, a GitHub review
 watch targeting a `Review` step with a limit of two admits at most two newly
@@ -271,7 +366,7 @@ reservation and does not start an agent for them.
 
 Auto-archive is checked on a five-minute background interval and uses the task's last update time. Any task update postpones eligibility, so the archive is not guaranteed at the exact configured minute. Archiving, deleting, or moving an admitted task opens capacity and promotes the oldest queued card. Auto-archive affects the task itself, not its children.
 
-Pull configuration rejects self-references, cycles, and cross-workflow feeders. Pulling runs when a task vacates the limited step and when eligible work is created in its feeder, filling each available slot. Candidates are ordered by board position, then priority (`critical`, `high`, `medium`, `low`, `none`), queue time, creation time, and ID. A candidate whose move fails—for example because its session is running or starting—is skipped for that pull pass.
+Pull configuration rejects self-references, cycles, and cross-workflow feeders. Pulling runs when a task vacates the limited step and when eligible work is created in its feeder, filling each available slot. Destination-queued tasks are promoted before feeder candidates. Candidates are ordered by board position, then priority (`critical`, `high`, `medium`, `low`, `none`), queue time, creation time, and ID. A candidate whose move fails, for example because its session is running or starting, is skipped for that pull pass.
 
 ### Configure events and transitions
 
@@ -388,9 +483,9 @@ Revision history is not an immutable record of every autosave. Consecutive write
 | One versioned task plan               | Available      | Available in Office-specific surfaces where enabled |
 | Multiple named task documents         | Not exposed    | In-progress Office capability                       |
 | Task label editor and label filters   | Not exposed    | In-progress Office capability                       |
-| Blocked-by / blocking property editor | Not exposed    | In-progress Office capability                       |
+| Blocked-by / blocking property editor | Set at task creation or over MCP; read-only afterwards | In-progress Office capability |
 
-Stored related-task data can include blocker relationships, but regular Kanban has no blocker editor or blocker filter. Use workflow gates, direct-child completion, and explicit messages for supported Kanban coordination. Do not treat Office's named documents, labels, or blocker UI as a stable public contract yet.
+Regular Kanban reads and enforces blocker relationships (see [Task dependencies](#task-dependencies)) but has no blocker filter and no in-place editor: dependencies are declared when the task is created or over MCP. Office additionally exposes named documents, labels, and its own blocker property editor. Do not treat those Office surfaces as a stable public contract yet.
 
 ## Archive, unarchive, and delete
 

@@ -36,7 +36,7 @@
   "signOut": "退出登录",
   "thisDevice": "此设备",
   "tokenCreated": "令牌已创建",
-  "tokenShownOnlyOnce": "此内容仅显示一次; 请立即复制并妥善保管。",
+  "tokenShownOnlyOnce": "此内容仅显示一次；请立即复制并妥善保管。",
   "tokensPageDescription": "供以你身份运行的脚本和 CLI 使用的个人访问令牌。",
   "tokensPageTitle": "API 令牌"
 }

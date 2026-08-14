@@ -10,6 +10,8 @@ import (
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -88,7 +90,12 @@ func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID str
 		return nil
 	}
 
-	moved, err := s.MoveTask(ctx, result.Session.TaskID, step.WorkflowID, newStepID, 0)
+	moved, err := s.MoveTaskWithOptions(ctx, result.Session.TaskID, step.WorkflowID, newStepID, 0,
+		MoveTaskOptions{
+			StepHistoryTrigger:   wfmodels.StepTransitionTriggerApproval,
+			StepHistorySessionID: sessionID,
+			StepHistoryActor:     wfmodels.StepTransitionActorHuman,
+		})
 	if err != nil {
 		return fmt.Errorf("failed to move task to next step after approval: %w", err)
 	}
@@ -388,6 +395,21 @@ type MoveTaskOptions struct {
 	// PreserveDeferredLaunch keeps the deferred launch intent when an internal
 	// queue promotion changes workflow steps. Manual moves still clear it.
 	PreserveDeferredLaunch bool
+	// StepHistoryTrigger overrides the ADR 0015 audit-row trigger recorded for
+	// this move. Zero value defaults to StepTransitionTriggerManual — callers
+	// driving an approval-gated transition (ApproveSession) set
+	// StepTransitionTriggerApproval instead.
+	StepHistoryTrigger wfmodels.StepTransitionTrigger
+	// StepHistorySessionID pins the ADR 0015 audit-row session_id to a
+	// specific session, overriding the primary/active-session resolution
+	// MoveTaskWithOptions otherwise uses. ApproveSession sets this to the
+	// session it is actually approving — on a task with more than one
+	// active session, resolvePrimaryOrActiveSession can pick a different
+	// (primary) session than the one being approved.
+	StepHistorySessionID string
+	// StepHistoryActor identifies the caller. Agent moves must not inherit the
+	// owner identity that MCP uses for authorization.
+	StepHistoryActor wfmodels.StepTransitionActor
 }
 
 type workflowMoveLimitsRepository interface {
@@ -400,6 +422,21 @@ type workflowAdmittedCountRepository interface {
 
 type workflowLimitedMoveRepository interface {
 	UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID, excludeTaskID string, limit int) error
+}
+
+type workflowMoveAdmissionRepository interface {
+	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, targetStepID string, limit int) (bool, error)
+}
+
+type workflowMoveAdmissionWithStateRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionAndState(
+		ctx context.Context,
+		task *models.Task,
+		targetStepID string,
+		limit int,
+		admittedState *v1.TaskState,
+		queueExitPending bool,
+	) (bool, error)
 }
 
 type workflowQueuedTaskPromoter interface {
@@ -450,24 +487,40 @@ func (s *Service) MoveTaskWithOptions(
 	oldStepID := task.WorkflowStepID
 	oldState := task.State
 	stepChanged := oldStepID != workflowStepID
+	stateAfterAdmission := *task
+	if stepChanged {
+		if err := s.syncTaskStateForWorkflowMove(ctx, &stateAfterAdmission, oldStepID, workflowStepID); err != nil {
+			return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
+		}
+	}
 
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
 	task.Position = position
 	if stepChanged {
+		if task.Metadata == nil {
+			task.Metadata = make(map[string]interface{})
+		}
 		task.WIPAdmitted = true
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
-		if !opts.PreserveDeferredLaunch {
-			delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		task.Metadata[models.MetaKeyQueuedMoveExitPending] = map[string]interface{}{
+			"from_step_id": oldStepID,
 		}
-	}
-	if err := s.syncTaskStateForWorkflowMove(ctx, task, oldStepID, workflowStepID); err != nil {
-		return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
+		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
+		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
+		if !opts.PreserveDeferredLaunch {
+			models.DropWIPDeferredLaunch(task)
+		}
 	}
 	task.UpdatedAt = time.Now().UTC()
 
-	if err := s.updateMovedTask(ctx, task, oldStepID, targetStep); err != nil {
+	var admittedState *v1.TaskState
+	if stepChanged {
+		admittedState = &stateAfterAdmission.State
+	}
+	_, err = s.updateMovedTask(ctx, task, oldStepID, targetStep, admittedState)
+	if err != nil {
 		s.logger.Error("failed to move task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -487,6 +540,11 @@ func (s *Service) MoveTaskWithOptions(
 	if stepChanged {
 		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
 		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
+		historySessionID := opts.StepHistorySessionID
+		if historySessionID == "" {
+			historySessionID = sessionID
+		}
+		s.recordManualStepTransition(ctx, historySessionID, oldStepID, workflowStepID, opts.StepHistoryTrigger, opts.StepHistoryActor)
 	}
 
 	s.logger.Info("task moved",
@@ -620,33 +678,69 @@ func (s *Service) promoteNextQueuedTask(ctx context.Context, targetStep *wfmodel
 		skipped[candidate.ID] = struct{}{}
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
+	if queuedMoveExitPending(candidate) {
+		skipped[candidate.ID] = struct{}{}
+		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+	}
 	if candidate.WorkflowStepID == targetStep.ID {
 		return s.promoteSameStepQueuedTask(ctx, candidate, fromStepID, targetStep, position, skipped)
 	}
 	return s.promoteFeederQueuedTask(ctx, candidate, fromStepID, oldWorkflowID, targetStep, position, skipped)
 }
 
+func queuedMoveExitPending(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	_, pending := task.Metadata[models.MetaKeyQueuedMoveExitPending]
+	if !pending {
+		return false
+	}
+	_, completed := task.Metadata[models.MetaKeyQueuedMoveExitCompleted]
+	return !completed
+}
+
 func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}) bool {
+	oldState := candidate.State
+	if candidate.Metadata == nil {
+		candidate.Metadata = make(map[string]interface{})
+	}
 	candidate.WIPAdmitted = true
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
 	candidate.Position = position
+	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
+	if err := s.syncTaskStateForQueuePromotion(ctx, candidate, targetStep); err != nil {
+		s.logger.Warn("failed to prepare same-step queued promotion", zap.String("task_id", candidate.ID), zap.Error(err))
+		skipped[candidate.ID] = struct{}{}
+		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+	}
 	supported, claimed, err := promoteQueuedTaskAtomically(ctx, s.tasks, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
 	if supported {
-		return s.finishAtomicQueuedPromotion(ctx, candidate, targetStep, position, skipped, claimed, err)
-	} else if limitedRepo, ok := s.tasks.(workflowLimitedMoveRepository); ok && targetStep.WIPLimit > 0 {
-		if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, targetStep.ID, candidate.ID, targetStep.WIPLimit); err != nil {
-			return false
+		return s.finishAtomicQueuedPromotion(ctx, candidate, targetStep, position, skipped, claimed, err, oldState)
+	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
+		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStep.ID, targetStep.WIPLimit)
+		if err != nil {
+			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
+			skipped[candidate.ID] = struct{}{}
+			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+		}
+		if !claimed {
+			skipped[candidate.ID] = struct{}{}
+			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 		}
 	} else if err := s.tasks.UpdateTask(ctx, candidate); err != nil {
 		return false
 	}
 	s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil)
+	if oldState != candidate.State {
+		s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
+	}
 	s.publishTaskEvent(ctx, events.TaskQueuePromoted, candidate, nil)
 	return true
 }
 
-func (s *Service) finishAtomicQueuedPromotion(ctx context.Context, candidate *models.Task, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}, claimed bool, err error) bool {
+func (s *Service) finishAtomicQueuedPromotion(ctx context.Context, candidate *models.Task, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}, claimed bool, err error, oldState v1.TaskState) bool {
 	if err != nil {
 		s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 		return false
@@ -656,6 +750,9 @@ func (s *Service) finishAtomicQueuedPromotion(ctx context.Context, candidate *mo
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
 	s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil)
+	if oldState != candidate.State {
+		s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
+	}
 	s.publishTaskEvent(ctx, events.TaskQueuePromoted, candidate, nil)
 	return true
 }
@@ -670,12 +767,22 @@ func promoteQueuedTaskAtomically(ctx context.Context, tasks interface{}, task *m
 }
 
 func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models.Task, fromStepID, oldWorkflowID string, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}) bool {
+	oldState := candidate.State
+	if candidate.Metadata == nil {
+		candidate.Metadata = make(map[string]interface{})
+	}
 	candidate.WIPAdmitted = true
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
+	candidate.Metadata[models.MetaKeyQueuePromotionPending] = true
 	candidate.Position = position
 	candidate.WorkflowID = targetStep.WorkflowID
 	candidate.WorkflowStepID = targetStep.ID
+	if err := s.syncTaskStateForQueuePromotion(ctx, candidate, targetStep); err != nil {
+		s.logger.Warn("failed to prepare feeder queued promotion", zap.String("task_id", candidate.ID), zap.Error(err))
+		skipped[candidate.ID] = struct{}{}
+		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+	}
 	if promoter, ok := s.tasks.(workflowQueuedTaskPromoter); ok {
 		claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
 		if err != nil {
@@ -687,6 +794,28 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 		}
 		s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil, oldWorkflowID)
+		if oldState != candidate.State {
+			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
+		}
+		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
+		return true
+	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
+		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStep.ID, targetStep.WIPLimit)
+		if err != nil {
+			s.logger.Warn("failed to promote feeder queued task", zap.String("task_id", candidate.ID), zap.Error(err))
+			skipped[candidate.ID] = struct{}{}
+			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+		}
+		if !claimed {
+			skipped[candidate.ID] = struct{}{}
+			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+		}
+		s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil, oldWorkflowID)
+		if oldState != candidate.State {
+			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
+		}
+		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
 		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
 		return true
 	}
@@ -709,6 +838,23 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
 	return true
+}
+
+func (s *Service) recordQueuedPromotion(ctx context.Context, taskID, fromStepID, toStepID string) {
+	if s.stepHistoryRecorder == nil {
+		return
+	}
+	session := s.resolvePrimaryOrActiveSession(ctx, taskID)
+	if session == nil {
+		return
+	}
+	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+		asyncRecorder.EnqueueStepTransition(session.ID, fromStepID, toStepID, wfmodels.StepTransitionTriggerQueuePromotion, nil, nil)
+		return
+	}
+	if err := s.stepHistoryRecorder.CreateStepTransition(ctx, session.ID, fromStepID, toStepID, wfmodels.StepTransitionTriggerQueuePromotion, nil, nil); err != nil {
+		s.logger.Warn("failed to record queued task promotion", zap.String("task_id", taskID), zap.Error(err))
+	}
 }
 
 func (s *Service) feederCandidateBlocked(ctx context.Context, taskID string) bool {
@@ -738,7 +884,7 @@ func (s *Service) nextQueuedCandidate(ctx context.Context, targetStep *wfmodels.
 	if sameStep == nil {
 		return feederTask, nil
 	}
-	if feederTask == nil || queuedTaskBefore(sameStep, feederTask) {
+	if sameStep != nil {
 		return sameStep, nil
 	}
 	return feederTask, nil
@@ -823,15 +969,63 @@ func skippedTaskIDs(skipped map[string]struct{}) []string {
 	return ids
 }
 
-func (s *Service) updateMovedTask(ctx context.Context, task *models.Task, oldStepID string, targetStep *wfmodels.WorkflowStep) error {
-	if targetStep == nil || targetStep.WIPLimit <= 0 || oldStepID == targetStep.ID {
-		return s.tasks.UpdateTask(ctx, task)
+func (s *Service) updateMovedTask(ctx context.Context, task *models.Task, oldStepID string, targetStep *wfmodels.WorkflowStep, admittedState *v1.TaskState) (bool, error) {
+	if targetStep == nil || oldStepID == targetStep.ID {
+		if err := s.tasks.UpdateTask(ctx, task); err != nil {
+			return false, err
+		}
+		return task.WIPAdmitted, nil
 	}
-	limitedRepo, ok := s.tasks.(workflowLimitedMoveRepository)
+	admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository)
 	if !ok {
-		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
+		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
-	return limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, task, targetStep.ID, task.ID, targetStep.WIPLimit)
+	if admissionWithState, ok := s.tasks.(workflowMoveAdmissionWithStateRepository); ok {
+		return admissionWithState.UpdateTaskWithWorkflowStepAdmissionAndState(
+			ctx, task, targetStep.ID, targetStep.WIPLimit, admittedState, true,
+		)
+	}
+
+	// Keep compatibility with narrow test/dry-run repositories that expose
+	// only the original admission method. Production repositories implement the
+	// atomic variant above, so this fallback is never used for real moves.
+	admitted, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
+	if err != nil {
+		return false, err
+	}
+	if admitted && admittedState != nil {
+		task.State = *admittedState
+		delete(task.Metadata, models.MetaKeyQueuedMoveExitPending)
+	} else if !admitted {
+		if task.Metadata == nil {
+			task.Metadata = make(map[string]interface{})
+		}
+		task.Metadata[models.MetaKeyQueuedMoveExitPending] = true
+	}
+	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+		return false, err
+	}
+	return admitted, nil
+}
+
+func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
+	if targetStep == nil {
+		return nil
+	}
+	terminal, err := s.terminalWorkflowStep(ctx, targetStep.ID)
+	if err != nil {
+		return fmt.Errorf("sync promoted task state for %s: %w", task.ID, err)
+	}
+	if terminal {
+		if !models.IsTerminalTaskState(task.State) {
+			task.State = v1.TaskStateCompleted
+		}
+		return nil
+	}
+	if task.State == v1.TaskStateCompleted {
+		task.State = v1.TaskStateTODO
+	}
+	return nil
 }
 
 func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workflowID, workflowStepID string, opts MoveTaskOptions) (*wfmodels.WorkflowStep, error) {
@@ -858,28 +1052,7 @@ func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workf
 	if targetStep.WorkflowID != workflowID {
 		return nil, fmt.Errorf("target workflow step does not belong to target workflow")
 	}
-	if err := s.validateMoveWIPLimit(ctx, task, targetStep); err != nil {
-		return nil, err
-	}
 	return targetStep, nil
-}
-
-func (s *Service) validateMoveWIPLimit(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
-	if targetStep == nil || targetStep.WIPLimit <= 0 || task.WorkflowStepID == targetStep.ID {
-		return nil
-	}
-	limitsRepo, ok := s.tasks.(workflowMoveLimitsRepository)
-	if !ok {
-		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
-	}
-	occupants, err := limitsRepo.CountTasksByWorkflowStepExcludingTask(ctx, targetStep.ID, task.ID)
-	if err != nil {
-		return fmt.Errorf("failed to count target workflow step tasks: %w", err)
-	}
-	if occupants >= targetStep.WIPLimit {
-		return wfmodels.NewWIPLimitError(targetStep.ID, targetStep.WIPLimit, occupants)
-	}
-	return nil
 }
 
 func (s *Service) validateMoveSessions(ctx context.Context, taskID string, opts MoveTaskOptions) error {
@@ -915,6 +1088,59 @@ func (s *Service) resolvePrimaryOrActiveSession(ctx context.Context, taskID stri
 		return nil
 	}
 	return active
+}
+
+// recordManualStepTransition writes the ADR 0015 audit row for a
+// user/agent-initiated move. trigger is normally StepTransitionTriggerManual;
+// callers driving an approval-gated transition (ApproveSession) pass
+// StepTransitionTriggerApproval — a zero value defaults to Manual. It is a
+// no-op when no recorder is wired or when the task has no session to record
+// against — session_step_history.session_id is a NOT NULL FK to
+// task_sessions, so a session-less move cannot be recorded without a
+// schema change. Runtime writes use the workflow service's bounded worker;
+// failures are logged and swallowed because this is best-effort telemetry.
+func (s *Service) recordManualStepTransition(ctx context.Context, sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actors ...wfmodels.StepTransitionActor) {
+	if s.stepHistoryRecorder == nil {
+		return
+	}
+	if sessionID == "" {
+		s.logger.Debug("skipping manual step transition audit: task has no session",
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID))
+		return
+	}
+	if trigger == "" {
+		trigger = wfmodels.StepTransitionTriggerManual
+	}
+	var actorID *string
+	actor := wfmodels.StepTransitionActorHuman
+	if len(actors) > 0 {
+		actor = actors[0]
+	}
+	if actor == wfmodels.StepTransitionActorHuman {
+		if identity, ok := authn.IdentityFromContext(ctx); ok && identity.UserID != "" {
+			actorID = &identity.UserID
+		}
+	}
+	if asyncRecorder, ok := s.stepHistoryRecorder.(asyncStepHistoryRecorder); ok {
+		asyncRecorder.EnqueueStepTransition(sessionID, fromStepID, toStepID, trigger, actorID, nil)
+		return
+	}
+	// The step change is already durably persisted by the time this runs.
+	// Use a detached, bounded context so a cancelled request context (client
+	// disconnect, turn-end) cannot drop the audit row for a transition that
+	// already committed.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.StepHistoryWriteTimeout)
+	defer cancel()
+	if err := s.stepHistoryRecorder.CreateStepTransition(
+		writeCtx, sessionID, fromStepID, toStepID, trigger, actorID, nil,
+	); err != nil {
+		s.logger.Warn("failed to record manual step transition",
+			zap.String("session_id", sessionID),
+			zap.String("from_step_id", fromStepID),
+			zap.String("to_step_id", toStepID),
+			zap.Error(err))
+	}
 }
 
 func isSessionActive(state models.TaskSessionState) bool {
@@ -954,10 +1180,6 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 	if err != nil {
 		return nil, err
 	}
-	if err := s.validateBulkMoveWIPCapacity(ctx, tasks, targetStepID); err != nil {
-		return nil, err
-	}
-
 	nextPosition, err := s.tasks.CountTasksByWorkflowStep(ctx, targetStepID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to count target workflow step tasks: %w", err)
@@ -1010,40 +1232,6 @@ func (s *Service) validateSelectedMoveBatch(ctx context.Context, taskIDs []strin
 	return tasks, nil
 }
 
-func (s *Service) validateBulkMoveWIPCapacity(ctx context.Context, tasks []*models.Task, targetStepID string) error {
-	if s.workflowStepGetter == nil {
-		return nil
-	}
-	targetStep, err := s.workflowStepGetter.GetStep(ctx, targetStepID)
-	if err != nil {
-		return fmt.Errorf("failed to get target workflow step: %w", err)
-	}
-	if targetStep.WIPLimit <= 0 {
-		return nil
-	}
-	incoming := 0
-	for _, task := range tasks {
-		if task.WorkflowStepID != targetStepID {
-			incoming++
-		}
-	}
-	if incoming == 0 {
-		return nil
-	}
-	limitsRepo, ok := s.tasks.(workflowMoveLimitsRepository)
-	if !ok {
-		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
-	}
-	occupants, err := limitsRepo.CountTasksByWorkflowStepExcludingTask(ctx, targetStep.ID, "")
-	if err != nil {
-		return fmt.Errorf("failed to count target workflow step tasks: %w", err)
-	}
-	if occupants+incoming > targetStep.WIPLimit {
-		return fmt.Errorf("%w: moving %d task(s)", wfmodels.NewWIPLimitError(targetStep.ID, targetStep.WIPLimit, occupants), incoming)
-	}
-	return nil
-}
-
 // BulkMoveTasks moves all tasks from a source workflow/step to a target workflow/step.
 // If sourceStepID is empty, all tasks in the source workflow are moved.
 func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceStepID, targetWorkflowID, targetStepID string) (*BulkMoveTasksResult, error) {
@@ -1062,10 +1250,6 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 	if len(tasks) == 0 {
 		return &BulkMoveTasksResult{MovedCount: 0}, nil
 	}
-	if err := s.validateBulkMoveWIPCapacity(ctx, tasks, targetStepID); err != nil {
-		return nil, err
-	}
-
 	for i, task := range tasks {
 		if _, err := s.MoveTask(ctx, task.ID, targetWorkflowID, targetStepID, i); err != nil {
 			return nil, fmt.Errorf("failed to move task %s: %w", task.ID, err)

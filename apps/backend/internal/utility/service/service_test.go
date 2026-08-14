@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/utility/models"
+	"github.com/kandev/kandev/internal/utility/profilebinding"
 	"github.com/kandev/kandev/internal/utility/template"
 )
 
@@ -41,8 +43,183 @@ func TestMigrateLegacyBindingsUpdatesOnlyUnambiguousRows(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacyBindingsNormalizesEmptyUnconfiguredBuiltin(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+	}}
+	svc := NewService(repo)
+	svc.SetProfileResolver(fakeProfileResolver{})
+
+	updated, err := svc.MigrateLegacyBindings(context.Background())
+	if err != nil {
+		t.Fatalf("MigrateLegacyBindings() error = %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("MigrateLegacyBindings() updated = %d, want 1", updated)
+	}
+	if got := repo.agents["builtin"].ProfileBindingState; got != models.ProfileBindingInherit {
+		t.Fatalf("profile binding state = %q, want %q", got, models.ProfileBindingInherit)
+	}
+	if repo.agents["builtin"].Enabled {
+		t.Fatal("migration enabled the built-in action")
+	}
+
+	updated, err = svc.MigrateLegacyBindings(context.Background())
+	if err != nil || updated != 0 {
+		t.Fatalf("second MigrateLegacyBindings() = (%d, %v), want (0, nil)", updated, err)
+	}
+}
+
+func TestMigrateLegacyBindingsDoesNotOverwriteConcurrentRepair(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+	}}
+	repo.normalizeEmptyBuiltinBindingHook = func(agent *models.UtilityAgent) {
+		agent.AgentProfileID = "profile-1"
+		agent.ProfileBindingState = models.ProfileBindingExplicit
+	}
+	svc := NewService(repo)
+	svc.SetProfileResolver(fakeProfileResolver{})
+
+	updated, err := svc.MigrateLegacyBindings(context.Background())
+	if err != nil || updated != 0 {
+		t.Fatalf("MigrateLegacyBindings() = (%d, %v), want (0, nil)", updated, err)
+	}
+	got := repo.agents["builtin"]
+	if got.AgentProfileID != "profile-1" || got.ProfileBindingState != models.ProfileBindingExplicit {
+		t.Fatalf("concurrent repair was overwritten: %#v", got)
+	}
+}
+
+func TestMigrateLegacyBindingsPreservesConcreteAndCustomUnconfiguredBindings(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Builtin:             true,
+			AgentProfileID:      "deleted-profile",
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+		"custom": {
+			ID:                  "custom",
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+	}}
+	svc := NewService(repo)
+	svc.SetProfileResolver(fakeProfileResolver{})
+
+	updated, err := svc.MigrateLegacyBindings(context.Background())
+	if err != nil || updated != 0 {
+		t.Fatalf("MigrateLegacyBindings() = (%d, %v), want (0, nil)", updated, err)
+	}
+	for id, agent := range repo.agents {
+		if agent.ProfileBindingState != models.ProfileBindingUnconfigured {
+			t.Fatalf("%s binding state = %q, want %q", id, agent.ProfileBindingState, models.ProfileBindingUnconfigured)
+		}
+	}
+	if got := repo.agents["builtin"].AgentProfileID; got != "deleted-profile" {
+		t.Fatalf("builtin profile ID = %q, want %q", got, "deleted-profile")
+	}
+}
+
+func TestMigrateLegacyBindingsNormalizesEmptyExplicitBuiltin(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingExplicit,
+		},
+	}}
+	svc := NewService(repo)
+	svc.SetProfileResolver(fakeProfileResolver{})
+
+	updated, err := svc.MigrateLegacyBindings(context.Background())
+	if err != nil {
+		t.Fatalf("MigrateLegacyBindings() error = %v", err)
+	}
+	if updated != 1 {
+		t.Fatalf("MigrateLegacyBindings() updated = %d, want 1", updated)
+	}
+	if got := repo.agents["builtin"].ProfileBindingState; got != models.ProfileBindingInherit {
+		t.Fatalf("profile binding state = %q, want %q", got, models.ProfileBindingInherit)
+	}
+}
+
+func TestMigrateLegacyBindingsMakesAmbiguousBuiltinInheritButCustomUnconfigured(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			AgentID:             "legacy-agent",
+			Model:               "legacy-model",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingExplicit,
+		},
+		"custom": {
+			ID:                  "custom",
+			AgentID:             "legacy-agent",
+			Model:               "legacy-model",
+			ProfileBindingState: models.ProfileBindingExplicit,
+		},
+	}}
+	svc := NewService(repo)
+	svc.SetProfileResolver(fakeProfileResolver{err: profilebinding.ErrLegacyBindingAmbiguous})
+
+	updated, err := svc.MigrateLegacyBindings(context.Background())
+	if err != nil {
+		t.Fatalf("MigrateLegacyBindings() error = %v", err)
+	}
+	if updated != 2 {
+		t.Fatalf("MigrateLegacyBindings() updated = %d, want 2", updated)
+	}
+	if got := repo.agents["builtin"].ProfileBindingState; got != models.ProfileBindingInherit {
+		t.Fatalf("builtin state = %q, want %q", got, models.ProfileBindingInherit)
+	}
+	if got := repo.agents["custom"].ProfileBindingState; got != models.ProfileBindingUnconfigured {
+		t.Fatalf("custom state = %q, want %q", got, models.ProfileBindingUnconfigured)
+	}
+}
+
+func TestClearAgentProfileBindingsRetainsStaleProfileID(t *testing.T) {
+	repo := &fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Builtin:             true,
+			AgentProfileID:      "deleted-profile",
+			ProfileBindingState: models.ProfileBindingExplicit,
+		},
+		"inherited": {
+			ID:                  "inherited",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingInherit,
+		},
+	}}
+	svc := NewService(repo)
+
+	if err := svc.ClearAgentProfileBindings(context.Background(), "deleted-profile"); err != nil {
+		t.Fatalf("ClearAgentProfileBindings() error = %v", err)
+	}
+	deleted := repo.agents["builtin"]
+	if deleted.AgentProfileID != "deleted-profile" {
+		t.Fatalf("stale profile ID = %q, want %q", deleted.AgentProfileID, "deleted-profile")
+	}
+	if deleted.ProfileBindingState != models.ProfileBindingUnconfigured {
+		t.Fatalf("deleted profile state = %q, want %q", deleted.ProfileBindingState, models.ProfileBindingUnconfigured)
+	}
+	if got := repo.agents["inherited"].ProfileBindingState; got != models.ProfileBindingInherit {
+		t.Fatalf("inherited state = %q, want %q", got, models.ProfileBindingInherit)
+	}
+}
+
 type fakeRepository struct {
-	agents map[string]*models.UtilityAgent
+	agents                           map[string]*models.UtilityAgent
+	normalizeEmptyBuiltinBindingHook func(*models.UtilityAgent)
 }
 
 func (r *fakeRepository) ListAgents(context.Context) ([]*models.UtilityAgent, error) {
@@ -78,6 +255,19 @@ func (r *fakeRepository) CreateAgent(_ context.Context, agent *models.UtilityAge
 func (r *fakeRepository) UpdateAgent(_ context.Context, agent *models.UtilityAgent) error {
 	r.agents[agent.ID] = agent
 	return nil
+}
+
+func (r *fakeRepository) NormalizeEmptyBuiltinBinding(_ context.Context, id string) (bool, error) {
+	agent := r.agents[id]
+	if r.normalizeEmptyBuiltinBindingHook != nil {
+		r.normalizeEmptyBuiltinBindingHook(agent)
+	}
+	if agent == nil || !agent.Builtin || agent.AgentProfileID != "" ||
+		agent.ProfileBindingState != models.ProfileBindingUnconfigured {
+		return false, nil
+	}
+	agent.ProfileBindingState = models.ProfileBindingInherit
+	return true, nil
 }
 
 func (r *fakeRepository) DeleteAgent(_ context.Context, id string) error {
@@ -232,5 +422,114 @@ func TestPreparePromptRequest_IgnoresDefaultsWhenAgentAndModelAreConfigured(t *t
 	}
 	if req.Model != "custom-model" {
 		t.Fatalf("Model = %q, want %q", req.Model, "custom-model")
+	}
+}
+
+func TestPreparePromptRequest_ResolvesInheritedBuiltinFromDefaultProfile(t *testing.T) {
+	t.Parallel()
+
+	defaultProfile := &agentsettingsmodels.AgentProfile{
+		ID:      "default-profile",
+		AgentID: "codex-acp",
+		Model:   "gpt-5",
+	}
+	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Prompt:              "Do {{UserPrompt}}",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingInherit,
+		},
+	}})
+	svc.SetProfileResolver(fakeProfileResolver{profile: defaultProfile})
+
+	req, err := svc.PreparePromptRequest(
+		context.Background(),
+		"builtin",
+		&template.Context{UserPrompt: "fix the bug"},
+		&DefaultUtilitySettings{ProfileID: "default-profile"},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("PreparePromptRequest() error = %v", err)
+	}
+	if req.AgentProfileID != "default-profile" {
+		t.Fatalf("AgentProfileID = %q, want %q", req.AgentProfileID, "default-profile")
+	}
+}
+
+func TestPreparePromptRequest_InheritedBuiltinRequiresDefault(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Prompt:              "Do {{UserPrompt}}",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingInherit,
+		},
+	}})
+	svc.SetProfileResolver(fakeProfileResolver{profile: &agentsettingsmodels.AgentProfile{ID: "unused"}})
+
+	_, err := svc.PreparePromptRequest(
+		context.Background(),
+		"builtin",
+		&template.Context{UserPrompt: "fix the bug"},
+		&DefaultUtilitySettings{},
+		false,
+	)
+	if !errors.Is(err, ErrProfileRequired) {
+		t.Fatalf("PreparePromptRequest() error = %v, want %v", err, ErrProfileRequired)
+	}
+}
+
+func TestPreparePromptRequest_EmptyUnconfiguredBuiltinFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Prompt:              "Do {{UserPrompt}}",
+			Builtin:             true,
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+	}})
+	svc.SetProfileResolver(fakeProfileResolver{profile: &agentsettingsmodels.AgentProfile{ID: "default-profile"}})
+
+	_, err := svc.PreparePromptRequest(
+		context.Background(),
+		"builtin",
+		&template.Context{UserPrompt: "fix the bug"},
+		&DefaultUtilitySettings{ProfileID: "default-profile"},
+		false,
+	)
+	if !errors.Is(err, ErrProfileUnconfigured) {
+		t.Fatalf("PreparePromptRequest() error = %v, want %v", err, ErrProfileUnconfigured)
+	}
+}
+
+func TestPreparePromptRequest_ConcreteUnconfiguredBindingFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	svc := NewService(&fakeRepository{agents: map[string]*models.UtilityAgent{
+		"builtin": {
+			ID:                  "builtin",
+			Prompt:              "Do {{UserPrompt}}",
+			Builtin:             true,
+			AgentProfileID:      "deleted-profile",
+			ProfileBindingState: models.ProfileBindingUnconfigured,
+		},
+	}})
+	svc.SetProfileResolver(fakeProfileResolver{profile: &agentsettingsmodels.AgentProfile{ID: "deleted-profile"}})
+
+	_, err := svc.PreparePromptRequest(
+		context.Background(),
+		"builtin",
+		&template.Context{UserPrompt: "fix the bug"},
+		&DefaultUtilitySettings{ProfileID: "default-profile"},
+		false,
+	)
+	if !errors.Is(err, ErrProfileUnconfigured) {
+		t.Fatalf("PreparePromptRequest() error = %v, want %v", err, ErrProfileUnconfigured)
 	}
 }

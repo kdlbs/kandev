@@ -70,7 +70,7 @@ After startup it returns HTTP 200 with:
 {"status":"ok","service":"kandev","mode":"websocket+http","version":"1.2.3"}
 ```
 
-It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready. The supplied Kubernetes probes use this endpoint. `/health` is unauthenticated even when auth is enabled, so it's also the credential-free way for monitoring to read the running version — no need to authenticate to **System > About** just to check what build is deployed.
+It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready. The supplied Kubernetes probes use this endpoint. `/health` is unauthenticated even when auth is enabled, so it's also the credential-free way for monitoring to read the running version; there is no need to authenticate to **System > About** just to check what build is deployed.
 
 For application diagnostics, open **Settings > System > Status** or request:
 
@@ -89,11 +89,13 @@ kandev service logs -f
 
 Add `--system` to both commands for a system service.
 
-## Message queue capacity
+## Message queue settings
 
-Open **Settings > General > Message Queue** to set the install-wide number of pending messages allowed in each session. The default is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting, so a queue at or above the new limit rejects new work until messages run or are removed. Delivery retries for work accepted before the change are not discarded by the lower cap.
+Open **Settings > Task Behavior > Message Queue** to manage install-wide queue behavior. The default capacity is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting, so a queue at or above the new limit rejects new work until messages run or are removed. Delivery retries for work accepted before the change are not discarded by the lower cap.
 
-`KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence than the saved setting. A valid environment value makes the UI field read-only; zero or a negative value means unlimited. Invalid text is logged and ignored in favor of the saved setting or default. Environment changes require a backend restart, while UI changes do not.
+`KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence than the saved capacity. A valid environment value makes only that field read-only; zero or a negative value means unlimited. Invalid text is logged and ignored in favor of the saved setting or default. Environment changes require a backend restart, while UI changes do not.
+
+**Automatically merge consecutive messages** is on by default. Capacity is checked before any fold, so a full queue still rejects a compatible message. After admission, a new row folds only into its immediate pending predecessor when both rows have the same strict source and compatible task, model, mode, metadata, attachments, and references. Any mismatch or combined limit leaves the new row separate. The earlier row survives and its ID is returned. Turning the switch on does not compact existing rows. This setting is independent from **Enable queued message merging**, which controls the manual queue action.
 
 To recover capacity in one session, expand its queue chip in the task workbench. **Remove** deletes one visible pending row and **Clear all** deletes all visible pending rows, including user-, agent-, workflow-, and server-origin work. After removal, merge, or drain, displayed positions immediately compact to `#1` through `#N`; durable FIFO ordering is unchanged. A row already reserved for delivery is hidden and is not cancelled by either action.
 
@@ -144,7 +146,7 @@ Scheduled cleanup is disabled by default and runs only after the configured reso
 period. Orphaned task workspaces and rotated Go caches move into Kandev's quarantine before
 permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
 **Clear eligible** cannot remove it before that time. The deadline is the earliest safe deletion
-time, not an exact promise—the first successful scheduled or full manual maintenance run after the
+time, not an exact promise, the first successful scheduled or full manual maintenance run after the
 deadline performs the purge, subject to the idle gate and any preemption.
 
 Use **Clear eligible** to remove only entries whose deadlines have passed. It reports protected
@@ -153,6 +155,17 @@ remove every active quarantine entry, discarding restore windows for entries tha
 deleted. Safety-validation or deletion failures may leave entries visible and retryable. This
 override bypasses only the retention timestamp; path, ownership, state, and filesystem safety
 checks still apply.
+
+Kandev keeps at most one restorable Go-cache generation for each original cache path. If that
+generation is still active when the replacement cache exceeds its limit, the next rotation is
+deferred. The maintenance run succeeds and reports `active_quarantine`; both the live cache and
+the retained generation stay unchanged.
+
+If a Go-cache quarantine payload is already missing, **Delete**, **Clear eligible**, or **Force
+clear all** can close its durable entry without changing the live replacement cache. The purge
+reports zero deleted bytes for that entry. **Restore** remains unavailable because Kandev cannot
+prove which cache generation is currently live.
+
 If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
 one of the quarantine actions when you want cleanup.
 
@@ -251,7 +264,7 @@ authoritative. Do not delete ownership rows by hand. Start a compatible
 pre-cutover binary to restore service, or deploy the migration hotfix and retry
 the upgrade against the unchanged database.
 
-The normalized schema is intentionally incompatible with older binaries. To downgrade, stop all instances and restore the pre-upgrade backup — never start an older binary against a post-cutover database. SQLite restores from its automatic pre-migration snapshot; PostgreSQL restores your verified `pg_dump` backup.
+The normalized schema is intentionally incompatible with older binaries. To downgrade, stop all instances and restore the pre-upgrade backup; never start an older binary against a post-cutover database. SQLite restores from the verified manual snapshot created before the upgrade; PostgreSQL restores your verified `pg_dump` backup.
 
 Switching `database.driver` does not migrate data. PostgreSQL and shared NATS remove two single-process data constraints, but they do not make Kandev horizontally scalable: WebSocket subscriptions, execution lifecycle/control state, and task workspaces remain process- or filesystem-local. The current product and supplied deployment validate one backend replica only; do not add replicas based on the database and event bus alone.
 
@@ -442,10 +455,11 @@ Kandev warns when its live WebSocket connection has not recovered for three seco
 
 **Settings > System > Feature Toggles** currently exposes:
 
-- **Office mode** — experimental, medium risk, and off in the production profile by default.
-- **Claude background prompt handoff** — experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
-- **Unread divider** — a per-user setting at **Settings > General > Task Actions**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
-- **Debug mode** — high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
+- **Office mode**: experimental, medium risk, and off in the production profile by default.
+- **App status bar**: stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins. Urgent WebSocket connectivity warnings still remain visible while the feature is off.
+- **Claude background prompt handoff**: experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
+- **Unread divider**: a per-user setting at **Settings > General > Task Actions**. It defaults off, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
+- **Debug mode**: high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
 
 Each feature toggle requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
 
@@ -476,8 +490,8 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 
 ## Related pages
 
-- [Configuration](configuration.md) — paths, database, logging, NATS, Docker, and security-sensitive environment variables
-- [Executors](executors.md) — runtime lifecycle, credentials, cleanup, and isolation boundaries
-- [Git operations](git-operations.md) — branches, worktrees, push, and pull-request behavior
-- [Automation and MCP](automation-and-mcp.md) — external MCP routes and their current unauthenticated trust boundary
-- [Windows support](windows-support.md) — Windows-native limitations and supported alternatives
+- [Configuration](configuration.md); paths, database, logging, NATS, Docker, and security-sensitive environment variables
+- [Executors](executors.md); runtime lifecycle, credentials, cleanup, and isolation boundaries
+- [Git operations](git-operations.md); branches, worktrees, push, and pull-request behavior
+- [Automation and MCP](automation-and-mcp.md); external MCP routes and their current unauthenticated trust boundary
+- [Windows support](windows-support.md); Windows-native limitations and supported alternatives

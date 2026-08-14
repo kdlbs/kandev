@@ -199,15 +199,17 @@ copyable settings for that pending import. It is short-lived and single-use.
 1. Start **Add existing App** from the workspace GitHub connection flow. Enter its owner, label,
    visibility, and the public Kandev origin.
 2. Open the App under the owning user's or organization's **Settings > Developer settings > GitHub
-   Apps**, then apply every URL, permission, and event shown by Kandev. Set the App homepage to the
-   public Kandev origin, use JSON webhook delivery with SSL verification, request user
-   authorization during installation, and keep expiring user tokens enabled.
+   Apps**, then apply every URL, permission, and event shown by Kandev. Add the workspace
+   installation callback as the first user authorization callback and the personal identity
+   callback as the second. Set the App homepage to the public Kandev origin, use JSON webhook
+   delivery with SSL verification, request user authorization during installation, leave the setup
+   URL empty, and keep expiring user tokens enabled.
 3. Return before the preparation expires and provide the App ID, OAuth client ID and secret, App
    slug, webhook secret, and an RSA private key generated for that App. Treat every secret field as
    a root credential and never put it in workspace environment variables or executor profiles.
 4. Kandev authenticates as the App, verifies its ID, owner, slug, homepage, permissions, events,
    and webhook settings where GitHub exposes them, then encrypts the credential bundle. You must
-   confirm callback/setup settings that GitHub's API does not expose.
+   confirm callback settings that GitHub's API does not expose.
 5. Select and install the imported registration. Importing alone never replaces the workspace's
    current PAT, CLI account, or App installation.
 
@@ -220,7 +222,7 @@ templates are useful when checking a proxy or GitHub setting:
 | Purpose | URL path |
 |---|---|
 | Manifest creation callback | `/api/v1/github/app/registrations/{registrationId}/manifest/callback` |
-| Workspace installation setup | `/api/v1/github/app/registrations/{registrationId}/install/callback` |
+| Workspace installation OAuth callback | `/api/v1/github/app/registrations/{registrationId}/install/callback` |
 | Personal identity OAuth callback | `/api/v1/github/app/registrations/{registrationId}/personal/callback` |
 | Signed webhook delivery | `/api/v1/github/app/registrations/{registrationId}/webhook` |
 
@@ -244,7 +246,7 @@ For full Kandev behavior, request the smallest applicable repository/organizatio
 | Members | Read | Organization/team membership lookups. |
 | Workflows | Write | Changes under `.github/workflows`; omit when agents must not edit workflow files. |
 
-Subscribe only to `installation`, `installation_repositories`, and `github_app_authorization`. Kandev uses these events to track installation suspension/deletion, repository access changes, and revoked personal authorizations. PR, issue, review, and CI watches continue to poll and do not require their corresponding webhooks. GitHub's [registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app), [App permission reference](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps), and [webhook guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/using-webhooks-with-github-apps) describe the provider-side settings.
+Subscribe to `push` and `check_run`. GitHub sends `installation`, `installation_repositories`, and `github_app_authorization` lifecycle events automatically; they do not appear as selectable subscriptions. Kandev uses the lifecycle events to track installation suspension/deletion, repository access changes, and revoked personal authorizations. PR, issue, and review watches continue to poll and do not require their corresponding webhooks. GitHub's [registration guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app), [App permission reference](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps), and [webhook guide](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/using-webhooks-with-github-apps) describe the provider-side settings.
 
 To delete a registration, first disconnect every workspace using it and remove personal identities
 issued through it. Kandev blocks deletion while any workspace or personal connection is bound,
@@ -292,7 +294,7 @@ Repository scope, authentication, and watch filters are workspace-specific. Repo
 
 ### Automate a linked pull request
 
-For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls are task-level booleans: **Auto-fix CI & address comments**, **Auto-merge when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**. Enabling any control applies it to every PR linked to that task; Kandev tracks delivery and deduplication separately for each linked PR.
+For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls, **Auto-fix CI & address comments**, **Auto-merge when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**, are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
 
 This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight task PR poller, which checks watched linked PRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked PRs without waiting for the next poll.
 
@@ -305,7 +307,7 @@ server-owned templates that include only the linked PR's canonical URL; their
 text cannot be customized through the UI, HTTP, MCP, or storage. They report the
 observed event without prescribing an action; the task workflow and agent
 context determine the response. GitLab has the same auto-fix, auto-merge, and
-lifecycle controls — see "Automate a linked merge request" below. Selecting a
+lifecycle controls. See "Automate a linked merge request" below. Selecting a
 destination workflow step for a lifecycle event remains follow-up work for
 both providers.
 
@@ -360,9 +362,9 @@ Kandev reuses the existing lightweight task MR poller, which checks linked MRs r
 
 **Auto-merge when ready** merges the linked MR only when it is open, not a draft, its pipeline is passing, it has no unresolved discussions, and GitLab's own merge-readiness verdict (`detailed_merge_status`, falling back to `merge_status` on older GitLab versions) agrees. An auto-fix dispatch in the same evaluation pass takes priority over an auto-merge attempt in that pass.
 
-**Your review is requested** matches the GitLab account connected to the task's workspace against the MR's current reviewer list — GitLab has no separate "review requested" API event, so appearing as a reviewer is the signal. The first observation is a quiet baseline; only a later false-to-true transition to being a reviewer wakes the agent. Staying assigned across MR updates does not re-fire it; clearing the reviewer assignment and being re-added — for example, for a re-review after changes — rearms the next transition.
+**Your review is requested** matches the GitLab account connected to the task's workspace against the MR's current reviewer list: GitLab has no separate "review requested" API event, so appearing as a reviewer is the signal. The first observation is a quiet baseline; only a later false-to-true transition to being a reviewer wakes the agent. Staying assigned across MR updates does not re-fire it; clearing the reviewer assignment and being re-added (for example, for a re-review after changes) rearms the next transition.
 
-**MR merged** and **MR closed without merging** each notify once when the linked MR enters that terminal state; reopening and re-closing an MR re-arms the notification. Kandev delivers lifecycle notifications to the task's active promptable session, preferring the primary session, and does not interrupt a busy session — it queues the message for delivery when that session is available. Lifecycle messages report only the observed event and the MR's canonical URL and cannot be customized.
+**MR merged** and **MR closed without merging** each notify once when the linked MR enters that terminal state; reopening and re-closing an MR re-arms the notification. Kandev delivers lifecycle notifications to the task's active promptable session, preferring the primary session, and does not interrupt a busy session; it queues the message for delivery when that session is available. Lifecycle messages report only the observed event and the MR's canonical URL and cannot be customized.
 
 For a GitLab Review Watch task with any MR lifecycle prompt enabled, the **Auto** cleanup policy retains the terminal task so lifecycle delivery can finish, matching the GitHub review-watch behavior described above.
 
@@ -387,6 +389,106 @@ For a task repository whose `origin` matches the workspace's GitLab host, the Ch
 A successful create returns the MR URL and asynchronously records it against the originating task repository. If association fails, use the manual link action. Retrying is idempotent for an existing open MR with the same source and target branches. A push can succeed even when MR creation fails; Kandev reports that partial result and leaves the remote branch in place for retry.
 
 </details>
+
+## Bitbucket
+
+> [!EXPERIMENTAL]
+> Bitbucket uses Kandev's experimental plugin platform. Package signatures are
+> not enforced yet, so the official plugin follows the same unsigned install
+> path as current plugins; signature enforcement is deferred.
+
+Bitbucket support is provided by the separately installed **Bitbucket** plugin.
+Install a package built for the running Kandev host from **Settings > Plugins**,
+then open its **Bitbucket** entry in the Integrations section. The connection is
+workspace-specific: configure each Kandev workspace that should discover
+repositories, launch tasks, link pull requests, or use Bitbucket review and
+watch workflows.
+
+### Connect Bitbucket Cloud
+
+Choose **Bitbucket Cloud**, enter the Bitbucket workspace slug or ID, then pick
+one of these authentication methods:
+
+| Method | Required values | Use when |
+|---|---|---|
+| API token | Atlassian account email and API token | A workspace-scoped, non-interactive connection is sufficient. |
+| OAuth 2.0 | OAuth client ID and secret, then complete the browser flow | Access should be granted interactively and refreshed by Bitbucket. |
+
+For a [scoped Cloud API token](https://support.atlassian.com/bitbucket-cloud/docs/using-api-tokens/), grant `read:user:bitbucket`,
+`read:repository:bitbucket`, `write:repository:bitbucket`,
+`read:pullrequest:bitbucket`, and `write:pullrequest:bitbucket`. The write
+grants are needed for Git push, pull-request creation/review mutations, and
+other enabled write actions; omit them only if those operations should fail
+closed. For OAuth, enable Account read plus Repository and Pull request
+read/write permissions on the consumer; the plugin requests those scopes in
+the authorization flow.
+
+For OAuth, copy the read-only callback URL that the plugin shows into the
+Bitbucket OAuth consumer. It is derived from the current Kandev origin; changing
+that origin requires updating the consumer redirect URI before reconnecting.
+Select **Check connection** and wait for the health card to report
+**Connected** before browsing repositories.
+
+### Connect Bitbucket Data Center
+
+Choose **Bitbucket Data Center**, enter the full HTTPS base URL (including any
+context path such as `/bitbucket`), and select the narrowest credential that
+matches your server:
+
+| Method | Required values |
+|---|---|
+| Personal access token | Bitbucket username and PAT. |
+| Project access token | Project token. |
+| Repository access token | Repository token. |
+| OAuth 2.0 | Bitbucket username, OAuth client ID and secret, then browser authorization. |
+
+The Data Center OAuth incoming application link must allow `REPO_READ` and
+`REPO_WRITE`. PATs and project/repository tokens likewise need read access for
+discovery/review and write access for push, pull-request, and review mutations.
+
+Data Center deployments differ in their enabled REST and OAuth capabilities.
+The plugin reports unavailable operations from the connected server rather than
+assuming Cloud behavior. Use a trusted HTTPS URL; test-only insecure endpoints
+are not accepted by the normal connection flow.
+
+### What the plugin adds
+
+With a healthy connection, the plugin contributes Bitbucket repository discovery
+to **New Task**, credential-free remote inspection/branch lookup, task link and
+launch actions, a provider-neutral review panel, pull-request create/update and
+review actions where the server grants them, and workspace pull-request watches.
+Watches persist their cursor and reservations so a restart can reconcile a
+partially created task; they still depend on the configured provider identity
+and its current access.
+
+Task Git credentials are brokered per verified Bitbucket provider/workspace/
+task/repository scope. The plugin returns credentials transiently; Kandev does
+not persist them in task metadata or remote URLs. Rotating credentials,
+disconnecting the workspace, disabling the plugin, or uninstalling it revokes
+the provider's leases so an already-issued helper fails closed. Configure
+executor SSH credentials separately for SSH remotes.
+
+### Security and limitations
+
+The plugin stores only credential-free connection settings in plugin state and
+keeps tokens, refresh tokens, and OAuth client secrets in Kandev's encrypted
+plugin secret vault. Existing secrets are never displayed; leave a secret empty
+only when the UI says it will retain the saved value. **Disconnect Bitbucket**
+removes that workspace's Bitbucket connection and stored plugin credentials.
+
+Install plugins only from sources you trust. A plugin backend runs as a Kandev
+subprocess and its native UI runs in the Kandev origin, so capabilities are
+permission gates, not an operating-system or browser sandbox. Limit Bitbucket
+tokens to the repositories and write operations the workspace needs, and review
+the plugin's requested `api_read`, `api_write`, `state`, and `secrets`
+capabilities before installation.
+
+The plugin does not turn a Bitbucket API credential into unrestricted executor
+access. A task can show a Bitbucket pull request while its selected executor
+cannot push; use the task's generated HTTPS credential path or separately
+configured SSH credentials. Dynamic `#` references and review actions are
+reauthorized against the active connection at use time, so a removed grant or
+disconnected connection is denied rather than using cached authority.
 
 ## Azure DevOps
 
@@ -468,7 +570,7 @@ Linear polling is also bounded. **Default (Linear order)** reads one page of 50;
 
 Sentry configuration is workspace-specific and supports multiple named instances. This is useful when one Kandev workspace spans different Sentry organizations or self-hosted installations.
 
-Create an instance with a unique name, base URL, and bearer authentication token. The default URL is `https://sentry.io`; replace it for self-hosted Sentry. A URL with no scheme becomes HTTPS. It must be a bare HTTP(S) host root—paths, queries, and fragments are rejected. The UI lists `org:read`, `project:read`, and `event:read` as the required read scopes.
+Create an instance with a unique name, base URL, and bearer authentication token. The default URL is `https://sentry.io`; replace it for self-hosted Sentry. A URL with no scheme becomes HTTPS. It must be a bare HTTP(S) host root, paths, queries, and fragments are rejected. The UI lists `org:read`, `project:read`, and `event:read` as the required read scopes.
 
 On any saved edit, a blank token preserves the existing token, including when the URL changes. The pre-save **Test connection** candidate cannot reuse that stored token after a URL change, so paste the token to test the new URL before saving.
 

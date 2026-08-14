@@ -37,12 +37,18 @@ func TestPublishGitStatus_PropagatesRepositoryName(t *testing.T) {
 		SessionID: "sess-multi",
 	}
 	pub.PublishGitStatus(exec, &agentctl.GitStatusUpdate{
-		Timestamp:      time.Now(),
-		RepositoryName: "frontend",
-		IsSubmodule:    true,
-		Branch:         "feature/x",
-		Modified:       []string{"src/app.tsx"},
-		Files:          map[string]agentctl.FileInfo{"src/app.tsx": {Path: "src/app.tsx"}},
+		Timestamp:        time.Now(),
+		RepositoryName:   "frontend",
+		IsSubmodule:      true,
+		Branch:           "feature/x",
+		HeadCommit:       "local-head",
+		BaseCommit:       "base-head",
+		RemoteBranch:     "contributor/feature/x",
+		RemoteHeadCommit: "upstream-head",
+		RemoteAhead:      2,
+		RemoteBehind:     1,
+		Modified:         []string{"src/app.tsx"},
+		Files:            map[string]agentctl.FileInfo{"src/app.tsx": {Path: "src/app.tsx"}},
 	})
 
 	select {
@@ -59,6 +65,12 @@ func TestPublishGitStatus_PropagatesRepositoryName(t *testing.T) {
 		}
 		if !payload.Status.IsSubmodule {
 			t.Error("is_submodule was dropped")
+		}
+		if payload.Status.HeadCommit != "local-head" || payload.Status.BaseCommit != "base-head" {
+			t.Errorf("commit comparison SHAs were dropped: head=%q base=%q", payload.Status.HeadCommit, payload.Status.BaseCommit)
+		}
+		if payload.Status.RemoteHeadCommit != "upstream-head" || payload.Status.RemoteAhead != 2 || payload.Status.RemoteBehind != 1 {
+			t.Errorf("upstream evidence was dropped: head=%q ahead=%d behind=%d", payload.Status.RemoteHeadCommit, payload.Status.RemoteAhead, payload.Status.RemoteBehind)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for git status event")

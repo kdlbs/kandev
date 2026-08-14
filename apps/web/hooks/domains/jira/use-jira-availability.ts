@@ -22,7 +22,7 @@ export function useJiraAvailable(workspaceId?: string | null): boolean {
     [workspaceId],
   );
   return useIntegrationAvailable({
-    useEnabled: useJiraEnabled,
+    enabledState: useJiraEnabled(workspaceId),
     fetchConfig,
   });
 }

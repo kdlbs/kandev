@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 )
@@ -140,7 +141,16 @@ func (c *Controller) httpCompleteAppInstallation(ctx *gin.Context) {
 			InstallationID: installationID,
 		})
 	if err != nil {
-		redirectGitHubCallback(ctx, workspaceID, githubAuthErrorCode(err))
+		resultCode := githubAuthErrorCode(err)
+		if c.logger != nil {
+			c.logger.Warn("GitHub App installation callback verification failed",
+				zap.String("registration_id", ctx.Param("registrationId")),
+				zap.String("workspace_id", workspaceID),
+				zap.String("result_code", resultCode),
+				zap.Error(err),
+			)
+		}
+		redirectGitHubCallback(ctx, workspaceID, resultCode)
 		return
 	}
 	redirectGitHubCallback(ctx, result.WorkspaceID, "app_connected")
@@ -239,6 +249,7 @@ func (c *Controller) httpResolveCredentialLease(ctx *gin.Context) {
 		Owner        string `json:"owner"`
 		Repo         string `json:"repo"`
 		Host         string `json:"host"`
+		Path         string `json:"path"`
 	}
 	if err := ctx.ShouldBindJSON(&request); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": "github_invalid_request", "error": "invalid payload"})
@@ -246,7 +257,7 @@ func (c *Controller) httpResolveCredentialLease(ctx *gin.Context) {
 	}
 	credential, err := c.service.ResolveGitHubCredential(ctx.Request.Context(), BrokerCredentialRequest{
 		Lease: request.Lease, TaskID: request.TaskID, SessionID: request.SessionID,
-		RepositoryID: request.RepositoryID, Owner: request.Owner, Repo: request.Repo, Host: request.Host,
+		RepositoryID: request.RepositoryID, Owner: request.Owner, Repo: request.Repo, Host: request.Host, Path: request.Path,
 	})
 	if err != nil {
 		writeGitHubAuthError(ctx, err)

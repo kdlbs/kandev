@@ -327,5 +327,8 @@
   "mrPopoverUnresolvedComments_one": "{{count}} comentário por resolver",
   "mrPopoverUnresolvedComments_other": "{{count}} comentários por resolver",
   "mrPopoverUpdatedJustNow": "atualizado agora mesmo",
-  "mrPopoverUpdatedAgo": "atualizado há {{elapsed}}"
+  "mrPopoverUpdatedAgo": "atualizado há {{elapsed}}",
+  "gitlabRejectedAssociation": "O GitLab rejeitou a associação.",
+  "taskCreatedMrNotLinked": "Tarefa criada, mas o merge request não foi associado",
+  "taskCreatedMrNotLinkedDescription": "Abra a tarefa e use Associar merge request do GitLab para tentar novamente. {{error}}"
 }

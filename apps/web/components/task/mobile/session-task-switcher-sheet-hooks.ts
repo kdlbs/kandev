@@ -26,11 +26,13 @@ import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import { resolvePreferredSessionId } from "../task-select-helpers";
 import { mapSnapshotToKanban, sortByUpdatedAtDesc } from "./session-task-switcher-sheet-helpers";
 import { useTranslation } from "react-i18next";
+import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
   workflowNameById: Map<string, string>;
   stepTitleById: Map<string, string>;
+  wipQueueByTaskId?: Map<string, WipQueueStatus>;
   acknowledgedAgentErrors?: Record<string, string>;
   dismissedAgentErrors?: Record<string, string>;
 };
@@ -129,6 +131,7 @@ export function toSheetItem(
     // Queued prompt count badge — same status summary source as the desktop
     // sidebar mapper (buildSidebarItem) so both surfaces agree.
     queuedCount: task.statusSummary?.queued_prompt_count,
+    wipQueue: ctx.wipQueueByTaskId?.get(task.id),
   };
 }
 
@@ -138,6 +141,7 @@ export function useSheetData(workspaceId: string | null) {
     allTasks,
     allSteps,
     stepsByWorkflowId,
+    wipQueueByTaskId,
     workflows,
     isLoading: tasksLoading,
     archivedError,
@@ -161,6 +165,7 @@ export function useSheetData(workspaceId: string | null) {
       stepTitleById: new Map(allSteps.map((s) => [s.id, s.title])),
       acknowledgedAgentErrors,
       dismissedAgentErrors,
+      wipQueueByTaskId,
     };
     return allTasks.map((task) => toSheetItem(task, ctx));
   }, [
@@ -171,6 +176,7 @@ export function useSheetData(workspaceId: string | null) {
     workspaceId,
     acknowledgedAgentErrors,
     dismissedAgentErrors,
+    wipQueueByTaskId,
   ]);
 
   const dialogSteps = useMemo(
@@ -348,6 +354,7 @@ function buildKanbanTaskUpsert(
     id: task.id,
     parentTaskId: task.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(task.metadata),
+    workflowId: task.workflow_id,
     workflowStepId: task.workflow_step_id,
     title: task.title,
     description: task.description,

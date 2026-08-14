@@ -36,7 +36,7 @@ vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
   useLinearAuthed: useLinearAuthedMock,
 }));
 
-// useNavAvailability now also folds in each integration's install-wide
+// useNavAvailability now also folds in each integration's per-workspace
 // enabled toggle plus the "hide disabled" nav setting. This suite never
 // exercises that decoupling (see hooks/use-nav-availability.test.ts for
 // that) — every enabled hook here defaults to `true` and the hide-disabled

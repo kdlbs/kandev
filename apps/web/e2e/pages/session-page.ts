@@ -1,5 +1,6 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 import { FileTreePage } from "./file-tree-page";
+import { dwell } from "../helpers/causal-waits";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -82,6 +83,11 @@ export class SessionPage {
   async togglePortForwardingPreference(): Promise<void> {
     await this.addPanelButton().click();
     await expect(this.portForwardingMenuItem).toBeVisible();
+    // The menu item is rendered before the session's agentctl launcher is
+    // ready, but it is disabled until port forwarding can actually work.
+    // Waiting for enabled avoids force-clicking a no-op during that startup
+    // window, which otherwise leaves the top-bar control absent.
+    await expect(this.portForwardingMenuItem).toBeEnabled({ timeout: 30_000 });
     const enabling = (await this.portForwardingMenuItem.getAttribute("aria-checked")) !== "true";
     await this.portForwardingMenuItem.click({ force: true });
     if (enabling) {
@@ -339,7 +345,12 @@ export class SessionPage {
       if ((await this.readXtermBuffer("passthrough-terminal")).includes(text)) {
         throw new Error(`Expected passthrough terminal NOT to contain "${text}", but it was found`);
       }
-      await this.page.waitForTimeout(200);
+      await dwell(
+        this.page,
+        200,
+        "poll-interval",
+        "sampling interval for the stability window above; the assertion is that the text never appears, so the loop keeps re-reading the buffer across real elapsed time",
+      );
     }
   }
 
@@ -643,8 +654,12 @@ export class SessionPage {
    * Hovers to reveal the menu trigger, opens it, clicks "Archive",
    * and confirms the archive dialog.
    */
-  async archiveTaskInSidebar(title: string): Promise<void> {
+  async archiveTaskInSidebar(title: string, options: { cascade?: boolean } = {}): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Archive");
+    if (options.cascade) {
+      const cascadeCheckbox = this.page.getByTestId("archive-cascade-checkbox");
+      await cascadeCheckbox.click();
+    }
     // Confirm the archive dialog
     const confirmButton = this.page
       .getByRole("alertdialog")
@@ -670,7 +685,12 @@ export class SessionPage {
       } catch {
         // Menu was likely detached by a re-render — dismiss and retry
         await this.page.keyboard.press("Escape");
-        await this.page.waitForTimeout(500);
+        await dwell(
+          this.page,
+          500,
+          "unverified",
+          "spacing before the next attempt in this menu-retry loop; the menu was detached mid-render and nothing was identified that signals it is safe to re-open",
+        );
       }
     }
     // Final attempt without catch
@@ -701,17 +721,19 @@ export class SessionPage {
 
   /** Submitted review row scoped by its normalized GitHub author login. */
   prSubmittedReview(author: string): Locator {
-    return this.page.getByTestId(`pr-submitted-review-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(`change-request-submitted-review-${author.trim().toLowerCase()}`);
   }
 
   /** Pending reviewer row scoped by its normalized GitHub author login. */
   prPendingReviewer(author: string): Locator {
-    return this.page.getByTestId(`pr-pending-reviewer-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(`change-request-pending-reviewer-${author.trim().toLowerCase()}`);
   }
 
   /** Re-request action scoped by its normalized GitHub author login. */
   prReRequestReviewButton(author: string): Locator {
-    return this.page.getByTestId(`pr-rerequest-review-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(
+      `change-request-review-action-rerequest-review-${author.trim().toLowerCase()}`,
+    );
   }
 
   // --- PR CI accessors: desktop hover popover + chip + mobile chip drawer ---

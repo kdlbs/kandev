@@ -185,6 +185,42 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettings_PreventAutoStartAgentOnOpen(t *testing.T) {
+	t.Run("omitted value leaves the setting unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{PreventAutoStartAgentOnOpen: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !settings.PreventAutoStartAgentOnOpen {
+			t.Fatal("expected the setting to remain enabled")
+		}
+	})
+
+	t.Run("explicit true enables the setting", func(t *testing.T) {
+		settings := &models.UserSettings{PreventAutoStartAgentOnOpen: false}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+			PreventAutoStartAgentOnOpen: ptr(true),
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !settings.PreventAutoStartAgentOnOpen {
+			t.Fatal("expected the setting to be enabled")
+		}
+	})
+
+	t.Run("explicit false disables the setting", func(t *testing.T) {
+		settings := &models.UserSettings{PreventAutoStartAgentOnOpen: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+			PreventAutoStartAgentOnOpen: ptr(false),
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.PreventAutoStartAgentOnOpen {
+			t.Fatal("expected the setting to be disabled")
+		}
+	})
+}
+
 func TestApplyBasicSettingsAgentGeneratedTaskTitles(t *testing.T) {
 	settings := &models.UserSettings{AgentGeneratedTaskTitles: false}
 	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
@@ -410,6 +446,38 @@ func TestApplyBasicSettingsTodoListPanel(t *testing.T) {
 		}
 		if settings.ShowTodoListPanel {
 			t.Fatal("ShowTodoListPanel = true, want false")
+		}
+	})
+}
+
+func TestApplyBasicSettingsTodoListPanelOnlyWhenNotEmpty(t *testing.T) {
+	t.Run("omission preserves saved value", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanelOnlyWhenNotEmpty: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if !settings.ShowTodoListPanelOnlyWhenNotEmpty {
+			t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = false, want true (unchanged)")
+		}
+	})
+
+	t.Run("explicit value replaces saved value", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanelOnlyWhenNotEmpty: false}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{ShowTodoListPanelOnlyWhenNotEmpty: ptr(true)}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if !settings.ShowTodoListPanelOnlyWhenNotEmpty {
+			t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = false, want true")
+		}
+	})
+
+	t.Run("explicit false disables it", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanelOnlyWhenNotEmpty: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{ShowTodoListPanelOnlyWhenNotEmpty: ptr(false)}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if settings.ShowTodoListPanelOnlyWhenNotEmpty {
+			t.Fatal("ShowTodoListPanelOnlyWhenNotEmpty = true, want false")
 		}
 	})
 }
@@ -1749,115 +1817,4 @@ func (b *recordingEventBus) Close() {}
 
 func (b *recordingEventBus) IsConnected() bool {
 	return true
-}
-
-func TestApplyVoiceMode(t *testing.T) {
-	t.Run("nil value leaves settings unchanged", func(t *testing.T) {
-		settings := &models.UserSettings{
-			VoiceMode: models.VoiceModeSettings{Engine: "webSpeech", Language: "en-US"},
-		}
-		if err := applyVoiceMode(settings, nil); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if settings.VoiceMode.Engine != "webSpeech" || settings.VoiceMode.Language != "en-US" {
-			t.Fatalf("expected unchanged, got %+v", settings.VoiceMode)
-		}
-	})
-
-	t.Run("happy path: applies a full update", func(t *testing.T) {
-		settings := &models.UserSettings{}
-		err := applyVoiceMode(settings, &models.VoiceModeSettings{
-			Enabled:         true,
-			Engine:          "whisperWeb",
-			Language:        "pt-PT",
-			Mode:            "hold",
-			AutoSend:        true,
-			WhisperWebModel: "small",
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		want := models.VoiceModeSettings{
-			Enabled:         true,
-			Engine:          "whisperWeb",
-			Language:        "pt-PT",
-			Mode:            "hold",
-			AutoSend:        true,
-			WhisperWebModel: "small",
-		}
-		if settings.VoiceMode != want {
-			t.Fatalf("expected %+v, got %+v", want, settings.VoiceMode)
-		}
-	})
-
-	t.Run("enabled=false is honored (user disabled the feature)", func(t *testing.T) {
-		settings := &models.UserSettings{VoiceMode: models.VoiceModeSettings{Enabled: true}}
-		if err := applyVoiceMode(settings, &models.VoiceModeSettings{Enabled: false}); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if settings.VoiceMode.Enabled {
-			t.Fatalf("expected Enabled=false after disable, got true")
-		}
-	})
-
-	t.Run("invalid engine is rejected", func(t *testing.T) {
-		err := applyVoiceMode(&models.UserSettings{}, &models.VoiceModeSettings{Engine: "bogus"})
-		if err == nil || !strings.Contains(err.Error(), "voice_mode.engine") {
-			t.Fatalf("expected engine validation error, got %v", err)
-		}
-	})
-
-	t.Run("invalid mode is rejected", func(t *testing.T) {
-		err := applyVoiceMode(&models.UserSettings{}, &models.VoiceModeSettings{Mode: "tap"})
-		if err == nil || !strings.Contains(err.Error(), "voice_mode.mode") {
-			t.Fatalf("expected mode validation error, got %v", err)
-		}
-	})
-
-	t.Run("invalid whisper_web_model is rejected", func(t *testing.T) {
-		err := applyVoiceMode(&models.UserSettings{}, &models.VoiceModeSettings{WhisperWebModel: "huge"})
-		if err == nil || !strings.Contains(err.Error(), "voice_mode.whisper_web_model") {
-			t.Fatalf("expected model validation error, got %v", err)
-		}
-	})
-
-	t.Run("partial update preserves string fields but zeroes booleans", func(t *testing.T) {
-		settings := &models.UserSettings{
-			VoiceMode: models.VoiceModeSettings{
-				Enabled:         true,
-				Engine:          "whisperServer",
-				Language:        "en-GB",
-				Mode:            "toggle",
-				AutoSend:        true,
-				WhisperWebModel: "tiny",
-			},
-		}
-		// Empty strings on the new payload mean "no change" for the string fields,
-		// but bools have no "unset" sentinel — every PATCH carries them. The settings
-		// UI always sends the full VoiceMode object so partial updates here would
-		// only happen in test or hand-crafted requests; the assertions below lock in
-		// that explicit behavior so it doesn't drift silently.
-		err := applyVoiceMode(settings, &models.VoiceModeSettings{Engine: "webSpeech"})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if settings.VoiceMode.Engine != "webSpeech" {
-			t.Fatalf("expected engine=webSpeech, got %q", settings.VoiceMode.Engine)
-		}
-		if settings.VoiceMode.Language != "en-GB" {
-			t.Fatalf("expected language preserved, got %q", settings.VoiceMode.Language)
-		}
-		if settings.VoiceMode.Mode != "toggle" {
-			t.Fatalf("expected mode preserved, got %q", settings.VoiceMode.Mode)
-		}
-		if settings.VoiceMode.WhisperWebModel != "tiny" {
-			t.Fatalf("expected whisper model preserved, got %q", settings.VoiceMode.WhisperWebModel)
-		}
-		if settings.VoiceMode.Enabled {
-			t.Fatalf("expected Enabled zeroed on partial update, got true")
-		}
-		if settings.VoiceMode.AutoSend {
-			t.Fatalf("expected AutoSend zeroed on partial update, got true")
-		}
-	})
 }

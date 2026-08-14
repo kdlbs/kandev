@@ -709,6 +709,10 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 	if s.eventBus == nil {
 		return
 	}
+	queuePromotion := false
+	if task.Metadata != nil {
+		_, queuePromotion = task.Metadata[models.MetaKeyQueuePromotionPending]
+	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
 		"from_workflow_id":          fromWorkflowID,
@@ -720,6 +724,14 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 		"task_description":          task.Description,
 		"parent_id":                 task.ParentID,
 		"assignee_agent_profile_id": task.AssigneeAgentProfileID,
+		"wip_admitted":              task.WIPAdmitted,
+		"queued_for_step_id":        task.QueuedForStepID,
+		"queue_promotion":           queuePromotion,
+	}
+	if task.QueuedAt != nil {
+		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
+	} else {
+		data["queued_at"] = nil
 	}
 	event := bus.NewEvent(events.TaskMoved, "task-service", data)
 	if err := s.eventBus.Publish(ctx, events.TaskMoved, event); err != nil {
@@ -921,6 +933,7 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"provider":               repository.Provider,
 		"provider_repo_id":       repository.ProviderRepoID,
 		"provider_host":          repository.ProviderHost,
+		"provider_scope":         repository.ProviderScope,
 		"provider_owner":         repository.ProviderOwner,
 		"provider_name":          repository.ProviderName,
 		"default_branch":         repository.DefaultBranch,

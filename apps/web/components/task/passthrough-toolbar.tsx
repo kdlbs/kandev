@@ -22,7 +22,9 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
+import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
+import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { PRMergedBanner } from "./chat/pr-archive-banners";
 import { type ChatInputContainerHandle } from "./chat/chat-input-container";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
@@ -181,6 +183,7 @@ export function PassthroughToolbar({
 
       <PassthroughStatusRow
         taskId={taskId}
+        sessionId={sessionId}
         nextStepName={planActions.proceedStepName}
         onProceed={planActions.proceed}
         isMoving={planActions.isMoving}
@@ -492,6 +495,7 @@ function CommentCard({
 
 type StatusRowProps = {
   taskId: string | null;
+  sessionId?: string | null;
   nextStepName: string | null;
   onProceed: () => void;
   isMoving: boolean;
@@ -506,6 +510,7 @@ type StatusRowProps = {
 
 function PassthroughStatusRow({
   taskId,
+  sessionId,
   nextStepName,
   onProceed,
   isMoving,
@@ -521,7 +526,7 @@ function PassthroughStatusRow({
   return (
     <div
       data-testid="passthrough-status-row"
-      className="flex flex-shrink-0 items-center gap-1.5 border-t bg-card px-2 py-1 text-xs text-muted-foreground"
+      className="flex min-w-0 flex-shrink-0 flex-wrap items-center gap-1.5 border-t bg-card px-2 py-1 text-xs text-muted-foreground"
     >
       <ChatToggleButton
         composerOpen={composerOpen}
@@ -534,10 +539,12 @@ function PassthroughStatusRow({
         pendingCommentsCount={pendingCommentsCount}
       />
 
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5">
+        <TaskDependencyChip taskId={taskId} />
         <PRStatusChip taskId={taskId} />
         <MRStatusChip taskId={taskId} />
         <AzureDevOpsTaskPullRequestChip taskId={taskId} />
+        <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
         {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
         {showProceed && nextStepName && (
           <Tooltip>
@@ -546,7 +553,7 @@ function PassthroughStatusRow({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary"
+                className="h-6 shrink-0 gap-1 px-2.5 text-xs cursor-pointer text-primary"
                 onClick={onProceed}
                 disabled={isMoving}
                 data-testid="passthrough-proceed-next-step"

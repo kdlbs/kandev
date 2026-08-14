@@ -22,7 +22,10 @@
  * (get on mount, debounced set, subscribe to pick up a write from another
  * tab/surface), a task-card-indicators slot component, a task-card-tags slot
  * component, and a registerTaskMenuAction under the kanban card's "edit"
- * group.
+ * group. It also registers one composer action on all three composer slots
+ * (chat-input-actions, task-create-input-actions, new-session-input-actions),
+ * which is how the e2e suite exercises PluginComposerCapability against real
+ * native composers rather than a mock.
  *
  * The task-created counter lives in module scope (not component state) with
  * a tiny listener set, so it survives across route navigations (the page
@@ -57,6 +60,44 @@
     return count;
   }
 
+  var PROVIDER_ID = "fixture-source-control";
+  var PULL_REQUEST_URL =
+    "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/42";
+  var REPOSITORY_URL = "https://bitbucket.example.test/scm/TEAM/fixture.git";
+
+  function fixtureRepository() {
+    return {
+      id: "fixture-repository",
+      repositoryId: "fixture-repository",
+      owner: "TEAM",
+      ownerOrProject: "TEAM",
+      name: "fixture",
+      repositoryName: "fixture",
+      fullName: "TEAM/fixture",
+      url: REPOSITORY_URL,
+      cloneUrl: REPOSITORY_URL,
+      providerHost: "bitbucket.example.test",
+      defaultBranch: "main",
+      private: true,
+    };
+  }
+
+  function abortableRefresh(signal) {
+    return new Promise(function (_resolve, reject) {
+      if (signal.aborted) {
+        reject(new Error("fixture review refresh aborted"));
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        function () {
+          reject(new Error("fixture review refresh aborted"));
+        },
+        { once: true },
+      );
+    });
+  }
+
   window.registerKandevPlugin("kandev-plugin-e2e", {
     initialize: function (registry, host) {
       var React = host.React;
@@ -85,12 +126,44 @@
 
       function PluginPage() {
         var count = useCounter(React);
+        var connectionState = React.useState("Not checked");
+        var connection = connectionState[0];
+        var setConnection = connectionState[1];
         var themeState = useHostTheme();
+        function checkConnection() {
+          host.api
+            .invokeAction("connection-status", {
+              workspaceId: host.store.getState().workspaces.activeId || undefined,
+            })
+            .then(function (result) {
+              setConnection(
+                result.connected ? "Connected" : result.error || "Connection unavailable",
+              );
+            })
+            .catch(function (error) {
+              setConnection(error instanceof Error ? error.message : "Connection unavailable");
+            });
+        }
         return jsx(
           "div",
           { id: "hello-plugin-page-root" },
           jsx("h1", { id: "hello-plugin-page" }, "Hello E2E"),
           jsx("span", { id: "hello-task-counter" }, String(count)),
+          jsx(
+            "button",
+            {
+              id: "fixture-connection-status",
+              "data-testid": "fixture-connection-status",
+              type: "button",
+              onClick: checkConnection,
+            },
+            "Check Bitbucket connection",
+          ),
+          jsx(
+            "span",
+            { id: "fixture-connection-result", "data-testid": "fixture-connection-result" },
+            connection,
+          ),
           jsx(
             "span",
             {
@@ -114,6 +187,55 @@
             "toast error",
           ),
         );
+      }
+
+      function FixtureReviewPanel(props) {
+        return jsx(
+          "section",
+          {
+            "data-testid": "fixture-review-panel-" + props.presentation,
+            "data-review-key": props.reviewKey,
+          },
+          jsx(
+            "h2",
+            null,
+            "Bitbucket pull request #" + props.reviewKey.replace("pull-request-", ""),
+          ),
+          jsx("p", null, "Provider-neutral fixture review panel"),
+        );
+      }
+
+      function FixtureReviewSelector() {
+        return jsx("span", { "data-testid": "fixture-review-selector" }, "Bitbucket");
+      }
+
+      function openLinkResult(context) {
+        host.openTaskLinkDialog({
+          title: "Link Bitbucket pull request",
+          description: "Use a Bitbucket pull request URL for this task.",
+          inputLabel: "Pull request",
+          placeholder: PULL_REQUEST_URL,
+          emptyError: "Enter a Bitbucket pull request URL.",
+          failureMessage: "Failed to link Bitbucket pull request.",
+          successMessage: "Bitbucket pull request linked",
+          inputTestId: "fixture-link-pull-request-input",
+          errorTestId: "fixture-link-pull-request-error",
+          submitTestId: "fixture-link-pull-request-submit",
+          onSubmit: function (reference) {
+            return host.api
+              .invokeAction("link-pull-request", {
+                workspaceId: context.workspaceId,
+                taskId: context.taskId,
+                body: { pullRequestUrl: reference },
+              })
+              .then(function (result) {
+                if (!result.linked) {
+                  throw new Error(result.error || "Connection unavailable");
+                }
+              });
+          },
+        });
+        return Promise.resolve();
       }
 
       function SidebarSlot() {
@@ -247,6 +369,125 @@
         );
       }
 
+      // Drives PluginComposerCapability through native composers. Capturing
+      // the capability and using it after later renders mirrors a real voice
+      // integration whose recording completes asynchronously.
+      var COMPOSER_BUTTON_STYLE = {
+        fontSize: "9px",
+        lineHeight: "1",
+        padding: "2px 3px",
+        minWidth: "16px",
+      };
+
+      function ComposerAction(props) {
+        var slotProps = props.slotProps || {};
+        var composer = slotProps.composer;
+        var statusState = React.useState("");
+        var status = statusState[0];
+        var setStatus = statusState[1];
+        var capturedRef = React.useRef(null);
+
+        function record(result) {
+          setStatus(result && result.status ? result.status : String(result));
+        }
+
+        return jsx(
+          "span",
+          {
+            "data-testid": "e2e-composer-action",
+            "data-surface": String(slotProps.surface),
+            "data-presentation": String(slotProps.presentation),
+            "data-task-id": String(slotProps.taskId || ""),
+            "data-session-id": String(slotProps.activeSessionId || ""),
+            "data-disabled": String(Boolean(slotProps.disabled)),
+            "data-submittable": String(Boolean(slotProps.submittable)),
+            "data-status": status,
+          },
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-insert",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                record(composer.insertText("DICTATED"));
+              },
+            },
+            "insert",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-capture",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                capturedRef.current = composer;
+                setStatus("captured");
+              },
+            },
+            "capture",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-insert-captured",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                record(
+                  capturedRef.current
+                    ? capturedRef.current.insertText("DICTATED")
+                    : { status: "not-captured" },
+                );
+              },
+            },
+            "insert captured",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-submit",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                var target = capturedRef.current || composer;
+                target.submit().then(record);
+              },
+            },
+            "submit",
+          ),
+          jsx(
+            "button",
+            {
+              type: "button",
+              "data-testid": "e2e-composer-focus",
+              style: COMPOSER_BUTTON_STYLE,
+              onClick: function () {
+                record(composer.focus());
+              },
+            },
+            "focus",
+          ),
+        );
+      }
+
+      function FixtureBitbucketIcon(props) {
+        return jsx(
+          "svg",
+          {
+            className: props.className,
+            viewBox: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            "aria-hidden": props["aria-hidden"] || true,
+            "data-testid": "fixture-bitbucket-icon",
+          },
+          jsx("path", { d: "M4 5h16l-2.5 14h-11z" }),
+          jsx("path", { d: "M9 9h6l-1 6h-4z" }),
+        );
+      }
+
       registry.registerNavItem({
         id: "e2e-hello",
         label: "Hello E2E",
@@ -262,6 +503,93 @@
         incrementCount();
       });
 
+      registry.registerRepositoryProvider({
+        id: PROVIDER_ID,
+        label: "Bitbucket",
+        icon: FixtureBitbucketIcon,
+        listRepositories: function () {
+          return Promise.resolve([fixtureRepository()]);
+        },
+        matchesURL: function (url) {
+          if (typeof url !== "string") return false;
+          try {
+            return new URL(url).hostname === "bitbucket.example.test";
+          } catch (_error) {
+            return false;
+          }
+        },
+        listBranches: function (_context) {
+          return Promise.resolve([{ name: "main" }, { name: "feature/provider-contract" }]);
+        },
+        inspectURL: function (_context) {
+          return Promise.resolve({
+            providerId: PROVIDER_ID,
+            providerHost: "bitbucket.example.test",
+            ownerOrProject: "TEAM",
+            repositoryId: "fixture-repository",
+            repositoryName: "fixture",
+            cloneUrl: REPOSITORY_URL,
+            defaultBranch: "main",
+            baseBranch: "main",
+            headBranch: "feature/provider-contract",
+            pullRequest: { number: 42, title: "Provider-neutral contract" },
+          });
+        },
+      });
+
+      registry.registerTaskAction({
+        id: "link-bitbucket-pull-request",
+        label: "Bitbucket Pull Request",
+        icon: FixtureBitbucketIcon,
+        placement: "link",
+        group: "Link",
+        run: openLinkResult,
+      });
+
+      registry.registerReviewProvider({
+        id: PROVIDER_ID,
+        label: "Bitbucket",
+        icon: FixtureBitbucketIcon,
+        changeRequestNoun: "Pull Request",
+        order: 50,
+        getSnapshot: function (taskId) {
+          return [
+            {
+              providerId: PROVIDER_ID,
+              reviewKey: "pull-request-42",
+              title: "Bitbucket Pull Request #42",
+              url: PULL_REQUEST_URL,
+              connectionScope: "https://bitbucket.example.test",
+              repositoryId: "fixture-repository",
+              changeRequestNumber: 42,
+              state: "OPEN",
+              statusBadge: { label: "Open" },
+              taskId: taskId,
+            },
+            {
+              providerId: PROVIDER_ID,
+              reviewKey: "pull-request-43",
+              title: "Bitbucket Pull Request #43",
+              url: "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/43",
+              connectionScope: "https://bitbucket.example.test",
+              repositoryId: "fixture-repository",
+              changeRequestNumber: 43,
+              state: "OPEN",
+              statusBadge: { label: "Open" },
+              taskId: taskId,
+            },
+          ];
+        },
+        subscribe: function () {
+          return function () {};
+        },
+        refresh: function (_taskId, signal) {
+          return abortableRefresh(signal);
+        },
+        ReviewPanel: FixtureReviewPanel,
+        Selector: FixtureReviewSelector,
+      });
+
       registry.registerTaskPanel({
         id: "notes",
         title: "Notes",
@@ -269,13 +597,16 @@
         Component: NotesPanel,
         mobileEnabled: true,
       });
+      registry.registerComponent("chat-input-actions", ComposerAction);
+      registry.registerComponent("task-create-input-actions", ComposerAction);
+      registry.registerComponent("new-session-input-actions", ComposerAction);
       registry.registerComponent("task-card-indicators", CardIndicator);
       registry.registerComponent("task-card-tags", CardTags);
       registry.registerTaskMenuAction({
         id: "enhance-notes",
         label: "Enhance notes",
         group: "edit",
-      run: function (context) {
+        run: function (context) {
           return host.storage
             .set("task", context.taskId, "note", "Enhanced via plugin action")
             .then(function () {
@@ -288,7 +619,7 @@
                 context.presentation,
               );
             });
-      },
+        },
       });
 
       registry.registerKeybinding("open-demo", function () {
@@ -305,11 +636,7 @@
             jsx(
               ui.Tooltip,
               null,
-              jsx(
-                ui.TooltipTrigger,
-                { "data-testid": "hello-modal-tooltip-trigger" },
-                "hover me",
-              ),
+              jsx(ui.TooltipTrigger, { "data-testid": "hello-modal-tooltip-trigger" }, "hover me"),
               jsx(ui.TooltipContent, null, "Tooltip inside a plugin modal"),
             ),
           );

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -13,16 +14,20 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -58,6 +63,29 @@ func newTestRouter(t *testing.T) (*gin.Engine, *Service) {
 	return router, svc
 }
 
+func newTestRouterWithIdentity(t *testing.T, identity authn.Identity) (*gin.Engine, *Service) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	svc, _, _ := newTestService(t)
+	svc.SetState(newTestStateStore(t))
+	// A vault is mandatory for plugins with secret config fields (Service
+	// fails closed without one), so wire an in-memory one, matching prod
+	// where Provide always attaches the shared vault.
+	svc.SetSecrets(newFakeSecretRevealer())
+	router := gin.New()
+	router.Use(func(ctx *gin.Context) {
+		authn.SetOnGin(ctx, identity)
+		ctx.Next()
+	})
+	RegisterRoutes(router, svc, nil, testLogger(t))
+	return router, svc
+}
+
+func newAdminTestRouter(t *testing.T) (*gin.Engine, *Service) {
+	t.Helper()
+	return newTestRouterWithIdentity(t, authn.Identity{UserID: "admin-1", Role: authn.RoleAdmin})
+}
+
 func doRequest(router *gin.Engine, method, path string, body string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	for k, v := range headers {
@@ -91,7 +119,7 @@ func doMultipartInstall(t *testing.T, router *gin.Engine, pkg *bytes.Buffer) *ht
 }
 
 func TestInstallHandlerFromURLCreatesActivePlugin(t *testing.T) {
-	router, svc := newTestRouter(t)
+	router, svc := newAdminTestRouter(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(testPackage(t, "kandev-plugin-slack", "1.0.0", false).Bytes())
@@ -119,8 +147,29 @@ func TestInstallHandlerFromURLCreatesActivePlugin(t *testing.T) {
 	}
 }
 
+func TestInstallHandlerRejectsMemberBeforeURLFetch(t *testing.T) {
+	router, _ := newTestRouterWithIdentity(t, authn.Identity{
+		UserID: "member-1",
+		Role:   authn.RoleMember,
+	})
+	var fetched atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetched.Store(true)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	rec := doRequest(router, http.MethodPost, "/api/plugins/install", fmt.Sprintf(`{"url":%q}`, srv.URL), nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if fetched.Load() {
+		t.Fatal("member-controlled install URL reached the network")
+	}
+}
+
 func TestInstallHandlerMultipartUpload(t *testing.T) {
-	router, svc := newTestRouter(t)
+	router, svc := newAdminTestRouter(t)
 
 	rec := doMultipartInstall(t, router, testPackage(t, "kandev-plugin-slack", "1.0.0", false))
 	if rec.Code != http.StatusCreated {
@@ -132,7 +181,7 @@ func TestInstallHandlerMultipartUpload(t *testing.T) {
 }
 
 func TestInstallHandlerMissingURLReturns400(t *testing.T) {
-	router, _ := newTestRouter(t)
+	router, _ := newAdminTestRouter(t)
 	rec := doRequest(router, http.MethodPost, "/api/plugins/install", `{}`, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
@@ -140,7 +189,7 @@ func TestInstallHandlerMissingURLReturns400(t *testing.T) {
 }
 
 func TestInstallHandlerDuplicateVersionReturns409(t *testing.T) {
-	router, _ := newTestRouter(t)
+	router, _ := newAdminTestRouter(t)
 	pkg := testPackage(t, "kandev-plugin-slack", "1.0.0", false)
 	pkgBytes := pkg.Bytes()
 
@@ -387,6 +436,33 @@ runtime:
 	return &buf
 }
 
+func authenticatedWebhookPackage(t *testing.T, id, key string, maxBodyBytes int64) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: "1.0.0"
+display_name: Test Plugin
+webhooks:
+  - key: %s
+    access: authenticated
+    max_body_bytes: %d
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+`, id, key, maxBodyBytes, platformKey)
+	var buf bytes.Buffer
+	if err := pkgtartest.WritePackage(&buf, map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
+}
+
 func TestWebhookHandlerUnknownPluginReturns404(t *testing.T) {
 	router, _ := newTestRouter(t)
 	rec := doRequest(router, http.MethodPost, "/api/plugins/missing/webhooks/key1", "{}", nil)
@@ -420,10 +496,53 @@ func TestWebhookHandlerOversizedBodyReturns413(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	oversized := strings.Repeat("a", maxWebhookBodyBytes+1)
+	oversized := strings.Repeat("a", int(maxWebhookBodyBytes+1))
 	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", oversized, nil)
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuthenticatedWebhookRejectsAnonymousRequest(t *testing.T) {
+	router, svc := newTestRouter(t)
+	if _, err := svc.Install(t.Context(), authenticatedWebhookPackage(t, "kandev-plugin-voice", "transcribe", 16<<20)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-voice/webhooks/transcribe", "audio", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestReadCappedWebhookBodyUsesDeclaredLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader("12345"))
+	_, err := readCappedWebhookBody(ctx, 4)
+	if err == nil || rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("error = %v, status = %d, want size error and 413", err, rec.Code)
+	}
+}
+
+func TestWebhookRelayHeadersStripHostCredentials(t *testing.T) {
+	headers := http.Header{
+		"Authorization": []string{"Bearer kandev-pat"},
+		"Cookie":        []string{"kandev_session=secret"},
+		"Content-Type":  []string{"audio/webm"},
+		"X-Plugin-Key":  []string{"plugin-secret"},
+	}
+
+	got := flattenWebhookHeaders(headers)
+
+	if _, ok := got["Authorization"]; ok {
+		t.Fatal("Authorization header was forwarded to plugin")
+	}
+	if _, ok := got["Cookie"]; ok {
+		t.Fatal("Cookie header was forwarded to plugin")
+	}
+	if got["Content-Type"] != "audio/webm" || got["X-Plugin-Key"] != "plugin-secret" {
+		t.Fatalf("relay-safe headers = %#v", got)
 	}
 }
 
@@ -439,6 +558,433 @@ func TestWebhookHandlerNotRunningReturns503(t *testing.T) {
 	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", "{}", nil)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+type recordingActionInvoker struct {
+	calls      int
+	request    *pluginsdk.PluginActionRequest
+	generation pluginDispatchGeneration
+	response   *pluginsdk.PluginActionResponse
+	err        error
+	invoke     func(context.Context, string, *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error)
+}
+
+func (f *recordingActionInvoker) InvokeAction(
+	ctx context.Context, id string, generation pluginDispatchGeneration, req *pluginsdk.PluginActionRequest,
+) (*pluginsdk.PluginActionResponse, error) {
+	f.calls++
+	f.request = req
+	f.generation = generation
+	if f.invoke != nil {
+		return f.invoke(ctx, id, req)
+	}
+	return f.response, f.err
+}
+
+// actionPackage builds a valid runtime-managed package with one declared,
+// workspace-scoped action. Its small, explicit body cap makes the action
+// relay's cap behavior testable without large test inputs.
+func actionPackage(t *testing.T, id, key, resourceScope string, maxBodyBytes int) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: "1.0.0"
+display_name: Test Plugin
+actions:
+  - key: %s
+    resource_scope: %s
+    max_body_bytes: %d
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+`, id, key, resourceScope, maxBodyBytes, platformKey)
+
+	var buf bytes.Buffer
+	if err := pkgtartest.WritePackage(&buf, map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
+}
+
+func newActionTestRouter(t *testing.T, invoker *recordingActionInvoker) (*gin.Engine, *Service) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	svc, _, _ := newTestService(t)
+	svc.taskData = &fakeTaskDataSource{
+		workspaces: []*taskmodels.Workspace{{ID: "workspace-1"}},
+	}
+	router := gin.New()
+	ctrl := &Controller{svc: svc, log: testLogger(t), actionInvoker: invoker}
+	router.POST("/api/plugins/:id/actions/:key", ctrl.action)
+	return router, svc
+}
+
+func doAuthenticatedActionRequest(router *gin.Engine, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "user-1", Role: authn.RoleMember}))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+// TestActionHandlerDispatchesVerifiedContext proves browser supplied scope
+// selectors are verified by the host and that plugins receive the trusted
+// actor/workspace context, never raw authentication material.
+func TestActionHandlerDispatchesVerifiedContext(t *testing.T) {
+	invoker := &recordingActionInvoker{response: &pluginsdk.PluginActionResponse{Body: []byte(`{"ok":true}`)}}
+	router, svc := newActionTestRouter(t, invoker)
+	if _, err := svc.Install(t.Context(), actionPackage(t, "kandev-plugin-actions", "create-task", "workspace", 128)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	rec := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/create-task",
+		`{"workspaceId":"workspace-1","body":{"title":"Ship it"}}`,
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if invoker.calls != 1 {
+		t.Fatalf("action invocations = %d, want 1", invoker.calls)
+	}
+	if got := invoker.request.Context; got.ActorID != "user-1" || got.WorkspaceID != "workspace-1" || got.TaskID != "" || got.RepositoryID != "" {
+		t.Fatalf("verified action context = %+v, want actor=user-1 workspace=workspace-1", got)
+	}
+	if got := string(invoker.request.Body); got != `{"title":"Ship it"}` {
+		t.Fatalf("action body = %s, want original action body", got)
+	}
+}
+
+func TestActionHandlerRejectsUndeclaredAndUnauthorizedResources(t *testing.T) {
+	invoker := &recordingActionInvoker{response: &pluginsdk.PluginActionResponse{Body: []byte(`{}`)}}
+	router, svc := newActionTestRouter(t, invoker)
+	if _, err := svc.Install(t.Context(), actionPackage(t, "kandev-plugin-actions", "declared", "workspace", 128)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	undeclared := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/undeclared",
+		`{"workspaceId":"workspace-1","body":{}}`,
+	)
+	if undeclared.Code != http.StatusNotFound {
+		t.Fatalf("undeclared status = %d, want 404, body=%s", undeclared.Code, undeclared.Body.String())
+	}
+
+	unauthorized := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/declared",
+		`{"workspaceId":"workspace-not-visible","body":{}}`,
+	)
+	if unauthorized.Code != http.StatusNotFound {
+		t.Fatalf("unauthorized status = %d, want 404, body=%s", unauthorized.Code, unauthorized.Body.String())
+	}
+	if invoker.calls != 0 {
+		t.Fatalf("action invocations = %d, want 0", invoker.calls)
+	}
+
+	unauthenticatedReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/plugins/kandev-plugin-actions/actions/declared",
+		strings.NewReader(`{"workspaceId":"workspace-1","body":{}}`),
+	)
+	unauthenticatedReq.Header.Set("Content-Type", "application/json")
+	unauthenticated := httptest.NewRecorder()
+	router.ServeHTTP(unauthenticated, unauthenticatedReq)
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want 401, body=%s", unauthenticated.Code, unauthenticated.Body.String())
+	}
+}
+
+func TestActionHandlerDerivesTaskWorkspaceAndRejectsMismatch(t *testing.T) {
+	invoker := &recordingActionInvoker{response: &pluginsdk.PluginActionResponse{Body: []byte(`{}`)}}
+	router, svc := newActionTestRouter(t, invoker)
+	svc.taskData = &fakeTaskDataSource{
+		tasksByID: map[string]*taskmodels.Task{
+			"task-1": {ID: "task-1", WorkspaceID: "workspace-1"},
+		},
+	}
+	if _, err := svc.Install(t.Context(), actionPackage(t, "kandev-plugin-actions", "review", "task", 128)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	valid := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/review",
+		`{"taskId":"task-1","body":{}}`,
+	)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("valid task status = %d, want 200, body=%s", valid.Code, valid.Body.String())
+	}
+	if got := invoker.request.Context; got.WorkspaceID != "workspace-1" || got.TaskID != "task-1" {
+		t.Fatalf("verified task context = %+v, want workspace-1/task-1", got)
+	}
+
+	mismatch := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/review",
+		`{"workspaceId":"workspace-not-visible","taskId":"task-1","body":{}}`,
+	)
+	if mismatch.Code != http.StatusBadRequest {
+		t.Fatalf("mismatch status = %d, want 400, body=%s", mismatch.Code, mismatch.Body.String())
+	}
+	if invoker.calls != 1 {
+		t.Fatalf("action invocations = %d, want 1", invoker.calls)
+	}
+}
+
+func TestActionHandlerVerifiesOptionalTaskRepository(t *testing.T) {
+	invoker := &recordingActionInvoker{response: &pluginsdk.PluginActionResponse{Body: []byte(`{}`)}}
+	router, svc := newActionTestRouter(t, invoker)
+	svc.taskData = &fakeTaskDataSource{
+		tasksByID: map[string]*taskmodels.Task{
+			"task-1": {
+				ID:          "task-1",
+				WorkspaceID: "workspace-1",
+				Repositories: []*taskmodels.TaskRepository{
+					{RepositoryID: "repository-1"},
+				},
+			},
+		},
+		sessionsByTask: map[string][]*taskmodels.TaskSession{
+			"task-1": {{
+				ID:     "session-1",
+				TaskID: "task-1",
+				Worktrees: []*taskmodels.TaskEnvironmentRepo{{
+					RepositoryID:   "repository-1",
+					WorktreeBranch: "feature/native-create",
+				}},
+			}},
+		},
+	}
+	if _, err := svc.Install(t.Context(), actionPackage(t, "kandev-plugin-actions", "create-review", "task", 128)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	valid := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/create-review",
+		`{"workspaceId":"workspace-1","taskId":"task-1","sessionId":"session-1","repositoryId":"repository-1","body":{}}`,
+	)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("task repository status = %d, want 200, body=%s", valid.Code, valid.Body.String())
+	}
+	if got := invoker.request.Context; got.WorkspaceID != "workspace-1" || got.TaskID != "task-1" || got.RepositoryID != "repository-1" {
+		t.Fatalf("verified task repository context = %+v", got)
+	}
+	if got := invoker.request.Context.SessionID; got != "session-1" {
+		t.Fatalf("verified session = %q, want session-1", got)
+	}
+	if got := invoker.request.Context.HeadBranch; got != "feature/native-create" {
+		t.Fatalf("verified head branch = %q, want feature/native-create", got)
+	}
+
+	unverifiedSession := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/create-review",
+		`{"workspaceId":"workspace-1","taskId":"task-1","sessionId":"session-not-on-task","repositoryId":"repository-1","body":{}}`,
+	)
+	if unverifiedSession.Code != http.StatusNotFound {
+		t.Fatalf("unverified session status = %d, want 404, body=%s", unverifiedSession.Code, unverifiedSession.Body.String())
+	}
+
+	unattached := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/create-review",
+		`{"workspaceId":"workspace-1","taskId":"task-1","repositoryId":"repository-2","body":{}}`,
+	)
+	if unattached.Code != http.StatusNotFound {
+		t.Fatalf("unattached repository status = %d, want 404, body=%s", unattached.Code, unattached.Body.String())
+	}
+	if invoker.calls != 1 {
+		t.Fatalf("action invocations = %d, want 1", invoker.calls)
+	}
+}
+
+func TestActionHandlerVerifiesRepositoryScope(t *testing.T) {
+	invoker := &recordingActionInvoker{response: &pluginsdk.PluginActionResponse{Body: []byte(`{}`)}}
+	router, svc := newActionTestRouter(t, invoker)
+	svc.taskData = &fakeTaskDataSource{
+		repositories: map[string][]*taskmodels.Repository{
+			"workspace-1": {{ID: "repository-1", WorkspaceID: "workspace-1"}},
+		},
+	}
+	if _, err := svc.Install(t.Context(), actionPackage(t, "kandev-plugin-actions", "browse", "repository", 128)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	valid := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/browse",
+		`{"workspaceId":"workspace-1","repositoryId":"repository-1","body":{}}`,
+	)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("repository status = %d, want 200, body=%s", valid.Code, valid.Body.String())
+	}
+	if got := invoker.request.Context; got.WorkspaceID != "workspace-1" || got.RepositoryID != "repository-1" || got.TaskID != "" {
+		t.Fatalf("verified repository context = %+v, want workspace-1/repository-1", got)
+	}
+
+	missing := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/browse",
+		`{"workspaceId":"workspace-1","repositoryId":"not-visible","body":{}}`,
+	)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing repository status = %d, want 404, body=%s", missing.Code, missing.Body.String())
+	}
+	if invoker.calls != 1 {
+		t.Fatalf("action invocations = %d, want 1", invoker.calls)
+	}
+}
+
+func TestActionHandlerEnforcesBodyResponseAndHeaderLimits(t *testing.T) {
+	invoker := &recordingActionInvoker{response: &pluginsdk.PluginActionResponse{
+		Headers: map[string]string{
+			"Cache-Control": "no-store",
+			"Content-Type":  "text/plain; charset=utf-8",
+			"Set-Cookie":    "session=attacker",
+			"X-Plugin":      "untrusted",
+		},
+		Body: []byte("safe"),
+	}}
+	router, svc := newActionTestRouter(t, invoker)
+	if _, err := svc.Install(t.Context(), actionPackage(t, "kandev-plugin-actions", "declared", "workspace", 16)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	overBody := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/declared",
+		fmt.Sprintf(`{"workspaceId":"workspace-1","body":%q}`, strings.Repeat("x", 17)),
+	)
+	if overBody.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body status = %d, want 413, body=%s", overBody.Code, overBody.Body.String())
+	}
+	if invoker.calls != 0 {
+		t.Fatalf("action invocations after oversized body = %d, want 0", invoker.calls)
+	}
+
+	valid := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/declared",
+		`{"workspaceId":"workspace-1","body":{}}`,
+	)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("safe response status = %d, want 200, body=%s", valid.Code, valid.Body.String())
+	}
+	if got := valid.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want allowed plugin value", got)
+	}
+	if got := valid.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want allowed plugin value", got)
+	}
+	if got := valid.Header().Get("Set-Cookie"); got != "" {
+		t.Fatalf("Set-Cookie = %q, want blocked", got)
+	}
+	if got := valid.Header().Get("X-Plugin"); got != "" {
+		t.Fatalf("X-Plugin = %q, want blocked", got)
+	}
+
+	invoker.response = &pluginsdk.PluginActionResponse{Body: make([]byte, maxPluginActionResponseBytes+1)}
+	overResponse := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/declared",
+		`{"workspaceId":"workspace-1","body":{}}`,
+	)
+	if overResponse.Code != http.StatusBadGateway {
+		t.Fatalf("oversized response status = %d, want 502, body=%s", overResponse.Code, overResponse.Body.String())
+	}
+}
+
+func TestActionHandlerPreservesValidatedDomainStatusAndRetryHeader(t *testing.T) {
+	invoker := &recordingActionInvoker{response: &pluginsdk.PluginActionResponse{
+		Status: http.StatusTooManyRequests,
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+			"ETag":         `"review-42"`,
+			"Retry-After":  "30",
+		},
+		Body: []byte(`{"error":"rate_limited"}`),
+	}}
+	router, svc := newActionTestRouter(t, invoker)
+	if _, err := svc.Install(t.Context(), actionPackage(t, "kandev-plugin-actions", "declared", "workspace", 16)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	response := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/declared",
+		`{"workspaceId":"workspace-1","body":{}}`,
+	)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429, body=%s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Retry-After"); got != "30" {
+		t.Fatalf("Retry-After = %q, want 30", got)
+	}
+	if got := response.Header().Get("ETag"); got != `"review-42"` {
+		t.Fatalf("ETag = %q, want review-42", got)
+	}
+
+	invoker.response.Status = http.StatusContinue
+	invalid := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/declared",
+		`{"workspaceId":"workspace-1","body":{}}`,
+	)
+	if invalid.Code != http.StatusBadGateway {
+		t.Fatalf("invalid plugin status = %d, want 502, body=%s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestActionHandlerTimeoutCancelsPluginCallAndLifecycleRevokesAccess(t *testing.T) {
+	invoker := &recordingActionInvoker{}
+	router, svc := newActionTestRouter(t, invoker)
+	if _, err := svc.Install(t.Context(), actionPackage(t, "kandev-plugin-actions", "declared", "workspace", 128)); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	oldTimeout := pluginActionTimeout
+	pluginActionTimeout = 5 * time.Millisecond
+	t.Cleanup(func() { pluginActionTimeout = oldTimeout })
+	canceled := false
+	invoker.invoke = func(ctx context.Context, _ string, _ *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+		<-ctx.Done()
+		canceled = errors.Is(ctx.Err(), context.DeadlineExceeded)
+		return nil, ctx.Err()
+	}
+	timedOut := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/declared",
+		`{"workspaceId":"workspace-1","body":{}}`,
+	)
+	if timedOut.Code != http.StatusGatewayTimeout || !canceled {
+		t.Fatalf("timeout status/cancellation = %d/%t, want 504/true, body=%s", timedOut.Code, canceled, timedOut.Body.String())
+	}
+
+	if err := svc.Disable("kandev-plugin-actions"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	revoked := doAuthenticatedActionRequest(
+		router,
+		"/api/plugins/kandev-plugin-actions/actions/declared",
+		`{"workspaceId":"workspace-1","body":{}}`,
+	)
+	if revoked.Code != http.StatusServiceUnavailable {
+		t.Fatalf("revoked status = %d, want 503, body=%s", revoked.Code, revoked.Body.String())
+	}
+	if invoker.calls != 1 {
+		t.Fatalf("action invocations = %d, want 1 after revoked request", invoker.calls)
 	}
 }
 

@@ -3,6 +3,7 @@
 import { IconAlertCircle, IconSubtask } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
 import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
 import { TaskTitleHoverCard } from "@/components/task/task-title-hover-card";
 import { useTaskPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
@@ -29,11 +30,11 @@ function ArchivedBadge({ task }: { task: Task }) {
 function PrimaryTaskLine({
   task,
   pendingInput,
-  showPullRequest,
+  showContributions,
 }: {
   task: Task;
   pendingInput: PendingInput;
-  showPullRequest: boolean;
+  showContributions: boolean;
 }) {
   return (
     <>
@@ -48,8 +49,9 @@ function PrimaryTaskLine({
           {task.title}
         </span>
       </TaskTitleHoverCard>
-      {showPullRequest && (
+      {showContributions && (
         <span
+          className="inline-flex items-center gap-1"
           onClick={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -57,6 +59,7 @@ function PrimaryTaskLine({
           <MRTaskIcon taskId={task.id} />
         </span>
       )}
+      <RegisteredChangeRequestTaskIcon taskId={task.id} />
       <ArchivedBadge task={task} />
     </>
   );
@@ -131,7 +134,7 @@ function RichTaskContent({
       style={{ paddingLeft: `${level * 28}px` }}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <PrimaryTaskLine task={task} pendingInput={pendingInput} showPullRequest />
+        <PrimaryTaskLine task={task} pendingInput={pendingInput} showContributions />
       </div>
       <RichMetadataBadges details={details} />
       {details.description && (
@@ -176,7 +179,7 @@ export function TaskListRowPrimaryContent({
       data-testid="tasks-list-row-content"
       style={{ paddingLeft: `${level * 28}px` }}
     >
-      <PrimaryTaskLine task={task} pendingInput={pendingInput} showPullRequest={false} />
+      <PrimaryTaskLine task={task} pendingInput={pendingInput} showContributions={false} />
     </div>
   );
 }

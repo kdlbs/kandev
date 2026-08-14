@@ -214,7 +214,7 @@ func TestDefaultPrepareScripts_NoInlineFeatureBranchCheckout(t *testing.T) {
 }
 
 func TestDefaultPrepareScript_SSHMaterializesPrimaryWorkspace(t *testing.T) {
-	script := DefaultPrepareScript("ssh")
+	script := DefaultPrepareScript(executorTypeSSH)
 	if script == "" {
 		t.Fatal("DefaultPrepareScript(\"ssh\") returned empty")
 	}

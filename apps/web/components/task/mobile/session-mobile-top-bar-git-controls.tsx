@@ -3,18 +3,7 @@
 import { useCallback, useState } from "react";
 import { ChangeRequestPartialStatus } from "@/components/vcs/vcs-dialog-fields";
 import { getChangeRequestFailureFeedback } from "@/components/vcs/change-request-feedback";
-import {
-  IconGitCommit,
-  IconGitPullRequest,
-  IconCloudDownload,
-  IconCloudUpload,
-  IconGitCherryPick,
-  IconGitMerge,
-  IconDots,
-  IconCheck,
-  IconLoader2,
-  IconAlertTriangle,
-} from "@tabler/icons-react";
+import { IconGitCommit, IconGitPullRequest, IconCheck, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -24,16 +13,6 @@ import {
   DialogFooter,
   DialogClose,
 } from "@kandev/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-} from "@kandev/ui/dropdown-menu";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { Checkbox } from "@kandev/ui/checkbox";
@@ -357,155 +336,8 @@ export function PRDialog({
   );
 }
 
-export type GitActionsDropdownProps = {
-  sessionId: string | null | undefined;
-  isGitLoading: boolean;
-  uncommittedCount: number;
-  baseBranch: string | undefined;
-  onCommitClick: () => void;
-  onPRClick: () => void;
-  onPull: () => void;
-  onPush: (force?: boolean) => void;
-  onRebase: () => void;
-  onMerge: () => void;
-};
-
-function PushSubmenu({
-  disabled,
-  onPush,
-}: {
-  disabled: boolean;
-  onPush: (force: boolean) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger className="cursor-pointer gap-3" disabled={disabled}>
-        <IconCloudUpload className="h-4 w-4 text-green-500" />
-        <span className="flex-1">{t("task:push")}</span>
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        <DropdownMenuItem
-          className="cursor-pointer gap-3"
-          onClick={() => onPush(false)}
-          disabled={disabled}
-        >
-          <IconCloudUpload className="h-4 w-4 text-green-500" />
-          <span>{t("task:push")}</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="cursor-pointer gap-3"
-          onClick={() => onPush(true)}
-          disabled={disabled}
-        >
-          <IconAlertTriangle className="h-4 w-4 text-orange-500" />
-          <span>{t("task:forcePush")}</span>
-        </DropdownMenuItem>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  );
-}
-
-function RebaseMergeItems({
-  disabled,
-  baseBranch,
-  onRebase,
-  onMerge,
-}: {
-  disabled: boolean;
-  baseBranch: string | undefined;
-  onRebase: () => void;
-  onMerge: () => void;
-}) {
-  const { t } = useTranslation();
-  // `main` is the default branch name, not copy — it travels through as an
-  // interpolated value so it is never translated.
-  const branch = baseBranch || DEFAULT_BASE_BRANCH;
-  return (
-    <>
-      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onRebase} disabled={disabled}>
-        <IconGitCherryPick className="h-4 w-4 text-orange-500" />
-        <span className="flex-1">{t("task:rebase")}</span>
-        <span className="text-xs text-muted-foreground">{t("task:ontoBranch", { branch })}</span>
-      </DropdownMenuItem>
-      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onMerge} disabled={disabled}>
-        <IconGitMerge className="h-4 w-4 text-purple-500" />
-        <span className="flex-1">{t("task:merge")}</span>
-        <span className="text-xs text-muted-foreground">{t("task:fromBranch", { branch })}</span>
-      </DropdownMenuItem>
-    </>
-  );
-}
-
-export function GitActionsDropdown({
-  sessionId,
-  isGitLoading,
-  uncommittedCount,
-  baseBranch,
-  onCommitClick,
-  onPRClick,
-  onPull,
-  onPush,
-  onRebase,
-  onMerge,
-}: GitActionsDropdownProps) {
-  const { t } = useTranslation();
-  const disabled = isGitLoading || !sessionId;
-  const terminology = useChangeRequestTerminology(sessionId);
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          className="h-11 w-11 cursor-pointer"
-          aria-label={t("task:gitActions")}
-          data-testid="mobile-git-actions"
-        >
-          {isGitLoading ? (
-            <IconLoader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <IconDots className="h-4 w-4" />
-          )}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuItem
-          className="cursor-pointer gap-3"
-          onClick={onCommitClick}
-          disabled={disabled}
-        >
-          <IconGitCommit className={`h-4 w-4 ${uncommittedCount > 0 ? "text-amber-500" : ""}`} />
-          <span className="flex-1">{t("task:commit")}</span>
-          {uncommittedCount > 0 && (
-            <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-xs font-medium text-amber-600">
-              {uncommittedCount}
-            </span>
-          )}
-        </DropdownMenuItem>
-        <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPRClick} disabled={disabled}>
-          <IconGitPullRequest className="h-4 w-4 text-cyan-500" />
-          <span className="flex-1">
-            {t("task:createChangeRequest", { shortName: terminology.shortName })}
-          </span>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPull} disabled={disabled}>
-          <IconCloudDownload className="h-4 w-4 text-blue-500" />
-          <span className="flex-1">{t("task:pull")}</span>
-        </DropdownMenuItem>
-        <PushSubmenu disabled={disabled} onPush={onPush} />
-        <DropdownMenuSeparator />
-        <RebaseMergeItems
-          disabled={disabled}
-          baseBranch={baseBranch}
-          onRebase={onRebase}
-          onMerge={onMerge}
-        />
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
+export { GitActionsDropdown } from "./mobile-git-actions-dropdown";
+export type { GitActionsDropdownProps } from "./mobile-git-actions-dropdown";
 
 /** The success toast for a created change request. Extracted to keep
  *  `useMobileGitActions` under the function-length cap. */

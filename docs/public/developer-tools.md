@@ -116,37 +116,34 @@ A saved prompt is an instruction, not an authorization or policy boundary. Execu
 <details>
 <summary>Voice details</summary>
 
-Open **Settings > Task Behavior** (`/settings/preferences/task-behavior`) and expand the Voice Mode
-section. Voice Mode inserts a transcript at the cursor in the active chat composer.
+Voice Mode is no longer built into Kandev. It ships as the
+[Voice Mode plugin](https://github.com/kdlbs/kandev-plugin-voice), installed like any other plugin
+from **Settings > Plugins**. Nothing in a Kandev install downloads a speech model, records audio, or
+holds a transcription key until you install it.
 
-Defaults are:
+Once installed, a microphone button appears beside the existing controls in task chat, Quick Chat,
+task creation and new-session creation, on desktop and on a phone. Dictating inserts the transcript
+at your cursor; Kandev's own composer still owns the draft and the send.
 
-| Setting           | Default                   |
-| ----------------- | ------------------------- |
-| Enabled           | On                        |
-| Engine            | Automatic                 |
-| Language          | Auto-detect               |
-| Activation        | Click to toggle           |
-| Auto-send         | Off                       |
-| Whisper Web model | Base, approximately 75 MB |
-| Shortcut          | `Cmd/Ctrl+Shift+M`        |
+The plugin offers three engines, chosen per user under **Settings > Plugins > Voice Mode**:
 
-The shortcut is also configurable under **Settings > General > Keyboard Shortcuts**. Hold-to-talk applies on a fine-pointer device. On touch/coarse-pointer devices, Kandev uses toggle behavior while preserving the stored preference. With auto-send enabled, a successful transcript is sent as soon as it is inserted.
+| Engine | Where recognition happens | Requirements and data flow |
+| --- | --- | --- |
+| **Browser speech** | The browser's own recognizer | No audio reaches your Kandev server. Chromium only, and the browser vendor's own handling applies. |
+| **In-browser Whisper** | On the device | Downloads and caches an ONNX model from Hugging Face (about 40 MB, 75 MB or 240 MB), then runs locally in a worker. No audio leaves the device. |
+| **Server transcription** | Your Kandev server, relaying to OpenAI | Requires an operator to save an OpenAI key in the plugin's settings. The key stays on the server; the request requires a signed-in Kandev user. |
 
-### Choose an engine
+`Automatic` picks the first engine the browser can run, in that order. Engine choice is capability
+selection, not runtime failover: once recognition starts, an error does not retry through the next
+engine.
 
-| Engine             | Where recognition happens       | Requirements and data flow                                                                                                                                                                       |
-| ------------------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Automatic**      | First available engine          | Selects the first currently available capability in this order: Web Speech, Whisper Web, then Whisper Server. A pinned engine that is unavailable is resolved through the same capability order. |
-| **Web Speech**     | Browser-provided implementation | No audio is sent to the Kandev backend. Browser/vendor behavior and privacy policy still apply, and some implementations require a network service.                                              |
-| **Whisper Web**    | In the browser                  | Downloads and caches an ONNX model from Hugging Face, then runs local inference in a worker. Tiny is about 40 MB, Base about 75 MB, and Small about 240 MB.                                      |
-| **Whisper Server** | Kandev backend and OpenAI       | The browser uploads audio to Kandev; Kandev sends it to OpenAI's `whisper-1` transcription API. Configure `KANDEV_VOICE_OPENAI_API_KEY` on the backend.                                          |
+Microphone capture requires browser permission and normally HTTPS or localhost. If recording fails,
+check site permission, input device, secure context, model download and cache, and network access.
+Switching task or session cancels an in-flight recording and discards its transcript.
 
-Whisper Server accepts at most 10 MiB per request and has a 60-second backend timeout. It returns an unavailable error when the key is not configured, a payload-too-large error above the limit, and an upstream error when transcription fails. Automatic selection can choose this unconfigured server when both browser capabilities are unavailable.
-
-Engine choice is capability selection, not runtime failover. Once recognition or transcription starts, an error does not retry the request through the next engine. The backend `/api/v1/transcribe` route has no Kandev authentication and spends the configured OpenAI key; protect the whole backend origin and do not publish that endpoint directly.
-
-Microphone capture requires browser permission and normally HTTPS or localhost. Whisper Web also needs `getUserMedia`, `MediaRecorder`, workers, enough browser storage, and a first-use network download. The UI mentions common Chrome, Edge, and Safari versions, but Kandev does not enforce a browser/version allow-list; runtime availability is determined from the required APIs. If recording fails, check site permission, input device, secure context, model download/cache, browser support, and network access. The composer must remain enabled; switching tasks or disabling the input cancels recording.
+Kandev no longer reads `KANDEV_VOICE_OPENAI_API_KEY` and no longer serves `/api/v1/transcribe`. An
+operator upgrading from an older release re-enters the key in the plugin's settings, and each user
+re-picks their engine and language: preferences are not carried over.
 
 </details>
 
@@ -161,7 +158,7 @@ For an idle, non-archived repository-backed task, **Files → Workspace actions 
 
 The task **Files** panel browses, searches, opens, and edits task-worktree files. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
 
-Open the context menu on any file or folder in the Files tree — right-click on desktop, long-press on touch — for **Open in \<editor\>**, which launches your default editor at that path instead of at the worktree root. When more than one editor is configured, **Open in other editor** lists the rest. When the tree is rooted above the worktrees — a multi-worktree task, or any task that has had sources attached — Kandev resolves the clicked path back to its own worktree, so no picker is needed. The action is hidden for entries that belong to no worktree, such as an attached plain folder, because the editor launch is resolved against a worktree. It is also hidden while several files are selected, because it applies to a single path.
+Open the context menu on any file or folder in the Files tree: right-click on desktop or long-press on touch to see **Open in \<editor\>**, which launches your default editor at that path instead of at the worktree root. When more than one editor is configured, **Open in other editor** lists the rest. When the tree is rooted above the worktrees (a multi-worktree task or any task that has had sources attached), Kandev resolves the clicked path back to its own worktree, so no picker is needed. The action is hidden for entries that belong to no worktree, such as an attached plain folder, because the editor launch is resolved against a worktree. It is also hidden while several files are selected, because it applies to a single path.
 
 **VS Code (Embedded)** runs code-server inside the active task environment and displays it in a workbench panel. Opening it starts code-server independently of the agent process. It launches with `--auth none` and binds `0.0.0.0` on a random port inside that runtime; network/firewall isolation is therefore important, especially for Local and SSH environments. If the binary is absent, agentctl attempts to download it into `~/.kandev/tools/code-server`; first use needs a supported execution platform and access to the [code-server release](https://github.com/coder/code-server/releases/tag/v4.130.0). Native Windows Local and Worktree sessions do not support this integration. Linux-backed Local Docker, Sprites, and supported SSH sessions can offer it even when the Kandev app runs on Windows. The task-detail topbar follows the active session's executor capability, never the visitor's browser platform; other configured editors remain available. Use the panel error and task-environment logs when installation, startup, or proxying fails.
 
@@ -195,7 +192,7 @@ Language-server settings are part of **Settings > General > Editors**. Kandev cu
 - Python;
 - Kotlin through the official `kotlin-lsp`. Kotlin support is experimental because the upstream server is still alpha.
 
-Auto-start and auto-install are off for every language by default. Enable only the languages used by the workspace, then save settings. Each language card keeps its installation command, prerequisites, and managed destination visible next to the auto-install setting, including for touch and keyboard users. Open the language-server control to inspect its status and use the explicit **Start**, **Stop**, or **Retry** action. Browser-local storage remembers manual enablement for that session and language. If you stop an auto-started server, it stays off for that session and language in the current browser tab—even if a matching editor reopens—until you explicitly start it again or reload the page. Kandev disconnects an unused server connection after two minutes.
+Auto-start and auto-install are off for every language by default. Enable only the languages used by the workspace, then save settings. Each language card keeps its installation command, prerequisites, and managed destination visible next to the auto-install setting, including for touch and keyboard users. Open the language-server control to inspect its status and use the explicit **Start**, **Stop**, or **Retry** action. Browser-local storage remembers manual enablement for that session and language. If you stop an auto-started server, it stays off for that session and language in the current browser tab, even if a matching editor reopens, until you explicitly start it again or reload the page. Kandev disconnects an unused server connection after two minutes.
 
 **Status location** defaults to the active file's editor toolbar. On a fine-pointer desktop with **Show status bar** enabled under **Settings > Preferences > Appearance > Status Bar**, you can instead place it in that bar; the item follows the active supported file and is absent on unsupported files and non-file panels. Turning the status surface off moves the item back to the editor toolbar without overwriting its saved location. A touch-oriented tablet also keeps the saved preference but uses the 44 px editor-toolbar control and bottom drawer. The phone file viewer has no LSP control.
 

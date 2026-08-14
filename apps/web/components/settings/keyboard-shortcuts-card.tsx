@@ -35,7 +35,7 @@ type ShortcutRecorderProps = {
   current: KeyboardShortcut;
   onChange: (id: string, shortcut: KeyboardShortcut) => void;
   onReset: (id: string) => void;
-  // Optional: callers that don't support an explicit "unbind" (e.g. the voice
+  // Optional: callers that don't support an explicit "unbind" (e.g. a single-row
   // settings recorder) omit this, and the Clear button is hidden for them.
   onClear?: (id: string) => void;
   isDirty?: boolean;
@@ -231,6 +231,21 @@ function buildConflictLabels(groups: ShortcutConflictGroup[]): Map<string, strin
 
 const CONFIGURABLE_SHORTCUT_IDS = Object.keys(CONFIGURABLE_SHORTCUTS) as ConfigurableShortcutId[];
 
+function useShortcutConflictLabels(
+  pluginEntries: ShortcutEntry[],
+  overrides: StoredShortcutOverrides,
+  translate: NonNullable<Parameters<typeof coreShortcutEntries>[0]>,
+) {
+  return useMemo(() => {
+    const allEntries = [...coreShortcutEntries(translate), ...pluginEntries];
+    const resolved = allEntries.map((entry) => ({
+      entry,
+      shortcut: resolveShortcutEntry(entry, overrides),
+    }));
+    return buildConflictLabels(findShortcutConflicts(resolved, isMac()));
+  }, [pluginEntries, overrides, translate]);
+}
+
 export function KeyboardShortcutsCard({
   overrides,
   baselineOverrides = {},
@@ -247,15 +262,7 @@ export function KeyboardShortcutsCard({
   const shortcuts = resolveAllShortcuts(overrides);
   const baselineShortcuts = resolveAllShortcuts(baselineOverrides);
 
-  const allEntries = useMemo(() => [...coreShortcutEntries(), ...pluginEntries], [pluginEntries]);
-
-  const conflictLabels = useMemo(() => {
-    const resolved = allEntries.map((entry) => ({
-      entry,
-      shortcut: resolveShortcutEntry(entry, overrides),
-    }));
-    return buildConflictLabels(findShortcutConflicts(resolved, isMac()));
-  }, [allEntries, overrides]);
+  const conflictLabels = useShortcutConflictLabels(pluginEntries, overrides, t);
 
   const handleChange = useCallback(
     (id: string, shortcut: KeyboardShortcut) => {
@@ -294,7 +301,7 @@ export function KeyboardShortcutsCard({
             <ShortcutRecorder
               key={id}
               shortcutId={id}
-              label={CONFIGURABLE_SHORTCUTS[id].label}
+              label={t(CONFIGURABLE_SHORTCUTS[id].labelKey)}
               defaultShortcut={CONFIGURABLE_SHORTCUTS[id].default}
               current={shortcuts[id]}
               onChange={handleChange}

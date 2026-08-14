@@ -253,21 +253,68 @@ jobs:
             apps/backend/test-results-${{ matrix.shard }}.json
           retention-days: 30
 
+  test_ambient_env:
+    name: Backend (ambient integration env)
+    runs-on: ubuntu-latest
+    # test_shards runs in the same clean container and never sets these vars,
+    # so it cannot catch a package that starts reading them again — the class
+    # of bug that shipped alongside internal/gitlab's host-trust tests (they
+    # only passed because CI never set KANDEV_GITLAB_HOST/GITLAB_HOST/
+    # GITLAB_TOKEN). This job poisons them with obviously-fake .invalid-TLD
+    # values so both GitLab-facing packages are forced to prove they stay
+    # hermetic instead of accidentally depending on an unset ambient env.
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Mark workspace safe for git
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ambient-env-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          restore-keys: |
+            go-ambient-env-${{ runner.os }}-
+            go-${{ runner.os }}-
+
+      - name: Run GitLab-facing packages under a poisoned host environment
+        env:
+          KANDEV_GITLAB_HOST: https://gitlab.ambient-ci.invalid
+          GITLAB_HOST: https://gitlab.ambient-ci.invalid
+          GITLAB_TOKEN: glpat-ambient-ci-not-a-real-token
+        run: go test -race ./internal/gitlab/... ./internal/agentctl/server/process/...
+
   test:
     name: Run Backend Tests
     runs-on: ubuntu-latest
-    needs: [static_checks, test_shards]
+    needs: [static_checks, test_shards, test_ambient_env]
     if: ${{ always() }}
     steps:
       - name: Require backend checks to pass
         env:
           STATIC_CHECKS_RESULT: ${{ needs.static_checks.result }}
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
+          TEST_AMBIENT_ENV_RESULT: ${{ needs.test_ambient_env.result }}
         run: |
           set -euo pipefail
-          if [[ "${STATIC_CHECKS_RESULT}" != "success" || "${TEST_SHARDS_RESULT}" != "success" ]]; then
+          if [[ "${STATIC_CHECKS_RESULT}" != "success" || "${TEST_SHARDS_RESULT}" != "success" || "${TEST_AMBIENT_ENV_RESULT}" != "success" ]]; then
             echo "Static checks: ${STATIC_CHECKS_RESULT}"
             echo "Test shards: ${TEST_SHARDS_RESULT}"
+            echo "Ambient env tests: ${TEST_AMBIENT_ENV_RESULT}"
             exit 1
           fi
 

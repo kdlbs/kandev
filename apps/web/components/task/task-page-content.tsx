@@ -260,6 +260,12 @@ function useTaskPageData(
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const setActiveSessionAuto = useAppStore((state) => state.setActiveSessionAuto);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
+  const previousRouteTaskId = useRef<string | null | undefined>(undefined);
+  // Route synchronization must see the current selection when route data or
+  // delayed session hydration changes, but a sidebar selection must not
+  // retrigger it and overwrite the session chosen by task selection.
+  const activeTaskIdForSyncRef = useRef(activeTaskId);
+  activeTaskIdForSyncRef.current = activeTaskId;
 
   // Validate that activeSessionId belongs to activeTaskId to prevent showing
   // messages from an unrelated session when navigating to a task without sessions.
@@ -273,18 +279,25 @@ function useTaskPageData(
   const { task, taskLoadError, onTaskUnarchived } = useTaskDetails(activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
-  const ensureSession = useEnsureTaskSession(task);
+  const ensureSession = useEnsureTaskSession({
+    id: task?.id,
+    workflowStepId: task?.workflow_step_id,
+    workflowId: task?.workflow_id,
+  });
   const initialSessionId = sessionId ?? agent.taskSessionId ?? null;
   const effectiveSessionId = validatedActiveSessionId ?? initialSessionId;
 
   useEffect(() => {
-    syncActiveTaskSession({
+    const applied = syncActiveTaskSession({
       initialTaskId: initialTask?.id,
       fallbackTaskId,
       initialSessionId,
+      activeTaskId: activeTaskIdForSyncRef.current,
+      previousRouteTaskId: previousRouteTaskId.current,
       setActiveSessionAuto,
       setActiveTask,
     });
+    if (applied) previousRouteTaskId.current = initialTask?.id ?? fallbackTaskId;
   }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSessionAuto, setActiveTask]);
 
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));

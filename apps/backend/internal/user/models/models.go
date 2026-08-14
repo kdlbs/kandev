@@ -12,6 +12,9 @@ const (
 	LspStatusLocationStatusBar                 = "status_bar"
 )
 
+// NormalizeMCPTaskAgentProfileDefault returns the canonical MCP task agent
+// profile default: workspace_default is accepted as-is, anything else is
+// coerced to current_task.
 func NormalizeMCPTaskAgentProfileDefault(value string) string {
 	if value == MCPTaskAgentProfileDefaultWorkspaceDefault {
 		return value
@@ -19,6 +22,8 @@ func NormalizeMCPTaskAgentProfileDefault(value string) string {
 	return MCPTaskAgentProfileDefaultCurrentTask
 }
 
+// NormalizeLspStatusLocation returns the canonical LSP status location:
+// status_bar is accepted as-is, anything else is coerced to toolbar.
 func NormalizeLspStatusLocation(value string) string {
 	if value == LspStatusLocationStatusBar {
 		return value
@@ -31,6 +36,8 @@ const (
 	StartupPageLastTask     = "last_task"
 )
 
+// NormalizeStartupPage returns the canonical startup page: last_task is
+// accepted as-is, anything else is coerced to task_overview.
 func NormalizeStartupPage(value string) string {
 	if value == StartupPageLastTask {
 		return value
@@ -64,64 +71,65 @@ type User struct {
 }
 
 type UserSettings struct {
-	UserID                          string                            `json:"user_id"`
-	WorkspaceID                     string                            `json:"workspace_id"`
-	KanbanViewMode                  string                            `json:"kanban_view_mode"`
-	StartupPage                     string                            `json:"startup_page"`
-	WorkflowFilterID                string                            `json:"workflow_filter_id"`
-	RepositoryIDs                   []string                          `json:"repository_ids"`
-	TasksListSort                   string                            `json:"tasks_list_sort"`
-	TasksListGroup                  string                            `json:"tasks_list_group"`
-	TasksListShowDetails            bool                              `json:"tasks_list_show_details"`
-	InitialSetupComplete            bool                              `json:"initial_setup_complete"`
-	PreferredShell                  string                            `json:"preferred_shell"`
-	DefaultEditorID                 string                            `json:"default_editor_id"`
-	EnablePreviewOnClick            bool                              `json:"enable_preview_on_click"`
-	ChatSubmitKey                   string                            `json:"chat_submit_key"` // "enter" | "cmd_enter"
-	ReviewAutoMarkOnScroll          bool                              `json:"review_auto_mark_on_scroll"`
-	ConfirmTaskArchive              bool                              `json:"confirm_task_archive"`
-	UnreadDivider                   bool                              `json:"unread_divider"`
-	AgentGeneratedTaskTitles        bool                              `json:"agent_generated_task_titles"`
-	MCPTaskAgentProfileDefault      string                            `json:"mcp_task_agent_profile_default"`
-	ShowAnchoredPromptBar           bool                              `json:"show_anchored_prompt_bar"` // desktop-only sticky last-prompt bar
-	ShowScrollToLastPrompt          bool                              `json:"show_scroll_to_last_prompt"`
-	ShowScrollToStart               bool                              `json:"show_scroll_to_start"`
-	ShowTranscriptAutoScrollControl bool                              `json:"show_transcript_auto_scroll_control"`
-	ShowTodoListPanel               bool                              `json:"show_todo_list_panel"`
-	ShowReleaseNotification         bool                              `json:"show_release_notification"`
-	ReleaseNotesLastSeenVersion     string                            `json:"release_notes_last_seen_version"`
-	LspAutoStartLanguages           []string                          `json:"lsp_auto_start_languages"`
-	LspAutoInstallLanguages         []string                          `json:"lsp_auto_install_languages"`
-	LspServerConfigs                map[string]map[string]interface{} `json:"lsp_server_configs"`
-	LspStatusLocation               string                            `json:"lsp_status_location"`
-	SavedLayouts                    []SavedLayout                     `json:"saved_layouts"`
-	SidebarViews                    []SidebarView                     `json:"sidebar_views"`
-	SidebarActiveViewID             string                            `json:"sidebar_active_view_id"`
-	SidebarDraft                    *SidebarViewDraft                 `json:"sidebar_draft"`
-	SidebarTaskPrefs                SidebarTaskPrefs                  `json:"sidebar_task_prefs"`
-	TaskCreateLastUsed              TaskCreateLastUsed                `json:"task_create_last_used"`
-	JiraSavedViews                  json.RawMessage                   `json:"jira_saved_views"`
-	JiraTaskPresets                 json.RawMessage                   `json:"jira_task_presets"`
-	GitHubSavedPresets              json.RawMessage                   `json:"github_saved_presets"`
-	GitHubDefaultQueryPresets       json.RawMessage                   `json:"github_default_query_presets"`
-	GitLabSavedPresets              json.RawMessage                   `json:"gitlab_saved_presets"`
-	AzureDevOpsBrowsePreferences    json.RawMessage                   `json:"azure_devops_browse_preferences"`
-	DefaultUtilityAgentID           string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
-	DefaultUtilityModel             string                            `json:"default_utility_model"`    // Default model for utility agents
-	DefaultUtilityAgentProfileID    string                            `json:"default_utility_agent_profile_id"`
-	KeyboardShortcuts               map[string]interface{}            `json:"keyboard_shortcuts"`     // User-configured keyboard shortcut overrides
-	TerminalLinkBehavior            string                            `json:"terminal_link_behavior"` // "new_tab" | "browser_panel"
-	TerminalFontFamily              string                            `json:"terminal_font_family"`
-	TerminalFontSize                int                               `json:"terminal_font_size"`
-	ChangesPanelLayout              string                            `json:"changes_panel_layout"` // "flat" | "tree"
-	SystemMetricsDisplay            SystemMetricsDisplaySettings      `json:"system_metrics_display"`
-	AppStatusBarEnabled             bool                              `json:"app_status_bar_enabled"`
-	AppStatusBarOrder               AppStatusBarOrder                 `json:"app_status_bar_order"`
-	VoiceMode                       VoiceModeSettings                 `json:"voice_mode"`
-	KanbanHiddenStepIDs             map[string][]string               `json:"kanban_hidden_step_ids"`
-	Revision                        int64                             `json:"revision"`
-	CreatedAt                       time.Time                         `json:"created_at"`
-	UpdatedAt                       time.Time                         `json:"updated_at"`
+	UserID                            string                            `json:"user_id"`
+	WorkspaceID                       string                            `json:"workspace_id"`
+	KanbanViewMode                    string                            `json:"kanban_view_mode"`
+	StartupPage                       string                            `json:"startup_page"`
+	WorkflowFilterID                  string                            `json:"workflow_filter_id"`
+	RepositoryIDs                     []string                          `json:"repository_ids"`
+	TasksListSort                     string                            `json:"tasks_list_sort"`
+	TasksListGroup                    string                            `json:"tasks_list_group"`
+	TasksListShowDetails              bool                              `json:"tasks_list_show_details"`
+	InitialSetupComplete              bool                              `json:"initial_setup_complete"`
+	PreferredShell                    string                            `json:"preferred_shell"`
+	DefaultEditorID                   string                            `json:"default_editor_id"`
+	EnablePreviewOnClick              bool                              `json:"enable_preview_on_click"`
+	ChatSubmitKey                     string                            `json:"chat_submit_key"` // "enter" | "cmd_enter"
+	ReviewAutoMarkOnScroll            bool                              `json:"review_auto_mark_on_scroll"`
+	ConfirmTaskArchive                bool                              `json:"confirm_task_archive"`
+	PreventAutoStartAgentOnOpen       bool                              `json:"prevent_auto_start_agent_on_open"`
+	UnreadDivider                     bool                              `json:"unread_divider"`
+	AgentGeneratedTaskTitles          bool                              `json:"agent_generated_task_titles"`
+	MCPTaskAgentProfileDefault        string                            `json:"mcp_task_agent_profile_default"`
+	ShowAnchoredPromptBar             bool                              `json:"show_anchored_prompt_bar"` // desktop-only sticky last-prompt bar
+	ShowScrollToLastPrompt            bool                              `json:"show_scroll_to_last_prompt"`
+	ShowScrollToStart                 bool                              `json:"show_scroll_to_start"`
+	ShowTranscriptAutoScrollControl   bool                              `json:"show_transcript_auto_scroll_control"`
+	ShowTodoListPanel                 bool                              `json:"show_todo_list_panel"`
+	ShowTodoListPanelOnlyWhenNotEmpty bool                              `json:"show_todo_list_panel_only_when_not_empty"`
+	ShowReleaseNotification           bool                              `json:"show_release_notification"`
+	ReleaseNotesLastSeenVersion       string                            `json:"release_notes_last_seen_version"`
+	LspAutoStartLanguages             []string                          `json:"lsp_auto_start_languages"`
+	LspAutoInstallLanguages           []string                          `json:"lsp_auto_install_languages"`
+	LspServerConfigs                  map[string]map[string]interface{} `json:"lsp_server_configs"`
+	LspStatusLocation                 string                            `json:"lsp_status_location"`
+	SavedLayouts                      []SavedLayout                     `json:"saved_layouts"`
+	SidebarViews                      []SidebarView                     `json:"sidebar_views"`
+	SidebarActiveViewID               string                            `json:"sidebar_active_view_id"`
+	SidebarDraft                      *SidebarViewDraft                 `json:"sidebar_draft"`
+	SidebarTaskPrefs                  SidebarTaskPrefs                  `json:"sidebar_task_prefs"`
+	TaskCreateLastUsed                TaskCreateLastUsed                `json:"task_create_last_used"`
+	JiraSavedViews                    json.RawMessage                   `json:"jira_saved_views"`
+	JiraTaskPresets                   json.RawMessage                   `json:"jira_task_presets"`
+	GitHubSavedPresets                json.RawMessage                   `json:"github_saved_presets"`
+	GitHubDefaultQueryPresets         json.RawMessage                   `json:"github_default_query_presets"`
+	GitLabSavedPresets                json.RawMessage                   `json:"gitlab_saved_presets"`
+	AzureDevOpsBrowsePreferences      json.RawMessage                   `json:"azure_devops_browse_preferences"`
+	DefaultUtilityAgentID             string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
+	DefaultUtilityModel               string                            `json:"default_utility_model"`    // Default model for utility agents
+	DefaultUtilityAgentProfileID      string                            `json:"default_utility_agent_profile_id"`
+	KeyboardShortcuts                 map[string]interface{}            `json:"keyboard_shortcuts"`     // User-configured keyboard shortcut overrides
+	TerminalLinkBehavior              string                            `json:"terminal_link_behavior"` // "new_tab" | "browser_panel"
+	TerminalFontFamily                string                            `json:"terminal_font_family"`
+	TerminalFontSize                  int                               `json:"terminal_font_size"`
+	ChangesPanelLayout                string                            `json:"changes_panel_layout"` // "flat" | "tree"
+	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
+	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
+	AppStatusBarOrder                 AppStatusBarOrder                 `json:"app_status_bar_order"`
+	KanbanHiddenStepIDs               map[string][]string               `json:"kanban_hidden_step_ids"`
+	Revision                          int64                             `json:"revision"`
+	CreatedAt                         time.Time                         `json:"created_at"`
+	UpdatedAt                         time.Time                         `json:"updated_at"`
 }
 
 type SystemMetricsDisplaySettings struct {
@@ -132,31 +140,6 @@ type SystemMetricsDisplaySettings struct {
 type AppStatusBarOrder struct {
 	LeftItemIDs  []string `json:"left_item_ids"`
 	RightItemIDs []string `json:"right_item_ids"`
-}
-
-// VoiceModeSettings is the per-user configuration surface for the chat
-// voice-input feature. Stored as a nested JSON object inside the `users.settings`
-// blob — adding fields here does not require a schema migration.
-type VoiceModeSettings struct {
-	// Enabled gates the whole feature. When false, the mic button is hidden
-	// entirely and no voice-related hooks run on the chat input. Defaults to
-	// true for new users; pre-existing user rows that have no `enabled` field
-	// in their stored JSON are also treated as enabled (see store layer).
-	Enabled bool `json:"enabled"`
-	// Engine is the user's preferred transcription engine.
-	// "auto" | "webSpeech" | "whisperWeb" | "whisperServer". Default "auto".
-	Engine string `json:"engine"`
-	// Language is the BCP-47 tag or "auto" to use the browser's language.
-	// Examples: "en-US", "pt-PT", "ja-JP". Default "auto".
-	Language string `json:"language"`
-	// Mode controls how the mic button is activated: "toggle" (click to start/stop)
-	// or "hold" (push-to-talk). Default "toggle".
-	Mode string `json:"mode"`
-	// AutoSend submits the chat message immediately after the transcript is inserted.
-	AutoSend bool `json:"auto_send"`
-	// WhisperWebModel selects the in-browser Whisper model when engine = whisperWeb.
-	// "tiny" | "base" | "small". Default "base".
-	WhisperWebModel string `json:"whisper_web_model"`
 }
 
 // SavedLayout represents a user-saved dockview layout configuration.

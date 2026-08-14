@@ -19,6 +19,11 @@ import (
 const (
 	parentQuestionStatusPending  = "pending"
 	parentQuestionStatusAnswered = "answered"
+	agentAuthorType              = "agent"
+	parentQuestionIDKey          = "question_id"
+	parentQuestionsKey           = "questions"
+	senderSessionIDKey           = "sender_session_id"
+	senderTaskIDKey              = "sender_task_id"
 )
 
 type parentQuestionRequest struct {
@@ -127,7 +132,7 @@ func (h *Handlers) handleAskParentQuestion(ctx context.Context, msg *ws.Message)
 		TaskSessionID: target.childSession.ID,
 		TaskID:        target.childTask.ID,
 		Content:       req.Questions[0].Prompt,
-		AuthorType:    "agent",
+		AuthorType:    agentAuthorType,
 		Type:          string(models.MessageTypeClarificationRequest),
 		Metadata:      questionMetadata,
 		RequestsInput: true,
@@ -142,9 +147,9 @@ func (h *Handlers) handleAskParentQuestion(ctx context.Context, msg *ws.Message)
 		models.MetaKeyParentQuestion:         true,
 		models.MetaKeyParentQuestionParentID: target.parentTask.ID,
 		models.MetaKeyParentQuestionChildID:  target.childTask.ID,
-		"sender_task_id":                     target.childTask.ID,
+		senderTaskIDKey:                      target.childTask.ID,
 		"sender_task_title":                  target.childTask.Title,
-		"sender_session_id":                  target.childSession.ID,
+		senderSessionIDKey:                   target.childSession.ID,
 	}
 	if _, dispatchErr := h.dispatchTaskMessage(ctx, target.parentTask.ID, target.parentSession, parentPrompt, parentMetadata, false, false); dispatchErr != nil {
 		_ = h.taskSvc.DeleteMessage(ctx, question.ID)
@@ -159,14 +164,14 @@ func (h *Handlers) handleAskParentQuestion(ctx context.Context, msg *ws.Message)
 	if h.inputPauser != nil {
 		if _, pauseErr := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), target.childSession.ID); pauseErr != nil {
 			h.logger.Warn("failed to pause autopilot child after parent question",
-				zap.String("question_id", questionID), zap.String("session_id", target.childSession.ID), zap.Error(pauseErr))
+				zap.String(parentQuestionIDKey, questionID), zap.String("session_id", target.childSession.ID), zap.Error(pauseErr))
 		}
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"question_id":    questionID,
-		"status":         "waiting_for_parent",
-		"parent_task_id": target.parentTask.ID,
+		parentQuestionIDKey: questionID,
+		stopTaskStatusKey:   "waiting_for_parent",
+		"parent_task_id":    target.parentTask.ID,
 	})
 }
 
@@ -222,7 +227,7 @@ func (h *Handlers) markParentQuestionAnswered(ctx context.Context, question *mod
 		return errors.New("parent question is not available")
 	}
 	metadata := cloneTaskMessageMetadataMap(question.Metadata)
-	metadata["status"] = parentQuestionStatusAnswered
+	metadata[stopTaskStatusKey] = parentQuestionStatusAnswered
 	metadata[models.MetaKeyParentQuestionStatus] = parentQuestionStatusAnswered
 	metadata[models.MetaKeyParentQuestionResponse] = answer
 	metadata["parent_question_answered_at"] = time.Now().UTC().Format(time.RFC3339Nano)
@@ -236,7 +241,7 @@ func (h *Handlers) restoreParentQuestionPending(ctx context.Context, question *m
 		return errors.New("parent question is not available")
 	}
 	metadata := cloneTaskMessageMetadataMap(question.Metadata)
-	metadata["status"] = parentQuestionStatusPending
+	metadata[stopTaskStatusKey] = parentQuestionStatusPending
 	metadata[models.MetaKeyParentQuestionStatus] = parentQuestionStatusPending
 	delete(metadata, models.MetaKeyParentQuestionResponse)
 	delete(metadata, "parent_question_answered_at")
@@ -249,10 +254,10 @@ func parentQuestionMetadata(questionID string, parentTask, childTask *models.Tas
 	questionData := make([]clarification.Question, len(questions))
 	copy(questionData, questions)
 	return map[string]interface{}{
-		"status":                             parentQuestionStatusPending,
+		stopTaskStatusKey:                    parentQuestionStatusPending,
 		"pending_id":                         questionID,
-		"question_id":                        questionID,
-		"questions":                          questionData,
+		parentQuestionIDKey:                  questionID,
+		parentQuestionsKey:                   questionData,
 		"question":                           questions[0],
 		"context":                            questionContext,
 		models.MetaKeyParentQuestionID:       questionID,

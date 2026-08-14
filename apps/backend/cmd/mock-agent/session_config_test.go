@@ -19,7 +19,7 @@ func TestSetSessionConfigOptionReturnsAuthoritativeState(t *testing.T) {
 		ValueId: &acp.SetSessionConfigOptionValueId{
 			SessionId: sessionID,
 			ConfigId:  "effort",
-			Value:     "low",
+			Value:     reasoningEffortLow,
 		},
 	})
 	if err != nil {
@@ -32,7 +32,7 @@ func TestSetSessionConfigOptionReturnsAuthoritativeState(t *testing.T) {
 			values[string(option.Select.Id)] = string(option.Select.CurrentValue)
 		}
 	}
-	if values["model"] != "mock-fast" || values["effort"] != "low" {
+	if values["model"] != modelFast || values["effort"] != reasoningEffortLow {
 		t.Fatalf("config values = %#v, want model=mock-fast and effort=low", values)
 	}
 }
@@ -62,7 +62,7 @@ func TestSetSessionConfigOptionRejectsUnknownValue(t *testing.T) {
 			values[string(option.Select.Id)] = string(option.Select.CurrentValue)
 		}
 	}
-	if values["effort"] != "medium" {
+	if values["effort"] != reasoningEffortMed {
 		t.Fatalf("effort = %q, want unchanged medium", values["effort"])
 	}
 }
@@ -82,7 +82,7 @@ func TestSetSessionConfigOptionModelChangesAvailableOptions(t *testing.T) {
 		ValueId: &acp.SetSessionConfigOptionValueId{
 			SessionId: session.SessionId,
 			ConfigId:  "model",
-			Value:     "mock-smart",
+			Value:     modelSmart,
 		},
 	})
 	if err != nil {
@@ -95,10 +95,10 @@ func TestSetSessionConfigOptionModelChangesAvailableOptions(t *testing.T) {
 			values[string(option.Select.Id)] = string(option.Select.CurrentValue)
 		}
 	}
-	if values["model"] != "mock-smart" {
+	if values["model"] != modelSmart {
 		t.Fatalf("model = %q, want mock-smart", values["model"])
 	}
-	if values["effort"] != "high" {
+	if values["effort"] != reasoningEffortHigh {
 		t.Fatalf("effort = %q, want high for mock-smart", values["effort"])
 	}
 	var hasMax, hasMedium bool
@@ -108,7 +108,7 @@ func TestSetSessionConfigOptionModelChangesAvailableOptions(t *testing.T) {
 		}
 		for _, choice := range *option.Select.Options.Ungrouped {
 			hasMax = hasMax || choice.Value == "max"
-			hasMedium = hasMedium || choice.Value == "medium"
+			hasMedium = hasMedium || choice.Value == reasoningEffortMed
 		}
 	}
 	if !hasMax || hasMedium {
@@ -138,7 +138,7 @@ func TestSessionConfigIsIsolatedAcrossNewSessions(t *testing.T) {
 		ValueId: &acp.SetSessionConfigOptionValueId{
 			SessionId: first.SessionId,
 			ConfigId:  "effort",
-			Value:     "low",
+			Value:     reasoningEffortLow,
 		},
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func TestSessionConfigIsIsolatedAcrossNewSessions(t *testing.T) {
 		t.Fatalf("read second state: %v", err)
 	}
 	for _, option := range response.ConfigOptions {
-		if option.Select != nil && option.Select.Id == "effort" && option.Select.CurrentValue != "medium" {
+		if option.Select != nil && option.Select.Id == "effort" && option.Select.CurrentValue != reasoningEffortMed {
 			t.Fatalf("second effort = %q, want medium", option.Select.CurrentValue)
 		}
 	}
@@ -179,7 +179,7 @@ func TestSetSessionConfigOptionRejectsClosedSession(t *testing.T) {
 		ValueId: &acp.SetSessionConfigOptionValueId{
 			SessionId: session.SessionId,
 			ConfigId:  "effort",
-			Value:     "low",
+			Value:     reasoningEffortLow,
 		},
 	})
 	if err == nil {

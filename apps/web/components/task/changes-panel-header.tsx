@@ -33,12 +33,19 @@ import type { GitCredentialDisplay } from "./changes-git-credential-display";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTranslation } from "react-i18next";
 import { PerRepoPullMenu } from "./changes-panel-per-repo-menu";
+import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
+import {
+  type RemoteContributionResolutionTarget,
+  type useRemoteContributionResolution,
+} from "./use-remote-contribution-resolution";
+import { RemoteContributionHeaderActions } from "./remote-contribution-header-actions";
 
 export type PerRepoStatus = {
   repository_name: string;
   branch: string | null;
   ahead: number;
   behind: number;
+  pullBehind?: number;
   hasStaged: boolean;
   hasUnstaged: boolean;
 };
@@ -335,8 +342,9 @@ function PullTriggerContent({
   );
 }
 
-function PullDropdown({
+export function PullDropdown({
   behindCount,
+  pullDisabled,
   isLoading,
   loadingOperation,
   repoNames,
@@ -345,8 +353,11 @@ function PullDropdown({
   onRepoRebase,
   onRepoMerge,
   repoDisplayName,
+  pullDisabledReason,
 }: {
   behindCount: number;
+  pullDisabled?: boolean;
+  pullDisabledReason?: string;
   isLoading: boolean;
   loadingOperation: string | null;
   /** Always non-empty (single-repo includes the empty-name entry). */
@@ -358,6 +369,7 @@ function PullDropdown({
   /** Maps a repository_name to its display label. */
   repoDisplayName?: (repositoryName: string) => string | undefined;
 }) {
+  const { t } = useTranslation();
   const isPulling = loadingOperation === "pull";
   const isRebasing = loadingOperation === "rebase";
   // For single-repo (empty repo entry), the trigger label uses the global
@@ -365,24 +377,39 @@ function PullDropdown({
   // labels and the trigger summarises with the max.
   const triggerBehind =
     perRepoStatus.length > 0
-      ? Math.max(behindCount, ...perRepoStatus.map((s) => s.behind))
+      ? Math.max(behindCount, ...perRepoStatus.map((s) => s.pullBehind ?? 0))
       : behindCount;
+  const pullButton = (
+    <Button
+      size="sm"
+      variant="ghost"
+      className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
+      disabled={isLoading || pullDisabled}
+    >
+      <PullTriggerContent
+        behindCount={triggerBehind}
+        isPulling={isPulling}
+        isRebasing={isRebasing}
+      />
+    </Button>
+  );
+  if (pullDisabled) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} className="inline-flex">
+            {pullButton}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          {pullDisabledReason ?? t("task:divergedActionsUnavailable")}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
-          disabled={isLoading}
-        >
-          <PullTriggerContent
-            behindCount={triggerBehind}
-            isPulling={isPulling}
-            isRebasing={isRebasing}
-          />
-        </Button>
-      </DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild>{pullButton}</DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <PerRepoPullMenu
           repoNames={repoNames}
@@ -390,6 +417,8 @@ function PullDropdown({
           onRepoPull={onRepoPull}
           onRepoRebase={onRepoRebase}
           onRepoMerge={onRepoMerge}
+          pullDisabled={pullDisabled}
+          pullDisabledReason={pullDisabledReason}
           repoDisplayName={repoDisplayName}
         />
       </DropdownMenuContent>
@@ -476,30 +505,7 @@ function ChangesPanelWalkthroughButton({
   );
 }
 
-export function ChangesPanelHeader({
-  hasChanges,
-  hasCommits,
-  hasPRFiles,
-  displayBranch,
-  baseBranchDisplay,
-  baseBranchByRepo,
-  behindCount,
-  isLoading,
-  loadingOperation,
-  onOpenDiffAll,
-  onOpenReview,
-  onRequestWalkthrough,
-  requestWalkthroughDisabled,
-  repoNames,
-  perRepoStatus,
-  onRepoPull,
-  onRepoRebase,
-  onRepoMerge,
-  repoDisplayName,
-  taskId,
-  onRenameBranch,
-  credentialDisplay,
-}: {
+type ChangesPanelHeaderProps = {
   hasChanges: boolean;
   hasCommits: boolean;
   hasPRFiles?: boolean;
@@ -509,6 +515,8 @@ export function ChangesPanelHeader({
    *  back to baseBranchDisplay. Empty/missing for single-repo workspaces. */
   baseBranchByRepo?: Record<string, string>;
   behindCount: number;
+  pullDisabled?: boolean;
+  pullDisabledReason?: string;
   isLoading: boolean;
   loadingOperation: string | null;
   onOpenDiffAll?: () => void;
@@ -528,7 +536,45 @@ export function ChangesPanelHeader({
    *  the right task_repositories row to PATCH. Null while task data is
    *  hydrating — the picker falls back to a static label. */
   taskId: string | null;
-}) {
+  relation?: RemoteContributionRelation;
+  resolution?: ReturnType<typeof useRemoteContributionResolution>;
+  resolutionTarget?: RemoteContributionResolutionTarget | null;
+  remoteContributionUrl?: string;
+  remoteContributionNumber?: number;
+};
+
+export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
+  const {
+    hasChanges,
+    hasCommits,
+    hasPRFiles,
+    displayBranch,
+    baseBranchDisplay,
+    baseBranchByRepo,
+    behindCount,
+    pullDisabled,
+    pullDisabledReason,
+    isLoading,
+    loadingOperation,
+    onOpenDiffAll,
+    onOpenReview,
+    onRequestWalkthrough,
+    requestWalkthroughDisabled,
+    repoNames,
+    perRepoStatus,
+    onRepoPull,
+    onRepoRebase,
+    onRepoMerge,
+    repoDisplayName,
+    taskId,
+    onRenameBranch,
+    credentialDisplay,
+    relation,
+    resolution,
+    resolutionTarget,
+    remoteContributionUrl,
+    remoteContributionNumber,
+  } = props;
   const branchRows = buildBranchRows(
     perRepoStatus,
     baseBranchByRepo,
@@ -560,8 +606,17 @@ export function ChangesPanelHeader({
               credentialDisplay={credentialDisplay}
             />
           )}
+          <RemoteContributionHeaderActions
+            relation={relation}
+            resolution={resolution}
+            resolutionTarget={resolutionTarget}
+            prUrl={remoteContributionUrl}
+            prNumber={remoteContributionNumber}
+          />
           <PullDropdown
             behindCount={behindCount}
+            pullDisabled={pullDisabled}
+            pullDisabledReason={pullDisabledReason}
             isLoading={isLoading}
             loadingOperation={loadingOperation}
             repoNames={repoNames}

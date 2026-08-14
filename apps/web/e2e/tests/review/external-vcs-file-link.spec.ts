@@ -45,13 +45,14 @@ async function createGitHubRepository(
   return apiClient.createRepository(workspaceId, repositoryPath, "main", options);
 }
 
-function trustedGitHubTaskRepository(repositoryName = GITHUB_REPOSITORY) {
+function trustedGitHubTaskRepository(repositoryName = GITHUB_REPOSITORY, checkoutBranch?: string) {
   return {
     remote_url: `https://github.com/${GITHUB_OWNER}/${repositoryName}.git`,
     provider: "github",
     provider_owner: GITHUB_OWNER,
     provider_name: repositoryName,
     base_branch: "main",
+    ...(checkoutBranch ? { checkout_branch: checkoutBranch } : {}),
   };
 }
 
@@ -85,7 +86,7 @@ test.describe("External VCS file links", () => {
         number: 81,
         title: "External file link",
         state: "open",
-        head_branch: "feature/external-file-link",
+        head_branch: "main",
         base_branch: "main",
         author_login: "reviewer",
         repo_owner: GITHUB_OWNER,
@@ -102,6 +103,7 @@ test.describe("External VCS file links", () => {
       },
     ]);
 
+    const checkoutBranch = "main";
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Published external file link",
@@ -110,7 +112,7 @@ test.describe("External VCS file links", () => {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
-        repositories: [trustedGitHubTaskRepository()],
+        repositories: [trustedGitHubTaskRepository(GITHUB_REPOSITORY, checkoutBranch)],
       },
     );
     await apiClient.mockGitHubAssociateTaskPR({
@@ -120,7 +122,7 @@ test.describe("External VCS file links", () => {
       pr_number: 81,
       pr_url: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPOSITORY}/pull/81`,
       pr_title: "External file link",
-      head_branch: "feature/external-file-link",
+      head_branch: checkoutBranch,
       base_branch: "main",
       author_login: "reviewer",
     });
@@ -139,8 +141,7 @@ test.describe("External VCS file links", () => {
     await expect(review).toBeVisible();
     const fileHeader = review.getByTestId("review-file-header").filter({ hasText: PUBLISHED_FILE });
     const link = fileHeader.getByRole("link", { name: "Open file in GitHub" });
-    const expectedURL =
-      "https://github.com/testorg/external-file-links/blob/feature%2Fexternal-file-link/published-link.ts";
+    const expectedURL = `https://github.com/testorg/external-file-links/blob/${encodeURIComponent(checkoutBranch)}/published-link.ts`;
     await expect(link).toHaveAttribute("href", expectedURL);
     await expect(link).toHaveAttribute("target", "_blank");
     await openExternalLink(testPage, link, expectedURL);

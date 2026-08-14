@@ -4,6 +4,9 @@ import viteConfig from "./vite.config";
 
 if (process.env.DEBUG === "1") process.env.DEBUG = "";
 
+// Pins NODE_ENV=test — see apps/web/AGENTS.md "Testing notes" for why this is load-bearing.
+process.env.NODE_ENV = "test";
+
 const configuredMaxWorkers = process.env.VITEST_MAX_WORKERS?.trim();
 const maxWorkers = resolveMaxWorkers(configuredMaxWorkers, Boolean(process.env.CI));
 
@@ -28,6 +31,9 @@ export default mergeConfig(
       exclude: ["e2e/**/*.spec.ts", "e2e/fixtures/**", "e2e/pages/**", "node_modules/**"],
       pool: "threads",
       maxWorkers,
+      // Already the default, pinned because it is load-bearing: a run that
+      // collects nothing must exit non-zero rather than read as a green suite.
+      passWithNoTests: false,
     },
   }),
 );

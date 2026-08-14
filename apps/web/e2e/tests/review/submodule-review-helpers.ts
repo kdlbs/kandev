@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { ApiClient } from "../../helpers/api-client";
+import { dwell } from "../../helpers/causal-waits";
 import type { SeedData } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 
@@ -64,7 +65,11 @@ async function waitForWorktreePath(
     const worktreePath =
       session?.worktree_path ?? session?.workspace_path ?? session?.worktrees?.[0]?.worktree_path;
     if (worktreePath) return worktreePath;
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await dwell(
+      250,
+      "poll-interval",
+      "sampling interval for the loop above; no Page exists here, and the worktree appears in a session record the backend writes without publishing anything this helper can subscribe to",
+    );
   }
   throw new Error(`Timed out waiting for the nested-review worktree for ${sessionId}`);
 }
@@ -80,69 +85,73 @@ export async function createSubmoduleReviewFixture(
   const outerPath = path.join(sourceRoot, "outer");
   const innerPath = path.join(sourceRoot, "inner");
   const env = { ...makeGitEnv(tempRoot), GIT_ALLOW_PROTOCOL: "file" };
+  const cleanup = () => fs.rmSync(sourceRoot, { recursive: true, force: true });
 
-  initializeRepository(innerPath, env, "README.md", "inner base\n");
+  try {
+    initializeRepository(innerPath, env, "README.md", "inner base\n");
 
-  initializeRepository(outerPath, env, "README.md", "outer base\n");
-  runGit(outerPath, [...GIT_PROTOCOL_ARGS, "submodule", "add", "../inner", "vendor/inner"], env);
-  commit(outerPath, env, "add nested inner submodule");
+    initializeRepository(outerPath, env, "README.md", "outer base\n");
+    runGit(outerPath, [...GIT_PROTOCOL_ARGS, "submodule", "add", "../inner", "vendor/inner"], env);
+    commit(outerPath, env, "add nested inner submodule");
 
-  initializeRepository(parentPath, env, "README.md", "parent base\n");
-  runGit(parentPath, [...GIT_PROTOCOL_ARGS, "submodule", "add", "../outer", "vendor/outer"], env);
-  runGit(parentPath, [...GIT_PROTOCOL_ARGS, "submodule", "update", "--init", "--recursive"], env);
-  runGit(
-    path.join(parentPath, "vendor/outer"),
-    [...GIT_PROTOCOL_ARGS, "submodule", "update", "--init", "--recursive"],
-    env,
-  );
-  commit(parentPath, env, "add outer submodule");
+    initializeRepository(parentPath, env, "README.md", "parent base\n");
+    runGit(parentPath, [...GIT_PROTOCOL_ARGS, "submodule", "add", "../outer", "vendor/outer"], env);
+    runGit(parentPath, [...GIT_PROTOCOL_ARGS, "submodule", "update", "--init", "--recursive"], env);
+    runGit(
+      path.join(parentPath, "vendor/outer"),
+      [...GIT_PROTOCOL_ARGS, "submodule", "update", "--init", "--recursive"],
+      env,
+    );
+    commit(parentPath, env, "add outer submodule");
 
-  const repository = await apiClient.createRepository(seedData.workspaceId, parentPath, "main", {
-    name: "nested-submodule-parent",
-  });
-  const { executors } = await apiClient.listExecutors();
-  const directProfile = executors.find(
-    (executor) => executor.type === "local" || executor.type === "local_pc",
-  )?.profiles?.[0];
-  if (!directProfile) throw new Error("Nested submodule fixture needs a direct local executor");
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [repository.id],
-      executor_profile_id: directProfile.id,
-    },
-  );
-  if (!task.session_id) throw new Error("Nested submodule fixture did not start a session");
+    const repository = await apiClient.createRepository(seedData.workspaceId, parentPath, "main", {
+      name: "nested-submodule-parent",
+    });
+    const { executors } = await apiClient.listExecutors();
+    const directProfile = executors.find(
+      (executor) => executor.type === "local" || executor.type === "local_pc",
+    )?.profiles?.[0];
+    if (!directProfile) throw new Error("Nested submodule fixture needs a direct local executor");
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      title,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [repository.id],
+        executor_profile_id: directProfile.id,
+      },
+    );
+    if (!task.session_id) throw new Error("Nested submodule fixture did not start a session");
 
-  return {
-    taskId: task.id,
-    sessionId: task.session_id,
-    sourceRoot,
-    waitForWorktree: (client) => waitForWorktreePath(client, task.id, task.session_id!),
-    applyNestedChanges(worktreePath: string) {
-      const outerWorktree = path.join(worktreePath, "vendor/outer");
-      const innerWorktree = path.join(outerWorktree, "vendor/inner");
-      if (!fs.existsSync(innerWorktree)) {
-        runGit(
-          worktreePath,
-          [...GIT_PROTOCOL_ARGS, "submodule", "update", "--init", "--recursive"],
-          env,
-        );
-      }
-      fs.appendFileSync(path.join(worktreePath, "README.md"), "parent working-tree change\n");
-      fs.appendFileSync(path.join(outerWorktree, "README.md"), "outer committed change\n");
-      commit(outerWorktree, env, "change outer submodule");
-      fs.appendFileSync(path.join(innerWorktree, "README.md"), "inner committed change\n");
-      commit(innerWorktree, env, "change inner submodule");
-      commit(outerWorktree, env, "record inner submodule change");
-    },
-    cleanup() {
-      fs.rmSync(sourceRoot, { recursive: true, force: true });
-    },
-  };
+    return {
+      taskId: task.id,
+      sessionId: task.session_id,
+      sourceRoot,
+      waitForWorktree: (client) => waitForWorktreePath(client, task.id, task.session_id!),
+      applyNestedChanges(worktreePath: string) {
+        const outerWorktree = path.join(worktreePath, "vendor/outer");
+        const innerWorktree = path.join(outerWorktree, "vendor/inner");
+        if (!fs.existsSync(innerWorktree)) {
+          runGit(
+            worktreePath,
+            [...GIT_PROTOCOL_ARGS, "submodule", "update", "--init", "--recursive"],
+            env,
+          );
+        }
+        fs.appendFileSync(path.join(worktreePath, "README.md"), "parent working-tree change\n");
+        fs.appendFileSync(path.join(outerWorktree, "README.md"), "outer committed change\n");
+        commit(outerWorktree, env, "change outer submodule");
+        fs.appendFileSync(path.join(innerWorktree, "README.md"), "inner committed change\n");
+        commit(innerWorktree, env, "change inner submodule");
+        commit(outerWorktree, env, "record inner submodule change");
+      },
+      cleanup,
+    };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }

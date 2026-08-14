@@ -71,7 +71,22 @@ export async function openSeededAgentReply(
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 45_000 });
+  // The seeded reply only needs the first agent message to be durable. A
+  // running status can outlive that message on mobile, where waiting for the
+  // idle composer would make comment-only coverage depend on terminal timing.
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(task.session_id!);
+        return messages.some(
+          (message) => message.author_type === "agent" && message.content.trim() === "ready",
+        );
+      },
+      { timeout: 45_000 },
+    )
+    .toBe(true);
+  await page.reload();
+  await session.waitForLoad();
   await apiClient.seedSessionMessage(task.session_id, {
     type: "message",
     content: AGENT_REPLY,

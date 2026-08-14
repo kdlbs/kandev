@@ -351,6 +351,22 @@ func (r *sqliteRepository) Close() error {
 	return r.db.Close()
 }
 
+// marshalTUIConfig renders a TUI config for the nullable tui_config column.
+// Shared by CreateAgent and UpdateAgent so the two writers cannot drift — the
+// column being absent from one of them is exactly how an editable field was
+// lost on save.
+func marshalTUIConfig(cfg *models.TUIConfigJSON) (*string, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal tui_config: %w", err)
+	}
+	s := string(data)
+	return &s, nil
+}
+
 func (r *sqliteRepository) CreateAgent(ctx context.Context, agent *models.Agent) error {
 	if agent.ID == "" {
 		agent.ID = uuid.New().String()
@@ -358,16 +374,11 @@ func (r *sqliteRepository) CreateAgent(ctx context.Context, agent *models.Agent)
 	now := time.Now().UTC()
 	agent.CreatedAt = now
 	agent.UpdatedAt = now
-	var tuiConfigJSON *string
-	if agent.TUIConfig != nil {
-		data, err := json.Marshal(agent.TUIConfig)
-		if err != nil {
-			return fmt.Errorf("failed to marshal tui_config: %w", err)
-		}
-		s := string(data)
-		tuiConfigJSON = &s
+	tuiConfigJSON, err := marshalTUIConfig(agent.TUIConfig)
+	if err != nil {
+		return err
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO agents (id, name, workspace_id, supports_mcp, mcp_config_path, tui_config, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`), agent.ID, agent.Name, agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, tuiConfigJSON, agent.CreatedAt, agent.UpdatedAt)
@@ -392,10 +403,18 @@ func (r *sqliteRepository) GetAgentByName(ctx context.Context, name string) (*mo
 
 func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Agent) error {
 	agent.UpdatedAt = time.Now().UTC()
+	// tui_config is written here as well as in CreateAgent: a custom TUI agent's
+	// MCP strategy is editable after creation, and omitting the column silently
+	// discarded that edit — the row kept supports_mcp while the strategy it was
+	// derived from reverted on the next boot.
+	tuiConfigJSON, err := marshalTUIConfig(agent.TUIConfig)
+	if err != nil {
+		return err
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE agents SET workspace_id = ?, supports_mcp = ?, mcp_config_path = ?, updated_at = ?
+		UPDATE agents SET workspace_id = ?, supports_mcp = ?, mcp_config_path = ?, tui_config = ?, updated_at = ?
 		WHERE id = ?
-	`), agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.UpdatedAt, agent.ID)
+	`), agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, tuiConfigJSON, agent.UpdatedAt, agent.ID)
 	if err != nil {
 		return err
 	}
@@ -450,6 +469,14 @@ func (r *sqliteRepository) UpsertAgentProfileMcpConfig(ctx context.Context, conf
 	if config.ProfileID == "" {
 		return fmt.Errorf("profile ID is required")
 	}
+	return r.upsertAgentProfileMcpConfig(ctx, r.db, config)
+}
+
+// upsertAgentProfileMcpConfig inserts or replaces the MCP config row for a
+// profile, running against the caller-supplied execer so the duplicate can
+// commit it in the same transaction as the profile row. Defaults nil maps and
+// fills timestamps on the passed config in place.
+func (r *sqliteRepository) upsertAgentProfileMcpConfig(ctx context.Context, execer profileExecer, config *models.AgentProfileMcpConfig) error {
 	if config.Servers == nil {
 		config.Servers = map[string]interface{}{}
 	}
@@ -471,7 +498,7 @@ func (r *sqliteRepository) UpsertAgentProfileMcpConfig(ctx context.Context, conf
 		return fmt.Errorf("failed to serialize MCP meta: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = execer.ExecContext(ctx, execer.Rebind(`
 		INSERT INTO agent_profile_mcp_configs (profile_id, enabled, servers_json, meta_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(profile_id) DO UPDATE SET
@@ -490,6 +517,116 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	now := time.Now().UTC()
 	profile.CreatedAt = now
 	profile.UpdatedAt = now
+	// New profiles are created enabled — the DB column default is 1 and
+	// nothing creates a profile pre-disabled. Setting the field here keeps
+	// callers' in-memory copy consistent with the row.
+	profile.Enabled = true
+	return r.insertAgentProfile(ctx, r.db, profile)
+}
+
+// DuplicateAgentProfile creates an independent copy of a profile in a single
+// transaction: the row is inserted with the caller-provided Enabled state (a
+// duplicate of a disabled profile must not become briefly selectable) and the
+// MCP config row is upserted when non-nil. A failure rolls back and leaves no
+// partial copy, so retrying after an error cannot create a duplicate row.
+//
+// The source rows are re-read inside the transaction and must still carry the
+// revisions the copy was built from; otherwise ErrProfileChanged is returned
+// and nothing is created. Combined with WAL snapshot isolation (a concurrent
+// commit after this transaction's first read aborts its write with a busy
+// error), the copy always reflects one consistent snapshot of the source.
+func (r *sqliteRepository) DuplicateAgentProfile(ctx context.Context, input DuplicateAgentProfileInput) error {
+	if input.Profile.ID == "" {
+		input.Profile.ID = uuid.New().String()
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := r.verifySourceSnapshot(ctx, tx, input); err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	input.Profile.CreatedAt = now
+	input.Profile.UpdatedAt = now
+	if err := r.insertAgentProfile(ctx, tx, input.Profile); err != nil {
+		return err
+	}
+	if input.McpConfig != nil {
+		input.McpConfig.ProfileID = input.Profile.ID
+		if err := r.upsertAgentProfileMcpConfig(ctx, tx, input.McpConfig); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// verifySourceSnapshot checks, inside the duplicate transaction, that the
+// source rows still match the revisions the caller built the copy from. A
+// mismatch means a concurrent writer changed the source between the caller's
+// read and this transaction — duplicating anyway would produce a copy mixing
+// two points in time.
+func (r *sqliteRepository) verifySourceSnapshot(ctx context.Context, tx *sqlx.Tx, input DuplicateAgentProfileInput) error {
+	var sourceUpdated time.Time
+	err := tx.QueryRowContext(ctx, tx.Rebind(
+		`SELECT updated_at FROM agent_profiles WHERE id = ? AND deleted_at IS NULL`),
+		input.Source.ID).Scan(&sourceUpdated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrSourceProfileNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if !sourceUpdated.Equal(input.Source.UpdatedAt) {
+		return ErrProfileChanged
+	}
+	if input.SourceMcp == nil {
+		// The caller's snapshot had no MCP row: verify one was not created in
+		// the meantime, otherwise the copy would silently drop it. Missing is
+		// the unchanged case; an existing row means the snapshot is stale.
+		var exists int
+		err = tx.QueryRowContext(ctx, tx.Rebind(
+			`SELECT 1 FROM agent_profile_mcp_configs WHERE profile_id = ?`),
+			input.Source.ID).Scan(&exists)
+		if err == nil {
+			return ErrProfileChanged
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		return nil
+	}
+	var mcpUpdated time.Time
+	err = tx.QueryRowContext(ctx, tx.Rebind(
+		`SELECT updated_at FROM agent_profile_mcp_configs WHERE profile_id = ?`),
+		input.Source.ID).Scan(&mcpUpdated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrProfileChanged
+	}
+	if err != nil {
+		return err
+	}
+	if !mcpUpdated.Equal(input.SourceMcp.UpdatedAt) {
+		return ErrProfileChanged
+	}
+	return nil
+}
+
+// profileExecer is the subset of *sqlx.DB / *sqlx.Tx the shared insert and
+// upsert helpers need, so one code path serves both single-statement and
+// transactional writes.
+type profileExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	Rebind(query string) string
+}
+
+// insertAgentProfile writes the profile row through the caller-supplied
+// execer, sharing one SQL statement between CreateAgentProfile and the
+// transactional duplicate path. The profile's Enabled value is written as-is.
+func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profileExecer, profile *models.AgentProfile) error {
 	cliFlagsJSON, err := cliFlagsToJSON(profile.CLIFlags)
 	if err != nil {
 		return err
@@ -502,11 +639,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	if err != nil {
 		return err
 	}
-	// New profiles are created enabled — the DB column default is 1 and
-	// nothing creates a profile pre-disabled. Setting the field here keeps
-	// callers' in-memory copy consistent with the row.
-	profile.Enabled = true
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = execer.ExecContext(ctx, execer.Rebind(`
 		INSERT INTO agent_profiles (
 			id, agent_id, name, agent_display_name, model, mode, migrated_from,
 			auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough,

@@ -647,7 +647,7 @@ func TestSummarizePipelines(t *testing.T) {
 		{"success", []Pipeline{{Status: "success", JobsTotal: 3, JobsPassing: 3}}, "success", true},
 		{"failed", []Pipeline{{Status: "failed"}}, "failure", false},
 		{"running", []Pipeline{{Status: "running"}}, "pending", false},
-		{"skipped-suppressed", []Pipeline{{Status: "skipped"}}, "", false},
+		{"skipped-suppressed", []Pipeline{{Status: pipelineStatusSkipped}}, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

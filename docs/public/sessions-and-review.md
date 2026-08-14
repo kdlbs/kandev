@@ -54,7 +54,7 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Set as Primary** | Makes a stoppable session the task's primary target |
 | **Stop** | Cancels the active agent turn for this session |
 | **Resume** | Attempts to continue a completed, failed, or cancelled session |
-| **Delete** | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept — a later session reuses them |
+| **Delete** | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
 | **Share** | Opens the publishing preview for an eligible session |
 | **Handoff** | Starts another session with a generated summary of this conversation |
 | **Close Others** | Closes other visible agent panels without deleting their sessions |
@@ -87,7 +87,9 @@ Delivery follows the target state:
 - a created session starts with the message as its first prompt;
 - a failed or cancelled session rejects the message.
 
-The default pending-message limit is 10 per session. An admin can change it live under **Settings > General > Message Queue**; `0` removes the cap. A valid `KANDEV_QUEUE_MAX_PER_SESSION` value takes precedence and makes the UI field read-only; changing the environment still requires a restart. Malformed environment values are logged and ignored, so the saved setting or default applies instead. Lowering the saved limit does not delete entries already waiting. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders must queue.
+The default pending-message limit is 10 per session. An admin can change it live under **Settings > Task Behavior > Message Queue**; `0` removes the cap. A valid `KANDEV_QUEUE_MAX_PER_SESSION` value takes precedence and makes only the capacity field read-only; changing the environment still requires a restart. Malformed environment values are logged and ignored, so the saved setting or default applies instead. Lowering the saved limit does not delete entries already waiting.
+
+The same card enables **Automatically merge consecutive messages** by default. Once capacity admission succeeds, compatible consecutive messages from the same strict source fold into the earlier pending entry; incompatible messages remain separate. The earlier entry's ID survives, and only admissions after the setting is read are eligible. This behavior is independent from the manual **Enable queued message merging** switch. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders must queue.
 
 For urgent replacement work, the parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; this cancels the current approach and immediately tries to dispatch the new prompt, with a safe queued fallback. Use `stop_task_kandev` only for halt-only intent. A successful stop marks every accepted live child session `CANCELLED` and schedules graceful teardown asynchronously. Kandev then attempts to move an eligible unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states remain unchanged. A child with no live execution returns idempotent `not_running`, and its worktrees, environment, commits, task record, descendants, and queued messages are preserved. See [Coordination](coordination.md) for the complete authority and lifecycle contract.
 
@@ -115,7 +117,7 @@ direct shortcut.
 
 Open **Settings > General > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition.
 
-**PR Details** is a reusable Layouts panel whose visibility follows the active task's review association. Without a linked GitHub pull request or GitLab merge request, the tab stays hidden—even when the selected layout includes it. Once a review is linked, Kandev adds PR Details as an inactive tab: beside **Agent** for the built-in Default, or in the group and tab position you configured in the Layouts editor. Closing that tab prevents it from reappearing automatically in the same session. Changing the default applies to task environments without a saved task-specific layout and **Reset Layout**, not a layout already saved for a task. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell.
+**PR Details** is a reusable Layouts panel whose visibility follows the active task's review association. Without a linked GitHub pull request or GitLab merge request, the tab stays hidden, even when the selected layout includes it. Once a review is linked, Kandev adds PR Details as an inactive tab: beside **Agent** for the built-in Default, or in the group and tab position you configured in the Layouts editor. Closing that tab prevents it from reappearing automatically in the same session. Changing the default applies to task environments without a saved task-specific layout and **Reset Layout**, not a layout already saved for a task. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell.
 
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
 
@@ -167,7 +169,7 @@ Review compares each submodule with the gitlink commit recorded by its parent an
 
 When a task has multiple linked pull requests, use the PR selector in the Changes diff header or Review toolbar to inspect one PR revision at a time. The selection is scoped to that task for the current app session. Switching PRs replaces only the remote PR contribution; uncommitted and committed sources keep their normal precedence. Selecting a file from a specific PR row opens that exact PR revision, even when a sibling PR changes the same path.
 
-When several pull requests are linked to a task, hover the PR control in the desktop top bar—or tap the PR status chip on mobile—to open the tabbed CI surface. Each PR tab has a **Remove from task** button. Removing a tab only detaches that Kandev task association; it does not close or modify the GitHub pull request, its branch or commits, the task repositories, or sibling PR associations. Explicitly linking that PR again restores the association.
+When several pull requests are linked to a task, hover the PR control in the desktop top bar or tap the PR status chip on mobile to open the tabbed CI surface. Each PR tab has a **Remove from task** button. Removing a tab only detaches that Kandev task association; it does not close or modify the GitHub pull request, its branch or commits, the task repositories, or sibling PR associations. Explicitly linking that PR again restores the association.
 
 <DocsVideo
   webm="./media/feature-guides/diff-line-feedback.webm"
@@ -237,12 +239,14 @@ The PR panel has two action controls:
 - **Auto-fix CI and address comments** waits for a check run to finish, then sends newly failed checks or review comments to the agent. It refreshes about once a minute, coalesces queued updates, and stops after 10 repair rounds for that PR. Disable and re-enable it after manual review to reset the limit.
 - **Auto-merge when ready** merges only after CI, required reviews, and mergeability are all ready.
 
-Open **Review follow-up** for three notification controls:
+Open **PR events** for three notification controls:
 
 - **Your review is requested** wakes the agent for any new request, including re-review after changes.
 - **PR merged** and **PR closed without merging** independently wake the agent when review work ends.
 
 Lifecycle messages only report the observed event and canonical PR URL; the task workflow and agent context decide what to do next. The repair prompt comes from the built-in `ci-auto-fix` saved prompt and can be overridden for the task. These controls currently operate on GitHub-linked PRs, require the GitHub integration and repository permissions, and do not bypass provider policy. Azure PR creation returns a URL but does not supply the same linked checks, review, or automation panel. See [Integrations](integrations.md).
+
+When a task has more than one linked PR, each PR's tab in the automation popover controls that PR only. Enabling auto-fix or a review notification for one linked PR does not turn it on for the task's other linked PRs. The saved auto-fix prompt override is the one exception: it applies to every linked PR.
 
 </details>
 
@@ -255,7 +259,7 @@ The GitLab MR topbar control has an **Automation** group with the same two actio
 
 Below that, open **Review follow-up** for the same three notification switches GitHub uses, task-level and applying to every merge request linked to the task:
 
-- **Your review is requested** wakes the agent when the workspace's connected GitLab account is newly added as a reviewer on the MR. Staying assigned across MR updates does not re-fire it; being removed and re-added — for example, for a re-review after changes — does.
+- **Your review is requested** wakes the agent when the workspace's connected GitLab account is newly added as a reviewer on the MR. Staying assigned across MR updates does not re-fire it; being removed and re-added (for example, for a re-review after changes) does.
 - **MR merged** and **MR closed without merging** independently wake the agent when review work ends.
 
 Lifecycle messages only report the observed event and canonical MR URL, and Kandev delivers them through the same task-session queue as GitHub's. The repair prompt comes from the built-in `mr-auto-fix` saved prompt and can be overridden for the task. Hovering the MR control in the desktop top bar (a single linked MR only) opens a preview with the pipeline pass rate, approval status, and unresolved-discussion count without opening the dropdown; touch surfaces skip the preview and tap straight to the dropdown. A linked MR also shows a status badge on the task's Kanban card, next to any linked pull-request badge. See [Integrations](integrations.md#gitlab).
@@ -294,7 +298,7 @@ Before moving a task to done:
 - **New Agent has no profiles:** create a profile compatible with the task executor. A profile for another executor is intentionally hidden.
 - **Summary or generated text fails:** configure the corresponding utility agent with an enabled ACP profile in **Settings > Utility Agents**. Repair any stale or disabled profile binding before retrying.
 - **Resume fails:** start fresh when the executor no longer has resumable session state, then supply a summary or copy the relevant context.
-- **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them. For a full queue, expand its chip and run, remove, or clear pending work before retrying; an admin can also review the install-wide limit under **Settings > General > Message Queue**.
+- **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them. For a full queue, expand its chip and run, remove, or clear pending work before retrying; an admin can also review the install-wide limit under **Settings > Task Behavior > Message Queue**.
 - **Changes is empty:** select the correct repository and comparison, then confirm the agent wrote inside the materialized task path.
 - **Review marks became stale:** the underlying diff changed. Re-review the new hash before marking the file complete.
 - **Walkthrough does not appear:** confirm an active task-MCP session exists and that the saved `changes-walkthrough` prompt was not removed or made invalid.

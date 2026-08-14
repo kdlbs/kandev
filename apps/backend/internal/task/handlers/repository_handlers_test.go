@@ -57,7 +57,7 @@ func TestHTTPCreateRepositoryRejectsInvalidLocalPathWithoutPersistence(t *testin
 
 func TestHTTPInitializeLocalRepositoryCreatesRepository(t *testing.T) {
 	router, repo := newRepositoryHTTPTestRouter(t)
-	parentPath := canonicalTempDir(t)
+	parentPath := trustedRepositoryParent(t)
 	body := []byte(`{"name":"new-project","parent_path":` + strconv.Quote(parentPath) + `}`)
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -121,7 +121,7 @@ func TestHTTPInitializeLocalRepositoryMapsClientErrors(t *testing.T) {
 
 	t.Run("existing target", func(t *testing.T) {
 		router, repo := newRepositoryHTTPTestRouter(t)
-		parent := t.TempDir()
+		parent := trustedRepositoryParent(t)
 		target := filepath.Join(parent, "existing")
 		if err := os.Mkdir(target, 0o755); err != nil {
 			t.Fatalf("Mkdir target: %v", err)
@@ -255,9 +255,9 @@ type repositoryHandlerRemoteLister struct {
 	expectedWorkspaceID string
 }
 
-func (l *repositoryHandlerRemoteLister) ListRepoBranches(_ context.Context, workspaceID, owner, name string) ([]service.Branch, error) {
+func (l *repositoryHandlerRemoteLister) ListRepoBranches(_ context.Context, source service.RemoteBranchSource) ([]service.Branch, error) {
 	l.calls++
-	if workspaceID != l.expectedWorkspaceID || owner != "owner" || name != "repo" {
+	if source.WorkspaceID != l.expectedWorkspaceID || source.Provider != "github" || source.Owner != "owner" || source.Name != "repo" {
 		return nil, errors.New("unexpected provider identity")
 	}
 	return []service.Branch{{Name: "main", Type: "remote"}}, nil
@@ -318,7 +318,7 @@ func TestHTTPListDirectoryIncludesChoosableContract(t *testing.T) {
 
 func TestHTTPCreateDirectoryCreatesFolder(t *testing.T) {
 	router, _ := newRepositoryHTTPTestRouter(t)
-	parent := canonicalTempDir(t)
+	parent := trustedRepositoryParent(t)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v1/fs/create-dir",
@@ -339,6 +339,15 @@ func TestHTTPCreateDirectoryCreatesFolder(t *testing.T) {
 	if !strings.Contains(response.Body.String(), strconv.Quote(wantPath)) {
 		t.Fatalf("response missing created path %q: %s", wantPath, response.Body.String())
 	}
+}
+
+func trustedRepositoryParent(t *testing.T) string {
+	t.Helper()
+	directory := canonicalTempDir(t)
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatalf("chmod trusted repository parent: %v", err)
+	}
+	return directory
 }
 
 func TestHTTPListBranchesRejectsRepositoryFromAnotherWorkspace(t *testing.T) {
@@ -565,7 +574,7 @@ func TestRepositoryMutationsRejectedInImproveKandevWorkspace(t *testing.T) {
 	require.Equal(t, http.StatusConflict, res2.Code, res2.Body.String())
 
 	// A normal workspace keeps working (initialize-local succeeds).
-	okPath := t.TempDir()
+	okPath := trustedRepositoryParent(t)
 	body3 := strings.NewReader(`{"name":"ok-repo","parent_path":` + strconv.Quote(okPath) + `}`)
 	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-1/repositories/initialize-local", body3)
 	req3.Header.Set("Content-Type", "application/json")

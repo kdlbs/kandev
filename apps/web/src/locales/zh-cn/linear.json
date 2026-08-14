@@ -1,7 +1,7 @@
 {
   "actions": "操作",
   "active": "活动",
-  "agentProfile": "代理配置",
+  "agentProfile": "智能体配置",
   "allTeams": "全部团队",
   "anApiKeyIsRequired": "必须提供 API 密钥。",
   "any": "（任意）",
@@ -118,7 +118,7 @@
   "priorityMedium": "中",
   "priorityNone": "无优先级",
   "priorityUrgent": "紧急",
-  "promptFieldHelp": "为每个新议题发送给代理的提示词。输入 {{token}} 可插入占位符。",
+  "promptFieldHelp": "为每个新议题发送给智能体的提示词。输入 {{token}} 可插入占位符。",
   "query": "查询",
   "queryHelp": "在标题和描述中做自由文本匹配（可选）。",
   "queryPlaceholder": "身份验证缺陷",

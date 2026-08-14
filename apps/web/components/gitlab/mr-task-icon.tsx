@@ -4,7 +4,7 @@ import { IconGitMerge } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { useTaskBadgeTooltip } from "@/hooks/use-task-badge-tooltip";
+import { useChangeRequestTaskTooltipState } from "@/components/integrations/use-change-request-task-tooltip-state";
 import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import type { TaskMR } from "@/lib/types/gitlab";
 import { deriveMRTaskStatusSummary, MRTaskStatusSummary } from "./mr-task-status-summary";
@@ -229,7 +229,7 @@ export function MRTaskIcon({ taskId }: { taskId: string }) {
 
 function SingleMRIcon({ taskId, mr }: { taskId: string; mr: TaskMR }) {
   const { t } = useTranslation();
-  const tooltip = useTaskBadgeTooltip();
+  const tooltip = useChangeRequestTaskTooltipState();
   const readyToMerge = isMRReadyToMerge(mr);
   const summary = deriveMRTaskStatusSummary(mr, readyToMerge);
   return (
@@ -265,7 +265,7 @@ function SingleMRIcon({ taskId, mr }: { taskId: string; mr: TaskMR }) {
 
 function MultiMRIcon({ taskId, mrs }: { taskId: string; mrs: TaskMR[] }) {
   const { t } = useTranslation();
-  const tooltip = useTaskBadgeTooltip();
+  const tooltip = useChangeRequestTaskTooltipState();
   const aggregateColor = aggregateMRStatusColor(mrs);
   const allReady = areAllOpenMRsReadyToMerge(mrs);
   const summaries = mrs.map((mr) => deriveMRTaskStatusSummary(mr, isMRReadyToMerge(mr)));

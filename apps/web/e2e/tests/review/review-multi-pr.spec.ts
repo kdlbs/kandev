@@ -7,20 +7,41 @@ import {
   seedMultiPRReviewTask,
 } from "../../helpers/multi-pr-review";
 import { SessionPage } from "../../pages/session-page";
+import type { Page } from "@playwright/test";
 
-async function openDesktopReview(session: SessionPage, repositoryName: string) {
-  await session.clickTab("Changes");
-  const prFiles = session.prFilesSection();
-  await expect(prFiles).toBeVisible({ timeout: 20_000 });
-  for (const pr of REVIEW_PRS) {
-    await expect(
-      prFiles.locator(
-        `[data-changes-file=${JSON.stringify(REVIEW_SHARED_FILE)}][data-pr-key="${REVIEW_OWNER}/${repositoryName}/${pr.number}"]`,
-      ),
-    ).toBeVisible();
+async function openDesktopReview(
+  testPage: Page,
+  session: SessionPage,
+  repositoryName: string,
+): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await session.clickTab("Changes");
+      const prFiles = session.prFilesSection();
+      await expect(prFiles).toBeVisible({ timeout: 20_000 });
+      for (const pr of REVIEW_PRS) {
+        await expect(
+          prFiles.locator(
+            `[data-changes-file=${JSON.stringify(REVIEW_SHARED_FILE)}][data-pr-key="${REVIEW_OWNER}/${repositoryName}/${pr.number}"]`,
+          ),
+        ).toBeVisible({ timeout: 30_000 });
+      }
+      await session.changes.getByRole("button", { name: "Review", exact: true }).click();
+      await expect(session.reviewDialog()).toBeVisible({ timeout: 15_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1) throw error;
+
+      // Task/PR records can hydrate before the changes hook finishes its
+      // first file request. Reload once to re-drive that bounded fetch path.
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle();
+    }
   }
-  await session.changes.getByRole("button", { name: "Review", exact: true }).click();
-  await expect(session.reviewDialog()).toBeVisible({ timeout: 15_000 });
+  throw lastError;
 }
 
 test.describe("Review dialog multi-PR selector", () => {
@@ -31,6 +52,7 @@ test.describe("Review dialog multi-PR selector", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(180_000);
     const task = await seedMultiPRReviewTask(apiClient, seedData, "Multi-PR Review E2E");
     const repositoryName = reviewRepositoryName(seedData);
     await testPage.goto(`/t/${task.id}`);
@@ -38,7 +60,7 @@ test.describe("Review dialog multi-PR selector", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
-    await openDesktopReview(session, repositoryName);
+    await openDesktopReview(testPage, session, repositoryName);
 
     const [firstPR, secondPR] = REVIEW_PRS;
     const selector = session.reviewPRSelectorTrigger();

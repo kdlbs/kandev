@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
 )
@@ -90,23 +91,8 @@ func validateMockProviders(reg *Registry, raw string, log *logger.Logger) {
 // HTTP /routing/retry endpoint can flip a degraded provider back to
 // healthy without waiting for the next real launch.
 func registerRealProvidersProber(reg *Registry, log *logger.Logger) {
-	resolver := func(providerID string) ([]string, map[string]string, bool) {
-		ag, ok := reg.Get(providerID)
-		if !ok || !ag.Enabled() {
-			return nil, nil, false
-		}
-		cmd := ag.BuildCommand(agents.CommandOptions{})
-		if cmd.IsEmpty() {
-			return nil, nil, false
-		}
-		var env map[string]string
-		if rt := ag.Runtime(); rt != nil && len(rt.Env) > 0 {
-			env = make(map[string]string, len(rt.Env))
-			for k, v := range rt.Env {
-				env[k] = v
-			}
-		}
-		return cmd.Args(), env, true
+	resolver := func(ctx context.Context, providerID string) ([]string, map[string]string, bool) {
+		return reg.resolveProviderCommand(ctx, providerID)
 	}
 	probe := routingerr.NewACPProbe(resolver, log)
 	for _, id := range RoutableProviderIDs {
@@ -120,6 +106,64 @@ func registerRealProvidersProber(reg *Registry, log *logger.Logger) {
 		}
 		routingerr.RegisterProber(id, probe)
 	}
+}
+
+// resolveProviderCommand builds the host command used by a recovery probe.
+// Managed agents must use the same persisted selection as ordinary host
+// launches. A selection read failure therefore returns no command instead of
+// silently probing the unversioned package.
+func (r *Registry) resolveProviderCommand(
+	ctx context.Context,
+	providerID string,
+) ([]string, map[string]string, bool) {
+	ag, ok := r.Get(providerID)
+	if !ok || !ag.Enabled() {
+		return nil, nil, false
+	}
+	managedRuntimeVersion, ok := r.resolveManagedProviderVersion(ctx, providerID, ag)
+	if !ok {
+		return nil, nil, false
+	}
+	opts := agents.CommandOptions{
+		Runtime:               agentruntime.RuntimeStandalone,
+		ManagedRuntimeVersion: managedRuntimeVersion,
+	}
+	cmd := ag.BuildCommand(opts)
+	if cmd.IsEmpty() {
+		return nil, nil, false
+	}
+	var env map[string]string
+	if rt := ag.Runtime(); rt != nil && len(rt.Env) > 0 {
+		env = make(map[string]string, len(rt.Env))
+		for k, v := range rt.Env {
+			env[k] = v
+		}
+	}
+	return cmd.Args(), env, true
+}
+
+func (r *Registry) resolveManagedProviderVersion(
+	ctx context.Context,
+	providerID string,
+	ag agents.Agent,
+) (string, bool) {
+	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return "", true
+	}
+	selectionStore := r.managedRuntimeSelectionReader()
+	if selectionStore == nil {
+		return "", false
+	}
+	spec := managed.ManagedNPMRuntime()
+	selection, found, err := selectionStore.Get(ctx, providerID, spec.Package)
+	if err != nil || !found {
+		return "", err == nil
+	}
+	if selection.Package != spec.Package || selection.Version == "" {
+		return "", false
+	}
+	return selection.Version, true
 }
 
 // registerExtraMockProviders parses the supplied comma-separated list

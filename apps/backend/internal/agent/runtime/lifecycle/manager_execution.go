@@ -32,11 +32,6 @@ var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 // will never recover an execution.
 var ErrSessionTerminal = errors.New("session is terminal")
 
-// coalescedExecutionCreationTimeout matches the runtime's 60-second agentctl
-// startup window while preventing blocked instance I/O from owning the shared
-// session slot and its activity lease for the lifetime of the manager.
-const coalescedExecutionCreationTimeout = time.Minute
-
 // ResolveSessionRuntime returns the runtime selected for a session without
 // creating or resuming its execution. Session-scoped handlers can use this to
 // reject unsupported runtimes before GetOrEnsureExecution starts resources.
@@ -223,7 +218,10 @@ func (m *Manager) doCoalescedExecution(
 }
 
 func (m *Manager) coalescedExecutionContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	sharedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coalescedExecutionCreationTimeout)
+	// The shared context owns caller-independent cancellation only. Runtime
+	// launch phases start their own deadlines after environment resolution, and
+	// setup scripts derive a separate preparation budget inside those phases.
+	sharedCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	if m.stopCh == nil {
 		return sharedCtx, cancel
 	}
@@ -574,11 +572,13 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if err != nil {
 		return nil, err
 	}
-	if err := resumeRemoteInstancePreflight(ctx, rt, preparation.request); err != nil {
+	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
+	defer launchCancel()
+	if err := resumeRemoteInstancePreflight(launchCtx, rt, preparation.request); err != nil {
 		return nil, err
 	}
 
-	runtimeInstance, err := rt.CreateInstance(ctx, preparation.request)
+	runtimeInstance, err := rt.CreateInstance(launchCtx, preparation.request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
@@ -859,7 +859,8 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 			WorktreeID: repository.WorktreeID, TaskDirName: info.TaskDirName, WorkspaceID: info.WorkspaceID,
 			RepoName: repository.RepoName, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
-			BranchSlug: repository.BranchSlug, BranchIdentitySlug: repository.BranchIdentitySlug,
+			RemoteSyncHandled: repository.RemoteSyncHandled,
+			BranchSlug:        repository.BranchSlug, BranchIdentitySlug: repository.BranchIdentitySlug,
 		}); err != nil {
 			return fmt.Errorf("recreate workspace worktree %q: %w", repository.RepoName, err)
 		}

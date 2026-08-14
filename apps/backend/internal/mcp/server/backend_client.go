@@ -34,6 +34,11 @@ type ChannelBackendClient struct {
 	requestCh chan *ws.Message
 	pending   map[string]chan *ws.Message
 	pendingMu sync.Mutex
+	done      chan struct{}
+	closeOnce sync.Once
+	closeMu   sync.Mutex
+	closed    bool
+	publishWG sync.WaitGroup
 	logger    *logger.Logger
 }
 
@@ -47,6 +52,7 @@ func NewChannelBackendClient(log *logger.Logger) *ChannelBackendClient {
 	return &ChannelBackendClient{
 		requestCh: make(chan *ws.Message, 100),
 		pending:   make(map[string]chan *ws.Message),
+		done:      make(chan struct{}),
 		logger:    clientLogger,
 	}
 }
@@ -78,6 +84,16 @@ func (c *ChannelBackendClient) HandleResponse(msg *ws.Message) {
 // RequestPayload sends a request to the backend and unmarshals the response.
 // The request will be cancelled if the context is cancelled or if Reset() is called.
 func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string, payload, result interface{}) error {
+	if !c.beginPublish() {
+		return fmt.Errorf("MCP backend client is closed")
+	}
+	publishing := true
+	defer func() {
+		if publishing {
+			c.publishWG.Done()
+		}
+	}()
+
 	id := uuid.New().String()
 	start := time.Now()
 
@@ -95,7 +111,7 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	c.logger.Debug("sending MCP request through agent stream",
 		zap.String("request_id", id),
 		zap.String("action", action),
-		zap.Any("payload", payload))
+		zap.Any("payload", backendPayloadForLog(action, payload)))
 
 	// Ensure cleanup on exit
 	defer func() {
@@ -108,6 +124,8 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	select {
 	case c.requestCh <- msg:
 		// Request sent
+	case <-c.done:
+		return fmt.Errorf("MCP backend client is closed")
 	case <-ctx.Done():
 		c.logger.Debug("MCP request cancelled before send",
 			zap.String("request_id", id),
@@ -122,6 +140,8 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 			zap.Duration("duration", time.Since(start)))
 		return fmt.Errorf("timeout sending request to agent stream")
 	}
+	publishing = false
+	c.publishWG.Done()
 
 	// Wait for response
 	select {
@@ -162,7 +182,36 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 			zap.Duration("duration", time.Since(start)),
 			zap.Error(ctx.Err()))
 		return ctx.Err()
+	case <-c.done:
+		return fmt.Errorf("MCP backend client is closed")
 	}
+}
+
+func (c *ChannelBackendClient) beginPublish() bool {
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
+	if c.closed {
+		return false
+	}
+	c.publishWG.Add(1)
+	return true
+}
+
+func backendPayloadForLog(action string, payload interface{}) interface{} {
+	if action != ws.ActionMCPInvokePluginTool {
+		return payload
+	}
+	values, ok := payload.(map[string]any)
+	if !ok {
+		return "<redacted>"
+	}
+	safe := make(map[string]any, len(values))
+	for key, value := range values {
+		if key != pluginToolArgumentsKey {
+			safe[key] = value
+		}
+	}
+	return safe
 }
 
 // Reset clears all pending MCP requests.
@@ -179,7 +228,13 @@ func (c *ChannelBackendClient) Reset() {
 	}
 }
 
-// Close closes the request channel.
+// Close prevents new requests and cancels pending requests.
 func (c *ChannelBackendClient) Close() {
-	close(c.requestCh)
+	c.closeOnce.Do(func() {
+		c.closeMu.Lock()
+		c.closed = true
+		close(c.done)
+		c.closeMu.Unlock()
+	})
+	c.publishWG.Wait()
 }
