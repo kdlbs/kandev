@@ -46,7 +46,9 @@ func clearAmbientGitLabEnv() {
 //
 // environmentValue is declared as an extra reader because it, not os.Getenv,
 // is how this package reads the environment almost everywhere: six of the
-// eight reads go through (*GitOperator).environmentValue, which falls back to
+// eight GitLab host/token reads go through (*GitOperator).environmentValue,
+// the other two being the package-level os.Getenv fallbacks in
+// git_pr_providers.go. environmentValue falls back to
 // os.Environ() when the operator was built with a nil provider (git.go:119).
 // That is the exact path the reported failure came in on, so a guard watching
 // only os.Getenv would have watched the wrong two call sites.
