@@ -13,8 +13,8 @@ spec: "../../specs/clarification-active-lifecycle/spec.md"
 ## Acceptance
 
 - The production projector derives pending state from a bounded authoritative loader on restore and
-  pending-sensitive events, including an ordinary message in a newer turn; event order cannot re-arm
-  an older request.
+  pending-sensitive events, including an ordinary message in a newer turn and deletion of that turn's
+  last message; event order and message deletion cannot re-arm an older request.
 - Boot/task-list hydration repairs an existing stale pending field with monotonic bounded CAS,
   preserves every unrelated summary field, returns the corrected row, and publishes a complete
   replacement on semantic change.

@@ -7,6 +7,7 @@
 > Amended by
 > [ADR-2026-08-14-current-turn-clarification-ownership](2026-08-14-current-turn-clarification-ownership.md):
 > a detached clarification remains a hard-pause barrier only while its turn remains current.
+> That ownership rule stands independently of this proposal's future status.
 
 ## Context
 

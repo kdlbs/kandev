@@ -74,8 +74,9 @@ remain during migration, but switchers use the summary when present.
   state icon. Both outrank generating/background activity, which outranks
   coarse lifecycle state. This is the existing task-row precedence.
 - A clarification contributes to `pending_action` only while its bundle is pending in the session's
-  current turn. A newer turn supersedes older pending clarification rows without requiring transcript
-  history to be rewritten.
+  current durable `task_session_turns` record. A newer turn supersedes older pending clarification rows
+  without requiring transcript history to be rewritten; deleting newer-turn messages cannot move this
+  boundary backward.
 - A session's `pending_action` clears only when the specific request that armed
   it resolves — a `message.updated` on that same permission/clarification
   request row (matched by type and `pending_id`) reaching a terminal,

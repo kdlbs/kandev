@@ -25,9 +25,10 @@ instance is required.
   `message.updated`.
 - The workflow clarification guard used that same unbounded finder, so an inert historical row could
   block `on_turn_complete`.
-- `GetPendingActionsBySessionIDs` already scoped task/session API projections to the latest message
-  turn. The live main instance therefore returned no flat pending action for two affected tasks while
-  their persisted `status_summary.pending_action` still said `clarification`.
+- `GetPendingActionsBySessionIDs` already scoped task/session API projections to the latest surviving
+  message turn. The live main instance therefore returned no flat pending action for two affected tasks
+  while their persisted `status_summary.pending_action` still said `clarification`. Review also found
+  that message deletion could move this provisional boundary backward despite a newer durable turn.
 - The status projector restored that cached summary and tracked one request identity per session.
   Existing-summary hydration repaired only missing rows, so a stale pending field survived restart
   and reload.
@@ -48,9 +49,10 @@ bundle detached, a newer bundle rejected, and a later completion republishing th
 ### Current-turn clarification authority
 
 - In `apps/backend/internal/task/repository/sqlite/message.go`, replace the historical pending finder
-  with `FindActiveClarificationMessagesBySessionID`. Factor/reuse the latest-message-turn CTE and
-  dialect ordering used by `GetPendingActionsBySessionIDs` so both methods agree on SQLite and
-  PostgreSQL.
+  with `FindActiveClarificationMessagesBySessionID`. Select the newest durable
+  `task_session_turns` row per session, then restrict messages to that turn. Reuse this derivation in
+  `GetPendingActionsBySessionIDs` so SQLite and PostgreSQL agree and message deletion cannot reactivate
+  an older bundle.
 - Treat missing clarification status as pending for parity with the existing compact projection.
   Return only current-turn `clarification_request` rows whose status is empty or `pending`.
 - Rename the repository interfaces and focused mocks in
@@ -66,8 +68,9 @@ bundle detached, a newer bundle rejected, and a later completion republishing th
   against active current-turn ownership. A superseded/terminal bundle returns conflict and cannot
   publish `clarification.answered`; current-turn detached answers and rejections keep existing
   behavior.
-- Add an environment-gated PostgreSQL behavior test for the changed dialect-sensitive query. No
-  migration or persisted-row rewrite.
+- Order durable turns identically by `started_at`, `created_at`, then `id` descending. Add an
+  environment-gated PostgreSQL behavior test for the changed query. No migration or persisted-row
+  rewrite.
 
 ### Authoritative summary convergence
 
@@ -99,12 +102,14 @@ bundle detached, a newer bundle rejected, and a later completion republishing th
 
 ### Current-turn transcript discovery
 
-- In `apps/web/lib/utils/pending-clarification.ts`, bound clarification discovery to the latest
-  message turn using the same legacy fallback already documented for permission requests.
+- In `apps/web/lib/utils/pending-clarification.ts`, accept the newest durable turn ID from the existing
+  `turns.bySession` state and bound clarification discovery to it. While turn history is unavailable,
+  use the session's authoritative `pending_action` rather than treating the latest surviving message
+  as current; retain latest-message fallback only for legacy sessions with no turn records.
 - Build the selected bundle only from that turn and exact `pending_id`; terminal or older-turn rows
   cannot become the overlay fallback after a newer bundle is skipped.
 - Extend `apps/web/lib/utils/pending-clarification.test.ts` with older-pending/newer-turn, same-turn
-  bundle, missing-turn legacy, and newer-rejected-bundle cases.
+  bundle, missing-turn legacy, newer-rejected-bundle, and deleted-newer-turn-message cases.
 
 ### Pending-owner task navigation
 
@@ -139,12 +144,13 @@ bundle detached, a newer bundle rejected, and a later completion republishing th
 
 ## Tests
 
-- **What:** only current-turn clarification rows are active; older-turn pending rows are excluded,
-  missing status remains pending, and SQLite/PostgreSQL agree.
+- **What:** only newest-durable-turn clarification rows are active; older-turn pending rows are
+  excluded, missing status remains pending only in that turn, deleting every newer-turn message does
+  not reactivate history, and SQLite/PostgreSQL agree.
   - **Files:** `apps/backend/internal/task/repository/sqlite/message_test.go` and new
     `apps/backend/internal/task/repository/sqlite/message_pending_postgres_test.go`
-  - **How:** real database tests create two turns with pending rows and verify the active finder and
-    compact pending projection return identical results.
+  - **How:** real database tests create two turns with pending rows, delete every message in the newer
+    turn, and verify the active finder and compact pending projection still exclude the older bundle.
 - **What:** repeated detach does not update or publish an already-detached bundle; a new turn prevents
   old-row detachment; query failure keeps the workflow guard closed.
   - **Files:** `apps/backend/internal/clarification/canceller_test.go`,
@@ -167,7 +173,8 @@ bundle detached, a newer bundle rejected, and a later completion republishing th
     tests nearest existing status-summary coverage.
   - **How:** persisted stale summary plus current-turn messages, then assert returned/persisted revision
     and complete replacement event.
-- **What:** loaded transcript discovery stays within the latest turn and preserves legacy no-turn data.
+- **What:** loaded transcript discovery follows durable turn identity through message deletion and
+  preserves legacy no-turn data.
   - **File:** `apps/web/lib/utils/pending-clarification.test.ts`
   - **How:** pure Vitest message arrays.
 - **What:** pending owner outranks remembered/primary selection on desktop and phone while clean tasks
@@ -241,8 +248,8 @@ share projection semantics; task 05 spans all layers. Waves do not authorize sub
 
 ## Risks
 
-- Latest-message ordering differs by dialect (`rowid` on SQLite, stable ID tie-break on PostgreSQL).
-  Reuse the existing pending-action ordering helper and run the env-gated PostgreSQL behavior test.
+- Durable-turn ordering must agree across dialects. Use the same `started_at`, `created_at`, and `id`
+  ordering in scalar and batch queries, then run the env-gated PostgreSQL behavior test.
 - Clearing on any ordinary message without checking its turn would recreate event-order bugs. The
   repository refresh, not message type, decides whether pending state changed.
 - Read-time summary repair can race the live projector. Bounded CAS reload/retry and projector

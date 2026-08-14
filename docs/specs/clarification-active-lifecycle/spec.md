@@ -1,5 +1,5 @@
 ---
-status: draft
+status: approved
 created: 2026-08-14
 owner: kandev
 ---
@@ -26,6 +26,8 @@ hiding the action the icon represents.
 - Acceptance of a newer turn supersedes every pending clarification from an older turn. Superseded
   rows remain transcript history but cannot drive a chat overlay, task/session pending projection,
   workflow guard, turn-completion detach pass, or late agent resume.
+- Deleting every message from the newer turn does not move ownership backward or reactivate an older
+  clarification.
 - All backend consumers derive active clarification state from one repository rule. Event payloads
   trigger projection refreshes; they are not a second source of pending truth.
 - Repeated detach/completion processing is a semantic no-op after a bundle is already detached. It
@@ -52,11 +54,14 @@ No schema change.
 - Clarification questions remain `task_session_messages` rows with
   `type = "clarification_request"`.
 - Rows in one bundle share `metadata.pending_id`; terminal status remains in `metadata.status`.
-- `task_session_messages.turn_id` determines current-turn ownership. The latest persisted message for
-  a session identifies the current turn, matching the existing pending-action projection.
+- `task_session_messages.turn_id` associates a question with its turn. The newest durable
+  `task_session_turns` record for the session identifies the current turn; deleting messages does not
+  delete that parent turn or move ownership backward.
 - `metadata.agent_disconnected=true` records that no in-memory waiter owns an otherwise active bundle.
 - A superseded row may retain `metadata.status = "pending"`. Pending metadata is historical evidence,
   not sufficient proof that the request is operational.
+- A missing-status row in an older turn is superseded history. Turn ownership takes precedence over
+  the legacy rule that missing status means pending.
 - `TaskSession.pending_action` and `TaskStatusSummary.pending_action` remain bounded derived fields.
   They are reconstructable and never become independent clarification state.
 
@@ -66,6 +71,8 @@ No new route or response field.
 
 - `GET /api/v1/tasks/:taskId/task-sessions` continues to expose each session's current derived
   `pending_action`; task navigation uses this existing field.
+- `GET /api/v1/task-sessions/:sessionId/turns` continues to expose durable turn history; active chat
+  uses its newest turn identity instead of inferring ownership from surviving messages.
 - Task list, workflow snapshot, and boot payloads continue to expose task-level `pending_action` in
   the status summary and legacy fallback fields.
 - `POST /api/v1/clarification/:pendingId/respond` accepts an active live or detached current-turn
@@ -94,7 +101,7 @@ Transitions:
 - Acceptance of a newer turn moves any older pending bundle to `superseded_history` operationally;
   no history rewrite is required.
 - Neither `terminal` nor `superseded_history` can become active again. A new request creates a new
-  bundle identity.
+  bundle identity; message deletion cannot reverse this transition.
 
 ## Permissions
 
@@ -119,7 +126,8 @@ session they can already access. Session selection does not broaden task visibil
 - Message history remains durable and is not destructively rewritten merely because a newer turn
   exists.
 - Active clarification state is reconstructable after restart from message status plus current-turn
-  ownership.
+- Current-turn ownership is reconstructable from durable turn rows even when a turn has no remaining
+  messages.
 - Task summaries are caches. Boot and task-list reads correct a stale persisted `pending_action` with
   a monotonic revision while preserving all unrelated summary fields.
 - No one-off mutation or backfill of an existing installation database is required. Deploying the
@@ -134,6 +142,8 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** an older turn retains a detached pending row, **WHEN** the session accepts a newer ordinary
   turn, **THEN** the old row remains in history but no overlay, pending projection, detach event, or
   workflow barrier derives from it.
+- **GIVEN** a newer turn superseded an older pending question, **WHEN** every message in the newer turn
+  is deleted, **THEN** the durable newer turn remains current and the older question stays inert.
 - **GIVEN** an old detached question and a newer clarification bundle, **WHEN** the user skips the
   newer bundle and reloads, **THEN** neither bundle reappears, the task question icon is absent, and
   later turn completion cannot re-arm the old bundle.

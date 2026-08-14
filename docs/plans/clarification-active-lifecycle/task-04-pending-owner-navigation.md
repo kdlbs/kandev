@@ -12,8 +12,9 @@ spec: "../../specs/clarification-active-lifecycle/spec.md"
 
 ## Acceptance
 
-- Loaded-message clarification discovery sees pending bundles only in the latest turn and preserves
-  legacy behavior when the newest message has no turn ID.
+- Loaded-message clarification discovery uses the newest durable turn from existing turn state,
+  survives deletion of all newer-turn messages, and preserves legacy behavior when no turn record
+  exists.
 - Desktop task activation loads sessions and chooses the newest input-capable session matching the
   task's pending action before remembered/primary preference, including activation from a non-task
   route; clean-task behavior and async selection guards stay unchanged.

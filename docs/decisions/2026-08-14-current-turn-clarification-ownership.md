@@ -13,8 +13,10 @@ resume the same session through an event fallback.
 Several consumers treated every historical pending row as operational. Turn completion repeatedly
 detached and republished old bundles, the workflow guard scanned full session history, and a persisted
 task summary could retain the resulting question indicator indefinitely. Other consumers already
-limited pending actions to the latest message turn. Those conflicting definitions let an older request
-reappear after a newer request was rejected and let an inert request block workflow transitions.
+limited pending actions to the latest surviving message turn. That boundary can move backward when
+the final message of a newer turn is deleted even though its durable turn record remains. Those
+conflicting definitions let an older request reappear after a newer request was rejected and let an
+inert request block workflow transitions.
 
 Task summaries also identify only the kind of pending action. A real question owned by a secondary
 session can therefore make a task row correct while normal task navigation opens the primary session
@@ -24,8 +26,10 @@ and hides the question.
 
 The session's current turn owns active clarification state.
 
-- A pending clarification is operational only when its message belongs to the turn of the session's
-  latest persisted message. Missing status retains the existing legacy meaning of pending.
+- A pending clarification is operational only when its message belongs to the session's newest durable
+  `task_session_turns` record. Missing status retains the existing legacy meaning of pending only after
+  current-turn ownership matches.
+- Deleting messages never moves current-turn ownership backward or reactivates a superseded bundle.
 - Detachment preserves late-answer behavior only while that turn remains current. Once a newer turn is
   accepted, older pending rows become inert history without requiring a destructive rewrite.
 - One repository derivation supplies the backend clarification guard, detach/expiry fallback,
@@ -39,13 +43,14 @@ The session's current turn owns active clarification state.
 - Existing task summaries reconcile their pending field on normal task-list and boot reads. Repair uses
   compare-and-set, preserves unrelated fields, advances revision only for a semantic change, and
   publishes the complete corrected replacement.
-- Frontend transcript logic mirrors the same turn boundary for already-loaded messages. Task-row
-  navigation uses the server's per-session `pending_action` projection and selects the newest matching
-  input-capable session before remembered or primary preferences.
+- Frontend transcript logic consumes the existing durable turn list when available and uses the
+  server's per-session `pending_action` while turn history is unavailable. Task-row navigation selects
+  the newest matching input-capable session before remembered or primary preferences.
 
 This decision narrows the clarification hard-pause lifetime in
 [ADR 0015](0015-explicit-completion-signal-for-auto-advance.md). A detached question remains a hard
 barrier while its turn is current, not forever after unrelated later turns are accepted.
+This ownership rule stands independently if ADR 0015 is later rejected, superseded, or amended again.
 
 ## Consequences
 
@@ -59,7 +64,7 @@ barrier while its turn is current, not forever after unrelated later turns are a
   session.
 - Pending projection performs bounded database reads on pending-sensitive events and normal list/boot
   hydration. It avoids unbounded transcript delivery or inactive-session subscriptions.
-- SQLite and PostgreSQL must share the latest-turn query semantics; dialect-sensitive repository tests
+- SQLite and PostgreSQL must select the same newest durable turn; dialect-sensitive repository tests
   are required.
 
 ## Alternatives considered
@@ -78,6 +83,11 @@ has not moved the conversation forward.
 
 Rejected. It adds a mutation to every turn-entry path and changes transcript history to enforce a
 rule that can be reconstructed from existing turn identity.
+
+### Derive ownership from the latest surviving message
+
+Rejected. Deleting the last message in a newer turn would roll the boundary backward and reactivate
+older pending history even though the newer `task_session_turns` record remains durable.
 
 ### Add a dedicated clarification-state table
 

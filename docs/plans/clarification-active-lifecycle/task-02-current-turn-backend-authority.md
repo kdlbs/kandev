@@ -12,8 +12,10 @@ spec: "../../specs/clarification-active-lifecycle/spec.md"
 
 ## Acceptance
 
-- One repository method returns only pending clarification rows in the latest message turn, with
-  matching SQLite/PostgreSQL behavior and legacy missing-status support.
+- One repository method returns only pending clarification rows in the newest durable turn, with
+  matching SQLite/PostgreSQL behavior and legacy missing-status support after ownership matches.
+- Deleting every message from a newer turn cannot reactivate a pending clarification from an older
+  turn.
 - Detach/expiry fallback and workflow guarding consume that method; repeated detach writes and
   publishes nothing, while repository errors keep the workflow barrier closed.
 - A detached bundle in the current turn still supports late answer/rejection. A database-fallback
@@ -61,8 +63,9 @@ Sequential. Task 03 consumes this repository authority and its exact failure sem
 
 ## Risks
 
-- Do not filter solely by maximum timestamp; tied timestamps need the existing dialect-specific stable
-  order.
+- Do not filter solely by maximum timestamp; use the shared `started_at`, `created_at`, and `id`
+  ordering for tied values.
+- Derive the boundary from `task_session_turns`, never the latest surviving message.
 - Do not reject a detached current-turn bundle merely because the in-memory Store no longer owns it.
 - Use `context.WithoutCancel` for terminal writes already promised durable by the handler.
 - Do not make query failure look like no pending clarification in workflow guarding.
