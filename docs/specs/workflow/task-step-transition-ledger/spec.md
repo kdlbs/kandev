@@ -159,6 +159,7 @@ trigger. The mapping is fixed so that no implementer has to choose:
 | A `move_task_kandev` pending move applied at turn end | `mcp_deferred_move` |
 | `Service.UpdateTask` where the request carries a new `workflow_step_id` | `task_update` |
 | `executeStepTransition` and the engine's `ApplyTransition` | `engine_transition` |
+| An explicit user cancellation completing a turn (`turnCompletionCauseUserCancellation`), reached through the same `on_turn_complete` code path as `engine_transition` | `user_cancellation` |
 | Feeder pull and queued-task promotion on step vacate | `wip_pull` |
 | `BulkMoveTasks` / `BulkMoveSelectedTasks` | `bulk_move` |
 | `RestoreTaskMessageRollbackIfSessionState` | `unarchive_restore` |
@@ -192,6 +193,19 @@ An `engine_transition` is `agent` when the trigger came from a session's turn
 (`on_turn_start`, `on_turn_complete`, `on_exit`/`on_enter` reached through one)
 and `system` when it came from a non-session trigger such as a
 children-completed rollup or a scheduled evaluation.
+
+A `user_cancellation` is never `agent`, even though it reaches the engine
+through the same `on_turn_complete` code path an `engine_transition` does: the
+turn didn't run to completion on its own, a caller forced it closed. Actor
+kind for `user_cancellation` follows the same identity-on-context rule as
+`manual_move` — `human` with the cancelling request's user ID when an
+authenticated identity is present, `system` with no identifier when it is not
+(for example, an automated caller that cancels on a session's behalf with no
+request-scoped identity). This is a deliberate carve-out from the
+`engine_transition` rule above, not a relaxation of it: the trigger value
+itself (`user_cancellation` vs. `engine_transition`) is what distinguishes a
+forced completion from a natural one, so a consumer never has to inspect
+`actor_kind` to tell them apart.
 
 ### `telemetry_activations` (new)
 

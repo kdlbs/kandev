@@ -13,6 +13,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -248,5 +249,92 @@ func TestApplyTransitionRepeatedToSameTargetWritesNoSecondRow(t *testing.T) {
 
 	if len(after) != len(before) {
 		t.Fatalf("rows after retried transition = %d, want unchanged %d", len(after), len(before))
+	}
+}
+
+// TestApplyTransitionOnUserCancellationRecordsHumanActorNotAgent covers
+// carlosflorencio's PR #2623 review point 2b: an explicit user cancellation
+// reaches ApplyTransition through the same on_turn_complete code path as a
+// natural completion, but must not be attributed to the session's agent.
+// cancellationTransitionAttribution pre-wraps ctx (as processOnTurnComplete-
+// WithCause and processOnTurnCompleteViaEngineWithCause do when cause is
+// turnCompletionCauseUserCancellation) so the row records the cancelling
+// human's identity instead — see spec.md's user_cancellation carve-out.
+func TestApplyTransitionOnUserCancellationRecordsHumanActorNotAgent(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-1", Role: authn.RoleMember})
+	cancelCtx := cancellationTransitionAttribution(ctx)
+
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	if err := store.ApplyTransition(cancelCtx, "t1", "s1", "step1", "step2", engine.TriggerOnTurnComplete); err != nil {
+		t.Fatalf("ApplyTransition: %v", err)
+	}
+
+	rows := stepTransitionRowsForTaskOrchestrator(t, repo, "t1")
+	last := rows[len(rows)-1]
+	if last.trigger != string(steptelemetry.TriggerUserCancellation) {
+		t.Fatalf("trigger = %q, want %q", last.trigger, steptelemetry.TriggerUserCancellation)
+	}
+	if last.actorKind != string(steptelemetry.ActorHuman) {
+		t.Fatalf("actor_kind = %q, want %q (cancellation is human-caused, not agent)", last.actorKind, steptelemetry.ActorHuman)
+	}
+	if last.actorID == nil || *last.actorID != "user-1" {
+		t.Fatalf("actor_id = %v, want user-1", last.actorID)
+	}
+	if last.sessionID != nil {
+		t.Fatalf("session_id = %v, want nil (the session is where the cancellation landed, not who caused it)", last.sessionID)
+	}
+}
+
+// TestApplyTransitionOnUserCancellationWithNoIdentityRecordsSystemActor
+// covers the unauthenticated-caller case (e.g. an automated cancellation with
+// no request-scoped identity): cancellationTransitionAttribution must fall
+// back to system, mirroring HumanOrSystemActor's manual_move behavior, not
+// silently produce an empty/unknown actor.
+func TestApplyTransitionOnUserCancellationWithNoIdentityRecordsSystemActor(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	cancelCtx := cancellationTransitionAttribution(context.Background())
+
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger())
+	if err := store.ApplyTransition(cancelCtx, "t1", "s1", "step1", "step2", engine.TriggerOnTurnComplete); err != nil {
+		t.Fatalf("ApplyTransition: %v", err)
+	}
+
+	rows := stepTransitionRowsForTaskOrchestrator(t, repo, "t1")
+	last := rows[len(rows)-1]
+	if last.trigger != string(steptelemetry.TriggerUserCancellation) {
+		t.Fatalf("trigger = %q, want %q", last.trigger, steptelemetry.TriggerUserCancellation)
+	}
+	if last.actorKind != string(steptelemetry.ActorSystem) {
+		t.Fatalf("actor_kind = %q, want %q", last.actorKind, steptelemetry.ActorSystem)
+	}
+	if last.actorID != nil {
+		t.Fatalf("actor_id = %v, want nil", last.actorID)
+	}
+}
+
+// TestEngineTransitionAttributionPreservesUserCancellationTrigger pins the
+// regression executeStepTransition's legacy on_turn_complete path would
+// otherwise hit: before this fix, engineTransitionAttribution unconditionally
+// overwrote whatever attribution ctx already carried, so a cancellation
+// pre-wrap set by the caller would have been silently clobbered back to
+// engine_transition/agent by executeStepTransition's own call. It must now
+// respect the same outermost-caller-wins rule ApplyTransition's HasTrigger
+// guard already enforces.
+func TestEngineTransitionAttributionPreservesUserCancellationTrigger(t *testing.T) {
+	cancelCtx := cancellationTransitionAttribution(context.Background())
+
+	got := engineTransitionAttribution(cancelCtx, "s1", engine.TriggerOnTurnComplete)
+
+	attribution := steptelemetry.FromContext(got)
+	if attribution.Trigger != steptelemetry.TriggerUserCancellation {
+		t.Fatalf("trigger = %q, want %q (outer caller must win)", attribution.Trigger, steptelemetry.TriggerUserCancellation)
+	}
+	if attribution.ActorKind == steptelemetry.ActorAgent {
+		t.Fatalf("actor_kind = %q, must not fall back to agent once a cancellation trigger is set", attribution.ActorKind)
 	}
 }

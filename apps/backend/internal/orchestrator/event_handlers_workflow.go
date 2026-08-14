@@ -85,6 +85,9 @@ func (s *Service) processOnTurnCompleteWithCause(
 	if !ok {
 		return false
 	}
+	if cause == turnCompletionCauseUserCancellation {
+		ctx = cancellationTransitionAttribution(ctx)
+	}
 	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true)
 	return true
 }
@@ -501,7 +504,15 @@ func engineTriggerIsSessionOriginated(trigger engine.Trigger) bool {
 // sessionID presence alone: on_children_completed always resolves a session
 // (the parent's active one) purely to satisfy the engine's MachineState API
 // shape, and that session did not cause the transition.
+//
+// Does not overwrite an attribution the caller already set explicitly (the
+// same outermost-caller-wins rule ApplyTransition uses) — executeStepTransition's
+// legacy on_turn_complete path pre-wraps ctx with cancellationTransitionAttribution
+// when the completion was forced by a cancellation, and that must survive.
 func engineTransitionAttribution(ctx context.Context, sessionID string, trigger engine.Trigger) context.Context {
+	if steptelemetry.HasTrigger(ctx) {
+		return ctx
+	}
 	attribution := steptelemetry.Attribution{Trigger: steptelemetry.TriggerEngineTransition, ActorKind: steptelemetry.ActorSystem}
 	if sessionID != "" && engineTriggerIsSessionOriginated(trigger) {
 		attribution.ActorKind = steptelemetry.ActorAgent
@@ -509,6 +520,24 @@ func engineTransitionAttribution(ctx context.Context, sessionID string, trigger 
 		attribution.SessionID = sessionID
 	}
 	return steptelemetry.WithAttribution(ctx, attribution)
+}
+
+// cancellationTransitionAttribution wraps ctx with the user_cancellation
+// trigger for an on_turn_complete that only ran because a caller force-closed
+// the turn (turnCompletionCauseUserCancellation), rather than the turn
+// completing on its own — reached through the same code path an
+// engine_transition is, but not attributable to the session's agent. Actor
+// kind follows the same identity-on-context rule as manual_move: human with
+// the cancelling request's user ID when authenticated, system with no ID
+// otherwise. Deliberately does not set SessionID — the session is where the
+// cancellation landed, not who caused it.
+func cancellationTransitionAttribution(ctx context.Context) context.Context {
+	actorKind, actorID := steptelemetry.HumanOrSystemActor(ctx)
+	return steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger:   steptelemetry.TriggerUserCancellation,
+		ActorKind: actorKind,
+		ActorID:   actorID,
+	})
 }
 
 // handleTaskMoved handles manual task step changes (drag-and-drop, stepper "Move here").
@@ -3272,6 +3301,9 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		zap.String("from_step_id", result.FromStepID),
 		zap.String("to_step_id", result.ToStepID))
 
+	if cause == turnCompletionCauseUserCancellation {
+		ctx = cancellationTransitionAttribution(ctx)
+	}
 	return s.applyEngineTransition(ctx, taskID, session, result, engine.TriggerOnTurnComplete, task.Description, true)
 }
 

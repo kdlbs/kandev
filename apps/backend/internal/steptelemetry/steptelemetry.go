@@ -31,6 +31,7 @@ const (
 	TriggerMCPMove          Trigger = "mcp_move"
 	TriggerMCPDeferredMove  Trigger = "mcp_deferred_move"
 	TriggerEngineTransition Trigger = "engine_transition"
+	TriggerUserCancellation Trigger = "user_cancellation"
 	TriggerWIPPull          Trigger = "wip_pull"
 	TriggerBulkMove         Trigger = "bulk_move"
 	TriggerUnarchiveRestore Trigger = "unarchive_restore"
