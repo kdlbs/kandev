@@ -75,8 +75,8 @@ version next to its installed version (e.g. "Latest v2.1.0"), so you can see
 version drift at a glance, not only when an update is available. A plugin
 that isn't in any configured source shows a "not in the marketplace" hint
 instead. That hint only appears when the check actually reached every enabled
-source: if one of your sources was unreachable — or you have no source enabled
-at all — the plugins it carries are simply left blank rather than reported as
+source: if one of your sources was unreachable, or you have no source enabled
+at all, the plugins it carries are simply left blank rather than reported as
 removed, and the header explains what went wrong.
 
 This check runs once when the page loads, and again whenever you click
