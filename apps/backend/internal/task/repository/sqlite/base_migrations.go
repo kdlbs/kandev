@@ -347,8 +347,12 @@ func (r *Repository) runMigrations() error {
 	// backfill in the same pass — the backfill's INSERT references the new
 	// column and conflict target. Both live in
 	// subagent_context_execution_migration.go / subagent_context_backfill.go.
-	r.migrateSubagentContextExecutionIdentity()
-	r.migrateSubagentContextBackfill()
+	// The backfill runs only when the AC-33 end state is schema-observed to
+	// hold; otherwise it is skipped entirely (not just its key writes) and
+	// retried, along with the shape migration, on the next boot.
+	if r.migrateSubagentContextExecutionIdentity() {
+		r.migrateSubagentContextBackfill()
+	}
 
 	return nil
 }

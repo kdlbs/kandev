@@ -30,22 +30,27 @@ const subagentContextShapeMigrationName = "task_session_subagents.execution_iden
 // pre-migration shape (recreateTable's own transaction rollback guarantees
 // that) and execution_since left unwritten. So the error is caught and
 // logged here instead of returned.
-func (r *Repository) migrateSubagentContextExecutionIdentity() {
+//
+// Returns whether the AC-33 end state is schema-observed to hold once this
+// call returns — AC-33c's caller (runMigrations) uses this to decide whether
+// the backfill may run at all this pass.
+func (r *Repository) migrateSubagentContextExecutionIdentity() bool {
 	if err := r.migrateSubagentContextExecutionIdentityUnsafe(); err != nil {
 		r.warnSubagentContextMigration(subagentContextShapeMigrationName, err)
-		return
+		return false
 	}
 
 	holds, err := r.subagentContextExecutionShapeHolds()
 	if err != nil {
 		r.warnSubagentContextMigration(subagentContextShapeMigrationName+".shape_check", err)
-		return
+		return false
 	}
 	if !holds {
-		return
+		return false
 	}
 	r.migrate.Apply("kandev_meta.subagent_context_execution_since",
 		subagentContextActivationKeyInsertSQL("subagent_context_execution_since", subagentContextNowRFC3339Nano()))
+	return true
 }
 
 func (r *Repository) migrateSubagentContextExecutionIdentityUnsafe() error {

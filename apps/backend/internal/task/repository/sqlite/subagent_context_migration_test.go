@@ -714,12 +714,18 @@ func TestSubagentContextBackfillStatementFailureLogsWarnWithMigrationName(t *tes
 	// Reset to "not yet activated" (see newSubagentMigrationTestRepo's
 	// comment) so the next runMigrations() call actually attempts the
 	// backfill instead of being skipped by subagentContextBackfillActivated,
-	// then drop its INSERT target so that attempt fails.
+	// then break its INSERT statement so that attempt fails. Dropping the
+	// whole table would also make subagentContextExecutionShapeHolds report
+	// "does not hold", and AC-33c gates the backfill on that check — so this
+	// drops a column the INSERT's column list needs (updated_at) instead of
+	// the table itself: the AC-33 shape check (agent_execution_id NOT NULL,
+	// the 3-column UNIQUE key) still holds, the gate still lets the backfill
+	// attempt run, and the attempt still fails at its own INSERT statement.
 	if _, err := db.Exec(`DELETE FROM kandev_meta WHERE key IN ('subagent_context_capture_since', 'subagent_context_backfill_through')`); err != nil {
 		t.Fatalf("reset activation keys: %v", err)
 	}
-	if _, err := db.Exec(`DROP TABLE task_session_subagents`); err != nil {
-		t.Fatalf("drop task_session_subagents: %v", err)
+	if _, err := db.Exec(`ALTER TABLE task_session_subagents DROP COLUMN updated_at`); err != nil {
+		t.Fatalf("drop updated_at column: %v", err)
 	}
 
 	if err := repo.runMigrations(); err != nil {
