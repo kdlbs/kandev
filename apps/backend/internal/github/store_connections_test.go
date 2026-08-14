@@ -558,7 +558,10 @@ func seedConnectionWorkspaces(t *testing.T, store *Store, workspaceIDs ...string
 	}
 }
 
-func TestStoreWorkspaceConnectionHealthIncludesUnconfiguredWorkspaces(t *testing.T) {
+// A workspace with no connection row must not appear in any count. Seeding a
+// fourth workspace with nothing attached is the whole point: it used to be
+// reported as a disconnected connection, which no user could act on.
+func TestStoreWorkspaceConnectionHealthExcludesUnconfiguredWorkspaces(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "ws-active", "ws-invalid", "ws-suspended", "ws-unconfigured")
 	seedStoreAppRegistration(t, store)
@@ -580,9 +583,38 @@ func TestStoreWorkspaceConnectionHealthIncludesUnconfiguredWorkspaces(t *testing
 	if err != nil {
 		t.Fatalf("GetWorkspaceConnectionHealth() error = %v", err)
 	}
-	if health.WorkspaceCount != 4 || health.Active != 1 || health.Invalid != 1 ||
-		health.Suspended != 1 || health.NotConfigured != 1 || health.Revoked != 0 {
-		t.Fatalf("GetWorkspaceConnectionHealth() = %+v", health)
+	want := WorkspaceConnectionHealth{Active: 1, Invalid: 1, Suspended: 1}
+	if health != want {
+		t.Fatalf("GetWorkspaceConnectionHealth() = %+v, want %+v (ws-unconfigured counts nowhere)", health, want)
+	}
+}
+
+// Connections have no database cascade, so a workspace row that disappeared
+// without its cleanup handler running must not keep its connection in the
+// aggregate forever.
+func TestStoreWorkspaceConnectionHealthExcludesOrphanedConnections(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "ws-active", "ws-doomed")
+	ctx := context.Background()
+	for _, connection := range []*WorkspaceConnection{
+		{WorkspaceID: "ws-active", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "active", Status: ConnectionStatusActive},
+		{WorkspaceID: "ws-doomed", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "doomed", Status: ConnectionStatusInvalid},
+	} {
+		if err := store.UpsertWorkspaceConnection(ctx, connection); err != nil {
+			t.Fatalf("UpsertWorkspaceConnection(%s): %v", connection.WorkspaceID, err)
+		}
+	}
+	if _, err := store.db.Exec(`DELETE FROM workspaces WHERE id = ?`, "ws-doomed"); err != nil {
+		t.Fatalf("delete workspace row: %v", err)
+	}
+
+	health, err := store.GetWorkspaceConnectionHealth(ctx)
+	if err != nil {
+		t.Fatalf("GetWorkspaceConnectionHealth() error = %v", err)
+	}
+	want := WorkspaceConnectionHealth{Active: 1}
+	if health != want {
+		t.Fatalf("GetWorkspaceConnectionHealth() = %+v, want %+v (orphan excluded)", health, want)
 	}
 }
 

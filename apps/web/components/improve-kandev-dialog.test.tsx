@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Trans } from "react-i18next";
 import { ImproveKandevDialog } from "./improve-kandev-dialog";
 import {
   IMPROVE_KANDEV_SKIP_INTRO_KEY,
@@ -244,6 +245,29 @@ describe("ImproveKandevDialog GitHub gate", () => {
     await waitFor(() => expect(screen.queryByTestId("improve-kandev-proceed")).toBeNull());
   });
 
+  // Every configured connection being broken means no usable credential, so
+  // the health check reports it as github_not_authenticated and the gate must
+  // block. Letting it through would fail at the PR step, after the user has
+  // already written the contribution.
+  it("blocks when every configured connection is unhealthy", async () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
+    mocks.health.mockResolvedValue({
+      issues: [
+        githubIssue(
+          "github_not_authenticated",
+          "No working GitHub connection: all 2 configured connections need attention " +
+            "(1 invalid, 0 suspended, 1 revoked).",
+        ),
+      ],
+    });
+    renderDialog();
+
+    await waitFor(() =>
+      expect(document.body.textContent).toContain("No working GitHub connection"),
+    );
+    expect(screen.queryByTestId("improve-kandev-proceed")).toBeNull();
+  });
+
   // Rendered through the component, not a hand-fed <Trans>: the catalog string
   // interpolates the binary name inside its <code> element, so a values object
   // missing `binary` ships the literal "{{binary}}" to the user. A test that
@@ -263,7 +287,6 @@ describe("ImproveKandevDialog GitHub gate", () => {
   });
 });
 
-import { Trans } from "react-i18next";
 describe("improve-kandev dialog <Trans> copy", () => {
   it("renders the gh-auth notice byte-identically to the old literal", () => {
     const { container } = render(
