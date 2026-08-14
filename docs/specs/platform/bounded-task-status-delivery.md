@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-08-01
-updated: 2026-08-09
+updated: 2026-08-14
 owner: kandev
 ---
 
@@ -73,6 +73,9 @@ remain during migration, but switchers use the summary when present.
 - Pending permission outranks pending clarification for the row's primary
   state icon. Both outrank generating/background activity, which outranks
   coarse lifecycle state. This is the existing task-row precedence.
+- A clarification contributes to `pending_action` only while its bundle is pending in the session's
+  current turn. A newer turn supersedes older pending clarification rows without requiring transcript
+  history to be rewritten.
 - A session's `pending_action` clears only when the specific request that armed
   it resolves — a `message.updated` on that same permission/clarification
   request row (matched by type and `pending_id`) reaching a terminal,
@@ -83,6 +86,10 @@ remain during migration, but switchers use the summary when present.
   `pending_action` unless it is that same request row. Otherwise a session that
   is busy streaming ordinary tool activity right after a permission/
   clarification request clears the affordance before the user ever answers it.
+- Pending-sensitive source events refresh from the bounded repository projection instead of trusting
+  event order as state. Boot and task-list hydration reconcile the pending field of existing persisted
+  summaries as well as creating missing summaries. Repairs preserve unrelated fields and advance the
+  monotonic revision only when pending semantics change.
 - `active_error` is independent of the primary state icon. It represents the
   newest relevant recoverable agent error and clears after an authoritative
   dismissal or a newer agent response according to the existing error rules.
@@ -236,6 +243,12 @@ intermediate replacement.
   unrelated message, **THEN** `pending_action` for the session remains
   `permission` (the affordance does not flash and disappear before the user
   answers it).
+- **GIVEN** a detached clarification row is pending in an older turn and the current turn has no
+  pending input, **WHEN** a summary is projected or hydrated, **THEN** the session and task omit
+  `pending_action` and later turn completion cannot re-arm it.
+- **GIVEN** an existing persisted summary advertises clarification but the bounded current-turn query
+  returns no pending action, **WHEN** a task-list or boot payload is built, **THEN** the persisted and
+  returned summary advance to a newer revision with the clarification removed.
 - **GIVEN** notification traffic saturates its queue, **WHEN** the selected
   session sends `message.add`, **THEN** the correlated response is delivered
   first or the connection closes for deterministic reconciliation.
