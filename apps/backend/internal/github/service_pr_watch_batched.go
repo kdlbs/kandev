@@ -84,7 +84,7 @@ func (s *Service) syncWatchesBatchedWithClient(
 		results = append(results, s.applyBatchedNumberedWatch(ctx, cacheScope, w, statusByKey, now))
 	}
 	for _, w := range searching {
-		results = append(results, s.applyBatchedSearchingWatch(ctx, cacheScope, w, statusByKey, now))
+		results = append(results, s.applyBatchedSearchingWatch(ctx, client, cacheScope, w, statusByKey, now))
 	}
 	return results, nil
 }
@@ -326,7 +326,7 @@ func (s *Service) applyBatchedNumberedWatch(
 // side. A searching watch (pr_number=0) is promoted to a known PR when the
 // branch lookup returns one; otherwise we just bump last_checked_at.
 func (s *Service) applyBatchedSearchingWatch(
-	ctx context.Context, cacheScope string, w *PRWatch, statusByKey map[string]*PRStatus, now time.Time,
+	ctx context.Context, client Client, cacheScope string, w *PRWatch, statusByKey map[string]*PRStatus, now time.Time,
 ) PRWatchSyncResult {
 	// Timestamps get bumped on both the "no PR found" and "PR detected"
 	// paths, so hoist the single call above the branch to make that
@@ -337,7 +337,21 @@ func (s *Service) applyBatchedSearchingWatch(
 	}
 	status, ok := statusByKey[graphqlBranchKey(w.Owner, w.Repo, w.Branch)]
 	if !ok || status == nil || status.PR == nil {
-		return PRWatchSyncResult{Watch: w}
+		pr, err := findPRByBranchInForkNetwork(ctx, client, w.Owner, w.Repo, w.Branch)
+		if err != nil {
+			s.logger.Debug("failed to search parent repository for PR",
+				zap.String("watch_id", w.ID), zap.String("branch", w.Branch), zap.Error(err))
+			return PRWatchSyncResult{Watch: w, SyncFailed: true}
+		}
+		if pr == nil {
+			return PRWatchSyncResult{Watch: w}
+		}
+		status = &PRStatus{PR: pr}
+	}
+	if err := s.rebindPRWatchRepository(ctx, w, status.PR); err != nil {
+		s.logger.Error("failed to rebind PR watch to detected repository",
+			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
+		return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
 	}
 	if err := s.store.UpdatePRWatchPRNumber(ctx, w.ID, status.PR.Number); err != nil {
 		s.logger.Error("failed to update PR watch with detected PR",

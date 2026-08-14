@@ -1486,6 +1486,16 @@ func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber i
 	return err
 }
 
+// UpdatePRWatchRepository repairs the provider repository identity after PR
+// discovery. A watch can start on a contributor fork while the PR targets the
+// canonical parent repository.
+func (s *Store) UpdatePRWatchRepository(ctx context.Context, id, owner, repo string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE github_pr_watches SET owner = ?, repo = ?, updated_at = ? WHERE id = ?`,
+		owner, repo, time.Now().UTC(), id)
+	return err
+}
+
 // ResetPRWatch atomically resets a watch to the searching state: updates the
 // tracked branch and clears pr_number in a single statement. Used when the
 // session's active branch changes (rename, checkout) so the poller re-searches

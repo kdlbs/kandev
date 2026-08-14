@@ -385,6 +385,9 @@ func (m *mockGitHubService) UpdatePRWatchPRNumber(_ context.Context, _ string, p
 	m.updatedPRNumber = prNumber
 	return nil
 }
+func (m *mockGitHubService) UpdatePRWatchRepository(context.Context, string, string, string) error {
+	return nil
+}
 func (m *mockGitHubService) ResetPRWatch(_ context.Context, _, branch string) error {
 	m.resetWatchCalls++
 	m.resetWatchBranch = branch

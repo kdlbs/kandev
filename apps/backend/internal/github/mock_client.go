@@ -220,6 +220,17 @@ func (m *MockClient) FindPRByBranch(_ context.Context, owner, repo, branch strin
 	return pr, nil
 }
 
+func (m *MockClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, branch string) (*PR, error) {
+	pr, err := m.FindPRByBranch(ctx, owner, repo, branch)
+	if err != nil || pr == nil {
+		return pr, err
+	}
+	if !strings.EqualFold(strings.TrimSpace(pr.HeadRepoOwner), strings.TrimSpace(headOwner)) {
+		return nil, nil
+	}
+	return pr, nil
+}
+
 // FindPRByBranchCallCount returns how many times FindPRByBranch has been
 // called. Used by tests asserting detection-probe throttling.
 func (m *MockClient) FindPRByBranchCallCount() int {

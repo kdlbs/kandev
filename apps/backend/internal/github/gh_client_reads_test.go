@@ -172,7 +172,7 @@ func TestGHClient_FindPRByBranch(t *testing.T) {
 	assertGHArgv(t, calls(t), 0, []string{
 		"pr", "list", "--repo", "acme/widget", "--head", "feature", "--state", "open",
 		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft," +
-			"mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt",
+			"mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,headRepository,headRepositoryOwner",
 		"--limit", "1",
 	})
 	if pr == nil {
@@ -189,6 +189,33 @@ func TestGHClient_FindPRByBranch(t *testing.T) {
 	}
 	if pr.RepoOwner != "acme" || pr.RepoName != "widget" {
 		t.Errorf("repo = (%q, %q)", pr.RepoOwner, pr.RepoName)
+	}
+}
+
+func TestGHClient_FindPRByHead_UsesExactSourceRepository(t *testing.T) {
+	calls := newFakeGH(t, ghResponse{
+		Prefix: "pr list",
+		Stdout: `[{
+			"number":12,"title":"fork PR","url":"https://github.com/kdlbs/kandev/pull/12",
+			"state":"OPEN","headRefName":"feature","headRefOid":"abc123","baseRefName":"main",
+			"author":{"login":"alice"},"isDraft":false,"mergeable":"MERGEABLE",
+			"mergeStateStatus":"CLEAN","headRepository":{"id":"200","name":"kandev","nameWithOwner":"alice/kandev"},
+			"headRepositoryOwner":{"login":"alice"}
+		}]`,
+	})
+
+	pr, err := NewGHClient().FindPRByHead(context.Background(), "kdlbs", "kandev", "alice", "feature")
+	if err != nil {
+		t.Fatalf("FindPRByHead: %v", err)
+	}
+	assertGHArgv(t, calls(t), 0, []string{
+		"pr", "list", "--repo", "kdlbs/kandev", "--head", "alice:feature", "--state", "open",
+		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft," +
+			"mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,headRepository,headRepositoryOwner",
+		"--limit", "1",
+	})
+	if pr == nil || pr.HeadRepoOwner != "alice" || pr.HeadRepoName != "kandev" {
+		t.Fatalf("PR = %#v, want source alice/kandev", pr)
 	}
 }
 
