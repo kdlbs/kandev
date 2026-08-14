@@ -136,6 +136,44 @@ export async function assertNoElementHorizontalOverflow(
 }
 
 /**
+ * Asserts that text occupies multiple rendered lines without overflowing its
+ * own horizontal content box. Useful for titles whose complete text must stay
+ * readable instead of being clipped with an ellipsis.
+ */
+export async function assertTextWrapsNaturallyWithoutHorizontalOverflow(
+  locator: Locator,
+  label = "text",
+): Promise<void> {
+  const metrics = await locator.evaluate((node) => {
+    const style = getComputedStyle(node);
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const lineWidths = Array.from(range.getClientRects(), (rect) => rect.width).filter(
+      (width) => width > 0,
+    );
+    return {
+      height: node.getBoundingClientRect().height,
+      lineHeight: Number.parseFloat(style.lineHeight),
+      scrollWidth: node.scrollWidth,
+      clientWidth: node.clientWidth,
+      lineWidths,
+    };
+  });
+  expect(
+    metrics.height,
+    `${label}: height (${metrics.height}) does not span multiple ${metrics.lineHeight}px lines`,
+  ).toBeGreaterThan(metrics.lineHeight * 1.5);
+  expect(
+    metrics.scrollWidth,
+    `${label}: scrollWidth (${metrics.scrollWidth}) exceeds clientWidth (${metrics.clientWidth})`,
+  ).toBeLessThanOrEqual(metrics.clientWidth + 1);
+  expect(
+    metrics.lineWidths[0],
+    `${label}: first line should consume available width before wrapping`,
+  ).toBeGreaterThan(metrics.clientWidth * 0.8);
+}
+
+/**
  * Asserts that a visible locator fits inside the viewport horizontally.
  * Useful for popovers that portal outside their dialog/container.
  */

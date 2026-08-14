@@ -1,10 +1,16 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { getDockviewGroupWidth, resizeColumnViaSplitview } from "../../helpers/dockview-resize";
+import { assertTextWrapsNaturallyWithoutHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const PR_NUMBER = 701;
+const RESPONSIVE_PR_NUMBER = 702;
+const RESPONSIVE_PR_TITLE =
+  "Keep this long pull request title visible while review and merge controls wrap below it at narrow widths";
+const RESPONSIVE_PR_URL = `https://github.com/testorg/testrepo/pull/${RESPONSIVE_PR_NUMBER}`;
 
 type ReviewLayout = {
   canonicalGroupId: string | null;
@@ -108,6 +114,55 @@ function sessionTabWrapper(page: Page, sessionId: string) {
   return page.locator(".dv-tab", {
     has: page.getByTestId(`session-tab-${sessionId}`),
   });
+}
+
+type ElementBox = { x: number; y: number; width: number; height: number };
+
+async function requireBox(locator: Locator, label: string): Promise<ElementBox> {
+  const box = await locator.boundingBox();
+  expect(box, `${label} has no bounding box`).not.toBeNull();
+  return box!;
+}
+
+function verticalOverlap(first: ElementBox, second: ElementBox): number {
+  return Math.min(first.y + first.height, second.y + second.height) - Math.max(first.y, second.y);
+}
+
+async function textLineCount(locator: Locator): Promise<number> {
+  return locator.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return Array.from(range.getClientRects()).filter((rect) => rect.width > 0).length;
+  });
+}
+
+async function resizeReviewDetailTo(page: Page, targetWidth: number): Promise<void> {
+  const detail = page.getByTestId("change-request-detail");
+  const currentDetailWidth = await detail.evaluate((element) =>
+    Math.round(element.getBoundingClientRect().width),
+  );
+  const currentRightWidth = await getDockviewGroupWidth(page, "files");
+  await resizeColumnViaSplitview(
+    page,
+    "right",
+    Math.round(currentRightWidth + currentDetailWidth - targetWidth),
+  );
+  await expect
+    .poll(() => detail.evaluate((element) => Math.round(element.getBoundingClientRect().width)), {
+      message: `change request detail did not settle at ${targetWidth}px`,
+    })
+    .toBe(targetWidth);
+}
+
+async function expectCenterHit(locator: Locator, label: string): Promise<void> {
+  await expect(
+    locator.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return hit === element || (hit !== null && element.contains(hit));
+    }),
+    `${label} center is not a usable hit target`,
+  ).resolves.toBe(true);
 }
 
 test.describe("PR Details layout panel", () => {
@@ -234,5 +289,140 @@ test.describe("PR Details layout panel", () => {
       },
     );
     await expect(agentTab).not.toHaveClass(/dv-active-tab/);
+  });
+
+  test("moves PR actions below before they force the title to wrap", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await testPage.setViewportSize({ width: 1600, height: 900 });
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    const task = await createTaskWithSession(apiClient, seedData, "Responsive PR Details header");
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: RESPONSIVE_PR_NUMBER,
+      pr_url: RESPONSIVE_PR_URL,
+      pr_title: RESPONSIVE_PR_TITLE,
+      head_branch: "feat/responsive-pr-header",
+      base_branch: "main",
+      author_login: "another-user",
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+      review_count: 1,
+      pending_review_count: 0,
+      required_reviews: 1,
+      checks_total: 1,
+      checks_passing: 1,
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: RESPONSIVE_PR_NUMBER,
+      checks: [
+        {
+          name: "Frontend tests",
+          status: "completed",
+          conclusion: "success",
+        },
+      ],
+      reviews: [
+        {
+          id: 1,
+          author: "code-owner",
+          state: "APPROVED",
+          created_at: "2026-08-14T10:00:00Z",
+        },
+      ],
+    });
+    await expect
+      .poll(() => apiClient.getTaskPR(task.id), {
+        message: "responsive PR fixture did not reach merge-ready state",
+      })
+      .toMatchObject({
+        state: "open",
+        review_state: "approved",
+        checks_state: "success",
+        mergeable_state: "clean",
+        review_count: 1,
+        required_reviews: 1,
+      });
+
+    const session = await openTask(testPage, task.id);
+    await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
+    await session.prDetailTab().click();
+    const detail = testPage.getByTestId("change-request-detail");
+    const title = detail.getByTestId("change-request-detail-title");
+    const actions = detail.getByTestId("change-request-detail-actions");
+    const approve = detail.getByTestId("pr-approve-button");
+    const merge = detail.getByTestId("pr-merge-button");
+    const refresh = detail.getByRole("button", { name: "Refresh" });
+    await expect(title).toBeVisible();
+    await expect(approve).toBeVisible();
+    await expect(merge).toBeVisible();
+    await expect(refresh).toBeVisible();
+
+    await resizeReviewDetailTo(testPage, 1200);
+    const [wideTitleBox, wideActionsBox] = await Promise.all([
+      requireBox(title, "wide title"),
+      requireBox(actions, "wide actions"),
+    ]);
+    expect(await textLineCount(title), "wide title should fit on one line").toBe(1);
+    expect(
+      verticalOverlap(wideTitleBox, wideActionsBox),
+      "actions may stay inline when the title remains one line",
+    ).toBeGreaterThan(0);
+
+    await resizeReviewDetailTo(testPage, 1000);
+    const [squeezedDetailBox, squeezedTitleBox, squeezedActionsBox] = await Promise.all([
+      requireBox(detail, "squeezed detail"),
+      requireBox(title, "squeezed title"),
+      requireBox(actions, "squeezed actions"),
+    ]);
+    expect(
+      await textLineCount(title),
+      "actions should move below before they force the title onto another line",
+    ).toBe(1);
+    expect(
+      squeezedActionsBox.y,
+      "squeezed actions should sit below the title",
+    ).toBeGreaterThanOrEqual(squeezedTitleBox.y + squeezedTitleBox.height);
+    expect(
+      squeezedTitleBox.width,
+      "squeezed title should recover the full row",
+    ).toBeGreaterThanOrEqual(squeezedDetailBox.width - 25);
+
+    await resizeReviewDetailTo(testPage, 600);
+    const [detailBox, titleBox, approveBox, mergeBox, refreshBox] = await Promise.all([
+      requireBox(detail, "narrow detail"),
+      requireBox(title, "narrow title"),
+      requireBox(approve, "narrow approve action"),
+      requireBox(merge, "narrow merge action"),
+      requireBox(refresh, "narrow refresh action"),
+    ]);
+    expect(approveBox.y, "approval should start below the title").toBeGreaterThanOrEqual(
+      titleBox.y + titleBox.height,
+    );
+    expect(mergeBox.y, "merge should share the action row").toBeCloseTo(approveBox.y, 0);
+    expect(refreshBox.y, "refresh should share the action row").toBeCloseTo(approveBox.y, 0);
+    expect(titleBox.width, "title should own the full padded row").toBeGreaterThanOrEqual(
+      detailBox.width - 25,
+    );
+    await assertTextWrapsNaturallyWithoutHorizontalOverflow(title, "narrow PR title");
+    expect(approveBox.x, "narrow actions should share the title's leading edge").toBeCloseTo(
+      titleBox.x,
+      0,
+    );
+    expect(approveBox.x).toBeLessThan(mergeBox.x);
+    expect(mergeBox.x).toBeLessThan(refreshBox.x);
+    expect(refreshBox.x + refreshBox.width).toBeLessThanOrEqual(detailBox.x + detailBox.width);
+    await expectCenterHit(approve, "approve action");
+    await expectCenterHit(merge, "merge action");
   });
 });
