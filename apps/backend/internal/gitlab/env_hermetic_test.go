@@ -1,14 +1,10 @@
 package gitlab
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/testutil"
 )
 
 // envMockGitLab mirrors the mock switch that factory.go and service_config.go
@@ -95,128 +91,5 @@ func TestClearAmbientGitLabEnvNeutralizesInheritedHosts(t *testing.T) {
 // a new os.Getenv/os.LookupEnv call that ambientGitLabEnvVars does not cover,
 // so the scrub cannot silently fall behind the code it protects.
 func TestAmbientGitLabEnvCoversEveryPackageEnvRead(t *testing.T) {
-	fileSet := token.NewFileSet()
-	files := parseNonTestSources(t, fileSet)
-	constants := stringConstants(files)
-	covered := make(map[string]bool, len(ambientGitLabEnvVars))
-	for _, name := range ambientGitLabEnvVars {
-		covered[name] = true
-	}
-	for _, file := range files {
-		for _, call := range envReadCalls(file) {
-			name, resolved := resolveEnvName(call, constants)
-			if !resolved {
-				t.Errorf("%s: environment variable name is not a string literal or a constant of this "+
-					"package; a constant imported from elsewhere needs resolveEnvName taught about it",
-					fileSet.Position(call.Pos()))
-				continue
-			}
-			if !covered[name] {
-				t.Errorf("%s: %s is read in non-test code but missing from ambientGitLabEnvVars",
-					fileSet.Position(call.Pos()), name)
-			}
-		}
-	}
-}
-
-// parseNonTestSources parses every production file of the package, which is
-// the code whose environment reads the scrub has to keep up with.
-func parseNonTestSources(t *testing.T, fileSet *token.FileSet) []*ast.File {
-	t.Helper()
-	paths, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("list sources: %v", err)
-	}
-	var files []*ast.File
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		file, parseErr := parser.ParseFile(fileSet, path, nil, 0)
-		if parseErr != nil {
-			t.Fatalf("parse %s: %v", path, parseErr)
-		}
-		files = append(files, file)
-	}
-	if len(files) == 0 {
-		t.Fatal("no non-test sources found in the package directory")
-	}
-	return files
-}
-
-// stringConstants maps package-level string constant names to their values so
-// env reads written as os.Getenv(envGitLabHost) resolve to the variable name.
-func stringConstants(files []*ast.File) map[string]string {
-	constants := make(map[string]string)
-	for _, file := range files {
-		for _, decl := range file.Decls {
-			genDecl, ok := decl.(*ast.GenDecl)
-			if !ok || genDecl.Tok != token.CONST {
-				continue
-			}
-			for _, spec := range genDecl.Specs {
-				valueSpec, ok := spec.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				for i, name := range valueSpec.Names {
-					if i >= len(valueSpec.Values) {
-						continue
-					}
-					if value, ok := literalString(valueSpec.Values[i]); ok {
-						constants[name.Name] = value
-					}
-				}
-			}
-		}
-	}
-	return constants
-}
-
-// envReadCalls collects every os.Getenv / os.LookupEnv call in a file.
-func envReadCalls(file *ast.File) []*ast.CallExpr {
-	var calls []*ast.CallExpr
-	ast.Inspect(file, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok || len(call.Args) != 1 {
-			return true
-		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		pkgIdent, ok := selector.X.(*ast.Ident)
-		if !ok || pkgIdent.Name != "os" {
-			return true
-		}
-		if selector.Sel.Name == "Getenv" || selector.Sel.Name == "LookupEnv" {
-			calls = append(calls, call)
-		}
-		return true
-	})
-	return calls
-}
-
-func resolveEnvName(call *ast.CallExpr, constants map[string]string) (string, bool) {
-	if value, ok := literalString(call.Args[0]); ok {
-		return value, true
-	}
-	ident, ok := call.Args[0].(*ast.Ident)
-	if !ok {
-		return "", false
-	}
-	value, ok := constants[ident.Name]
-	return value, ok
-}
-
-func literalString(expr ast.Expr) (string, bool) {
-	lit, ok := expr.(*ast.BasicLit)
-	if !ok || lit.Kind != token.STRING {
-		return "", false
-	}
-	value, err := strconv.Unquote(lit.Value)
-	if err != nil {
-		return "", false
-	}
-	return value, true
+	testutil.AssertEnvReadsCovered(t, ambientGitLabEnvVars, nil)
 }
