@@ -189,6 +189,48 @@ func TestHttpSetTaskPRDisposition_RejectsURLWithoutSupersededDisposition(t *test
 	})
 }
 
+// TestHttpSetTaskPRDisposition_RejectsNullDispositionWithExplicitSupersededURL
+// covers AC-24 for a combination distinct from the "clear plus URL" case
+// above: a single request that explicitly sends BOTH `disposition: null` AND
+// a non-null `superseded_by_url`. That combination is self-contradictory —
+// "nobody looked" and "here is the superseding PR" in the same body — and
+// AC-24 requires rejecting it with 400. It must not be silently resolved by
+// discarding the URL and clearing everything, which is what
+// normalizeDispositionPatch's disposition-null force-clear used to do for
+// every null-disposition request regardless of what else the same request
+// asked for.
+func TestHttpSetTaskPRDisposition_RejectsNullDispositionWithExplicitSupersededURL(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	disposition := "superseded"
+	oldURL := "https://github.com/kdlbs/kandev/pull/900"
+	now := time.Now().UTC()
+	tp := seedDispositionEndpointTaskPR(t, store, &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", Owner: "kdlbs", Repo: "kandev",
+		PRNumber: 100, PRURL: "https://github.com/kdlbs/kandev/pull/100",
+		PRTitle: "t", State: "closed",
+		Disposition: &disposition, DispositionSupersededByURL: &oldURL, DispositionRecordedAt: &now,
+	})
+
+	resp := dispositionPatch(t, router, "/api/v1/github/task-prs/"+tp.ID+"/disposition?workspace_id=ws-1", map[string]any{
+		"disposition":       nil,
+		"superseded_by_url": "https://github.com/kdlbs/kandev/pull/901",
+	})
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+	}
+
+	fromStore, err := store.GetTaskPRByID(context.Background(), tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if fromStore.Disposition == nil || *fromStore.Disposition != "superseded" {
+		t.Fatalf("row should be unchanged, Disposition = %v, want superseded", fromStore.Disposition)
+	}
+	if fromStore.DispositionSupersededByURL == nil || *fromStore.DispositionSupersededByURL != oldURL {
+		t.Fatalf("row should be unchanged, DispositionSupersededByURL = %v, want %s", fromStore.DispositionSupersededByURL, oldURL)
+	}
+}
+
 // TestHttpSetTaskPRDisposition_EmptySupersededURLTreatedAsAbsent covers the
 // spec's "Nil, empty, and error" rule: an empty superseded_by_url string is
 // absent, not an invalid URL, so it must not trip AC-24 (URL without

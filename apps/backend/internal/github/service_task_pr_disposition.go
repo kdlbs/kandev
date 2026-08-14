@@ -57,7 +57,10 @@ func (s *Service) SetTaskPRDisposition(
 	if !patch.HasAny() {
 		return tp, nil
 	}
-	patch = normalizeDispositionPatch(patch)
+	patch, err = normalizeDispositionPatch(patch)
+	if err != nil {
+		return nil, err
+	}
 
 	disposition, supersededByURL := mergeTaskPRDispositionPatch(tp, patch)
 	if err := validateTaskPRDisposition(tp, disposition, supersededByURL); err != nil {
@@ -84,22 +87,31 @@ func (s *Service) SetTaskPRDisposition(
 //     normalized to absent (nil) — the same rule this endpoint has always
 //     applied to the merged value, now applied to the patch that is
 //     actually written.
-//  2. An explicit `disposition: null` always forces superseded_by_url to
-//     clear too (AC-22), regardless of whether the same request also
-//     touched superseded_by_url. Without this, a disposition-only null
-//     PATCH sent against a row with a previously stored superseded_by_url
-//     would merge to (disposition: nil, superseded_by_url: non-nil) — a
-//     combination validateTaskPRDisposition rejects — instead of restoring
-//     the "nobody looked" state the caller asked for.
-func normalizeDispositionPatch(patch DispositionPatch) DispositionPatch {
+//  2. A request that explicitly sets BOTH `disposition: null` and a non-nil
+//     `superseded_by_url` in the same body is rejected (AC-24): "nobody
+//     looked" and "here is the superseding PR" cannot both be true, and
+//     silently discarding one of the two caller-supplied fields would mask
+//     a client bug instead of surfacing it.
+//  3. Otherwise, an explicit `disposition: null` still forces
+//     superseded_by_url to clear too (AC-22), regardless of whether the
+//     same request also touched superseded_by_url. Without this, a
+//     disposition-only null PATCH sent against a row with a previously
+//     stored superseded_by_url would merge to (disposition: nil,
+//     superseded_by_url: non-nil) — a combination validateTaskPRDisposition
+//     rejects — instead of restoring the "nobody looked" state the caller
+//     asked for.
+func normalizeDispositionPatch(patch DispositionPatch) (DispositionPatch, error) {
 	if patch.SupersededByURLSet {
 		patch.SupersededByURL = normalizeSupersededByURL(patch.SupersededByURL)
 	}
 	if patch.DispositionSet && patch.Disposition == nil {
+		if patch.SupersededByURLSet && patch.SupersededByURL != nil {
+			return DispositionPatch{}, ErrInvalidDisposition
+		}
 		patch.SupersededByURLSet = true
 		patch.SupersededByURL = nil
 	}
-	return patch
+	return patch, nil
 }
 
 // writeTaskPRDisposition persists a validated, changed disposition write,
