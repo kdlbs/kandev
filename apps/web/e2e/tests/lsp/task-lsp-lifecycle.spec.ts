@@ -5,6 +5,7 @@ import {
   restoreAppStatusBarSettings,
   setAppStatusBarEnabled,
 } from "../../helpers/app-status-bar-settings";
+import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import {
   createKotlinTask,
@@ -270,7 +271,12 @@ test.describe("task-scoped LSP lifecycle", () => {
     await openDesktopFile(testPage, task.session, task.filePaths[0]);
     // Observe beyond the first one-second recovery epoch so this proves Stop
     // canceled reacquisition rather than merely winning a short timing window.
-    await testPage.waitForTimeout(1_500);
+    await dwell(
+      testPage,
+      1_500,
+      "negative-assertion",
+      "proves explicit Stop suppresses automatic reacquisition beyond the first recovery epoch",
+    );
     expect(readFakeLspEvents(backend).filter((event) => event.event === "started")).toHaveLength(2);
     await expectKotlinState(testPage, "stopped");
   });

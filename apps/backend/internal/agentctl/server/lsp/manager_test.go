@@ -417,8 +417,12 @@ func TestManagerUpdatesConfigurationWithoutRestartingGeneration(t *testing.T) {
 	}
 	waitForPhase(t, manager, "kotlin", sharedlsp.PhaseReady)
 	select {
-	case <-server.configurationChanges:
-	default:
+	case params := <-server.configurationChanges:
+		if !stringContains(params, "17") {
+			t.Fatalf("initial configuration notification = %s", params)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("initial workspace/didChangeConfiguration was not sent")
 	}
 
 	snapshot, err := manager.UpdateConfiguration(context.Background(), sharedlsp.TaskHostConfigurationRequest{
