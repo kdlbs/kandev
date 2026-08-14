@@ -235,7 +235,10 @@ func (s *Store) createTables() error {
 	if err := s.migrateMRWatchUniqueKey(); err != nil {
 		return err
 	}
-	return s.ensureMRWatchIndexes()
+	if err := s.ensureMRWatchIndexes(); err != nil {
+		return err
+	}
+	return s.healTaskContributionOrphans()
 }
 
 // migrateTaskMRAutomationFields adds the reviewer/merge-readiness columns

@@ -55,6 +55,9 @@ func TestHandleTaskUpdated_ArchiveDeletesWatches(t *testing.T) {
 
 	seedTask(t, store, "t1", false)
 	mustCreateWatch(t, store, "s1", "t1")
+	if err := store.CreateTaskPR(ctx, &TaskPR{TaskID: "t1", WorkspaceID: testWorkspaceID, Owner: "owner", Repo: "repo", PRNumber: 1}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
 
 	// Simulate task-service publishing task.updated with archived_at set.
 	event := bus.NewEvent(events.TaskUpdated, "task-service", map[string]interface{}{
@@ -67,6 +70,10 @@ func TestHandleTaskUpdated_ArchiveDeletesWatches(t *testing.T) {
 
 	if got, _ := store.GetPRWatchBySession(ctx, "s1"); got != nil {
 		t.Errorf("expected watch to be deleted after archive event, got %+v", got)
+	}
+	// AC4: archive must not delete the task/PR association, only the watch.
+	if got, _ := store.ListTaskPRsByTaskIncludingDetached(ctx, "t1"); len(got) != 1 {
+		t.Errorf("task PRs after archive event = %d, want 1 (association retained)", len(got))
 	}
 }
 
@@ -132,6 +139,14 @@ func TestHandleTaskEvents_MalformedPayloadIsNoop(t *testing.T) {
 
 	seedTask(t, store, "t1", false)
 	mustCreateWatch(t, store, "s1", "t1")
+	if err := store.CreateTaskPR(ctx, &TaskPR{TaskID: "t1", WorkspaceID: testWorkspaceID, Owner: "owner", Repo: "repo", PRNumber: 1}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	// Nil event — should be ignored, not crash.
+	if err := svc.handleTaskDeleted(ctx, nil); err != nil {
+		t.Fatalf("handleTaskDeleted nil event: %v", err)
+	}
 
 	// Wrong payload type — should be ignored, not crash.
 	bad := bus.NewEvent(events.TaskUpdated, "task-service", "not-a-map")
@@ -147,6 +162,9 @@ func TestHandleTaskEvents_MalformedPayloadIsNoop(t *testing.T) {
 
 	if got, _ := store.GetPRWatchBySession(ctx, "s1"); got == nil {
 		t.Error("expected watch to persist when payload is malformed")
+	}
+	if got, _ := store.ListTaskPRsByTaskIncludingDetached(ctx, "t1"); len(got) != 1 {
+		t.Errorf("task PRs after malformed events = %d, want 1", len(got))
 	}
 }
 

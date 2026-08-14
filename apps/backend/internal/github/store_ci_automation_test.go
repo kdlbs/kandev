@@ -565,6 +565,15 @@ func seedLegacyTaskCIOptions(t *testing.T, store *Store, taskID string, autoFix,
 	}
 }
 
+// insertTestTask registers taskID in the tasks table so the task-contribution
+// orphan sweep does not delete rows the test seeds against it.
+func insertTestTask(t *testing.T, store *Store, taskID string) {
+	t.Helper()
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES (?, ?)`, taskID, "ws-1"); err != nil {
+		t.Fatalf("insert task %s: %v", taskID, err)
+	}
+}
+
 // TestStoreMigrateTaskCIOptionsToPRScope_FansOutToLinkedPRs covers AC14: a
 // pre-upgrade task row with two linked PRs yields, after one boot, two
 // per-PR rows each matching the legacy booleans.
@@ -573,6 +582,7 @@ func TestStoreMigrateTaskCIOptionsToPRScope_FansOutToLinkedPRs(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
+	insertTestTask(t, store, "task-1")
 	seedLegacyTaskCIOptions(t, store, "task-1", true, false)
 	if err := store.CreateTaskPR(ctx, &TaskPR{
 		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,
@@ -612,6 +622,7 @@ func TestStoreMigrateTaskCIOptionsToPRScope_SkipsDetachedPRs(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
+	insertTestTask(t, store, "task-1")
 	seedLegacyTaskCIOptions(t, store, "task-1", true, true)
 	active := &TaskPR{
 		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,
@@ -654,6 +665,7 @@ func TestStoreMigrateTaskCIOptionsToPRScope_Idempotent(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
+	insertTestTask(t, store, "task-1")
 	seedLegacyTaskCIOptions(t, store, "task-1", true, false)
 	if err := store.CreateTaskPR(ctx, &TaskPR{
 		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,
