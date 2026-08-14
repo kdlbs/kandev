@@ -409,6 +409,7 @@ func (s *Service) executeSendNowClaimWithContext(
 		restore()
 		return
 	}
+	s.markAcceptedDispatchLive(sessionID, reservation)
 
 	if err := s.promptSendNowClaim(ctx, claim); err != nil {
 		s.logger.Warn("send-now replacement prompt failed; restoring queue claim",

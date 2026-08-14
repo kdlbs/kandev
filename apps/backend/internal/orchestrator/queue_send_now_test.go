@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -305,4 +306,124 @@ func TestSendQueuedNowConflictsAfterFIFOHandoffAccepted(t *testing.T) {
 	}
 
 	close(allowPrompt)
+}
+
+func TestStreamCompletePreservesAcceptedSendNowDispatch(t *testing.T) {
+	svc := &Service{logger: testLogger()}
+	reservation := svc.markQueuedDispatchInFlight("session-1", "dispatch-1")
+	tracked, err := svc.claimQueuedDispatchForExecution("session-1", "dispatch-1", reservation)
+	if err != nil || !tracked {
+		t.Fatalf("claim accepted dispatch: tracked=%v err=%v", tracked, err)
+	}
+	if !svc.isCurrentQueuedDispatch("session-1", "dispatch-1") {
+		t.Fatal("accepted send-now dispatch was not current before stream complete")
+	}
+
+	svc.completeTurnForTaskSession(context.Background(), "task-1", "session-1")
+	if !svc.isCurrentQueuedDispatch("session-1", "dispatch-1") {
+		t.Fatal("stream-only predecessor complete wiped accepted send-now dispatch")
+	}
+
+	svc.completeTurnForSession(context.Background(), "session-1")
+	if svc.isCurrentQueuedDispatch("session-1", "dispatch-1") {
+		t.Fatal("ready-path successor complete left accepted send-now dispatch blocking the next queue action")
+	}
+}
+
+func TestLiveSendNowSuccessorDoesNotConflictAndStaysProtected(t *testing.T) {
+	svc := &Service{logger: testLogger()}
+	reservation := svc.markQueuedDispatchInFlight("session-1", "dispatch-1")
+	if _, err := svc.claimQueuedDispatchForExecution("session-1", "dispatch-1", reservation); err != nil {
+		t.Fatalf("claim accepted dispatch: %v", err)
+	}
+	if !svc.isQueuedDispatchAccepted("session-1") {
+		t.Fatal("handoff reservation should conflict before it is live")
+	}
+
+	svc.markAcceptedDispatchLive("session-1", reservation)
+	if svc.isQueuedDispatchAccepted("session-1") {
+		t.Fatal("live send-now successor still reported as a handoff conflict")
+	}
+	if _, err := svc.pendingQueuedDispatchForSendNow("session-1"); err != nil {
+		t.Fatalf("live successor blocked send-now restore: %v", err)
+	}
+
+	svc.completeTurnForTaskSession(context.Background(), "task-1", "session-1")
+	if !svc.isCurrentQueuedDispatch("session-1", "dispatch-1") {
+		t.Fatal("stream-only predecessor complete wiped live send-now dispatch")
+	}
+}
+
+func TestSendQueuedNowCancelsLiveReplacementTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	firstPromptEntered := make(chan struct{})
+	allowFirstPrompt := make(chan struct{})
+	secondPromptEntered := make(chan struct{})
+	allowSecondPrompt := make(chan struct{})
+	var promptCount atomic.Int32
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptAgentFunc: func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error) {
+			n := promptCount.Add(1)
+			if n == 1 {
+				close(firstPromptEntered)
+				<-allowFirstPrompt
+				return &executor.PromptResult{}, nil
+			}
+			close(secondPromptEntered)
+			<-allowSecondPrompt
+			return &executor.PromptResult{}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.messageQueue.SetAutoMergeEnabled(false)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageCreator = &mockMessageCreator{}
+
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "session-1", "task-1", "first send now", "", messagequeue.QueuedByUser, false, nil, nil,
+	); err != nil {
+		t.Fatalf("queue first message: %v", err)
+	}
+	if _, err := svc.SendQueuedNow(ctx, "session-1", QueueSendNowScopeAll, ""); err != nil {
+		t.Fatalf("first send now: %v", err)
+	}
+	select {
+	case <-firstPromptEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first replacement prompt")
+	}
+
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "session-1", "task-1", "second send now", "", messagequeue.QueuedByUser, false, nil, nil,
+	); err != nil {
+		t.Fatalf("queue second message: %v", err)
+	}
+	if _, err := svc.SendQueuedNow(ctx, "session-1", QueueSendNowScopeAll, ""); err != nil {
+		t.Fatalf("later send now: %v", err)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got == 0 {
+		t.Fatal("later send now did not cancel the live replacement turn")
+	}
+
+	close(allowFirstPrompt)
+	select {
+	case <-secondPromptEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for later replacement prompt")
+	}
+	close(allowSecondPrompt)
 }
