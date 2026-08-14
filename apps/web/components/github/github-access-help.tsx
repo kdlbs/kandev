@@ -19,14 +19,20 @@ export function GitHubAccessHelp({
   title,
   description,
   content,
+  onOpen,
 }: {
   label: string;
   title: string;
   description: string;
   content?: ReactNode;
+  onOpen?: () => void;
 }) {
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
+  const handleDrawerOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (nextOpen) onOpen?.();
+  };
   const button = (
     <Button
       type="button"
@@ -43,7 +49,7 @@ export function GitHubAccessHelp({
   const trigger = usesTouchDrawer ? (
     <DrawerTrigger asChild>{button}</DrawerTrigger>
   ) : (
-    <Tooltip>
+    <Tooltip onOpenChange={(nextOpen) => nextOpen && onOpen?.()}>
       <TooltipTrigger asChild>{button}</TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[320px] text-xs leading-relaxed">
         {content ?? description}
@@ -52,7 +58,7 @@ export function GitHubAccessHelp({
   );
 
   return (
-    <Drawer open={open} onOpenChange={setOpen}>
+    <Drawer open={open} onOpenChange={handleDrawerOpenChange}>
       {trigger}
       <DrawerContent>
         <DrawerHeader>

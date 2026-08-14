@@ -58,12 +58,16 @@ function snapshotsFromInfo(info: GitHubRateLimitInfo): GitHubRateLimitSnapshot[]
   return out;
 }
 
-export function GitHubRateLimitDisplay({ info }: { info?: GitHubRateLimitInfo }) {
+export function GitHubRateLimitDisplay({
+  info,
+  onOpen,
+}: {
+  info?: GitHubRateLimitInfo;
+  onOpen?: () => void;
+}) {
   const { t } = useTranslation();
   const now = useTickNow(30_000);
-  if (!info) return null;
-  const snapshots = snapshotsFromInfo(info);
-  if (snapshots.length === 0) return null;
+  const snapshots = info ? snapshotsFromInfo(info) : [];
   const exhausted = snapshots.filter((s) => isExhausted(s, now));
 
   return (
@@ -71,7 +75,12 @@ export function GitHubRateLimitDisplay({ info }: { info?: GitHubRateLimitInfo })
       label={t("github:showGithubApiLimits")}
       title={t("github:githubApiLimits")}
       description={t("github:currentGithubApiRateAndQuery")}
-      content={<RateLimitDetails snapshots={snapshots} exhausted={exhausted} />}
+      content={
+        snapshots.length > 0 ? (
+          <RateLimitDetails snapshots={snapshots} exhausted={exhausted} />
+        ) : undefined
+      }
+      onOpen={onOpen}
     />
   );
 }

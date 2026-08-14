@@ -573,7 +573,7 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
       icon={<IconTicket className="h-5 w-5" />}
       title={t("jira:jiraIntegration")}
       description={t("jira:connectThisWorkspaceToAtlassianCloud")}
-      action={<JiraEnabledControl />}
+      action={<JiraEnabledControl workspaceId={workspaceId} />}
     >
       <SettingsCard isDirty={dirty}>
         <CardContent className="space-y-4 pt-6">

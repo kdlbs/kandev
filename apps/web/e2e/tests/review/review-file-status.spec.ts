@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { REVIEW_SIDEBAR_LIMITS } from "../../../hooks/use-review-sidebar-resize";
@@ -182,7 +183,12 @@ test.describe("Review file status", () => {
     await expect
       .poll(() => reviewScroll.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
-    await testPage.waitForTimeout(600);
+    await dwell(
+      testPage,
+      600,
+      "negative-assertion",
+      "asserts that jumping to a file never marks it reviewed; the count staying at zero is the absence of an event, so a regression needs the auto-review window to elapse to have room to fire",
+    );
     await expect(reviewProgress).toHaveText(`0 of ${totalFiles} files reviewed`);
     await prCapture.screenshot("review-ordered-safe-jump", {
       caption: "Review keeps tree and diff order aligned without auto-reviewing a file jump",

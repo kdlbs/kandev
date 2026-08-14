@@ -34,6 +34,16 @@ to associate with the agent it changes.
 - Existing profile rows, profile links, duplicate/delete actions, agent status
   badges, authentication controls, and runtime-update controls keep their
   current behavior.
+- On a full desktop viewport (at least 1024px wide), each profile row shows
+  compact icon-only **Duplicate** and **Delete** action buttons directly in the
+  row action area. The buttons retain translated accessible names, are small
+  and vertically centered. Hovering or focusing either button shows a tooltip
+  with its translated action name, and the row does not show the three-dots
+  profile-actions trigger at this width.
+- Below the full desktop boundary, including compact desktop, tablet, and
+  mobile viewports, each profile row keeps the three-dots profile-actions
+  trigger and exposes **Duplicate** and **Delete** in its overflow menu. Inline
+  action buttons are not rendered in these viewports.
 - The desktop and mobile layouts expose the same actions and outcomes. On a
   narrow touch viewport, card-header actions remain visible, reachable with a
   touch target of at least 44px, and do not create document-level horizontal
@@ -56,6 +66,18 @@ to associate with the agent it changes.
 - **GIVEN** a configured agent card, **WHEN** the user clicks **New profile**,
   **THEN** the browser navigates to that agent's profile creation route and
   the existing profile rows remain unchanged.
+- **GIVEN** a profile row in a viewport at least 1024px wide, **WHEN** the user
+  views the row, **THEN** compact icon-only **Duplicate** and **Delete** buttons
+  with translated accessible names are visible inline, vertically centered,
+  and the three-dots profile-actions trigger is absent. Hovering or focusing an
+  inline button shows a tooltip with the matching translated action name.
+- **GIVEN** a profile row in a viewport narrower than 1024px, **WHEN** the user
+  opens the profile-actions trigger, **THEN** the overflow menu contains
+  **Duplicate** and **Delete**, and no inline action buttons are rendered.
+- **GIVEN** a profile row with inline actions or overflow actions, **WHEN** the
+  user activates **Duplicate** or confirms **Delete**, **THEN** the existing
+  duplicate or delete behavior completes without changing the profile link or
+  other row metadata.
 - **GIVEN** a phone viewport below 768px, **WHEN** the user opens the agents
   settings page, **THEN** the card-header creation action and the section
   toolbar actions remain visible and touch-reachable, the profile rows remain
@@ -64,8 +86,10 @@ to associate with the agent it changes.
 
 ## Out of scope
 
-- Changing the profile editor, profile-row actions, agent discovery, agent
-  installation, or the backend/API contracts.
+- Changing the profile editor, agent discovery, agent installation, or the
+  backend/API contracts.
+- Changing the duplicate or delete operation, confirmation flow, profile link,
+  or store synchronization behavior.
 - Renaming the existing translated **New profile**, **Setup profile**, refresh,
   or agent-creation labels.
 - Changing the profile count text used by unrelated task or picker surfaces.

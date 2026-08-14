@@ -12,12 +12,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import Link from "@/components/routing/app-link";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { AgentProfileDeleteConfirmDialog } from "@/components/settings/agent-profile-delete-dialog";
 import { deleteAgentProfileAction } from "@/app/actions/agents";
 import { useProfileDuplicate } from "@/hooks/domains/settings/use-profile-duplicate";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile } from "@/lib/types/http";
@@ -63,16 +65,15 @@ export function AgentProfilesSubList({
  * guard, revision-aware store merge).
  */
 function ProfileRowActions({
-  agent,
   profile,
+  onDuplicate,
   onConfirmDelete,
 }: {
-  agent: Agent;
   profile: AgentProfile;
+  onDuplicate: () => void;
   onConfirmDelete: () => void;
 }) {
   const { t } = useTranslation();
-  const handleDuplicate = useProfileDuplicate();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -81,6 +82,7 @@ function ProfileRowActions({
           size="sm"
           className="cursor-pointer min-h-11 min-w-11"
           aria-label={t("agents:profileActions")}
+          data-testid={`profile-actions-menu-${profile.id}`}
         >
           <IconDotsVertical className="h-4 w-4" />
         </Button>
@@ -89,13 +91,14 @@ function ProfileRowActions({
         <DropdownMenuItem
           className="cursor-pointer"
           data-testid={`duplicate-profile-${profile.id}`}
-          onSelect={() => void handleDuplicate(agent, profile)}
+          onSelect={onDuplicate}
         >
           <IconCopy className="h-4 w-4 mr-2" />
           {t("agents:duplicate")}
         </DropdownMenuItem>
         <DropdownMenuItem
           className="cursor-pointer text-destructive focus:text-destructive"
+          data-testid={`delete-profile-${profile.id}`}
           onSelect={onConfirmDelete}
         >
           <IconTrash className="h-4 w-4 mr-2" />
@@ -106,16 +109,67 @@ function ProfileRowActions({
   );
 }
 
+function ProfileRowInlineActions({
+  profile,
+  onDuplicate,
+  onConfirmDelete,
+}: {
+  profile: AgentProfile;
+  onDuplicate: () => void;
+  onConfirmDelete: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-1" data-testid={`profile-actions-inline-${profile.id}`}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="cursor-pointer"
+            data-testid={`duplicate-profile-inline-${profile.id}`}
+            onClick={onDuplicate}
+            aria-label={t("agents:duplicate")}
+          >
+            <IconCopy className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">{t("agents:duplicate")}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="destructive"
+            size="icon"
+            className="cursor-pointer"
+            data-testid={`delete-profile-inline-${profile.id}`}
+            onClick={onConfirmDelete}
+            aria-label={t("agents:delete")}
+          >
+            <IconTrash className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">{t("agents:delete")}</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
 /** One saved profile as a fully clickable row — shared by the Agents index and the agent page. */
 export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const router = useRouter();
+  const { isFullDesktop } = useResponsiveBreakpoint();
+  const handleDuplicate = useProfileDuplicate();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const store = useAppStoreApi();
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
   const href = profileHref(agent.name, profile.id);
+  const onDuplicate = () => void handleDuplicate(agent, profile);
 
   const handleDelete = async () => {
     setConfirmOpen(false);
@@ -180,11 +234,19 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
           )}
         </div>
         <div className="relative z-10 flex shrink-0 items-center gap-1">
-          <ProfileRowActions
-            agent={agent}
-            profile={profile}
-            onConfirmDelete={() => setConfirmOpen(true)}
-          />
+          {isFullDesktop ? (
+            <ProfileRowInlineActions
+              profile={profile}
+              onDuplicate={onDuplicate}
+              onConfirmDelete={() => setConfirmOpen(true)}
+            />
+          ) : (
+            <ProfileRowActions
+              profile={profile}
+              onDuplicate={onDuplicate}
+              onConfirmDelete={() => setConfirmOpen(true)}
+            />
+          )}
         </div>
       </CardContent>
       <AgentProfileDeleteConfirmDialog

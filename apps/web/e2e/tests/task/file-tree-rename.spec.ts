@@ -9,6 +9,7 @@ import {
   openTaskSession,
   createStandardProfile,
 } from "../../helpers/git-helper";
+import { dwell } from "../../helpers/causal-waits";
 
 // Inline rename lives in file-context-menu.tsx (useFileRename + TreeNodeName).
 // Entry points (today, in product code):
@@ -151,10 +152,12 @@ test.describe("File tree inline rename", () => {
     const input = await startRenameViaContextMenu(testPage, node);
     await input.press("ControlOrMeta+A");
     await input.fill("blur-final.ts");
-    // deliberate-sleep(product-timer): the product gates blur-commit on a
-    // ~400ms timer after isRenaming flips. That timer is the thing being waited
-    // for and it publishes nothing to observe, so the wait has to outlast it.
-    await testPage.waitForTimeout(500);
+    await dwell(
+      testPage,
+      500,
+      "product-timer",
+      "the product gates blur-commit on a ~400ms timer after isRenaming flips; that timer publishes nothing to observe, so the wait has to outlast it",
+    );
     // Click another file to blur the input. The other node also belongs to
     // the tree, so we don't lose tree-container focus state.
     await session.fileTreeNode("other.ts").click();

@@ -19,7 +19,7 @@ export type IntegrationConfigStatus = {
   lastOk?: boolean;
 };
 
-// Reads the backend-recorded auth health for the install-wide integration.
+// Reads the backend-recorded auth health for the integration.
 // Returns true only when a config exists, has a secret, and the most recent
 // probe succeeded. Pass `active=false` to skip fetching entirely (e.g. while
 // the user toggle is off) — this avoids the polling overhead on disabled
@@ -70,24 +70,25 @@ export function useIntegrationAuthed(
 }
 
 export type IntegrationAvailabilityOptions = {
-  // Install-wide enabled toggle that has settled. `loaded` gates the
-  // probe so we don't waste a fetch on the first render when the toggle is
-  // off.
-  useEnabled: () => { enabled: boolean; loaded: boolean };
+  // The workspace's enabled toggle, already read by the caller (it owns the
+  // workspace id its `fetchConfig` is keyed by, so it owns the toggle read
+  // too). `loaded` gates the probe so we don't waste a fetch on the first
+  // render when the toggle is off.
+  enabledState: { enabled: boolean; loaded: boolean };
   fetchConfig: () => Promise<IntegrationConfigStatus | null>;
   refreshMs?: number;
 };
 
-// Combined check for showing an integration's UI: the user toggle is on AND
-// the backend reports a configured, healthy connection. When the toggle is
+// Combined check for showing an integration's UI: the workspace's toggle is on
+// AND the backend reports a configured, healthy connection. When the toggle is
 // off (or hasn't loaded yet) the auth probe is skipped — disabled
 // integrations don't poll the backend.
 export function useIntegrationAvailable({
-  useEnabled,
+  enabledState,
   fetchConfig,
   refreshMs,
 }: IntegrationAvailabilityOptions): boolean {
-  const { enabled, loaded } = useEnabled();
+  const { enabled, loaded } = enabledState;
   const active = loaded && enabled;
   const authed = useIntegrationAuthed(fetchConfig, refreshMs, active);
   return active && authed;

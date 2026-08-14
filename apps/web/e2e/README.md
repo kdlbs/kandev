@@ -293,12 +293,27 @@ A fourth case, "the backend has reached state X", needs no primitive:
 `expect.poll(() => apiClient.getX(id))` already reads the backend directly
 instead of through the DOM.
 
-Three things that are easy to get wrong:
+Four things that are easy to get wrong:
 
 - **`watchWs(page)` must be called before the first `page.goto()`.** Playwright
   only reports sockets opened after the listener is attached, so a watcher
   created once the app is running observes nothing and every wait times out.
   It survives `page.reload()`.
+- **Arming early is necessary but not sufficient: the page's socket has to be
+  subscribed before the frame is published.** The gateway broadcaster
+  (`internal/gateway/websocket/task_notifications.go`) is a live fan-out of the
+  event bus with **no replay on subscribe**, so a notification published while
+  the page is still booting is not delivered late, it is gone. The symptom is a
+  correctly-armed wait that never resolves, and it bites whenever the trigger
+  precedes the navigation, most often a task seeded with `createTaskWithAgent`
+  (the turn starts server-side at creation) whose early-turn frames land before
+  the page subscribes. Under load the arm can pass, which makes it a flake
+  rather than an honest failure. When the cause fires before the page exists,
+  wait on the resulting **state** instead of the frame: `expect.poll` against
+  `helpers/api-client.ts`, or a store helper such as
+  `waitForActiveSessionForegroundActivity`. This is the one-transport version of
+  the bullet below: there, two transports mean no single frame is authoritative;
+  here there is only one and you still cannot observe it.
 - **Confirm the causal chain, don't infer it from the code.** Attach a throwaway
   `page.on("response")` / `page.on("websocket")` logger and run the spec once.
   Two of the three chains behind this section's example specs were not what a
@@ -428,6 +443,153 @@ A ratchet banning raw sleeps needs to allow **both** tokens, `dwell(` and
 `injectLatency(`. Do not try to exempt route handlers by scope detection
 instead — a proximity heuristic misfires, and a wrong exemption silently
 unguards real sleeps.
+
+### How this is enforced
+
+**The sanctioned forms are only sanctioned when they are actually imported.**
+`dwell` and `injectLatency` must resolve to a binding from
+`e2e/helpers/causal-waits`; a call to an unimported (or differently imported)
+identifier of that name is reported like a raw sleep. It is not pedantry: the
+repo turns `no-undef` off, nothing typechecks `e2e/`, and an import that
+silently fails to apply leaves a call site that lints clean and throws
+`dwell is not defined` at runtime, inside whichever retry path only executes on
+a loaded shard. That has already happened once.
+
+Two checks, deliberately scoped differently, because ~126 raw sleeps predate
+them and `pnpm lint` is `eslint --max-warnings 0` — a repo-wide rule at _any_
+severity would break every unrelated PR until the conversion finishes.
+
+**1. The new-code ratchet** (`scripts/check-new-e2e-sleeps.mjs`) runs in CI and
+pre-commit and judges the **change**, not the file:
+
+- a file the change **added** must be clean outright;
+- a file the change **modified** is judged only on the lines it touched.
+
+So editing a line next to somebody else's `waitForTimeout` never becomes your
+problem, and there is no migration treadmill. Same model as
+`golangci-lint --new-from-rev` and the i18n ratchet.
+
+**2. The eslint rule** (`eslint-rules/no-unsanctioned-sleep.mjs`) is an
+**error**, but only on `e2eSleepGuardFiles` — directories the conversion has
+already driven to zero. Append a directory there in the same PR that clears it.
+**Never remove an entry to make a build pass**: a removal means a sleep was added
+to a clean directory.
+
+When the list would cover all of `e2e/`, replace it with `e2e/**/*.ts`. That is
+the graduation, and from then on the ratchet is a second line of defence rather
+than the only one.
+
+Two commands:
+
+```bash
+pnpm run e2e:waits              # debt report: raw sleeps, dwell by category
+pnpm run lint:e2e-sleeps <path> # preview the rule on a path not yet guarded
+```
+
+`e2e:waits` reports three numbers that must not be added together. Raw sleeps are
+what the conversion drives to zero. **Dwell debt excludes `negative-assertion`,
+which is permanent** — a test asserting something never happens has no event to
+wait for, and deleting its wait removes the window the regression needs in order
+to appear. `injectLatency` is counted apart from both, so deliberate fixture
+configuration cannot inflate a number that is supposed to be shrinking. Inside
+the debt, `unverified` is the sub-total to attack first.
+
+**What the rule does not flag, and why.** It is an AST rule rather than a grep
+because `e2e/` holds ~700 `test.setTimeout(60_000)` calls — Playwright's per-test
+timeout setter, unrelated to sleeping. It also leaves alone two shapes that look
+almost identical to a sleep:
+
+- a **race guard**, where the timer is one of several resolution paths
+  (`socket.onopen = …; setTimeout(() => resolve(false), 3000)`);
+- a **cancellable timer**, where the handle is kept for a later `clearTimeout`.
+  A sleep never keeps the handle.
+
+The same reasoning leaves `requestAnimationFrame(() => setTimeout(resolve, 0))`
+alone: that promise resolves on the **frame**, and the `setTimeout(…, 0)` only
+hops out of the rAF callback so a measurement reflects painted geometry. It is
+not a duration wait. This falls out of the rule's shape rather than from a
+carve-out — a blanket "any `setTimeout(…, 0)` is fine" exemption would have been
+a loophole.
+
+## Verifying a converted wait
+
+Replacing a sleep with a causal wait is easy to do wrongly in a way that still
+passes. These four checks are ordered by how often they actually catch
+something.
+
+### 1. Verify against observed traffic, never a name that looks right
+
+Reading the components and picking the action that sounds correct is the single
+most common way a conversion goes wrong. Attach a throwaway logger, run the spec
+once, and read what actually arrived:
+
+```ts
+page.on("response", (r) => console.log(r.request().method(), new URL(r.url()).pathname));
+page.on("websocket", (ws) =>
+  ws.on("framereceived", (f) => console.log(String(f.payload).slice(0, 200))),
+);
+```
+
+Three conversions in this suite were wrong despite careful code-reading: a spec
+named after `kanban.update` whose path only ever delivers `task.updated`; a
+branch list fetched on the workspace-scoped route rather than the
+repository-scoped one the client's shape implies; and a `task.plan.get` that
+never fires on first panel open at all. Each looked right in the source.
+
+### 2. Rule out the silent burn
+
+A wait that resolves on timeout instead of throwing converts a hard failure into
+a slow pass — the test still goes green, having asserted nothing about timing.
+Every armed wait must be awaited, and must reject rather than resolve when it
+expires (the primitives in `helpers/causal-waits.ts` do).
+
+Then compare **runtime against the budget**. A spec carrying two 15s waits that
+finishes in 6.3s cannot be burning either of them; one that finishes in 30.1s is
+burning both. One fixed conversion here went from a 15s burn to 6.8s, and that
+delta is what exposed it — not any assertion.
+
+### 3. Run it enough times to mean something
+
+```sh
+pnpm run build:e2e                       # specs run against the prebuilt dist
+pnpm e2e:raw tests/<area>/<spec>.spec.ts --repeat-each=10
+```
+
+Read the **spread**, not the pass count. `1.4s-11.4s` across ten runs with zero
+failures is evidence the wait absorbs load; a single green 1.4s run is evidence
+of nothing. A component edit is invisible until `build:e2e` re-runs, so a spec
+that "passes after the fix" without a rebuild has told you nothing.
+
+### 4. Mutate what you rely on
+
+Break the thing the test depends on, confirm the intended test fails, restore,
+confirm the tree is byte-identical. Assert the expected number of tests was
+**collected and executed** — a mutant that fails to compile makes the runner
+report zero collected, which at a glance is indistinguishable from a clean run.
+
+### Two traps
+
+**Wrong Playwright project.** `mobile-*.spec.ts` exists only under
+`mobile-chrome`, `tests/auth/**` under `auth`, `office-routing-*` under
+`routing`, and `tests/{docker,ssh}/**` under `containers`. Selecting one under
+`chromium` matches nothing, prints `No tests found`, and **exits non-zero** — so
+the failure is real. What hides it is the idiom: `playwright test … | tail`
+reports `tail`'s exit status, not Playwright's. **Never pipe a gate.** Derive the
+expected test count before the run and compare it to Playwright's first line;
+checking afterwards is a habit, deriving first is a check.
+
+**Nothing typechecks `e2e/**`.** `apps/web/tsconfig.json`excludes it, there is
+no`e2e/tsconfig.json`, and eslint runs no type-aware rules here — a file
+containing `const x: number = "string"`passes both`pnpm run typecheck`and`pnpm lint`. Anything load-bearing needs a runtime check or a test. `dwell`
+validates its category at runtime for exactly this reason.
+
+### Why this matters
+
+**A sleep is where a test goes to stop asserting.** Converting them has already
+found two specs that had quietly stopped testing anything. The clearest was a
+test pressing a keybinding that is `UNBOUND_SHORTCUT` by default: the keypress
+was a no-op, and the 250ms sleep after it made the test look like it was waiting
+for a result it could never receive.
 
 ## Adding a new spec
 

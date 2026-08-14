@@ -1,18 +1,18 @@
 "use client";
 
+import { INTEGRATION_ENABLED_KEYS } from "@/lib/integrations/integration-enabled-keys";
 import { useIntegrationEnabled } from "../integrations/use-integration-enabled";
 
-const STORAGE_KEY = "kandev:azure-devops:enabled:v1";
-const LEGACY_KEY_PREFIX = "kandev:azure-devops:enabled:";
-const SYNC_EVENT = "kandev:azure-devops:enabled-changed";
+const { storageKey, legacyKeyPrefix, syncEvent } = INTEGRATION_ENABLED_KEYS["azure-devops"];
 
 /**
- * Install-wide enable/disable state for the Azure DevOps integration.
+ * Per-workspace enable/disable state for the Azure DevOps integration.
  *
- * Backed by `localStorage` (key `kandev:azure-devops:enabled:v1`), synced
- * across browser tabs and across the own-settings-page and index-page
- * sliders. Defaults to `true` when no value has ever been persisted.
+ * Backed by `localStorage` (key `kandev:azure-devops:enabled:v1:<workspaceId>`), synced across
+ * browser tabs and across the own-settings-page and index-page sliders.
+ * Defaults to `true` when no value has ever been persisted for the workspace.
+ * Omitting `workspaceId` reads the pre-scoping install-wide value.
  */
-export function useAzureDevOpsEnabled() {
-  return useIntegrationEnabled(STORAGE_KEY, LEGACY_KEY_PREFIX, SYNC_EVENT);
+export function useAzureDevOpsEnabled(workspaceId?: string | null) {
+  return useIntegrationEnabled(storageKey, legacyKeyPrefix, syncEvent, workspaceId);
 }

@@ -35,7 +35,7 @@ export type SentryAvailability = {
 // surfaces and settings banner consume. Fetches are request-versioned so a slow
 // response for a previous workspace can't clobber a newer one.
 export function useSentryInstances(workspaceId?: string | null): SentryAvailability {
-  const { enabled, loaded } = useSentryEnabled();
+  const { enabled, loaded } = useSentryEnabled(workspaceId);
   const active = loaded && enabled && !!workspaceId;
   const [instances, setInstances] = useState<SentryConfig[]>([]);
   const [loading, setLoading] = useState(true);
