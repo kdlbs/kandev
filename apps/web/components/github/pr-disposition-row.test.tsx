@@ -18,6 +18,8 @@ vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
 const PR_URL = "https://github.com/kdlbs/kandev/pull/100";
 const OTHER_PR_URL = "https://github.com/kdlbs/kandev/pull/101";
 const SELECT_TESTID = "pr-disposition-select";
+const ERROR_TESTID = "pr-disposition-error";
+const NONE_LABEL = "No disposition recorded";
 
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
@@ -93,7 +95,7 @@ describe("PRDispositionRow", () => {
 
   it("shows the 'no disposition recorded' placeholder when null (AC-33)", () => {
     renderRow(makePR({ disposition: null }));
-    expect(screen.getByTestId(SELECT_TESTID).textContent).toContain("No disposition recorded");
+    expect(screen.getByTestId(SELECT_TESTID).textContent).toContain(NONE_LABEL);
   });
 
   it("reveals the superseded-by URL field when the stored disposition is already superseded", () => {
@@ -122,7 +124,7 @@ describe("PRDispositionRow", () => {
     fireEvent.click(screen.getByTestId("pr-disposition-save"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("pr-disposition-error").textContent).toContain(
+      expect(screen.getByTestId(ERROR_TESTID).textContent).toContain(
         "superseded_by_url resolves to this PR's own identity",
       );
     });
@@ -149,7 +151,7 @@ describe("PRDispositionRow", () => {
         superseded_by_url: OTHER_PR_URL,
       });
     });
-    expect(screen.queryByTestId("pr-disposition-error")).toBeNull();
+    expect(screen.queryByTestId(ERROR_TESTID)).toBeNull();
   });
 
   it("disables the save button until a superseding URL is entered", () => {
@@ -178,13 +180,43 @@ describe("PRDispositionRow auto-save failure handling", () => {
     fireEvent.click(option);
 
     await waitFor(() => {
-      expect(screen.getByTestId("pr-disposition-error").textContent).toContain(
-        "workspace not found",
-      );
+      expect(screen.getByTestId(ERROR_TESTID).textContent).toContain("workspace not found");
     });
     // The write failed, so the select must fall back to the last persisted
     // value ("no disposition recorded") rather than keep showing the
     // unsaved "Duplicate" pick as if it had taken effect.
-    expect(screen.getByTestId(SELECT_TESTID).textContent).toContain("No disposition recorded");
+    expect(screen.getByTestId(SELECT_TESTID).textContent).toContain(NONE_LABEL);
+  });
+});
+
+describe("PRDispositionRow interactive clearing", () => {
+  beforeEach(() => {
+    vi.mocked(patchTaskPRDisposition).mockReset();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("clears an already-set disposition when the user picks 'No disposition recorded' (AC-33)", async () => {
+    const cleared = makePR({
+      disposition: null,
+      disposition_superseded_by_url: null,
+      disposition_recorded_at: null,
+    });
+    vi.mocked(patchTaskPRDisposition).mockResolvedValue(cleared);
+    renderRow(makePR({ disposition: "duplicate" }));
+
+    fireEvent.click(screen.getByTestId(SELECT_TESTID));
+    const option = await screen.findByRole("option", { name: NONE_LABEL });
+    fireEvent.click(option);
+
+    await waitFor(() => {
+      expect(patchTaskPRDisposition).toHaveBeenCalledWith("assoc-1", "ws-1", {
+        disposition: null,
+        superseded_by_url: null,
+      });
+    });
+    expect(screen.queryByTestId(ERROR_TESTID)).toBeNull();
+    expect(screen.getByTestId(SELECT_TESTID).textContent).toContain(NONE_LABEL);
   });
 });
