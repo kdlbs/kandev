@@ -27,10 +27,22 @@ func terminalSessionDispatchError(session *models.TaskSession) error {
 }
 
 // isTerminalMessageTargetState reports whether a session can no longer receive a
-// message. It mirrors exactly the two states dispatchTaskMessage refuses, so the
-// resolver never hands back a session the dispatcher is about to reject.
+// message, so the resolver never hands back a session the dispatcher is about
+// to reject.
+//
+// COMPLETED belongs here even though dispatchTaskMessage's own switch refuses
+// only CANCELLED and FAILED. The idle branch it falls into calls
+// ProcessOnTurnStart, and the orchestrator's isTerminalSessionState — the one
+// in event_handlers_streaming.go, NOT the executor's same-named function —
+// counts COMPLETED as terminal and rejects the turn. Leaving it out let a
+// retired COMPLETED sibling shadow an older RUNNING one during fallback: newest
+// wins, the dispatcher then refuses it, and the message failed with a live
+// session sitting right there. The set here is "states a turn can start on",
+// which is the question the resolver is actually asking.
 func isTerminalMessageTargetState(state models.TaskSessionState) bool {
-	return state == models.TaskSessionStateCancelled || state == models.TaskSessionStateFailed
+	return state == models.TaskSessionStateCancelled ||
+		state == models.TaskSessionStateFailed ||
+		state == models.TaskSessionStateCompleted
 }
 
 // resolveMessageTargetSession picks the session a message_task call targets:

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -151,5 +152,64 @@ func TestUpdateDeferredLaunchPromptRejectsABlankPrompt(t *testing.T) {
 	}
 	if launch := storedLaunch(t, repo); launch["prompt"] != "the brief written before the work started" {
 		t.Fatalf("prompt = %v, want the record left untouched", launch["prompt"])
+	}
+}
+
+// racingSessionRepo fires a concurrent start at the exact point the prompt
+// update is vulnerable: after it has decided the task has no session, before it
+// writes. Deterministic — the interleaving is the seam, not a sleep.
+type racingSessionRepo struct {
+	repository.SessionRepository
+	tasks *sqliterepo.Repository
+	fired bool
+}
+
+func (r *racingSessionRepo) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	sessions, err := r.SessionRepository.ListTaskSessions(ctx, taskID)
+	if err != nil || r.fired {
+		return sessions, err
+	}
+	r.fired = true
+	// The task starts right now: the start path claims the intent atomically,
+	// exactly as consumeDeferredLaunchOnStart's claim does.
+	if _, removeErr := r.tasks.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch); removeErr != nil {
+		return nil, removeErr
+	}
+	return sessions, nil
+}
+
+// The resurrection race, reported independently by three reviewers on #2660.
+//
+// A read-modify-write prompt edit re-creates the metadata key when a start
+// consumes it between the read and the write, because UpdateTask persists the
+// whole metadata blob it read earlier. The gate then finds a live intent on a
+// task that is already running and launches a second session — the exact bug
+// this PR exists to fix, reintroduced through the editing path.
+//
+// The conditional single-key write makes the start win: nothing is written and
+// the caller is told the task started.
+func TestUpdateDeferredLaunchPromptLosesToAConcurrentStart(t *testing.T) {
+	var racing *racingSessionRepo
+	svc, _, repo := createTestServiceWithSessionsRepo(t, func(r *sqliterepo.Repository) repository.SessionRepository {
+		racing = &racingSessionRepo{SessionRepository: r, tasks: r}
+		return racing
+	})
+	seedDeferredLaunchTask(t, repo)
+
+	_, err := svc.UpdateDeferredLaunchPrompt(context.Background(), deferredLaunchTaskID, "a prompt nothing will read")
+	if !errors.Is(err, ErrDeferredLaunchAlreadyStarted) {
+		t.Fatalf("err = %v, want ErrDeferredLaunchAlreadyStarted", err)
+	}
+	if !racing.fired {
+		t.Fatal("the fixture never injected the concurrent start; the test proved nothing")
+	}
+
+	task, getErr := repo.GetTask(context.Background(), deferredLaunchTaskID)
+	if getErr != nil {
+		t.Fatalf("GetTask: %v", getErr)
+	}
+	if _, resurrected := task.Metadata[models.MetaKeyDeferredLaunch]; resurrected {
+		t.Fatal("the prompt edit resurrected a launch intent the start had consumed; " +
+			"the gate can now gate-launch a second session on a running task")
 	}
 }

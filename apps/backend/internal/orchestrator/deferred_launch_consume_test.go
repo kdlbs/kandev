@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -281,4 +282,96 @@ func TestFailedStartKeepsTheDeferredLaunch(t *testing.T) {
 	launch, still := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
 	require.True(t, still, "a failed start must not consume the launch intent")
 	assert.Equal(t, deferredStalePrompt, launch["prompt"])
+}
+
+// The interleaving the ordering-based tests cannot see: the gate opens WHILE a
+// direct start is mid-launch.
+//
+// Consuming the intent after a successful launch left that whole window open,
+// and a launch is slow — worktree creation, a container health check. A gate
+// firing inside it loads the task, still sees the intent, claims it, and starts
+// its own session alongside the one being launched. Same double session, reached
+// by interleaving rather than by ordering, so
+// TestManualStartConsumesTheDeferredLaunchSoTheGateCannotRefire passes right
+// through it.
+//
+// Deterministic, not timing-based: the gate is fired from inside the agent
+// manager's launch callback, which is exactly the middle of the launch.
+func TestGateFiringMidLaunchCannotStartASecondSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedChainStepTask(t, repo, deferredChainTaskID)
+	counter := newLaunchCounter()
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[deferredChainTaskID] = &v1.Task{
+		ID: deferredChainTaskID, WorkflowID: "wf1",
+		Title: "Chain step", Description: "desc", State: v1.TaskStateCreated,
+	}
+	var svc *Service
+	gateFired := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			counter.record()
+			// Mid-launch: the last predecessor completes and the gate opens.
+			// Fired once — the gate's own launch would re-enter this callback.
+			select {
+			case <-gateFired:
+			default:
+				close(gateFired)
+				svc.handleTaskDependenciesForTerminalState(ctx, deferredPredecessorID, v1.TaskStateCompleted)
+			}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc = createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.SetTaskDependencyReader(&resolvedDependencyReader{dependents: []string{deferredChainTaskID}})
+
+	_, err := svc.StartTask(ctx, deferredChainTaskID, "profile1", "", "", "",
+		"do the work with what we know now", "", false, false, nil)
+	require.NoError(t, err)
+	<-gateFired
+
+	assert.False(t, counter.awaitLaunch(1),
+		"a gate opening mid-launch must not launch a second session")
+	assert.Equal(t, 1, sessionCount(t, repo, deferredChainTaskID),
+		"the task must end with exactly one session")
+}
+
+// A start that fails must PUT THE INTENT BACK, now that the claim is taken
+// before the launch rather than after it. Without the release the task silently
+// never runs, which is a worse failure than the extra session the claim
+// prevents.
+func TestFailedLaunchReleasesTheClaimedIntent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedChainStepTask(t, repo, deferredChainTaskID)
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[deferredChainTaskID] = &v1.Task{
+		ID: deferredChainTaskID, WorkflowID: "wf1",
+		Title: "Chain step", Description: "desc", State: v1.TaskStateCreated,
+	}
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, errors.New("executor refused the launch")
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	_, err := svc.StartTask(ctx, deferredChainTaskID, "profile1", "", "", "",
+		"do the work", "", false, false, nil)
+	require.Error(t, err)
+
+	task, err := repo.GetTask(ctx, deferredChainTaskID)
+	require.NoError(t, err)
+	launch, still := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	require.True(t, still, "a failed launch must put the reserved intent back")
+	assert.Equal(t, deferredStalePrompt, launch["prompt"], "the restored intent must be the one that was claimed")
+	assert.Equal(t, "profile1", launch["agent_profile_id"])
+	if flag, _ := launch[models.DeferredLaunchStartWhenUnblockedKey].(bool); !flag {
+		t.Fatal("the restored intent must keep its start-when-unblocked flag or the gate stops recognising it")
+	}
 }

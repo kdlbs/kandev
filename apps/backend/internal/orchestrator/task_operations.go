@@ -547,6 +547,11 @@ func (s *Service) StartCreatedSession(
 	if isOfficeTask {
 		mcpMode = executor.McpModeOffice
 	}
+	// Reserve the pending launch intent across the launch — same protocol as
+	// startTask; see deferredLaunchClaim for why it is taken before, not after.
+	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
+	defer launchClaim.releaseIfHeld(ctx)
+
 	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
 	if err != nil {
@@ -563,9 +568,8 @@ func (s *Service) StartCreatedSession(
 	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
 	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive, autoStart, attachments)
 
-	// The task is running now, so any pending "start it later" intent is spent.
-	// See consumeDeferredLaunchOnStart for why the predicate is the start itself.
-	s.consumeDeferredLaunchOnStart(ctx, taskID)
+	// The agent is running, so the reservation becomes a consumption.
+	launchClaim.consume(ctx)
 
 	// Ensure a PR watch exists so the poller can detect PRs created by the agent.
 	// PrepareTaskSession may have already created one, but if that goroutine failed
@@ -1028,6 +1032,12 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// re-drive this first turn — initial launches bypass PromptTask.
 	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
+	// Reserve any pending "start it later" intent across the launch so a gate
+	// opening mid-launch cannot start a second session. Deferred release covers
+	// every failure path; see deferredLaunchClaim.
+	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
+	defer launchClaim.releaseIfHeld(ctx)
+
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID:       agentProfileID,
 		OfficeAgentProfileID: officeAgentProfileID,
@@ -1050,9 +1060,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
 
-	// The task is running now, so any pending "start it later" intent is spent.
-	// See consumeDeferredLaunchOnStart for why the predicate is the start itself.
-	s.consumeDeferredLaunchOnStart(ctx, taskID)
+	// The agent is running, so the reservation becomes a consumption.
+	launchClaim.consume(ctx)
 
 	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.

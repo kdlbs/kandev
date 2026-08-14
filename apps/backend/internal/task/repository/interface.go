@@ -74,6 +74,11 @@ type TaskRepository interface {
 	// by metadata key (not integration name) so this layer stays agnostic of
 	// which integrations exist.
 	CountOpenWatcherCreatedTasks(ctx context.Context, metadataKey, watchID string) (int, error)
+	// SetTaskMetadataKeyIfPresent rewrites one metadata key only while that
+	// key is still present, reporting whether the write landed. The CAS
+	// counterpart to an atomic remove: an editor must never re-create a key a
+	// concurrent claim just consumed.
+	SetTaskMetadataKeyIfPresent(ctx context.Context, taskID, key string, value interface{}) (bool, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	// UpdateTaskStateIfSessionState atomically transitions task state only while
 	// the named session remains in expectedSessionState and the task is not

@@ -494,6 +494,10 @@ func (r *phase4TaskRepo) ListSiblings(ctx context.Context, taskID string) ([]*mo
 	}
 	return out, nil
 }
+func (r *phase4TaskRepo) SetTaskMetadataKeyIfPresent(context.Context, string, string, interface{}) (bool, error) {
+	return false, nil
+}
+
 func (r *phase4TaskRepo) IncrementTaskSequence(context.Context, string) (int, error) {
 	r.panicNotUsed("IncrementTaskSequence")
 	return 0, nil

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"maps"
 	"strings"
-	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -38,6 +37,21 @@ var (
 // true, so the caller is never told it changed a prompt that nothing will read:
 // the record itself is gone (consumed by the gate or by a direct start), or a
 // session already exists on the task.
+//
+// # Why the write is a conditional single-key patch
+//
+// The obvious implementation — read the task, check it has no session, write
+// the task back — reintroduces the very bug this file exists to fix. A start
+// landing between the check and the write consumes the intent with an atomic
+// RemoveTaskMetadataKey, and then the full-row UpdateTask, still holding the
+// metadata it read before, RESURRECTS the key. The gate fires a second session
+// on a task that is already running, which is exactly the production symptom.
+//
+// So the write goes through SetTaskMetadataKeyIfPresent, which patches the one
+// key and only while it is still there. A concurrent start wins the race and
+// this returns ErrDeferredLaunchAlreadyStarted, with nothing written. The
+// session check stays because it gives the common case a precise error instead
+// of a bare conflict; it is not what makes the update safe.
 func (s *Service) UpdateDeferredLaunchPrompt(ctx context.Context, taskID, prompt string) (*models.Task, error) {
 	if err := s.authorizeTaskID(ctx, taskID); err != nil {
 		return nil, err
@@ -64,13 +78,23 @@ func (s *Service) UpdateDeferredLaunchPrompt(ctx context.Context, taskID, prompt
 	updated := make(map[string]interface{}, len(launch)+1)
 	maps.Copy(updated, launch)
 	updated["prompt"] = prompt
-	task.Metadata[models.MetaKeyDeferredLaunch] = updated
-	task.UpdatedAt = time.Now().UTC()
-	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+	written, err := s.tasks.SetTaskMetadataKeyIfPresent(ctx, taskID, models.MetaKeyDeferredLaunch, updated)
+	if err != nil {
 		return nil, err
 	}
-	s.PublishTaskUpdated(ctx, task)
-	return task, nil
+	if !written {
+		return nil, ErrDeferredLaunchAlreadyStarted
+	}
+
+	// Re-read rather than returning the patched in-memory copy: the row now
+	// carries whatever else changed while this ran, and handing back a stale
+	// snapshot is how the resurrection bug got in.
+	stored, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	s.PublishTaskUpdated(ctx, stored)
+	return stored, nil
 }
 
 // pendingDeferredLaunch returns the task's deferred launch record when it is

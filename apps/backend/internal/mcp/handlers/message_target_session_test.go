@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,11 +15,24 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-// addSession attaches another session to a task in the given state. Sessions
-// are ordered newest-started-first by the resolver, and CreateTaskSession
-// stamps started_at, so call order decides recency.
+// sessionAge orders fallback candidates. The resolver walks sessions
+// newest-started-first, and CreateTaskSession persists whatever StartedAt the
+// caller sets — it stamps nothing — so two sessions left at the zero time sort
+// arbitrarily and any "newest" assertion built on call order is a coin flip.
+// Every session these tests create gets an explicit age.
+type sessionAge int
+
+func (a sessionAge) startedAt() time.Time {
+	return time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC).Add(time.Duration(a) * time.Minute)
+}
+
+// addSession attaches another session to a task in the given state, started at
+// the given age. Higher age = more recently started = earlier in the resolver's
+// walk. seedTaskWithSession's primary is left at the zero time, so it is always
+// the oldest.
 func addSession(
-	t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, state models.TaskSessionState,
+	t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string,
+	state models.TaskSessionState, age sessionAge,
 ) *models.TaskSession {
 	t.Helper()
 	ctx := context.Background()
@@ -26,6 +40,7 @@ func addSession(
 		ID: sessionID, TaskID: taskID,
 		AgentProfileID: "agent-profile-2",
 		State:          models.TaskSessionStateCreated,
+		StartedAt:      age.startedAt(),
 	}
 	require.NoError(t, repo.CreateTaskSession(ctx, session))
 	if state != models.TaskSessionStateCreated {
@@ -59,7 +74,7 @@ func errorPayload(t *testing.T, resp *ws.Message) ws.ErrorPayload {
 func TestHandleMessageTask_CancelledPrimaryFallsBackToTheLiveSession(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
-	live := addSession(t, repo, target.ID, "sess-live", models.TaskSessionStateRunning)
+	live := addSession(t, repo, target.ID, "sess-live", models.TaskSessionStateRunning, 1)
 	cancelSession(t, repo, primary.ID)
 
 	h, orch := newMessageTaskHandler(t, svc)
@@ -82,7 +97,7 @@ func TestHandleMessageTask_CancelledPrimaryFallsBackToTheLiveSession(t *testing.
 func TestHandleMessageTask_LivePrimaryKeepsPriorityOverNewerSessions(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
-	newer := addSession(t, repo, target.ID, "sess-newer", models.TaskSessionStateRunning)
+	newer := addSession(t, repo, target.ID, "sess-newer", models.TaskSessionStateRunning, 1)
 
 	h, orch := newMessageTaskHandler(t, svc)
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
@@ -151,7 +166,7 @@ func TestHandleMessageTask_ExplicitTerminalSessionNamesTheRecoveryTool(t *testin
 func TestHandleMessageTask_ExplicitTerminalSessionIsNotRedirected(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
-	live := addSession(t, repo, target.ID, "sess-live", models.TaskSessionStateRunning)
+	live := addSession(t, repo, target.ID, "sess-live", models.TaskSessionStateRunning, 1)
 	cancelSession(t, repo, primary.ID)
 
 	h, orch := newMessageTaskHandler(t, svc)
@@ -181,7 +196,7 @@ func TestHandleMessageTask_NoPrimarySessionUsesTheLiveSpawnedSession(t *testing.
 		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Sender",
 	})
 	require.NoError(t, err)
-	spawned := addSession(t, repo, targetResult.Task.ID, "sess-spawned", models.TaskSessionStateRunning)
+	spawned := addSession(t, repo, targetResult.Task.ID, "sess-spawned", models.TaskSessionStateRunning, 1)
 
 	h, orch := newMessageTaskHandler(t, svc)
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
@@ -229,7 +244,7 @@ func TestHandleMessageTask_IdleFallbackSessionIsNotReroutedToTheCancelledPrimary
 	sender, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 
 	ctx := context.Background()
-	live := addSession(t, repo, target.ID, "sess-live-idle", models.TaskSessionStateWaitingForInput)
+	live := addSession(t, repo, target.ID, "sess-live-idle", models.TaskSessionStateWaitingForInput, 1)
 	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
 		ID: "exec-row-" + live.ID, SessionID: live.ID, TaskID: target.ID,
 		Status: "running", Resumable: true, AgentExecutionID: "exec-" + live.ID,
@@ -249,4 +264,56 @@ func TestHandleMessageTask_IdleFallbackSessionIsNotReroutedToTheCancelledPrimary
 	require.Len(t, orch.promptCalls, 1)
 	assert.Equal(t, live.ID, orch.promptCalls[0].sessionID,
 		"the prompt must stay on the fallback session, not bounce to the cancelled primary")
+}
+
+// Fallback must pick a session the dispatcher can actually start a turn on, not
+// merely the newest one that is not cancelled.
+//
+// A COMPLETED session is retired, not messageable: the idle dispatch path calls
+// ProcessOnTurnStart, and the orchestrator's isTerminalSessionState counts
+// COMPLETED as terminal. So a newer COMPLETED sibling shadowing an older RUNNING
+// one made the call fail with a live session sitting right there. Reported
+// independently by two reviewers on #2660; my own fallback tests never had a
+// COMPLETED candidate, so none of them could see it.
+func TestHandleMessageTask_CompletedSiblingDoesNotShadowTheLiveFallback(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	running := addSession(t, repo, target.ID, "sess-running", models.TaskSessionStateRunning, 1)
+	retired := addSession(t, repo, target.ID, "sess-retired", models.TaskSessionStateCompleted, 2)
+	cancelSession(t, repo, primary.ID)
+
+	// The fixture only bites if the retired session really does come first in
+	// the resolver's walk. Assert the ordering rather than assuming it — the
+	// primary is stamped with the current time on its state change, so it
+	// outranks both siblings and index 0 is not the interesting slot.
+	sessions, err := svc.ListTaskSessions(context.Background(), target.ID)
+	require.NoError(t, err)
+	require.Less(t, indexOfSession(t, sessions, retired.ID), indexOfSession(t, sessions, running.ID),
+		"fixture must present the completed session ahead of the running one")
+
+	h, orch := newMessageTaskHandler(t, svc)
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
+		senderPayload(target.ID, "keep going", sender.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, running.ID, out["session_id"],
+		"a retired completed session must not shadow the running one")
+	assert.Equal(t, 1, orch.queue.GetStatus(context.Background(), running.ID).Count)
+	assert.Equal(t, 0, orch.queue.GetStatus(context.Background(), retired.ID).Count)
+}
+
+// indexOfSession reports where a session lands in the resolver's walk order.
+func indexOfSession(t *testing.T, sessions []*models.TaskSession, sessionID string) int {
+	t.Helper()
+	for i, session := range sessions {
+		if session.ID == sessionID {
+			return i
+		}
+	}
+	t.Fatalf("session %s missing from the task's session list", sessionID)
+	return -1
 }
