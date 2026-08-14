@@ -270,7 +270,7 @@ function InsightOverflowMenu({
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <DropdownMenuContent align="start">
+        <DropdownMenuContent>
           {destinations.map((destination) => (
             <DropdownMenuItem
               key={destination.id}
