@@ -8,7 +8,6 @@ import { dwell } from "../helpers/causal-waits";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
 import type { WorkflowStep } from "../../lib/types/http";
-import { dwell } from "../helpers/causal-waits";
 
 const DEFAULT_SIDEBAR_VIEW = {
   id: "view-all-tasks",
