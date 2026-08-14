@@ -3,6 +3,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -109,12 +110,28 @@ func (r *Repository) migrateSubagentContextExecutionIdentityUnsafe() error {
 	)
 }
 
+// migrateSubagentContextExecutionIdentityPostgres runs the column addition
+// and the unique-constraint swap in one transaction, so a failure partway
+// through (the constraint swap failing after the column was added, or vice
+// versa) rolls back the complete cutover rather than leaving the schema in a
+// state this function never intended and subagentContextExecutionShapeHolds
+// would not recognize as either "old" or "new" (per the destructive cutover
+// migration convention in AGENTS.md).
 func (r *Repository) migrateSubagentContextExecutionIdentityPostgres() error {
-	if _, err := r.db.Exec(`ALTER TABLE task_session_subagents
+	tx, err := r.db.Beginx()
+	if err != nil {
+		return fmt.Errorf("begin subagent context execution migration transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`ALTER TABLE task_session_subagents
 		ADD COLUMN IF NOT EXISTS agent_execution_id TEXT NOT NULL DEFAULT 'unknown'`); err != nil {
 		return fmt.Errorf("add task_session_subagents.agent_execution_id: %w", err)
 	}
-	if _, err := r.db.Exec(`
+	if err := r.maybeFailSubagentContextExecutionMigration("add_column"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
 DO $$
 DECLARE
 	old_constraint_name text;
@@ -157,6 +174,27 @@ BEGIN
 END $$;
 	`); err != nil {
 		return fmt.Errorf("migrate task_session_subagents unique constraint: %w", err)
+	}
+	if err := r.maybeFailSubagentContextExecutionMigration("swap_constraint"); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit subagent context execution migration transaction: %w", err)
+	}
+	return nil
+}
+
+// maybeFailSubagentContextExecutionMigration is a test-only failpoint: when
+// the repository's failSubagentContextExecutionMigrationAfter step matches,
+// the migration aborts so tests can prove the transaction restores the
+// complete pre-migration schema.
+func (r *Repository) maybeFailSubagentContextExecutionMigration(step string) error {
+	if r.failSubagentContextExecutionMigrationAfter == "" {
+		return nil
+	}
+	if r.failSubagentContextExecutionMigrationAfter == step {
+		r.failSubagentContextExecutionMigrationAfter = ""
+		return errors.New("injected subagent context execution migration failure at " + step)
 	}
 	return nil
 }
@@ -257,6 +295,10 @@ func (r *Repository) subagentContextUniqueIndexColumnsSQLite() ([][]string, erro
 }
 
 func (r *Repository) subagentContextIndexInfoColumnsSQLite(indexName string) ([]string, error) {
+	// PRAGMA index_info does not support bind parameters for the index name;
+	// string concatenation is the only option. indexName comes from PRAGMA
+	// index_list above, which reflects this application's own DDL, so this
+	// is not a SQL injection surface.
 	infoRows, err := r.db.Query(`PRAGMA index_info(` + indexName + `)`)
 	if err != nil {
 		return nil, fmt.Errorf("subagent context shape: index_info(%s): %w", indexName, err)

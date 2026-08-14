@@ -241,6 +241,114 @@ func TestPostgresSubagentContextExecutionIdentityMigratesLegacyShape(t *testing.
 	}
 }
 
+// resetSubagentContextExecutionMigrationToLegacyShape rolls
+// task_session_subagents back to its pre-Amendment-1 shape (no
+// agent_execution_id column, the old 2-column UNIQUE constraint) so a test
+// can exercise migrateSubagentContextExecutionIdentityPostgres from a known
+// starting point, mirroring
+// TestPostgresSubagentContextExecutionIdentityMigratesLegacyShape's technique.
+func resetSubagentContextExecutionMigrationToLegacyShape(t *testing.T, db *sqlx.DB) {
+	t.Helper()
+	var newConstraintName string
+	if err := db.Get(&newConstraintName, `
+		SELECT con.conname
+		FROM pg_constraint con
+		JOIN pg_class rel ON rel.oid = con.conrelid
+		JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+		WHERE rel.relname = 'task_session_subagents'
+			AND nsp.nspname = current_schema()
+			AND con.contype = 'u'
+			AND (
+				SELECT array_agg(attr.attname::text ORDER BY cols.ordinality)
+				FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
+				JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = cols.attnum
+			) = ARRAY['task_session_id', 'agent_execution_id', 'tool_call_id']
+	`); err != nil {
+		t.Fatalf("find new unique constraint name: %v", err)
+	}
+	quotedConstraintName := `"` + strings.ReplaceAll(newConstraintName, `"`, `""`) + `"`
+	if _, err := db.Exec(`ALTER TABLE task_session_subagents DROP CONSTRAINT ` + quotedConstraintName); err != nil {
+		t.Fatalf("drop new unique constraint: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE task_session_subagents DROP COLUMN agent_execution_id`); err != nil {
+		t.Fatalf("drop agent_execution_id: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE task_session_subagents ADD CONSTRAINT task_session_subagents_legacy_key UNIQUE (task_session_id, tool_call_id)`); err != nil {
+		t.Fatalf("add legacy unique constraint: %v", err)
+	}
+}
+
+// TestPostgresSubagentContextExecutionMigrationRollsBackAtEveryFailpoint
+// covers the destructive cutover migration convention in AGENTS.md: a
+// failure at either step of migrateSubagentContextExecutionIdentityPostgres
+// must roll back the complete cutover, restoring the exact pre-migration
+// legacy shape, rather than leaving agent_execution_id added without the new
+// unique constraint (or any other partial state).
+func TestPostgresSubagentContextExecutionMigrationRollsBackAtEveryFailpoint(t *testing.T) {
+	for _, step := range []string{"add_column", "swap_constraint"} {
+		t.Run(step, func(t *testing.T) {
+			db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+			if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS kandev_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`); err != nil {
+				t.Fatalf("create kandev_meta: %v", err)
+			}
+			repo, err := NewWithDB(db, db, nil)
+			if err != nil {
+				t.Fatalf("init postgres schema: %v", err)
+			}
+			resetSubagentContextExecutionMigrationToLegacyShape(t, db)
+			repo.failSubagentContextExecutionMigrationAfter = step
+
+			if err := repo.migrateSubagentContextExecutionIdentityPostgres(); err == nil {
+				t.Fatalf("expected injected failure at %s", step)
+			}
+
+			var hasColumn bool
+			if err := db.Get(&hasColumn, `
+				SELECT EXISTS (
+					SELECT 1 FROM information_schema.columns
+					WHERE table_schema = current_schema()
+						AND table_name = 'task_session_subagents'
+						AND column_name = 'agent_execution_id'
+				)`); err != nil {
+				t.Fatalf("check agent_execution_id column: %v", err)
+			}
+			if hasColumn {
+				t.Errorf("agent_execution_id column present after rollback at %s, want dropped", step)
+			}
+
+			var hasLegacyKey bool
+			if err := db.Get(&hasLegacyKey, `
+				SELECT EXISTS (
+					SELECT 1
+					FROM pg_constraint con
+					JOIN pg_class rel ON rel.oid = con.conrelid
+					JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+					WHERE rel.relname = 'task_session_subagents'
+						AND nsp.nspname = current_schema()
+						AND con.contype = 'u'
+						AND (
+							SELECT array_agg(attr.attname::text ORDER BY cols.ordinality)
+							FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
+							JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = cols.attnum
+						) = ARRAY['task_session_id', 'tool_call_id']
+				)`); err != nil {
+				t.Fatalf("check legacy unique constraint: %v", err)
+			}
+			if !hasLegacyKey {
+				t.Errorf("legacy 2-column unique constraint missing after rollback at %s, want preserved", step)
+			}
+
+			holds, err := repo.subagentContextExecutionShapeHolds()
+			if err != nil {
+				t.Fatalf("subagentContextExecutionShapeHolds: %v", err)
+			}
+			if holds {
+				t.Errorf("subagentContextExecutionShapeHolds = true after rollback at %s, want false", step)
+			}
+		})
+	}
+}
+
 // TestPostgresUpsertSubagentContextConflictBehavior verifies the upsert's
 // conflict clause behaviorally on Postgres — schema replay alone would not
 // exercise ON CONFLICT DO UPDATE semantics (ADR 0027). Covers fill-forward,

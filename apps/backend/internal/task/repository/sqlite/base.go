@@ -15,11 +15,11 @@ import (
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db           *sqlx.DB // writer
-	ro           *sqlx.DB // reader (read-only pool)
-	ownsDB       bool
-	log          *logger.Logger
-	migrate      *db.MigrateLogger
+	db               *sqlx.DB // writer
+	ro               *sqlx.DB // reader (read-only pool)
+	ownsDB           bool
+	log              *logger.Logger
+	migrate          *db.MigrateLogger
 	queuePurgeMu     sync.RWMutex
 	queuePurger      func(context.Context, string)
 	queuePurgeNotify func(context.Context, string)
@@ -27,6 +27,11 @@ type Repository struct {
 	// cutover: when set to a cutover step name, the migration aborts at that
 	// step so tests can prove rollback restores the pre-upgrade state.
 	failCutoverAfter string
+	// failSubagentContextExecutionMigrationAfter is a test-only failpoint for
+	// the PostgreSQL subagent context execution-identity migration: when set
+	// to a step name, the migration aborts at that step so tests can prove
+	// the transaction restores the pre-migration schema.
+	failSubagentContextExecutionMigrationAfter string
 }
 
 // SetTaskQueuePurger registers the orchestrator-owned queue cleanup for
