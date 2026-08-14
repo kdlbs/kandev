@@ -72,6 +72,8 @@ export function TaskTitleHoverCard({
         align={align}
         data-testid="task-title-hover-card"
         className="w-80 max-w-[calc(100vw-1rem)] max-h-80 overflow-y-auto p-3"
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
       >
         <div className="text-pretty break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">
           {title}

@@ -33,7 +33,13 @@ export function useWorkspaceMRs(workspaceId: string | null) {
     if (fetchedRef.current === workspaceId) return;
     const requestId = ++requestRef.current;
     fetchedRef.current = workspaceId;
-    resetTaskMRs(workspaceId);
+    // No pre-fetch reset here (unlike the null branch above): setTaskMRs
+    // below fully replaces byWorkspaceId[workspaceId] once the fetch
+    // resolves, so a reset only serves to blank the badges in between. A
+    // second hook instance for the same workspace (e.g. AppSidebar mounted
+    // alongside /tasks) would otherwise have its already-fetched MRs wiped
+    // by this instance's fetch, then have to wait out the round trip before
+    // they reappear — see mr-task-list-badges spec "Hydration ownership".
     listWorkspaceTaskMRs(workspaceId, { cache: "no-store" })
       .then((response) => {
         if (requestRef.current !== requestId) return;

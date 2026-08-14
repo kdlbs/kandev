@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { TaskPR } from "@/lib/types/github";
@@ -281,5 +281,36 @@ describe("TaskTitleHoverCard — subtask cap and dismissal", () => {
     await openCard();
 
     expect(document.querySelector('[data-slot="tooltip-content"]')).toBeNull();
+  });
+
+  it("does not bubble a click on the title (non-link) area to the parent row's onClick", async () => {
+    const onParentClick = vi.fn();
+    render(
+      <StateProvider
+        initialState={{
+          kanban: {
+            workflowId: "wf-1",
+            steps: [],
+            tasks: [makeTask({ id: "parent-1" })],
+          },
+        }}
+      >
+        <div onClick={onParentClick} data-testid="parent-row">
+          <TaskTitleHoverCard taskId="parent-1" title={LONG_TITLE}>
+            <span tabIndex={0} data-testid="trigger">
+              {LONG_TITLE}
+            </span>
+          </TaskTitleHoverCard>
+        </div>
+      </StateProvider>,
+    );
+    await openCard();
+
+    const card = screen.getAllByTestId("task-title-hover-card")[0];
+    const titleEl = card.querySelector(".font-semibold");
+    expect(titleEl).not.toBeNull();
+    fireEvent.click(titleEl!);
+
+    expect(onParentClick).not.toHaveBeenCalled();
   });
 });

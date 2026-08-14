@@ -89,6 +89,30 @@ function workspaceProbe(workspaceId: string) {
   });
 }
 
+// Simulates AppSidebar and /tasks each mounting their own useWorkspaceMRs
+// instance for the same workspace: each instance's fetchedRef is private, so
+// this renders two independent hook instances sharing one store.
+function DualWorkspaceMRInstance() {
+  useWorkspaceMRs("ws-1");
+  return null;
+}
+function DualWorkspaceMRHarness({ mountSecond }: { mountSecond: boolean }) {
+  const mrs = useAppStore((state) => state.taskMRs.byWorkspaceId["ws-1"] ?? EMPTY_TASK_MRS);
+  return createElement(
+    "div",
+    null,
+    createElement(DualWorkspaceMRInstance, { key: "first" }),
+    mountSecond ? createElement(DualWorkspaceMRInstance, { key: "second" }) : null,
+    createElement("output", { "data-testid": WORKSPACE_MRS_TEST_ID }, JSON.stringify(mrs)),
+  );
+}
+function dualWorkspaceMRTree(mountSecond: boolean) {
+  return createElement(StateProvider, {
+    initialState: { workspaces: { items: [], activeId: "ws-1" } },
+    children: createElement(DualWorkspaceMRHarness, { mountSecond }),
+  });
+}
+
 describe("useWorkspaceMRs", () => {
   beforeEach(() => {
     listWorkspaceTaskMRsMock.mockReset();
@@ -206,6 +230,46 @@ describe("useWorkspaceMRs", () => {
     listWorkspaceTaskMRsMock.mockResolvedValueOnce({ task_mrs: {} });
     rerender({ ws: "ws-1" });
     await waitFor(() => expect(listWorkspaceTaskMRsMock).toHaveBeenCalledTimes(3));
+  });
+});
+
+describe("useWorkspaceMRs, co-mounted instances", () => {
+  beforeEach(() => {
+    listWorkspaceTaskMRsMock.mockReset();
+  });
+
+  it("keeps an already-fetched workspace's MRs visible while a second co-mounted instance re-fetches", async () => {
+    // Regression for PR #2610 review: AppSidebar and /tasks each mount their
+    // own useWorkspaceMRs(workspaceId) instance. Each instance's fetchedRef
+    // is private, so the second instance to mount for an already-fetched
+    // workspace must not blank the shared store while its own fetch is in
+    // flight — the first instance's badges must stay visible throughout.
+    const mr = makeMR({ task_id: "task-1" });
+    listWorkspaceTaskMRsMock.mockResolvedValueOnce({ task_mrs: { "task-1": [mr] } });
+
+    const view = render(dualWorkspaceMRTree(false));
+    await waitFor(() =>
+      expect(screen.getByTestId(WORKSPACE_MRS_TEST_ID).textContent).toEqual(
+        JSON.stringify({ "task-1": [mr] }),
+      ),
+    );
+
+    let resolveSecond: (v: { task_mrs: Record<string, TaskMR[]> }) => void = () => {};
+    const secondPromise = new Promise<{ task_mrs: Record<string, TaskMR[]> }>((resolve) => {
+      resolveSecond = resolve;
+    });
+    listWorkspaceTaskMRsMock.mockReturnValueOnce(secondPromise);
+    view.rerender(dualWorkspaceMRTree(true));
+
+    // The second instance's fetch is still in flight — the first instance's
+    // already-fetched MR must not have been blanked by a pre-fetch reset.
+    expect(screen.getByTestId(WORKSPACE_MRS_TEST_ID).textContent).toEqual(
+      JSON.stringify({ "task-1": [mr] }),
+    );
+
+    await act(async () => {
+      resolveSecond({ task_mrs: { "task-1": [mr] } });
+    });
   });
 });
 
