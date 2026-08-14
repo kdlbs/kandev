@@ -363,20 +363,35 @@ func TestPersistAndPublishTaskPRSync_PublishesReReadValueNotStaleInMemoryOne(t *
 // TestSyncTaskPR_OutcomeFieldChangePublishesEvent covers AC-18: a sync that
 // changes only an outcome field (no legacy field change) still publishes
 // github.task_pr.updated, and an unchanged sync publishes nothing.
+//
+// The seed and status deliberately match on every non-outcome comparison
+// SyncTaskPR's `changed` expression checks, including mergeable_state: a
+// draft PR forces prepareTaskPRSyncState to override mergeableState to
+// "draft" regardless of status.MergeableState, so an earlier version of this
+// test (Draft: true, tp.MergeableState left at its zero value "") had TWO
+// independent causes of changed == true — the mergeableState override and
+// the outcome-field change — and would have stayed green even if
+// taskPROutcomeFieldsChanged were deleted from that expression entirely.
+// Using a non-draft PR with a pre-matched, non-empty MergeableState removes
+// that second cause, so changedFiles is the only thing that can make this
+// sync report changed.
 func TestSyncTaskPR_OutcomeFieldChangePublishesEvent(t *testing.T) {
 	svc, store, eb := setupSyncTest(t)
 	ctx := context.Background()
+	seededIsDraft := false
 	createOutcomeSyncTestTaskPR(t, store, &TaskPR{
 		TaskID: "t1", Owner: "owner", Repo: "repo", PRNumber: 1,
 		PRURL: "https://github.com/owner/repo/pull/1", PRTitle: "Same title",
 		HeadBranch: "feat", BaseBranch: "main", State: "open",
+		MergeableState: "clean", IsDraft: &seededIsDraft,
 	})
 
 	status := &PRStatus{
 		PR: &PR{
 			Number: 1, Title: "Same title", State: "open", RepoOwner: "owner", RepoName: "repo",
-			Draft: true, ChangedFiles: 5, MergedByLogin: "",
+			Draft: false, ChangedFiles: 5, MergedByLogin: "",
 		},
+		MergeableState:         "clean",
 		OutcomeFieldsPopulated: true,
 	}
 	if err := svc.SyncTaskPR(ctx, "t1", status); err != nil {
