@@ -67,22 +67,26 @@ func (s *Service) RecordSubagentContext(ctx context.Context, req RecordSubagentC
 	if s.subagentContexts == nil {
 		return
 	}
+	if req.Payload == nil {
+		return
+	}
+	// attempted counts every recognized-payload frame that reaches this
+	// point, before the identity check below — skipped_no_identity is a
+	// subset counted WITHIN attempted (AC-26: attempted =
+	// skipped_no_identity + persisted + failed), not a separate bucket.
+	subagentContextTotal.Add("attempted", 1)
 	if req.TaskSessionID == "" || req.TaskID == "" || req.ToolCallID == "" {
 		subagentContextTotal.Add("skipped_no_identity", 1)
 		return
 	}
-	if req.Payload == nil {
-		return
-	}
-	subagentContextTotal.Add("attempted", 1)
 
 	totalTokens, totalTokensAnomalous := normalizeOmitEmptyMetric(req.Payload.TotalTokens)
 	durationMs, durationAnomalous := normalizeOmitEmptyMetric(req.Payload.DurationMs)
 	toolUseCount, toolUseCountAnomalous := normalizeToolUseCount(req.Payload.ToolUseCount)
-	for _, anomalous := range []bool{totalTokensAnomalous, durationAnomalous, toolUseCountAnomalous} {
-		if anomalous {
-			subagentContextTotal.Add("anomalous_value", 1)
-		}
+	// AC-26 counts anomalous_value once per frame carrying at least one
+	// negative metric, not once per negative field.
+	if totalTokensAnomalous || durationAnomalous || toolUseCountAnomalous {
+		subagentContextTotal.Add("anomalous_value", 1)
 	}
 
 	sc := &models.SubagentContext{

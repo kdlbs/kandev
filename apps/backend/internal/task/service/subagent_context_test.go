@@ -99,7 +99,10 @@ func intptr(n int) *int { return &n }
 
 // TestRecordSubagentContextIdentityGate covers AC-2: each of an empty
 // session id, task id, or tool_call_id skips the write entirely and
-// increments skipped_no_identity by exactly one.
+// increments skipped_no_identity by exactly one. It also covers AC-26's
+// invariant (attempted = skipped_no_identity + persisted + failed):
+// skipped_no_identity is a subset counted WITHIN attempted, so a recognized
+// payload that fails the identity gate must still move attempted by one.
 func TestRecordSubagentContextIdentityGate(t *testing.T) {
 	cases := []struct {
 		name string
@@ -123,11 +126,17 @@ func TestRecordSubagentContextIdentityGate(t *testing.T) {
 			repo := &stubSubagentContextRepo{}
 			svc := newSubagentContextTestService(t, repo)
 
-			delta := counterDelta(t, "skipped_no_identity", func() {
-				svc.RecordSubagentContext(context.Background(), tc.req)
+			var attemptedDelta int64
+			skippedDelta := counterDelta(t, "skipped_no_identity", func() {
+				attemptedDelta = counterDelta(t, "attempted", func() {
+					svc.RecordSubagentContext(context.Background(), tc.req)
+				})
 			})
-			if delta != 1 {
-				t.Errorf("skipped_no_identity delta = %d, want 1", delta)
+			if skippedDelta != 1 {
+				t.Errorf("skipped_no_identity delta = %d, want 1", skippedDelta)
+			}
+			if attemptedDelta != 1 {
+				t.Errorf("attempted delta = %d, want 1 (AC-26 invariant)", attemptedDelta)
 			}
 			if repo.count() != 0 {
 				t.Errorf("repository call count = %d, want 0 (no write)", repo.count())
@@ -273,6 +282,23 @@ func TestRecordSubagentContextMetricNormalization(t *testing.T) {
 		}
 		if repo.last(t).ToolUseCount != nil {
 			t.Errorf("tool_use_count = %v, want nil", repo.last(t).ToolUseCount)
+		}
+	})
+
+	t.Run("multiple_negative_metrics_in_one_frame_count_once", func(t *testing.T) {
+		repo := &stubSubagentContextRepo{}
+		svc := newSubagentContextTestService(t, repo)
+		delta := counterDelta(t, "anomalous_value", func() {
+			svc.RecordSubagentContext(context.Background(), RecordSubagentContextRequest{
+				TaskSessionID: "session-1", TaskID: "task-1", ToolCallID: "tc-1",
+				Payload: &streams.SubagentTaskPayload{
+					TotalTokens: -5, DurationMs: -1, ToolUseCount: intptr(-3),
+				},
+				ObservedAt: time.Now().UTC(),
+			})
+		})
+		if delta != 1 {
+			t.Errorf("anomalous_value delta = %d, want 1 (one frame, not one per negative field)", delta)
 		}
 	})
 }
