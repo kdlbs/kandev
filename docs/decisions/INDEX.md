@@ -6,7 +6,6 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 
 | ID   | Title                                                                                                                               | Status     | Area                        | Date       |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------- | --------------------------- | ---------- |
-| 2026-08-13-hard-delete-task-contribution-links | [Hard delete owns task contribution links](2026-08-13-hard-delete-task-contribution-links.md) | accepted | backend | 2026-08-13 |
 | 0001 | [File-based knowledge system](0001-file-based-knowledge-system.md)                                                                  | accepted (amended 2026-07-16) | infra             | 2026-03-28 |
 | 0002 | [Host utility agentctl for sessionless ACP flows](0002-host-utility-agentctl-for-sessionless-flows.md)                              | accepted   | backend                     | 2026-04-08 |
 | 0003 | [executors_running as the single source of truth for agent_execution_id](0003-executors-running-as-execution-id-source-of-truth.md) | accepted   | backend                     | 2026-05-03 |
@@ -153,3 +152,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-11-user-owned-status-bar-visibility | [Make Status Bar Visibility a Portable User Preference](2026-08-11-user-owned-status-bar-visibility.md) | accepted | backend, frontend, protocol | 2026-08-11 |
 | 2026-08-12-built-in-utility-default-inheritance | [Built-in Utility Actions Inherit the Global Profile by Default](2026-08-12-built-in-utility-default-inheritance.md) | accepted | backend, frontend | 2026-08-12 |
 | 2026-08-10-no-em-dash-public-copy | [Keep Em Dashes Out of Public Copy](2026-08-10-no-em-dash-public-copy.md) | accepted | frontend, infra | 2026-08-10 |
+| 2026-08-13-hard-delete-task-contribution-links | [Hard delete owns task contribution links](2026-08-13-hard-delete-task-contribution-links.md) | accepted | backend | 2026-08-13 |

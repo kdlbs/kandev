@@ -20,9 +20,7 @@ func (s *Service) handleTaskDeleted(ctx context.Context, event *bus.Event) error
 	if taskID == "" {
 		return nil
 	}
-	s.mu.RLock()
-	store := s.store
-	s.mu.RUnlock()
+	store := s.requireStore()
 	if store == nil {
 		return nil
 	}
