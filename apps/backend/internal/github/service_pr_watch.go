@@ -387,8 +387,12 @@ func (s *Service) associatePRWithTask(
 		// handling) keeps this path from drifting out of sync with
 		// SyncTaskPR. Guards a row linked already-terminal — e.g. the
 		// "+Task" URL flow on an already-merged PR — from shipping with
-		// merged_at set but merged_by_login NULL, which AC-36 forbids.
-		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, _, _ =
+		// merged_at set but merged_by_login NULL, which AC-36 forbids. Also
+		// captures closed_by_login and auto_merge_observed_at rather than
+		// discarding them: a fresh row linking a PR that already has
+		// auto-merge armed must set the latch immediately (AC-16), not wait
+		// for a later sync to observe the same state again.
+		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt =
 			resolveTaskPROutcomeFields(tp, &PRStatus{PR: pr, OutcomeFieldsPopulated: true})
 	}
 	// ReplaceTaskPR upserts the row matching (task, repository, pr_number).

@@ -93,3 +93,33 @@ func TestAssociateExistingPRByURL_LinkingAlreadyMergedPRPopulatesOutcomeFields(t
 		t.Errorf("changed_files = %v, want 7 observed, not NULL", tp.ChangedFiles)
 	}
 }
+
+// TestAssociateExistingPRByURL_LinkingAutoMergeArmedPRSetsLatch is the
+// regression for COR-001 / codex[P1]: associatePRWithTask's fresh-insert
+// branch only captured resolveTaskPROutcomeFields' first three return
+// values (is_draft, changed_files, merged_by_login) via `_, _` for the rest,
+// discarding closed_by_login and auto_merge_observed_at. Linking a PR that
+// already has auto-merge armed at the moment of the "+Task" URL link (a
+// populating fetch, AC-10) must set the auto_merge_observed_at latch
+// immediately (AC-16) rather than leaving it NULL until some later sync
+// happens to observe the same state again.
+func TestAssociateExistingPRByURL_LinkingAutoMergeArmedPRSetsLatch(t *testing.T) {
+	_, svc, mockClient, _ := setupPollerTest(t)
+	ctx := context.Background()
+
+	mockClient.AddPR(&PR{
+		Number: 44, Title: "Auto-merge armed", State: "open",
+		HeadSHA: "abc", HeadBranch: "feat/z", RepoOwner: "org", RepoName: "repo",
+		HTMLURL: "https://github.com/org/repo/pull/44",
+		Draft:   false, ChangedFiles: 3, AutoMergeEnabled: true,
+	})
+
+	tp, err := svc.AssociateExistingPRByURL(ctx, "task-D", "repo-1", "https://github.com/org/repo/pull/44")
+	if err != nil {
+		t.Fatalf("associate: %v", err)
+	}
+	if tp == nil || tp.AutoMergeObservedAt == nil {
+		t.Fatalf("AutoMergeObservedAt = %v, want set on a fresh insert observing auto-merge armed (AC-16)",
+			tp.AutoMergeObservedAt)
+	}
+}
