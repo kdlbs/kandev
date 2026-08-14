@@ -98,6 +98,7 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(context).toHaveText(
       "Picking the foundational stack: answer all three so we can move forward.",
     );
+    await expect(context).toHaveCSS("font-size", "13px");
     await expect(context).toHaveCSS("margin-top", "12px");
     await expect(context).toHaveCSS("padding", "0px");
     await expect(context).toHaveCSS("border-width", "0px");
