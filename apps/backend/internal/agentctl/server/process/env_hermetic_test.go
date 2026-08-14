@@ -40,9 +40,16 @@ func clearAmbientGitLabEnv() {
 }
 
 // TestAmbientEnvCoverageIncludesEveryPackageEnvRead fails when non-test code
-// grows a new os.Getenv/os.LookupEnv call that is neither in
-// ambientGitLabEnvVars nor ambientEnvNotScrubbed, so the TestMain scrub cannot
-// silently fall behind the code it protects.
+// grows a new environment read that is neither in ambientGitLabEnvVars nor
+// ambientEnvNotScrubbed, so the TestMain scrub cannot silently fall behind the
+// code it protects.
+//
+// environmentValue is declared as an extra reader because it, not os.Getenv,
+// is how this package reads the environment almost everywhere: six of the
+// eight reads go through (*GitOperator).environmentValue, which falls back to
+// os.Environ() when the operator was built with a nil provider (git.go:119).
+// That is the exact path the reported failure came in on, so a guard watching
+// only os.Getenv would have watched the wrong two call sites.
 func TestAmbientEnvCoverageIncludesEveryPackageEnvRead(t *testing.T) {
-	testutil.AssertEnvReadsCovered(t, ambientGitLabEnvVars, ambientEnvNotScrubbed)
+	testutil.AssertEnvReadsCovered(t, ambientGitLabEnvVars, ambientEnvNotScrubbed, "environmentValue")
 }

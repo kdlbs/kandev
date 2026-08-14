@@ -13,51 +13,72 @@ import (
 
 // AssertEnvReadsCovered parses every non-test *.go file in the caller's
 // package directory (the current working directory when the test runs) and
-// fails t for any os.Getenv/os.LookupEnv call whose argument name is not
-// present in scrubbed or exempt, or cannot be resolved to a string literal or
+// fails t for any environment read whose argument name is not present in
+// scrubbed or exempt, or cannot be resolved to a string literal or
 // same-package constant. Callers use it to guard a hermetic-environment test
 // scrub against silently falling behind new environment reads.
-func AssertEnvReadsCovered(t testing.TB, scrubbed, exempt []string) {
+//
+// os.Getenv and os.LookupEnv are always treated as environment reads. A
+// package that funnels its reads through its own single-argument accessor
+// (for example (*GitOperator).environmentValue, which falls back to
+// os.Environ) must name that accessor in extraReaders, or the guard sees only
+// the minority of its reads and the assurance is hollow. Names in
+// extraReaders match on the selector alone, so any receiver counts, as does a
+// plain package-level function of the same name.
+func AssertEnvReadsCovered(t testing.TB, scrubbed, exempt []string, extraReaders ...string) {
 	t.Helper()
 	fileSet := token.NewFileSet()
 	files := parseNonTestSources(t, fileSet)
-	for _, message := range uncoveredEnvReads(fileSet, files, scrubbed, exempt) {
+	for _, message := range uncoveredEnvReads(fileSet, files, scrubbed, exempt, extraReaders...) {
 		t.Error(message)
 	}
 }
 
-// uncoveredEnvReads returns one message per os.Getenv/os.LookupEnv call in
-// files whose argument cannot be resolved to a string literal or
-// same-package constant, or whose resolved name is in neither scrubbed nor
-// exempt. Kept independent of testing.TB so it can be driven directly from
-// inline source snippets in tests.
-func uncoveredEnvReads(fileSet *token.FileSet, files []*ast.File, scrubbed, exempt []string) []string {
-	constants := stringConstants(files)
-	covered := make(map[string]bool, len(scrubbed)+len(exempt))
+// envScan carries the classification inputs shared by every file in one pass.
+type envScan struct {
+	constants    map[string]string
+	covered      map[string]bool
+	extraReaders map[string]bool
+}
+
+// uncoveredEnvReads returns one message per environment read in files whose
+// argument cannot be resolved to a string literal or same-package constant,
+// or whose resolved name is in neither scrubbed nor exempt. Kept independent
+// of testing.TB so it can be driven directly from inline source snippets in
+// tests.
+func uncoveredEnvReads(fileSet *token.FileSet, files []*ast.File, scrubbed, exempt []string, extraReaders ...string) []string {
+	scan := envScan{
+		constants:    stringConstants(files),
+		covered:      make(map[string]bool, len(scrubbed)+len(exempt)),
+		extraReaders: make(map[string]bool, len(extraReaders)),
+	}
 	for _, name := range scrubbed {
-		covered[name] = true
+		scan.covered[name] = true
 	}
 	for _, name := range exempt {
-		covered[name] = true
+		scan.covered[name] = true
+	}
+	for _, name := range extraReaders {
+		scan.extraReaders[name] = true
 	}
 	var messages []string
 	for _, file := range files {
-		messages = append(messages, uncoveredEnvReadsInFile(fileSet, file, constants, covered)...)
+		messages = append(messages, uncoveredEnvReadsInFile(fileSet, file, scan)...)
 	}
 	return messages
 }
 
-func uncoveredEnvReadsInFile(fileSet *token.FileSet, file *ast.File, constants map[string]string, covered map[string]bool) []string {
+func uncoveredEnvReadsInFile(fileSet *token.FileSet, file *ast.File, scan envScan) []string {
 	var messages []string
-	for _, call := range envReadCalls(file) {
-		name, resolved := resolveEnvName(call, constants)
+	for _, call := range envReadCalls(file, scan.extraReaders) {
+		name, resolved := resolveEnvName(call, scan.constants)
 		pos := fileSet.Position(call.Pos())
 		if !resolved {
 			messages = append(messages, fmt.Sprintf("%s: environment variable name is not a string literal or a "+
 				"resolvable same-package constant; pass a literal or constant so AssertEnvReadsCovered can classify it", pos))
 			continue
 		}
-		if !covered[name] {
+		if !scan.covered[name] {
 			messages = append(messages, fmt.Sprintf("%s: %s is read in non-test code but missing from the "+
 				"scrubbed/exempt lists passed to AssertEnvReadsCovered", pos, name))
 		}
@@ -119,28 +140,42 @@ func stringConstants(files []*ast.File) map[string]string {
 	return constants
 }
 
-// envReadCalls collects every os.Getenv / os.LookupEnv call in a file.
-func envReadCalls(file *ast.File) []*ast.CallExpr {
+// envReadCalls collects every os.Getenv / os.LookupEnv call in a file, plus
+// every single-argument call to one of the caller-declared extraReaders.
+func envReadCalls(file *ast.File, extraReaders map[string]bool) []*ast.CallExpr {
 	var calls []*ast.CallExpr
 	ast.Inspect(file, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if !ok || len(call.Args) != 1 {
 			return true
 		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		pkgIdent, ok := selector.X.(*ast.Ident)
-		if !ok || pkgIdent.Name != "os" {
-			return true
-		}
-		if selector.Sel.Name == "Getenv" || selector.Sel.Name == "LookupEnv" {
+		if isEnvRead(call.Fun, extraReaders) {
 			calls = append(calls, call)
 		}
 		return true
 	})
 	return calls
+}
+
+// isEnvRead reports whether fun names os.Getenv, os.LookupEnv, or one of the
+// extraReaders. An extraReader matches on the trailing name alone, so both
+// receiver.environmentValue(x) and a bare environmentValue(x) count.
+func isEnvRead(fun ast.Expr, extraReaders map[string]bool) bool {
+	switch target := fun.(type) {
+	case *ast.SelectorExpr:
+		if extraReaders[target.Sel.Name] {
+			return true
+		}
+		pkgIdent, ok := target.X.(*ast.Ident)
+		if !ok || pkgIdent.Name != "os" {
+			return false
+		}
+		return target.Sel.Name == "Getenv" || target.Sel.Name == "LookupEnv"
+	case *ast.Ident:
+		return extraReaders[target.Name]
+	default:
+		return false
+	}
 }
 
 func resolveEnvName(call *ast.CallExpr, constants map[string]string) (string, bool) {

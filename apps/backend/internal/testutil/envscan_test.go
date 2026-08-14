@@ -82,6 +82,81 @@ func read(name string) string { return os.Getenv(name) }
 	}
 }
 
+// TestUncoveredEnvReadsIgnoresExtraReaderWhenNotDeclared pins the blind spot
+// that makes the extraReaders parameter necessary: a package reading the
+// environment through its own accessor is invisible to a Getenv-only scan.
+func TestUncoveredEnvReadsIgnoresExtraReaderWhenNotDeclared(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+type op struct{}
+
+func (o *op) environmentValue(key string) string { return "" }
+
+func read(o *op) string { return o.environmentValue("BAR") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil)
+	if len(messages) != 0 {
+		t.Fatalf("undeclared accessor should not be scanned, got %v", messages)
+	}
+}
+
+func TestUncoveredEnvReadsUncoveredExtraReaderMethod(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+type op struct{}
+
+func (o *op) environmentValue(key string) string { return "" }
+
+func read(o *op) string { return o.environmentValue("BAR") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil, "environmentValue")
+	if len(messages) != 1 {
+		t.Fatalf("expected exactly one uncovered-name message, got %v", messages)
+	}
+	if !strings.Contains(messages[0], "BAR") {
+		t.Fatalf("message %q does not name the uncovered variable", messages[0])
+	}
+}
+
+func TestUncoveredEnvReadsCoveredExtraReaderConstant(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+type op struct{}
+
+const fooEnv = "FOO"
+
+func (o *op) environmentValue(key string) string { return "" }
+
+func read(o *op) string { return o.environmentValue(fooEnv) }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, []string{"FOO"}, nil, "environmentValue")
+	if len(messages) != 0 {
+		t.Fatalf("covered accessor read reported as uncovered: %v", messages)
+	}
+}
+
+// TestUncoveredEnvReadsExtraReaderAsPlainFunction covers the package-level
+// spelling of an extra reader, which matches on the name alone.
+func TestUncoveredEnvReadsExtraReaderAsPlainFunction(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+func environmentValue(key string) string { return "" }
+
+func read() string { return environmentValue("BAR") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil, "environmentValue")
+	if len(messages) != 1 {
+		t.Fatalf("expected exactly one uncovered-name message, got %v", messages)
+	}
+	if !strings.Contains(messages[0], "BAR") {
+		t.Fatalf("message %q does not name the uncovered variable", messages[0])
+	}
+}
+
 func TestUncoveredEnvReadsExemptName(t *testing.T) {
 	fileSet, file := parseSnippet(t, `package example
 
