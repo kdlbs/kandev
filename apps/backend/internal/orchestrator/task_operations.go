@@ -395,6 +395,14 @@ func (s *Service) StartCreatedSession(
 		return nil, errOfficeTaskStartRequiresScheduler
 	}
 
+	// Reserve any pending "start it later" intent for the rest of this start.
+	// Taken here rather than just before the launch: everything below persists
+	// session state this start owns, and a gate that claims the intent during
+	// that work launches its own session alongside it. Deferred release covers
+	// every failure path; see deferredLaunchClaim.
+	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
+	defer launchClaim.releaseIfHeld(ctx)
+
 	// Use agent profile from request, fall back to session's stored value.
 	effectiveProfileID := agentProfileID
 	if effectiveProfileID == "" {
@@ -547,11 +555,6 @@ func (s *Service) StartCreatedSession(
 	if isOfficeTask {
 		mcpMode = executor.McpModeOffice
 	}
-	// Reserve the pending launch intent across the launch — same protocol as
-	// startTask; see deferredLaunchClaim for why it is taken before, not after.
-	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
-	defer launchClaim.releaseIfHeld(ctx)
-
 	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
 	if err != nil {
@@ -836,6 +839,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		zap.Bool("auto_start", autoStart),
 		zap.Int("attachments", len(attachments)))
 
+	// Reserve any pending "start it later" intent for the whole of this start,
+	// taken before the session is prepared rather than just before the launch:
+	// the gate only needs the intent to still be there, so any window in which
+	// this start has already created a session is a window that ends in two.
+	// The deferred release covers every failure path, including the early
+	// returns just below.
+	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
+	defer launchClaim.releaseIfHeld(ctx)
+
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine office task status: %w", err)
@@ -1031,12 +1043,6 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Cache the raw prompt so a transient-provider-error (529) retry can
 	// re-drive this first turn — initial launches bypass PromptTask.
 	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
-
-	// Reserve any pending "start it later" intent across the launch so a gate
-	// opening mid-launch cannot start a second session. Deferred release covers
-	// every failure path; see deferredLaunchClaim.
-	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
-	defer launchClaim.releaseIfHeld(ctx)
 
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID:       agentProfileID,

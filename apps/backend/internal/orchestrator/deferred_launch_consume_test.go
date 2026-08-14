@@ -375,3 +375,73 @@ func TestFailedLaunchReleasesTheClaimedIntent(t *testing.T) {
 		t.Fatal("the restored intent must keep its start-when-unblocked flag or the gate stops recognising it")
 	}
 }
+
+// intentObserver records the dangerous state: does the task still carry a
+// claimable deferred launch intent at a moment when this start already owns a
+// session row?
+//
+// The observation point is the session reload startTask performs between
+// preparing the session and launching it. Session creation itself runs through
+// the executor's own repo handle, not this one, so the first orchestrator-owned
+// read of the new session is the earliest seam available here. (The title claim
+// would be tidier but only reaches the repository for tasks awaiting a
+// generated title, so it never fires for this fixture — which is why the test
+// asserts it observed something at all.)
+type intentObserver struct {
+	*sqliterepo.Repository
+	sessionExisted *bool
+	intentPresent  *bool
+}
+
+func (r *intentObserver) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
+	session, err := r.Repository.GetTaskSession(ctx, sessionID)
+	if r.intentPresent == nil && err == nil && session != nil {
+		if task, taskErr := r.GetTask(ctx, session.TaskID); taskErr == nil && task != nil {
+			_, present := task.Metadata[models.MetaKeyDeferredLaunch]
+			r.intentPresent = &present
+			existed := true
+			r.sessionExisted = &existed
+		}
+	}
+	return session, err
+}
+
+// The window between "this start created a session" and "this start launches".
+//
+// Reserving the intent immediately before LaunchPreparedSession left roughly a
+// hundred lines and half a dozen DB round trips — session preparation, workflow
+// session config, passthrough resolution, prompt building, the title claim — in
+// which the session row already existed and the intent was still claimable. A
+// gate opening there takes it and launches its own session next to the one
+// about to start: the same two-session outcome by a third route.
+//
+// Asserting the invariant directly rather than racing a real gate through it:
+// once this start owns a session, the intent must already be gone, so there is
+// nothing left for a gate to claim whenever it fires. Driving an actual
+// concurrent gate through this window deadlocks on SQLite's single writer, and
+// a test that hangs is worse than one that states the property.
+//
+// Found by re-reading the fix, not by a reviewer: the mid-launch test cannot
+// see this window, because by then the claim has been taken either way.
+func TestTheLaunchIntentIsClaimedBeforeTheStartOwnsASession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedChainStepTask(t, repo, deferredChainTaskID)
+	counter := newLaunchCounter()
+	svc := newDeferredLaunchTestService(t, repo, counter)
+
+	observer := &intentObserver{Repository: repo}
+	svc.repo = observer
+
+	_, err := svc.StartTask(ctx, deferredChainTaskID, "profile1", "", "", "",
+		"do the work with what we know now", "", false, false, nil)
+	require.NoError(t, err)
+
+	require.NotNil(t, observer.intentPresent, "the observation point never ran; the test measured nothing")
+	require.NotNil(t, observer.sessionExisted)
+	require.True(t, *observer.sessionExisted,
+		"fixture must observe a point where this start already owns a session")
+	assert.False(t, *observer.intentPresent,
+		"the intent must already be claimed once this start owns a session, or a gate "+
+			"firing in between launches a second one alongside it")
+}
