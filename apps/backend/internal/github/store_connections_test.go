@@ -558,9 +558,9 @@ func seedConnectionWorkspaces(t *testing.T, store *Store, workspaceIDs ...string
 	}
 }
 
-func TestStoreWorkspaceConnectionHealthIncludesDisconnectedWorkspaces(t *testing.T) {
+func TestStoreWorkspaceConnectionHealthIncludesUnconfiguredWorkspaces(t *testing.T) {
 	store := newTestStore(t)
-	seedConnectionWorkspaces(t, store, "ws-active", "ws-invalid", "ws-suspended", "ws-disconnected")
+	seedConnectionWorkspaces(t, store, "ws-active", "ws-invalid", "ws-suspended", "ws-unconfigured")
 	seedStoreAppRegistration(t, store)
 	ctx := context.Background()
 	installationID := int64(42)
@@ -581,7 +581,7 @@ func TestStoreWorkspaceConnectionHealthIncludesDisconnectedWorkspaces(t *testing
 		t.Fatalf("GetWorkspaceConnectionHealth() error = %v", err)
 	}
 	if health.WorkspaceCount != 4 || health.Active != 1 || health.Invalid != 1 ||
-		health.Suspended != 1 || health.Disconnected != 1 || health.Revoked != 0 {
+		health.Suspended != 1 || health.NotConfigured != 1 || health.Revoked != 0 {
 		t.Fatalf("GetWorkspaceConnectionHealth() = %+v", health)
 	}
 }

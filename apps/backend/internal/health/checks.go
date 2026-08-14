@@ -15,10 +15,16 @@ type GitHubStatusProvider interface {
 
 // GitHubConnectionHealth is an aggregate of persisted workspace-owned
 // connections. It intentionally contains no process-global auth state.
+//
+// NotConfigured counts workspaces with no connection row at all. That is a
+// normal state — a workspace that uses Azure DevOps, or no code host, never
+// had a GitHub connection to lose — so it is deliberately excluded from the
+// degraded tally below. Only a persisted row in a non-active status is a
+// problem the user can act on.
 type GitHubConnectionHealth struct {
 	WorkspaceCount int
 	Active         int
-	Disconnected   int
+	NotConfigured  int
 	Invalid        int
 	Suspended      int
 	Revoked        int
@@ -88,8 +94,14 @@ func (c *GitHubChecker) Check(ctx context.Context) []Issue {
 		}}, c.rateLimitIssues()...)
 	}
 	issues := make([]Issue, 0, 1)
-	unhealthy := health.Disconnected + health.Invalid + health.Suspended + health.Revoked
-	if health.WorkspaceCount == 0 || (health.Active == 0 && unhealthy == health.WorkspaceCount) {
+	// Degraded counts only workspaces that hold a connection which stopped
+	// working. Configured is the denominator users can reason about: an
+	// unconfigured workspace is not a broken one, so counting it made the
+	// warning permanent for anyone using GitHub in some workspaces but not
+	// all, with no setting that could clear it.
+	degraded := health.Invalid + health.Suspended + health.Revoked
+	configured := health.Active + degraded
+	if configured == 0 {
 		issues = append(issues, Issue{
 			ID:       "github_not_authenticated",
 			Category: "github",
@@ -99,14 +111,14 @@ func (c *GitHubChecker) Check(ctx context.Context) []Issue {
 			FixURL:   "/settings/integrations/github",
 			FixLabel: "Configure GitHub",
 		})
-	} else if unhealthy > 0 {
+	} else if degraded > 0 {
 		issues = append(issues, Issue{
 			ID:       "github_workspace_connections_unhealthy",
 			Category: "github",
 			Title:    "GitHub workspace connections need attention",
 			Message: fmt.Sprintf(
-				"%d of %d GitHub workspace connections need attention (%d disconnected, %d invalid, %d suspended, %d revoked).",
-				unhealthy, health.WorkspaceCount, health.Disconnected, health.Invalid, health.Suspended, health.Revoked,
+				"%d of %d configured GitHub workspace connections need attention (%d invalid, %d suspended, %d revoked).",
+				degraded, configured, health.Invalid, health.Suspended, health.Revoked,
 			),
 			Severity: SeverityWarning,
 			FixURL:   "/settings/integrations/github",

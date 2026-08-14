@@ -29,10 +29,16 @@ const userConnectionSelect = `
 
 // WorkspaceConnectionHealth summarizes persisted connection state across all
 // workspaces, including workspaces with no connection row.
+//
+// NotConfigured is that last group: workspaces the LEFT JOIN below found no
+// connection for. It is not a status value — `github_workspace_connections.status`
+// only ever holds active/invalid/suspended/revoked — so callers must not fold
+// it into a degraded tally. A workspace that never used GitHub has nothing to
+// reconnect.
 type WorkspaceConnectionHealth struct {
 	WorkspaceCount int
 	Active         int
-	Disconnected   int
+	NotConfigured  int
 	Invalid        int
 	Suspended      int
 	Revoked        int
@@ -53,7 +59,7 @@ func (s *Store) GetWorkspaceConnectionHealth(ctx context.Context) (WorkspaceConn
 		LEFT JOIN github_workspace_connections c ON c.workspace_id = w.id`).Scan(
 		&health.WorkspaceCount,
 		&health.Active,
-		&health.Disconnected,
+		&health.NotConfigured,
 		&health.Invalid,
 		&health.Suspended,
 		&health.Revoked,

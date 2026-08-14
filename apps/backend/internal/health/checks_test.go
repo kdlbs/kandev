@@ -47,7 +47,7 @@ func TestGitHubChecker_NilProvider(t *testing.T) {
 
 func TestGitHubChecker_NotAuthenticated(t *testing.T) {
 	checker := NewGitHubChecker(&mockGitHubProvider{health: GitHubConnectionHealth{
-		WorkspaceCount: 2, Disconnected: 2,
+		WorkspaceCount: 2, NotConfigured: 2,
 	}})
 	issues := checker.Check(context.Background())
 	if len(issues) != 1 {
@@ -71,6 +71,49 @@ func TestGitHubChecker_Authenticated(t *testing.T) {
 	issues := checker.Check(context.Background())
 	if len(issues) != 0 {
 		t.Errorf("expected 0 issues, got %d", len(issues))
+	}
+}
+
+// A workspace with no GitHub connection row is not a broken connection. The
+// common shape is one workspace on GitHub and others on a different code host
+// (or none); that used to report every unconfigured workspace as
+// "disconnected", producing a warning no setting could clear.
+func TestGitHubChecker_UnconfiguredWorkspacesAreNotDegraded(t *testing.T) {
+	checker := NewGitHubChecker(&mockGitHubProvider{health: GitHubConnectionHealth{
+		WorkspaceCount: 3, Active: 1, NotConfigured: 2,
+	}})
+	if issues := checker.Check(context.Background()); len(issues) != 0 {
+		t.Errorf("issues = %+v, want none for workspaces that never configured GitHub", issues)
+	}
+}
+
+// Nothing configured anywhere is still the setup prompt, even though the
+// unconfigured workspaces themselves are not counted as degraded.
+func TestGitHubChecker_NoConnectionRowsAnywhere(t *testing.T) {
+	checker := NewGitHubChecker(&mockGitHubProvider{health: GitHubConnectionHealth{
+		WorkspaceCount: 3, NotConfigured: 3,
+	}})
+	issues := checker.Check(context.Background())
+	if len(issues) != 1 || issues[0].ID != "github_not_authenticated" {
+		t.Fatalf("issues = %+v, want github_not_authenticated", issues)
+	}
+}
+
+// The degraded message counts against configured connections, not workspaces:
+// "1 of 1" is actionable where "1 of 4" implied three more were broken.
+func TestGitHubChecker_DegradedCountsConfiguredConnectionsOnly(t *testing.T) {
+	checker := NewGitHubChecker(&mockGitHubProvider{health: GitHubConnectionHealth{
+		WorkspaceCount: 4, Active: 1, NotConfigured: 2, Invalid: 1,
+	}})
+	issues := checker.Check(context.Background())
+	if len(issues) != 1 || issues[0].ID != "github_workspace_connections_unhealthy" {
+		t.Fatalf("issues = %+v, want github_workspace_connections_unhealthy", issues)
+	}
+	if !strings.Contains(issues[0].Message, "1 of 2") {
+		t.Errorf("message = %q, want it to count only configured connections", issues[0].Message)
+	}
+	if strings.Contains(issues[0].Message, "disconnected") {
+		t.Errorf("message = %q, must not describe unconfigured workspaces as disconnected", issues[0].Message)
 	}
 }
 
@@ -118,7 +161,7 @@ func TestGitHubChecker_AuthenticatedRateProviderEmpty(t *testing.T) {
 
 func TestGitHubChecker_ReportsDegradedWorkspacesAndRateLimitsTogether(t *testing.T) {
 	provider := &mockGitHubProvider{health: GitHubConnectionHealth{
-		WorkspaceCount: 4, Active: 1, Disconnected: 1, Invalid: 1, Suspended: 1,
+		WorkspaceCount: 4, Active: 1, NotConfigured: 1, Invalid: 1, Suspended: 1,
 	}}
 	rate := &stubRateLimitProvider{exhausted: []GitHubRateLimitStatus{{Resource: "core"}}}
 	issues := NewGitHubChecker(provider).WithRateLimitProvider(rate).Check(context.Background())
@@ -126,7 +169,7 @@ func TestGitHubChecker_ReportsDegradedWorkspacesAndRateLimitsTogether(t *testing
 		t.Fatalf("issues = %+v, want connection and rate-limit issues", issues)
 	}
 	if issues[0].ID != "github_workspace_connections_unhealthy" ||
-		!strings.Contains(issues[0].Message, "3 of 4") {
+		!strings.Contains(issues[0].Message, "2 of 3") {
 		t.Fatalf("connection issue = %+v", issues[0])
 	}
 	if issues[1].ID != "github_rate_limit_core" {
