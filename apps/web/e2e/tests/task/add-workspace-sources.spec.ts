@@ -3,8 +3,11 @@ import type { Locator, Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+
+const WORKSPACE_SOURCES_PATH = /^\/api\/v1\/tasks\/[^/]+\/workspace-sources$/;
 
 async function chooseDirectory(
   page: Page,
@@ -37,6 +40,15 @@ function createSourceDirectories(root: string) {
   execFileSync("git", ["add", "."], { cwd: repositoryPath, env: gitEnv });
   execFileSync("git", ["commit", "-m", "initial source"], { cwd: repositoryPath, env: gitEnv });
   return { repositoryPath, folderPath };
+}
+
+async function submitWorkspaceSources(page: Page, submit: Locator) {
+  const responsePromise = waitForHttp(page, "POST", WORKSPACE_SOURCES_PATH);
+
+  await submit.click();
+  const response = await responsePromise;
+  expect(response.ok()).toBe(true);
+  await response.finished();
 }
 
 function activeFileEditor(page: Page) {
@@ -159,8 +171,8 @@ test.describe("Attach local workspace sources", () => {
       repositoryPath,
     );
     await repositoryRow.getByRole("textbox", { name: "Base branch" }).fill("main");
-    await submit.click();
-    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+    await submitWorkspaceSources(testPage, submit);
+    await expect(dialog).not.toBeVisible();
     await expect(
       session.files
         .getByTestId("file-tree-node")
@@ -184,8 +196,8 @@ test.describe("Attach local workspace sources", () => {
     await prCapture.screenshot("workspace-actions-mixed-sources", {
       caption: "Desktop Add to workspace dialog with a local folder configured",
     });
-    await submit.click();
-    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+    await submitWorkspaceSources(testPage, submit);
+    await expect(dialog).not.toBeVisible();
 
     await expect(
       session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),
