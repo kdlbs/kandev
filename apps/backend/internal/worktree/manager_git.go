@@ -70,6 +70,30 @@ func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bo
 	return true, nil
 }
 
+// isAncestor reports whether ancestor is reachable from descendant, i.e.
+// whether descendant already contains every commit in ancestor.
+//
+// Used to decide whether falling back to origin/<branch> can lose local work.
+// A probe that cannot answer (throttle wait, timeout, missing ref) returns
+// false, which keeps the caller on the local branch: being slightly stale is
+// recoverable, silently dropping the user's unpushed commits is not.
+func (m *Manager) isAncestor(ctx context.Context, repoPath, ancestor, descendant string) bool {
+	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
+	if err != nil {
+		m.logger.Warn("isAncestor bounded by context before throttle acquire",
+			zap.String("repository_path", repoPath),
+			zap.String("ancestor", ancestor),
+			zap.String("descendant", descendant),
+			zap.Error(err))
+		return false
+	}
+	defer release()
+	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
+	defer cancel()
+	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "merge-base", "--is-ancestor", ancestor, descendant)
+	return cmd.Run() == nil
+}
+
 // checkoutBranchExistsAnywhere returns true when the named branch is present
 // either locally or as origin/<branch>. Used by createInTaskDir to decide
 // whether to treat req.CheckoutBranch as "fetch this existing ref" or as
@@ -338,14 +362,27 @@ func (m *Manager) pullCurrentBranchOrFallback(
 	output, err, execCtxErr := m.runGitCombinedAfterAcquire(ctx, m.pullTimeout, repoPath, "pull", "--ff-only", "origin", baseBranch)
 	if err != nil {
 		reason := classifyGitFallbackReason(err, string(output), execCtxErr)
-		m.logger.Warn("git pull failed before worktree creation; continuing with remote ref",
+		// The preceding fetch succeeded, so origin/<branch> holds the latest
+		// remote state and is normally the better start point. It is only
+		// better when it is *ahead* of the local branch, though: if the local
+		// branch carries commits origin does not have, starting from the
+		// remote ref silently drops them from the new worktree, and creation
+		// still succeeds so nothing surfaces the loss. Keep the local branch
+		// in that case, matching handleFetchFallback and the non-current-branch
+		// path in resolveLocalBaseRef, which both resolve to it on failure.
+		fallbackRef := remoteRef
+		if !m.isAncestor(ctx, repoPath, baseBranch, remoteRef) {
+			fallbackRef = baseBranch
+		}
+		m.logger.Warn("git pull failed before worktree creation; continuing with fallback ref",
 			zap.String("branch", baseBranch),
 			zap.String("reason", reason),
 			zap.String("remote_ref", remoteRef),
+			zap.String("fallback_ref", fallbackRef),
 			zap.String("output", string(output)),
 			zap.Error(err))
-		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Pull %s; using %s", reason, remoteRef), string(output))
-		return remoteRef
+		m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Pull %s; using %s", reason, fallbackRef), string(output))
+		return fallbackRef
 	}
 	m.reportSyncCompleted(stepName, onProgress, fmt.Sprintf("Synced and using %s", baseBranch), "")
 	return baseBranch
