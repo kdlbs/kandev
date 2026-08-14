@@ -305,15 +305,15 @@ func (p *managedProcess) kill() managedProcessShutdownResult {
 	default:
 	}
 	shutdownDebugf("managed process kill begin label=%q pid=%d grace=%s", p.label, pid, managedProcessShutdownGrace)
-	shutdownDebugf("managed process group SIGTERM requested label=%q pgid=%d", p.label, pid)
-	if err := terminateManagedProcessGroup(pid); err != nil {
+	shutdownDebugf("managed process graceful termination requested label=%q pid=%d", p.label, pid)
+	if err := terminateManagedProcess(pid); err != nil {
 		if errors.Is(err, syscall.ESRCH) {
 			result.duration = time.Since(start)
 			result.graceful = true
-			shutdownDebugf("managed process group already gone label=%q pid=%d", p.label, pid)
+			shutdownDebugf("managed process already gone label=%q pid=%d", p.label, pid)
 			return result
 		}
-		shutdownDebugf("managed process group SIGTERM failed pid=%d err=%v; killing process", pid, err)
+		shutdownDebugf("managed process graceful termination failed pid=%d err=%v; killing process", pid, err)
 		shutdownDebugf("managed process SIGKILL requested label=%q pid=%d reason=%q", p.label, pid, "sigterm_failed")
 		_ = p.cmd.Process.Kill()
 		result.forceKilled = true
@@ -327,7 +327,7 @@ func (p *managedProcess) kill() managedProcessShutdownResult {
 		result.duration = time.Since(start)
 		return result
 	}
-	shutdownDebugf("managed process group SIGTERM sent pgid=%d", pid)
+	shutdownDebugf("managed process graceful termination sent pid=%d", pid)
 	select {
 	case <-p.done:
 		result.duration = time.Since(start)

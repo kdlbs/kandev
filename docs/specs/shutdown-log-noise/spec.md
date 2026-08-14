@@ -25,8 +25,18 @@ the stack traces suggest a crash where none occurred.
 - The go-plugin subprocess exiting because Kandev killed it during shutdown
   SHALL NOT surface as a library ERROR (`plugin process exited ... signal:
   terminated`).
-- No change to control flow, task/session state transitions, returned errors,
-  or WS responses. This is a logging-severity change only.
+- On platforms where the supervised root can be signaled without orphaning a
+  wrapper's descendants, the launcher SHALL deliver the first
+  graceful-shutdown signal only to that root. This gives the backend and its
+  owned runtimes, including plugins, an opportunity to run their cleanup paths
+  before forced descendant cleanup. If root-only signaling is unsafe for a
+  platform's wrapper process, the launcher SHALL retain its tree-wide graceful
+  fallback so descendants are not orphaned. The complete shutdown MUST still
+  terminate the supervised process tree.
+- No change to backend/plugin lifecycle control flow, task/session state
+  transitions, returned errors, or WS responses. Launcher sequencing changes
+  only at the graceful-signal versus forced-cleanup boundary, so the complete
+  supervised process tree still terminates.
 
 ## Affected log sites and target behavior
 Classification reuses existing helpers/sentinels wherever possible.
@@ -48,8 +58,16 @@ Classification reuses existing helpers/sentinels wherever possible.
 3. `internal/plugins/runtime/manager.go` (`hcplugin.NewClient`, L394). go-plugin
    is constructed with no `Logger`, so its default hclog logger prints the
    process exit at ERROR when `client.Kill()` runs during `StopAll`. Supply an
-   hclog logger routed through Kandev's logger and silence it for the
-   deliberate kill so an expected `signal: terminated` is not an ERROR.
+   hclog logger routed through Kandev's logger and downgrade the deliberate
+   kill so an expected `signal: terminated` is not an ERROR. The launcher must
+   signal the supervised backend root first; otherwise a process-group
+   SIGTERM reaches the plugin before this intentional-stop marker is set.
+4. `internal/launcher/process.go` graceful child shutdown. On platforms with a
+   safe root-only signal, the first signal SHALL target only the supervised
+   root process. If the root does not exit within the existing grace period, or
+   a second interrupt arrives, the launcher SHALL use the existing
+   process-group force-kill path to reap the complete tree. Platforms with an
+   unsafe wrapper process SHALL use the existing tree-wide graceful fallback.
 
 ## Log sites reviewed and deliberately left unchanged
 - `internal/agent/runtime/lifecycle/manager_events.go:544` "agent updates
@@ -90,9 +108,20 @@ Classification reuses existing helpers/sentinels wherever possible.
 - **GIVEN** the plugin manager `StopAll` kills a running plugin during shutdown,
   **WHEN** the subprocess exits with `signal: terminated`, **THEN** no ERROR log
   line for that expected exit is emitted.
+- **GIVEN** a supervised backend has plugin subprocesses in the same process
+  group, **WHEN** the launcher receives the first Ctrl+C, **THEN** it signals
+  the backend root first on platforms with safe root-only signaling, the
+  backend can invoke plugin cleanup, and the plugin subprocesses are not
+  directly terminated by the launcher's initial graceful signal. Platforms
+  with an unsafe wrapper use the existing tree-wide graceful fallback.
+- **GIVEN** the supervised root ignores the graceful signal or a second Ctrl+C
+  arrives, **WHEN** the launcher's grace/force path runs, **THEN** the existing
+  process-group force kill terminates the root and all descendants.
 
 ## Out of scope
-- Changing shutdown ordering, timeouts, or which subprocesses are killed.
+- Changing the existing grace duration or second-signal force-kill policy.
+- Changing which processes the final forced cleanup terminates; the complete
+  supervised process tree remains covered by process-group force kill.
 - Changing WS responses or task/session state on launch failure.
 - Suppressing agentctl child stderr relay during shutdown.
 - Any non-shutdown logging severity review.

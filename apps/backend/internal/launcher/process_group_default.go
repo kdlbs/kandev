@@ -17,6 +17,10 @@ func killManagedProcessGroup(_ int) error {
 	return errors.New("process groups are not supported on this platform")
 }
 
+func terminateManagedProcess(pid int) error {
+	return terminateManagedProcessGroup(pid)
+}
+
 func terminateManagedProcessGroup(_ int) error {
 	return errors.New("process groups are not supported on this platform")
 }

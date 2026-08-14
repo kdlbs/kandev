@@ -23,6 +23,12 @@ func killManagedProcessGroup(pid int) error {
 	return runLauncherTaskkill("/F", "/T", "/PID", fmt.Sprintf("%d", pid))
 }
 
+func terminateManagedProcess(pid int) error {
+	// The dev backend is launched through make on Windows. Signalling only make
+	// would orphan the backend, so retain tree-wide graceful cleanup there.
+	return terminateManagedProcessGroup(pid)
+}
+
 func terminateManagedProcessGroup(pid int) error {
 	return runLauncherTaskkill("/T", "/PID", fmt.Sprintf("%d", pid))
 }

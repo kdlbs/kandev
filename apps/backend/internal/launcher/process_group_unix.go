@@ -20,6 +20,10 @@ func killManagedProcessGroup(pid int) error {
 	return syscall.Kill(-pid, syscall.SIGKILL)
 }
 
+func terminateManagedProcess(pid int) error {
+	return syscall.Kill(pid, syscall.SIGTERM)
+}
+
 func terminateManagedProcessGroup(pid int) error {
 	return syscall.Kill(-pid, syscall.SIGTERM)
 }
