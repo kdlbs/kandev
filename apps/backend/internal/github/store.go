@@ -2094,17 +2094,35 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 
 // UpdateTaskPRDisposition is the disposition writer's exclusive write path:
 // it touches only the three disposition* columns plus updated_at, and names
-// no sync-owned column. Passing disposition == nil clears all three
-// disposition columns to NULL in one statement, restoring the "nobody
-// looked" state (AC-22).
-func (s *Store) UpdateTaskPRDisposition(
-	ctx context.Context, associationID string, disposition, supersededByURL *string, recordedAt *time.Time,
-) error {
+// no sync-owned column. Every column write is a single atomic
+// UPDATE ... CASE WHEN <field touched> THEN <new value> ELSE <column> END
+// statement (mirrors UpdateTaskCIOptions's boolPatchValue pattern): an
+// untouched column is preserved by referencing its own live value inside the
+// same statement, not a value carried from an earlier read, so two
+// concurrent PATCHes touching disjoint columns cannot lose one side's write
+// to the other's stale snapshot (SEC-001). disposition_recorded_at's
+// "touched" flag mirrors patch.DispositionSet: a URL-only patch does not
+// disturb when the disposition was last recorded. Clearing disposition
+// (patch.DispositionSet with a nil Disposition) writes recorded_at as NULL
+// alongside it; callers that want AC-22's "clear all three" must also set
+// SupersededByURLSet so the URL clears in the same statement.
+func (s *Store) UpdateTaskPRDisposition(ctx context.Context, associationID string, patch DispositionPatch) error {
+	var recordedAt *time.Time
+	if patch.DispositionSet && patch.Disposition != nil {
+		now := time.Now().UTC()
+		recordedAt = &now
+	}
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE github_task_prs SET disposition = ?, disposition_superseded_by_url = ?,
-			disposition_recorded_at = ?, updated_at = ?
+		UPDATE github_task_prs SET
+			disposition = CASE WHEN ? THEN ? ELSE disposition END,
+			disposition_superseded_by_url = CASE WHEN ? THEN ? ELSE disposition_superseded_by_url END,
+			disposition_recorded_at = CASE WHEN ? THEN ? ELSE disposition_recorded_at END,
+			updated_at = ?
 		WHERE id = ?`,
-		disposition, supersededByURL, recordedAt, time.Now().UTC(), associationID)
+		patch.DispositionSet, patch.Disposition,
+		patch.SupersededByURLSet, patch.SupersededByURL,
+		patch.DispositionSet, recordedAt,
+		time.Now().UTC(), associationID)
 	return err
 }
 

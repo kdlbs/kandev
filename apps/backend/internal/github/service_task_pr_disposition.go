@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -58,6 +57,7 @@ func (s *Service) SetTaskPRDisposition(
 	if !patch.HasAny() {
 		return tp, nil
 	}
+	patch = normalizeDispositionPatch(patch)
 
 	disposition, supersededByURL := mergeTaskPRDispositionPatch(tp, patch)
 	if err := validateTaskPRDisposition(tp, disposition, supersededByURL); err != nil {
@@ -67,24 +67,51 @@ func (s *Service) SetTaskPRDisposition(
 	if dispositionUnchanged(tp, disposition, supersededByURL) {
 		return tp, nil
 	}
-	return s.writeTaskPRDisposition(ctx, associationID, disposition, supersededByURL)
+	action := "clear"
+	if disposition != nil {
+		action = "set"
+	}
+	return s.writeTaskPRDisposition(ctx, associationID, patch, action)
+}
+
+// normalizeDispositionPatch puts the raw caller-supplied DispositionPatch
+// into the exact shape that gets both validated and persisted (the patch
+// itself is now the write, per Store.UpdateTaskPRDisposition — SEC-001 — so
+// unlike the old merge-then-write flow there is no second normalization
+// pass between validation and the store call):
+//
+//  1. An explicit superseded_by_url is trimmed, with an empty string
+//     normalized to absent (nil) — the same rule this endpoint has always
+//     applied to the merged value, now applied to the patch that is
+//     actually written.
+//  2. An explicit `disposition: null` always forces superseded_by_url to
+//     clear too (AC-22), regardless of whether the same request also
+//     touched superseded_by_url. Without this, a disposition-only null
+//     PATCH sent against a row with a previously stored superseded_by_url
+//     would merge to (disposition: nil, superseded_by_url: non-nil) — a
+//     combination validateTaskPRDisposition rejects — instead of restoring
+//     the "nobody looked" state the caller asked for.
+func normalizeDispositionPatch(patch DispositionPatch) DispositionPatch {
+	if patch.SupersededByURLSet {
+		patch.SupersededByURL = normalizeSupersededByURL(patch.SupersededByURL)
+	}
+	if patch.DispositionSet && patch.Disposition == nil {
+		patch.SupersededByURLSet = true
+		patch.SupersededByURL = nil
+	}
+	return patch
 }
 
 // writeTaskPRDisposition persists a validated, changed disposition write,
 // re-reads the row, and publishes the update event. Split out of
 // SetTaskPRDisposition to keep that function's complexity within the repo's
-// lint limits.
+// lint limits. The write itself is the normalized patch, not the merged
+// final values SetTaskPRDisposition computed for validation — see
+// Store.UpdateTaskPRDisposition for why (SEC-001).
 func (s *Service) writeTaskPRDisposition(
-	ctx context.Context, associationID string, disposition, normalizedURL *string,
+	ctx context.Context, associationID string, patch DispositionPatch, action string,
 ) (*TaskPR, error) {
-	var recordedAt *time.Time
-	action := "clear"
-	if disposition != nil {
-		now := time.Now().UTC()
-		recordedAt = &now
-		action = "set"
-	}
-	if err := s.store.UpdateTaskPRDisposition(ctx, associationID, disposition, normalizedURL, recordedAt); err != nil {
+	if err := s.store.UpdateTaskPRDisposition(ctx, associationID, patch); err != nil {
 		return nil, err
 	}
 	incTaskPROutcomeDisposition(action)

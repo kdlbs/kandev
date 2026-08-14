@@ -103,7 +103,8 @@ func TestUpdateTaskPRDisposition_NeverTouchesSyncOwnedColumns(t *testing.T) {
 	}
 
 	disposition := TaskPRDispositionDuplicate
-	if err := store.UpdateTaskPRDisposition(ctx, tp.ID, &disposition, nil, &now); err != nil {
+	patch := DispositionPatch{DispositionSet: true, Disposition: &disposition, SupersededByURLSet: true}
+	if err := store.UpdateTaskPRDisposition(ctx, tp.ID, patch); err != nil {
 		t.Fatalf("UpdateTaskPRDisposition: %v", err)
 	}
 
@@ -160,7 +161,8 @@ func TestUpdateTaskPRDisposition_ClearsAllThreeColumnsInOneStatement(t *testing.
 		t.Fatalf("CreateTaskPR: %v", err)
 	}
 
-	if err := store.UpdateTaskPRDisposition(ctx, tp.ID, nil, nil, nil); err != nil {
+	clearPatch := DispositionPatch{DispositionSet: true, SupersededByURLSet: true}
+	if err := store.UpdateTaskPRDisposition(ctx, tp.ID, clearPatch); err != nil {
 		t.Fatalf("UpdateTaskPRDisposition clear: %v", err)
 	}
 
@@ -176,6 +178,62 @@ func TestUpdateTaskPRDisposition_ClearsAllThreeColumnsInOneStatement(t *testing.
 	}
 	if got.DispositionRecordedAt != nil {
 		t.Fatalf("DispositionRecordedAt = %v, want nil after clear", got.DispositionRecordedAt)
+	}
+}
+
+// TestUpdateTaskPRDisposition_ConcurrentDisjointPatchesDoNotLoseWrites is the
+// deterministic regression for SEC-001: the disposition writer used to merge
+// a patch onto an app-level read of the row and then perform an absolute
+// 3-column write of the merged result, so a patch touching only one column
+// silently re-asserted the OTHER column's value from whatever the writer's
+// own stale read happened to see. This drives store.UpdateTaskPRDisposition
+// directly with two such stale reads — one patch setting only disposition,
+// the other setting only superseded_by_url — landing in sequence, and
+// asserts each patch's column survives the other's write intact. The fix
+// makes every column write a CASE WHEN <field touched> THEN <new value> ELSE
+// <column> END clause, so an untouched column is preserved by referencing
+// its own live value inside the same statement rather than a merged
+// snapshot (mirrors UpdateTaskCIOptions's boolPatchValue pattern).
+func TestUpdateTaskPRDisposition_ConcurrentDisjointPatchesDoNotLoseWrites(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedDispositionTestTask(t, store, "task-disjoint-patches", "ws-disjoint-patches")
+
+	initialDisposition := TaskPRDispositionDuplicate
+	initialURL := "https://github.com/kdlbs/kandev/pull/900"
+	now := time.Now().UTC()
+	tp := &TaskPR{
+		TaskID: "task-disjoint-patches", Owner: "kdlbs", Repo: "kandev", PRNumber: 4,
+		PRURL: "https://github.com/kdlbs/kandev/pull/4", PRTitle: "disjoint patch race",
+		State: "closed", CreatedAt: now,
+		Disposition: &initialDisposition, DispositionSupersededByURL: &initialURL, DispositionRecordedAt: &now,
+	}
+	if err := store.CreateTaskPR(ctx, tp); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+
+	newDisposition := TaskPRDispositionSuperseded
+	dispositionOnlyPatch := DispositionPatch{DispositionSet: true, Disposition: &newDisposition}
+	newURL := "https://github.com/kdlbs/kandev/pull/901"
+	urlOnlyPatch := DispositionPatch{SupersededByURLSet: true, SupersededByURL: &newURL}
+
+	if err := store.UpdateTaskPRDisposition(ctx, tp.ID, dispositionOnlyPatch); err != nil {
+		t.Fatalf("UpdateTaskPRDisposition (disposition-only, lands first): %v", err)
+	}
+	if err := store.UpdateTaskPRDisposition(ctx, tp.ID, urlOnlyPatch); err != nil {
+		t.Fatalf("UpdateTaskPRDisposition (url-only, lands second): %v", err)
+	}
+
+	got, err := store.GetTaskPRByID(ctx, tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if got.Disposition == nil || *got.Disposition != TaskPRDispositionSuperseded {
+		t.Fatalf("Disposition = %v, want %q preserved from the first write, not reverted by the second",
+			got.Disposition, TaskPRDispositionSuperseded)
+	}
+	if got.DispositionSupersededByURL == nil || *got.DispositionSupersededByURL != newURL {
+		t.Fatalf("DispositionSupersededByURL = %v, want %q from the second write", got.DispositionSupersededByURL, newURL)
 	}
 }
 

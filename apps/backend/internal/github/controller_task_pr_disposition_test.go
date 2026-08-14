@@ -104,6 +104,41 @@ func TestHttpSetTaskPRDisposition_NullClearsAllThreeColumns(t *testing.T) {
 	}
 }
 
+// TestHttpSetTaskPRDisposition_NullClearsAllThreeColumnsEvenWithStoredURL
+// covers AC-22 for the case NullClearsAllThreeColumns doesn't: a stored
+// superseded_by_url still on the row when the caller sends a bare
+// {"disposition": null}. Without forcing the URL to clear alongside an
+// explicit disposition null, the merged state would be (disposition: nil,
+// superseded_by_url: non-nil) — a combination validateTaskPRDisposition
+// rejects — so the PATCH would 400 instead of restoring the "nobody looked"
+// state AC-22 requires.
+func TestHttpSetTaskPRDisposition_NullClearsAllThreeColumnsEvenWithStoredURL(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	disposition := "superseded"
+	oldURL := "https://github.com/kdlbs/kandev/pull/101"
+	now := time.Now().UTC()
+	tp := seedDispositionEndpointTaskPR(t, store, &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", Owner: "kdlbs", Repo: "kandev",
+		PRNumber: 100, PRURL: "https://github.com/kdlbs/kandev/pull/100",
+		PRTitle: "t", State: "closed",
+		Disposition: &disposition, DispositionSupersededByURL: &oldURL, DispositionRecordedAt: &now,
+	})
+
+	resp := dispositionPatch(t, router, "/api/v1/github/task-prs/"+tp.ID+"/disposition?workspace_id=ws-1", map[string]any{
+		"disposition": nil,
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", resp.Code, resp.Body.String())
+	}
+	fromStore, err := store.GetTaskPRByID(context.Background(), tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if fromStore.Disposition != nil || fromStore.DispositionSupersededByURL != nil || fromStore.DispositionRecordedAt != nil {
+		t.Fatalf("expected all three cleared, got %+v", fromStore)
+	}
+}
+
 // TestHttpSetTaskPRDisposition_RejectsUnknownEnumValue covers AC-23.
 func TestHttpSetTaskPRDisposition_RejectsUnknownEnumValue(t *testing.T) {
 	router, store := setupControllerStoreTest(t)
