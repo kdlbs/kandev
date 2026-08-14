@@ -10,6 +10,7 @@ import {
   WORKSPACE_SETTINGS_TABS,
   workspaceSettingsHref,
 } from "@/lib/settings/workspace-settings-tabs";
+import { orderWorkspacesForDisplay } from "@/lib/settings/workspace-display-order";
 
 /**
  * What the settings menu grows *underneath* a row when a tree mode is on.
@@ -204,7 +205,7 @@ export function buildWorkspacesBranch(
   visibleIntegrationSlugsFor?: (workspaceId: string) => ReadonlySet<IntegrationSlug> | undefined,
   integrationContributions: ReadonlyArray<BranchIntegrationContribution> = [],
 ): SettingsMenuNode[] {
-  return workspaces.map((workspace) => {
+  return orderWorkspacesForDisplay(workspaces, activeWorkspaceId).map((workspace) => {
     const integrationsHref = workspaceSettingsHref(workspace.id, "integrations");
     return {
       key: `workspace:${workspace.id}`,
