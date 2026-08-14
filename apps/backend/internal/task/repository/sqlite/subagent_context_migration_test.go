@@ -743,6 +743,18 @@ func TestSubagentContextBackfillStatementFailureLogsWarnWithMigrationName(t *tes
 	if !found {
 		t.Fatalf("no WARN log carrying migration name %q found among %d entries", "task_session_subagents.backfill", len(entries))
 	}
+
+	// AC-24d: the INSERT and both activation-key writes share one
+	// transaction, so a failed INSERT must leave neither key written —
+	// never just the backfill row-set incomplete while activation still
+	// reports "done". Confirms this stays true rather than one write
+	// slipping outside the transaction in a future edit.
+	if _, ok := readMetaKey(t, db, subagentContextCaptureSinceKey); ok {
+		t.Fatalf("%s must not be written when the backfill INSERT fails", subagentContextCaptureSinceKey)
+	}
+	if _, ok := readMetaKey(t, db, subagentContextBackfillThroughKey); ok {
+		t.Fatalf("%s must not be written when the backfill INSERT fails", subagentContextBackfillThroughKey)
+	}
 }
 
 // TestSubagentContextBackfillDoesNotRescanWhenBackfillThroughEmpty is SR45's
