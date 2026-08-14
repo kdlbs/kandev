@@ -16,6 +16,7 @@ import { FileContextMenu, TreeNodeName, useFileRename } from "./file-context-men
 
 const FILE_NODE: FileTreeNode = { name: "README.md", path: "README.md", is_dir: false, size: 0 };
 const DIR_NODE: FileTreeNode = { name: "src", path: "src", is_dir: true, size: 0 };
+const RENAME_ROW = "rename-row";
 const BULK_TREE: FileTreeNode = {
   name: "root",
   path: "",
@@ -71,19 +72,81 @@ function RenameHarness() {
       onRenameFile={vi.fn().mockResolvedValue(true)}
       onStartRename={rename.handleStartRename}
     >
-      <div data-testid="rename-row">
+      <div data-testid={RENAME_ROW}>
         <TreeNodeName node={FILE_NODE} isActive={false} gitStatus={undefined} rename={rename} />
       </div>
     </FileContextMenu>
   );
 }
 
+// `FileContextMenuSurface` defers `onStartRename` to `onCloseAutoFocus` and calls
+// `preventDefault()` there so Radix does not pull focus back to the trigger and
+// steal it from the freshly mounted input. Both halves of that are only correct
+// if the deferral is scoped to a *pending* rename: any other menu item, and any
+// dismissal, must leave Radix's default focus restoration alone and must never
+// enter edit mode. A pending flag that outlives its close is the failure mode.
+function PendingRenameHarness({ onStartRename }: { onStartRename: () => void }) {
+  const [tree, setTree] = React.useState<FileTreeNode | null>(FILE_NODE);
+  return (
+    <FileContextMenu
+      node={FILE_NODE}
+      tree={tree}
+      setTree={setTree}
+      onRenameFile={vi.fn().mockResolvedValue(true)}
+      onDownloadFile={vi.fn().mockResolvedValue(true)}
+      onStartRename={onStartRename}
+    >
+      <div data-testid={RENAME_ROW}>row</div>
+    </FileContextMenu>
+  );
+}
+
 describe("FileContextMenu rename", () => {
+  it("does not start rename when a different menu item is selected", async () => {
+    const onStartRename = vi.fn();
+    render(<PendingRenameHarness onStartRename={onStartRename} />);
+
+    openMenu(RENAME_ROW);
+    fireEvent.click(screen.getByText("Download"));
+
+    await waitFor(() => expect(screen.queryByText("Download")).toBeNull());
+    expect(onStartRename).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("does not start rename when the menu is dismissed without a selection", async () => {
+    const onStartRename = vi.fn();
+    render(<PendingRenameHarness onStartRename={onStartRename} />);
+
+    openMenu(RENAME_ROW);
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByText("Rename")).toBeNull());
+    expect(onStartRename).not.toHaveBeenCalled();
+  });
+
+  it("does not replay a consumed rename on the next menu close", async () => {
+    const onStartRename = vi.fn();
+    render(<PendingRenameHarness onStartRename={onStartRename} />);
+
+    openMenu(RENAME_ROW);
+    fireEvent.click(screen.getByText("Rename"));
+    await waitFor(() => expect(onStartRename).toHaveBeenCalledTimes(1));
+
+    // Reopening and dismissing must not re-fire the rename the previous close
+    // already consumed.
+    openMenu(RENAME_ROW);
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByText("Rename")).toBeNull());
+    expect(onStartRename).toHaveBeenCalledTimes(1);
+  });
+
   it("starts rename after the menu closes and immediately focuses the selected filename", async () => {
     vi.useFakeTimers();
     render(<RenameHarness />);
 
-    openMenu("rename-row");
+    openMenu(RENAME_ROW);
     fireEvent.click(screen.getByText("Rename"));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
