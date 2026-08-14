@@ -23,11 +23,14 @@ tree-wide graceful fallback.
 ## Acceptance
 
 - On supported platforms, `managedProcess.kill` sends the first graceful
-  termination signal only to the supervised root process. A descendant in the
-  same process group is not directly signalled during that phase.
+  termination signal only to the supervised root process. For the Unix dev
+  make wrapper, it targets the backend PID written by the backend binary. A
+  remaining descendant in the same process group is not directly signalled
+  during that phase.
 - If graceful shutdown does not complete before the existing grace period, or
   the launcher receives a second signal, process-group force cleanup still
-  terminates the complete supervised tree.
+  terminates the complete supervised tree, including descendants after root
+  exit, where process-group support is available.
 - The existing plugin adapter policy remains conservative: deliberate plugin
   termination is not logged at ERROR, while an unexpected active-runtime exit
   remains visible at ERROR/WARN through the existing paths. No broad log-level
@@ -55,29 +58,39 @@ the available Unix/Linux package tests and record the unverified platform in
 - `apps/backend/internal/launcher/process_group_default.go`
 - `apps/backend/internal/launcher/process_group_unix_test.go`
 - `apps/backend/internal/launcher/process_group_windows_test.go` (if needed)
+- `apps/backend/cmd/kandev/main.go` and `main_test.go`
 - `apps/backend/internal/plugins/runtime/hclog_adapter.go` and its test only
   if focused verification proves the existing policy is still bypassed
 
 ## Dependencies and risks
 
-None. The main risk is preserving complete descendant cleanup on Windows,
-where the dev backend is launched through `make` without a POSIX `exec`.
+No external dependencies. The main platform risk is preserving descendant
+cleanup on Windows, where the dev backend is launched through `make` without a
+POSIX `exec`; the implementation therefore retains Windows tree-wide graceful
+termination.
 
 ## Results
 
 - `go test -race ./internal/launcher -run
   'TestManagedProcessKillSignalsOnlyRootBeforeForceKill|TestAttachSignalsSecondSignalForceKillsChildren' -count=1`
+  passed, including descendant cleanup after root exit.
+- `go test ./internal/launcher -run
+  'TestManagedProcessKill(SignalsOnlyRootBeforeForceKill|TargetsBackendPIDFile)$' -count=1`
   passed (2 tests).
+- `go test ./cmd/kandev -run '^TestDispatchWritesBackendPIDFile$' -count=1`
+  passed.
 - `go test ./internal/plugins/runtime -run '^TestHCLogAdapter' -count=1`
   passed (6 tests).
-- `go test ./internal/launcher ./internal/plugins/runtime` passed (226 tests).
-- `GOOS=windows GOARCH=amd64 go test -c ./internal/launcher` passed.
-- `golangci-lint run ./internal/launcher --timeout=5m` passed (0 issues).
+- `go test ./internal/launcher ./internal/plugins/runtime` passed (227 tests).
+- `GOOS=windows GOARCH=amd64 go test -c` passed for `./internal/launcher` and
+  `./cmd/kandev`.
+- `golangci-lint run ./internal/launcher ./cmd/kandev --timeout=5m` passed
+  (0 issues).
 - `git diff --check` passed.
 
-Unix and Darwin use root-only graceful signaling. Windows retains the existing
-tree-wide graceful fallback because the dev backend runs through a `make`
-wrapper and signaling only that wrapper could orphan descendants. Forced
-process-group cleanup is unchanged. The plugin adapter was not modified: its
-existing DEBUG-for-deliberate-stop and ERROR-for-unexpected-exit policy passed
-the focused tests.
+Unix and Darwin use root-only graceful signaling, with the Unix dev make
+wrapper targeting the backend PID handoff. Windows retains the existing
+tree-wide graceful fallback because signaling only that wrapper could orphan
+descendants. Process-group cleanup runs after root exit on supported platforms.
+The plugin adapter was not modified: its existing DEBUG-for-deliberate-stop and
+ERROR-for-unexpected-exit policy passed the focused tests.

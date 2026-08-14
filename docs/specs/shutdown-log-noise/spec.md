@@ -29,14 +29,20 @@ the stack traces suggest a crash where none occurred.
   wrapper's descendants, the launcher SHALL deliver the first
   graceful-shutdown signal only to that root. This gives the backend and its
   owned runtimes, including plugins, an opportunity to run their cleanup paths
-  before forced descendant cleanup. If root-only signaling is unsafe for a
-  platform's wrapper process, the launcher SHALL retain its tree-wide graceful
-  fallback so descendants are not orphaned. The complete shutdown MUST still
-  terminate the supervised process tree.
+  before forced descendant cleanup. For the Unix dev wrapper, the launcher
+  SHALL target the backend PID written by the backend binary and validate that
+  it remains in the wrapper's process group. If that target is unavailable, or
+  root-only signaling is unsafe for a platform's wrapper process, the launcher
+  SHALL retain its tree-wide graceful fallback so descendants are not orphaned.
+  On platforms with process-group support, the complete shutdown MUST still
+  terminate the supervised process tree, including descendants left after the
+  root exits. Platforms without portable process-group support only guarantee
+  cleanup through their available supervised-root operation.
 - No change to backend/plugin lifecycle control flow, task/session state
   transitions, returned errors, or WS responses. Launcher sequencing changes
   only at the graceful-signal versus forced-cleanup boundary, so the complete
-  supervised process tree still terminates.
+  supervised process tree still terminates on platforms with process-group
+  support.
 
 ## Affected log sites and target behavior
 Classification reuses existing helpers/sentinels wherever possible.
@@ -64,10 +70,12 @@ Classification reuses existing helpers/sentinels wherever possible.
    SIGTERM reaches the plugin before this intentional-stop marker is set.
 4. `internal/launcher/process.go` graceful child shutdown. On platforms with a
    safe root-only signal, the first signal SHALL target only the supervised
-   root process. If the root does not exit within the existing grace period, or
-   a second interrupt arrives, the launcher SHALL use the existing
-   process-group force-kill path to reap the complete tree. Platforms with an
-   unsafe wrapper process SHALL use the existing tree-wide graceful fallback.
+   root process. The Unix dev wrapper SHALL use the backend PID handoff for
+   this target. If the root does not exit within the existing grace period, or
+   a second interrupt arrives, the launcher SHALL use process-group force
+   cleanup to reap the complete tree, including descendants after root exit.
+   Platforms with an unsafe wrapper process SHALL use the existing tree-wide
+   graceful fallback.
 
 ## Log sites reviewed and deliberately left unchanged
 - `internal/agent/runtime/lifecycle/manager_events.go:544` "agent updates
@@ -110,18 +118,22 @@ Classification reuses existing helpers/sentinels wherever possible.
   line for that expected exit is emitted.
 - **GIVEN** a supervised backend has plugin subprocesses in the same process
   group, **WHEN** the launcher receives the first Ctrl+C, **THEN** it signals
-  the backend root first on platforms with safe root-only signaling, the
+  the backend root first on platforms with safe root-only signaling, using the
+  backend PID handoff when the managed process is a Unix dev wrapper. The
   backend can invoke plugin cleanup, and the plugin subprocesses are not
   directly terminated by the launcher's initial graceful signal. Platforms
   with an unsafe wrapper use the existing tree-wide graceful fallback.
 - **GIVEN** the supervised root ignores the graceful signal or a second Ctrl+C
   arrives, **WHEN** the launcher's grace/force path runs, **THEN** the existing
-  process-group force kill terminates the root and all descendants.
+  process-group force cleanup terminates the root and all descendants, even if
+  the root exits before a descendant does.
 
 ## Out of scope
 - Changing the existing grace duration or second-signal force-kill policy.
-- Changing which processes the final forced cleanup terminates; the complete
-  supervised process tree remains covered by process-group force kill.
+- Changing which processes the final forced cleanup terminates; on platforms
+  with process-group support, the complete supervised process tree remains
+  covered by process-group force cleanup. Unsupported platforms retain their
+  existing root-only limitation.
 - Changing WS responses or task/session state on launch failure.
 - Suppressing agentctl child stderr relay during shutdown.
 - Any non-shutdown logging severity review.
