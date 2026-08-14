@@ -8,6 +8,11 @@ plan: "plan.md"
 spec: "../../specs/subagent-context-persistence/spec.md"
 ---
 
+> **Amendment 1 update:** Postgres parity now also covers the dedicated
+> execution-identity migration's atomicity (failpoint-and-rollback matrix) —
+> see the "Amendment 1 update" note near the top of `plan.md` for the current
+> migration and backfill shape this task must validate.
+
 # Task 05: Postgres parity and health-query coverage
 
 Prove the dialect-sensitive statements behave identically on PostgreSQL, and pin

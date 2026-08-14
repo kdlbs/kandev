@@ -8,6 +8,11 @@ plan: "plan.md"
 spec: "../../specs/subagent-context-persistence/spec.md"
 ---
 
+> **Amendment 1 update:** the shipped schema and migration differ from this
+> task as originally drafted — see the "Amendment 1 update" note near the top
+> of `plan.md` for the current uniqueness key, the execution-identity
+> migration, and the atomic backfill transaction.
+
 # Task 01: Schema, backfill migration, activation keys
 
 Create the `task_session_subagents` table, the one-time backfill from existing

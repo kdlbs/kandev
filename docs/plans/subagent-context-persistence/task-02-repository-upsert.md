@@ -8,6 +8,11 @@ plan: "plan.md"
 spec: "../../specs/subagent-context-persistence/spec.md"
 ---
 
+> **Amendment 1 update:** the shipped conflict key is
+> `(task_session_id, agent_execution_id, tool_call_id)`, and `SubagentContext`
+> carries `AgentExecutionID` — see the "Amendment 1 update" note near the top
+> of `plan.md`.
+
 # Task 02: Model and repository upsert
 
 Add the `SubagentContext` model and the single atomic upsert that encodes every

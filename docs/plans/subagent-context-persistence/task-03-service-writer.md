@@ -8,6 +8,11 @@ plan: "plan.md"
 spec: "../../specs/subagent-context-persistence/spec.md"
 ---
 
+> **Amendment 1 update:** the writer's request/identity-gate shape carries an
+> `ExecutionID` and the attempted/anomalous counters aggregate as documented in
+> the "Amendment 1 update" note near the top of `plan.md` — read that note for
+> the current writer-health invariants before implementing from this file.
+
 # Task 03: Service writer and expvar counters
 
 Add the single service entry point that owns identity gating, value

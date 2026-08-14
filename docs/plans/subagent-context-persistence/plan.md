@@ -6,6 +6,44 @@ status: draft
 
 # Implementation Plan: Subagent context persistence
 
+> **Amendment 1 update (execution identity).** Everything below this note
+> describes the pre-Amendment-1 design as originally drafted. The spec's
+> Amendment 1 (see `docs/specs/subagent-context-persistence/spec.md`)
+> changed the uniqueness key and added an execution-identity migration after
+> this plan was written; the shipped code reflects Amendment 1, not the
+> sections below. The load-bearing differences:
+>
+> - **Uniqueness key** is `(task_session_id, agent_execution_id, tool_call_id)`,
+>   not `(task_session_id, tool_call_id)`. `task_session_subagents` carries a
+>   new `agent_execution_id TEXT NOT NULL DEFAULT 'unknown'` column (AC-31).
+>   A live write with no execution identity available stores the `'unknown'`
+>   sentinel and the service increments `unknown_execution`.
+> - **A dedicated execution-identity migration** brings a pre-Amendment-1
+>   database to this shape:
+>   `apps/backend/internal/task/repository/sqlite/subagent_context_execution_migration.go`.
+>   On SQLite this is a `recreateTableNamed` rebuild; on PostgreSQL it runs the
+>   column addition and the unique-constraint swap inside one transaction, so a
+>   failure partway through rolls back the complete cutover rather than leaving
+>   `agent_execution_id` added without the new constraint (per the destructive
+>   cutover migration convention in `apps/backend/AGENTS.md`). The backfill
+>   only proceeds once this shape is schema-observed to hold (AC-33c); if the
+>   shape migration itself fails, the backfill is skipped entirely — not just
+>   its key writes — and both are retried together on the next boot.
+> - **The backfill and the activation-key writes are one transaction**, not
+>   three independent `r.migrate.Apply(...)` calls: `tx.Beginx()` /
+>   `defer tx.Rollback()` wraps the `INSERT ... SELECT`, the `capture_since`
+>   write, and the `backfill_through` write, then `tx.Commit()`. A key is
+>   therefore never written after a swallowed backfill failure — the whole
+>   transaction rolls back together, so this is already the atomic-with-success
+>   behavior a docs-only staleness report once flagged as missing.
+> - **`RecordSubagentContextRequest` carries `ExecutionID string`**, propagated
+>   from the orchestrator's frame handling through to the repository upsert's
+>   conflict key.
+>
+> The "Schema (task 01)" through "Orchestrator wiring (task 04)" sections below
+> are kept as the historical record of the original (pre-Amendment-1) design;
+> read them alongside this note, not as the current shape.
+
 ## Overview
 
 Add one new table, `task_session_subagents`, and a write path that fills it from

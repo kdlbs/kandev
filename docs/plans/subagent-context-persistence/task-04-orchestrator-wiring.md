@@ -8,6 +8,11 @@ plan: "plan.md"
 spec: "../../specs/subagent-context-persistence/spec.md"
 ---
 
+> **Amendment 1 update:** the orchestrator must supply the execution identity
+> (`agent_execution_id`) alongside the existing frame fields — see the
+> "Amendment 1 update" note near the top of `plan.md` for the current wiring
+> shape.
+
 # Task 04: Orchestrator frame wiring
 
 Call the writer from the two frame handlers that already parse the subagent
