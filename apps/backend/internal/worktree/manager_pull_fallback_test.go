@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // initGitRepoWithOriginAheadLocal builds the shape that matters here: a normal
@@ -22,8 +21,8 @@ func initGitRepoWithOriginAheadLocal(t *testing.T) (string, string) {
 	originPath := filepath.Join(base, "origin.git")
 	repoPath := filepath.Join(base, "repo")
 
-	runGitIn(t, base, "init", "--bare", "-b", "main", originPath)
-	runGitIn(t, base, "init", "-b", "main", repoPath)
+	runGit(t, base, "init", "--bare", "-b", "main", originPath)
+	runGit(t, base, "init", "-b", "main", repoPath)
 	runGit(t, repoPath, "config", "user.email", "test@example.com")
 	runGit(t, repoPath, "config", "user.name", "Test User")
 	runGit(t, repoPath, "config", "commit.gpgsign", "false")
@@ -51,11 +50,19 @@ func writeRepoFile(t *testing.T, repoPath, name, contents string) {
 	}
 }
 
-// runGitIn runs git in an arbitrary directory (runGit requires the repo itself,
-// which does not exist yet while we are creating it).
-func runGitIn(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	return runGit(t, dir, args...)
+// captureSyncProgress records every SyncProgressEvent so a test can assert
+// which branch of the sync actually ran, not merely what it returned.
+func captureSyncProgress(events *[]SyncProgressEvent) SyncProgressCallback {
+	return func(event SyncProgressEvent) { *events = append(*events, event) }
+}
+
+// syncOutputs joins the captured progress output for assertion messages.
+func syncOutputs(events []SyncProgressEvent) string {
+	parts := make([]string, 0, len(events))
+	for _, e := range events {
+		parts = append(parts, e.Output)
+	}
+	return strings.Join(parts, " | ")
 }
 
 // TestPullBaseBranch_PullFailureKeepsLocalCommits pins the behaviour that a
@@ -79,12 +86,28 @@ func TestPullBaseBranch_PullFailureKeepsLocalCommits(t *testing.T) {
 		t.Fatalf("NewManager failed: %v", err)
 	}
 	// Let the fetch succeed (so we reach the pull) but force the pull to fail
-	// the way contention makes it fail in a loaded run.
-	mgr.pullTimeout = time.Nanosecond
+	// the way contention makes it fail in a loaded run. A zero timeout yields
+	// an already-expired context, so the pull cannot accidentally succeed.
+	mgr.pullTimeout = 0
 
-	resolved := mgr.pullBaseBranch(context.Background(), repoPath, "main", nil)
+	var events []SyncProgressEvent
+	resolved := mgr.pullBaseBranch(context.Background(), repoPath, "main", captureSyncProgress(&events))
 	if resolved == "" {
 		t.Fatal("pullBaseBranch returned an empty ref")
+	}
+
+	// Prove the failure path actually ran. Both the success and failure paths
+	// resolve to `main` here, so the SHA assertion below cannot distinguish
+	// them on its own — without this the test would pass vacuously if the pull
+	// ever succeeded. The failure path reports "Pull <reason>; using <ref>",
+	// the success path "Synced and using <ref>".
+	outputs := syncOutputs(events)
+	if !strings.Contains(outputs, "Pull ") {
+		t.Fatalf(
+			"pull was expected to fail and take the fallback path, but sync progress was %q;\n"+
+				"the assertion below would pass without exercising the fallback",
+			outputs,
+		)
 	}
 
 	// Assert on the commit the ref actually points at, not on the ref's name:
@@ -110,8 +133,8 @@ func TestPullBaseBranch_SuccessfulPullStillAdoptsRemoteCommits(t *testing.T) {
 	repoPath := filepath.Join(base, "repo")
 	otherPath := filepath.Join(base, "other")
 
-	runGitIn(t, base, "init", "--bare", "-b", "main", originPath)
-	runGitIn(t, base, "init", "-b", "main", repoPath)
+	runGit(t, base, "init", "--bare", "-b", "main", originPath)
+	runGit(t, base, "init", "-b", "main", repoPath)
 	runGit(t, repoPath, "config", "user.email", "test@example.com")
 	runGit(t, repoPath, "config", "user.name", "Test User")
 	runGit(t, repoPath, "config", "commit.gpgsign", "false")
@@ -122,7 +145,7 @@ func TestPullBaseBranch_SuccessfulPullStillAdoptsRemoteCommits(t *testing.T) {
 	runGit(t, repoPath, "push", "origin", "main")
 
 	// A second clone pushes a commit the working repo has not seen yet.
-	runGitIn(t, base, "clone", originPath, otherPath)
+	runGit(t, base, "clone", originPath, otherPath)
 	runGit(t, otherPath, "config", "user.email", "other@example.com")
 	runGit(t, otherPath, "config", "user.name", "Other User")
 	runGit(t, otherPath, "config", "commit.gpgsign", "false")
