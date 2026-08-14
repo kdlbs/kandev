@@ -12,8 +12,14 @@ package sqlite
 // ~40-microsecond ULP at 2026-scale epoch distances is coarser than this
 // comparison's required floor.
 //
-// On Postgres the column is already a native timestamptz, so a straight cast
-// is exact and needs no string surgery.
+// On Postgres the column is a naive TIMESTAMP (no time zone), storing the
+// same UTC wall clock SQLite does — NOT a native timestamptz. A straight
+// ::timestamptz cast would reinterpret those digits using the session's
+// `timezone` GUC rather than as literal UTC, silently shifting every
+// comparison by whatever offset that session happens to have (pinned by
+// TestPostgresSubagentContextHealthQueriesIgnoreSessionTimezone). AT TIME
+// ZONE 'UTC' instead reinterprets the naive value as already being UTC,
+// producing a timestamptz whose comparisons are session-timezone-independent.
 //
 // On SQLite, this repository's own stored TIMESTAMP text (verified against
 // the mattn/go-sqlite3 driver's on-disk bytes, not the reformatted string a
@@ -38,7 +44,7 @@ package sqlite
 // mode; TestSubagentPreciseTimestampOrdersWholeSecondBeforeFraction pins it.
 func subagentPreciseTimestamp(postgres bool, expr string) string {
 	if postgres {
-		return "((" + expr + ")::timestamptz)"
+		return "((" + expr + ") AT TIME ZONE 'UTC')"
 	}
 
 	normalized := "REPLACE(REPLACE(" + expr + ", ' ', 'T'), '+00:00', 'Z')"

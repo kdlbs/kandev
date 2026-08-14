@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,8 +164,29 @@ func TestPostgresSubagentContextExecutionIdentityMigratesLegacyShape(t *testing.
 	// Roll the table back to its pre-Amendment-1 legacy shape: drop the
 	// column the migration adds and swap the 3-column key for the old
 	// 2-column one, under a name the migration must discover dynamically
-	// rather than assume.
-	if _, err := db.Exec(`ALTER TABLE task_session_subagents DROP CONSTRAINT task_session_subagents_session_exec_tool_key`); err != nil {
+	// rather than assume. NewWithDB's own initial schema creation names this
+	// inline UNIQUE(...) constraint whatever Postgres auto-assigns it, not
+	// the name the migration would give it, so this test must look the name
+	// up the same way — by column set — the production migration code does.
+	var newConstraintName string
+	if err := db.Get(&newConstraintName, `
+		SELECT con.conname
+		FROM pg_constraint con
+		JOIN pg_class rel ON rel.oid = con.conrelid
+		JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+		WHERE rel.relname = 'task_session_subagents'
+			AND nsp.nspname = current_schema()
+			AND con.contype = 'u'
+			AND (
+				SELECT array_agg(attr.attname::text ORDER BY cols.ordinality)
+				FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
+				JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = cols.attnum
+			) = ARRAY['task_session_id', 'agent_execution_id', 'tool_call_id']
+	`); err != nil {
+		t.Fatalf("find new unique constraint name: %v", err)
+	}
+	quotedConstraintName := `"` + strings.ReplaceAll(newConstraintName, `"`, `""`) + `"`
+	if _, err := db.Exec(`ALTER TABLE task_session_subagents DROP CONSTRAINT ` + quotedConstraintName); err != nil {
 		t.Fatalf("drop new unique constraint: %v", err)
 	}
 	if _, err := db.Exec(`ALTER TABLE task_session_subagents DROP COLUMN agent_execution_id`); err != nil {
@@ -292,6 +314,15 @@ func TestPostgresUpsertSubagentContextConflictBehavior(t *testing.T) {
 // correctly.
 func TestPostgresSubagentContextBackfillJSONHelpers(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	// Production boot order (internal/persistence/provider.go) creates
+	// kandev_meta before the task repository; mirror that here since this
+	// package's repository never creates it itself. Without this, the
+	// backfill transaction's capture_since key write fails and rolls back
+	// the whole migration, silently discarding the valid row along with the
+	// malformed ones this test means to exercise.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS kandev_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("create kandev_meta: %v", err)
+	}
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)
@@ -333,6 +364,14 @@ func TestPostgresSubagentContextBackfillJSONHelpers(t *testing.T) {
 		t.Fatalf("seed valid message: %v", err)
 	}
 
+	// Reset the write-once activation keys to simulate this being the
+	// database's first boot with historical data present — mirrors
+	// TestPostgresSubagentContextSchemaAndBackfill's technique, needed
+	// because NewWithDB above already claimed both keys against the
+	// then-empty database in this same boot.
+	if _, err := db.Exec(`DELETE FROM kandev_meta WHERE key IN ('subagent_context_capture_since', 'subagent_context_backfill_through')`); err != nil {
+		t.Fatalf("reset activation keys: %v", err)
+	}
 	if err := repo.runMigrations(); err != nil {
 		t.Fatalf("runMigrations must not abort on malformed metadata rows: %v", err)
 	}
@@ -350,6 +389,84 @@ func TestPostgresSubagentContextBackfillJSONHelpers(t *testing.T) {
 	}
 	if !row.IsAsync {
 		t.Error("is_async = false, want true (Postgres #>> 'true' spelling must normalize to 1)")
+	}
+}
+
+// TestPostgresSubagentContextHealthQueriesIgnoreSessionTimezone proves the
+// health queries' timestamp comparisons produce the same result regardless
+// of the Postgres session's `timezone` GUC. observed_at/created_at are naive
+// TIMESTAMP columns storing a UTC wall clock (see subagentPreciseTimestamp's
+// doc comment); casting one via ::timestamptz reinterprets its digits using
+// whatever timezone the current session happens to have set, silently
+// shifting the comparison by that session's UTC offset. A production server
+// whose default timezone is not UTC — the common case outside test
+// environments — would see the shortfall/excess anti-joins undercount and
+// max-observed-since go blind exactly like a stalled writer would, which is
+// what AC-29's "ok=false must mean genuinely nothing observed" guarantee
+// depends on. TestPostgresSubagentContextHealthCountsAgreeAfterLiveWrites
+// above never varies the session timezone, so it could not have caught this.
+func TestPostgresSubagentContextHealthQueriesIgnoreSessionTimezone(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS kandev_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("create kandev_meta: %v", err)
+	}
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	seedPostgresForMsgTest(t, db, "task-pg-tz", "session-pg-tz", "turn-pg-tz")
+
+	// OpenIsolatedPostgres pins the pool to a single connection, so this SET
+	// holds for every query the test and the repository issue afterward.
+	// Kiritimati (UTC+14) is far enough from UTC that the naive-TIMESTAMP-
+	// as-timestamptz bug shifts a comparison by far more than the hour of
+	// slack seeded below, regardless of the host running the test.
+	if _, err := db.Exec(`SET TIME ZONE 'Pacific/Kiritimati'`); err != nil {
+		t.Fatalf("set session timezone: %v", err)
+	}
+
+	since := time.Date(2026, 8, 12, 8, 0, 0, 0, time.UTC)
+	after := since.Add(time.Hour)
+
+	// A message with no accounting context row: shortfall must count it.
+	seedSubagentMessage(t, repo, "msg-pg-tz-shortfall", "session-pg-tz", "task-pg-tz", "turn-pg-tz",
+		"tc-pg-tz-shortfall", "", "completed", map[string]interface{}{"status": "completed"},
+		after, after)
+
+	// A context row with no accounting message: excess must count it, and
+	// max-observed-since must report it.
+	if err := repo.UpsertSubagentContext(context.Background(), &models.SubagentContext{
+		TaskSessionID: "session-pg-tz", TaskID: "task-pg-tz", ToolCallID: "tc-pg-tz-excess",
+		Source: "live", ObservedAt: after, UpdatedAt: after,
+	}); err != nil {
+		t.Fatalf("UpsertSubagentContext: %v", err)
+	}
+
+	shortfall, err := repo.subagentContextShortfall(since)
+	if err != nil {
+		t.Fatalf("subagentContextShortfall: %v", err)
+	}
+	if shortfall != 1 {
+		t.Errorf("shortfall = %d, want 1 (a non-UTC session timezone must not hide an unmatched message)", shortfall)
+	}
+
+	excess, err := repo.subagentContextExcess(since)
+	if err != nil {
+		t.Fatalf("subagentContextExcess: %v", err)
+	}
+	if excess != 1 {
+		t.Errorf("excess = %d, want 1 (a non-UTC session timezone must not hide an unmatched context row)", excess)
+	}
+
+	maxObserved, ok, err := repo.subagentContextMaxObservedSince(since)
+	if err != nil {
+		t.Fatalf("subagentContextMaxObservedSince: %v", err)
+	}
+	if !ok {
+		t.Fatal("subagentContextMaxObservedSince: want a value, got none (a non-UTC session timezone must not make a live write invisible)")
+	}
+	if !maxObserved.Equal(after) {
+		t.Errorf("subagentContextMaxObservedSince = %v, want %v", maxObserved, after)
 	}
 }
 
