@@ -218,7 +218,11 @@ export async function waitForScopedKandevContainersRemoved(
   while (Date.now() < deadline) {
     await removeScopedKandevContainers(scope);
     if (scopedKandevContainerIDs(scope).length === 0) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    await dwell(
+      100,
+      "poll-interval",
+      "sampling interval for the container-teardown loop above; docker rm is asynchronous and the CLI reports completion only by the container list emptying",
+    );
   }
   await removeScopedKandevContainers(scope);
   const remaining = scopedKandevContainerIDs(scope);

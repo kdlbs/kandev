@@ -85,6 +85,7 @@ vi.mock("@/components/task-create-dialog-repo-chips", () => ({
 }));
 
 vi.mock("@/hooks/use-task-create-dialog-popover-container", () => ({
+  useTaskCreateDialogPopoverContainer: () => null,
   TaskCreateDialogPopoverContainerProvider: ({ children }: { children: ReactNode }) => (
     <>{children}</>
   ),

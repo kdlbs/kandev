@@ -6,6 +6,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import { dwell } from "../../helpers/causal-waits";
 
 /** Wire action the kanban WS handler consumes when a task moves step. */
 const TASK_UPDATED_ACTION = "task.updated";
@@ -191,10 +192,12 @@ test.describe("Session tab management — close behavior", () => {
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
 
     // …and stays gone — useAutoSessionTab must not recreate it.
-    // deliberate-sleep(negative-assertion): the regression is a tab being
-    // recreated after removal. There is no event for a recreation that must
-    // never happen, so the check needs real elapsed time to be meaningful.
-    await testPage.waitForTimeout(800);
+    await dwell(
+      testPage,
+      800,
+      "negative-assertion",
+      "the regression is a tab being recreated after removal; a recreation that must never happen has no event, so the check needs real elapsed time to mean anything",
+    );
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
 
@@ -297,10 +300,12 @@ test.describe("Session tab management — close behavior", () => {
     // that the remaining session tab is present (and the deleted one didn't come
     // back), so gate on the surviving session tab instead.
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 15_000 });
-    // deliberate-sleep(negative-assertion): the deleted tab must not come back
-    // after a task round-trip. Nothing is rendered to wait for when the
-    // expected outcome is "no tab ever appears".
-    await testPage.waitForTimeout(800);
+    await dwell(
+      testPage,
+      800,
+      "negative-assertion",
+      "the deleted tab must not come back after a task round-trip; nothing is rendered to wait for when the expected outcome is that no tab ever appears",
+    );
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
   });
 
@@ -354,9 +359,12 @@ test.describe("Session tab management — close behavior", () => {
     await expect(session.sessionTabBySessionId(sessionB1Id)).toBeVisible({ timeout: 10_000 });
 
     // …and neither of task A's session tabs should have followed us in.
-    // deliberate-sleep(negative-assertion): asserts tabs from another task
-    // never leak in, which has no arrival event to wait on.
-    await testPage.waitForTimeout(800);
+    await dwell(
+      testPage,
+      800,
+      "negative-assertion",
+      "asserts that tabs from another task never leak in, which has no arrival event to wait on",
+    );
     await expect(session.sessionTabBySessionId(sessionA1Id)).not.toBeVisible();
     await expect(session.sessionTabBySessionId(sessionA2Id)).not.toBeVisible();
 

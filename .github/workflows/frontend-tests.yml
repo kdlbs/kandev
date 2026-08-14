@@ -209,6 +209,36 @@ jobs:
 
           node scripts/run-i18n-ratchet.mjs --base "${BASE_SHA}"
 
+      # New-code ratchet for E2E waits. `page.waitForTimeout(500)` and
+      # hand-rolled promise sleeps are the suite's most reliable source of flake:
+      # a hand-picked number that was long enough on the machine it was written
+      # on. The sanctioned forms (`dwell`, `injectLatency` in
+      # e2e/helpers/causal-waits.ts) take a category and a reason.
+      #
+      # The eslint rule is an error only on directories already converted to
+      # zero, so this judges the CHANGE instead of the FILE for everywhere else —
+      # added files whole, modified files only on touched lines. Same base
+      # handling as the i18n step above, and the same reason for it: DO NOT pass
+      # --base on pull_request.
+      - name: Run E2E sleep ratchet
+        shell: bash
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            node scripts/check-new-e2e-sleeps.mjs
+            exit 0
+          fi
+
+          BASE_SHA="${{ github.event.before }}"
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            echo "No usable base SHA; skipping the E2E sleep ratchet."
+            exit 0
+          fi
+
+          node scripts/check-new-e2e-sleeps.mjs --base "${BASE_SHA}"
+
       # Deliberately run under the variable that broke the suite, so a
       # regression fails here instead of only in a container. React exports
       # `act()` from its development build alone, `vitest.config.ts` pins

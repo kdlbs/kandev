@@ -1,6 +1,7 @@
 import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { dwell } from "../../helpers/causal-waits";
 
 async function maxRingSpread(locator: Locator): Promise<number> {
   const boxShadow = await locator.evaluate((element) => getComputedStyle(element).boxShadow);
@@ -685,9 +686,12 @@ test.describe("Seed protection", () => {
     // `workflow.created` WS event arrives at the open settings page.
     await apiClient.e2eCreateHiddenWorkflow(seedData.workspaceId, hiddenName);
 
-    // Allow the WS event to propagate and the React effect in
-    // useWorkflowSettings a chance to (incorrectly) add a card.
-    await testPage.waitForTimeout(500);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "gives the workflow.created frame and the useWorkflowSettings effect a chance to incorrectly add a card; the assertion is that no card appears, which publishes nothing to wait on",
+    );
 
     // No new card appeared and the hidden entry is not in the list.
     const allCards = testPage.locator('[data-testid^="workflow-card-"]');

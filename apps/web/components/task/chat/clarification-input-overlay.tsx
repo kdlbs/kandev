@@ -58,6 +58,11 @@ function sortMessagesByQuestionIndex(messages: Message[]): Message[] {
   });
 }
 
+function readSharedContext(message: Message | undefined): string | null {
+  const context = (message?.metadata as ClarificationRequestMetadata | undefined)?.context;
+  return context?.trim() ? context : null;
+}
+
 function isQuestionAnsweredAt(
   messages: readonly Message[],
   answers: Record<string, ClarificationAnswer>,
@@ -537,6 +542,7 @@ export function ClarificationInputOverlay({
   // messages or shrunk bundles never put us out of range.
   const total = sortedMessages.length;
   const activeIndex = total === 0 ? 0 : Math.min(rawActiveIndex, total - 1);
+  const sharedContext = readSharedContext(sortedMessages[0]);
 
   useResolveCallback(group.submitState, onResolved);
 
@@ -588,6 +594,14 @@ export function ClarificationInputOverlay({
           onSkip={() => void group.skipAll("User skipped")}
         />
       </div>
+      {sharedContext && (
+        <div
+          data-testid="clarification-context"
+          className="mx-4 mt-3 mb-2 break-words whitespace-pre-wrap"
+        >
+          {sharedContext}
+        </div>
+      )}
       <ClarificationCarouselBody
         sortedMessages={sortedMessages}
         group={group}

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { injectLatency } from "../../helpers/causal-waits";
 
 /**
  * E2E coverage for the per-agent paginated runs list and the run
@@ -102,12 +103,10 @@ test.describe("Office agent run detail", () => {
         await route.continue();
         return;
       }
-      // deliberate-sleep(latency-injection): NOT a wait. This delay is injected
-      // into the mocked paginated-runs response so the test can observe the
-      // pending/loading UI; the delay is the stimulus under test, and removing
-      // or shortening it destroys the scenario. Proposed as an eighth category
-      // because none of the existing seven describe "this is not a wait".
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await injectLatency(
+        800,
+        "slows the mocked paginated-runs response so the pending/loading UI stays observable; the delay is the stimulus under test, not a wait",
+      );
       await route.continue();
     });
 

@@ -8,6 +8,7 @@ import { dwell } from "../helpers/causal-waits";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
 import type { WorkflowStep } from "../../lib/types/http";
+import { dwell } from "../helpers/causal-waits";
 
 const DEFAULT_SIDEBAR_VIEW = {
   id: "view-all-tasks",
@@ -132,7 +133,11 @@ export const test = backendFixture.extend<
           lastText = await probe.text();
           break;
         }
-        await new Promise((r) => setTimeout(r, 250));
+        await dwell(
+          250,
+          "poll-interval",
+          "sampling interval for the mock-harness health probe above; the backend is still booting and there is no page, let alone a socket, to receive a ready signal on",
+        );
       }
       if (lastStatus === 404) {
         throw new Error(
@@ -198,7 +203,11 @@ export const test = backendFixture.extend<
         lastAgentCount = agents.length;
         agentProfileId = agents[0]?.profiles[0]?.id;
         if (agentProfileId) break;
-        await new Promise((r) => setTimeout(r, 250));
+        await dwell(
+          250,
+          "poll-interval",
+          "sampling interval for the seeded-agent-profile poll above; seeding is asynchronous backend work read back over HTTP, with no page in this fixture",
+        );
       }
       if (!agentProfileId) {
         throw new Error(
