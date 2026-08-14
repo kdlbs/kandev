@@ -74,17 +74,17 @@ remain during migration, but switchers use the summary when present.
   state icon. Both outrank generating/background activity, which outranks
   coarse lifecycle state. This is the existing task-row precedence.
 - A clarification contributes to `pending_action` only while its bundle is pending in the session's
-  current durable `task_session_turns` record. A newer turn supersedes older pending clarification rows
-  without requiring transcript history to be rewritten; deleting newer-turn messages cannot move this
-  boundary backward.
-- A session's `pending_action` clears only when the specific request that armed
-  it resolves — a `message.updated` on that same permission/clarification
+  current durable `task_session_turns` record. Within that turn, unrelated rows do not clear the
+  request. A newer turn supersedes older pending clarification rows without requiring transcript
+  history to be rewritten; deleting newer-turn messages cannot move this boundary backward.
+- Within the same current turn, a session's `pending_action` clears only when the specific request that
+  armed it resolves: a `message.updated` on that same permission/clarification
   request row (matched by type and `pending_id`) reaching a terminal,
   non-`pending` status, or that row's deletion. An unrelated message on the
   same session (a tool call, script execution, or any other row that merely
   carries its own terminal status metadata) must not clear a different
   session's armed `pending_action`, and must not clear the current session's
-  `pending_action` unless it is that same request row. Otherwise a session that
+  same-turn `pending_action` unless it is that same request row. Otherwise a session that
   is busy streaming ordinary tool activity right after a permission/
   clarification request clears the affordance before the user ever answers it.
 - Pending-sensitive source events refresh from the bounded repository projection instead of trusting

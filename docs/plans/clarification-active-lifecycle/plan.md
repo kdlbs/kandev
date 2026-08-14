@@ -65,9 +65,10 @@ bundle detached, a newer bundle rejected, and a later completion republishing th
 - In `apps/backend/internal/orchestrator/clarification_guard.go`, guard only on active current-turn
   rows. Preserve fail-closed behavior when the authoritative query fails.
 - In `apps/backend/internal/clarification/handlers.go`, validate the database-fallback response
-  against active current-turn ownership. A superseded/terminal bundle returns conflict and cannot
-  publish `clarification.answered`; current-turn detached answers and rejections keep existing
-  behavior.
+  against active current-turn ownership before any fallback write. A detached current-turn answer
+  persists and publishes one resume event; a detached current-turn rejection persists without a
+  resume event. Any answer or rejection for a superseded/terminal bundle returns conflict without a
+  write or `clarification.answered` publication.
 - Order durable turns identically by `started_at`, `created_at`, then `id` descending. Add an
   environment-gated PostgreSQL behavior test for the changed query. No migration or persisted-row
   rewrite.

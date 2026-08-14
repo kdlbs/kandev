@@ -37,9 +37,11 @@ hiding the action the icon represents.
 - The chat's Skip action rejects the exact visible bundle through the existing response endpoint. A
   live waiter receives the rejection in the same turn. A detached current-turn bundle is persisted as
   rejected without resuming the agent.
-- A stale client response for a superseded bundle does not resume the agent. The response is reported
-  as a conflict so current clients close their obsolete local overlay through the existing conflict
-  handling.
+- An affirmative response to a detached current-turn bundle persists the answer and publishes one
+  resume event. A rejection persists terminal status without publishing a resume event.
+- Any response to a superseded or terminal bundle returns conflict, performs no message mutation, and
+  publishes no resume event. Current clients close their obsolete local overlay through the existing
+  conflict handling.
 - Persisted task status summaries reconcile `pending_action` against current-turn repository state on
   source events and task-list/boot reads. Existing summaries are repaired, not only missing rows.
 - When a task row advertises a pending action, desktop and phone task activation load the task's
@@ -75,9 +77,12 @@ No new route or response field.
   uses its newest turn identity instead of inferring ownership from surviving messages.
 - Task list, workflow snapshot, and boot payloads continue to expose task-level `pending_action` in
   the status summary and legacy fallback fields.
-- `POST /api/v1/clarification/:pendingId/respond` accepts an active live or detached current-turn
-  bundle. After the in-memory request is absent, a superseded or already-terminal bundle returns
-  conflict and never publishes a resume event.
+- `POST /api/v1/clarification/:pendingId/respond` uses one state-based contract:
+  - `active_live`: answer or rejection returns success and is delivered to the same-turn waiter.
+  - `active_detached`: an answer returns success, persists, and publishes one resume event; rejection
+    returns success, persists, and publishes no resume event.
+  - `superseded_history` or `terminal`: answer or rejection returns conflict, performs no write, and
+    publishes no resume event.
 - `POST /api/v1/clarification/:pendingId/cancel` remains the low-level cancellation path for a request
   still owned by the in-memory clarification store. The chat Skip control uses `/respond` with
   `rejected=true`, including for detached requests.

@@ -36,8 +36,9 @@ The session's current turn owns active clarification state.
   response validation, per-session pending projection, and task-summary reconciliation.
 - Message and clarification events trigger a fresh authoritative projection. Event arrival order and
   one in-memory request identity per session do not define persisted pending state.
-- A stale response to a superseded request cannot resume an agent. It returns conflict after the
-  in-memory waiter path is unavailable.
+- Response handling follows the same ownership rule: a detached current-turn answer persists and
+  resumes once; a detached current-turn rejection persists without resuming; any response to a
+  superseded or terminal bundle returns conflict without a write or resume event.
 - Repeated detachment of an already detached bundle performs no write and publishes no duplicate
   message occurrence.
 - Existing task summaries reconcile their pending field on normal task-list and boot reads. Repair uses

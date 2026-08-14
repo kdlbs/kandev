@@ -18,8 +18,9 @@ spec: "../../specs/clarification-active-lifecycle/spec.md"
   turn.
 - Detach/expiry fallback and workflow guarding consume that method; repeated detach writes and
   publishes nothing, while repository errors keep the workflow barrier closed.
-- A detached bundle in the current turn still supports late answer/rejection. A database-fallback
-  response for an older-turn or terminal bundle returns conflict and emits no agent-resume event.
+- A detached bundle in the current turn accepts a late answer with one resume event or a rejection
+  with no resume event. Any database-fallback answer or rejection for an older-turn or terminal bundle
+  returns conflict, performs no write, and emits no agent-resume event.
 
 ## Verification
 
