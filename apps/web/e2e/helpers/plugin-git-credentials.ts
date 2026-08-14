@@ -9,7 +9,7 @@ import { pipeline, type Duplex, type Readable, type Writable } from "node:stream
 
 export const fixtureGitProvider = "fixture-source-control";
 export const fixtureGitHost = "bitbucket.example.test";
-export const fixtureGitPath = "/scm/TEAM/fixture.git";
+export const fixtureGitPath = "/scm/TEAM/fixture";
 export const fixtureGitURL = `https://${fixtureGitHost}${fixtureGitPath}`;
 export const fixtureGitUser = "fixture-user";
 export const fixtureGitSecret = "fixture-credential-secret";
@@ -17,7 +17,7 @@ export const fixtureGitSecret = "fixture-credential-secret";
 const fixturePluginID = "kandev-plugin-e2e";
 const fixturePluginPackage = path.resolve(
   __dirname,
-  "../../../../backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
+  "../../../backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
 );
 
 type GitHTTPFixture = {
@@ -102,11 +102,8 @@ export async function startPluginGitFixture(root: string): Promise<GitHTTPFixtur
     checkoutPath,
     proxyURL,
     profileGitEnv: [
-      { key: "GIT_CONFIG_COUNT", value: "2" },
-      { key: "GIT_CONFIG_KEY_0", value: "http.proxy" },
-      { key: "GIT_CONFIG_VALUE_0", value: proxyURL },
-      { key: "GIT_CONFIG_KEY_1", value: "http.sslVerify" },
-      { key: "GIT_CONFIG_VALUE_1", value: "false" },
+      { key: "HTTPS_PROXY", value: proxyURL },
+      { key: "GIT_SSL_NO_VERIFY", value: "true" },
     ],
     requestPaths: () => [...requestPaths],
     requestHosts: () => [...requestHosts],
@@ -175,33 +172,40 @@ export function assertExactFixtureTransport(fixture: GitHTTPFixture): void {
 export function runDockerGit(
   containerID: string,
   command: string,
-): { output: string; status: number } {
-  const result = spawnSync("docker", ["exec", containerID, "sh", "-lc", command], {
-    encoding: "utf8",
-  });
-  return { output: `${result.stdout ?? ""}${result.stderr ?? ""}`, status: result.status ?? 1 };
+): Promise<{ output: string; status: number }> {
+  return runProcess("docker", ["exec", containerID, "sh", "-lc", command]);
 }
 
 export function runRemoteGit(
   agentctlPID: number,
   command: string,
   targetName: string,
-): {
+): Promise<{
   output: string;
   status: number;
-} {
-  const result = spawnSync(
-    "docker",
-    [
-      "exec",
-      targetName,
-      "sh",
-      "-lc",
-      `xargs -0 sh -c 'env "$@" sh -lc "$0"' ${shellQuote(command)} < /proc/${agentctlPID}/environ`,
-    ],
-    { encoding: "utf8" },
-  );
-  return { output: `${result.stdout ?? ""}${result.stderr ?? ""}`, status: result.status ?? 1 };
+}> {
+  return runProcess("docker", [
+    "exec",
+    "--user",
+    "kandev",
+    targetName,
+    "sh",
+    "-lc",
+    `xargs -0 sh -c 'env "$@" sh -lc "$0"' ${shellQuote(command)} < /proc/${agentctlPID}/environ`,
+  ]);
+}
+
+function runProcess(command: string, args: string[]): Promise<{ output: string; status: number }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args);
+    const chunks: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => chunks.push(chunk));
+    child.once("error", reject);
+    child.once("close", (status) => {
+      resolve({ output: Buffer.concat(chunks).toString(), status: status ?? 1 });
+    });
+  });
 }
 
 function requestHasFixtureAuth(req: IncomingMessage): boolean {

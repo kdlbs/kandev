@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/task/models"
 	"golang.org/x/crypto/ssh"
 )
@@ -490,6 +491,43 @@ func TestSSHRemoteContributionEnvUsesScopedGitCredentialHelper(t *testing.T) {
 	}
 	if got["GIT_CONFIG_COUNT"] != "1" {
 		t.Fatalf("GIT_CONFIG_COUNT = %q, want 1", got["GIT_CONFIG_COUNT"])
+	}
+}
+
+func TestSSHRemoteContributionEnvRewritesPluginCredentialHelper(t *testing.T) {
+	req := &ExecutorCreateRequest{Env: map[string]string{
+		envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+		envKeyGitHubCredentialLease:     "lease",
+		"GIT_CONFIG_COUNT":              "2",
+		"GIT_CONFIG_KEY_0":              "credential.https://bitbucket.example.test.helper",
+		"GIT_CONFIG_VALUE_0":            "",
+		"GIT_CONFIG_KEY_1":              "credential.https://bitbucket.example.test.helper",
+		"GIT_CONFIG_VALUE_1":            githubauth.ManagedGitCredentialHelper,
+	}}
+
+	got := sshRemoteContributionEnv(req, "/home/agent/.kandev/bin/agentctl")
+	if got["GIT_CONFIG_VALUE_1"] != "!/home/agent/.kandev/bin/agentctl git-credential" {
+		t.Fatalf("plugin helper = %q, want absolute agentctl helper", got["GIT_CONFIG_VALUE_1"])
+	}
+	if got["GIT_CONFIG_COUNT"] != "2" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 2", got["GIT_CONFIG_COUNT"])
+	}
+}
+
+func TestBuildSSHCreateInstanceRequestRewritesPluginCredentialHelper(t *testing.T) {
+	req := &ExecutorCreateRequest{Env: map[string]string{
+		envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+		envKeyGitHubCredentialLease:     "lease",
+		"GIT_CONFIG_COUNT":              "2",
+		"GIT_CONFIG_KEY_0":              "credential.https://bitbucket.example.test.helper",
+		"GIT_CONFIG_VALUE_0":            "",
+		"GIT_CONFIG_KEY_1":              "credential.https://bitbucket.example.test.helper",
+		"GIT_CONFIG_VALUE_1":            githubauth.ManagedGitCredentialHelper,
+	}}
+
+	got := buildSSHCreateInstanceRequest(req, "/workspace", "/home/agent/.kandev/bin/agentctl")
+	if got.Env["GIT_CONFIG_VALUE_1"] != "!/home/agent/.kandev/bin/agentctl git-credential" {
+		t.Fatalf("plugin helper = %q, want absolute agentctl helper", got.Env["GIT_CONFIG_VALUE_1"])
 	}
 }
 
