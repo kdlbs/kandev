@@ -17,6 +17,7 @@ import { FileContextMenu, TreeNodeName, useFileRename } from "./file-context-men
 const FILE_NODE: FileTreeNode = { name: "README.md", path: "README.md", is_dir: false, size: 0 };
 const DIR_NODE: FileTreeNode = { name: "src", path: "src", is_dir: true, size: 0 };
 const RENAME_ROW = "rename-row";
+const FOCUS_ANCHOR = "focus-anchor";
 const BULK_TREE: FileTreeNode = {
   name: "root",
   path: "",
@@ -85,19 +86,25 @@ function RenameHarness() {
 // if the deferral is scoped to a *pending* rename: any other menu item, and any
 // dismissal, must leave Radix's default focus restoration alone and must never
 // enter edit mode. A pending flag that outlives its close is the failure mode.
+// The anchor stands in for whatever held focus when the user opened the menu.
+// Radix restores focus to it on close, so asserting against it distinguishes a
+// real restoration from focus falling back to `document.body`.
 function PendingRenameHarness({ onStartRename }: { onStartRename: () => void }) {
   const [tree, setTree] = React.useState<FileTreeNode | null>(FILE_NODE);
   return (
-    <FileContextMenu
-      node={FILE_NODE}
-      tree={tree}
-      setTree={setTree}
-      onRenameFile={vi.fn().mockResolvedValue(true)}
-      onDownloadFile={vi.fn().mockResolvedValue(true)}
-      onStartRename={onStartRename}
-    >
-      <div data-testid={RENAME_ROW}>row</div>
-    </FileContextMenu>
+    <>
+      <button data-testid={FOCUS_ANCHOR}>anchor</button>
+      <FileContextMenu
+        node={FILE_NODE}
+        tree={tree}
+        setTree={setTree}
+        onRenameFile={vi.fn().mockResolvedValue(true)}
+        onDownloadFile={vi.fn().mockResolvedValue(true)}
+        onStartRename={onStartRename}
+      >
+        <div data-testid={RENAME_ROW}>row</div>
+      </FileContextMenu>
+    </>
   );
 }
 
@@ -140,6 +147,33 @@ describe("FileContextMenu rename", () => {
 
     await waitFor(() => expect(screen.queryByText("Rename")).toBeNull());
     expect(onStartRename).toHaveBeenCalledTimes(1);
+  });
+
+  // The three tests above prove `onStartRename` stays unfired, which is only
+  // half of the contract. `preventDefault()` suppresses Radix's focus
+  // restoration, and hoisting it above the pending-rename guard would keep every
+  // assertion above green while silently dropping the user back on
+  // `document.body` after Download or Escape. These two pin the other half.
+  it("restores focus to the opener when a different menu item is selected", async () => {
+    render(<PendingRenameHarness onStartRename={vi.fn()} />);
+    const anchor = screen.getByTestId(FOCUS_ANCHOR);
+    anchor.focus();
+
+    openMenu(RENAME_ROW);
+    fireEvent.click(screen.getByText("Download"));
+
+    await waitFor(() => expect(document.activeElement).toBe(anchor));
+  });
+
+  it("restores focus to the opener when the menu is dismissed without a selection", async () => {
+    render(<PendingRenameHarness onStartRename={vi.fn()} />);
+    const anchor = screen.getByTestId(FOCUS_ANCHOR);
+    anchor.focus();
+
+    openMenu(RENAME_ROW);
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(document.activeElement).toBe(anchor));
   });
 
   it("starts rename after the menu closes and immediately focuses the selected filename", async () => {
