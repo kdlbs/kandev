@@ -79,6 +79,8 @@ termination.
   passed (2 tests).
 - `go test ./cmd/kandev -run '^TestDispatchWritesBackendPIDFile$' -count=1`
   passed.
+- The process-tree assertion treats a reaped Linux zombie as terminated, which
+  avoids false leak failures while container init reaps force-killed children.
 - `go test ./internal/plugins/runtime -run '^TestHCLogAdapter' -count=1`
   passed (6 tests).
 - `go test ./internal/launcher ./internal/plugins/runtime` passed (227 tests).

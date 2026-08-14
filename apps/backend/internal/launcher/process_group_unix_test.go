@@ -4,10 +4,12 @@ package launcher
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -517,6 +519,12 @@ func waitForProcessGone(t *testing.T, pid int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
+		if runtime.GOOS == "linux" {
+			status, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
+			if errors.Is(err, os.ErrNotExist) || strings.Contains(string(status), "State:\tZ") {
+				return
+			}
+		}
 		process, err := os.FindProcess(pid)
 		if err != nil || process.Signal(syscall.Signal(0)) != nil {
 			return
