@@ -9,12 +9,12 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
-// These three functions are a package-private, test-only surface (SR44 in
-// this build's task plan, and AC-28's own "what Build ships for this
-// criterion is the two anti-joins as executable queries exercised by tests
-// on both dialects" scope note). No production endpoint, scheduled check, or
-// alerting integration is wired to them in this build; a deployment that
-// wants one wires it separately.
+// These three functions are the package-private health surface for AC-28/AC-29.
+// No production endpoint, scheduled check, or alerting integration is wired to
+// them in this build — a deployment that wants one wires it separately. Tests
+// exercise them on both dialects (SR44 / AC-28 scope note). They must live in
+// a regular .go file (not _test.go) because a future caller will be production
+// code that needs a real DB connection, not testing.TB.
 
 // subagentContextTimeLiteral renders t as a single-quoted RFC3339Nano SQL
 // string literal. Every call site here passes a Go time.Time the caller
