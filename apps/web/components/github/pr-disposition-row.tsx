@@ -46,6 +46,12 @@ function dispositionLabel(t: (key: string) => string, value: TaskPRDisposition):
  * Selecting `superseded` reveals a URL field; the server's validation error
  * is surfaced verbatim (AC-32). A row that already carries a value shows it
  * and allows it to be changed or cleared (AC-33).
+ *
+ * Rendered from two surfaces: the desktop/touch-drawer CI popover
+ * (pr-ci-popover.tsx) and the PR detail panel (pr-detail-panel.tsx) — the
+ * latter is reachable on touch even when the popover's hover trigger is
+ * suppressed, so the interactive controls below size up on a coarse pointer
+ * regardless of which surface renders them.
  */
 export function PRDispositionRow({ pr }: { pr: TaskPR }) {
   const { t } = useTranslation();
@@ -115,7 +121,10 @@ export function PRDispositionRow({ pr }: { pr: TaskPR }) {
         <Select value={pendingValue} onValueChange={handleValueChange} disabled={saving}>
           <SelectTrigger
             data-testid="pr-disposition-select"
-            className="h-7 w-auto min-w-[9rem] text-xs"
+            // SelectTrigger's own data-[size=default]:h-7 rule outranks a
+            // plain class on specificity regardless of source order, so the
+            // coarse-pointer override needs the important suffix to win.
+            className="h-7 w-auto min-w-[9rem] text-xs [@media(pointer:coarse)]:h-11!"
           >
             <SelectValue placeholder={t("github:dispositionNone")} />
           </SelectTrigger>
@@ -136,14 +145,14 @@ export function PRDispositionRow({ pr }: { pr: TaskPR }) {
             value={supersededURL}
             onChange={(e) => setSupersededURL(e.target.value)}
             placeholder={t("github:dispositionSupersededByUrlPlaceholder")}
-            className="h-7 text-xs"
+            className="h-7 text-xs [@media(pointer:coarse)]:h-11"
             disabled={saving}
           />
           <Button
             type="button"
             size="sm"
             variant="secondary"
-            className="h-7 cursor-pointer text-xs"
+            className="h-7 cursor-pointer text-xs [@media(pointer:coarse)]:h-11"
             disabled={saving || supersededURL.trim() === ""}
             onClick={() => void save("superseded", supersededURL.trim())}
             data-testid="pr-disposition-save"

@@ -20,6 +20,7 @@ import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useToast } from "@/components/toast-provider";
 import { submitPRReview } from "@/lib/api/domains/github-pr-api";
 import type { TaskPR, PRFeedback } from "@/lib/types/github";
+import { PRDispositionRow } from "./pr-disposition-row";
 import { PRMergeButton } from "./pr-merge-button";
 import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
 import { usePRScopedReviewRequest } from "./use-pr-scoped-review-request";
@@ -449,15 +450,30 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
         </>
       }
       notice={
-        <PRMergeabilityNotice
-          state={mergeableState}
-          mergeable={isMergeable}
-          isDraft={isDraft}
-          prState={liveState}
-          baseBranch={taskPR.base_branch}
-          onResolveConflicts={onResolveConflicts}
-          resolveDisabled={conflictQueued}
-        />
+        <>
+          <PRMergeabilityNotice
+            state={mergeableState}
+            mergeable={isMergeable}
+            isDraft={isDraft}
+            prState={liveState}
+            baseBranch={taskPR.base_branch}
+            onResolveConflicts={onResolveConflicts}
+            resolveDisabled={conflictQueued}
+          />
+          {/* Renders here (rather than only in the CI popover) because this
+              component is what the true mobile layout's "Review" bottom-nav
+              tab reaches for a GitHub PR (session-mobile-layout.tsx ->
+              MobileReviewPanel -> ReviewDetailPanelComponent ->
+              PRDetailPanelComponent), and that tab is unconditionally
+              reachable for any linked PR regardless of state — unlike
+              pr-status-chip.tsx's compact chat-bar chip, which hides itself
+              once a task's lone PR goes terminal. On tablet / coarse-pointer
+              desktop-layout widths this is also the surface
+              pr-topbar-button.tsx falls through to on touch, since its hover
+              popover (the only other place PRDispositionRow renders) is
+              suppressed there. */}
+          <PRDispositionRow pr={taskPR} />
+        </>
       }
     />
   );

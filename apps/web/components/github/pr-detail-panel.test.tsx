@@ -182,3 +182,47 @@ describe("PRDetailPanelComponent — task switch on the singleton legacy panel",
     expect(screen.queryByText("PR 1 bot comment")).toBeNull();
   });
 });
+
+// The PR detail panel is the surface `pr-topbar-button.tsx` falls through to
+// on touch devices (its hover CI popover — where PRDispositionRow otherwise
+// lives — is suppressed entirely on touch). It is also the only surface
+// reachable at all for a task with a single closed-unmerged PR, since
+// PRStatusChip's compact chat-bar chip hides itself once a lone PR goes
+// terminal. Rendering the disposition control here closes that mobile gap
+// without a new UI surface or drawer.
+describe("PRDetailPanelComponent — disposition control (mobile PR detail path)", () => {
+  it("renders the disposition control for a closed, unmerged PR", async () => {
+    const pr = makePR({ id: "pr-1", task_id: "task-1", pr_number: 1, state: "closed" });
+    vi.mocked(getPRFeedback).mockResolvedValue(makeFeedback(pr, "comment"));
+
+    renderPanel(taskState("task-1", "session-1", [pr]));
+
+    await waitFor(() => expect(screen.getByTestId("pr-disposition-row")).toBeTruthy());
+  });
+
+  it("does not render the disposition control for an open PR", async () => {
+    const pr = makePR({ id: "pr-1", task_id: "task-1", pr_number: 1, state: "open" });
+    vi.mocked(getPRFeedback).mockResolvedValue(makeFeedback(pr, "comment"));
+
+    renderPanel(taskState("task-1", "session-1", [pr]));
+
+    await waitFor(() => expect(screen.getByTestId("change-request-detail")).toBeTruthy());
+    expect(screen.queryByTestId("pr-disposition-row")).toBeNull();
+  });
+
+  it("does not render the disposition control for a merged PR", async () => {
+    const pr = makePR({
+      id: "pr-1",
+      task_id: "task-1",
+      pr_number: 1,
+      state: "merged",
+      merged_at: "2026-08-01T00:00:00Z",
+    });
+    vi.mocked(getPRFeedback).mockResolvedValue(makeFeedback(pr, "comment"));
+
+    renderPanel(taskState("task-1", "session-1", [pr]));
+
+    await waitFor(() => expect(screen.getByTestId("change-request-detail")).toBeTruthy());
+    expect(screen.queryByTestId("pr-disposition-row")).toBeNull();
+  });
+});
