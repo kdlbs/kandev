@@ -102,7 +102,7 @@ describe("workspace GitHub authentication", () => {
     await fetchGitHubStatus(workspaceID, { cache: "no-store" }, true);
 
     expect(lastCallUrl()).toBe(
-      "http://api.test/api/v1/github/status?workspace_id=workspace%2Fone&refresh_rate_limit=true",
+      "http://api.test/api/v1/github/status?workspace_id=ws%2F1&refresh_rate_limit=true",
     );
   });
 

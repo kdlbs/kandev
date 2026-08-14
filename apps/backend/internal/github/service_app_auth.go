@@ -527,13 +527,31 @@ func (s *Service) seedWorkspaceRateLimit(
 	resolved *ResolvedCredential,
 	force bool,
 ) {
-	if resolved == nil || resolved.RateTracker == nil ||
-		(!force && hasCompleteRateLimitSnapshot(resolved.RateTracker)) {
+	if resolved == nil || resolved.RateTracker == nil {
 		return
 	}
 	fetcher, ok := resolved.Client.(RateLimitFetcher)
 	if !ok {
 		return
+	}
+	tracker := resolved.RateTracker
+	for {
+		done, shouldFetch := tracker.beginRateLimitRefresh(force)
+		if shouldFetch {
+			defer tracker.finishRateLimitRefresh(done)
+			break
+		}
+		if done == nil {
+			return
+		}
+		select {
+		case <-done:
+			if hasCompleteRateLimitSnapshot(tracker) {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
 	}
 	seedCtx, cancel := context.WithTimeout(ctx, workspaceRateLimitSeedTimeout)
 	defer cancel()

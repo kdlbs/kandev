@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -31,6 +32,51 @@ func (c *rateLimitSeedClient) FetchRateLimit(context.Context) error {
 type rateLimitAutomationProvider struct {
 	client  Client
 	tracker *RateTracker
+}
+
+type concurrentRateLimitSeedClient struct {
+	*MockClient
+	tracker       *RateTracker
+	mu            sync.Mutex
+	calls         int
+	firstStarted  chan struct{}
+	secondStarted chan struct{}
+	release       chan struct{}
+}
+
+func (c *concurrentRateLimitSeedClient) FetchRateLimit(ctx context.Context) error {
+	c.mu.Lock()
+	c.calls++
+	call := c.calls
+	c.mu.Unlock()
+	switch call {
+	case 1:
+		close(c.firstStarted)
+	case 2:
+		close(c.secondStarted)
+	}
+	select {
+	case <-c.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	now := time.Now().UTC()
+	for _, snapshot := range []RateSnapshot{
+		{Resource: ResourceCore, Remaining: 4000 - call, Limit: 5000},
+		{Resource: ResourceGraphQL, Remaining: 4001 - call, Limit: 5000},
+		{Resource: ResourceSearch, Remaining: 28 - call, Limit: 30},
+	} {
+		snapshot.ResetAt = now.Add(time.Hour)
+		snapshot.UpdatedAt = now
+		c.tracker.Record(snapshot)
+	}
+	return nil
+}
+
+func (c *concurrentRateLimitSeedClient) callCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
 }
 
 func (p rateLimitAutomationProvider) ResolveAutomation(
@@ -141,6 +187,69 @@ func TestWorkspaceAuthStatusCompletesPartialRateLimitSeed(t *testing.T) {
 	}
 	if status.RateLimit == nil || status.RateLimit.GraphQL == nil || status.RateLimit.Search == nil {
 		t.Fatalf("rate limit = %+v, want all seeded buckets", status.RateLimit)
+	}
+}
+
+func TestWorkspaceRateLimitSeedSerializesConcurrentRefreshes(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "workspace-concurrent-rate-limit")
+	connection := &WorkspaceConnection{
+		WorkspaceID:          "workspace-concurrent-rate-limit",
+		Source:               ConnectionSourceGHCLI,
+		GitHubHost:           defaultGitHubHost,
+		Login:                "octocat",
+		Status:               ConnectionStatusActive,
+		CredentialGeneration: 1,
+	}
+	if err := store.UpsertWorkspaceConnection(context.Background(), connection); err != nil {
+		t.Fatalf("seed workspace connection: %v", err)
+	}
+
+	tracker := NewRateTracker(nil, nil)
+	client := &concurrentRateLimitSeedClient{
+		MockClient:    NewMockClient(),
+		tracker:       tracker,
+		firstStarted:  make(chan struct{}),
+		secondStarted: make(chan struct{}),
+		release:       make(chan struct{}),
+	}
+	service := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	service.resolver = NewCredentialResolver(testConnectionReader{
+		workspaces: map[string]*WorkspaceConnection{connection.WorkspaceID: connection},
+	}, nil)
+	service.resolver.SetAutomationProvider(rateLimitAutomationProvider{client: client, tracker: tracker})
+
+	regularDone := make(chan error, 1)
+	go func() {
+		_, err := service.GetWorkspaceAuthStatus(context.Background(), connection.WorkspaceID, DefaultUserID)
+		regularDone <- err
+	}()
+	<-client.firstStarted
+
+	forcedDone := make(chan error, 1)
+	go func() {
+		_, err := service.RefreshWorkspaceRateLimit(context.Background(), connection.WorkspaceID, DefaultUserID)
+		forcedDone <- err
+	}()
+
+	secondStarted := false
+	select {
+	case <-client.secondStarted:
+		secondStarted = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(client.release)
+	if err := <-regularDone; err != nil {
+		t.Fatalf("regular status: %v", err)
+	}
+	if err := <-forcedDone; err != nil {
+		t.Fatalf("forced status: %v", err)
+	}
+	if secondStarted {
+		t.Fatal("concurrent forced refresh started a duplicate rate-limit fetch")
+	}
+	if got := client.callCount(); got != 1 {
+		t.Fatalf("FetchRateLimit calls = %d, want 1", got)
 	}
 }
 
