@@ -277,6 +277,123 @@ func TestHttpSetTaskPRDisposition_AcceptedRegardlessOfState(t *testing.T) {
 	}
 }
 
+// TestHttpSetTaskPRDisposition_EmptyBodyIsNoOpNotClear covers the maintainer
+// review gap: an omitted `disposition` key must be distinguished from an
+// explicit `null`. A `{}` PATCH supplies neither key, so it must leave an
+// already-recorded disposition untouched — not collapse to the same "clear"
+// behaviour as an explicit `{"disposition": null}`.
+func TestHttpSetTaskPRDisposition_EmptyBodyIsNoOpNotClear(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	disposition := "duplicate"
+	now := time.Now().UTC()
+	tp := seedDispositionEndpointTaskPR(t, store, &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", Owner: "kdlbs", Repo: "kandev",
+		PRNumber: 100, PRURL: "https://github.com/kdlbs/kandev/pull/100",
+		PRTitle: "t", State: "closed",
+		Disposition: &disposition, DispositionRecordedAt: &now,
+	})
+
+	resp := dispositionPatch(t, router, "/api/v1/github/task-prs/"+tp.ID+"/disposition?workspace_id=ws-1", map[string]any{})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	fromStore, err := store.GetTaskPRByID(context.Background(), tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if fromStore.Disposition == nil || *fromStore.Disposition != "duplicate" {
+		t.Fatalf("Disposition = %v, want unchanged %q (empty body must be a no-op, not a clear)", fromStore.Disposition, "duplicate")
+	}
+	if fromStore.DispositionRecordedAt == nil || !fromStore.DispositionRecordedAt.Equal(now) {
+		t.Fatalf("DispositionRecordedAt = %v, want unchanged %v", fromStore.DispositionRecordedAt, now)
+	}
+}
+
+// TestHttpSetTaskPRDisposition_URLOnlyPatchUpdatesExistingSupersededDisposition
+// covers the other half of the same review gap: a PATCH carrying only
+// `superseded_by_url` (no `disposition` key) must be able to update the URL
+// on an association whose stored disposition is already "superseded",
+// without the caller resending `"disposition":"superseded"`.
+func TestHttpSetTaskPRDisposition_URLOnlyPatchUpdatesExistingSupersededDisposition(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	disposition := "superseded"
+	oldURL := "https://github.com/kdlbs/kandev/pull/101"
+	tp := seedDispositionEndpointTaskPR(t, store, &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", Owner: "kdlbs", Repo: "kandev",
+		PRNumber: 100, PRURL: "https://github.com/kdlbs/kandev/pull/100",
+		PRTitle: "t", State: "closed",
+		Disposition: &disposition, DispositionSupersededByURL: &oldURL,
+	})
+
+	resp := dispositionPatch(t, router, "/api/v1/github/task-prs/"+tp.ID+"/disposition?workspace_id=ws-1", map[string]any{
+		"superseded_by_url": "https://github.com/kdlbs/kandev/pull/102",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	fromStore, err := store.GetTaskPRByID(context.Background(), tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if fromStore.Disposition == nil || *fromStore.Disposition != "superseded" {
+		t.Fatalf("Disposition = %v, want unchanged %q", fromStore.Disposition, "superseded")
+	}
+	if fromStore.DispositionSupersededByURL == nil || *fromStore.DispositionSupersededByURL != "https://github.com/kdlbs/kandev/pull/102" {
+		t.Fatalf("DispositionSupersededByURL = %v, want updated to pull/102", fromStore.DispositionSupersededByURL)
+	}
+}
+
+// TestHttpSetTaskPRDisposition_ChangingAwayFromSupersededWithoutClearingURLRejected
+// covers the merged-state validation the maintainer asked for: a PATCH that
+// changes `disposition` away from "superseded" while an old
+// `superseded_by_url` is still on the stored row (and not explicitly cleared
+// in this same request) must be rejected — the resulting (merged) state
+// would otherwise carry a URL on a non-superseded disposition.
+func TestHttpSetTaskPRDisposition_ChangingAwayFromSupersededWithoutClearingURLRejected(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	disposition := "superseded"
+	oldURL := "https://github.com/kdlbs/kandev/pull/101"
+	tp := seedDispositionEndpointTaskPR(t, store, &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", Owner: "kdlbs", Repo: "kandev",
+		PRNumber: 100, PRURL: "https://github.com/kdlbs/kandev/pull/100",
+		PRTitle: "t", State: "closed",
+		Disposition: &disposition, DispositionSupersededByURL: &oldURL,
+	})
+
+	resp := dispositionPatch(t, router, "/api/v1/github/task-prs/"+tp.ID+"/disposition?workspace_id=ws-1", map[string]any{
+		"disposition": "duplicate",
+	})
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", resp.Code, resp.Body.String())
+	}
+	fromStore, err := store.GetTaskPRByID(context.Background(), tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if fromStore.Disposition == nil || *fromStore.Disposition != "superseded" {
+		t.Fatalf("nothing should have been written, got Disposition = %v", fromStore.Disposition)
+	}
+
+	// The same change succeeds once the URL is explicitly cleared alongside it.
+	resp = dispositionPatch(t, router, "/api/v1/github/task-prs/"+tp.ID+"/disposition?workspace_id=ws-1", map[string]any{
+		"disposition":       "duplicate",
+		"superseded_by_url": nil,
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	fromStore, err = store.GetTaskPRByID(context.Background(), tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if fromStore.Disposition == nil || *fromStore.Disposition != "duplicate" {
+		t.Fatalf("Disposition = %v, want duplicate", fromStore.Disposition)
+	}
+	if fromStore.DispositionSupersededByURL != nil {
+		t.Fatalf("DispositionSupersededByURL = %v, want cleared", *fromStore.DispositionSupersededByURL)
+	}
+}
+
 // TestHttpSetTaskPRDisposition_IdenticalRePatchDoesNotAdvanceRecordedAt
 // covers AC-29's idempotency clause: a repeated PATCH with an identical body
 // leaves disposition_recorded_at byte-identical and publishes nothing.

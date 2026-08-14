@@ -567,6 +567,28 @@ func validTaskPRDisposition(value string) bool {
 	return ok
 }
 
+// DispositionPatch is a partial update for a task-PR association's
+// disposition, tracking JSON key presence separately from value so a PATCH
+// can distinguish three states per field: key absent (leave the stored value
+// alone), key present with an explicit `null` (the pointer is nil), and key
+// present with a value. Without this distinction an omitted `disposition`
+// collapses to the same nil as an explicit `null`, so an empty `{}` body
+// would clear a recorded disposition and a URL-only PATCH could never update
+// an already-`superseded` disposition's URL without resending `disposition`.
+type DispositionPatch struct {
+	DispositionSet     bool
+	Disposition        *string
+	SupersededByURLSet bool
+	SupersededByURL    *string
+}
+
+// HasAny reports whether the patch names at least one field, so an empty
+// `{}` body can be treated as a true no-op rather than merged against the
+// stored row.
+func (p DispositionPatch) HasAny() bool {
+	return p.DispositionSet || p.SupersededByURLSet
+}
+
 // TaskCIOptions stores task-level PR automation preferences.
 //
 // The five automation switches below (AutoFixEnabled, AutoMergeEnabled,

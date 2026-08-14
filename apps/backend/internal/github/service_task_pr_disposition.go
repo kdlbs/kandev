@@ -18,20 +18,29 @@ import (
 // association's own PR.
 var ErrInvalidDisposition = errors.New("invalid task PR disposition")
 
-// SetTaskPRDisposition records (or clears) a human-supplied closure reason
-// for a task-PR association. Order of operations mirrors DetachTaskPR: the
-// association is looked up and authorized before any validation, so a
-// superseded_by_url self-reference check has the association's own identity
-// available and authorization matches every other task-PR mutation.
+// SetTaskPRDisposition records, updates, or clears a human-supplied closure
+// reason for a task-PR association. Order of operations mirrors
+// DetachTaskPR: the association is looked up and authorized before any
+// validation, so a superseded_by_url self-reference check has the
+// association's own identity available and authorization matches every
+// other task-PR mutation.
 //
-// A nil disposition — whether the JSON key was absent or explicitly null —
-// means clear: all three disposition columns are reset to NULL in one
-// statement (AC-22). The endpoint accepts the write regardless of the
+// patch is merged onto the stored row (mergeTaskPRDispositionPatch) before
+// validation: a field absent from the patch preserves its stored value, so
+// an empty patch is a true no-op (not a clear) and a URL-only patch can
+// update an already-superseded disposition's URL without resending
+// "disposition". Validation then runs against the RESULTING merged state
+// (validateTaskPRDisposition), not just the fields this patch happened to
+// touch, so changing disposition away from "superseded" while an old
+// superseded_by_url is still on the row is rejected unless the same patch
+// also clears the URL. Explicit `null` on disposition always clears all
+// three disposition columns (AC-22), overriding whatever the stored
+// superseded_by_url was. The endpoint accepts the write regardless of the
 // association's state (AC-29b) or detached_at (AC-27): a detached
 // association is exactly a PR someone walked away from, and a user may
 // record intent on a PR they are about to close.
 func (s *Service) SetTaskPRDisposition(
-	ctx context.Context, workspaceID, associationID string, disposition, supersededByURL *string,
+	ctx context.Context, workspaceID, associationID string, patch DispositionPatch,
 ) (*TaskPR, error) {
 	if strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(associationID) == "" {
 		return nil, ErrTaskPRNotFound
@@ -46,16 +55,19 @@ func (s *Service) SetTaskPRDisposition(
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
 	}
+	if !patch.HasAny() {
+		return tp, nil
+	}
 
-	normalizedURL, err := normalizeTaskPRDisposition(tp, disposition, supersededByURL)
-	if err != nil {
+	disposition, supersededByURL := mergeTaskPRDispositionPatch(tp, patch)
+	if err := validateTaskPRDisposition(tp, disposition, supersededByURL); err != nil {
 		return nil, err
 	}
 
-	if dispositionUnchanged(tp, disposition, normalizedURL) {
+	if dispositionUnchanged(tp, disposition, supersededByURL) {
 		return tp, nil
 	}
-	return s.writeTaskPRDisposition(ctx, associationID, disposition, normalizedURL)
+	return s.writeTaskPRDisposition(ctx, associationID, disposition, supersededByURL)
 }
 
 // writeTaskPRDisposition persists a validated, changed disposition write,
@@ -93,36 +105,61 @@ func (s *Service) writeTaskPRDisposition(
 	return updated, nil
 }
 
-// normalizeTaskPRDisposition validates a disposition write body against tp
-// and returns the trimmed supersededByURL (nil when absent). An empty
-// supersededByURL string is treated as absent, not as an invalid URL.
-func normalizeTaskPRDisposition(tp *TaskPR, disposition, supersededByURL *string) (*string, error) {
-	var normalizedURL *string
-	if supersededByURL != nil {
-		trimmed := strings.TrimSpace(*supersededByURL)
-		if trimmed != "" {
-			normalizedURL = &trimmed
-		}
+// mergeTaskPRDispositionPatch merges a partial disposition patch onto the
+// stored association: a field the patch did not set (DispositionSet /
+// SupersededByURLSet false) preserves tp's stored value; a field the patch
+// did set uses the patch's value as-is (nil for an explicit `null`). An
+// explicit superseded_by_url is trimmed, with an empty string normalized to
+// absent (nil) — the same "empty string is absent, not an invalid URL" rule
+// this endpoint has always applied.
+func mergeTaskPRDispositionPatch(tp *TaskPR, patch DispositionPatch) (disposition, supersededByURL *string) {
+	disposition = tp.Disposition
+	if patch.DispositionSet {
+		disposition = patch.Disposition
 	}
+	supersededByURL = tp.DispositionSupersededByURL
+	if patch.SupersededByURLSet {
+		supersededByURL = normalizeSupersededByURL(patch.SupersededByURL)
+	}
+	return disposition, supersededByURL
+}
 
+// normalizeSupersededByURL trims raw and normalizes an empty result to nil,
+// so an empty string is treated as absent rather than an invalid URL.
+func normalizeSupersededByURL(raw *string) *string {
+	if raw == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*raw)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+// validateTaskPRDisposition validates the RESULTING (already-merged)
+// disposition and supersededByURL against tp's identity — not just the
+// fields a particular patch happened to touch — so a patch that changes
+// disposition away from "superseded" while an old superseded_by_url is still
+// on the row is rejected exactly as if that URL had been freshly supplied.
+func validateTaskPRDisposition(tp *TaskPR, disposition, supersededByURL *string) error {
 	if disposition != nil && !validTaskPRDisposition(*disposition) {
-		return nil, ErrInvalidDisposition
+		return ErrInvalidDisposition
 	}
-	if normalizedURL != nil && (disposition == nil || *disposition != TaskPRDispositionSuperseded) {
-		return nil, ErrInvalidDisposition
+	if supersededByURL == nil {
+		return nil
 	}
-	if normalizedURL == nil {
-		return nil, nil
+	if disposition == nil || *disposition != TaskPRDispositionSuperseded {
+		return ErrInvalidDisposition
 	}
-
-	owner, repo, number, err := parsePRURL(*normalizedURL)
+	owner, repo, number, err := parsePRURL(*supersededByURL)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
+		return fmt.Errorf("%w: %w", ErrInvalidPRURL, err)
 	}
 	if strings.EqualFold(owner, tp.Owner) && strings.EqualFold(repo, tp.Repo) && number == tp.PRNumber {
-		return nil, ErrInvalidDisposition
+		return ErrInvalidDisposition
 	}
-	return normalizedURL, nil
+	return nil
 }
 
 // dispositionUnchanged reports whether the desired write is identical to

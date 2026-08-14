@@ -27,7 +27,8 @@ func TestSetTaskPRDisposition_PublishesOnChangeNotOnIdenticalRePatch(t *testing.
 	svc.SetWorkspaceAuthorizer(func(context.Context, string) error { return nil })
 
 	disposition := TaskPRDispositionDuplicate
-	updated, err := svc.SetTaskPRDisposition(ctx, "ws-1", tp.ID, &disposition, nil)
+	patch := DispositionPatch{DispositionSet: true, Disposition: &disposition}
+	updated, err := svc.SetTaskPRDisposition(ctx, "ws-1", tp.ID, patch)
 	if err != nil {
 		t.Fatalf("SetTaskPRDisposition: %v", err)
 	}
@@ -42,7 +43,7 @@ func TestSetTaskPRDisposition_PublishesOnChangeNotOnIdenticalRePatch(t *testing.
 		t.Fatal("DispositionRecordedAt = nil, want set after first PATCH")
 	}
 
-	updated, err = svc.SetTaskPRDisposition(ctx, "ws-1", tp.ID, &disposition, nil)
+	updated, err = svc.SetTaskPRDisposition(ctx, "ws-1", tp.ID, patch)
 	if err != nil {
 		t.Fatalf("SetTaskPRDisposition (identical re-PATCH): %v", err)
 	}
