@@ -108,13 +108,16 @@ responsive contract is tested in Chromium.
 
 ## Verification Results
 
-- Content-aware RED: at a 1000px detail width, the fixed container query kept
-  actions inline and forced the title onto two lines; the regression expected
-  one full-width title line with actions below.
+- Content-aware RED: at the initial 1000px detail width, the fixed container
+  query kept actions inline and forced the title onto two lines; the regression
+  expected one full-width title line with actions below.
 - Desktop Chromium passed 1/1 after intrinsic flex wrapping. The scenario
-  proves a 1200px inline single-line state, a 1000px full-width single-line
-  title with actions below, and a 600px full-width wrapping title with actions
-  below.
+  proves a 1200px inline single-line state, a content-derived squeezed
+  single-line title with actions below, and a 600px full-width wrapping title
+  with actions below.
+- CI follow-up replaced the fixed squeezed width with one derived from rendered
+  title and action sizes so font metrics cannot move the test across the flex
+  boundary; desktop Chromium passed 1/1.
 - Mobile Chromium passed 1/1, preserving 44px action targets, natural title
   wrapping, the dismissed-review re-request flow, and zero document horizontal
   overflow.

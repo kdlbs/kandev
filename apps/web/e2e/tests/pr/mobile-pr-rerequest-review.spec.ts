@@ -3,6 +3,7 @@ import {
   assertLocatorWithinViewportX,
   assertNoDocumentHorizontalOverflow,
   assertTextWrapsNaturallyWithoutHorizontalOverflow,
+  requireBox,
 } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 
@@ -107,53 +108,41 @@ test.describe("mobile PR re-request review", () => {
     await apiClient.mockGitHubAssociateTaskPR(mergeReadyPR);
     await expect(merge).toBeVisible({ timeout: 15_000 });
     const [detailBox, titleBox, actionsBox, approveBox, mergeBox] = await Promise.all([
-      detail.boundingBox(),
-      title.boundingBox(),
-      actions.boundingBox(),
-      approve.boundingBox(),
-      merge.boundingBox(),
+      requireBox(detail, "mobile detail"),
+      requireBox(title, "mobile title"),
+      requireBox(actions, "mobile action cluster"),
+      requireBox(approve, "mobile approve action"),
+      requireBox(merge, "mobile merge action"),
     ]);
-    expect(detailBox, "mobile detail has no bounding box").not.toBeNull();
-    expect(titleBox, "mobile title has no bounding box").not.toBeNull();
-    expect(actionsBox, "mobile action cluster has no bounding box").not.toBeNull();
-    expect(approveBox, "mobile approve action has no bounding box").not.toBeNull();
-    expect(mergeBox, "mobile merge action has no bounding box").not.toBeNull();
-    if (detailBox && titleBox && actionsBox && approveBox && mergeBox) {
-      expect(
-        actionsBox.y,
-        "mobile action cluster should sit below the title",
-      ).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
-      expect(
-        approveBox.y,
-        "mobile approve action should sit below the title",
-      ).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
-      expect(mergeBox.y, "mobile merge action should follow approval").toBeGreaterThanOrEqual(
-        approveBox.y,
-      );
-      expect(
-        mergeBox.y > approveBox.y || mergeBox.x > approveBox.x,
-        "mobile merge action should preserve visual action order",
-      ).toBe(true);
-      expect(titleBox.width, "mobile title should own the full padded row").toBeGreaterThanOrEqual(
-        detailBox.width - 25,
-      );
-      expect(approveBox.x, "mobile actions should share the title's leading edge").toBeCloseTo(
-        titleBox.x,
-        0,
-      );
-      expect(approveBox.height, "mobile approve action height").toBeGreaterThanOrEqual(44);
-      expect(mergeBox.height, "mobile merge action height").toBeGreaterThanOrEqual(44);
-    }
+    expect(actionsBox.y, "mobile action cluster should sit below the title").toBeGreaterThanOrEqual(
+      titleBox.y + titleBox.height,
+    );
+    expect(approveBox.y, "mobile approve action should sit below the title").toBeGreaterThanOrEqual(
+      titleBox.y + titleBox.height,
+    );
+    expect(mergeBox.y, "mobile merge action should follow approval").toBeGreaterThanOrEqual(
+      approveBox.y,
+    );
+    expect(
+      mergeBox.y > approveBox.y || mergeBox.x > approveBox.x,
+      "mobile merge action should preserve visual action order",
+    ).toBe(true);
+    expect(titleBox.width, "mobile title should own the full padded row").toBeGreaterThanOrEqual(
+      detailBox.width - 25,
+    );
+    expect(approveBox.x, "mobile actions should share the title's leading edge").toBeCloseTo(
+      titleBox.x,
+      0,
+    );
+    expect(approveBox.height, "mobile approve action height").toBeGreaterThanOrEqual(44);
+    expect(mergeBox.height, "mobile merge action height").toBeGreaterThanOrEqual(44);
     await assertTextWrapsNaturallyWithoutHorizontalOverflow(title, "mobile PR title");
     await assertLocatorWithinViewportX(approve, "mobile approve action");
     await assertLocatorWithinViewportX(merge, "mobile merge action");
 
-    const box = await action.boundingBox();
-    expect(box, "re-request review action has no bounding box").not.toBeNull();
-    if (box) {
-      expect(box.width, "re-request review action width").toBeGreaterThanOrEqual(44);
-      expect(box.height, "re-request review action height").toBeGreaterThanOrEqual(44);
-    }
+    const box = await requireBox(action, "re-request review action");
+    expect(box.width, "re-request review action width").toBeGreaterThanOrEqual(44);
+    expect(box.height, "re-request review action height").toBeGreaterThanOrEqual(44);
     await assertLocatorWithinViewportX(action, "mobile re-request review action");
     const reRequestResponse = testPage.waitForResponse(
       (response) =>

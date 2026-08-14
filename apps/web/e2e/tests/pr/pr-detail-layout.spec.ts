@@ -2,7 +2,11 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { getDockviewGroupWidth, resizeColumnViaSplitview } from "../../helpers/dockview-resize";
-import { assertTextWrapsNaturallyWithoutHorizontalOverflow } from "../../helpers/layout-assertions";
+import {
+  assertTextWrapsNaturallyWithoutHorizontalOverflow,
+  requireBox,
+  type ElementBox,
+} from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -116,14 +120,6 @@ function sessionTabWrapper(page: Page, sessionId: string) {
   });
 }
 
-type ElementBox = { x: number; y: number; width: number; height: number };
-
-async function requireBox(locator: Locator, label: string): Promise<ElementBox> {
-  const box = await locator.boundingBox();
-  expect(box, `${label} has no bounding box`).not.toBeNull();
-  return box!;
-}
-
 function verticalOverlap(first: ElementBox, second: ElementBox): number {
   return Math.min(first.y + first.height, second.y + second.height) - Math.max(first.y, second.y);
 }
@@ -134,6 +130,18 @@ async function textLineCount(locator: Locator): Promise<number> {
     range.selectNodeContents(element);
     return Array.from(range.getClientRects()).filter((rect) => rect.width > 0).length;
   });
+}
+
+async function singleLineTextWidth(locator: Locator, label: string): Promise<number> {
+  const widths = await locator.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return Array.from(range.getClientRects(), (rect) => rect.width).filter((width) => width > 0);
+  });
+  expect(widths, `${label} should render on exactly one line`).toHaveLength(1);
+  const [width] = widths;
+  if (width === undefined) throw new Error(`${label}: text has no rendered line rectangles`);
+  return width;
 }
 
 async function resizeReviewDetailTo(page: Page, targetWidth: number): Promise<void> {
@@ -369,9 +377,11 @@ test.describe("PR Details layout panel", () => {
     await expect(refresh).toBeVisible();
 
     await resizeReviewDetailTo(testPage, 1200);
-    const [wideTitleBox, wideActionsBox] = await Promise.all([
+    const [wideDetailBox, wideTitleBox, wideActionsBox, wideTitleTextWidth] = await Promise.all([
+      requireBox(detail, "wide detail"),
       requireBox(title, "wide title"),
       requireBox(actions, "wide actions"),
+      singleLineTextWidth(title, "wide title"),
     ]);
     expect(await textLineCount(title), "wide title should fit on one line").toBe(1);
     expect(
@@ -379,7 +389,9 @@ test.describe("PR Details layout panel", () => {
       "actions may stay inline when the title remains one line",
     ).toBeGreaterThan(0);
 
-    await resizeReviewDetailTo(testPage, 1000);
+    const inlineOverhead = wideDetailBox.width - wideTitleBox.width - wideActionsBox.width;
+    const squeezedWidth = Math.ceil(wideTitleTextWidth + inlineOverhead + wideActionsBox.width / 2);
+    await resizeReviewDetailTo(testPage, squeezedWidth);
     const [squeezedDetailBox, squeezedTitleBox, squeezedActionsBox] = await Promise.all([
       requireBox(detail, "squeezed detail"),
       requireBox(title, "squeezed title"),

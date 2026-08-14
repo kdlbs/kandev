@@ -100,13 +100,17 @@ in this conversation.
 
 ## Results
 
-- RED: at a 1000px detail width, actions stayed inline and forced the title onto
-  two lines instead of moving below.
+- RED: at the initial 1000px detail width, actions stayed inline and forced the
+  title onto two lines instead of moving below.
 - GREEN: intrinsic flex wrapping passed desktop Chromium 1/1 across 1200px,
-  1000px, and 600px detail widths. Actions remain inline only in the first
-  single-line-fit state; squeezed and wrapping states give the title a full row.
+  a content-derived squeezed width, and 600px detail widths. Actions remain
+  inline only in the first single-line-fit state; squeezed and wrapping states
+  give the title a full row.
 - Mobile Chromium passed 1/1 while retaining 44px targets, action order,
   re-request behavior, natural wrapping, and zero horizontal overflow.
+- CI follow-up replaced the fixed squeezed width with a content-derived width
+  so font metrics cannot move the test across the flex boundary; desktop
+  Chromium passed 1/1.
 - Live rendering confirmed the 1200px inline, 1000px stacked single-line, 600px
   stacked multiline, and 320px phone states. Targeted ESLint and Prettier
   passed, `git diff --check` was clean, and the fixed container-query classes

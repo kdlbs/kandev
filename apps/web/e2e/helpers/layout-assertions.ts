@@ -1,5 +1,14 @@
 import { expect, type Locator } from "@playwright/test";
 
+export type ElementBox = { x: number; y: number; width: number; height: number };
+
+export async function requireBox(locator: Locator, label: string): Promise<ElementBox> {
+  const box = await locator.boundingBox();
+  expect(box, `${label}: locator has no bounding box`).not.toBeNull();
+  if (!box) throw new Error(`${label}: locator has no bounding box`);
+  return box;
+}
+
 // Shared layout assertions for mobile / responsive specs. Extracted because
 // both onboarding mobile specs need the same overflow + padding checks and
 // duplicating the DOM walk caused review churn.
@@ -167,8 +176,12 @@ export async function assertTextWrapsNaturallyWithoutHorizontalOverflow(
     metrics.scrollWidth,
     `${label}: scrollWidth (${metrics.scrollWidth}) exceeds clientWidth (${metrics.clientWidth})`,
   ).toBeLessThanOrEqual(metrics.clientWidth + 1);
+  const [firstLineWidth] = metrics.lineWidths;
+  if (firstLineWidth === undefined) {
+    throw new Error(`${label}: text has no rendered line rectangles`);
+  }
   expect(
-    metrics.lineWidths[0],
+    firstLineWidth,
     `${label}: first line should consume available width before wrapping`,
   ).toBeGreaterThan(metrics.clientWidth * 0.8);
 }
