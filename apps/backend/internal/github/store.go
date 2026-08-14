@@ -2106,20 +2106,45 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 // (patch.DispositionSet with a nil Disposition) writes recorded_at as NULL
 // alongside it; callers that want AC-22's "clear all three" must also set
 // SupersededByURLSet so the URL clears in the same statement.
+//
+// AC-24 requires superseded_by_url to be non-NULL only when disposition is
+// "superseded" — but SetTaskPRDisposition's validation runs against a
+// per-request snapshot, not this statement's live row. Two concurrent
+// partial PATCHes can each validate against the same stale snapshot and
+// still combine into a state that violates the invariant: one moves
+// disposition away from "superseded" (with its own URL cleared, so it
+// passes validation), the other is a URL-only PATCH that read the row
+// before the first committed (so it too passes validation against a
+// disposition it saw as "superseded"). SEC-001's per-column CASE makes that
+// interleaving reach the database, because the URL write no longer
+// depends on anything about disposition. resultingDisposition below closes
+// that gap: it evaluates what this statement's disposition column will
+// hold (the patch's own value if DispositionSet, else the row's current
+// live value), and the URL column is forced to NULL whenever that result
+// is not "superseded" — regardless of what the patch's own URL field asked
+// for. This keeps the single-statement, no-read-modify-write property
+// SEC-001 established while making the DB itself enforce AC-24 against the
+// live row, not a stale one.
 func (s *Store) UpdateTaskPRDisposition(ctx context.Context, associationID string, patch DispositionPatch) error {
 	var recordedAt *time.Time
 	if patch.DispositionSet && patch.Disposition != nil {
 		now := time.Now().UTC()
 		recordedAt = &now
 	}
+	const resultingDisposition = "CASE WHEN ? THEN ? ELSE disposition END"
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE github_task_prs SET
-			disposition = CASE WHEN ? THEN ? ELSE disposition END,
-			disposition_superseded_by_url = CASE WHEN ? THEN ? ELSE disposition_superseded_by_url END,
+			disposition = `+resultingDisposition+`,
+			disposition_superseded_by_url = CASE
+				WHEN COALESCE(`+resultingDisposition+`, '') != ? THEN NULL
+				WHEN ? THEN ?
+				ELSE disposition_superseded_by_url
+			END,
 			disposition_recorded_at = CASE WHEN ? THEN ? ELSE disposition_recorded_at END,
 			updated_at = ?
 		WHERE id = ?`,
 		patch.DispositionSet, patch.Disposition,
+		patch.DispositionSet, patch.Disposition, TaskPRDispositionSuperseded,
 		patch.SupersededByURLSet, patch.SupersededByURL,
 		patch.DispositionSet, recordedAt,
 		time.Now().UTC(), associationID)

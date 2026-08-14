@@ -237,6 +237,75 @@ func TestUpdateTaskPRDisposition_ConcurrentDisjointPatchesDoNotLoseWrites(t *tes
 	}
 }
 
+// TestUpdateTaskPRDisposition_URLOnlyPatchClearsURLWhenLiveDispositionIsNotSuperseded
+// is the regression for the Testing-round finding: SEC-001's atomic per-column
+// write fixed lost writes, but validateTaskPRDisposition only ever checks a
+// per-request snapshot, not the row's state at write time. Two concurrent
+// partial PATCHes that are each individually valid against the same stale
+// snapshot can combine into a state AC-24 forbids: superseded_by_url non-nil
+// while disposition is not "superseded". This seeds a row at
+// disposition="superseded", lands a disposition-only write that moves it away
+// from "superseded" (mirroring a request that read the row before this write
+// landed and therefore validated fine), then lands a URL-only write (mirroring
+// a second concurrent request that read the pre-first-write snapshot, so it
+// also validated fine against a live "superseded" disposition that no longer
+// holds by the time it writes). The fix must make the URL column's write
+// depend on the row's LIVE disposition value inside the same statement — not
+// the patch's own fields — so the second write clears the URL instead of
+// setting it once the row is no longer superseded.
+func TestUpdateTaskPRDisposition_URLOnlyPatchClearsURLWhenLiveDispositionIsNotSuperseded(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedDispositionTestTask(t, store, "task-invariant-race", "ws-invariant-race")
+
+	initialDisposition := TaskPRDispositionSuperseded
+	initialURL := "https://github.com/kdlbs/kandev/pull/900"
+	now := time.Now().UTC()
+	tp := &TaskPR{
+		TaskID: "task-invariant-race", Owner: "kdlbs", Repo: "kandev", PRNumber: 5,
+		PRURL: "https://github.com/kdlbs/kandev/pull/5", PRTitle: "invariant race",
+		State: "closed", CreatedAt: now,
+		Disposition: &initialDisposition, DispositionSupersededByURL: &initialURL, DispositionRecordedAt: &now,
+	}
+	if err := store.CreateTaskPR(ctx, tp); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+
+	// R1 (a well-behaved client changing disposition away from "superseded",
+	// explicitly clearing the URL in the same patch — the only way to pass
+	// AC-24 validation for this change): lands first.
+	newDisposition := TaskPRDispositionDuplicate
+	r1Patch := DispositionPatch{DispositionSet: true, Disposition: &newDisposition, SupersededByURLSet: true, SupersededByURL: nil}
+	if err := store.UpdateTaskPRDisposition(ctx, tp.ID, r1Patch); err != nil {
+		t.Fatalf("UpdateTaskPRDisposition (R1, disposition away from superseded + clear URL): %v", err)
+	}
+
+	// R2 (a legitimate URL-only patch per AC-20, whose request-time validation
+	// ran against the pre-R1 snapshot where disposition was still
+	// "superseded"): lands second, after the live disposition has already
+	// changed.
+	newURL := "https://github.com/kdlbs/kandev/pull/901"
+	r2Patch := DispositionPatch{SupersededByURLSet: true, SupersededByURL: &newURL}
+	if err := store.UpdateTaskPRDisposition(ctx, tp.ID, r2Patch); err != nil {
+		t.Fatalf("UpdateTaskPRDisposition (R2, url-only, lands second): %v", err)
+	}
+
+	got, err := store.GetTaskPRByID(ctx, tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if got.Disposition == nil || *got.Disposition != TaskPRDispositionDuplicate {
+		t.Fatalf("Disposition = %v, want %q from R1", got.Disposition, TaskPRDispositionDuplicate)
+	}
+	if got.DispositionSupersededByURL != nil {
+		t.Fatalf(
+			"DispositionSupersededByURL = %v, want nil: disposition=%v is not %q, so a URL must never be "+
+				"live on this row (AC-24) regardless of what R2's patch asked for",
+			*got.DispositionSupersededByURL, *got.Disposition, TaskPRDispositionSuperseded,
+		)
+	}
+}
+
 func seedDispositionTestTask(t *testing.T, store *Store, taskID, workspaceID string) {
 	t.Helper()
 	if _, err := store.db.Exec(`INSERT INTO workspaces (id) VALUES (?)`, workspaceID); err != nil {
