@@ -3,7 +3,11 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
 import { MRStatusChip } from "./mr-status-chip";
-import type { TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
+import type {
+  TaskMR,
+  TaskMRAutomationOptions,
+  TaskMRAutomationOptionsForMR,
+} from "@/lib/types/gitlab";
 
 const OPEN_DELAY_MS = 150;
 const CHIP_TESTID = "mr-status-chip";
@@ -136,6 +140,32 @@ function makeAutomation(overrides: Partial<TaskMRAutomationOptions> = {}): TaskM
   };
 }
 
+/**
+ * One `mr_options` row for the default `makeMR()` MR. The badges read each
+ * MR's own switches (the top-level booleans are an aggregate over every
+ * linked MR), so a fixture with open MRs must carry a matching row —
+ * `mr_options: []` alongside an open MR is a state the backend cannot
+ * produce, since it emits one entry per linked MR.
+ */
+function makeMROptions(
+  overrides: Partial<TaskMRAutomationOptionsForMR> = {},
+): TaskMRAutomationOptionsForMR {
+  return {
+    task_id: "task-1",
+    repository_id: "",
+    project_path: "group/project",
+    mr_iid: 81,
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    prompt_on_review_requested: false,
+    prompt_on_merged: false,
+    prompt_on_closed: false,
+    created_at: "",
+    updated_at: "",
+    ...overrides,
+  };
+}
+
 function resetChipMocks() {
   vi.useFakeTimers();
   touchMocks.usesTouchDrawer = false;
@@ -198,6 +228,7 @@ describe("MRStatusChip rendering and selection", () => {
       auto_fix_enabled: true,
       auto_fix_max_rounds: 5,
       auto_merge_enabled: true,
+      mr_options: [makeMROptions({ auto_fix_enabled: true, auto_merge_enabled: true })],
     });
     render(createElement(MRStatusChip, { taskId: "task-1" }));
     const badge = screen.getByTestId("mr-status-auto-fix-chip");
