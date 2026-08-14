@@ -134,6 +134,9 @@ func TestHandleTaskDeletedConcurrentDeliveryIsIdempotent(t *testing.T) {
 	if got, _ := store.ListTaskMRsByTask(ctx, "bystander"); len(got) != 1 {
 		t.Fatalf("bystander task MRs = %d, want 1", len(got))
 	}
+	if got, _ := store.GetMRWatchBySession(ctx, "session-doomed"); got != nil {
+		t.Fatal("doomed watch survived the delete")
+	}
 	if got, _ := store.GetMRWatchBySession(ctx, "session-bystander"); got == nil {
 		t.Fatal("bystander watch was removed by a concurrent delete of another task")
 	}
