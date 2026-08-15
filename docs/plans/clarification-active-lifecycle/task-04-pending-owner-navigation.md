@@ -81,6 +81,8 @@ update task/plan status.
   latest bundle when clarification remains active. The explicit no-turn legacy overlay path is pinned.
 - Desktop navigation re-reads the active source session after asynchronous loading, and mobile item
   projection reuses the shared task pending-action authority helper.
+- Closing the mobile task sheet invalidates any asynchronous selection before a later reopen, preventing
+  an old session load from navigating or closing the new sheet instance.
 - Added one shared pending-owner resolver. Desktop waits for session loading when a task advertises
   input, including non-task routes; phone selection waits, navigates to the owning session, then
   closes the drawer, with safe load-failure fallback.

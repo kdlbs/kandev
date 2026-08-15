@@ -43,6 +43,9 @@ hiding the action the icon represents.
   a detached resume. Terminal message updates are published only after delivery succeeds. If detached
   resume publication fails, the endpoint returns an error and restores the still-current bundle to
   pending so the same answer can be retried.
+- A current-turn bundle remains answerable while any sibling question is pending. Recovery claims only
+  those pending rows, preserves siblings already made terminal by an earlier partial write, and restores
+  only the claimed rows if detached delivery fails.
 - Any response to a superseded or terminal bundle returns conflict, performs no message mutation, and
   publishes no resume event. Current clients close their obsolete local overlay through the existing
   conflict handling.
@@ -132,6 +135,8 @@ session they can already access. Session selection does not broaden task visibil
 - Detached resume context resolution or event publication fails: use a non-cancelled write context,
   withhold terminal message events, restore the still-current bundle to pending, and return a retryable
   server error instead of reporting false success.
+- Historical partial terminalization leaves pending and terminal siblings in one current-turn bundle:
+  complete the pending siblings without rewriting terminal history or returning a permanent conflict.
 - Session loading fails during task activation: retain existing navigation fallback instead of
   stranding the user in the task drawer or on an unchanged URL.
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { toSheetItem } from "./session-task-switcher-sheet-item";
 import {
+  handleTaskSheetOpenChange,
   selectPendingTaskFromSheet,
   selectTaskFromSheet,
 } from "./session-task-switcher-sheet-selection";
@@ -299,5 +300,53 @@ describe("selectTaskFromSheet races", () => {
     expect(navigate).toHaveBeenCalledWith("task-b");
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("selectTaskFromSheet sheet lifecycle", () => {
+  it("invalidates a pending selection when the sheet closes and reopens", async () => {
+    let resolveLoad: (sessions: TaskSession[]) => void = () => undefined;
+    const loadTaskSessionsForTask = vi.fn(
+      () =>
+        new Promise<TaskSession[]>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const setActiveSession = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+
+    selectTaskFromSheet({
+      taskId: "task-stale",
+      task: { primarySessionId: "primary", taskPendingAction: "clarification" },
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask: vi.fn(),
+      navigate,
+      onOpenChange,
+    });
+    handleTaskSheetOpenChange(false, onOpenChange);
+    handleTaskSheetOpenChange(true, onOpenChange);
+
+    resolveLoad([
+      {
+        id: "owner-stale",
+        task_id: "task-stale",
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+        started_at: UPDATED_AT,
+        updated_at: UPDATED_AT,
+      } as TaskSession,
+    ]);
+    await Promise.resolve();
+
+    expect(setActiveSession).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(onOpenChange.mock.calls).toEqual([[false], [true]]);
   });
 });

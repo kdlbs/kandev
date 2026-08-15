@@ -32,6 +32,14 @@ type SelectionState = {
 
 let taskSelectionSequence = 0;
 
+export function handleTaskSheetOpenChange(
+  open: boolean,
+  onOpenChange: (open: boolean) => void,
+): void {
+  if (!open) taskSelectionSequence += 1;
+  onOpenChange(open);
+}
+
 function selectionIsCurrent(actions: SelectionActions): boolean {
   return actions.isSelectionCurrent?.() ?? true;
 }

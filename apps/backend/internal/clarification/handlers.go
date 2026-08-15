@@ -57,7 +57,11 @@ type MessageCreator interface {
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*taskmodels.Message, bool, error)
 	// RestoreActiveClarificationBundle reopens a claimed bundle when detached
 	// resume publication fails, so the same response can be retried safely.
-	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string) (bool, error)
+	RestoreActiveClarificationBundle(
+		ctx context.Context,
+		pendingID, terminalStatus string,
+		claimedMessages []*taskmodels.Message,
+	) (bool, error)
 	// PublishClarificationBundleUpdates exposes terminal rows after delivery.
 	PublishClarificationBundleUpdates(ctx context.Context, messages []*taskmodels.Message)
 }
@@ -366,7 +370,7 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 		return http.StatusConflict, "response already submitted"
 	}
 	if !errors.Is(deliveryErr, ErrNotFound) {
-		h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus)
+		h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
 		h.logger.Error("failed to deliver clarification response",
 			zap.String("pending_id", pendingID),
 			zap.Error(deliveryErr))
@@ -406,7 +410,7 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 		zap.String("error", deliveryErr.Error()))
 
 	if err := h.respondViaEventFallback(ctx, pendingID, body.Answers, body.Rejected, body.RejectReason); err != nil {
-		h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus)
+		h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
 		h.logger.Error("failed to resume detached clarification",
 			zap.String("pending_id", pendingID),
 			zap.Error(err))
@@ -416,8 +420,17 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 	return 0, ""
 }
 
-func (h *Handlers) restoreFailedClarificationClaim(ctx context.Context, pendingID, terminalStatus string) {
-	restored, err := h.messageCreator.RestoreActiveClarificationBundle(ctx, pendingID, terminalStatus)
+func (h *Handlers) restoreFailedClarificationClaim(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*taskmodels.Message,
+) {
+	restored, err := h.messageCreator.RestoreActiveClarificationBundle(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
 	if err != nil {
 		h.logger.Error("failed to restore clarification after delivery failure",
 			zap.String("pending_id", pendingID),

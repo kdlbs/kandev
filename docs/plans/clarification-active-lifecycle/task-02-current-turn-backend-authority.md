@@ -90,6 +90,8 @@ blockers/risks, and update task/plan status.
   cancelled-context, and PostgreSQL-dialect cases pin the behavior.
 - Detach and expiry counts now include only bundles whose messages changed. Malformed messages without
   their schema-required durable turn remain inert instead of becoming pending authority.
+- Final review remediation lets atomic response claims recover pending rows from a mixed-status bundle,
+  while targeted rollback restores only rows owned by the failed delivery attempt.
 - `cd apps/backend && go test ./internal/task/repository/sqlite ./internal/clarification ./internal/orchestrator`
   passed. The environment-gated PostgreSQL case skipped locally because
   `KANDEV_TEST_POSTGRES_DSN` was unset; it remains enabled for PostgreSQL CI.

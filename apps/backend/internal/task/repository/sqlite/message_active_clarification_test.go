@@ -259,6 +259,80 @@ func TestCompleteActiveClarificationBundleRejectsSupersededTurn(t *testing.T) {
 	}
 }
 
+func TestCompleteActiveClarificationBundleRecoversMixedStatusBundle(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 15, 0, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-mixed", "session-mixed")
+	createPendingActionTurn(t, repo, "task-mixed", "session-mixed", "turn-mixed", base, base)
+	createClarificationBundleMessage(
+		t, repo, "message-mixed-terminal", "task-mixed", "session-mixed", "turn-mixed",
+		"pending-mixed", "q1", base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-mixed-pending", "task-mixed", "session-mixed", "turn-mixed",
+		"pending-mixed", "q2", base.Add(time.Nanosecond),
+	)
+	terminal, err := repo.GetMessage(ctx, "message-mixed-terminal")
+	if err != nil {
+		t.Fatalf("GetMessage terminal sibling: %v", err)
+	}
+	terminal.Metadata["status"] = "rejected"
+	if err := repo.UpdateMessage(ctx, terminal); err != nil {
+		t.Fatalf("UpdateMessage terminal sibling: %v", err)
+	}
+
+	claimedMessages, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-mixed",
+		"answered",
+		map[string]interface{}{"q2": map[string]interface{}{"question_id": "q2"}},
+	)
+	if err != nil || !claimed {
+		t.Fatalf("complete mixed bundle: claimed=%v err=%v", claimed, err)
+	}
+	if ids := messageIDs(claimedMessages); len(ids) != 1 || ids[0] != "message-mixed-pending" {
+		t.Fatalf("claimed messages = %v, want only pending sibling", ids)
+	}
+	terminal, err = repo.GetMessage(ctx, "message-mixed-terminal")
+	if err != nil {
+		t.Fatalf("GetMessage preserved sibling: %v", err)
+	}
+	if terminal.Metadata["status"] != "rejected" {
+		t.Fatalf("terminal sibling status = %v, want rejected", terminal.Metadata["status"])
+	}
+	completed, err := repo.GetMessage(ctx, "message-mixed-pending")
+	if err != nil {
+		t.Fatalf("GetMessage completed sibling: %v", err)
+	}
+	if completed.Metadata["status"] != "answered" {
+		t.Fatalf("pending sibling status = %v, want answered", completed.Metadata["status"])
+	}
+	restored, err := repo.RestoreActiveClarificationBundle(
+		ctx,
+		"pending-mixed",
+		"answered",
+		claimedMessages,
+	)
+	if err != nil || !restored {
+		t.Fatalf("restore claimed mixed rows: restored=%v err=%v", restored, err)
+	}
+	terminal, err = repo.GetMessage(ctx, "message-mixed-terminal")
+	if err != nil {
+		t.Fatalf("GetMessage terminal sibling after restore: %v", err)
+	}
+	if terminal.Metadata["status"] != "rejected" {
+		t.Fatalf("terminal sibling changed during restore: %#v", terminal.Metadata)
+	}
+	completed, err = repo.GetMessage(ctx, "message-mixed-pending")
+	if err != nil {
+		t.Fatalf("GetMessage restored sibling: %v", err)
+	}
+	if completed.Metadata["status"] != "pending" || completed.Metadata["response"] != nil {
+		t.Fatalf("restored sibling metadata = %#v, want pending without response", completed.Metadata)
+	}
+}
+
 func TestRestoreActiveClarificationBundleAllowsRetryAfterDeliveryFailure(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -273,13 +347,18 @@ func TestRestoreActiveClarificationBundleAllowsRetryAfterDeliveryFailure(t *test
 		"q1": map[string]interface{}{"question_id": "q1", "custom_text": "continue"},
 	}
 
-	_, claimed, err := repo.CompleteActiveClarificationBundle(
+	claimedMessages, claimed, err := repo.CompleteActiveClarificationBundle(
 		ctx, "pending-restore", "answered", responses,
 	)
 	if err != nil || !claimed {
 		t.Fatalf("complete before restore: claimed=%v err=%v", claimed, err)
 	}
-	restored, err := repo.RestoreActiveClarificationBundle(ctx, "pending-restore", "answered")
+	restored, err := repo.RestoreActiveClarificationBundle(
+		ctx,
+		"pending-restore",
+		"answered",
+		claimedMessages,
+	)
 	if err != nil || !restored {
 		t.Fatalf("restore: restored=%v err=%v", restored, err)
 	}
@@ -309,7 +388,7 @@ func TestRestoreActiveClarificationBundleDoesNotReactivateSupersededTurn(t *test
 		t, repo, "message-restore-old", "task-restore-old", "session-restore-old", "turn-restore-old",
 		"pending-restore-old", "q1", base,
 	)
-	_, claimed, err := repo.CompleteActiveClarificationBundle(
+	claimedMessages, claimed, err := repo.CompleteActiveClarificationBundle(
 		ctx,
 		"pending-restore-old",
 		"answered",
@@ -324,7 +403,10 @@ func TestRestoreActiveClarificationBundleDoesNotReactivateSupersededTurn(t *test
 	)
 
 	restored, err := repo.RestoreActiveClarificationBundle(
-		ctx, "pending-restore-old", "answered",
+		ctx,
+		"pending-restore-old",
+		"answered",
+		claimedMessages,
 	)
 	if err != nil {
 		t.Fatalf("RestoreActiveClarificationBundle: %v", err)

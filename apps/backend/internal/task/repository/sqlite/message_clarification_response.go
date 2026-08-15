@@ -68,6 +68,7 @@ func (r *Repository) CompleteActiveClarificationBundle(
 func (r *Repository) RestoreActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
 ) (bool, error) {
 	if terminalStatus != clarificationStatusAnswered && terminalStatus != clarificationStatusRejected {
 		return false, fmt.Errorf("invalid clarification terminal status %q", terminalStatus)
@@ -78,14 +79,34 @@ func (r *Repository) RestoreActiveClarificationBundle(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	messages, err := r.loadRestorableClarificationBundle(ctx, tx, r.db.DriverName(), pendingID, terminalStatus)
+	claimIDs, err := clarificationClaimIDs(claimedMessages)
 	if err != nil {
 		return false, err
 	}
-	if len(messages) == 0 {
+	messages, err := r.loadRestorableClarificationBundle(ctx, tx, r.db.DriverName(), pendingID)
+	if err != nil {
+		return false, err
+	}
+	restorable := make([]*models.Message, 0, len(claimIDs))
+	for _, message := range messages {
+		if _, claimed := claimIDs[message.ID]; !claimed {
+			continue
+		}
+		if status, _ := message.Metadata["status"].(string); status != terminalStatus {
+			return false, nil
+		}
+		restorable = append(restorable, message)
+	}
+	if len(restorable) != len(claimIDs) {
 		return false, nil
 	}
-	if err := r.restoreClarificationMessages(ctx, tx, r.db.DriverName(), messages, terminalStatus); err != nil {
+	if err := r.restoreClarificationMessages(
+		ctx,
+		tx,
+		r.db.DriverName(),
+		restorable,
+		terminalStatus,
+	); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -94,22 +115,36 @@ func (r *Repository) RestoreActiveClarificationBundle(
 	return true, nil
 }
 
+func clarificationClaimIDs(messages []*models.Message) (map[string]struct{}, error) {
+	if len(messages) == 0 {
+		return nil, fmt.Errorf("clarification restore requires claimed messages")
+	}
+	ids := make(map[string]struct{}, len(messages))
+	for _, message := range messages {
+		if message == nil || message.ID == "" {
+			return nil, fmt.Errorf("clarification restore received an empty message id")
+		}
+		if _, duplicate := ids[message.ID]; duplicate {
+			return nil, fmt.Errorf("clarification restore received duplicate message %s", message.ID)
+		}
+		ids[message.ID] = struct{}{}
+	}
+	return ids, nil
+}
+
 func (r *Repository) loadRestorableClarificationBundle(
 	ctx context.Context,
 	tx *sqlx.Tx,
-	drv, pendingID, terminalStatus string,
+	drv, pendingID string,
 ) ([]*models.Message, error) {
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
-	statusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
 	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
-	bundleStatusExpr := dialect.JSONExtract(drv, "bundle.metadata", "status")
 	query := fmt.Sprintf(`
 		SELECT m.id, m.task_session_id, m.task_id, m.turn_id, m.author_type, m.author_id,
 		       m.content, m.requests_input, m.type, m.metadata, m.created_at, m.updated_at
 		FROM task_session_messages m
 		WHERE %s = ?
 		  AND m.type = 'clarification_request'
-		  AND %s = ?
 		  AND m.turn_id = (
 			SELECT id
 			FROM task_session_turns
@@ -125,18 +160,15 @@ func (r *Repository) loadRestorableClarificationBundle(
 				bundle.type != 'clarification_request'
 				OR bundle.task_session_id != m.task_session_id
 				OR bundle.turn_id != m.turn_id
-				OR COALESCE(%s, '') != ?
 			  )
 		  )
 		ORDER BY m.created_at ASC, m.id ASC
-	`, pendingIDExpr, statusExpr, bundlePendingIDExpr, bundleStatusExpr)
+	`, pendingIDExpr, bundlePendingIDExpr)
 	rows, err := tx.QueryxContext(
 		ctx,
 		r.db.Rebind(query),
 		pendingID,
-		terminalStatus,
 		pendingID,
-		terminalStatus,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("load restorable clarification bundle: %w", err)
@@ -200,7 +232,6 @@ func (r *Repository) claimActiveClarificationBundle(
 	pendingIDExpr := dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id")
 	statusExpr := dialect.JSONExtract(drv, "task_session_messages.metadata", "status")
 	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
-	bundleStatusExpr := dialect.JSONExtract(drv, "bundle.metadata", "status")
 	claimQuery := fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
@@ -222,10 +253,9 @@ func (r *Repository) claimActiveClarificationBundle(
 				bundle.type != 'clarification_request'
 				OR bundle.task_session_id != task_session_messages.task_session_id
 				OR bundle.turn_id != task_session_messages.turn_id
-				OR COALESCE(%s, '') NOT IN ('', 'pending')
 			  )
 		  )
-	`, dialect.JSONSet(drv, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr, bundlePendingIDExpr, bundleStatusExpr)
+	`, dialect.JSONSet(drv, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr, bundlePendingIDExpr)
 	result, err := tx.ExecContext(ctx, r.db.Rebind(claimQuery), pendingID, pendingID)
 	if err != nil {
 		return 0, fmt.Errorf("claim active clarification bundle: %w", err)

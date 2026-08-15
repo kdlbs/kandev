@@ -74,7 +74,12 @@ func (s *stubMessageCreator) CompleteActiveClarificationBundle(
 	if !activeBundle {
 		return nil, false, nil
 	}
+	claimedMessages := make([]*taskmodels.Message, 0, len(msgs))
 	for _, message := range msgs {
+		currentStatus := stringFromMetadata(message.Metadata, "status")
+		if currentStatus != "" && currentStatus != "pending" {
+			continue
+		}
 		questionID := stringFromMetadata(message.Metadata, "question_id")
 		message.Metadata["status"] = status
 		if response, ok := responses[questionID]; ok && response != nil {
@@ -85,24 +90,28 @@ func (s *stubMessageCreator) CompleteActiveClarificationBundle(
 			questionID string
 			status     string
 		}{pendingID, questionID, status})
+		claimedMessages = append(claimedMessages, message)
 	}
-	return msgs, true, nil
+	return claimedMessages, len(claimedMessages) > 0, nil
 }
 
 func (s *stubMessageCreator) RestoreActiveClarificationBundle(
 	_ context.Context,
 	pendingID, terminalStatus string,
+	claimedMessages []*taskmodels.Message,
 ) (bool, error) {
-	msgs := s.repo.messages[pendingID]
-	if len(msgs) == 0 {
+	if len(claimedMessages) == 0 {
 		return false, nil
 	}
-	for _, message := range msgs {
+	for _, message := range claimedMessages {
+		if stringFromMetadata(message.Metadata, "pending_id") != pendingID {
+			return false, nil
+		}
 		if stringFromMetadata(message.Metadata, "status") != terminalStatus {
 			return false, nil
 		}
 	}
-	for _, message := range msgs {
+	for _, message := range claimedMessages {
 		questionID := stringFromMetadata(message.Metadata, "question_id")
 		message.Metadata["status"] = "pending"
 		delete(message.Metadata, "response")

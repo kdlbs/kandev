@@ -1038,8 +1038,14 @@ func (a *messageCreatorAdapter) CompleteActiveClarificationBundle(
 func (a *messageCreatorAdapter) RestoreActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
 ) (bool, error) {
-	return a.svc.RestoreActiveClarificationBundle(ctx, pendingID, terminalStatus)
+	return a.svc.RestoreActiveClarificationBundle(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
 }
 
 func (a *messageCreatorAdapter) PublishClarificationBundleUpdates(

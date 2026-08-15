@@ -22,7 +22,11 @@ const (
 
 type activeClarificationBundleCompleter interface {
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
-	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string) (bool, error)
+	RestoreActiveClarificationBundle(
+		ctx context.Context,
+		pendingID, terminalStatus string,
+		claimedMessages []*models.Message,
+	) (bool, error)
 }
 
 // CreateMessage creates a new message on an agent session
@@ -803,12 +807,18 @@ func (s *Service) CompleteActiveClarificationBundle(
 func (s *Service) RestoreActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
 ) (bool, error) {
 	completer, ok := s.messages.(activeClarificationBundleCompleter)
 	if !ok {
 		return false, errors.New("message repository does not support clarification restore")
 	}
-	return completer.RestoreActiveClarificationBundle(ctx, pendingID, terminalStatus)
+	return completer.RestoreActiveClarificationBundle(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
 }
 
 // PublishClarificationBundleUpdates exposes a completed bundle only after its

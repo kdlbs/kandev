@@ -42,6 +42,9 @@ The session's current turn owns active clarification state.
   when its turn is still current, preserving a safe retry. A detached current-turn rejection persists
   without resuming; any response to a superseded or terminal bundle returns conflict without a write or
   resume event.
+- If historical per-row failures leave a current-turn bundle with both terminal and pending siblings,
+  the response claim transitions only the pending rows and preserves terminal siblings. Failed delivery
+  restores only rows owned by that claim.
 - Repeated detachment of an already detached bundle performs no write and publishes no duplicate
   message occurrence.
 - Existing task summaries reconcile their pending field on normal task-list and boot reads. Repair uses
