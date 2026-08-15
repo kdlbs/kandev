@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -760,6 +761,9 @@ func (s *Service) createRepository(
 	if sourceType == "" {
 		sourceType = sourceTypeLocal
 	}
+	if req.DefaultBranch != "" && !securityutil.IsValidBranchName(req.DefaultBranch) {
+		return nil, fmt.Errorf("%w: invalid default branch", ErrInvalidRepositorySettings)
+	}
 	prefix := strings.TrimSpace(req.WorktreeBranchPrefix)
 	if err := worktree.ValidateBranchPrefix(prefix); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
@@ -1181,6 +1185,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 		repository.ProviderName = *req.ProviderName
 	}
 	if req.DefaultBranch != nil {
+		if *req.DefaultBranch != "" && !securityutil.IsValidBranchName(*req.DefaultBranch) {
+			return fmt.Errorf("%w: invalid default branch", ErrInvalidRepositorySettings)
+		}
 		repository.DefaultBranch = *req.DefaultBranch
 	}
 	if req.WorktreeBranchPrefix != nil {
