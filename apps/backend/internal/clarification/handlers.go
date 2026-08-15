@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -25,6 +26,8 @@ const (
 	metaQuestionKey   = "question"
 	metaQuestionIDKey = "question_id"
 	metaStatusKey     = "status"
+
+	clarificationPersistenceTimeout = 30 * time.Second
 )
 
 // messageStore is the minimal task repository interface required by clarification handlers.
@@ -347,8 +350,10 @@ func (h *Handlers) claimClarificationResponse(
 	pendingID string,
 	body RespondBody,
 ) (*clarificationResponseClaim, int, string) {
+	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
 	if !body.Rejected {
-		if errMsg := h.validateRespondAnswers(ctx, pendingID, body.Answers); errMsg != "" {
+		if errMsg := h.validateRespondAnswers(persistenceCtx, pendingID, body.Answers); errMsg != "" {
 			return nil, http.StatusBadRequest, errMsg
 		}
 	}
@@ -367,7 +372,7 @@ func (h *Handlers) claimClarificationResponse(
 		return nil, http.StatusInternalServerError, "clarification message service unavailable"
 	}
 	completedMessages, claimed, claimErr := h.messageCreator.CompleteActiveClarificationBundle(
-		ctx,
+		persistenceCtx,
 		pendingID,
 		terminalStatus,
 		responses,
@@ -498,8 +503,10 @@ func (h *Handlers) restoreFailedClarificationClaim(
 	pendingID, terminalStatus string,
 	claimedMessages []*taskmodels.Message,
 ) bool {
+	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
 	restored, err := h.messageCreator.RestoreActiveClarificationBundle(
-		ctx,
+		persistenceCtx,
 		pendingID,
 		terminalStatus,
 		claimedMessages,
@@ -515,6 +522,10 @@ func (h *Handlers) restoreFailedClarificationClaim(
 			zap.String("pending_id", pendingID))
 	}
 	return restored
+}
+
+func clarificationPersistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), clarificationPersistenceTimeout)
 }
 
 // validateRespondAnswers enforces the all-required gate **and** the question-id

@@ -25,12 +25,16 @@ type stubMessageCreator struct {
 		questionID string
 		status     string
 	}
-	created          [][]Question
-	repo             *stubMessageStore
-	publishedBundles int
-	claimedMessages  []*taskmodels.Message
-	restoreErr       error
-	refuseRestore    bool
+	created            [][]Question
+	repo               *stubMessageStore
+	publishedBundles   int
+	claimedMessages    []*taskmodels.Message
+	restoreErr         error
+	refuseRestore      bool
+	claimHasDeadline   bool
+	claimContextErr    error
+	restoreHasDeadline bool
+	restoreContextErr  error
 }
 
 func (s *stubMessageCreator) CreateClarificationRequestMessages(
@@ -60,6 +64,8 @@ func (s *stubMessageCreator) CompleteActiveClarificationBundle(
 	pendingID, status string,
 	responses map[string]interface{},
 ) ([]*taskmodels.Message, bool, error) {
+	_, s.claimHasDeadline = ctx.Deadline()
+	s.claimContextErr = ctx.Err()
 	msgs := s.repo.messages[pendingID]
 	if len(msgs) == 0 {
 		return nil, false, nil
@@ -107,10 +113,12 @@ func (s *stubMessageCreator) CompleteActiveClarificationBundle(
 }
 
 func (s *stubMessageCreator) RestoreActiveClarificationBundle(
-	_ context.Context,
+	ctx context.Context,
 	pendingID, terminalStatus string,
 	claimedMessages []*taskmodels.Message,
 ) (bool, error) {
+	_, s.restoreHasDeadline = ctx.Deadline()
+	s.restoreContextErr = ctx.Err()
 	if s.restoreErr != nil {
 		return false, s.restoreErr
 	}
@@ -377,6 +385,14 @@ func TestHttpRespond_DetachedResumeFailureRestoresRetryableBundle(t *testing.T) 
 	}
 	if messageCreator.publishedBundles != 0 {
 		t.Fatalf("published terminal bundles after failed resume = %d, want 0", messageCreator.publishedBundles)
+	}
+	if !messageCreator.claimHasDeadline || messageCreator.claimContextErr != nil {
+		t.Fatalf("claim context deadline=%v err=%v, want fresh bounded context",
+			messageCreator.claimHasDeadline, messageCreator.claimContextErr)
+	}
+	if !messageCreator.restoreHasDeadline || messageCreator.restoreContextErr != nil {
+		t.Fatalf("restore context deadline=%v err=%v, want fresh bounded context",
+			messageCreator.restoreHasDeadline, messageCreator.restoreContextErr)
 	}
 
 	eventBus.resumeErr = nil
