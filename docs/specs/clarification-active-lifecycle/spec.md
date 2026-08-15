@@ -38,8 +38,9 @@ hiding the action the icon represents.
   live waiter receives the rejection in the same turn. A detached current-turn bundle is persisted as
   rejected without resuming the agent.
 - An affirmative response to a detached current-turn bundle returns success only after the
-  orchestrator synchronously accepts one resume request. A rejection persists terminal status without
-  resuming the agent.
+  orchestrator accepts one resume dispatch within a bounded wait. The response waits for prompt
+  acknowledgement, not agent-turn completion. A rejection persists terminal status without resuming
+  the agent.
 - Every response atomically claims current-turn ownership before it can reach a live waiter or request
   a detached resume. Terminal message updates are published only after delivery succeeds. If detached
   resume acceptance fails, the endpoint returns an error and restores the still-current bundle to
@@ -88,9 +89,10 @@ No new route or response field.
   the status summary and legacy fallback fields.
 - `POST /api/v1/clarification/:pendingId/respond` uses one state-based contract:
   - `active_live`: answer or rejection returns success and is delivered to the same-turn waiter.
-  - `active_detached`: an answer returns success only after the orchestrator accepts one resume request;
-    rejection returns success and persists without resuming the agent. If resume acceptance fails, an
-    answer returns a server error and the still-current bundle remains answerable for retry.
+  - `active_detached`: an answer returns success only after the orchestrator acknowledges one resume
+    dispatch within a bounded wait; it does not wait for the resumed turn to complete. Rejection returns
+    success and persists without resuming the agent. If resume acceptance fails, an answer returns a
+    server error and the still-current bundle remains answerable for retry.
   - `superseded_history` or `terminal`: answer or rejection returns conflict, performs no write, and
     initiates no agent resume.
 - `POST /api/v1/clarification/:pendingId/cancel` remains the low-level cancellation path for a request

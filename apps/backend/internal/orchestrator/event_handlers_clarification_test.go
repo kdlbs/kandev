@@ -113,6 +113,116 @@ func TestResumeDetachedClarificationReportsPromptFailure(t *testing.T) {
 	}
 }
 
+func TestResumeDetachedClarificationUsesBoundedDispatchOnlyPrompt(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-bounded", "session-bounded", "step-1")
+	seedExecutorRunning(t, repo, "session-bounded", "task-bounded", "exec-bounded")
+	if err := repo.UpdateTaskSessionState(
+		context.Background(),
+		"session-bounded",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+	type promptObservation struct {
+		dispatchOnly bool
+		hasDeadline  bool
+	}
+	observed := make(chan promptObservation, 1)
+	release := make(chan struct{})
+	defer close(release)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	agentMgr.promptAgentFunc = func(
+		ctx context.Context,
+		_ string,
+		_ string,
+		_ []v1.MessageAttachment,
+		dispatchOnly bool,
+	) (*executor.PromptResult, error) {
+		_, hasDeadline := ctx.Deadline()
+		observed <- promptObservation{dispatchOnly: dispatchOnly, hasDeadline: hasDeadline}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-release:
+			return &executor.PromptResult{}, nil
+		}
+	}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	resumeCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.ResumeDetachedClarification(resumeCtx, clarification.DetachedClarificationResume{
+			TaskID:     "task-bounded",
+			SessionID:  "session-bounded",
+			PendingID:  "pending-bounded",
+			Question:   "Continue?",
+			AnswerText: "Continue",
+		})
+	}()
+
+	var observation promptObservation
+	select {
+	case observation = <-observed:
+	case err := <-done:
+		t.Fatalf("resume returned before prompt dispatch: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt dispatch")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("resume error = %v, want context cancellation", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("detached resume ignored cancellation before prompt acknowledgment")
+	}
+	if !observation.dispatchOnly || !observation.hasDeadline {
+		t.Fatalf("prompt observation = %+v, want dispatch-only with deadline", observation)
+	}
+}
+
+func TestResumeDetachedClarificationDoesNotTreatAsyncRecoveryAsAcknowledgment(t *testing.T) {
+	repo := setupTestRepo(t)
+	promptEntered := make(chan struct{}, 1)
+	promptRelease := make(chan struct{})
+	t.Cleanup(func() { close(promptRelease) })
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	agentMgr.promptAgentFunc = func(
+		context.Context,
+		string,
+		string,
+		[]v1.MessageAttachment,
+		bool,
+	) (*executor.PromptResult, error) {
+		promptEntered <- struct{}{}
+		<-promptRelease
+		return &executor.PromptResult{}, nil
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedTaskAndSession(t, repo, "task-busy", "session-busy", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session-busy", "task-busy", "exec-busy")
+
+	err := svc.ResumeDetachedClarification(context.Background(), clarification.DetachedClarificationResume{
+		TaskID:     "task-busy",
+		SessionID:  "session-busy",
+		PendingID:  "pending-busy",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if err == nil {
+		t.Fatal("detached resume reported acknowledgment after only an asynchronous retry handoff")
+	}
+	select {
+	case <-promptEntered:
+		t.Fatal("bounded detached resume must not hand an unacknowledged retry to the async queue")
+	default:
+	}
+}
+
 func TestHandleClarificationStaleDismissed(t *testing.T) {
 	ctx := context.Background()
 

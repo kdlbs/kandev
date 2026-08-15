@@ -108,6 +108,8 @@ var (
 	agentPromptReadyInterval = 100 * time.Millisecond
 )
 
+const promptFailureCleanupTimeout = 5 * time.Second
+
 const promptReadinessRecoveryStopReason = "prompt readiness recovery"
 
 type agentPromptStreamRecoverer interface {
@@ -3247,11 +3249,35 @@ func (s *Service) saveArchiveCommits(ctx context.Context, sessionID string, comm
 // If planMode is true, a plan mode prefix is prepended to the prompt.
 // Attachments (images) are passed through to the agent if provided.
 func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error) {
-	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, "", false, nil)
+	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, promptTaskOptions{})
 }
 
-// promptTask is PromptTask's implementation, taking an additional
-// claimEntryID parameter used only by queued dispatches. When non-empty, this
+type promptTaskOptions struct {
+	claimEntryID          string
+	lifecyclePrompt       bool
+	afterClaim            func() error
+	preservePromptContext bool
+}
+
+func (options promptTaskOptions) executorContext(ctx context.Context) context.Context {
+	if options.preservePromptContext {
+		return ctx
+	}
+	return context.WithoutCancel(ctx)
+}
+
+func (options promptTaskOptions) failureContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if options.preservePromptContext {
+		// Preserve a small bounded window for state rollback after the dispatch
+		// deadline expires; otherwise a cancelled context can leave RUNNING state.
+		return context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
+	}
+	return ctx, func() {}
+}
+
+// promptTask is PromptTask's implementation. Its options carry queued-dispatch
+// ownership and the bounded-context exception. When options.claimEntryID is
+// non-empty, this
 // acquires sessionID's cancelInFlight guard around a second ownership check
 // and the "mark the session RUNNING" step immediately before startTurnForSession
 // and the (potentially long-blocking) executor.Prompt call below it. The worker
@@ -3276,7 +3302,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 // executeQueuedMessage's own deferred cleanup instead
 // (clearQueuedDispatchInFlightIfCurrent), which is safe since none of them
 // block on an agent turn.
-func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, claimEntryID string, lifecyclePrompt bool, afterClaim func() error) (*PromptResult, error) {
+func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, options promptTaskOptions) (*PromptResult, error) {
 	s.logPromptTaskCall(taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly)
 	if err := s.validatePromptTaskStart(sessionID); err != nil {
 		return nil, err
@@ -3339,8 +3365,8 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	s.rememberTurnPrompt(sessionID, prompt, model, planMode, attachments)
 
 	session, rollback, err := s.claimPromptDispatch(
-		ctx, taskID, sessionID, claimEntryID, lifecyclePrompt,
-		afterClaim, session, foregroundClaim,
+		ctx, taskID, sessionID, options.claimEntryID, options.lifecyclePrompt,
+		options.afterClaim, session, foregroundClaim,
 	)
 	if err != nil {
 		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
@@ -3354,10 +3380,10 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
 
-	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the prompt.
-	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
-	// We still want to log and respond, but the prompt should continue regardless.
-	promptCtx := context.WithoutCancel(ctx)
+	// Ordinary prompts outlive their transport request because turns can take
+	// minutes. Callers that only need bounded dispatch acknowledgement preserve
+	// their context explicitly.
+	promptCtx := options.executorContext(ctx)
 	result, err := s.executor.PromptWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
 		func() {
@@ -3367,10 +3393,12 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		}, session,
 	)
 	if err != nil {
-		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
+		failureCtx, cancel := options.failureContext(ctx)
+		defer cancel()
+		s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
 		return s.handlePromptDispatchFailure(
-			ctx, taskID, sessionID, prompt, planMode, resumedForPrompt,
-			attachments, rollback, lifecyclePrompt, err,
+			failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt,
+			attachments, rollback, options.lifecyclePrompt, err,
 		)
 	}
 	return &PromptResult{

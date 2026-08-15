@@ -17,6 +17,8 @@ export function isPendingClarificationMessage(message: Message): boolean {
   return !metadata?.status || metadata.status === "pending";
 }
 
+// TurnDTO timestamps are normalized by the backend to UTC with a Z suffix.
+// Non-Z input falls through to raw comparison and is outside this contract.
 function durableTurnTimestampKey(value: string): string {
   const match = /^(.*T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/.exec(value);
   if (!match) return value;

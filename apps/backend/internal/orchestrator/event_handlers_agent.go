@@ -749,7 +749,11 @@ func (s *Service) executeQueuedMessageWithReservation(
 	afterClaim := s.queuedLifecycleAfterClaim(promptCtx, queuedMsg, attachments, lifecyclePrompt)
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
-		claimEntryID, lifecyclePrompt, afterClaim)
+		promptTaskOptions{
+			claimEntryID:    claimEntryID,
+			lifecyclePrompt: lifecyclePrompt,
+			afterClaim:      afterClaim,
+		})
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg,
 		lifecyclePrompt, userMessageRecorded, err,

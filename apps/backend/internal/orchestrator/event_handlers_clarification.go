@@ -18,7 +18,10 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const clarificationInputPauseTimeout = 30 * time.Second
+const (
+	clarificationInputPauseTimeout       = 30 * time.Second
+	detachedClarificationDispatchTimeout = 30 * time.Second
+)
 
 // subscribeClarificationEvents subscribes to clarification-related events.
 func (s *Service) subscribeClarificationEvents() {
@@ -151,7 +154,9 @@ func (s *Service) ResumeDetachedClarification(
 	ctx context.Context,
 	request clarification.DetachedClarificationResume,
 ) error {
-	return s.resumeDetachedClarification(ctx, clarificationAnsweredData{
+	resumeCtx, cancel := context.WithTimeout(ctx, detachedClarificationDispatchTimeout)
+	defer cancel()
+	return s.resumeDetachedClarificationWithPrompt(resumeCtx, clarificationAnsweredData{
 		SessionID:    request.SessionID,
 		TaskID:       request.TaskID,
 		PendingID:    request.PendingID,
@@ -159,10 +164,19 @@ func (s *Service) ResumeDetachedClarification(
 		AnswerText:   request.AnswerText,
 		Rejected:     request.Rejected,
 		RejectReason: request.RejectReason,
-	})
+	}, true, promptTaskOptions{preservePromptContext: true})
 }
 
 func (s *Service) resumeDetachedClarification(ctx context.Context, data clarificationAnsweredData) error {
+	return s.resumeDetachedClarificationWithPrompt(ctx, data, false, promptTaskOptions{})
+}
+
+func (s *Service) resumeDetachedClarificationWithPrompt(
+	ctx context.Context,
+	data clarificationAnsweredData,
+	dispatchOnly bool,
+	options promptTaskOptions,
+) error {
 	if data.SessionID == "" || data.TaskID == "" {
 		return errors.New("detached clarification resume missing session_id or task_id")
 	}
@@ -182,8 +196,14 @@ func (s *Service) resumeDetachedClarification(ctx context.Context, data clarific
 	// reconcileTaskStateForRuntime.
 	s.writeTaskInProgressForRuntime(ctx, data.TaskID, data.SessionID)
 
-	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, false); err != nil {
-		if s.retryClarificationAfterCancel(ctx, data, prompt, err) {
+	if _, err := s.promptTask(
+		ctx, data.TaskID, data.SessionID, prompt, "", false, nil, dispatchOnly, options,
+	); err != nil {
+		// The synchronous HTTP path must not turn an asynchronous queue handoff
+		// into false acknowledgement. Its handler restores the claimed bundle on
+		// any error so the user can retry. Event/watchdog recovery keeps the
+		// existing cancel-and-queue fallback.
+		if !dispatchOnly && s.retryClarificationAfterCancel(ctx, data, prompt, err) {
 			return nil
 		}
 		return fmt.Errorf("prompt task with clarification answer: %w", err)

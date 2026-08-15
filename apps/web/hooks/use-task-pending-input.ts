@@ -45,6 +45,8 @@ function loadedSessionFlags(
   pendingAction?: TaskPendingAction | null,
 ): PendingInput {
   const currentTurnId = newestDurableTurnId(turnsBySession[sessionId]);
+  // With both authority signals unavailable, preserve the legacy full-message
+  // scan. Once either loads, explicit turn/action scoping applies.
   const clarificationScope: PendingClarificationScope | undefined =
     currentTurnId === undefined && pendingAction === undefined
       ? undefined

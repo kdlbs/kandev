@@ -18,8 +18,9 @@ spec: "../../specs/clarification-active-lifecycle/spec.md"
   turn.
 - Detach/expiry fallback and workflow guarding consume that method; repeated detach writes and
   publishes nothing, while repository errors keep the workflow barrier closed.
-- A detached bundle in the current turn accepts a late answer only after one acknowledged orchestrator
-  resume, or a rejection without resuming the agent. Any database-fallback answer or rejection for an
+- A detached bundle in the current turn accepts a late answer only after one bounded, acknowledged
+  orchestrator resume dispatch, or a rejection without resuming the agent. It does not wait for the
+  resumed turn to complete. Any database-fallback answer or rejection for an
   older-turn or terminal bundle returns conflict, performs no write, and initiates no agent resume.
 
 ## Verification
@@ -97,6 +98,8 @@ blockers/risks, and update task/plan status.
   restores only rows owned by the failed delivery attempt.
 - Restore serialization uses copied metadata, so a failed transactional write cannot mutate its
   in-memory terminal snapshot.
+- Detached HTTP resume now preserves a 30-second context through the executor and uses dispatch-only
+  acknowledgement, so request completion cannot wait for the full agent turn.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - `cd apps/backend && go test ./internal/task/repository/sqlite ./internal/clarification ./internal/orchestrator`
