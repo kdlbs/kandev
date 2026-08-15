@@ -119,6 +119,24 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
+### Setup and launch timing
+
+`KANDEV_TASK_PREPARATION_TIMEOUT` controls how long Kandev allows repository
+setup and executor-profile prepare scripts to run. The value uses Go duration
+syntax, such as `90s`, `10m`, or `1h`. The default is `10m`.
+
+Only positive durations are accepted. An unset, invalid, zero, or negative value
+uses the `10m` default. Kandev reads this environment variable when the backend
+starts, so restart the backend after changing it. The setting applies to Local,
+Worktree, Docker, Sprites, and SSH launches.
+
+Runtime launch phases use the configured preparation timeout plus a fixed
+five-minute allowance for runtime creation and `agentctl` readiness. With the
+default, each launch-phase limit is `15m`. Preparation scripts use a separate
+context, so earlier work such as Sprite uploads does not reduce their full
+`10m` preparation budget. This setting is environment-only; it is not read from
+YAML, the database, or Settings.
+
 ### Authentication, Office, Plugins, and feature flags
 
 | YAML key | Environment variable | Default | Current behavior |
@@ -358,7 +376,7 @@ These variables are supported by specific runtime components but are not YAML fi
 | `KANDEV_MCP_LOG_FILE` | unset | File path for per-agentctl MCP debug logs. Logs tool names, arguments, session IDs, results for tool errors, and timings; invalid paths warn and disable this sink. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Enables OTLP/HTTP tracing for backend and agentctl spans; unset uses a no-op tracer. See the transport warning below. |
 
-Changing concurrency values trades process pressure against throughput and requires a restart. The queue environment value is also read at startup. Without that environment override, an admin can use **Settings > General > Message Queue** to save an install-wide limit that applies live. `0` means unlimited. Lowering the live limit does not prune existing rows; new admissions remain blocked until the pending count drops below the limit, while retries of already accepted work remain eligible.
+Changing concurrency values trades process pressure against throughput and requires a restart. The queue environment value is also read at startup. Under **Settings > Task Behavior > Message Queue**, an admin can save an install-wide capacity and independently control manual and automatic merging. All three values apply live and persist across restarts. `KANDEV_QUEUE_MAX_PER_SESSION` overrides and locks only capacity; neither merge switch has an environment override. `0` means unlimited. Lowering the live limit does not prune existing rows; new admissions remain blocked until the pending count drops below the limit, while retries of already accepted work remain eligible. The default-on automatic switch affects only later admissions and never bypasses capacity or sweeps existing rows.
 
 The current OTLP exporter strips an `http://` or `https://` prefix from the configured endpoint and always uses `WithInsecure()`. Treat this as implementation-bound cleartext transport: send it only to a trusted private collector over a protected network, not directly across an untrusted network. The service name is `kandev-agentctl`, and spans can include task/session/execution IDs plus raw agent-event JSON truncated to 8192 characters. That payload can contain prompts, files, and tool data. Use collector-side access controls and retention accordingly.
 

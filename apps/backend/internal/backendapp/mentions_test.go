@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/mentions"
+	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
@@ -304,5 +305,15 @@ func TestBuiltinMentionProvidersRemainDescriptorDrivenWhenIntegrationsAreNil(t *
 		if descriptor.Source != expected.source || descriptor.Order != expected.order {
 			t.Fatalf("provider %d descriptor = %#v, want source=%q order=%d", index, descriptor, expected.source, expected.order)
 		}
+	}
+}
+
+func TestBuiltinMentionProvidersIncludePluginSourceRegistrar(t *testing.T) {
+	providers := builtinMentionProviders(&Services{Plugins: &plugins.Service{}}, nil)
+	if len(providers) != 10 {
+		t.Fatalf("provider count = %d, want builtins plus plugin source registrar", len(providers))
+	}
+	if _, ok := providers[len(providers)-1].(mentions.SourceRegistrar); !ok {
+		t.Fatalf("last provider = %T, want plugin source registrar", providers[len(providers)-1])
 	}
 }

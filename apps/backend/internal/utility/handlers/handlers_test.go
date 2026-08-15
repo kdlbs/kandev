@@ -20,10 +20,35 @@ import (
 
 type stubInferenceExecutor struct {
 	agents []lifecycle.InferenceAgentInfo
+	// resp/err drive the session-bound execution path; when both are unset the
+	// stub reports a trivially successful run so a caller that only cares
+	// about routing does not have to configure one.
+	resp *agentctlutil.PromptResponse
+	err  error
+	// calls records every (sessionID, agentID, model, prompt) tuple the
+	// handler forwarded, so a test can assert what was actually executed.
+	calls []inferenceCall
 }
 
-func (s *stubInferenceExecutor) ExecuteInferencePrompt(_ context.Context, _, _, _, _ string) (*agentctlutil.PromptResponse, error) {
-	return nil, nil
+// inferenceCall is one recorded ExecuteInferencePrompt invocation.
+type inferenceCall struct {
+	sessionID string
+	agentID   string
+	model     string
+	prompt    string
+}
+
+func (s *stubInferenceExecutor) ExecuteInferencePrompt(
+	_ context.Context, sessionID, agentID, model, prompt string,
+) (*agentctlutil.PromptResponse, error) {
+	s.calls = append(s.calls, inferenceCall{sessionID: sessionID, agentID: agentID, model: model, prompt: prompt})
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.resp != nil {
+		return s.resp, nil
+	}
+	return &agentctlutil.PromptResponse{Success: true}, nil
 }
 
 func (s *stubInferenceExecutor) ListInferenceAgentsWithContext(_ context.Context) []lifecycle.InferenceAgentInfo {

@@ -78,5 +78,15 @@
   "walkMeThroughTheseReviewChanges": "Walk me through these review changes",
   "walkthrough": "Walkthrough",
   "walkthroughDiscarded": "Walkthrough discarded",
-  "wrapLongLines": "Wrap long lines"
+  "wrapLongLines": "Wrap long lines",
+  "changesDiscarded": "Changes discarded",
+  "changesStillLoading": "Changes are still loading",
+  "couldNotSendFinding": "Could not send the finding",
+  "couldNotUpdateFinding": "Could not update finding",
+  "discardFailed": "Discard failed",
+  "failedToRequestWalkthrough": "Failed to request walkthrough",
+  "findingQueuedForAgent": "Finding queued for the agent",
+  "findingSentToAgent": "Finding sent to the agent",
+  "walkthroughRequestQueued": "Walkthrough request queued",
+  "walkthroughRequestSent": "Walkthrough request sent"
 }

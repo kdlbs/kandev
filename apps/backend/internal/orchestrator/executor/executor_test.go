@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -207,6 +208,122 @@ func TestPrepareSessionSnapshotsProfileRuntimeConfig(t *testing.T) {
 	options, ok := snapshot["config_options"].(map[string]string)
 	if !ok || options["reasoning_effort"] != "high" {
 		t.Fatalf("profile snapshot config options = %#v", snapshot["config_options"])
+	}
+}
+
+func TestPrepareSessionConsumesInitialRuntimeSeedOnlyForFirstSession(t *testing.T) {
+	repo := newMockRepository()
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	seed := models.SessionRuntimeConfig{
+		Model:         "gpt-5.6-sol",
+		Mode:          "acceptEdits",
+		ConfigOptions: map[string]string{"reasoning_effort": "high"},
+	}
+	task := &v1.Task{
+		ID:          "task-runtime-seed",
+		WorkspaceID: "workspace-123",
+		Title:       "Runtime seed task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyInitialSessionRuntimeConfig:          seed,
+			models.MetaKeyInitialSessionRuntimeConfigProfileID: "profile-123",
+		},
+	}
+
+	firstID, err := executor.PrepareSession(
+		context.Background(), task, "profile-123", "executor-123", "", "",
+	)
+	if err != nil {
+		t.Fatalf("PrepareSession first: %v", err)
+	}
+	first, err := repo.GetTaskSession(context.Background(), firstID)
+	if err != nil {
+		t.Fatalf("GetTaskSession first: %v", err)
+	}
+	firstOverrides, ok := models.LoadSessionRuntimeConfigOverrides(first.Metadata)
+	if !ok || firstOverrides.Model != seed.Model || firstOverrides.Mode != seed.Mode {
+		t.Fatalf("first runtime overrides = %#v, want %#v", firstOverrides, seed)
+	}
+	if firstOverrides.ConfigOptions["reasoning_effort"] != "high" {
+		t.Fatalf("first runtime options = %#v", firstOverrides.ConfigOptions)
+	}
+	if _, exists := first.Metadata[models.MetaKeyInitialSessionRuntimeConfig]; exists {
+		t.Fatalf("launch-only seed leaked into first session metadata: %#v", first.Metadata)
+	}
+	if _, exists := first.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]; exists {
+		t.Fatalf("launch-only seed owner leaked into first session metadata: %#v", first.Metadata)
+	}
+
+	secondID, err := executor.PrepareSession(
+		context.Background(), task, "profile-123", "executor-123", "", "",
+	)
+	if err != nil {
+		t.Fatalf("PrepareSession second: %v", err)
+	}
+	second, err := repo.GetTaskSession(context.Background(), secondID)
+	if err != nil {
+		t.Fatalf("GetTaskSession second: %v", err)
+	}
+	if _, ok := models.LoadSessionRuntimeConfigOverrides(second.Metadata); ok {
+		t.Fatalf("second session unexpectedly received initial runtime overrides: %#v", second.Metadata)
+	}
+	if _, exists := second.Metadata[models.MetaKeyInitialSessionRuntimeConfig]; exists {
+		t.Fatalf("launch-only seed leaked into second session metadata: %#v", second.Metadata)
+	}
+	if _, exists := second.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]; exists {
+		t.Fatalf("launch-only seed owner leaked into second session metadata: %#v", second.Metadata)
+	}
+
+	firstOverrides.ConfigOptions["reasoning_effort"] = "low"
+	if seed.ConfigOptions["reasoning_effort"] != "high" {
+		t.Fatalf("seed options aliased prepared session: %#v", seed.ConfigOptions)
+	}
+}
+
+func TestPrepareSessionDoesNotApplyInitialRuntimeSeedAfterProfileSelectionChanges(t *testing.T) {
+	seed := models.SessionRuntimeConfig{
+		Model:         "gpt-5.6-sol",
+		Mode:          "acceptEdits",
+		ConfigOptions: map[string]string{"reasoning_effort": "high"},
+	}
+	for _, testCase := range []struct {
+		name            string
+		selectedProfile string
+	}{
+		{name: "explicit profile", selectedProfile: "explicit-profile"},
+		{name: "workflow profile", selectedProfile: "workflow-profile"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := newMockRepository()
+			executor := newTestExecutor(t, &mockAgentManager{}, repo)
+			task := &v1.Task{
+				ID:          "task-runtime-seed-" + testCase.selectedProfile,
+				WorkspaceID: "workspace-123",
+				Title:       "Changed initial runtime seed profile",
+				Metadata: map[string]interface{}{
+					models.MetaKeyInitialSessionRuntimeConfig:          seed,
+					models.MetaKeyInitialSessionRuntimeConfigProfileID: "creator-profile",
+				},
+			}
+
+			sessionID, err := executor.PrepareSession(
+				context.Background(), task, testCase.selectedProfile, "executor-123", "", "",
+			)
+			if err != nil {
+				t.Fatalf("PrepareSession: %v", err)
+			}
+			created, err := repo.GetTaskSession(context.Background(), sessionID)
+			if err != nil {
+				t.Fatalf("GetTaskSession: %v", err)
+			}
+			_, hasOverrides := models.LoadSessionRuntimeConfigOverrides(created.Metadata)
+			if hasOverrides {
+				t.Fatalf("changed profile must not receive the creator runtime seed: %#v", created.Metadata)
+			}
+			_, hasOwner := created.Metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID]
+			if hasOwner {
+				t.Fatalf("launch-only seed owner must not leak into the session: %#v", created.Metadata)
+			}
+		})
 	}
 }
 
@@ -2571,9 +2688,9 @@ func TestRepositoryCloneURL(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "bitbucket repo",
+			name: "plugin provider without persisted clone URL fails closed",
 			repo: &models.Repository{Provider: "bitbucket", ProviderOwner: "acme", ProviderName: "app"},
-			want: "https://bitbucket.org/acme/app.git",
+			want: "",
 		},
 		{
 			name: "unknown provider returns empty",
@@ -2616,15 +2733,38 @@ type recordingAuthenticatedCloner struct {
 	workspaceID string
 	provider    string
 	password    string
+	request     repoclone.GitCredentialRequest
 }
 
-func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedForProvider(
-	_ context.Context, workspaceID, _, provider, _, _, _, _, _ string,
+type sessionScopedWorkspaceAuth interface {
+	ensureClonedWithWorkspaceAuthForSession(
+		context.Context, string, string, *models.Repository, string,
+	) (string, error)
+}
+
+func TestExecutorExposesSessionScopedWorkspaceClone(t *testing.T) {
+	t.Parallel()
+
+	exec := &Executor{}
+	if _, supported := any(exec).(sessionScopedWorkspaceAuth); !supported {
+		t.Fatal("Executor does not expose a session-scoped workspace clone operation")
+	}
+}
+
+func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedWithCredentialRequest(
+	_ context.Context, request repoclone.GitCredentialRequest, _, _ string,
 ) (string, error) {
 	c.normalCalls++
-	c.workspaceID = workspaceID
-	c.provider = provider
+	c.workspaceID = request.WorkspaceID
+	c.provider = request.Provider
+	c.request = request
 	return "/repos/normal", nil
+}
+
+func (c *recordingAuthenticatedCloner) RefreshWorkspaceRepositoryWithCredentialRequest(
+	context.Context, repoclone.GitCredentialRequest, string, string, string,
+) error {
+	return nil
 }
 
 func (c *recordingAuthenticatedCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
@@ -2676,11 +2816,25 @@ func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), github, "https://github.com/acme/api.git"); err != nil {
 		t.Fatal(err)
 	}
+	bitbucket := &models.Repository{
+		ID: "repository-3", WorkspaceID: "workspace-3", Provider: "bitbucket",
+		ProviderHost: "https://bitbucket.org", ProviderOwner: "acme", ProviderName: "api",
+	}
+	if _, err := exec.ensureClonedWithWorkspaceAuthForSession(
+		context.Background(), "task-3", "session-3", bitbucket,
+		"https://bitbucket.org/acme/api.git",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if cloner.request.TaskID != "task-3" || cloner.request.SessionID != "session-3" ||
+		cloner.request.RepositoryID != "repository-3" {
+		t.Fatalf("plugin clone scope = %+v", cloner.request)
+	}
 	azureSSH := "git@ssh.dev.azure.com:v3/acme/Platform/api"
 	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), azure, azureSSH); err != nil {
 		t.Fatal(err)
 	}
-	if cloner.normalCalls != 2 || cloner.authCalls != 1 {
+	if cloner.normalCalls != 3 || cloner.authCalls != 1 {
 		t.Fatalf("non-Azure-HTTPS providers must use ordinary cloning: %+v", cloner)
 	}
 	if cloner.workspaceID != "workspace-1" || cloner.provider != "azure_devops" {

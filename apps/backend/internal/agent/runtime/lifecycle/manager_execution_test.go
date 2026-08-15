@@ -25,6 +25,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -311,10 +312,10 @@ func TestCoalescedExecutionCreationHasManagerDeadline(t *testing.T) {
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("creation error = %v, want manager deadline", err)
 			}
-			if elapsed := time.Since(startedAt); elapsed != coalescedExecutionCreationTimeout {
-				t.Fatalf("manager deadline elapsed after %v, want %v", elapsed, coalescedExecutionCreationTimeout)
+			if elapsed := time.Since(startedAt); elapsed != constants.AgentLaunchTimeout {
+				t.Fatalf("manager deadline elapsed after %v, want %v", elapsed, constants.AgentLaunchTimeout)
 			}
-		case <-time.After(coalescedExecutionCreationTimeout + time.Second):
+		case <-time.After(constants.AgentLaunchTimeout + time.Second):
 			t.Fatal("blocked creation outlived the manager startup deadline")
 		}
 

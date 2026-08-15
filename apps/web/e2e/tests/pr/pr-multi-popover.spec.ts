@@ -153,6 +153,29 @@ async function openTaskAndWait(
   return session;
 }
 
+async function selectPRFromAddPanel(
+  testPage: import("@playwright/test").Page,
+  session: SessionPage,
+  itemTestId: string,
+) {
+  const item = testPage.getByTestId(itemTestId);
+  await expect(async () => {
+    if ((await session.prDetailTab().count()) >= 2) return;
+
+    // Radix submenu content can be replaced by a PR refresh between the
+    // visibility check and the click. Reopen the short-lived menu for each
+    // bounded attempt and force the click once the exact row is visible.
+    await testPage.keyboard.press("Escape").catch(() => undefined);
+    await session.addPanelButton().click({ force: true });
+    const submenu = testPage.getByTestId("add-panel-pr-submenu");
+    await expect(submenu).toBeVisible({ timeout: 2_000 });
+    await submenu.click({ force: true });
+    await expect(item).toBeVisible({ timeout: 2_000 });
+    await item.click({ force: true });
+    await expect(session.prDetailTab()).toHaveCount(2, { timeout: 2_000 });
+  }).toPass({ timeout: 15_000, intervals: [100, 250, 500] });
+}
+
 test.describe("Multi-PR CI popover", () => {
   test("hover opens tabbed popover defaulting to the worst-status PR; tab switch swaps CI detail", async ({
     testPage,
@@ -353,9 +376,7 @@ test.describe("Multi-PR CI popover", () => {
     // from inside it must open a second, distinct tab instead of repurposing
     // the layout-owned canonical one. (Dedup when re-selecting the same PR is
     // covered by the runAutoPRPanelEffect / addPRPanel unit tests.)
-    await session.addPanelButton().click();
-    await testPage.getByTestId("add-panel-pr-submenu").click();
-    await testPage.getByTestId(`add-panel-pr-item-${OWNER}-api-77`).click();
+    await selectPRFromAddPanel(testPage, session, `add-panel-pr-item-${OWNER}-api-77`);
     await expect(session.prDetailTab()).toHaveCount(2, { timeout: 15_000 });
   });
 });

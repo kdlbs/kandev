@@ -60,6 +60,44 @@
     return count;
   }
 
+  var PROVIDER_ID = "fixture-source-control";
+  var PULL_REQUEST_URL =
+    "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/42";
+  var REPOSITORY_URL = "https://bitbucket.example.test/scm/TEAM/fixture.git";
+
+  function fixtureRepository() {
+    return {
+      id: "fixture-repository",
+      repositoryId: "fixture-repository",
+      owner: "TEAM",
+      ownerOrProject: "TEAM",
+      name: "fixture",
+      repositoryName: "fixture",
+      fullName: "TEAM/fixture",
+      url: REPOSITORY_URL,
+      cloneUrl: REPOSITORY_URL,
+      providerHost: "bitbucket.example.test",
+      defaultBranch: "main",
+      private: true,
+    };
+  }
+
+  function abortableRefresh(signal) {
+    return new Promise(function (_resolve, reject) {
+      if (signal.aborted) {
+        reject(new Error("fixture review refresh aborted"));
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        function () {
+          reject(new Error("fixture review refresh aborted"));
+        },
+        { once: true },
+      );
+    });
+  }
+
   window.registerKandevPlugin("kandev-plugin-e2e", {
     initialize: function (registry, host) {
       var React = host.React;
@@ -88,12 +126,44 @@
 
       function PluginPage() {
         var count = useCounter(React);
+        var connectionState = React.useState("Not checked");
+        var connection = connectionState[0];
+        var setConnection = connectionState[1];
         var themeState = useHostTheme();
+        function checkConnection() {
+          host.api
+            .invokeAction("connection-status", {
+              workspaceId: host.store.getState().workspaces.activeId || undefined,
+            })
+            .then(function (result) {
+              setConnection(
+                result.connected ? "Connected" : result.error || "Connection unavailable",
+              );
+            })
+            .catch(function (error) {
+              setConnection(error instanceof Error ? error.message : "Connection unavailable");
+            });
+        }
         return jsx(
           "div",
           { id: "hello-plugin-page-root" },
           jsx("h1", { id: "hello-plugin-page" }, "Hello E2E"),
           jsx("span", { id: "hello-task-counter" }, String(count)),
+          jsx(
+            "button",
+            {
+              id: "fixture-connection-status",
+              "data-testid": "fixture-connection-status",
+              type: "button",
+              onClick: checkConnection,
+            },
+            "Check Bitbucket connection",
+          ),
+          jsx(
+            "span",
+            { id: "fixture-connection-result", "data-testid": "fixture-connection-result" },
+            connection,
+          ),
           jsx(
             "span",
             {
@@ -117,6 +187,55 @@
             "toast error",
           ),
         );
+      }
+
+      function FixtureReviewPanel(props) {
+        return jsx(
+          "section",
+          {
+            "data-testid": "fixture-review-panel-" + props.presentation,
+            "data-review-key": props.reviewKey,
+          },
+          jsx(
+            "h2",
+            null,
+            "Bitbucket pull request #" + props.reviewKey.replace("pull-request-", ""),
+          ),
+          jsx("p", null, "Provider-neutral fixture review panel"),
+        );
+      }
+
+      function FixtureReviewSelector() {
+        return jsx("span", { "data-testid": "fixture-review-selector" }, "Bitbucket");
+      }
+
+      function openLinkResult(context) {
+        host.openTaskLinkDialog({
+          title: "Link Bitbucket pull request",
+          description: "Use a Bitbucket pull request URL for this task.",
+          inputLabel: "Pull request",
+          placeholder: PULL_REQUEST_URL,
+          emptyError: "Enter a Bitbucket pull request URL.",
+          failureMessage: "Failed to link Bitbucket pull request.",
+          successMessage: "Bitbucket pull request linked",
+          inputTestId: "fixture-link-pull-request-input",
+          errorTestId: "fixture-link-pull-request-error",
+          submitTestId: "fixture-link-pull-request-submit",
+          onSubmit: function (reference) {
+            return host.api
+              .invokeAction("link-pull-request", {
+                workspaceId: context.workspaceId,
+                taskId: context.taskId,
+                body: { pullRequestUrl: reference },
+              })
+              .then(function (result) {
+                if (!result.linked) {
+                  throw new Error(result.error || "Connection unavailable");
+                }
+              });
+          },
+        });
+        return Promise.resolve();
       }
 
       function SidebarSlot() {
@@ -250,22 +369,9 @@
         );
       }
 
-
-      // ── Composer action ────────────────────────────────────────────────
-      //
-      // Drives the PluginComposerCapability the host passes to
-      // chat-input-actions, task-create-input-actions and
-      // new-session-input-actions. This is what proves the contract end to
-      // end in a browser: a mock that calls the host's submit callback
-      // directly would prove nothing about the native path.
-      //
-      // "Capture" then "insert captured" deliberately splits the flow across
-      // renders, because that is the shape a real voice plugin has — the
-      // capability is grabbed when recording starts and used seconds later,
-      // after the host has re-rendered the composer many times.
-      // Deliberately tiny: the fixture needs five affordances where a real
-      // plugin contributes one icon button, and five full-size buttons
-      // overflow a phone toolbar and land underneath the native controls.
+      // Drives PluginComposerCapability through native composers. Capturing
+      // the capability and using it after later renders mirrors a real voice
+      // integration whose recording completes asynchronously.
       var COMPOSER_BUTTON_STYLE = {
         fontSize: "9px",
         lineHeight: "1",
@@ -366,6 +472,22 @@
         );
       }
 
+      function FixtureBitbucketIcon(props) {
+        return jsx(
+          "svg",
+          {
+            className: props.className,
+            viewBox: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            "aria-hidden": props["aria-hidden"] || true,
+            "data-testid": "fixture-bitbucket-icon",
+          },
+          jsx("path", { d: "M4 5h16l-2.5 14h-11z" }),
+          jsx("path", { d: "M9 9h6l-1 6h-4z" }),
+        );
+      }
+
       registry.registerNavItem({
         id: "e2e-hello",
         label: "Hello E2E",
@@ -379,6 +501,93 @@
       registry.registerComponent("app-status-bar-right", StatusSlot);
       registry.registerWsHandler("task.created", function () {
         incrementCount();
+      });
+
+      registry.registerRepositoryProvider({
+        id: PROVIDER_ID,
+        label: "Bitbucket",
+        icon: FixtureBitbucketIcon,
+        listRepositories: function () {
+          return Promise.resolve([fixtureRepository()]);
+        },
+        matchesURL: function (url) {
+          if (typeof url !== "string") return false;
+          try {
+            return new URL(url).hostname === "bitbucket.example.test";
+          } catch (_error) {
+            return false;
+          }
+        },
+        listBranches: function (_context) {
+          return Promise.resolve([{ name: "main" }, { name: "feature/provider-contract" }]);
+        },
+        inspectURL: function (_context) {
+          return Promise.resolve({
+            providerId: PROVIDER_ID,
+            providerHost: "bitbucket.example.test",
+            ownerOrProject: "TEAM",
+            repositoryId: "fixture-repository",
+            repositoryName: "fixture",
+            cloneUrl: REPOSITORY_URL,
+            defaultBranch: "main",
+            baseBranch: "main",
+            headBranch: "feature/provider-contract",
+            pullRequest: { number: 42, title: "Provider-neutral contract" },
+          });
+        },
+      });
+
+      registry.registerTaskAction({
+        id: "link-bitbucket-pull-request",
+        label: "Bitbucket Pull Request",
+        icon: FixtureBitbucketIcon,
+        placement: "link",
+        group: "Link",
+        run: openLinkResult,
+      });
+
+      registry.registerReviewProvider({
+        id: PROVIDER_ID,
+        label: "Bitbucket",
+        icon: FixtureBitbucketIcon,
+        changeRequestNoun: "Pull Request",
+        order: 50,
+        getSnapshot: function (taskId) {
+          return [
+            {
+              providerId: PROVIDER_ID,
+              reviewKey: "pull-request-42",
+              title: "Bitbucket Pull Request #42",
+              url: PULL_REQUEST_URL,
+              connectionScope: "https://bitbucket.example.test",
+              repositoryId: "fixture-repository",
+              changeRequestNumber: 42,
+              state: "OPEN",
+              statusBadge: { label: "Open" },
+              taskId: taskId,
+            },
+            {
+              providerId: PROVIDER_ID,
+              reviewKey: "pull-request-43",
+              title: "Bitbucket Pull Request #43",
+              url: "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/43",
+              connectionScope: "https://bitbucket.example.test",
+              repositoryId: "fixture-repository",
+              changeRequestNumber: 43,
+              state: "OPEN",
+              statusBadge: { label: "Open" },
+              taskId: taskId,
+            },
+          ];
+        },
+        subscribe: function () {
+          return function () {};
+        },
+        refresh: function (_taskId, signal) {
+          return abortableRefresh(signal);
+        },
+        ReviewPanel: FixtureReviewPanel,
+        Selector: FixtureReviewSelector,
       });
 
       registry.registerTaskPanel({
@@ -397,7 +606,7 @@
         id: "enhance-notes",
         label: "Enhance notes",
         group: "edit",
-      run: function (context) {
+        run: function (context) {
           return host.storage
             .set("task", context.taskId, "note", "Enhanced via plugin action")
             .then(function () {
@@ -410,7 +619,7 @@
                 context.presentation,
               );
             });
-      },
+        },
       });
 
       registry.registerKeybinding("open-demo", function () {
@@ -427,11 +636,7 @@
             jsx(
               ui.Tooltip,
               null,
-              jsx(
-                ui.TooltipTrigger,
-                { "data-testid": "hello-modal-tooltip-trigger" },
-                "hover me",
-              ),
+              jsx(ui.TooltipTrigger, { "data-testid": "hello-modal-tooltip-trigger" }, "hover me"),
               jsx(ui.TooltipContent, null, "Tooltip inside a plugin modal"),
             ),
           );

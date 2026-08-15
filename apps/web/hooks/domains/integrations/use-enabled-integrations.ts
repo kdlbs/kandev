@@ -24,8 +24,8 @@ export type IntegrationSlug = (typeof WORKSPACE_INTEGRATIONS)[number][0];
  * The predicates are the ones the settings tree used before it flattened into
  * a menu, kept identical so the badge still means what it used to. Note the
  * asymmetry that carries over with them: most read the connection alone, while
- * Sentry's `available` also requires its per-workspace toggle, so a connected
- * Sentry whose toggle is off reports false.
+ * Sentry's `available` also requires that workspace's enable toggle, so a
+ * connected Sentry whose toggle is off reports false.
  */
 export function useEnabledIntegrations(workspaceId: string): ReadonlySet<IntegrationSlug> {
   const azureDevOps = useAzureDevOpsAvailable(workspaceId);

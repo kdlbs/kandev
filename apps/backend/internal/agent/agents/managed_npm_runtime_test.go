@@ -59,6 +59,63 @@ func TestManagedNPMRuntimeExecutionCacheKeyMatchesNPM(t *testing.T) {
 	}
 }
 
+func TestManagedNPMRuntimeBuildsExactVersionCommandsAndCacheKey(t *testing.T) {
+	spec := ManagedNPMRuntimeSpec{
+		Package: "opencode-ai",
+		ACPArgs: []string{"acp", "--print-logs"},
+	}
+	wantACP := []string{"npx", "--yes", "--prefer-offline", "opencode-ai@1.18.5", "acp", "--print-logs"}
+	if got := spec.ACPCommand("1.18.5").Args(); !slices.Equal(got, wantACP) {
+		t.Fatalf("ACPCommand = %#v, want %#v", got, wantACP)
+	}
+	wantUpdate := []string{
+		"npm", "exec", "--yes", "--prefer-online",
+		"--package=opencode-ai@1.18.5", "--", "node", "-e", "",
+	}
+	if got := spec.CacheUpdateCommand("1.18.5").Args(); !slices.Equal(got, wantUpdate) {
+		t.Fatalf("CacheUpdateCommand = %#v, want %#v", got, wantUpdate)
+	}
+	if got := spec.ExecutionCacheKey("1.18.5"); got != "cd439a892fc193b3" {
+		t.Fatalf("versioned ExecutionCacheKey = %q, want cd439a892fc193b3", got)
+	}
+}
+
+func TestManagedNPMRuntimeExactVersionSupportsScopedPackages(t *testing.T) {
+	spec := ManagedNPMRuntimeSpec{Package: "@scope/managed-acp", ACPArgs: []string{"--acp"}}
+	want := []string{"npx", "--yes", "--prefer-offline", "@scope/managed-acp@3.4.5", "--acp"}
+	if got := spec.ACPCommand("3.4.5").Args(); !slices.Equal(got, want) {
+		t.Fatalf("scoped ACPCommand = %#v, want %#v", got, want)
+	}
+	if spec.ExecutionCacheKey("3.4.5") == spec.ExecutionCacheKey() {
+		t.Fatal("versioned scoped cache key equals legacy key")
+	}
+}
+
+func TestManagedAgentsHonorExactVersionCommandOption(t *testing.T) {
+	tests := []struct {
+		name  string
+		agent ManagedNPMRuntimeAgent
+	}{
+		{"claude", NewClaudeACP()},
+		{"codex", NewCodexACP()},
+		{"opencode", NewOpenCodeACP()},
+		{"copilot", NewCopilotACP()},
+		{"gemini", NewGemini()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version := "1.2.3"
+			want := tt.agent.ManagedNPMRuntime().ACPCommand(version).Args()
+			got := tt.agent.(interface {
+				BuildCommand(CommandOptions) Command
+			}).BuildCommand(CommandOptions{ManagedRuntimeVersion: version}).Args()
+			if !slices.Equal(got, want) {
+				t.Fatalf("exact BuildCommand = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
 func assertUnversionedPackage(t *testing.T, argv []string, wantPackage string) {
 	t.Helper()
 	packageArg := argv[3]

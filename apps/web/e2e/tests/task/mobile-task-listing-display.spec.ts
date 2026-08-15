@@ -70,6 +70,7 @@ test.describe("Mobile task listing display preferences", () => {
     );
     await testPage.goto("/");
     await expect(testPage.getByTestId("mobile-kanban-layout")).toBeVisible();
+    await expect(testPage.getByTestId("app-sidebar-layout")).toBeHidden();
     await expect(
       testPage.evaluate((key) => window.localStorage.getItem(key), VIEW_STORAGE_KEY),
     ).resolves.toBe(JSON.stringify("pipeline"));

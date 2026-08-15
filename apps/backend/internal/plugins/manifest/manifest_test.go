@@ -124,6 +124,239 @@ func TestValidate_ValidManifestPasses(t *testing.T) {
 	}
 }
 
+func TestValidate_RejectsActionWithUnknownResourceScope(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - key: connection.get
+    resource_scope: user
+    max_body_bytes: 1024
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for an action with an unknown resource scope, got nil")
+	}
+}
+
+func TestValidate_RejectsDuplicateActionKeys(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - key: connection.get
+    resource_scope: workspace
+    max_body_bytes: 1024
+  - key: connection.get
+    resource_scope: workspace
+    max_body_bytes: 1024
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for duplicate action keys, got nil")
+	}
+}
+
+func TestParseActionUsesDocumentedScopeField(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - key: connection.get
+    scope: workspace
+    max_body_bytes: 1024
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error for documented action scope: %v", err)
+	}
+	if got := m.Actions[0].ResourceScope; got != "workspace" {
+		t.Fatalf("action scope = %q, want workspace", got)
+	}
+}
+
+func TestValidate_RejectsActionWithoutBodyLimit(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - key: connection.get
+    resource_scope: workspace
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for an unbounded action body, got nil")
+	}
+}
+
+func TestValidate_RejectsActionWithoutKey(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - resource_scope: workspace
+    max_body_bytes: 1024
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for action without a key, got nil")
+	}
+}
+
+func TestValidate_RejectsRouteUnsafeActionKey(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - key: pullrequests/link
+    scope: workspace
+    max_body_bytes: 1024
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "action key") {
+		t.Fatalf("Validate() error = %v, want route-safe action key rejection", err)
+	}
+}
+
+func TestValidate_RejectsDuplicateRepositoryProvider(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+repository_providers: [bitbucket, bitbucket]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for duplicate repository providers, got nil")
+	}
+}
+
+func TestValidate_RejectsRepositoryProvidersThatCollideAfterNormalization(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+repository_providers: [Bitbucket, bitbucket]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for case-insensitive duplicate repository providers, got nil")
+	}
+}
+
+func TestValidate_RejectsNonCanonicalRepositoryProviderID(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+repository_providers: [Bitbucket]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "lowercase") {
+		t.Fatalf("Validate() error = %v, want canonical lowercase provider rejection", err)
+	}
+}
+
+func TestValidate_RejectsRepositoryProviderWithSurroundingWhitespace(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+repository_providers: [" bitbucket "]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for repository provider with surrounding whitespace, got nil")
+	}
+}
+
+func TestValidate_RejectsDuplicateReferenceSource(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+reference_sources:
+  - source: bitbucket
+    provider: bitbucket
+    kind: pull_request
+    display_name: Bitbucket
+    kind_label: Pull request
+  - source: bitbucket
+    provider: bitbucket
+    kind: build
+    display_name: Bitbucket
+    kind_label: Build
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for duplicate reference sources, got nil")
+	}
+}
+
+func TestValidate_RejectsDuplicateReferenceProviderKind(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+reference_sources:
+  - source: bitbucket_pull_requests
+    provider: bitbucket
+    kind: pull_request
+    display_name: Bitbucket
+    kind_label: Pull request
+  - source: bitbucket_prs
+    provider: bitbucket
+    kind: pull_request
+    display_name: Bitbucket
+    kind_label: Pull request
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil {
+		t.Fatal("Validate() expected error for duplicate reference provider/kind, got nil")
+	}
+}
+
+func TestValidate_RejectsReferenceIdentityThatMentionRegistryCannotNormalize(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+reference_sources:
+  - source: bitbucket_pull_requests
+    provider: Bitbucket
+    kind: pull_request
+    display_name: Bitbucket
+    kind_label: Pull request
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "lowercase") {
+		t.Fatalf("Validate() error = %v, want canonical reference identity rejection", err)
+	}
+}
+
+func TestValidate_RejectsWhitespaceOnlyReferenceLabel(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+reference_sources:
+  - source: bitbucket_pull_requests
+    provider: bitbucket
+    kind: pull_request
+    display_name: "   "
+    kind_label: Pull request
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "display_name") {
+		t.Fatalf("Validate() error = %v, want invalid reference label rejection", err)
+	}
+}
+
 func TestParse_AgentToolDeclarationIsRetained(t *testing.T) {
 	yaml := validManifestYAML + `
 agent_tools:

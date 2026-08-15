@@ -85,6 +85,7 @@ vi.mock("@/components/task-create-dialog-repo-chips", () => ({
 }));
 
 vi.mock("@/hooks/use-task-create-dialog-popover-container", () => ({
+  useTaskCreateDialogPopoverContainer: () => null,
   TaskCreateDialogPopoverContainerProvider: ({ children }: { children: ReactNode }) => (
     <>{children}</>
   ),
@@ -231,6 +232,8 @@ vi.mock("@/components/task-create-dialog-state", () => ({
 
 function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   return {
+    blockedBy: [],
+    setBlockedBy: () => undefined,
     taskName: "Task title",
     autopilot: false,
     setAutopilot: () => undefined,
@@ -287,6 +290,7 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     prInfoByUrl: {
       info: () => undefined,
       loading: () => false,
+      settled: () => true,
       error: () => undefined,
       ensure: () => undefined,
       clear: () => undefined,

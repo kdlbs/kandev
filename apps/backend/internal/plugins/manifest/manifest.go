@@ -4,7 +4,15 @@
 // POST /api/plugins/register.
 package manifest
 
-import "gopkg.in/yaml.v3"
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
+// MaxActionBodyBytes is the largest request body an authenticated action may
+// declare. Individual actions must still declare their own smaller bound.
+const MaxActionBodyBytes = 1 << 20
 
 // Manifest is the plugin registration manifest.
 type Manifest struct {
@@ -38,6 +46,12 @@ type Manifest struct {
 	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
 
 	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
+	Actions  []Action  `yaml:"actions,omitempty" json:"actions,omitempty"`
+	// RepositoryProviders declares provider IDs this plugin owns while active.
+	// Ownership is checked across active plugins by the runtime registry.
+	RepositoryProviders []string `yaml:"repository_providers,omitempty" json:"repository_providers,omitempty"`
+	// ReferenceSources declares composer sources this plugin owns while active.
+	ReferenceSources []ReferenceSource `yaml:"reference_sources,omitempty" json:"reference_sources,omitempty"`
 
 	// AuthProviders declares external login options (OIDC/SAML) this plugin
 	// contributes to the pre-auth login screen. Only meaningful alongside
@@ -166,6 +180,58 @@ func (w Webhook) EffectiveMaxBodyBytes() int64 {
 		return DefaultWebhookMaxBodyBytes
 	}
 	return w.MaxBodyBytes
+}
+
+// Action is an authenticated browser-to-plugin operation. Unlike Webhook,
+// actions always pass through Kandev's normal request authentication and
+// resource authorization before reaching the plugin.
+type Action struct {
+	Key           string `yaml:"key" json:"key"`
+	ResourceScope string `yaml:"scope" json:"scope"`
+	MaxBodyBytes  int    `yaml:"max_body_bytes" json:"max_body_bytes"`
+}
+
+const (
+	ActionScopeWorkspace  = "workspace"
+	ActionScopeTask       = "task"
+	ActionScopeRepository = "repository"
+)
+
+// UnmarshalYAML accepts the frozen manifest field name (scope) and the
+// pre-release resource_scope spelling so stored local plugin records remain
+// readable through the contract correction. Marshal paths emit scope only.
+func (a *Action) UnmarshalYAML(value *yaml.Node) error {
+	var raw struct {
+		Key                 string `yaml:"key"`
+		Scope               string `yaml:"scope"`
+		LegacyResourceScope string `yaml:"resource_scope"`
+		MaxBodyBytes        int    `yaml:"max_body_bytes"`
+	}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	if raw.Scope != "" && raw.LegacyResourceScope != "" && raw.Scope != raw.LegacyResourceScope {
+		return fmt.Errorf("action scope and resource_scope disagree")
+	}
+	a.Key = raw.Key
+	a.ResourceScope = raw.Scope
+	if a.ResourceScope == "" {
+		a.ResourceScope = raw.LegacyResourceScope
+	}
+	a.MaxBodyBytes = raw.MaxBodyBytes
+	return nil
+}
+
+// ReferenceSource describes one plugin-owned entity-reference source. The
+// host owns canonical reference construction and validates every use through
+// the live plugin; these fields describe presentation and routing only.
+type ReferenceSource struct {
+	Source      string `yaml:"source" json:"source"`
+	Provider    string `yaml:"provider" json:"provider"`
+	Kind        string `yaml:"kind" json:"kind"`
+	DisplayName string `yaml:"display_name" json:"display_name"`
+	KindLabel   string `yaml:"kind_label" json:"kind_label"`
+	Order       int    `yaml:"order,omitempty" json:"order,omitempty"`
 }
 
 // UISection declares UI pages the plugin contributes, and/or a native UI

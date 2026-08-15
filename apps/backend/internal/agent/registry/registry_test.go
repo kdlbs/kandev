@@ -406,7 +406,7 @@ func TestResolveFamilyIDsReportsEveryAmbiguousCandidate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := NewRegistry(newTestLogger())
 			reg.LoadDefaults()
-			if err := reg.RegisterCustomTUIAgent(tc.slug, tc.displayName, "claude-tui", "", "", nil); err != nil {
+			if err := reg.RegisterCustomTUIAgent(CustomTUIAgentSpec{Slug: tc.slug, DisplayName: tc.displayName, Command: "claude-tui", Description: "", Model: ""}); err != nil {
 				t.Fatalf("register custom agent: %v", err)
 			}
 

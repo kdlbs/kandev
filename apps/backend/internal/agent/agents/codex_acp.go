@@ -96,7 +96,7 @@ func (a *CodexACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *CodexACP) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().CachedACPCommand()
+	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
 }
 
 func (a *CodexACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {

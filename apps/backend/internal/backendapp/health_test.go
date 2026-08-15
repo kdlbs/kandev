@@ -44,10 +44,10 @@ func TestHealthHandlerReadyBodyIncludesVersion(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if body["version"] != "1.2.3" {
-		t.Fatalf("version = %v, want 1.2.3", body["version"])
+	if body[versionFieldKey] != "1.2.3" {
+		t.Fatalf("version = %v, want 1.2.3", body[versionFieldKey])
 	}
-	if body["status"] != "ok" || body["service"] != "kandev" || body["mode"] != "websocket+http" {
+	if body["status"] != "ok" || body["service"] != kandevName || body["mode"] != "websocket+http" {
 		t.Fatalf("unexpected ready body: %#v", body)
 	}
 	if len(body) != 4 {
@@ -75,10 +75,10 @@ func TestHealthHandlerStartingBodyIncludesVersion(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if body["version"] != "1.2.3" {
-		t.Fatalf("version = %v, want 1.2.3", body["version"])
+	if body[versionFieldKey] != "1.2.3" {
+		t.Fatalf("version = %v, want 1.2.3", body[versionFieldKey])
 	}
-	if body["status"] != "starting" || body["service"] != "kandev" {
+	if body["status"] != startingStatus || body["service"] != kandevName {
 		t.Fatalf("unexpected starting body: %#v", body)
 	}
 	if len(body) != 3 {
@@ -144,8 +144,8 @@ func TestHealthHandlerVersionMatchesSystemInfoVersion(t *testing.T) {
 		t.Fatalf("decode info body: %v", err)
 	}
 
-	if healthBody["version"] != infoBody.Version {
-		t.Fatalf("health version = %v, system/info version = %v, want equal", healthBody["version"], infoBody.Version)
+	if healthBody[versionFieldKey] != infoBody.Version {
+		t.Fatalf("health version = %v, system/info version = %v, want equal", healthBody[versionFieldKey], infoBody.Version)
 	}
 }
 
@@ -213,7 +213,7 @@ func TestHealthHandlerFallsBackToPackageVersionWhenParamEmpty(t *testing.T) {
 		ready bool
 	}{
 		{name: "ready", ready: true},
-		{name: "starting", ready: false},
+		{name: startingStatus, ready: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setReadyForTest(t, tc.ready)
@@ -224,8 +224,8 @@ func TestHealthHandlerFallsBackToPackageVersionWhenParamEmpty(t *testing.T) {
 			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 				t.Fatalf("decode body: %v", err)
 			}
-			if body["version"] != "9.9.9-fallback-test" {
-				t.Fatalf("version = %v, want fallback to package-level Version %q", body["version"], "9.9.9-fallback-test")
+			if body[versionFieldKey] != "9.9.9-fallback-test" {
+				t.Fatalf("version = %v, want fallback to package-level Version %q", body[versionFieldKey], "9.9.9-fallback-test")
 			}
 		})
 	}
@@ -258,8 +258,8 @@ func TestHealthHandlerAuthEnabledServesVersionWithoutCredential(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if body["version"] != "1.2.3" {
-		t.Fatalf("version = %v, want 1.2.3", body["version"])
+	if body[versionFieldKey] != "1.2.3" {
+		t.Fatalf("version = %v, want 1.2.3", body[versionFieldKey])
 	}
 	if body["status"] != "ok" {
 		t.Fatalf("status field = %v, want ok", body["status"])

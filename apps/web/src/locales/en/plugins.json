@@ -61,6 +61,7 @@
   "override": "override",
   "packageUrl": "Package URL",
   "pluginInstalled": "{{name}} installed",
+  "pluginDialog": "Plugin dialog",
   "pluginPageFailedToLoad": "This plugin page failed to load.",
   "pluginsAvailable_one": "{{count}} plugin available",
   "pluginsAvailable_other": "{{count}} plugins available",

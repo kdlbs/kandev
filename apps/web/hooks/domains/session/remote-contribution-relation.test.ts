@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyRemoteContribution,
+  remoteContributionActionReasonKey,
   remoteContributionActionPolicy,
   type RemoteContributionRelationInput,
 } from "./remote-contribution-relation";
@@ -54,6 +55,16 @@ const classificationCases = [
       remoteBehind: 1,
     },
     expected: { kind: "provider_ahead", canPush: false, canPull: true },
+  },
+  {
+    name: "provider ahead without a configured upstream",
+    overrides: {
+      providerCommits: [{ sha: PROVIDER_BASE }, { sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
+      upstreamHead: null,
+      hasUpstream: false,
+      baseAhead: 0,
+    },
+    expected: { kind: "provider_ahead", canPush: false, canPull: false },
   },
   {
     name: "rewritten provider history",
@@ -227,6 +238,33 @@ describe("remoteContributionActionPolicy", () => {
     });
   });
 
+  it("leaves the Pull reason empty when provider-ahead has an upstream", () => {
+    const relation = classifyRemoteContribution(
+      input({
+        providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
+        remoteBehind: 1,
+      }),
+    );
+
+    expect(remoteContributionActionReasonKey(relation, "pull")).toBeNull();
+  });
+
+  it("does not offer Pull for provider-ahead without an upstream", () => {
+    const relation = classifyRemoteContribution(
+      input({
+        providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
+        upstreamHead: null,
+        hasUpstream: false,
+      }),
+    );
+
+    expect(remoteContributionActionPolicy(relation)).toMatchObject({
+      action: "provider_ahead_pull",
+      pushDisabled: true,
+      pullDisabled: true,
+    });
+  });
+
   it("keeps normal push behavior for local-ahead history", () => {
     const relation = classifyRemoteContribution(input({ remoteAhead: 2 }));
 
@@ -245,11 +283,44 @@ describe("remoteContributionActionPolicy", () => {
 
     expect(remoteContributionActionPolicy(relation)).toEqual({
       action: "unavailable_evidence",
-      pushDisabled: false,
-      pullDisabled: false,
+      pushDisabled: true,
+      pullDisabled: true,
       replaceDisabled: true,
       useDisabled: true,
       disabledReason: "provider_evidence_unavailable",
     });
+  });
+});
+
+describe("remoteContributionActionReasonKey", () => {
+  it("returns action-specific disabled reason keys", () => {
+    const providerAhead = classifyRemoteContribution(
+      input({
+        providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
+        upstreamHead: null,
+        hasUpstream: false,
+      }),
+    );
+    const diverged = classifyRemoteContribution(
+      input({
+        providerCommits: [{ sha: REWRITTEN_HEAD }],
+        upstreamHead: REWRITTEN_HEAD,
+        remoteAhead: 1,
+        remoteBehind: 1,
+      }),
+    );
+
+    expect(remoteContributionActionReasonKey(providerAhead, "push")).toBe(
+      "task:providerAheadPushDisabled",
+    );
+    expect(remoteContributionActionReasonKey(providerAhead, "pull")).toBe(
+      "task:providerAheadPullRequiresUpstream",
+    );
+    expect(remoteContributionActionReasonKey(diverged, "pull")).toBe(
+      "task:divergedActionsUnavailable",
+    );
+
+    const unavailable = classifyRemoteContribution(input({ providerLoading: true }));
+    expect(remoteContributionActionReasonKey(unavailable, "push")).toBe("task:providerUnavailable");
   });
 });

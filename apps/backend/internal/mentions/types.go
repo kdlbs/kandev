@@ -167,3 +167,16 @@ type MentionProvider interface {
 	Descriptor() ProviderDescriptor
 	Search(context.Context, SearchRequest) ([]Candidate, error)
 }
+
+// SourceRegistrar materializes dynamic mention providers into one registry.
+// Implementations must register only descriptors they own.
+type SourceRegistrar interface {
+	RegisterMentionSources(*Registry) error
+}
+
+// SourceRefresher updates dynamic providers before a registry snapshot or
+// authorization lookup. Refresh failures must leave the previous registry
+// state intact so callers fail closed through the existing provider boundary.
+type SourceRefresher interface {
+	RefreshMentionSources()
+}

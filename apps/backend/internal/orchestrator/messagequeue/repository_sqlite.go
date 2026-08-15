@@ -571,11 +571,14 @@ func (r *sqliteRepository) CountPendingByTaskIDs(ctx context.Context, taskIDs []
 	if len(taskIDs) == 0 {
 		return counts, nil
 	}
+	// Join task_sessions so rows left on deleted sessions cannot inflate the
+	// sidebar badge. Pre-fix session deletes left orphans keyed only by task_id.
 	query, args, err := sqlx.In(`
-		SELECT id, session_id, task_id, position, content, model, plan_mode,
-		       attachments_json, metadata_json, queued_at, queued_by
-		FROM queued_messages
-		WHERE task_id IN (?)
+		SELECT q.id, q.session_id, q.task_id, q.position, q.content, q.model, q.plan_mode,
+		       q.attachments_json, q.metadata_json, q.queued_at, q.queued_by
+		FROM queued_messages q
+		INNER JOIN task_sessions s ON s.id = q.session_id
+		WHERE q.task_id IN (?)
 	`, taskIDs)
 	if err != nil {
 		return nil, fmt.Errorf("count pending by task ids: %w", err)
@@ -1317,6 +1320,52 @@ func (r *sqliteRepository) MergeIntoAbove(ctx context.Context, sessionID, source
 	merged.Attachments = attachments
 	merged.Metadata = metadata
 	return &merged, nil
+}
+
+// AutoMergeIntoAbove folds one exact source into its immediate compatible
+// predecessor in one transaction. Missing or incompatible candidates are
+// successful skips and leave storage unchanged.
+func (r *sqliteRepository) AutoMergeIntoAbove(ctx context.Context, sessionID, sourceID string) (*QueuedMessage, bool, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin automatic merge tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	source, err := readMergeSource(ctx, r, tx, sessionID, sourceID)
+	if errors.Is(err, ErrEntryNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position)
+	if errors.Is(err, ErrNoMergeTarget) {
+		return source, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	values, compatible := buildAutoMergedEntry(target, source)
+	if !compatible {
+		return source, false, nil
+	}
+	if err := applyMergeWrites(ctx, r, tx, target, source, values.content, values.attachments, values.metadata, sessionID); err != nil {
+		if errors.Is(err, ErrEntryNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	target.Content = values.content
+	target.Attachments = values.attachments
+	target.Metadata = values.metadata
+	return target, true, nil
 }
 
 // ReorderEntries atomically rewrites the FIFO positions of the session's

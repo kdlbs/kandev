@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -395,6 +396,39 @@ func TestAttachmentOpenClaimedAuthorizesByBinding(t *testing.T) {
 	}
 	if _, _, _, _, err := svc.OpenClaimed(ctx, attachment.ID, "task-1", "sess-1"); !errors.Is(err, ErrAttachmentNotFound) {
 		t.Fatalf("missing bytes = %v, want ErrAttachmentNotFound", err)
+	}
+}
+
+func TestAttachmentOpenClaimedAllowsAuthorizedTaskReader(t *testing.T) {
+	svc, _, _, _ := newAttachmentTestService(t)
+	ctx := context.Background()
+	attachment := stageTestAttachment(t, svc, "user-a", "shared.png", "payload")
+	if err := svc.Claim(ctx, "user-a", "ws-att", "task-1", "sess-1", []string{attachment.ID}); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+
+	svc.SetTaskAuthorizer(func(ctx context.Context, taskID string) error {
+		identity, ok := authn.IdentityFromContext(ctx)
+		if !ok || identity.UserID != "user-b" || taskID != "task-1" {
+			return ErrAttachmentForbidden
+		}
+		return nil
+	})
+	_, reader, err := svc.Open(ctxAs("user-b"), "user-b", attachment.ID)
+	if err != nil {
+		t.Fatalf("authorized transcript reader Open: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read claimed attachment: %v", err)
+	}
+	if string(content) != "payload" {
+		t.Fatalf("content = %q, want payload", content)
+	}
+
+	if _, _, err := svc.Open(ctxAs("user-c"), "user-c", attachment.ID); !errors.Is(err, ErrAttachmentForbidden) {
+		t.Fatalf("unauthorized transcript reader Open = %v, want ErrAttachmentForbidden", err)
 	}
 }
 

@@ -21,6 +21,11 @@ test.describe("MCP-created task agent profile default on mobile", () => {
     ).toBeVisible();
     await expect(testPage.getByText("create_task_kandev", { exact: true })).toBeVisible();
     await expect(testPage.getByText("spawn_session_kandev", { exact: true })).toBeVisible();
+    await expect(testPage.getByText(/effective model, mode, and options/i)).toBeVisible();
+    await expect(testPage.getByText(/workflow-selected profiles win first/i)).toBeVisible();
+    await expect(
+      testPage.getByText(/skips the creating session and source or parent task profiles/i),
+    ).toBeVisible();
 
     await testPage.getByRole("button", { name: "About affected Kandev MCP tools" }).tap();
     await expect(testPage.getByRole("tooltip")).toContainText(
@@ -28,7 +33,7 @@ test.describe("MCP-created task agent profile default on mobile", () => {
     );
     await testPage.getByRole("heading", { name: "Task Actions", exact: true }).tap();
 
-    const currentTask = testPage.getByRole("radio", { name: "Current task profile" });
+    const currentTask = testPage.getByRole("radio", { name: "Creating session profile" });
     const workspaceDefault = testPage.getByRole("radio", {
       name: "Workspace default profile",
     });

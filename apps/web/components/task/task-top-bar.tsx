@@ -21,6 +21,7 @@ import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
+import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { isDebugUI } from "@/lib/config";
 import { useTranslation } from "react-i18next";
 
@@ -209,6 +210,7 @@ function DebugOverlayToggle({
 }
 
 function AttentionStatusGroup({
+  taskId,
   activeSessionId,
   isArchived,
   workspaceId,
@@ -216,6 +218,7 @@ function AttentionStatusGroup({
   issueUrl,
   issueNumber,
 }: {
+  taskId?: string | null;
   activeSessionId?: string | null;
   isArchived?: boolean;
   workspaceId?: string | null;
@@ -246,6 +249,11 @@ function AttentionStatusGroup({
           <GitHubIssueTopbarButton issueUrl={issueUrl} issueNumber={issueNumber} />
           <PRTopbarButton />
           <MRTopbarButton />
+          <RegisteredChangeRequestStatus
+            taskId={taskId ?? null}
+            sessionId={activeSessionId}
+            surface="topbar"
+          />
           <IssueTrackerButtons workspaceId={workspaceId} taskTitle={taskTitle} />
         </>
       )}
@@ -388,6 +396,7 @@ function TopBarRight({
         </TopbarCluster>
       )}
       <AttentionStatusGroup
+        taskId={taskId}
         activeSessionId={activeSessionId}
         isArchived={isArchived}
         workspaceId={workspaceId}

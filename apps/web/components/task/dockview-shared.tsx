@@ -121,6 +121,7 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   todos: PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
+  "review-detail": PortalSlot,
   // Generic component every plugin-contributed task panel shares (Approach
   // A1) — panel identity lives in params.pluginId/params.panelKey, resolved
   // by PluginTaskPanel. See lib/state/layout-manager/plugin-panels.ts.
@@ -214,6 +215,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     <TaskChatPanel
       sessionId={sessionId}
       taskId={sessionId ? taskId : null}
+      statusTaskId={taskId}
       onOpenFile={openFile}
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
@@ -402,6 +404,9 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
   "pr-detail": (panelId, params) => (
+    <ReviewDetailPanelComponent panelId={panelId} params={params} />
+  ),
+  "review-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),
   "mr-detail": (panelId, params) => (

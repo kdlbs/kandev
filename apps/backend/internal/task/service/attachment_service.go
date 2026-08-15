@@ -58,6 +58,7 @@ type AttachmentService struct {
 	repo               repository.AttachmentRepository
 	root               string
 	authorizeWorkspace func(context.Context, string) error
+	authorizeTask      func(context.Context, string) error
 	log                *logger.Logger
 }
 
@@ -76,6 +77,13 @@ func NewAttachmentService(repo repository.AttachmentRepository, root string, aut
 
 func (s *AttachmentService) ensureRoot() error {
 	return os.MkdirAll(s.root, 0o700)
+}
+
+// SetTaskAuthorizer wires the per-user task visibility check used to serve
+// claimed attachments to transcript readers. Staged attachments remain
+// owner-only; claimed attachments are authorized through their owning task.
+func (s *AttachmentService) SetTaskAuthorizer(authorizer func(context.Context, string) error) {
+	s.authorizeTask = authorizer
 }
 
 // Stage writes one raw file to a temporary file, validates its exact byte
@@ -187,9 +195,27 @@ func (s *AttachmentService) Get(ctx context.Context, ownerID, id string) (*model
 }
 
 func (s *AttachmentService) Open(ctx context.Context, ownerID, id string) (*models.TaskMessageAttachment, *os.File, error) {
-	attachment, err := s.Get(ctx, ownerID, id)
+	attachment, err := s.repo.GetMessageAttachment(ctx, id)
 	if err != nil {
 		return nil, nil, err
+	}
+	if attachment == nil {
+		return nil, nil, ErrAttachmentForbidden
+	}
+	switch attachment.State {
+	case models.AttachmentStateStaged:
+		if attachment.OwnerID != ownerID {
+			return nil, nil, ErrAttachmentForbidden
+		}
+	case models.AttachmentStateClaimed:
+		if attachment.TaskID == "" || s.authorizeTask == nil {
+			return nil, nil, ErrAttachmentForbidden
+		}
+		if err := s.authorizeTask(ctx, attachment.TaskID); err != nil {
+			return nil, nil, ErrAttachmentForbidden
+		}
+	default:
+		return nil, nil, ErrAttachmentForbidden
 	}
 	if filepath.Base(attachment.StorageKey) != attachment.StorageKey || attachment.StorageKey == "" {
 		return nil, nil, ErrAttachmentInvalid

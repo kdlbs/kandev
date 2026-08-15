@@ -69,6 +69,19 @@ repos:
         files: ^apps/web/(components|app|hooks|lib|src)/.*\.tsx?$|^apps/web/eslint\.i18n\.options\.mjs$
         pass_filenames: false
 
+      # New E2E waits must name their cause, or name a category and a reason via
+      # dwell()/injectLatency(). Raw page.waitForTimeout() and hand-rolled
+      # promise sleeps are the suite's most reliable source of flake. Same
+      # judge-the-change contract as the i18n hook above: added files whole,
+      # modified files only on touched lines, so the ~126 sleeps that predate it
+      # never block an unrelated commit.
+      - id: e2e-sleep-ratchet
+        name: E2E sleep guard (new code only)
+        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; cd apps/web && node scripts/check-new-e2e-sleeps.mjs'
+        language: system
+        files: ^apps/web/e2e/.*\.tsx?$|^apps/web/eslint-rules/no-unsanctioned-sleep\.mjs$
+        pass_filenames: false
+
   # Public copy hooks
   - repo: local
     hooks:

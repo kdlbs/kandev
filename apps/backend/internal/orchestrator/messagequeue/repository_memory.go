@@ -660,6 +660,44 @@ func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID
 	return &merged, nil
 }
 
+// AutoMergeIntoAbove folds one exact source into its immediate compatible
+// predecessor. Incompatibility and missing candidates are successful skips.
+func (r *memoryRepository) AutoMergeIntoAbove(_ context.Context, sessionID, sourceID string) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	list := r.entries[sessionID]
+	sourceIndex := -1
+	for index, message := range list {
+		if message.ID == sourceID {
+			sourceIndex = index
+			break
+		}
+	}
+	if sourceIndex < 0 {
+		return nil, false, nil
+	}
+	source := list[sourceIndex]
+	var target *QueuedMessage
+	for _, message := range list {
+		if message.Position < source.Position && (target == nil || message.Position > target.Position) {
+			target = message
+		}
+	}
+	if target == nil {
+		return cloneQueuedMessage(source), false, nil
+	}
+	values, compatible := buildAutoMergedEntry(target, source)
+	if !compatible {
+		return cloneQueuedMessage(source), false, nil
+	}
+	target.Content = values.content
+	target.Attachments = values.attachments
+	target.Metadata = values.metadata
+	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
+	return cloneQueuedMessage(target), true, nil
+}
+
 // ReorderEntries rewrites the session's visible pending order to match
 // orderedIDs, mirroring the sqlite repository's semantics: reserved in-flight
 // rows keep their place in the sequence, visible rows appear in the submitted

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -18,10 +19,13 @@ import (
 
 // TaskEventData contains data from task events
 type TaskEventData struct {
-	TaskID   string        `json:"task_id"`
-	Task     *v1.Task      `json:"task,omitempty"`
-	OldState *v1.TaskState `json:"old_state,omitempty"`
-	NewState *v1.TaskState `json:"new_state,omitempty"`
+	TaskID          string        `json:"task_id"`
+	Task            *v1.Task      `json:"task,omitempty"`
+	OldState        *v1.TaskState `json:"old_state,omitempty"`
+	NewState        *v1.TaskState `json:"new_state,omitempty"`
+	WIPAdmitted     bool          `json:"wip_admitted"`
+	QueuedForStepID string        `json:"queued_for_step_id,omitempty"`
+	QueuedAt        *time.Time    `json:"queued_at,omitempty"`
 }
 
 // AgentEventData contains data from agent events
@@ -65,12 +69,16 @@ type GitEventData = lifecycle.GitEventPayload
 
 // TaskMovedEventData contains data from task.moved events (manual step changes).
 type TaskMovedEventData struct {
-	TaskID          string `json:"task_id"`
-	FromStepID      string `json:"from_step_id"`
-	ToStepID        string `json:"to_step_id"`
-	SessionID       string `json:"session_id"`
-	WorkflowID      string `json:"workflow_id"`
-	TaskDescription string `json:"task_description"`
+	TaskID          string     `json:"task_id"`
+	FromStepID      string     `json:"from_step_id"`
+	ToStepID        string     `json:"to_step_id"`
+	SessionID       string     `json:"session_id"`
+	WorkflowID      string     `json:"workflow_id"`
+	TaskDescription string     `json:"task_description"`
+	WIPAdmitted     bool       `json:"wip_admitted"`
+	QueuedForStepID string     `json:"queued_for_step_id,omitempty"`
+	QueuedAt        *time.Time `json:"queued_at,omitempty"`
+	QueuePromotion  bool       `json:"queue_promotion,omitempty"`
 }
 
 // ContextWindowData contains data from context window events

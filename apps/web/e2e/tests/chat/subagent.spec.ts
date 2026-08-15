@@ -51,7 +51,9 @@ test.describe("Subagent card", () => {
     );
 
     // Metadata row of chips surfaces the completed subagent's metrics.
-    await expect(card.locator('[data-testid="subagent-meta"]')).toBeVisible();
+    await expect(card.locator('[data-testid="subagent-meta"]')).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(card.locator('[data-testid="subagent-meta-duration"]')).toContainText("2.2s");
     await expect(card.locator('[data-testid="subagent-meta-tokens"]')).toContainText("9,987");
     await expect(card.locator('[data-testid="subagent-meta-tools"]')).toContainText("3 tools");

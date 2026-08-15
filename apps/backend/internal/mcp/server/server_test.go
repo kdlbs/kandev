@@ -644,7 +644,7 @@ drained:
 	// as in TestServerModeTask_ToolCount and
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
-	require.Len(t, tools, 33, "final registry should contain the complete GitLab-only task tool set")
+	require.Len(t, tools, 35, "final registry should contain the complete GitLab-only task tool set")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
 }
@@ -812,7 +812,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	// list_task_sessions + PR automation + MR automation) + 1 add_branch_to_task +
 	// 1 add_workspace_sources + 1 update_repository_base_branch +
 	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
-	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle = 35.
+	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle
+	// + 2 task-dependency (add/remove) = 37.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
@@ -820,7 +821,9 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "spawn_session_kandev", "spawn_session must be registered in task mode")
 	assert.Contains(t, tools, "add_workspace_sources_kandev")
 	assert.Contains(t, tools, "list_task_sessions_kandev", "session discovery must be registered in task mode")
-	assert.Equal(t, 35, len(tools))
+	assert.Contains(t, tools, "add_task_dependency_kandev", "dependency edges must be manageable in task mode")
+	assert.Contains(t, tools, "remove_task_dependency_kandev")
+	assert.Equal(t, 37, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
@@ -984,6 +987,8 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, createTask.Tool.Description, "current_task")
 	assert.Contains(t, createTask.Tool.Description, "workspace_default")
 	assert.Contains(t, createTask.Tool.Description, "workflow profiles first")
+	assert.Contains(t, createTask.Tool.Description, "no creating session")
+	assert.Contains(t, createTask.Tool.Description, "parent task profile")
 
 	// External mode does NOT include session-scoped tools
 	assert.NotContains(t, tools, "ask_user_question_kandev")
@@ -1007,9 +1012,9 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task = 33.
+	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency = 35.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 33, len(tools))
+	assert.Equal(t, 35, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 

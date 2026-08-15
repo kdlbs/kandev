@@ -2,9 +2,7 @@ package github
 
 import (
 	"context"
-	"crypto/sha256"
 	"testing"
-	"time"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -121,7 +119,7 @@ func TestHandleTaskDeletedRevokesCredentialLeases(t *testing.T) {
 	if err := svc.handleTaskDeleted(context.Background(), event); err != nil {
 		t.Fatalf("handleTaskDeleted: %v", err)
 	}
-	if got := len(broker.leases); got != 0 {
+	if got := broker.ActiveLeaseCount(); got != 0 {
 		t.Fatalf("lease records = %d, want 0", got)
 	}
 }
@@ -200,7 +198,7 @@ func TestHandleWorkspaceDeletedRevokesCredentialLeasesWithoutSecretStore(t *test
 	if err := svc.handleWorkspaceDeleted(context.Background(), event); err != nil {
 		t.Fatalf("handleWorkspaceDeleted: %v", err)
 	}
-	if got := len(broker.leases); got != 0 {
+	if got := broker.ActiveLeaseCount(); got != 0 {
 		t.Fatalf("lease records = %d, want 0", got)
 	}
 }
@@ -220,7 +218,7 @@ func TestSubscribeTaskEventsTerminalSessionRevokesCredentialLease(t *testing.T) 
 	if err := svc.eventBus.Publish(context.Background(), events.TaskSessionStateChanged, event); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	if got := len(broker.leases); got != 0 {
+	if got := broker.ActiveLeaseCount(); got != 0 {
 		t.Fatalf("lease records = %d, want 0", got)
 	}
 }
@@ -265,16 +263,18 @@ func mustCreateWatch(t *testing.T, store *Store, sessionID, taskID string) {
 }
 
 func revocationTestBroker(workspaceID, taskID, sessionID string) *CredentialBroker {
-	hash := sha256.Sum256([]byte(workspaceID + taskID + sessionID))
-	return &CredentialBroker{
-		leases: map[[sha256.Size]byte]credentialLeaseRecord{
-			hash: {
-				WorkspaceID: workspaceID,
-				TaskID:      taskID,
-				SessionID:   sessionID,
-				ExpiresAt:   time.Now().Add(time.Hour),
-			},
-		},
-		now: time.Now,
+	connection := &WorkspaceConnection{
+		WorkspaceID: workspaceID, Source: ConnectionSourcePAT, Status: ConnectionStatusActive,
 	}
+	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{workspaceID: connection}}
+	broker := NewCredentialBroker(connections, NewCredentialResolver(connections, fakeAuthSecrets{
+		WorkspacePATSecretKey(workspaceID): "transient",
+	}), &fakeBrokerAuthorizer{})
+	if _, err := broker.Issue(context.Background(), CredentialLeaseRequest{
+		WorkspaceID: workspaceID, TaskID: taskID, SessionID: sessionID, RepositoryID: "repository-1",
+		Owner: "owner", Repo: "repo", Host: defaultGitHubHost,
+	}); err != nil {
+		panic(err)
+	}
+	return broker
 }

@@ -15,6 +15,7 @@ import type { RunEventAppendedPayload } from "./run-events";
 export type { RunEventAppendedPayload } from "./run-events";
 
 import type {
+  Agent,
   AvailableAgent,
   ForegroundActivity,
   TaskPendingAction,
@@ -118,6 +119,15 @@ export type AgentUpdatePayload = {
   agentId: string;
   status: "idle" | "running" | "error";
   message?: string;
+};
+
+/**
+ * A full agent settings record after an agent-level settings change (e.g. a
+ * custom TUI agent's MCP strategy). Distinct from AgentUpdatePayload, which is
+ * the runtime status ping.
+ */
+export type AgentSettingsUpdatedPayload = {
+  agent: Agent;
 };
 
 export type AgentAvailableUpdatedPayload = {
@@ -345,6 +355,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     >;
     "task.plan.reverted": BackendMessage<"task.plan.reverted", TaskPlanRevisionEventPayload>;
     "agent.updated": BackendMessage<"agent.updated", AgentUpdatePayload>;
+    "agent.settings.updated": BackendMessage<"agent.settings.updated", AgentSettingsUpdatedPayload>;
     "agent.available.updated": BackendMessage<
       "agent.available.updated",
       AgentAvailableUpdatedPayload

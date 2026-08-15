@@ -285,6 +285,8 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
 // Bumping the prefix invalidates legacy saves so every env opens at the
 // preset defaults once, then resumes per-env persistence. Bumped to v3 to
 // discard layouts captured with the now-removed dockview sidebar column.
+// Mirrored (deliberately, see below) by LAYOUT_KEY_PREFIX in
+// `apps/web/e2e/helpers/dockview-persistence.ts`; bump both together.
 const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout-v3.";
 
 // A serialized Dockview layout is geometry, not evidence of an intentional

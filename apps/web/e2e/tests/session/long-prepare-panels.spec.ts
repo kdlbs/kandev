@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { dwell } from "../../helpers/causal-waits";
 
 /**
  * Regression: when workspace preparation takes longer than the file-tree
@@ -58,12 +59,15 @@ test.describe("Long prepare (slow git fetch)", () => {
       await expect(fileTreeWaiting).toBeVisible({ timeout: 15_000 });
       await expect(fileTreeManual).toHaveCount(0);
 
-      // Wait past the pre-fix retry budget (1+2+5+10 = 18s). The file tree
-      // must NOT have transitioned to the "manual" (Load Files) state —
-      // that's the regression. On faster CI runners the 22s fetch may already
-      // have completed by the time this assertion runs, so do not require the
-      // waiting state to still be visible here.
-      await testPage.waitForTimeout(19_000);
+      // On faster CI runners the 22s fetch may already have completed by the
+      // time the assertion below runs, so it does not require the waiting state
+      // to still be visible.
+      await dwell(
+        testPage,
+        19_000,
+        "product-timer",
+        "outlasts our own 1+2+5+10s file-tree retry ladder; the regression under test is the tree falling back to its manual state when that budget expires, and the expiry renders nothing to signal it",
+      );
       await expect(fileTreeManual).toHaveCount(0);
 
       // Fetch eventually returns, worktree creation proceeds, agentctl

@@ -9,7 +9,10 @@ import { LineStat } from "@/components/diff-stat";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useRemoteContributionRelation } from "@/hooks/domains/session/use-remote-contribution-relation";
-import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
+import {
+  remoteContributionActionPolicy,
+  remoteContributionActionReasonKey,
+} from "@/hooks/domains/session/remote-contribution-relation";
 import {
   CommitDialog,
   PRDialog,
@@ -302,6 +305,73 @@ type MobileTopBarActionsProps = {
   onMenuClick: () => void;
 };
 
+type MobileTopBarGitActionsProps = Pick<
+  MobileTopBarActionsProps,
+  | "sessionId"
+  | "isGitLoading"
+  | "uncommittedCount"
+  | "baseBranch"
+  | "onCommitClick"
+  | "onPRClick"
+  | "onPull"
+  | "onPush"
+  | "onRebase"
+  | "onMerge"
+>;
+
+function MobileTopBarGitActions(props: MobileTopBarGitActionsProps) {
+  const { t } = useTranslation();
+  const {
+    remoteActionPolicy,
+    resolution,
+    resolutionTarget,
+    requestReplace,
+    requestUse,
+    viewPRVersion,
+    confirmResolution,
+  } = useMobileContributionResolutionActions(props.sessionId);
+  const pushDisabledReasonKey = remoteContributionActionReasonKey(
+    remoteActionPolicy.relation,
+    "push",
+  );
+  const pullDisabledReasonKey = remoteContributionActionReasonKey(
+    remoteActionPolicy.relation,
+    "pull",
+  );
+  return (
+    <>
+      <GitActionsDropdown
+        sessionId={props.sessionId}
+        isGitLoading={props.isGitLoading}
+        uncommittedCount={props.uncommittedCount}
+        baseBranch={props.baseBranch}
+        onCommitClick={props.onCommitClick}
+        onPRClick={props.onPRClick}
+        onPull={props.onPull}
+        onPush={props.onPush}
+        onRebase={props.onRebase}
+        onMerge={props.onMerge}
+        pushDisabled={remoteActionPolicy.pushDisabled}
+        pullDisabled={remoteActionPolicy.pullDisabled}
+        pushDisabledReason={pushDisabledReasonKey ? t(pushDisabledReasonKey) : undefined}
+        pullDisabledReason={pullDisabledReasonKey ? t(pullDisabledReasonKey) : undefined}
+        showContributionResolution={remoteActionPolicy.action === "diverged_replace"}
+        replaceDisabled={remoteActionPolicy.replaceDisabled}
+        useDisabled={remoteActionPolicy.useDisabled}
+        onReplaceContribution={requestReplace}
+        onUseContribution={requestUse}
+        onViewPRVersion={viewPRVersion}
+        prNumber={remoteActionPolicy.selectedPR?.pr_number}
+      />
+      <MobileResolutionDrawer
+        resolution={resolution}
+        resolutionTarget={resolutionTarget}
+        confirmResolution={confirmResolution}
+      />
+    </>
+  );
+}
+
 function MobileTopBarActions({
   taskId,
   workspaceId,
@@ -329,15 +399,6 @@ function MobileTopBarActions({
   onMenuClick,
 }: MobileTopBarActionsProps) {
   const { t } = useTranslation();
-  const {
-    remoteActionPolicy,
-    resolution,
-    resolutionTarget,
-    requestReplace,
-    requestUse,
-    viewPRVersion,
-    confirmResolution,
-  } = useMobileContributionResolutionActions(sessionId);
   return (
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
@@ -363,7 +424,7 @@ function MobileTopBarActions({
         />
       )}
       {showApproveButton && onApprove && <ApproveButton onApprove={onApprove} />}
-      <GitActionsDropdown
+      <MobileTopBarGitActions
         sessionId={sessionId}
         isGitLoading={isGitLoading}
         uncommittedCount={uncommittedCount}
@@ -374,20 +435,6 @@ function MobileTopBarActions({
         onPush={onPush}
         onRebase={onRebase}
         onMerge={onMerge}
-        pushDisabled={remoteActionPolicy.pushDisabled}
-        pullDisabled={remoteActionPolicy.pullDisabled}
-        showContributionResolution={remoteActionPolicy.action === "diverged_replace"}
-        replaceDisabled={remoteActionPolicy.replaceDisabled}
-        useDisabled={remoteActionPolicy.useDisabled}
-        onReplaceContribution={requestReplace}
-        onUseContribution={requestUse}
-        onViewPRVersion={viewPRVersion}
-        prNumber={remoteActionPolicy.selectedPR?.pr_number}
-      />
-      <MobileResolutionDrawer
-        resolution={resolution}
-        resolutionTarget={resolutionTarget}
-        confirmResolution={confirmResolution}
       />
       <Button
         variant="ghost"

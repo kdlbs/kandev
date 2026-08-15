@@ -18,7 +18,11 @@ import { useSubtaskCount } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
 import { StillWorkingWarning } from "./task-still-working-warning";
-import { TASK_CONFIRM_CLASS, stopDialogPropagation } from "./task-confirm-dialog-shared";
+import {
+  TASK_CONFIRM_CLASS,
+  TASK_CONFIRM_HEADER_CLASS,
+  stopDialogPropagation,
+} from "./task-confirm-dialog-shared";
 import { useTranslation } from "react-i18next";
 
 type TaskArchiveConfirmDialogProps = {
@@ -131,7 +135,7 @@ export function TaskArchiveConfirmDialog({
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
       <AlertDialogContent size="lg" className={TASK_CONFIRM_CLASS} onClick={stopDialogPropagation}>
-        <AlertDialogHeader>
+        <AlertDialogHeader className={TASK_CONFIRM_HEADER_CLASS}>
           <AlertDialogTitle className="text-base font-semibold">{title}</AlertDialogTitle>
           <AlertDialogDescription asChild className="text-sm leading-6">
             <div>

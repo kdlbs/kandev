@@ -1,12 +1,14 @@
 package plugins
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -29,13 +31,35 @@ import (
 // worst-case memory use per request.
 const maxWebhookBodyBytes = manifest.DefaultWebhookMaxBodyBytes
 
+const (
+	// maxPluginActionEnvelopeBytes bounds the complete browser request before
+	// its declared action-specific body cap is available. The small allowance
+	// covers the resource selectors and JSON envelope around the largest legal
+	// action body without allowing arbitrary envelope growth.
+	maxPluginActionEnvelopeBytes = manifest.MaxActionBodyBytes + 4096
+	maxPluginActionResponseBytes = 1 << 20 // 1 MiB
+	contentTypeHeader            = "Content-Type"
+)
+
+var pluginActionTimeout = 15 * time.Second
+
+// actionInvoker is deliberately narrower than Service so the HTTP boundary
+// can be tested without a subprocess while production dispatch remains the
+// Service's runtime-mediated RPC call.
+type actionInvoker interface {
+	InvokeAction(
+		context.Context, string, pluginDispatchGeneration, *pluginsdk.PluginActionRequest,
+	) (*pluginsdk.PluginActionResponse, error)
+}
+
 // Controller holds the plugin HTTP handlers: operator-facing management
 // (install/list/get/config/uninstall/enable/disable), the bundle/UI
 // static-file serving (from the extracted package on disk), and the
 // external webhook relay (HTTP -> Host RPC over the live subprocess).
 type Controller struct {
-	svc *Service
-	log *logger.Logger
+	svc           *Service
+	log           *logger.Logger
+	actionInvoker actionInvoker
 }
 
 // RegisterRoutes wires the plugin HTTP surface. deliverer is accepted for
@@ -43,10 +67,10 @@ type Controller struct {
 // alongside this call) — no handler in this file calls it directly, since
 // Service already notifies it on every install/status change.
 func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.Logger) {
-	ctrl := &Controller{svc: svc, log: log}
+	ctrl := &Controller{svc: svc, log: log, actionInvoker: svc}
 
 	api := router.Group("/api/plugins")
-	api.POST("/install", ctrl.install)
+	api.POST("/install", authn.RequireAdmin(), ctrl.install)
 	api.POST("/sync", ctrl.sync)
 	// Register the static /marketplace and /settings routes before the /:id
 	// wildcard, matching the /install and /sync ordering — some gin/httprouter
@@ -66,6 +90,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 
 	api.GET("/:id/bundle", ctrl.bundle)
 	api.GET("/:id/ui/*path", ctrl.ui)
+	api.POST("/:id/actions/:key", ctrl.action)
 	// Registered before the /:id/webhooks/:key wildcard for the same reason
 	// /settings is registered before /:id above: some gin/httprouter tree
 	// versions reject a static-ish sibling added after an existing wildcard.
@@ -349,7 +374,7 @@ func (c *Controller) ui(ctx *gin.Context) {
 // auto-detects when the header is unset).
 func serveInstalledFile(ctx *gin.Context, root, relPath, contentType string) {
 	if contentType != "" {
-		ctx.Writer.Header().Set("Content-Type", contentType)
+		ctx.Writer.Header().Set(contentTypeHeader, contentType)
 	}
 	req := ctx.Request.Clone(ctx.Request.Context())
 	req.URL.Path = relPath

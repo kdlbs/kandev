@@ -160,6 +160,9 @@ jobs:
       - name: Run typecheck
         run: pnpm --filter @kandev/web typecheck
 
+      - name: Verify standalone plugin SDK contract
+        run: pnpm --filter @kandev/plugin-sdk test && pnpm --filter @kandev/plugin-sdk typecheck
+
       # Unlike the eslint literal-string guard (scoped to already-migrated paths
       # via i18nGuardFiles), these five checks scan components/app/hooks/lib
       # repo-wide. Each one pins a class of i18n bug that fails silently at
@@ -206,7 +209,49 @@ jobs:
 
           node scripts/run-i18n-ratchet.mjs --base "${BASE_SHA}"
 
+      # New-code ratchet for E2E waits. `page.waitForTimeout(500)` and
+      # hand-rolled promise sleeps are the suite's most reliable source of flake:
+      # a hand-picked number that was long enough on the machine it was written
+      # on. The sanctioned forms (`dwell`, `injectLatency` in
+      # e2e/helpers/causal-waits.ts) take a category and a reason.
+      #
+      # The eslint rule is an error only on directories already converted to
+      # zero, so this judges the CHANGE instead of the FILE for everywhere else —
+      # added files whole, modified files only on touched lines. Same base
+      # handling as the i18n step above, and the same reason for it: DO NOT pass
+      # --base on pull_request.
+      - name: Run E2E sleep ratchet
+        shell: bash
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            node scripts/check-new-e2e-sleeps.mjs
+            exit 0
+          fi
+
+          BASE_SHA="${{ github.event.before }}"
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            echo "No usable base SHA; skipping the E2E sleep ratchet."
+            exit 0
+          fi
+
+          node scripts/check-new-e2e-sleeps.mjs --base "${BASE_SHA}"
+
+      # Deliberately run under the variable that broke the suite, so a
+      # regression fails here instead of only in a container. React exports
+      # `act()` from its development build alone, `vitest.config.ts` pins
+      # `NODE_ENV=test` to force that build, and this image sets no NODE_ENV of
+      # its own — so without this line CI would pass with the pin deleted while
+      # every `render()` throws `TypeError: React.act is not a function` for
+      # anyone whose shell inherits the runtime image's `NODE_ENV=production`
+      # (`Dockerfile`). That gap is exactly how the breakage went unnoticed.
+      # Scoped to this step: `pnpm install` above must keep seeing devDependencies
+      # through its own resolution, not through `apps/.npmrc`'s `production=false`.
       - name: Run tests
+        env:
+          NODE_ENV: production
         run: pnpm --filter @kandev/web test
 
       - name: Build

@@ -1,5 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { settledBoundingBox } from "../../helpers/settled-box";
+import { dwell } from "../../helpers/causal-waits";
 
 /**
  * Touch-drags a task row's handle onto a nest drop zone via CDP touch events.
@@ -15,29 +17,27 @@ async function touchDragRowToNestZone(
   handleLocator: ReturnType<Page["locator"]>,
   zoneLocator: ReturnType<Page["locator"]>,
 ) {
-  await handleLocator.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(100);
-  const handleBox = await handleLocator.boundingBox();
-  if (!handleBox) throw new Error("drag source handle has no bounding box");
+  const handleBox = await settledBoundingBox(handleLocator);
   const startX = handleBox.x + handleBox.width / 2;
   const startY = handleBox.y + handleBox.height / 2;
   await cdp.send("Input.dispatchTouchEvent", {
     type: "touchStart",
     touchPoints: [{ x: startX, y: startY }],
   });
-  // Hold still past the sensor delay, then move past the 5px tolerance to
-  // activate the drag.
-  await page.waitForTimeout(350);
+  await dwell(
+    page,
+    350,
+    "library-timer",
+    "dnd-kit's TouchSensor arms a 250ms activation timer on touchStart and only starts the drag if the touch is still held when it fires; nothing renders while that timer runs",
+  );
   await cdp.send("Input.dispatchTouchEvent", {
     type: "touchMove",
     touchPoints: [{ x: startX + 14, y: startY }],
   });
-  await page.waitForTimeout(50);
+  // The zone appearing is the signal that the drag went live, and asserting
+  // it is itself the wait -- no settle needed before or after.
   await expect(zoneLocator).toBeVisible();
-  await zoneLocator.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(50);
-  const to = await zoneLocator.boundingBox();
-  if (!to) throw new Error("nest drop zone has no bounding box");
+  const to = await settledBoundingBox(zoneLocator);
   const endX = to.x + to.width / 2;
   const endY = to.y + to.height / 2;
   for (let i = 1; i <= 10; i++) {

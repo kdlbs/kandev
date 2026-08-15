@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { buildExtraPanelActions } from "./dockview-panel-actions";
+import { buildExtraPanelActions, reviewPanelId } from "./dockview-panel-actions";
 import { CENTER_GROUP } from "./layout-manager";
 import { makeApi, makeStore } from "./dockview-panel-actions.test-utils";
 import type { MockPanel } from "./dockview-panel-actions.test-utils";
+
+const PR_DETAILS_TITLE = "PR Details";
 
 describe("addPRPanel — dedup with legacy auto-shown panel", () => {
   const PR_KEY = "testorg/testrepo/101";
@@ -265,5 +267,90 @@ describe("addPluginPanel / closePluginPanels", () => {
 
     expect(api.getPanel(PLUGIN_PANEL_ID)).toBeUndefined();
     expect(api.getPanel("plugin:kandev-plugin-other:widget")).toBeDefined();
+  });
+});
+
+describe("addReviewPanel", () => {
+  const providerId = "bitbucket";
+  const reviewKey = "project/repository/42";
+  const repositoryId = "repository-uuid";
+  const connectionScope = "https://bitbucket.example.test";
+  const changeRequestNumber = 42;
+  const title = "Bitbucket Pull Request";
+  const review = {
+    providerId,
+    reviewKey,
+    connectionScope,
+    repositoryId,
+    changeRequestNumber,
+    title,
+  };
+  const panelId = reviewPanelId(review);
+
+  it("opens a provider-neutral panel with normalized params in the canonical review group", () => {
+    const api = makeApi();
+    const actions = buildExtraPanelActions(makeStore(api).get);
+    api.addPanel({
+      id: "pr-detail",
+      component: "pr-detail",
+      title: PR_DETAILS_TITLE,
+      position: { referenceGroup: "provider-review-group" },
+    });
+
+    actions.addReviewPanel(review);
+
+    const panel = api.getPanel(panelId) as unknown as MockPanel;
+    expect(panel.title).toBe(title);
+    expect(panel.params).toEqual({
+      providerId,
+      reviewKey,
+      connectionScope,
+      repositoryId,
+      changeRequestNumber,
+    });
+    expect(panel.group.id).toBe("provider-review-group");
+  });
+
+  it("focuses the canonical review panel when it already renders the requested review", () => {
+    const api = makeApi();
+    const actions = buildExtraPanelActions(makeStore(api).get);
+    api.addPanel({
+      id: "pr-detail",
+      component: "pr-detail",
+      title: PR_DETAILS_TITLE,
+      params: { providerId, reviewKey, connectionScope, repositoryId, changeRequestNumber },
+    });
+
+    actions.addReviewPanel(review);
+
+    expect((api.getPanel("pr-detail") as unknown as MockPanel).isActive).toBe(true);
+    expect(api.getPanel(panelId)).toBeUndefined();
+  });
+
+  it("does not collide when provider IDs or review keys contain panel delimiters", () => {
+    const api = makeApi();
+    const actions = buildExtraPanelActions(makeStore(api).get);
+
+    const first = {
+      providerId: "a|b",
+      reviewKey: "mutable",
+      connectionScope: "https://one.example.test",
+      repositoryId: "c",
+      changeRequestNumber: 1,
+      title: "First",
+    };
+    const second = {
+      providerId: "a",
+      reviewKey: "mutable",
+      connectionScope: "https://two.example.test",
+      repositoryId: "b|c",
+      changeRequestNumber: 1,
+      title: "Second",
+    };
+    actions.addReviewPanel(first);
+    actions.addReviewPanel(second);
+
+    expect(api.getPanel(reviewPanelId(first))).toBeDefined();
+    expect(api.getPanel(reviewPanelId(second))).toBeDefined();
   });
 });
