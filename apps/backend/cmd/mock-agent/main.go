@@ -315,6 +315,12 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleOverloaded(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
+	// Same rationale as /overloaded above: /transport-lost must also surface a
+	// real prompt-time ACP error, so it is intercepted here rather than routed
+	// through handlePrompt's emitter.
+	if resp, err, handled := a.handleTransportLost(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}
 	handlePrompt(e, prompt, a.model)
 	if promptCtx.Err() != nil {
