@@ -31,6 +31,18 @@ async function createSecretFromSettings(
   await expect(page.locator("body")).not.toContainText(value);
 }
 
+/** Selects a workspace by its exact name in the open destination picker. */
+async function selectWorkspaceDestination(
+  page: import("@playwright/test").Page,
+  dialog: import("@playwright/test").Locator,
+  workspaceName: string,
+) {
+  const destination = dialog.getByRole("combobox", { name: "Destination" });
+  await expect(destination).toBeVisible();
+  await destination.click();
+  await page.getByRole("listbox").getByRole("option", { name: workspaceName, exact: true }).click();
+}
+
 /**
  * Opens the copy/move dialog for a named secret and submits through the
  * dialog's OWN primary button (never the settings floating Save control).
@@ -39,12 +51,16 @@ async function submitCopyMove(
   page: import("@playwright/test").Page,
   secretName: string,
   mode: "Copy" | "Move",
+  destinationWorkspaceName?: string,
 ): Promise<SecretListItem> {
   await page.getByRole("button", { name: `Copy or move ${secretName}` }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   if (mode === "Move") {
     await dialog.getByRole("radio", { name: /Move/ }).click();
+  }
+  if (destinationWorkspaceName) {
+    await selectWorkspaceDestination(page, dialog, destinationWorkspaceName);
   }
   const transferResponse = waitForHttp(page, "POST", /\/api\/v1\/secrets\/[^/]+\/(?:copy|move)$/, {
     predicate: (response) => response.status() === 201,
@@ -87,11 +103,16 @@ test.describe("secrets-copy-move", () => {
   }) => {
     const sourceName = `E2E Copy Move Global Copy ${runToken()}`;
     const copiedName = `${sourceName} (from Global)`;
+    const workspaces = await apiClient.listWorkspaces();
+    const workspaceName = workspaces.workspaces.find(
+      (workspace) => workspace.id === seedData.workspaceId,
+    )?.name;
+    expect(workspaceName).toBeTruthy();
     await createSecretFromSettings(testPage, "/settings/general/secrets", sourceName, GLOBAL_VALUE);
     const global = (await apiClient.listSecrets()).find((secret) => secret.name === sourceName);
     expect(global?.id).toBeTruthy();
 
-    const transferred = await submitCopyMove(testPage, sourceName, "Copy");
+    const transferred = await submitCopyMove(testPage, sourceName, "Copy", workspaceName!);
     expect(transferred).toMatchObject({
       name: copiedName,
       scope: "workspace",
@@ -153,9 +174,14 @@ test.describe("secrets-copy-move", () => {
   }) => {
     const sourceName = `E2E Copy Move Global Move ${runToken()}`;
     const movedName = `${sourceName} (from Global)`;
+    const workspaces = await apiClient.listWorkspaces();
+    const workspaceName = workspaces.workspaces.find(
+      (workspace) => workspace.id === seedData.workspaceId,
+    )?.name;
+    expect(workspaceName).toBeTruthy();
     await createSecretFromSettings(testPage, "/settings/general/secrets", sourceName, GLOBAL_VALUE);
 
-    await submitCopyMove(testPage, sourceName, "Move");
+    await submitCopyMove(testPage, sourceName, "Move", workspaceName!);
 
     await expect(testPage.getByText(sourceName, { exact: true })).toHaveCount(0);
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/secrets`);
@@ -172,6 +198,7 @@ test.describe("secrets-copy-move", () => {
 
   test("blocks a duplicate target name and marks the name field invalid", async ({
     testPage,
+    apiClient,
     seedData,
   }) => {
     const sourceName = `E2E Copy Move Conflict Source ${runToken()}`;
@@ -183,11 +210,17 @@ test.describe("secrets-copy-move", () => {
       conflictingName,
       WORKSPACE_VALUE,
     );
+    const workspaces = await apiClient.listWorkspaces();
+    const workspaceName = workspaces.workspaces.find(
+      (workspace) => workspace.id === seedData.workspaceId,
+    )?.name;
+    expect(workspaceName).toBeTruthy();
 
     await testPage.goto("/settings/general/secrets");
     await testPage.getByRole("button", { name: `Copy or move ${sourceName}` }).click();
     const dialog = testPage.getByRole("dialog");
     await expect(dialog).toBeVisible();
+    await selectWorkspaceDestination(testPage, dialog, workspaceName!);
 
     const nameInput = dialog.getByLabel("Name");
     await expect(nameInput).toHaveValue(conflictingName);
