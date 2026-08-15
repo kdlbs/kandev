@@ -6,7 +6,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/clarification";
-import { waitForSessionState } from "../../helpers/session";
+import { waitForSessionDone, waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 type ClarificationMessage = {
@@ -125,6 +125,13 @@ test.describe("Sidebar pending-question indicator without opening the task", () 
         return messages.some((message) => message.content?.includes("post-skip turn completed"));
       })
       .toBe(true);
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "post-skip turn should complete before reload",
+      60_000,
+    );
 
     await testPage.reload();
     await session.waitForLoad();
