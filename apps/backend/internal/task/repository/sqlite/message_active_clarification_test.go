@@ -2,11 +2,37 @@ package sqlite
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func createClarificationBundleMessage(
+	t *testing.T,
+	repo *Repository,
+	id, taskID, sessionID, turnID, pendingID, questionID string,
+	createdAt time.Time,
+) {
+	t.Helper()
+	if err := repo.CreateMessage(context.Background(), &models.Message{
+		ID:            id,
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypeClarificationRequest,
+		Metadata: map[string]interface{}{
+			"pending_id":  pendingID,
+			"question_id": questionID,
+			"status":      "pending",
+		},
+		CreatedAt: createdAt,
+	}); err != nil {
+		t.Fatalf("CreateMessage(%s): %v", id, err)
+	}
+}
 
 func seedPendingActionSession(t *testing.T, repo *Repository, taskID, sessionID string) {
 	t.Helper()
@@ -114,5 +140,92 @@ func TestFindActiveClarificationMessagesUsesDeterministicTurnTieBreak(t *testing
 	}
 	if len(got) != 0 {
 		t.Fatalf("turn id descending tie-break did not select turn-z: %v", messageIDs(got))
+	}
+}
+
+func TestCompleteActiveClarificationBundleClaimsExactlyOnce(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 12, 0, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-claim", "session-claim")
+	createPendingActionTurn(t, repo, "task-claim", "session-claim", "turn-claim", base, base)
+	createClarificationBundleMessage(t, repo, "message-q1", "task-claim", "session-claim", "turn-claim", "pending-claim", "q1", base)
+	createClarificationBundleMessage(t, repo, "message-q2", "task-claim", "session-claim", "turn-claim", "pending-claim", "q2", base.Add(time.Nanosecond))
+
+	responses := map[string]interface{}{
+		"q1": map[string]interface{}{"question_id": "q1", "custom_text": "first"},
+		"q2": map[string]interface{}{"question_id": "q2", "custom_text": "second"},
+	}
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, claimed, err := repo.CompleteActiveClarificationBundle(ctx, "pending-claim", "answered", responses)
+			results <- claimed
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	claims := 0
+	for claimed := range results {
+		if claimed {
+			claims++
+		}
+	}
+	if claims != 1 {
+		t.Fatalf("successful claims = %d, want 1", claims)
+	}
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("CompleteActiveClarificationBundle: %v", err)
+		}
+	}
+	for _, id := range []string{"message-q1", "message-q2"} {
+		message, err := repo.GetMessage(ctx, id)
+		if err != nil {
+			t.Fatalf("GetMessage(%s): %v", id, err)
+		}
+		if message.Metadata["status"] != "answered" {
+			t.Fatalf("%s status = %v, want answered", id, message.Metadata["status"])
+		}
+		if message.Metadata["response"] == nil {
+			t.Fatalf("%s response was not persisted", id)
+		}
+	}
+}
+
+func TestCompleteActiveClarificationBundleRejectsSupersededTurn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 13, 0, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-superseded", "session-superseded")
+	createPendingActionTurn(t, repo, "task-superseded", "session-superseded", "turn-old", base, base)
+	createClarificationBundleMessage(t, repo, "message-old", "task-superseded", "session-superseded", "turn-old", "pending-old", "q1", base)
+	createPendingActionTurn(t, repo, "task-superseded", "session-superseded", "turn-new", base.Add(time.Second), base.Add(time.Second))
+
+	_, claimed, err := repo.CompleteActiveClarificationBundle(ctx, "pending-old", "answered", map[string]interface{}{
+		"q1": map[string]interface{}{"question_id": "q1"},
+	})
+	if err != nil {
+		t.Fatalf("CompleteActiveClarificationBundle: %v", err)
+	}
+	if claimed {
+		t.Fatal("superseded clarification bundle was claimed")
+	}
+	message, err := repo.GetMessage(ctx, "message-old")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if message.Metadata["status"] != "pending" {
+		t.Fatalf("status = %v, want pending", message.Metadata["status"])
 	}
 }

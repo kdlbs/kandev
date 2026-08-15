@@ -20,6 +20,10 @@ const (
 	messageCreateRetryDelay = 50 * time.Millisecond
 )
 
+type activeClarificationBundleCompleter interface {
+	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
+}
+
 // CreateMessage creates a new message on an agent session
 func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) (*models.Message, error) {
 	messageID := uuid.New().String()
@@ -776,4 +780,25 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 		zap.String("status", status))
 
 	return nil
+}
+
+// CompleteActiveClarificationBundle atomically transitions a detached,
+// current-turn bundle and publishes message updates only for the winning claim.
+func (s *Service) CompleteActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+) (bool, error) {
+	completer, ok := s.messages.(activeClarificationBundleCompleter)
+	if !ok {
+		return false, errors.New("message repository does not support atomic clarification completion")
+	}
+	messages, claimed, err := completer.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
+	if err != nil || !claimed {
+		return claimed, err
+	}
+	for _, message := range messages {
+		s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	}
+	return true, nil
 }

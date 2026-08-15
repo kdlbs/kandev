@@ -17,14 +17,28 @@ export function isPendingClarificationMessage(message: Message): boolean {
   return !metadata?.status || metadata.status === "pending";
 }
 
+function durableTurnTimestampKey(value: string): string {
+  const match = /^(.*T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/.exec(value);
+  if (!match) return value;
+  return `${match[1]}.${(match[2] ?? "").padEnd(9, "0")}Z`;
+}
+
 export function newestDurableTurnId(turns?: readonly Turn[]): string | null | undefined {
   if (turns === undefined) return undefined;
   if (turns.length === 0) return null;
   let newest = turns[0];
   for (let index = 1; index < turns.length; index++) {
     const candidate = turns[index];
-    const newestKey = [newest.started_at, newest.created_at, newest.id];
-    const candidateKey = [candidate.started_at, candidate.created_at, candidate.id];
+    const newestKey = [
+      durableTurnTimestampKey(newest.started_at),
+      durableTurnTimestampKey(newest.created_at),
+      newest.id,
+    ];
+    const candidateKey = [
+      durableTurnTimestampKey(candidate.started_at),
+      durableTurnTimestampKey(candidate.created_at),
+      candidate.id,
+    ];
     for (let part = 0; part < candidateKey.length; part++) {
       if (candidateKey[part] === newestKey[part]) continue;
       if (candidateKey[part] > newestKey[part]) newest = candidate;

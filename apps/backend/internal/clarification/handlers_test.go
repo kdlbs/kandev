@@ -25,6 +25,7 @@ type stubMessageCreator struct {
 		status     string
 	}
 	created [][]Question
+	repo    *stubMessageStore
 }
 
 func (s *stubMessageCreator) CreateClarificationRequestMessages(
@@ -49,13 +50,51 @@ func (s *stubMessageCreator) UpdateClarificationMessage(
 	return nil
 }
 
+func (s *stubMessageCreator) CompleteActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+) (bool, error) {
+	msgs := s.repo.messages[pendingID]
+	if len(msgs) == 0 {
+		return false, nil
+	}
+	active, err := s.repo.FindActiveClarificationMessagesBySessionID(ctx, msgs[0].TaskSessionID)
+	if err != nil {
+		return false, err
+	}
+	activeBundle := false
+	for _, message := range active {
+		if stringFromMetadata(message.Metadata, "pending_id") == pendingID {
+			activeBundle = true
+			break
+		}
+	}
+	if !activeBundle {
+		return false, nil
+	}
+	for _, message := range msgs {
+		questionID := stringFromMetadata(message.Metadata, "question_id")
+		message.Metadata["status"] = status
+		if response, ok := responses[questionID]; ok && response != nil {
+			message.Metadata["response"] = response
+		}
+		s.updates = append(s.updates, struct {
+			pendingID  string
+			questionID string
+			status     string
+		}{pendingID, questionID, status})
+	}
+	return true, nil
+}
+
 func setupTestHandler(t *testing.T, msgs map[string][]*taskmodels.Message) (*Handlers, *stubMessageStore, *stubEventBus, *stubMessageCreator) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	store := NewStore(time.Minute)
 	repo := &stubMessageStore{messages: msgs}
 	eventBus := &stubEventBus{}
-	messageCreator := &stubMessageCreator{}
+	messageCreator := &stubMessageCreator{repo: repo}
 	h := NewHandlers(store, nil, messageCreator, repo, eventBus, logger.Default())
 	return h, repo, eventBus, messageCreator
 }
@@ -174,6 +213,35 @@ func TestHttpRespond_AnsweredAfterTimeout_PublishesEvent(t *testing.T) {
 	}
 	if len(messageCreator.updates) != 1 || messageCreator.updates[0].status != "answered" {
 		t.Errorf("detached answer updates = %+v, want one answered write", messageCreator.updates)
+	}
+}
+
+func TestHttpRespond_DetachedAnswerPublishesOnlyForWinningClaim(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{
+		"pending-race": {{
+			ID: "message-race", TaskID: "task-race", TaskSessionID: "session-race",
+			Metadata: map[string]any{
+				"status": "pending", "pending_id": "pending-race", "question_id": "q1",
+				"question": map[string]any{"id": "q1", "prompt": "Continue?"},
+			},
+		}},
+	}
+	h, _, eventBus, _ := setupTestHandler(t, msgs)
+	body := RespondBody{Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}}}
+
+	first := runRespond(t, h, "pending-race", body)
+	second := runRespond(t, h, "pending-race", body)
+	if first.Code != http.StatusOK || second.Code != http.StatusConflict {
+		t.Fatalf("response statuses = (%d, %d), want (200, 409)", first.Code, second.Code)
+	}
+	answeredEvents := 0
+	for _, event := range eventBus.events {
+		if event.Type == events.ClarificationAnswered {
+			answeredEvents++
+		}
+	}
+	if answeredEvents != 1 {
+		t.Fatalf("ClarificationAnswered events = %d, want 1", answeredEvents)
 	}
 }
 

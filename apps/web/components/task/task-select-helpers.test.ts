@@ -316,6 +316,30 @@ describe("selectTaskWithLayout pending summary authority", () => {
     await flushTaskSelection();
     expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, OTHER_SESSION_ID);
   });
+
+  it("falls back to the target session when pending-session loading fails", async () => {
+    const store = makeKanbanStore({
+      activeSessionId: OTHER_SESSION_ID,
+      envIds: { [PRIMARY]: PRIMARY_ENV_ID },
+    });
+    const switchToSession = vi.fn();
+
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: { primarySessionId: PRIMARY, taskPendingAction: "clarification" },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+      setActiveTask: vi.fn(),
+      setPreparingTaskId: vi.fn(),
+    });
+
+    await flushTaskSelection();
+    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, OTHER_SESSION_ID);
+    expect(replaceTaskUrl).toHaveBeenCalledWith(TASK_ID);
+  });
 });
 
 describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {

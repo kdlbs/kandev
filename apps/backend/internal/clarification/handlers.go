@@ -52,6 +52,9 @@ type MessageCreator interface {
 	// status (and stores the matching answer if any) for a (pending_id, question_id)
 	// pair within the session.
 	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *Answer) error
+	// CompleteActiveClarificationBundle atomically transitions a detached bundle
+	// only when it still belongs to the session's current durable turn.
+	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) (bool, error)
 }
 
 // EventBus interface for publishing events.
@@ -303,23 +306,46 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		return
 	}
 
-	active, activeErr := h.fallbackBundleIsActive(c.Request.Context(), pendingID)
-	if activeErr != nil {
-		h.logger.Error("failed to validate clarification fallback ownership",
-			zap.String("pending_id", pendingID),
-			zap.Error(activeErr))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate clarification state"})
-		return
-	}
-	if !active {
-		c.JSON(http.StatusConflict, gin.H{"error": "clarification request is no longer active"})
-		return
-	}
 	if !body.Rejected {
 		if errMsg := h.validateRespondAnswers(c.Request.Context(), pendingID, body.Answers); errMsg != "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
 			return
 		}
+	}
+	terminalStatus := string(StatusAnswered)
+	responses := make(map[string]interface{}, len(body.Answers))
+	if body.Rejected {
+		terminalStatus = string(StatusRejected)
+		for _, questionID := range h.expectedQuestionIDs(c.Request.Context(), pendingID) {
+			responses[questionID] = nil
+		}
+	} else {
+		for i := range body.Answers {
+			answer := body.Answers[i]
+			responses[answer.QuestionID] = answer
+		}
+	}
+	if h.messageCreator == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "clarification message service unavailable"})
+		return
+	}
+	writeCtx := context.WithoutCancel(c.Request.Context())
+	claimed, claimErr := h.messageCreator.CompleteActiveClarificationBundle(
+		writeCtx,
+		pendingID,
+		terminalStatus,
+		responses,
+	)
+	if claimErr != nil {
+		h.logger.Error("failed to claim detached clarification response",
+			zap.String("pending_id", pendingID),
+			zap.Error(claimErr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update clarification state"})
+		return
+	}
+	if !claimed {
+		c.JSON(http.StatusConflict, gin.H{"error": "clarification request is no longer active"})
+		return
 	}
 
 	// Fallback path: entry not found (agent timed out, entry was cleaned up).
@@ -331,8 +357,6 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 	// We still need to mark the bundle rejected in the DB; otherwise the durable
 	// pending-clarification guard would keep blocking future workflow transitions.
 	if body.Rejected {
-		writeCtx := context.WithoutCancel(c.Request.Context())
-		h.applyAnswersToMessages(c, pendingID, true, nil)
 		h.publishStaleDismissedEvent(writeCtx, pendingID)
 		h.logger.Info("clarification rejected after agent moved on; no-op",
 			zap.String("pending_id", pendingID))
@@ -347,33 +371,9 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		zap.String("pending_id", pendingID),
 		zap.String("error", err.Error()))
 
-	h.applyAnswersToMessages(c, pendingID, body.Rejected, body.Answers)
 	h.respondViaEventFallback(c, pendingID, body.Answers, body.Rejected, body.RejectReason)
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
-}
-
-func (h *Handlers) fallbackBundleIsActive(ctx context.Context, pendingID string) (bool, error) {
-	if h.repo == nil {
-		return false, fmt.Errorf("message repository unavailable")
-	}
-	bundle, err := h.repo.FindMessagesByPendingID(ctx, pendingID)
-	if err != nil {
-		return false, err
-	}
-	if len(bundle) == 0 || bundle[0].TaskSessionID == "" {
-		return false, nil
-	}
-	active, err := h.repo.FindActiveClarificationMessagesBySessionID(ctx, bundle[0].TaskSessionID)
-	if err != nil {
-		return false, err
-	}
-	for _, msg := range active {
-		if stringFromMetadata(msg.Metadata, "pending_id") == pendingID {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // validateRespondAnswers enforces the all-required gate **and** the question-id

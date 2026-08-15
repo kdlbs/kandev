@@ -47,6 +47,37 @@ func TestPostgresActiveClarificationUsesNewestDurableTurn(t *testing.T) {
 	assertNoActivePostgresClarification(t, ctx, repo)
 }
 
+func TestPostgresCompleteActiveClarificationBundleClaimsOnce(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 14, 0, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-claim-pg", "session-claim-pg")
+	createPendingActionTurn(t, repo, "task-claim-pg", "session-claim-pg", "turn-claim-pg", base, base)
+	createClarificationBundleMessage(t, repo, "message-claim-pg", "task-claim-pg", "session-claim-pg", "turn-claim-pg", "pending-claim-pg", "q1", base)
+	responses := map[string]interface{}{
+		"q1": map[string]interface{}{"question_id": "q1", "custom_text": "continue"},
+	}
+
+	updated, claimed, err := repo.CompleteActiveClarificationBundle(ctx, "pending-claim-pg", "answered", responses)
+	if err != nil {
+		t.Fatalf("first CompleteActiveClarificationBundle: %v", err)
+	}
+	if !claimed || len(updated) != 1 {
+		t.Fatalf("first completion = claimed %v, rows %d; want true, 1", claimed, len(updated))
+	}
+	_, claimed, err = repo.CompleteActiveClarificationBundle(ctx, "pending-claim-pg", "answered", responses)
+	if err != nil {
+		t.Fatalf("second CompleteActiveClarificationBundle: %v", err)
+	}
+	if claimed {
+		t.Fatal("already-answered Postgres bundle was claimed twice")
+	}
+}
+
 func assertNoActivePostgresClarification(t *testing.T, ctx context.Context, repo *Repository) {
 	t.Helper()
 	active, err := repo.FindActiveClarificationMessagesBySessionID(ctx, "session-active-pg")

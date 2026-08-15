@@ -280,8 +280,12 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
         switchToSession(taskId, resolvedSessionId, oldSessionId);
         navigateToTask(taskId);
       })
-      .finally(selectionGuard.dispose)
-      .catch(() => undefined);
+      .catch(() => {
+        if (selectionGuard.wasSuperseded()) return;
+        switchToSession(taskId, targetSessionId, oldSessionId);
+        navigateToTask(taskId);
+      })
+      .finally(selectionGuard.dispose);
     return;
   }
 

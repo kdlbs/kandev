@@ -1027,6 +1027,14 @@ func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, 
 	return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
 }
 
+func (a *messageCreatorAdapter) CompleteActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+) (bool, error) {
+	return a.svc.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
+}
+
 // CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.
 // This is used for real-time streaming where content arrives incrementally.
 func (a *messageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error {

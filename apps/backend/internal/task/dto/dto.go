@@ -1103,7 +1103,7 @@ func TaskPlanRevisionMetaFromModel(rev *models.TaskPlanRevision) *TaskPlanRevisi
 func FromTurn(turn *models.Turn) TurnDTO {
 	var completedAt *string
 	if turn.CompletedAt != nil {
-		formatted := turn.CompletedAt.UTC().Format(time.RFC3339)
+		formatted := turn.CompletedAt.UTC().Format(time.RFC3339Nano)
 		completedAt = &formatted
 	}
 
@@ -1111,10 +1111,10 @@ func FromTurn(turn *models.Turn) TurnDTO {
 		ID:          turn.ID,
 		SessionID:   turn.TaskSessionID,
 		TaskID:      turn.TaskID,
-		StartedAt:   turn.StartedAt.UTC().Format(time.RFC3339),
+		StartedAt:   turn.StartedAt.UTC().Format(time.RFC3339Nano),
 		CompletedAt: completedAt,
 		Metadata:    turn.Metadata,
-		CreatedAt:   turn.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:   turn.UpdatedAt.UTC().Format(time.RFC3339),
+		CreatedAt:   turn.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:   turn.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
