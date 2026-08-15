@@ -476,11 +476,17 @@ const shellEnv = "SHELL"
 
 // TestUncoveredEnvReadsUnreadableSpecDoesNotPoisonItsBlock bounds the rule
 // above: a name is marked unresolvable individually, not by association with a
-// const block that happens to contain one. Both guarded packages declare their
-// env names beside only other string literals — git_pr_providers.go's block is
-// literals throughout — so nothing live would notice if a refactor hoisted the
-// marking to spec or block level, and every constant in a mixed block would
-// start reporting unresolvable at once.
+// const block or a multi-name spec that happens to contain one. Both guarded
+// packages declare their env names beside only other string literals —
+// git_pr_providers.go's block is literals throughout — so nothing live would
+// notice if a refactor hoisted the marking to spec or block level, and every
+// constant in a mixed block would start reporting unresolvable at once.
+//
+// Both hoists are covered, and each needs its own shape. fooEnv is a
+// single-name spec beside an unreadable sibling spec, which only a block-level
+// hoist poisons. bazEnv shares one spec with an unreadable name, which a
+// spec-level hoist poisons too — the level a first mutation attempt reached for
+// and found inert, because every other declaration here is one name per spec.
 func TestUncoveredEnvReadsUnreadableSpecDoesNotPoisonItsBlock(t *testing.T) {
 	fileSet, file := parseSnippet(t, `package example
 
@@ -489,9 +495,9 @@ import "os"
 const timeout = 30
 
 const (
-	fooEnv = "FOO"
-	scale  = timeout
-	bazEnv = "BAZ"
+	fooEnv       = "FOO"
+	scale        = timeout
+	bazEnv, unit = "BAZ", timeout
 )
 
 func read() string { return os.Getenv(fooEnv) + os.Getenv(bazEnv) }
