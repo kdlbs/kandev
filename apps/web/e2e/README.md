@@ -11,7 +11,26 @@ Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go
 | `helpers/`             | Reusable building blocks for specs (`api-client.ts`, `docker.ts`, `ssh.ts`, `git-helper.ts`, `ws-capture.ts`, …).                            |
 | `pages/`               | Page Objects (one class per top-level UI surface — `SessionPage`, `KanbanPage`, `JiraSettingsPage`, `SSHSettingsPage`, …).                   |
 | `playwright.config.ts` | Project definitions, timeouts, sharding config.                                                                                              |
-| `global-setup.ts`      | Pre-flight checks for required binaries (kandev, mock-agent) and the Vite web build.                                                         |
+| `global-setup.ts`      | Pre-flight checks for required binaries (kandev, mock-agent), the Vite web build, and backend binary freshness.                              |
+
+## Prerequisites
+
+E2E runs the **prebuilt** backend, not a live rebuild — `fixtures/backend.ts` spawns
+`apps/backend/bin/kandev`, and `pnpm run build:e2e` only rebuilds the Vite bundle.
+Before running specs (or after touching anything under `apps/backend`), rebuild both:
+
+```sh
+make -C apps/backend build              # bin/kandev, bin/mock-agent
+make -C apps/backend e2e-plugin-package # .build/kandev-plugin-e2e-1.0.0.tar.gz, for tests/plugins/plugins.spec.ts
+cd apps/web && pnpm run build:e2e
+```
+
+These are prerequisites, not optional steps — `global-setup.ts` fails fast with the
+exact remedy command if the backend binary is older than any `apps/backend` source
+file (or is missing entirely), and separately if the plugin package or Vite build is
+missing. Skip the freshness check with `KANDEV_E2E_SKIP_FRESHNESS=1` (e.g. CI paths
+that stage artifacts out of band) or by setting `KANDEV_E2E_BIN` to point at your own
+binary.
 
 ## Playwright projects
 

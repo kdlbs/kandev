@@ -14,6 +14,8 @@ export default function globalSetup() {
     }
   }
 
+  assertBackendBinaryFresh(BACKEND_DIR, [kandevBin, mockAgentBin]);
+
   const spaIndex = path.join(WEB_DIR, "dist", "index.html");
   if (!fs.existsSync(spaIndex)) {
     throw new Error(`Vite web build not found: ${spaIndex}\nRun "make build-web" first.`);
@@ -30,6 +32,70 @@ export default function globalSetup() {
     throw new Error(
       `E2E fixture plugin package not found: ${pluginPackage}\nRun "make -C apps/backend e2e-plugin-package" first.`,
     );
+  }
+}
+
+const BACKEND_SOURCE_SKIP_DIRS = new Set(["bin", ".build", "testdata"]);
+
+function findNewestBackendSource(
+  backendDir: string,
+): { file: string; mtimeMs: number } | undefined {
+  let newest: { file: string; mtimeMs: number } | undefined;
+
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (BACKEND_SOURCE_SKIP_DIRS.has(entry.name)) continue;
+        walk(path.join(dir, entry.name));
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".go") && entry.name !== "go.mod" && entry.name !== "go.sum")
+        continue;
+
+      const filePath = path.join(dir, entry.name);
+      const mtimeMs = fs.statSync(filePath).mtimeMs;
+      if (!newest || mtimeMs > newest.mtimeMs) {
+        newest = { file: filePath, mtimeMs };
+      }
+    }
+  };
+
+  walk(backendDir);
+  return newest;
+}
+
+/**
+ * `fixtures/backend.ts` spawns the *prebuilt* Go binary — `pnpm run build:e2e`
+ * only rebuilds the Vite bundle, so nothing else checks the two agree. A stale
+ * binary produces failures that look exactly like product regressions (missing
+ * routes return 404, unknown JSON fields are silently dropped) instead of the
+ * "rebuild the backend" message a developer actually needs.
+ *
+ * Compares binary mtime against the newest `apps/backend` source file rather
+ * than the embedded git sha, since the sha still matches HEAD with uncommitted
+ * backend edits — the more common case during local development.
+ */
+export function assertBackendBinaryFresh(
+  backendDir: string,
+  binPaths: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (env.KANDEV_E2E_BIN) return;
+  if (env.KANDEV_E2E_SKIP_FRESHNESS === "1") return;
+
+  const newestSource = findNewestBackendSource(backendDir);
+  if (!newestSource) return;
+
+  for (const binPath of binPaths) {
+    const binMtimeMs = fs.statSync(binPath).mtimeMs;
+    if (binMtimeMs < newestSource.mtimeMs) {
+      throw new Error(
+        `Backend binary is older than apps/backend sources (${newestSource.file} is newer). ` +
+          'Run "make -C apps/backend build" — E2E runs the prebuilt binary, and pnpm run ' +
+          "build:e2e only rebuilds the frontend.",
+      );
+    }
   }
 }
 
