@@ -25,6 +25,9 @@ func TestPostgresLedgerWriterGenesisMoveAttachDetach(t *testing.T) {
 	ctx := steptelemetry.WithAttribution(context.Background(), steptelemetry.Attribution{
 		Trigger: steptelemetry.TriggerManualMove, ActorKind: steptelemetry.ActorHuman, ActorID: "user-pg",
 	})
+	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{ID: "ws-pg-ledger", Name: "PG Ledger Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
 
 	task := &models.Task{ID: "task-pg-ledger", WorkspaceID: "ws-pg-ledger", WorkflowID: "wf-pg", WorkflowStepID: "step-a", Title: "PG Task", Priority: "medium"}
 	if err := repo.CreateTask(ctx, task); err != nil {
@@ -87,6 +90,9 @@ func TestPostgresLedgerWriterConcurrentMovesProduceIntactChain(t *testing.T) {
 	ctx := steptelemetry.WithAttribution(context.Background(), steptelemetry.Attribution{
 		Trigger: steptelemetry.TriggerManualMove, ActorKind: steptelemetry.ActorHuman, ActorID: "user-pg-concurrent",
 	})
+	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{ID: "ws-pg-concurrent", Name: "PG Concurrent Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
 
 	task := &models.Task{ID: "task-pg-concurrent", WorkspaceID: "ws-pg-concurrent", WorkflowID: "wf-pg-concurrent", WorkflowStepID: "step-a", Title: "PG Concurrent Task", Priority: "medium"}
 	if err := repo.CreateTask(ctx, task); err != nil {
