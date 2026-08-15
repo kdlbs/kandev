@@ -378,6 +378,36 @@ func TestRestoreActiveClarificationBundleAllowsRetryAfterDeliveryFailure(t *test
 	}
 }
 
+func TestRestoreClarificationMessagesLeavesInputUnchangedOnWriteFailure(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	tx, err := repo.db.BeginTxx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTxx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	message := &models.Message{
+		ID: "missing-message",
+		Metadata: map[string]interface{}{
+			"status":   "answered",
+			"response": map[string]interface{}{"custom_text": "continue"},
+		},
+	}
+
+	err = repo.restoreClarificationMessages(
+		context.Background(),
+		tx,
+		repo.db.DriverName(),
+		[]*models.Message{message},
+		"answered",
+	)
+	if err == nil {
+		t.Fatal("restoreClarificationMessages succeeded for a missing row")
+	}
+	if message.Metadata["status"] != "answered" || message.Metadata["response"] == nil {
+		t.Fatalf("failed restore mutated input metadata: %#v", message.Metadata)
+	}
+}
+
 func TestRestoreActiveClarificationBundleDoesNotReactivateSupersededTurn(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

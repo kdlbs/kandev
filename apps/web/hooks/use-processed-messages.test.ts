@@ -138,6 +138,16 @@ describe("filterVisibleMessages clarification history", () => {
     },
   );
 
+  it("hides pending clarification while turn and action authority are unloaded", () => {
+    const pending = makeMessage("unloaded-question", "clarification_request", {
+      status: "pending",
+    });
+
+    expect(
+      filterVisibleMessages([pending], new Set<string>(), new Set<string>(), undefined, undefined),
+    ).toEqual([]);
+  });
+
   it("hides only the active bundle when clarification authority exists before turn hydration", () => {
     const old = makeMessage("unhydrated-superseded", "clarification_request", {
       status: "pending",

@@ -95,6 +95,8 @@ blockers/risks, and update task/plan status.
 - Final review remediation lets atomic response claims recover pending rows from a mixed-status bundle,
   validates answers only for those pending rows, and preserves terminal siblings; targeted rollback
   restores only rows owned by the failed delivery attempt.
+- Restore serialization uses copied metadata, so a failed transactional write cannot mutate its
+  in-memory terminal snapshot.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - `cd apps/backend && go test ./internal/task/repository/sqlite ./internal/clarification ./internal/orchestrator`

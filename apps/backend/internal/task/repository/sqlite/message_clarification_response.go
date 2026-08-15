@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -198,9 +199,10 @@ func (r *Repository) restoreClarificationMessages(
 		WHERE id = ? AND %s = ?
 	`, statusExpr))
 	for _, message := range messages {
-		message.Metadata["status"] = clarificationStatusPending
-		delete(message.Metadata, "response")
-		metadataJSON, marshalErr := json.Marshal(message.Metadata)
+		restoredMetadata := maps.Clone(message.Metadata)
+		restoredMetadata["status"] = clarificationStatusPending
+		delete(restoredMetadata, "response")
+		metadataJSON, marshalErr := json.Marshal(restoredMetadata)
 		if marshalErr != nil {
 			return fmt.Errorf("marshal clarification message %s for restore: %w", message.ID, marshalErr)
 		}

@@ -81,6 +81,7 @@ update task/plan status.
   latest bundle when clarification remains active. The explicit no-turn legacy overlay path is pinned.
 - Mixed-status recovery counts terminal siblings for arrival completeness but renders only pending
   questions, so already-answered cards never request replacement answers.
+- The all-unloaded boot state hides pending overlays until turn or compact session authority arrives.
 - Desktop navigation re-reads the active source session after asynchronous loading, and mobile item
   projection reuses the shared task pending-action authority helper.
 - Closing the mobile task sheet invalidates any asynchronous selection before a later reopen, preventing
