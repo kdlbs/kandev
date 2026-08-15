@@ -38,10 +38,25 @@ export default function globalSetup() {
 const BACKEND_SOURCE_SKIP_DIRS = new Set(["bin", ".build", "testdata"]);
 
 /**
+ * Go build and test *outputs* that land in the source tree rather than in
+ * bin/ or .build/: `make -C apps/backend test-coverage` writes coverage.out
+ * and coverage.html next to go.mod, and `go test -c` leaves `*.test` binaries
+ * wherever it is run. The repo .gitignore lists exactly these three patterns;
+ * none is `//go:embed`-ed, and no tracked file under apps/backend matches one.
+ *
+ * Without this, the ordinary `make test-coverage` → run E2E sequence aborts
+ * demanding a backend rebuild because a coverage profile — which changes
+ * nothing the binary contains — is newer than the binary.
+ */
+const BACKEND_SOURCE_SKIP_FILE_PATTERNS = [/\.out$/, /\.test$/, /^coverage\.html$/];
+
+/**
  * `make sync-embedded-web` copies apps/web/dist here so the binary can serve
- * the SPA itself. E2E never uses that copy — fixtures/backend.ts points the
- * backend at apps/web/dist directly — and it is written *after* the backend
- * builds, so counting it would fail every run over a bundle the tests ignore.
+ * the SPA itself. E2E never reads that copy — fixtures/backend.ts points the
+ * backend at apps/web/dist directly — and refreshing it does not require
+ * relinking the binary (`make build-web && make sync-embedded-web` on its own
+ * leaves the copy newer than bin/kandev), so counting it would demand a
+ * pointless backend rebuild over a bundle the tests ignore.
  */
 const EMBEDDED_WEB_DIR = path.join("internal", "webapp", "embedded", "generated");
 
@@ -72,6 +87,7 @@ function findNewestBackendSource(
         continue;
       }
       if (!entry.isFile()) continue;
+      if (BACKEND_SOURCE_SKIP_FILE_PATTERNS.some((pattern) => pattern.test(entry.name))) continue;
 
       const mtimeMs = fs.statSync(entryPath).mtimeMs;
       if (!newest || mtimeMs > newest.mtimeMs) {

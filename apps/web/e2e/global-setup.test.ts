@@ -92,8 +92,9 @@ describe("assertBackendBinaryFresh", () => {
   });
 
   it("ignores the synced web bundle under internal/webapp/embedded/generated", () => {
-    // `make sync-embedded-web` writes this after the backend is built, and E2E
-    // serves apps/web/dist instead — counting it would fail every run.
+    // A copy of apps/web/dist that E2E never reads — fixtures/backend.ts serves
+    // apps/web/dist directly — and `make sync-embedded-web` refreshes it without
+    // relinking the binary, so counting it would demand a pointless rebuild.
     touch(
       path.join(backendDir, "internal", "task", "service.go"),
       new Date("2025-01-01T00:00:00Z"),
@@ -103,6 +104,24 @@ describe("assertBackendBinaryFresh", () => {
     fs.mkdirSync(generated, { recursive: true });
     fs.writeFileSync(path.join(generated, "index.html"), "<html></html>");
     touch(path.join(generated, "index.html"), new Date("2026-06-01T00:00:00Z"));
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
+  });
+
+  it("ignores Go coverage and compiled-test artifacts left in the source tree", () => {
+    // `make -C apps/backend test-coverage` writes these next to go.mod. They are
+    // gitignored build outputs, so a test run must not demand a backend rebuild.
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2025-01-01T00:00:00Z"),
+    );
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+
+    for (const name of ["coverage.out", "coverage.html", "task.test"]) {
+      const artifact = path.join(backendDir, name);
+      fs.writeFileSync(artifact, "generated");
+      touch(artifact, new Date("2026-06-01T00:00:00Z"));
+    }
 
     expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
   });

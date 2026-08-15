@@ -33,9 +33,10 @@ Vite build is missing.
 "Any file", not just `*.go`: the binary `//go:embed`s a large asset surface, so
 editing `internal/profiles/profiles.yaml` (runtime feature-flag defaults), a
 `config/workflows/*.yml`, a `config/prompts/*.md`, or an `internal/i18n/locales/*.json`
-changes backend behaviour without touching a single `.go` file. `bin/`, `.build/`,
-`testdata/`, and the synced web bundle at `internal/webapp/embedded/generated/` are
-excluded.
+changes backend behaviour without touching a single `.go` file. Excluded are `bin/`,
+`.build/`, `testdata/`, the synced web bundle at `internal/webapp/embedded/generated/`,
+and the gitignored Go outputs that land in the source tree (`*.out`, `*.test`,
+`coverage.html`) so that `make -C apps/backend test-coverage` does not ask for a rebuild.
 
 Skip the freshness check with `KANDEV_E2E_SKIP_FRESHNESS=1` (both E2E CI jobs set
 this — they stage the binary from the `build` job's artifact after their own
