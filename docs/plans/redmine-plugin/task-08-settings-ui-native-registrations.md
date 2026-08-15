@@ -1,7 +1,7 @@
 ---
 id: "08-settings-ui-native-registrations"
 title: "Settings UI and native registrations"
-status: not started
+status: completed
 wave: 3
 depends_on: ["03-connection-secrets-health", "04-projects-field-mapping"]
 plan: "plan.md"

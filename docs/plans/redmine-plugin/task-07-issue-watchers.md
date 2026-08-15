@@ -1,7 +1,7 @@
 ---
 id: "07-issue-watchers"
 title: "Issue watchers"
-status: not started
+status: completed
 wave: 3
 depends_on: ["03-connection-secrets-health", "04-projects-field-mapping", "05-issue-read-write-attachments"]
 plan: "plan.md"

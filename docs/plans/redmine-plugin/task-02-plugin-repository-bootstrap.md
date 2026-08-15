@@ -1,7 +1,7 @@
 ---
 id: "02-plugin-repository-bootstrap"
 title: "Plugin repository bootstrap"
-status: not started
+status: completed
 wave: 1
 depends_on: ["01-design-package"]
 plan: "plan.md"

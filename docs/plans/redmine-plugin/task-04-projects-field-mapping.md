@@ -1,7 +1,7 @@
 ---
 id: "04-projects-field-mapping"
 title: "Project selection and field mapping"
-status: not started
+status: completed
 wave: 2
 depends_on: ["02-plugin-repository-bootstrap"]
 plan: "plan.md"

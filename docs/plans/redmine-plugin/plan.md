@@ -73,20 +73,20 @@ plugin repo's own test suite, not here.
 ## Implementation waves and task files
 
 Wave 0 (design):
-- [ ] [task 01 — design package](task-01-design-package.md)
+- [x] [task 01 — design package](task-01-design-package.md)
 
 Wave 1 (plugin repository bootstrap, depends on 01):
-- [ ] [task 02 — plugin repository bootstrap](task-02-plugin-repository-bootstrap.md)
+- [x] [task 02 — plugin repository bootstrap](task-02-plugin-repository-bootstrap.md)
 
 Wave 2 (core plugin behavior, depends on 02 — parallelizable within the wave):
-- [ ] [task 03 — connection, secrets, health poll](task-03-connection-secrets-health.md)
-- [ ] [task 04 — projects and field mapping](task-04-projects-field-mapping.md)
-- [ ] [task 05 — issue read/write and attachments](task-05-issue-read-write-attachments.md)
+- [x] [task 03 — connection, secrets, health poll](task-03-connection-secrets-health.md)
+- [x] [task 04 — projects and field mapping](task-04-projects-field-mapping.md)
+- [x] [task 05 — issue read/write and attachments](task-05-issue-read-write-attachments.md)
 
 Wave 3 (sync and native surfaces, depends on wave 2):
-- [ ] [task 06 — task linking and bidirectional sync](task-06-task-linking-bidirectional-sync.md)
-- [ ] [task 07 — issue watchers](task-07-issue-watchers.md)
-- [ ] [task 08 — settings UI and native registrations](task-08-settings-ui-native-registrations.md)
+- [x] [task 06 — task linking and bidirectional sync](task-06-task-linking-bidirectional-sync.md)
+- [x] [task 07 — issue watchers](task-07-issue-watchers.md)
+- [x] [task 08 — settings UI and native registrations](task-08-settings-ui-native-registrations.md)
 
 Wave 4 (release, depends on wave 3):
 - [ ] [task 09 — contract E2E, release, registry pointer](task-09-contract-e2e-release.md)
@@ -97,11 +97,24 @@ word on parity with Jira/Linear/Sentry's native settings pages.
 
 ## Current status
 
-2026-08-15: Spec and plan authored following the direct architecture redirection (see
-spec's Why section and this task's plan-history). No plugin-repo code exists yet;
-`yattdev/kandev-plugin-redmine` exists on GitHub but is empty. Proceeding straight
-through to bootstrap + a plugin-repo subtask per the author's explicit instruction,
-without pausing for a separate spec/plan review gate.
+2026-08-15: Tasks 01-08 (waves 0-3) are complete on the plugin repo
+(`yattdev/kandev-plugin-redmine`, branch `feature/redmine-plugin-build-os2`, local-only,
+not yet pushed to `origin/main`): bootstrap, connection/secrets/health poll, projects and
+field mapping, issue read/write and attachments, task linking and bidirectional sync,
+issue watchers, and the native settings UI with `reference_sources` wiring. The
+plugin's own Go test suite covers connection.save/link.set round-trips against an
+`httptest` fixture server (`server/actions_test.go`). Only task 09 (contract E2E,
+release, registry pointer) remains, gated on `wave 4`'s dependency on 06/07/08.
+
+The `kdlbs/kandev` side of task 09 is already in progress on a sibling task/branch
+(`feature/feat-implement-redmi-ib8`): `apps/web/e2e/tests/plugins/redmine-packaged-plugin.spec.ts`
+exists there (commit `4ed46b9c6`), gated on `KANDEV_REDMINE_PLUGIN_PACKAGE` and scoped to
+zero-network assertions (unconfigured defaults, settings-page rendering, Link dialog
+opening) — it deliberately does not exercise a real connection.save/link.set flow, which
+is covered instead by the plugin repo's own httptest-backed tests above. Remaining task 09
+work on this branch: `make package-host`, install/exercise against a disposable dev
+instance, cut a GitHub Release on `yattdev/kandev-plugin-redmine`, and add the
+`plugin-registry/plugins.yaml` pointer once that release exists.
 
 ## Risks
 
