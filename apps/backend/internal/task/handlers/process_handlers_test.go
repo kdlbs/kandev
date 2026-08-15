@@ -234,6 +234,22 @@ func (m *mockRepository) FindActiveClarificationMessagesBySessionID(ctx context.
 func (m *mockRepository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
 	return make(map[string]models.TaskPendingAction), nil
 }
+func (m *mockRepository) CompleteActiveClarificationBundle(
+	context.Context,
+	string,
+	string,
+	map[string]interface{},
+) ([]*models.Message, bool, error) {
+	return nil, false, nil
+}
+func (m *mockRepository) RestoreActiveClarificationBundle(
+	context.Context,
+	string,
+	string,
+	[]*models.Message,
+) ([]*models.Message, bool, error) {
+	return nil, false, nil
+}
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
 }

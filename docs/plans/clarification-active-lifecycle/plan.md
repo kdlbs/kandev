@@ -280,6 +280,11 @@ All task gates passed:
   through the live projector before promising retryability, removes wall-clock polling from repository
   timestamp tests through an injected clock, and clarifies why every successor-turn message shares the
   PostgreSQL session lock.
+- New bot-review remediation uses bounded detached rollback after admission-time context cancellation,
+  normalizes pending/attempted flag predicates across SQLite and PostgreSQL, surfaces exhausted pending
+  summary CAS retries, and makes atomic clarification bundle operations a compile-time repository
+  contract. Focused race checks and all six affected backend package suites passed; the environment-gated
+  PostgreSQL predicate case skipped locally and remains enabled in CI.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

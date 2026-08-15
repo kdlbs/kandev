@@ -18,6 +18,19 @@ type rejectingPendingProjectorStore struct {
 	rejected  bool
 }
 
+type alwaysRejectingPendingProjectorStore struct {
+	*projectorTestStore
+	attempts int
+}
+
+func (s *alwaysRejectingPendingProjectorStore) CompareAndUpdateTaskStatusSummary(
+	context.Context,
+	*StoredTaskStatusSummary,
+) (bool, error) {
+	s.attempts++
+	return false, nil
+}
+
 func (s *rejectingPendingProjectorStore) CompareAndUpdateTaskStatusSummary(
 	ctx context.Context,
 	stored *StoredTaskStatusSummary,
@@ -203,6 +216,41 @@ func TestProjectorPendingLoaderFailureRetainsStoredState(t *testing.T) {
 	got := store.summary("task-load-error")
 	if got == nil || got.Revision != 2 || got.PendingAction != pendingPermission {
 		t.Fatalf("stored summary after loader failure = %+v", got)
+	}
+}
+
+func TestProjectorPendingRefreshSurfacesExhaustedCASRetries(t *testing.T) {
+	base := newProjectorTestStore()
+	base.rows["task-cas-exhausted"] = &StoredTaskStatusSummary{
+		TaskID:      "task-cas-exhausted",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision: 1,
+		},
+	}
+	store := &alwaysRejectingPendingProjectorStore{projectorTestStore: base}
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		LoadPendingActions: func(context.Context, string) (map[string]string, error) {
+			return map[string]string{"session-1": pendingClarification}, nil
+		},
+	})
+
+	err := projector.HandleEvent(context.Background(), bus.NewEvent(events.MessageUpdated, "test", map[string]interface{}{
+		"task_id":      "task-cas-exhausted",
+		"workspace_id": "workspace-1",
+		"session_id":   "session-1",
+		"author_type":  "agent",
+		"type":         messageTypeClarificationRequest,
+	}))
+	if err == nil {
+		t.Fatal("exhausted pending CAS retries returned nil")
+	}
+	if store.attempts != maxPendingPersistAttempts {
+		t.Fatalf("CAS attempts = %d, want %d", store.attempts, maxPendingPersistAttempts)
+	}
+	if got := base.summary("task-cas-exhausted"); got == nil || got.PendingAction != "" {
+		t.Fatalf("stored summary after exhausted CAS retries = %+v, want unchanged", got)
 	}
 }
 

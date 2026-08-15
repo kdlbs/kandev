@@ -21,15 +21,6 @@ const (
 	clarificationPendingStatus = "pending"
 )
 
-type activeClarificationBundleCompleter interface {
-	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
-	RestoreActiveClarificationBundle(
-		ctx context.Context,
-		pendingID, terminalStatus string,
-		claimedMessages []*models.Message,
-	) ([]*models.Message, bool, error)
-}
-
 // CreateMessage creates a new message on an agent session
 func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) (*models.Message, error) {
 	messageID := uuid.New().String()
@@ -796,11 +787,7 @@ func (s *Service) CompleteActiveClarificationBundle(
 	pendingID, status string,
 	responses map[string]interface{},
 ) ([]*models.Message, bool, error) {
-	completer, ok := s.messages.(activeClarificationBundleCompleter)
-	if !ok {
-		return nil, false, errors.New("message repository does not support atomic clarification completion")
-	}
-	return completer.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
+	return s.messages.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
 }
 
 // RestoreActiveClarificationBundle reopens a terminal bundle after detached
@@ -810,11 +797,7 @@ func (s *Service) RestoreActiveClarificationBundle(
 	pendingID, terminalStatus string,
 	claimedMessages []*models.Message,
 ) ([]*models.Message, bool, error) {
-	completer, ok := s.messages.(activeClarificationBundleCompleter)
-	if !ok {
-		return nil, false, errors.New("message repository does not support clarification restore")
-	}
-	return completer.RestoreActiveClarificationBundle(
+	return s.messages.RestoreActiveClarificationBundle(
 		ctx,
 		pendingID,
 		terminalStatus,

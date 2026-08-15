@@ -167,3 +167,8 @@ blockers/risks, and update task/plan status.
 - Final review remediation bounds synchronous detached resume with the same fresh 30-second context as
   durable claim and restore work. Repository tests now inject exact mutation clocks, removing
   scheduler-dependent timestamp-boundary sleeps while retaining nanosecond ordering coverage.
+- Latest bot review remediation rolls back failed successor-turn and attempt-marker admission through a
+  fresh bounded context after caller cancellation. Shared SQLite/PostgreSQL predicates now recognize
+  boolean, numeric, and string pending/attempted encodings; focused regressions cover both rollback paths
+  and both database dialects. Focused race checks and the six affected backend package suites passed;
+  the PostgreSQL case skipped locally without `KANDEV_TEST_POSTGRES_DSN` and remains enabled in CI.

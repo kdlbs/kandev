@@ -27,25 +27,24 @@ func turnAuthorityPredicate(driverName, turnAlias string) string {
 }
 
 func turnDispatchPendingPredicate(driverName, turnAlias string) string {
-	value := dialect.JSONExtract(
-		driverName,
-		turnAlias+".metadata",
-		models.TurnMetaKeyPromptDispatchPending,
+	return turnMetadataFlagPredicate(
+		driverName, turnAlias, models.TurnMetaKeyPromptDispatchPending,
 	)
-	if dialect.IsPostgres(driverName) {
-		return fmt.Sprintf("COALESCE(%s, '') IN ('true', '1')", value)
-	}
-	return fmt.Sprintf("COALESCE(%s, 0) = 1", value)
 }
 
 func turnDispatchAttemptedPredicate(driverName, turnAlias string) string {
+	return turnMetadataFlagPredicate(
+		driverName, turnAlias, models.TurnMetaKeyPromptDispatchAttempted,
+	)
+}
+
+func turnMetadataFlagPredicate(driverName, turnAlias, key string) string {
 	value := dialect.JSONExtract(
 		driverName,
 		turnAlias+".metadata",
-		models.TurnMetaKeyPromptDispatchAttempted,
+		key,
 	)
-	if dialect.IsPostgres(driverName) {
-		return fmt.Sprintf("COALESCE(%s, '') IN ('true', '1')", value)
-	}
-	return fmt.Sprintf("COALESCE(%s, 0) = 1", value)
+	// Metadata normally stores JSON booleans, but older/manual rows can contain
+	// equivalent string values. Normalizing to text keeps both dialects tolerant.
+	return fmt.Sprintf("CAST(COALESCE(%s, '') AS TEXT) IN ('true', '1')", value)
 }

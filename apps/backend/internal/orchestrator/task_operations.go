@@ -3908,7 +3908,7 @@ func (s *Service) claimPromptDispatch(
 	}
 	if reservedTurn != nil && s.turnService != nil {
 		if err := s.turnService.MarkReservedTurnDispatchAttempted(ctx, reservedTurn); err != nil {
-			s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
+			s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)
 			return nil, promptClaimRollback{}, fmt.Errorf("persist prompt dispatch attempt: %w", err)
 		}
 	}
@@ -3937,7 +3937,7 @@ func (s *Service) claimLifecyclePromptDispatch(
 		ctx, sessionID, false,
 	)
 	if err != nil {
-		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
+		s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)
 		return nil, promptClaimRollback{}, fmt.Errorf("persist lifecycle prompt turn: %w", err)
 	}
 	if err := s.acknowledgePromptClaim(ctx, taskID, sessionID, afterClaim, rollback); err != nil {
@@ -3963,6 +3963,16 @@ func (s *Service) acknowledgePromptClaim(
 		return fmt.Errorf("%w: %v", errLifecyclePromptMessagePersistence, err)
 	}
 	return nil
+}
+
+func (s *Service) rollbackPromptClaimAfterAdmissionFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	rollback promptClaimRollback,
+) {
+	failureCtx, cancel := (promptTaskOptions{}).failureContext(ctx)
+	defer cancel()
+	s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
 }
 
 func (s *Service) rollbackPromptClaim(

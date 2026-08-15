@@ -4,12 +4,61 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
 )
+
+func TestPostgresTurnAuthorityToleratesStringFlagEncodings(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 22, 0, 0, 0, time.UTC)
+	for index, tt := range []struct {
+		name          string
+		pending       interface{}
+		attempted     interface{}
+		wantCurrentID string
+	}{
+		{name: "pending string true", pending: "true", wantCurrentID: "turn-previous"},
+		{name: "pending string one", pending: "1", wantCurrentID: "turn-previous"},
+		{name: "attempted string true", pending: true, attempted: "true", wantCurrentID: "turn-reserved"},
+		{name: "attempted string one", pending: true, attempted: "1", wantCurrentID: "turn-reserved"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			taskID := fmt.Sprintf("task-string-flags-pg-%d", index)
+			sessionID := fmt.Sprintf("session-string-flags-pg-%d", index)
+			previousID := fmt.Sprintf("turn-previous-pg-%d", index)
+			reservedID := fmt.Sprintf("turn-reserved-pg-%d", index)
+			seedSessionForTurns(t, repo, taskID, sessionID)
+			createRecoveryTurn(t, repo, taskID, sessionID, previousID, base, nil)
+			createRecoveryTurn(t, repo, taskID, sessionID, reservedID, base.Add(time.Minute), map[string]interface{}{
+				models.TurnMetaKeyPromptDispatchPending:   tt.pending,
+				models.TurnMetaKeyPromptDispatchAttempted: tt.attempted,
+			})
+
+			active, err := repo.GetActiveTurnBySessionID(ctx, sessionID)
+			if err != nil {
+				t.Fatalf("GetActiveTurnBySessionID: %v", err)
+			}
+			wantCurrentID := tt.wantCurrentID
+			if wantCurrentID == "turn-previous" {
+				wantCurrentID = previousID
+			} else {
+				wantCurrentID = reservedID
+			}
+			if active == nil || active.ID != wantCurrentID {
+				t.Fatalf("active turn = %#v, want %s", active, wantCurrentID)
+			}
+		})
+	}
+}
 
 // TestPostgresReconcileUnpublishedPromptTurns pins restart recovery on the
 // second repository dialect. It skips unless KANDEV_TEST_POSTGRES_DSN is set.

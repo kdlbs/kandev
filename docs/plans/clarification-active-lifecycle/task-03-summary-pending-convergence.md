@@ -89,3 +89,7 @@ actual files, then update task/plan status.
 - Final review remediation wires the live projector back into the task service as a synchronous
   acknowledgement boundary. Restored clarification publication now returns an error until durable
   pending-summary convergence succeeds, with focused service and handler regressions.
+- Latest review remediation surfaces bounded summary CAS exhaustion instead of returning a false
+  acknowledgement. Atomic clarification bundle methods now belong to the compile-time message repository
+  contract rather than an optional runtime assertion. The focused CAS race check and full status-summary,
+  task-service, and backend-app suites passed.

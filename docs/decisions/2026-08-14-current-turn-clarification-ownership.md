@@ -40,7 +40,8 @@ The session's current turn owns active clarification state.
   waiter delivery and detached resume publication. Terminal message updates become visible only after
   delivery succeeds; a failed detached publication returns an error and restores the bundle to pending
   when its turn is still current. Retryability is acknowledged only after the live projector durably
-  refreshes the task summary from those restored rows; message publication then converges other clients.
+  refreshes the task summary from those restored rows; exhausted summary compare-and-set retries return
+  an error instead of false acknowledgement. Message publication then converges other clients.
   Detached orchestrator acceptance uses a finite deadline. A detached current-turn rejection persists
   without resuming; any response to a superseded or terminal bundle returns conflict without a write or
   resume event.

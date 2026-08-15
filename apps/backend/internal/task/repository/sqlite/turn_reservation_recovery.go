@@ -230,6 +230,8 @@ func (r *Repository) restoreReservedClarificationMessage(
 	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
 		return fmt.Errorf("decode clarification message %s for prompt recovery: %w", messageID, err)
 	}
+	// Only an answered bundle was claimed for the unpublished resume prompt.
+	// Pending or rejected bundles were never reserved and must remain unchanged.
 	if metadata["status"] != clarificationStatusAnswered {
 		return nil
 	}
@@ -276,7 +278,7 @@ func (r *Repository) deleteEmptyUnpublishedPromptTurn(
 		return fmt.Errorf("count deleted unpublished prompt turn %s: %w", turn.id, err)
 	}
 	if rows != 1 {
-		return fmt.Errorf("unpublished prompt turn %s gained a message during recovery", turn.id)
+		return fmt.Errorf("unpublished prompt turn %s could not be removed (rows=%d) during recovery", turn.id, rows)
 	}
 	return nil
 }

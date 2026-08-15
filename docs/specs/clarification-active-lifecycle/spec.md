@@ -58,15 +58,18 @@ hiding the action the icon represents.
   reservation rolls back, a ready event whose predecessor generation still owns the session continues
   through normal completion so the predecessor and its queue are not stranded. A generationless ready
   event that overlapped the reservation is dropped after resolution because ownership cannot be proven.
-  If the attempt marker cannot be persisted, dispatch does not occur and the answer remains retryable.
+  If the attempt marker cannot be persisted, dispatch does not occur and a fresh bounded context rolls
+  back the reservation and session claim even when the transport context was cancelled, so the answer
+  remains retryable.
   If agentctl synchronously rejects the prompt, the reservation is rolled back and the answer can be
   restored. If agentctl accepts the prompt but publication or later transport handling fails, the
   endpoint returns a server error, performs normal prompt-failure cleanup, and keeps the claimed bundle
   terminal because retrying could dispatch the answer twice. Startup
   deletes only an empty, unattempted unpublished reservation and restores the exact clarification rows
   claimed for its dispatch; an attempt marker or message evidence instead proves dispatch ambiguity and
-  preserves the successor. Recovery treats boolean `true`, strings `"true"` and `"1"`, and numeric `1`
-  as the same conservative attempted marker. If reservation reconciliation fails, orchestrator startup
+  preserves the successor. Authority and recovery treat boolean `true`, strings `"true"` and `"1"`,
+  and numeric `1` as equivalent pending/attempted flags across SQLite and PostgreSQL. If reservation
+  reconciliation fails, orchestrator startup
   fails before watcher, scheduler, or prompt admission starts; the next start retries recovery. A
   rejection persists terminal status without resuming the agent.
 - Every response atomically claims current-turn ownership before it can reach a live waiter or request
@@ -180,7 +183,8 @@ session they can already access. Session selection does not broaden task visibil
 - A forced task-session list cannot project authoritative pending actions: fail the HTTP or WebSocket
   request instead of returning a successful list with empty pending ownership.
 - Summary compare-and-set loses a race: reload the newer summary, reapply authoritative pending state,
-  and retry within a bounded loop. Never overwrite unrelated newer summary fields.
+  and retry within a bounded loop. Exhaustion is an error, so restored-state acknowledgement is withheld
+  until the pending action is durably confirmed. Never overwrite unrelated newer summary fields.
 - Summary repair persists but its WebSocket publication fails: the initiating response carries the
   corrected summary; other clients converge on their next event or read.
 - A stale browser submits an older-turn answer: return conflict, do not update runtime ownership, and
@@ -190,8 +194,9 @@ session they can already access. Session selection does not broaden task visibil
   still-current bundle to pending, and return a retryable server error instead of reporting false
   success. Before promising retryability, synchronously refresh and persist the task summary from
   authoritative pending rows, then publish the restored messages for other clients.
-- Persisting the dispatch-attempt marker fails: roll back the reserved successor before making any
-  external executor call, restore the still-current bundle, and return a retryable server error.
+- Persisting a successor turn or dispatch-attempt marker fails: use a fresh bounded context to roll back
+  the session claim and any reserved successor before making an external executor call, restore the
+  still-current bundle, and return a retryable server error.
 - Reserved-successor rollback fails or has an ambiguous durable outcome: keep the live reservation
   unresolved so ready handling waits and later prompt admission remains blocked until restart recovery
   reconciles the row.

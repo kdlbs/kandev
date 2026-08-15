@@ -197,6 +197,8 @@ type MessageRepository interface {
 	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
 	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
+	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
+	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)

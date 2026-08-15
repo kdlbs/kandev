@@ -372,7 +372,11 @@ func (p *Projector) persistPendingRefreshLocked(
 	p.logger.Warn("exhausted CAS retries refreshing pending task status",
 		zap.String("task_id", taskID),
 		zap.Int("attempts", maxPendingPersistAttempts))
-	return nil
+	return fmt.Errorf(
+		"exhausted CAS retries refreshing pending task status for task %s after %d attempts",
+		taskID,
+		maxPendingPersistAttempts,
+	)
 }
 
 // maxQueueCountPersistAttempts bounds the retry loop when a competing writer
