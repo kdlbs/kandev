@@ -140,6 +140,7 @@ func TestCodexStrategy_Args(t *testing.T) {
 	// stdio server: command + args + env
 	for _, want := range []string{
 		`-c mcp_servers.kandev.url="http://localhost:1234/mcp"`,
+		`-c mcp_servers.kandev.default_tools_approval_mode="auto"`,
 		`-c mcp_servers.github.command="npx"`,
 		`-c mcp_servers.github.args=["-y","@mcp/github"]`,
 		`-c mcp_servers.github.env={"GITHUB_TOKEN":"tok"}`,
@@ -149,6 +150,10 @@ func TestCodexStrategy_Args(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing arg %q in:\n%s", want, joined)
 		}
+	}
+	if strings.Contains(joined, `mcp_servers.github.default_tools_approval_mode`) ||
+		strings.Contains(joined, `mcp_servers.stream.default_tools_approval_mode`) {
+		t.Errorf("external MCP servers must not receive Kandev approval policy:\n%s", joined)
 	}
 	// Every value token must be preceded by a -c flag.
 	for i := 0; i < len(art.Args); i += 2 {
@@ -163,6 +168,27 @@ func TestCodexStrategy_OmitsEmptyArgsAndEnv(t *testing.T) {
 	art, _ := CodexStrategy{}.BuildPassthroughMCP(servers, PassthroughPaths{})
 	if got := strings.Join(art.Args, " "); got != `-c mcp_servers.bare.command="run"` {
 		t.Errorf("Args = %q", got)
+	}
+}
+
+func TestCodexStrategy_KandevPolicyIsAppliedPerLaunch(t *testing.T) {
+	for _, url := range []string{
+		"http://localhost:1001/mcp",
+		"http://localhost:1002/mcp",
+	} {
+		art, err := CodexStrategy{}.BuildPassthroughMCP([]types.McpServer{
+			{Name: "kandev", Type: "http", URL: url},
+		}, PassthroughPaths{})
+		if err != nil {
+			t.Fatalf("unexpected error for %s: %v", url, err)
+		}
+		joined := strings.Join(art.Args, " ")
+		if !strings.Contains(joined, `mcp_servers.kandev.default_tools_approval_mode="auto"`) {
+			t.Errorf("launch for %s omitted Kandev approval policy: %s", url, joined)
+		}
+		if !strings.Contains(joined, `mcp_servers.kandev.url="`+url+`"`) {
+			t.Errorf("launch for %s omitted dynamic Kandev URL: %s", url, joined)
+		}
 	}
 }
 
