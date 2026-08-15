@@ -1228,7 +1228,7 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 
 	// Make all agent CLI failures recoverable — let the user choose to resume or start fresh.
 	if data.SessionID != "" {
-		s.handleRecoverableFailure(ctx, data)
+		s.handleRecoverableFailureLocked(ctx, data)
 		return
 	}
 
@@ -1480,6 +1480,30 @@ func (s *Service) clearResumeToken(ctx context.Context, sessionID string) {
 // creates an error message with recovery action buttons so the user can choose to
 // resume the agent session or start fresh.
 func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.AgentEventData) {
+	if data.SessionID == "" {
+		s.handleRecoverableFailureLocked(ctx, data)
+		return
+	}
+
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	if _, err := s.repo.GetTaskSession(ctx, data.SessionID); err != nil {
+		s.logger.Warn("skipping recoverable failure for unavailable session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return
+	}
+	s.handleRecoverableFailureLocked(ctx, data)
+}
+
+// handleRecoverableFailureLocked performs recovery side effects while the
+// session's cancelInFlight guard is held. Deletion uses the same guard, so an
+// active error event cannot publish after the deleted-session inactive event.
+func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Warn("handling recoverable agent failure",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -1791,7 +1815,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 	s.logger.Info("agent start failure is auth error, treating as recoverable",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
-	s.handleRecoverableFailure(ctx, watcher.AgentEventData{
+	s.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{
 		TaskID:           taskID,
 		SessionID:        sessionID,
 		AgentExecutionID: agentExecutionID,

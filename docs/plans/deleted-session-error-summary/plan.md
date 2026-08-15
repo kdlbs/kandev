@@ -11,6 +11,9 @@ status: done
 `DeleteSession` removes the session row but does not publish an inactive session-error occurrence.
 The stored task summary therefore retains an error that belongs to a removed session.
 The repair publishes that occurrence after a successful deletion and proves the full summary path.
+When a restarted projector has hydrated the deleted session as the current winner,
+the repair also republishes the newest retained session error so the single-value
+summary converges to the remaining authoritative error.
 
 ## Backend
 
@@ -42,6 +45,14 @@ Desktop and mobile task switchers already consume the complete `status_summary` 
 - **What:** Session deletion still removes only the deleted session's queued prompts.
 - **File:** `apps/backend/internal/orchestrator/queue_purge_status_test.go`
 - **How:** Run the existing queue cleanup regression with the new error-summary regression.
+- **What:** Deleting the newer error after a projector restart preserves an older retained error.
+- **File:** `apps/backend/internal/orchestrator/queue_purge_status_test.go`
+- **How:** Hydrate a summary with two session errors, restart the projector, delete the newer
+  session, and assert that the retained session is the summary's active error.
+- **What:** Recoverable error handling serializes with session deletion.
+- **File:** `apps/backend/internal/orchestrator/queue_purge_status_test.go`
+- **How:** Hold the per-session deletion guard and assert that recovery waits before persisting
+  or publishing an active error.
 
 No E2E change is required.
 The backend integration test covers the same complete summary payload that both task switchers consume.
@@ -54,7 +65,8 @@ Passed:
 cd apps/backend && go test -tags fts5 -run 'TestDeleteSessionClearsProjectedAgentError|TestDeleteSessionCancelsQueuedPromptsAndPublishesStatus' ./internal/orchestrator -count=1
 ```
 
-Result: 2 tests passed.
+Result: 2 tests passed initially; the retained-session restart regression and guard regression
+also passed during PR fixup, for 4 focused tests total.
 
 ## Implementation Waves And Parallel Candidates
 

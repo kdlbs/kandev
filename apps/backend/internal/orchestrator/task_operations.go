@@ -2830,20 +2830,90 @@ func (s *Service) publishDeletedSessionError(ctx context.Context, taskID, sessio
 	if s.eventBus == nil {
 		return
 	}
-	if err := s.eventBus.Publish(context.WithoutCancel(ctx), events.TaskSessionErrorChanged, bus.NewEvent(
-		events.TaskSessionErrorChanged,
-		"orchestrator",
-		map[string]interface{}{
-			"task_id":    taskID,
-			"session_id": sessionID,
-			"active":     false,
-		},
-	)); err != nil {
+	eventCtx := context.WithoutCancel(ctx)
+	if err := s.publishTaskSessionErrorEvent(eventCtx, taskID, sessionID, false, nil); err != nil {
 		s.logger.Warn("failed to publish deleted task session error event",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+
+	retainedSessionID, lastError, err := s.newestRetainedSessionError(eventCtx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to reload retained task session error after delete",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if lastError == nil {
+		return
+	}
+	if err := s.publishTaskSessionErrorEvent(eventCtx, taskID, retainedSessionID, true, lastError); err != nil {
+		s.logger.Warn("failed to republish retained task session error after delete",
+			zap.String("task_id", taskID),
+			zap.String("session_id", retainedSessionID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) newestRetainedSessionError(
+	ctx context.Context,
+	taskID string,
+) (string, *models.LastAgentError, error) {
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return "", nil, err
+	}
+	var newestSessionID string
+	var newest models.LastAgentError
+	found := false
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		lastError, ok := models.LoadLastAgentError(session.Metadata)
+		if !ok || lastError.IsDismissed() {
+			continue
+		}
+		if found && !lastError.OccurredAt.After(newest.OccurredAt) {
+			continue
+		}
+		newestSessionID = session.ID
+		newest = lastError
+		found = true
+	}
+	if !found {
+		return "", nil, nil
+	}
+	return newestSessionID, &newest, nil
+}
+
+func (s *Service) publishTaskSessionErrorEvent(
+	ctx context.Context,
+	taskID, sessionID string,
+	active bool,
+	lastError *models.LastAgentError,
+) error {
+	eventData := map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"active":     active,
+	}
+	if active && lastError != nil {
+		eventData["message"] = lastError.Message
+		eventData["occurred_at"] = lastError.OccurredAt.Format(time.RFC3339Nano)
+		eventData["stamp"] = lastError.Stamp()
+		eventData["agent_execution_id"] = lastError.AgentExecutionID
+		if lastError.RemediationURL != "" {
+			eventData["remediation_url"] = lastError.RemediationURL
+		}
+	}
+	return s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
+		events.TaskSessionErrorChanged,
+		"orchestrator",
+		eventData,
+	))
 }
 
 // cancelDeletedSessionQueue removes pending prompts left on a deleted session

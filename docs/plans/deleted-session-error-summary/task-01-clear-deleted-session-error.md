@@ -18,6 +18,8 @@ Remove a deleted session's error from the task status summary immediately after 
 
 - A successful `Service.DeleteSession` publishes one inactive error occurrence for the removed session.
 - The persisted task summary has no error from the removed session after the projector processes the occurrence.
+- If another session has a recoverable error, deleting the current summary winner leaves the retained session's error projected.
+- Recoverable error persistence and publication serialize with session deletion for the same session.
 - Existing queue cleanup, workspace retention, and primary-session promotion behavior remains unchanged.
 
 ## Files Likely Touched
@@ -46,6 +48,8 @@ None.
 3. Delete the session and make sure that the stored summary removes the error.
 4. Publish an inactive session-error occurrence after the repository removes the session row.
 5. Use `context.WithoutCancel` for the post-commit publication and log publication errors.
+6. Re-publish the newest retained session error after deletion to repair a summary hydrated before the deletion.
+7. Serialize recoverable-error side effects with the session deletion guard.
 
 ## Verification
 
@@ -70,7 +74,11 @@ Completed.
   inactive `TaskSessionErrorChanged` occurrence after session deletion commits.
 - Added `TestDeleteSessionClearsProjectedAgentError` to
   `apps/backend/internal/orchestrator/queue_purge_status_test.go`.
-- Verification passed: 2 tests passed with the command in this task's
-  Verification section.
+- Added restart and guard regressions in
+  `apps/backend/internal/orchestrator/queue_purge_status_test.go`.
+- Verification passed: the original 2-test command passed, and the 4-test
+  focused fixup command passed.
+- Re-published the newest retained session error after deletion and serialized
+  recoverable-error publication with the session deletion guard.
 - No blockers. Event publication remains best effort, and a later authoritative
   rebuild can repair a summary if publication fails.

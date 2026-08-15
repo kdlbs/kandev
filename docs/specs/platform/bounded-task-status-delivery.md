@@ -236,6 +236,10 @@ intermediate replacement.
 - **GIVEN** a stopped session owns the task's `active_error`, **WHEN** the user
   deletes that session, **THEN** desktop and mobile task switchers remove its
   error indicator while the task and replacement sessions remain available.
+- **GIVEN** two sessions have recoverable errors and the stored summary points
+  to the newer error, **WHEN** the projector restarts and the newer session is
+  deleted, **THEN** the retained session's error becomes the task's
+  `active_error` instead of leaving the summary empty.
 - **GIVEN** a session's agent requests permission and, before that request is
   answered, the same session emits an unrelated tool call/execute/read message
   that reaches its own terminal status, **WHEN** the projector processes that
