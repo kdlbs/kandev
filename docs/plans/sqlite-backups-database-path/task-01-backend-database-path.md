@@ -75,11 +75,12 @@ Report the exact changed files and test counts. Include the expected red failure
   composer listed the old default backup, restore could not reach the custom
   filename, stats missed the custom WAL and backup, and reset used the wrong
   parent directory.
-- Green phase: `cd apps/backend && go test ./internal/system/... -run
-  'Test.*(Configured|Custom)DatabasePath' -count=1 -v` passed 5 tests across 19
-  packages, including restore quiescing.
-- Full affected suite: `cd apps/backend && go test ./internal/system/... -count=1`
-  passed 504 tests across 19 packages.
+- Green phase: `cd apps/backend && go test -race ./internal/system/backups
+  ./internal/system ./internal/backendapp -run 'TestRestore|TestConfiguredDatabasePath|TestProvideWiresRestoreQuiesce|TestQuiesceForRestore' -count=1`
+  passed 11 restore-safety tests across 3 packages, including restore quiescing.
+- Full affected suite: `cd apps/backend && go test ./internal/system/... ./internal/backendapp -count=1`
+  passed 844 tests across 20 packages.
+- `cd apps/backend && make lint` passed with 0 issues.
 - Changed files: `system.go`, `system_database_path_test.go`,
   `backups/store.go`, `backups/store_test.go`, `backups/path_test.go`,
   `database/stats.go`, `database/stats_test.go`, `database/reset.go`,

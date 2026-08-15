@@ -89,9 +89,15 @@ No new browser test is planned. The dialog keeps the existing shared responsive 
 
 ## Verification Results
 
-- `cd apps/backend && go test ./internal/system/... -run 'Test.*(Configured|Custom)DatabasePath' -count=1 -v`
-  passed 5 tests across 19 packages.
-- `cd apps/backend && go test ./internal/system/... -count=1` passed 504 tests across 19 packages.
+- `cd apps/backend && go test -race ./internal/system/backups ./internal/system ./internal/backendapp -run 'TestRestore|TestConfiguredDatabasePath|TestProvideWiresRestoreQuiesce|TestQuiesceForRestore' -count=1`
+  passed 11 restore-safety tests across 3 packages.
+- `cd apps/backend && go test ./internal/system/... ./internal/backendapp -count=1`
+  passed 844 tests across 20 packages.
+- `cd apps/backend && make lint` passed with 0 issues.
+- `cd apps && pnpm --filter @kandev/web exec vitest run components/settings/system/system-confirmation-dialogs.test.tsx`
+  passed 5 UI tests.
+- `cd apps && pnpm --filter @kandev/web run i18n:check`, `i18n:ratchet`, and `typecheck`
+  passed.
 - `rg -n 'KANDEV_DATABASE_PATH|data/backups|database path|backup caveat' docs/public apps/backend/AGENTS.md`
   confirmed the corrected terminology and intentional default-path references.
 - `node --test scripts/validate-public-docs.test.mjs` passed 61 tests.
