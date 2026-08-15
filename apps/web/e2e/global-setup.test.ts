@@ -126,6 +126,36 @@ describe("assertBackendBinaryFresh", () => {
     expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
   });
 
+  it("still reports a stale binary when a coverage run sits alongside a real source edit", () => {
+    // The property that makes the artifact exclusion safe: it removes those files
+    // from consideration, it does not short-circuit the check. Widening the skip
+    // patterns far enough to swallow real sources has to fail here.
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+
+    const artifact = path.join(backendDir, "coverage.out");
+    fs.writeFileSync(artifact, "mode: set\n");
+    touch(artifact, new Date("2026-06-01T00:00:00Z"));
+
+    const edited = path.join(backendDir, "internal", "task", "service.go");
+    touch(edited, new Date("2026-06-02T00:00:00Z"));
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).toThrow(/service\.go/);
+  });
+
+  it("only skips exact artifact names, not files that merely resemble them", () => {
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2025-01-01T00:00:00Z"),
+    );
+
+    const lookalike = path.join(backendDir, "internal", "task", "notes.output");
+    fs.writeFileSync(lookalike, "not a coverage profile\n");
+    touch(lookalike, new Date("2026-06-01T00:00:00Z"));
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).toThrow(/notes\.output/);
+  });
+
   it("ignores files under bin/, .build/, and testdata/ when finding the newest source", () => {
     touch(binPath, new Date("2026-01-01T00:00:00Z"));
     touch(
