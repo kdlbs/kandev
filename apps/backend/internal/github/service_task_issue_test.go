@@ -15,6 +15,8 @@ type fakeTaskIssueStore struct {
 	entities             map[string]*taskmodels.Repository
 	repositoryErrs       map[string]error
 	failOnCanceledUpdate bool
+	getCalls             int
+	returnNilTask        bool
 	// taskErr takes priority over the task-not-set fallback. Set it to an
 	// error wrapping ErrTaskNotFound when a test needs the controller's 404 path.
 	taskErr   error
@@ -42,6 +44,10 @@ func (c *countingIssueClient) GetIssue(ctx context.Context, owner, repo string, 
 }
 
 func (f *fakeTaskIssueStore) GetTask(_ context.Context, taskID string) (*taskmodels.Task, error) {
+	f.getCalls++
+	if f.returnNilTask {
+		return nil, nil
+	}
 	if f.taskErr != nil {
 		return nil, f.taskErr
 	}

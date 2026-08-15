@@ -79,15 +79,17 @@ risks, and synchronized task/plan status in the primary conversation.
   stored workspace; legacy rows resolve the owning task workspace through the
   existing `TaskIssueStore`.
 - Workspace mismatches, missing resolvers, absent tasks, task-not-found errors,
-  and blank task workspaces return `ErrTaskPRNotFound` before authorization or
-  mutation. Unrelated task lookup errors remain unchanged.
+  blank task IDs, and blank task workspaces return `ErrTaskPRNotFound` before
+  authorization or mutation. Unrelated task lookup errors remain unchanged.
 - Wired the helper into detach and disposition before validation, writes,
   metrics, or event publication. Legacy rows remain blank in
   `github_task_prs.workspace_id`.
 - Dependency PR #2614 remains open at `708d8d2`; this branch is intentionally
   stacked on `feature/tel-record-why-a-pul-p4w`.
 - Verification passed:
-  - Focused authorization and mutation tests: 21 passed.
+  - Focused authorization and mutation tests: 22 passed.
   - `go test ./internal/github -run 'TaskPR' -count=1`: 121 passed.
-  - `go test ./internal/github -count=1`: 1,610 passed.
+  - `go test ./internal/github -count=1`: 1,611 passed.
   - `git diff --check` passed.
+  - PR review follow-up added a blank-task-ID fail-closed guard and reused the
+    shared task-store test double.

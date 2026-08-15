@@ -9,33 +9,10 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
-type recordingTaskPRTaskStore struct {
-	task     *taskmodels.Task
-	err      error
-	getCalls int
-}
-
-func (s *recordingTaskPRTaskStore) GetTask(context.Context, string) (*taskmodels.Task, error) {
-	s.getCalls++
-	return s.task, s.err
-}
-
-func (s *recordingTaskPRTaskStore) ListTaskRepositories(context.Context, string) ([]*taskmodels.TaskRepository, error) {
-	return nil, nil
-}
-
-func (s *recordingTaskPRTaskStore) GetRepository(context.Context, string) (*taskmodels.Repository, error) {
-	return nil, nil
-}
-
-func (s *recordingTaskPRTaskStore) UpdateTaskMetadata(context.Context, string, map[string]interface{}) (*taskmodels.Task, error) {
-	return s.task, s.err
-}
-
 type authorizeTaskPRMutationCase struct {
 	name             string
 	association      *TaskPR
-	taskStore        *recordingTaskPRTaskStore
+	taskStore        *fakeTaskIssueStore
 	workspaceID      string
 	authorizeErr     error
 	wantErr          error
@@ -48,7 +25,7 @@ func TestAuthorizeTaskPRMutationWorkspace(t *testing.T) {
 		{
 			name:           "modern uses stored workspace without task lookup",
 			association:    &TaskPR{WorkspaceID: "ws-modern"},
-			taskStore:      &recordingTaskPRTaskStore{task: &taskmodels.Task{WorkspaceID: "ws-other"}},
+			taskStore:      &fakeTaskIssueStore{task: &taskmodels.Task{WorkspaceID: "ws-other"}},
 			workspaceID:    "ws-modern",
 			wantAuthorized: "ws-modern",
 		},
@@ -61,7 +38,7 @@ func TestAuthorizeTaskPRMutationWorkspace(t *testing.T) {
 		{
 			name:             "legacy uses owning task workspace",
 			association:      &TaskPR{TaskID: "task-legacy"},
-			taskStore:        &recordingTaskPRTaskStore{task: &taskmodels.Task{WorkspaceID: "ws-legacy"}},
+			taskStore:        &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-legacy", WorkspaceID: "ws-legacy"}},
 			workspaceID:      "ws-legacy",
 			wantAuthorized:   "ws-legacy",
 			wantTaskGetCalls: 1,
@@ -69,7 +46,7 @@ func TestAuthorizeTaskPRMutationWorkspace(t *testing.T) {
 		{
 			name:             "legacy mismatch is not authorized",
 			association:      &TaskPR{TaskID: "task-legacy"},
-			taskStore:        &recordingTaskPRTaskStore{task: &taskmodels.Task{WorkspaceID: "ws-owner"}},
+			taskStore:        &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-legacy", WorkspaceID: "ws-owner"}},
 			workspaceID:      "ws-other",
 			wantErr:          ErrTaskPRNotFound,
 			wantTaskGetCalls: 1,
@@ -91,7 +68,7 @@ func TestAuthorizeTaskPRMutationWorkspaceFailures(t *testing.T) {
 		{
 			name:             "absent task fails closed",
 			association:      &TaskPR{TaskID: "task-legacy"},
-			taskStore:        &recordingTaskPRTaskStore{},
+			taskStore:        &fakeTaskIssueStore{returnNilTask: true},
 			workspaceID:      "ws-supplied",
 			wantErr:          ErrTaskPRNotFound,
 			wantTaskGetCalls: 1,
@@ -99,7 +76,7 @@ func TestAuthorizeTaskPRMutationWorkspaceFailures(t *testing.T) {
 		{
 			name:             "task not found sentinel fails closed",
 			association:      &TaskPR{TaskID: "task-legacy"},
-			taskStore:        &recordingTaskPRTaskStore{err: fmt.Errorf("lookup task: %w", ErrTaskNotFound)},
+			taskStore:        &fakeTaskIssueStore{taskErr: fmt.Errorf("lookup task: %w", ErrTaskNotFound)},
 			workspaceID:      "ws-supplied",
 			wantErr:          ErrTaskPRNotFound,
 			wantTaskGetCalls: 1,
@@ -107,7 +84,7 @@ func TestAuthorizeTaskPRMutationWorkspaceFailures(t *testing.T) {
 		{
 			name:             "blank task workspace fails closed",
 			association:      &TaskPR{TaskID: "task-legacy"},
-			taskStore:        &recordingTaskPRTaskStore{task: &taskmodels.Task{}},
+			taskStore:        &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-legacy"}},
 			workspaceID:      "ws-supplied",
 			wantErr:          ErrTaskPRNotFound,
 			wantTaskGetCalls: 1,
@@ -115,7 +92,7 @@ func TestAuthorizeTaskPRMutationWorkspaceFailures(t *testing.T) {
 		{
 			name:             "unrelated task lookup error is preserved",
 			association:      &TaskPR{TaskID: "task-legacy"},
-			taskStore:        &recordingTaskPRTaskStore{err: lookupErr},
+			taskStore:        &fakeTaskIssueStore{taskErr: lookupErr},
 			workspaceID:      "ws-supplied",
 			wantErr:          lookupErr,
 			wantTaskGetCalls: 1,
@@ -123,7 +100,7 @@ func TestAuthorizeTaskPRMutationWorkspaceFailures(t *testing.T) {
 		{
 			name:             "workspace authorizer error is preserved",
 			association:      &TaskPR{TaskID: "task-legacy"},
-			taskStore:        &recordingTaskPRTaskStore{task: &taskmodels.Task{WorkspaceID: "ws-legacy"}},
+			taskStore:        &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-legacy", WorkspaceID: "ws-legacy"}},
 			workspaceID:      "ws-legacy",
 			authorizeErr:     authorizeErr,
 			wantErr:          authorizeErr,
@@ -133,6 +110,13 @@ func TestAuthorizeTaskPRMutationWorkspaceFailures(t *testing.T) {
 		{
 			name:        "nil association fails closed",
 			workspaceID: "ws-any",
+			wantErr:     ErrTaskPRNotFound,
+		},
+		{
+			name:        "blank task ID fails closed before lookup",
+			association: &TaskPR{TaskID: "  "},
+			taskStore:   &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-legacy", WorkspaceID: "ws-owner"}},
+			workspaceID: "ws-owner",
 			wantErr:     ErrTaskPRNotFound,
 		},
 	}

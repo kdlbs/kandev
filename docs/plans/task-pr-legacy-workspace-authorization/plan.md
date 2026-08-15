@@ -86,9 +86,11 @@ before starting the task and record that dependency in the PR.
 
 - Dependency PR #2614 remains open at `708d8d2`; this implementation is stacked
   on `feature/tel-record-why-a-pul-p4w` and targets that branch.
-- The focused authorization and mutation command passed: 21 tests.
+- The focused authorization and mutation command passed: 22 tests.
 - `go test ./internal/github -run 'TaskPR' -count=1` passed: 121 tests.
-- `go test ./internal/github -count=1` passed: 1,610 tests.
+- `go test ./internal/github -count=1` passed: 1,611 tests.
+- PR review follow-up added a blank-task-ID fail-closed guard and reused the
+  shared task-store test double.
 - `git diff --check` passed.
 
 ## Implementation Waves And Parallel Candidates

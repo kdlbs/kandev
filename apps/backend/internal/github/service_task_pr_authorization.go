@@ -19,6 +19,9 @@ func (s *Service) authorizeTaskPRMutation(ctx context.Context, tp *TaskPR, works
 		}
 		return s.authorizeWorkspaceAccess(ctx, tp.WorkspaceID)
 	}
+	if strings.TrimSpace(tp.TaskID) == "" {
+		return ErrTaskPRNotFound
+	}
 
 	taskStore := s.getTaskIssueStore()
 	if taskStore == nil {
