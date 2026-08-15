@@ -6,6 +6,7 @@ import {
   type MessageType,
 } from "@/lib/types/http";
 import type { RichMetadata } from "@/components/task/chat/types";
+import { findPendingClarificationGroup } from "@/lib/utils/pending-clarification";
 import { filterVisibleMessages } from "./processed-message-filtering";
 import {
   buildGroupedRenderItems,
@@ -98,6 +99,68 @@ describe("filterVisibleMessages clarification history", () => {
         "turn-current",
       ).map((message) => message.id),
     ).toEqual(["old-question"]);
+  });
+
+  it("hides a legacy pending clarification from transcript for the overlay", () => {
+    const pending = makeMessage("legacy-question", "clarification_request", {
+      status: "pending",
+    });
+
+    expect(
+      filterVisibleMessages([pending], new Set<string>(), new Set<string>(), null).map(
+        (message) => message.id,
+      ),
+    ).toEqual([]);
+    expect(
+      findPendingClarificationGroup([pending], { currentTurnId: null }).map(
+        (message) => message.id,
+      ),
+    ).toEqual(["legacy-question"]);
+  });
+
+  it.each([null, "permission"] as const)(
+    "keeps pending metadata as inert history when authority is %s",
+    (pendingAction) => {
+      const old = makeMessage("unhydrated-old-question", "clarification_request", {
+        status: "pending",
+        agent_disconnected: true,
+      });
+
+      expect(
+        filterVisibleMessages(
+          [old],
+          new Set<string>(),
+          new Set<string>(),
+          undefined,
+          pendingAction,
+        ).map((message) => message.id),
+      ).toEqual(["unhydrated-old-question"]);
+    },
+  );
+
+  it("hides only the active bundle when clarification authority exists before turn hydration", () => {
+    const old = makeMessage("unhydrated-superseded", "clarification_request", {
+      status: "pending",
+      pending_id: "pending-old",
+    });
+    const activeA = makeMessage("unhydrated-active-a", "clarification_request", {
+      status: "pending",
+      pending_id: "pending-active",
+    });
+    const activeB = makeMessage("unhydrated-active-b", "clarification_request", {
+      status: "pending",
+      pending_id: "pending-active",
+    });
+
+    expect(
+      filterVisibleMessages(
+        [old, activeA, activeB],
+        new Set<string>(),
+        new Set<string>(),
+        undefined,
+        "clarification",
+      ).map((message) => message.id),
+    ).toEqual(["unhydrated-superseded"]);
   });
 });
 

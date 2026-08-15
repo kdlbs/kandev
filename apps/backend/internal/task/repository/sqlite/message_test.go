@@ -197,6 +197,8 @@ func TestGetPendingActionsBySessionIDs(t *testing.T) {
 	now := time.Now().UTC()
 
 	seedForMsgTest(t, repo, "task-clar", "sess-clar", "turn-clar")
+	// Transitional history may contain both kinds. Clarification deliberately
+	// wins within one session, independent of UNION ALL row order.
 	createPendingActionMessage(t, repo, "perm-clar", "task-clar", "sess-clar", "turn-clar", models.MessageTypePermissionRequest, "<missing>", now)
 	createPendingActionMessage(t, repo, "clar-clar", "task-clar", "sess-clar", "turn-clar", models.MessageTypeClarificationRequest, "pending", now.Add(time.Second))
 

@@ -1031,8 +1031,22 @@ func (a *messageCreatorAdapter) CompleteActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, status string,
 	responses map[string]interface{},
-) (bool, error) {
+) ([]*models.Message, bool, error) {
 	return a.svc.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
+}
+
+func (a *messageCreatorAdapter) RestoreActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+) (bool, error) {
+	return a.svc.RestoreActiveClarificationBundle(ctx, pendingID, terminalStatus)
+}
+
+func (a *messageCreatorAdapter) PublishClarificationBundleUpdates(
+	ctx context.Context,
+	messages []*models.Message,
+) {
+	a.svc.PublishClarificationBundleUpdates(ctx, messages)
 }
 
 // CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.

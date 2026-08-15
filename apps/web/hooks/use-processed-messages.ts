@@ -422,6 +422,25 @@ function usePendingClarificationState(messages: Message[], options: ProcessedMes
   };
 }
 
+function useVisibleMessages(
+  messages: Message[],
+  toolCallIds: Set<string>,
+  subagentChildIds: Set<string>,
+  options: ProcessedMessagesOptions,
+) {
+  return useMemo(
+    () =>
+      filterVisibleMessages(
+        messages,
+        toolCallIds,
+        subagentChildIds,
+        options.currentTurnId,
+        options.pendingAction,
+      ),
+    [messages, toolCallIds, subagentChildIds, options.currentTurnId, options.pendingAction],
+  );
+}
+
 export function useProcessedMessages(
   messages: Message[],
   taskId: string | null,
@@ -447,10 +466,7 @@ export function useProcessedMessages(
     options,
   );
 
-  const visibleMessages = useMemo(
-    () => filterVisibleMessages(messages, toolCallIds, subagentChildIds, options.currentTurnId),
-    [messages, toolCallIds, subagentChildIds, options.currentTurnId],
-  );
+  const visibleMessages = useVisibleMessages(messages, toolCallIds, subagentChildIds, options);
 
   const taskDescriptionMessage: Message | null = useMemo(() => {
     return taskDescription && visibleMessages.length === 0

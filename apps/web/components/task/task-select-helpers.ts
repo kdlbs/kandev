@@ -272,17 +272,18 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
     void loadTaskSessionsForTask(taskId)
       .then((sessions) => {
         if (selectionGuard.wasSuperseded()) return;
+        const currentOldSessionId = store.getState().tasks.activeSessionId;
         const resolvedSessionId = resolveTaskSessionId({
           sessions,
           preferredSessionId: targetSessionId,
           taskPendingAction,
         });
-        switchToSession(taskId, resolvedSessionId, oldSessionId);
+        switchToSession(taskId, resolvedSessionId, currentOldSessionId);
         navigateToTask(taskId);
       })
       .catch(() => {
         if (selectionGuard.wasSuperseded()) return;
-        switchToSession(taskId, targetSessionId, oldSessionId);
+        switchToSession(taskId, targetSessionId, store.getState().tasks.activeSessionId);
         navigateToTask(taskId);
       })
       .finally(selectionGuard.dispose);

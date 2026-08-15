@@ -76,6 +76,11 @@ update task/plan status.
 - Clarification discovery now follows the newest durable turn, keeps earlier active bundles visible
   when a newer bundle is terminal, remains deletion-proof, and gates unavailable turn history on the
   compact session pending action while retaining legacy no-turn behavior.
+- PR review follow-up keeps superseded pending-metadata rows as inert transcript history when turns
+  are unhydrated and the server reports no active clarification, while hiding only the authoritative
+  latest bundle when clarification remains active. The explicit no-turn legacy overlay path is pinned.
+- Desktop navigation re-reads the active source session after asynchronous loading, and mobile item
+  projection reuses the shared task pending-action authority helper.
 - Added one shared pending-owner resolver. Desktop waits for session loading when a task advertises
   input, including non-task routes; phone selection waits, navigates to the owning session, then
   closes the drawer, with safe load-failure fallback.
@@ -83,3 +88,5 @@ update task/plan status.
 - The exact three-file Vitest command passed: 3 files, 68 tests.
 - `cd apps/web && pnpm run typecheck` passed.
 - `cd apps/web && pnpm run i18n:check` passed; existing real-locale parity warnings remain advisory.
+- Follow-up Vitest passed 79 tests across processed-message and pending-clarification suites; web lint,
+  typecheck, i18n check, and i18n ratchet passed.

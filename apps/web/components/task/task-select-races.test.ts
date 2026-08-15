@@ -66,15 +66,18 @@ function makeSelectionHarness(args: {
 
 function makeDeferredSessionLoader() {
   let resolveLoad: (sessions: TaskSession[]) => void = () => {};
+  let rejectLoad: (error: Error) => void = () => {};
   const loadTaskSessionsForTask = vi.fn(
     () =>
-      new Promise<TaskSession[]>((resolve) => {
+      new Promise<TaskSession[]>((resolve, reject) => {
         resolveLoad = resolve;
+        rejectLoad = reject;
       }),
   );
   return {
     loadTaskSessionsForTask,
     resolveLoad: (sessions: TaskSession[]) => resolveLoad(sessions),
+    rejectLoad: (error: Error) => rejectLoad(error),
   };
 }
 
@@ -288,5 +291,63 @@ describe("selectTaskWithLayout old-session changes", () => {
 
     expect(setActiveTask).toHaveBeenCalledWith(sessionlessTaskId);
     expect(replaceTaskUrl).toHaveBeenCalledWith(sessionlessTaskId);
+  });
+
+  it("uses the current old session after a primary-session load resolves", async () => {
+    const replacementSessionId = "sess-old-replaced";
+    const switchToSession = vi.fn();
+    const { state, store, setActiveTask } = makeSelectionHarness({
+      activeTaskId: ORIGINAL_TASK_ID,
+      activeSessionId: ORIGINAL_SESSION_ID,
+    });
+    const { loadTaskSessionsForTask, resolveLoad } = makeDeferredSessionLoader();
+    selectTaskWithLayout({
+      taskId: PENDING_TASK_ID,
+      task: { primarySessionId: PENDING_SESSION_ID },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask,
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+
+    state.tasks.activeSessionId = replacementSessionId;
+    resolveLoad([{ id: PENDING_SESSION_ID, task_id: PENDING_TASK_ID } as TaskSession]);
+    await flushTaskSelection();
+
+    expect(switchToSession).toHaveBeenCalledWith(
+      PENDING_TASK_ID,
+      PENDING_SESSION_ID,
+      replacementSessionId,
+    );
+  });
+
+  it("uses the current old session after a primary-session load rejects", async () => {
+    const replacementSessionId = "sess-old-replaced";
+    const switchToSession = vi.fn();
+    const { state, store, setActiveTask } = makeSelectionHarness({
+      activeTaskId: ORIGINAL_TASK_ID,
+      activeSessionId: ORIGINAL_SESSION_ID,
+    });
+    const { loadTaskSessionsForTask, rejectLoad } = makeDeferredSessionLoader();
+    selectTaskWithLayout({
+      taskId: PENDING_TASK_ID,
+      task: { primarySessionId: PENDING_SESSION_ID },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask,
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+
+    state.tasks.activeSessionId = replacementSessionId;
+    rejectLoad(new Error("load failed"));
+    await flushTaskSelection();
+
+    expect(switchToSession).toHaveBeenCalledWith(
+      PENDING_TASK_ID,
+      PENDING_SESSION_ID,
+      replacementSessionId,
+    );
   });
 });

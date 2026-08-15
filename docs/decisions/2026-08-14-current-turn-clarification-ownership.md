@@ -1,6 +1,6 @@
 # ADR-2026-08-14-current-turn-clarification-ownership: Current Turn Owns Active Clarification
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-15)
 **Date:** 2026-08-14
 **Area:** backend, frontend, protocol, workflow
 
@@ -36,9 +36,12 @@ The session's current turn owns active clarification state.
   response validation, per-session pending projection, and task-summary reconciliation.
 - Message and clarification events trigger a fresh authoritative projection. Event arrival order and
   one in-memory request identity per session do not define persisted pending state.
-- Response handling follows the same ownership rule: a detached current-turn answer persists and
-  resumes once; a detached current-turn rejection persists without resuming; any response to a
-  superseded or terminal bundle returns conflict without a write or resume event.
+- Response handling follows the same ownership rule. An atomic current-turn claim precedes both live
+  waiter delivery and detached resume publication. Terminal message updates become visible only after
+  delivery succeeds; a failed detached publication returns an error and restores the bundle to pending
+  when its turn is still current, preserving a safe retry. A detached current-turn rejection persists
+  without resuming; any response to a superseded or terminal bundle returns conflict without a write or
+  resume event.
 - Repeated detachment of an already detached bundle performs no write and publishes no duplicate
   message occurrence.
 - Existing task summaries reconcile their pending field on normal task-list and boot reads. Repair uses

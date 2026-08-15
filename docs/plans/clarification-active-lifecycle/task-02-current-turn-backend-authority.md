@@ -84,6 +84,14 @@ blockers/risks, and update task/plan status.
 - Routed canceller, workflow guard, and detached-response fallback through that authority. Repeated
   detachment is a no-op; superseded/terminal responses return conflict without writes or resume
   events; repository errors fail closed.
+- PR review follow-up now claims durable current-turn ownership before live waiter delivery, withholds
+  terminal message events until delivery succeeds, and restores a still-current detached bundle when
+  resume publication fails so the answer can be retried. SQLite concurrency, rollback, supersession,
+  cancelled-context, and PostgreSQL-dialect cases pin the behavior.
+- Detach and expiry counts now include only bundles whose messages changed. Malformed messages without
+  their schema-required durable turn remain inert instead of becoming pending authority.
 - `cd apps/backend && go test ./internal/task/repository/sqlite ./internal/clarification ./internal/orchestrator`
   passed. The environment-gated PostgreSQL case skipped locally because
   `KANDEV_TEST_POSTGRES_DSN` was unset; it remains enabled for PostgreSQL CI.
+- The same exact package command passed again after review remediation; changed-code `golangci-lint`
+  reported zero issues against merge base `8c9456074a2f61abec48ddd8742ec81635faa16e`.

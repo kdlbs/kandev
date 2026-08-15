@@ -2,6 +2,7 @@ import {
   type ClarificationRequestMetadata,
   type Message,
   type MessageType,
+  type TaskPendingAction,
 } from "@/lib/types/http";
 import type { RichMetadata, ToolCallMetadata, TodoSnapshot } from "@/components/task/chat/types";
 
@@ -173,18 +174,61 @@ export function collapseTodoSnapshotsPerTurn(messages: Message[]): Message[] {
   });
 }
 
+function findUnhydratedActiveClarification(
+  messages: Message[],
+  currentTurnId?: string | null,
+  pendingAction?: TaskPendingAction | null,
+): Message | undefined {
+  if (currentTurnId !== undefined || pendingAction !== "clarification") return undefined;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const candidate = messages[index];
+    const metadata = candidate.metadata as ClarificationRequestMetadata | undefined;
+    if (
+      candidate.type === "clarification_request" &&
+      (!metadata?.status || metadata.status === "pending")
+    ) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function isClarificationVisible(
+  message: Message,
+  currentTurnId: string | null | undefined,
+  pendingAction: TaskPendingAction | null | undefined,
+  unhydratedActive: Message | undefined,
+): boolean {
+  const metadata = message.metadata as ClarificationRequestMetadata | undefined;
+  if (metadata?.status && metadata.status !== "pending") return true;
+  if (currentTurnId !== undefined) {
+    return typeof currentTurnId === "string" && message.turn_id !== currentTurnId;
+  }
+  if (unhydratedActive) {
+    const activeMetadata = unhydratedActive.metadata as ClarificationRequestMetadata | undefined;
+    return activeMetadata?.pending_id
+      ? metadata?.pending_id !== activeMetadata.pending_id
+      : message.id !== unhydratedActive.id;
+  }
+  return pendingAction !== undefined && pendingAction !== "clarification";
+}
+
 export function filterVisibleMessages(
   messages: Message[],
   toolCallIds: Set<string>,
   subagentChildIds: Set<string>,
   currentTurnId?: string | null,
+  pendingAction?: TaskPendingAction | null,
 ): Message[] {
+  const unhydratedActive = findUnhydratedActiveClarification(
+    messages,
+    currentTurnId,
+    pendingAction,
+  );
   const filtered = messages.filter((message) => {
     if (subagentChildIds.has(message.id) || isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {
-      const metadata = message.metadata as ClarificationRequestMetadata | undefined;
-      if (metadata?.status && metadata.status !== "pending") return true;
-      return typeof currentTurnId === "string" && message.turn_id !== currentTurnId;
+      return isClarificationVisible(message, currentTurnId, pendingAction, unhydratedActive);
     }
     if (
       message.type === "status" &&

@@ -6,6 +6,7 @@ import {
 import type { KanbanState } from "@/lib/state/slices";
 import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import { effectiveTaskPendingAction } from "../task-select-helpers";
 
 export type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
@@ -31,11 +32,8 @@ function sheetRepositoryPath(
     : undefined;
 }
 
-function sheetPendingFlags(
-  summary: KanbanState["tasks"][number]["statusSummary"],
-  fallback?: string | null,
-) {
-  const action = summary != null ? summary.pending_action : fallback;
+function sheetPendingFlags(task: KanbanState["tasks"][number]) {
+  const action = effectiveTaskPendingAction(task);
   return {
     clarification: action === "clarification",
     permission: action === "permission",
@@ -45,7 +43,7 @@ function sheetPendingFlags(
 function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
   const summary = task.statusSummary;
   const hasSummary = summary != null;
-  const pending = sheetPendingFlags(hasSummary ? summary : undefined, task.taskPendingAction);
+  const pending = sheetPendingFlags(task);
   return {
     sessionState: hasSummary
       ? summary?.primary_session?.state

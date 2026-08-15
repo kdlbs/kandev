@@ -24,8 +24,9 @@ type stubMessageCreator struct {
 		questionID string
 		status     string
 	}
-	created [][]Question
-	repo    *stubMessageStore
+	created          [][]Question
+	repo             *stubMessageStore
+	publishedBundles int
 }
 
 func (s *stubMessageCreator) CreateClarificationRequestMessages(
@@ -54,14 +55,14 @@ func (s *stubMessageCreator) CompleteActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, status string,
 	responses map[string]interface{},
-) (bool, error) {
+) ([]*taskmodels.Message, bool, error) {
 	msgs := s.repo.messages[pendingID]
 	if len(msgs) == 0 {
-		return false, nil
+		return nil, false, nil
 	}
 	active, err := s.repo.FindActiveClarificationMessagesBySessionID(ctx, msgs[0].TaskSessionID)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	activeBundle := false
 	for _, message := range active {
@@ -71,7 +72,7 @@ func (s *stubMessageCreator) CompleteActiveClarificationBundle(
 		}
 	}
 	if !activeBundle {
-		return false, nil
+		return nil, false, nil
 	}
 	for _, message := range msgs {
 		questionID := stringFromMetadata(message.Metadata, "question_id")
@@ -85,7 +86,40 @@ func (s *stubMessageCreator) CompleteActiveClarificationBundle(
 			status     string
 		}{pendingID, questionID, status})
 	}
+	return msgs, true, nil
+}
+
+func (s *stubMessageCreator) RestoreActiveClarificationBundle(
+	_ context.Context,
+	pendingID, terminalStatus string,
+) (bool, error) {
+	msgs := s.repo.messages[pendingID]
+	if len(msgs) == 0 {
+		return false, nil
+	}
+	for _, message := range msgs {
+		if stringFromMetadata(message.Metadata, "status") != terminalStatus {
+			return false, nil
+		}
+	}
+	for _, message := range msgs {
+		questionID := stringFromMetadata(message.Metadata, "question_id")
+		message.Metadata["status"] = "pending"
+		delete(message.Metadata, "response")
+		s.updates = append(s.updates, struct {
+			pendingID  string
+			questionID string
+			status     string
+		}{pendingID, questionID, "pending"})
+	}
 	return true, nil
+}
+
+func (s *stubMessageCreator) PublishClarificationBundleUpdates(
+	context.Context,
+	[]*taskmodels.Message,
+) {
+	s.publishedBundles++
 }
 
 func setupTestHandler(t *testing.T, msgs map[string][]*taskmodels.Message) (*Handlers, *stubMessageStore, *stubEventBus, *stubMessageCreator) {
@@ -245,6 +279,87 @@ func TestHttpRespond_DetachedAnswerPublishesOnlyForWinningClaim(t *testing.T) {
 	}
 }
 
+func TestHttpRespond_DetachedPublishFailureRestoresRetryableBundle(t *testing.T) {
+	msg := &taskmodels.Message{
+		ID: "message-retry", TaskID: "task-retry", TaskSessionID: "session-retry",
+		Metadata: map[string]any{
+			"status": "pending", "pending_id": "pending-retry", "question_id": "q1",
+			"question": map[string]any{"id": "q1", "prompt": "Continue?"},
+		},
+	}
+	h, _, eventBus, messageCreator := setupTestHandler(t, map[string][]*taskmodels.Message{
+		"pending-retry": {msg},
+	})
+	eventBus.publishErr = errors.New("event bus unavailable")
+	body := RespondBody{Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}}}
+
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	first := runRespondWithContext(t, h, "pending-retry", body, cancelledCtx)
+	if first.Code != http.StatusInternalServerError {
+		t.Fatalf("first response status = %d, want 500; body=%s", first.Code, first.Body.String())
+	}
+	if got := msg.Metadata["status"]; got != "pending" {
+		t.Fatalf("status after failed publication = %v, want pending for retry", got)
+	}
+	if messageCreator.publishedBundles != 0 {
+		t.Fatalf("published terminal bundles after failed resume = %d, want 0", messageCreator.publishedBundles)
+	}
+
+	eventBus.publishErr = nil
+	second := runRespond(t, h, "pending-retry", body)
+	if second.Code != http.StatusOK {
+		t.Fatalf("retry status = %d, want 200; body=%s", second.Code, second.Body.String())
+	}
+	if got := msg.Metadata["status"]; got != "answered" {
+		t.Fatalf("status after retry = %v, want answered", got)
+	}
+	if messageCreator.publishedBundles != 1 {
+		t.Fatalf("published terminal bundles after retry = %d, want 1", messageCreator.publishedBundles)
+	}
+	if len(eventBus.events) != 1 || eventBus.events[0].Type != events.ClarificationAnswered {
+		t.Fatalf("successful resume events = %+v, want exactly one", eventBus.events)
+	}
+	for index, contextErr := range eventBus.contextErrs {
+		if contextErr != nil {
+			t.Fatalf("event publish %d used cancelled context: %v", index, contextErr)
+		}
+	}
+}
+
+func TestHttpRespond_LiveSupersededBundleReturnsConflict(t *testing.T) {
+	old := &taskmodels.Message{
+		ID: "old-message", TaskID: "task-live", TaskSessionID: "session-live",
+		Metadata: map[string]any{
+			"status": "pending", "pending_id": "pending-live", "question_id": "q1",
+			"question": map[string]any{"id": "q1", "prompt": "Old question?"},
+		},
+	}
+	h, repo, eventBus, messageCreator := setupTestHandler(t, map[string][]*taskmodels.Message{
+		"pending-live": {old},
+	})
+	pendingID, _ := h.store.CreateRequest(&Request{
+		PendingID: "pending-live", SessionID: "session-live", TaskID: "task-live",
+		Questions: []Question{{ID: "q1", Prompt: "Old question?"}},
+	})
+	repo.activeBySession = map[string][]*taskmodels.Message{
+		"session-live": {{
+			ID: "new-message", TaskID: "task-live", TaskSessionID: "session-live",
+			Metadata: map[string]any{"status": "pending", "pending_id": "pending-new"},
+		}},
+	}
+
+	rec := runRespond(t, h, pendingID, RespondBody{
+		Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}},
+	})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(messageCreator.updates) != 0 || len(eventBus.events) != 0 {
+		t.Fatalf("stale live response produced writes=%+v events=%+v", messageCreator.updates, eventBus.events)
+	}
+}
+
 func TestHttpRespond_FallbackInactiveBundleReturnsConflictWithoutSideEffects(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -400,7 +515,7 @@ func TestHttpRespond_PartialAnswers_Rejected400(t *testing.T) {
 // question is answered the primary path delivers the full response and
 // updates each message exactly once.
 func TestHttpRespond_AllAnswers_PrimaryPath_Success(t *testing.T) {
-	h, _, _, msgCreator := setupTestHandler(t, map[string][]*taskmodels.Message{})
+	h, repo, _, msgCreator := setupTestHandler(t, map[string][]*taskmodels.Message{})
 
 	pendingID, _ := h.store.CreateRequest(&Request{
 		SessionID: "s1",
@@ -410,6 +525,20 @@ func TestHttpRespond_AllAnswers_PrimaryPath_Success(t *testing.T) {
 			{ID: "q2", Prompt: "Second?"},
 		},
 	})
+	repo.messages[pendingID] = []*taskmodels.Message{
+		{
+			ID: "message-q1", TaskID: "t1", TaskSessionID: "s1",
+			Metadata: map[string]any{
+				"status": "pending", "pending_id": pendingID, "question_id": "q1",
+			},
+		},
+		{
+			ID: "message-q2", TaskID: "t1", TaskSessionID: "s1",
+			Metadata: map[string]any{
+				"status": "pending", "pending_id": pendingID, "question_id": "q2",
+			},
+		},
+	}
 
 	// Drain the response channel so Respond does not block indefinitely.
 	go func() {
@@ -516,11 +645,26 @@ func TestBuildAnswerSummary_MultiQuestion(t *testing.T) {
 
 func runRespond(t *testing.T, h *Handlers, pendingID string, body RespondBody) *httptest.ResponseRecorder {
 	t.Helper()
+	return runRespondWithContext(t, h, pendingID, body, context.Background())
+}
+
+func runRespondWithContext(
+	t *testing.T,
+	h *Handlers,
+	pendingID string,
+	body RespondBody,
+	ctx context.Context,
+) *httptest.ResponseRecorder {
+	t.Helper()
 	payload, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/clarification/"+pendingID+"/respond", bytes.NewReader(payload))
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/clarification/"+pendingID+"/respond",
+		bytes.NewReader(payload),
+	).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)

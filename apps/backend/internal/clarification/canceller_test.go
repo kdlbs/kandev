@@ -64,10 +64,16 @@ func (s *stubMessageStore) UpdateMessage(_ context.Context, m *taskmodels.Messag
 }
 
 type stubEventBus struct {
-	events []*bus.Event
+	events      []*bus.Event
+	publishErr  error
+	contextErrs []error
 }
 
-func (s *stubEventBus) Publish(_ context.Context, _ string, ev *bus.Event) error {
+func (s *stubEventBus) Publish(ctx context.Context, _ string, ev *bus.Event) error {
+	s.contextErrs = append(s.contextErrs, ctx.Err())
+	if s.publishErr != nil {
+		return s.publishErr
+	}
 	s.events = append(s.events, ev)
 	return nil
 }
@@ -252,6 +258,12 @@ func TestCanceller_RepeatedDetachIsNoOp(t *testing.T) {
 		}},
 	}
 	c, repo, eventBus := newTestCanceller(t, msgs)
+	if _, created := c.store.CreateRequest(&Request{
+		PendingID: pendingID,
+		SessionID: "s1",
+	}); !created {
+		t.Fatal("expected in-memory request to be created")
+	}
 
 	if got := c.DetachSessionAndNotify(context.Background(), "s1"); got != 0 {
 		t.Fatalf("repeated detach count = %d, want 0", got)
@@ -261,6 +273,37 @@ func TestCanceller_RepeatedDetachIsNoOp(t *testing.T) {
 	}
 	if len(eventBus.events) != 0 {
 		t.Fatalf("repeated detach published %d events", len(eventBus.events))
+	}
+}
+
+func TestCanceller_RepeatedExpiryIsNoOp(t *testing.T) {
+	pendingID := "already-expired"
+	msgs := map[string][]*taskmodels.Message{
+		pendingID: {{
+			ID:            "m-expired",
+			TaskSessionID: "s1",
+			Metadata: map[string]any{
+				"status":     "expired",
+				"pending_id": pendingID,
+			},
+		}},
+	}
+	c, repo, eventBus := newTestCanceller(t, msgs)
+	if _, created := c.store.CreateRequest(&Request{
+		PendingID: pendingID,
+		SessionID: "s1",
+	}); !created {
+		t.Fatal("expected in-memory request to be created")
+	}
+
+	if got := c.ExpireSessionAndNotify(context.Background(), "s1"); got != 0 {
+		t.Fatalf("repeated expiry count = %d, want 0", got)
+	}
+	if len(repo.updated) != 0 {
+		t.Fatalf("repeated expiry wrote %d messages", len(repo.updated))
+	}
+	if len(eventBus.events) != 0 {
+		t.Fatalf("repeated expiry published %d events", len(eventBus.events))
 	}
 }
 

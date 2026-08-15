@@ -125,6 +125,35 @@ func TestFindActiveClarificationMessagesSupportsMissingStatusInCurrentTurn(t *te
 	}
 }
 
+func TestGetPendingActionsIgnoresMessagesWithoutDurableTurn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedPendingActionSession(t, repo, "task-orphan", "session-orphan")
+	if _, err := repo.db.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+		t.Fatalf("disable foreign keys for malformed-history fixture: %v", err)
+	}
+	t.Cleanup(func() { _, _ = repo.db.Exec("PRAGMA foreign_keys=ON") })
+	createPendingActionMessage(
+		t,
+		repo,
+		"clarification-orphan",
+		"task-orphan",
+		"session-orphan",
+		"missing-turn",
+		models.MessageTypeClarificationRequest,
+		"pending",
+		time.Date(2026, time.August, 15, 14, 30, 0, 0, time.UTC),
+	)
+
+	actions, err := repo.GetPendingActionsBySessionIDs(ctx, []string{"session-orphan"})
+	if err != nil {
+		t.Fatalf("GetPendingActionsBySessionIDs: %v", err)
+	}
+	if _, ok := actions["session-orphan"]; ok {
+		t.Fatalf("orphan message became authoritative without a durable turn: %#v", actions)
+	}
+}
+
 func TestFindActiveClarificationMessagesUsesDeterministicTurnTieBreak(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -227,5 +256,80 @@ func TestCompleteActiveClarificationBundleRejectsSupersededTurn(t *testing.T) {
 	}
 	if message.Metadata["status"] != "pending" {
 		t.Fatalf("status = %v, want pending", message.Metadata["status"])
+	}
+}
+
+func TestRestoreActiveClarificationBundleAllowsRetryAfterDeliveryFailure(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 13, 30, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-restore", "session-restore")
+	createPendingActionTurn(t, repo, "task-restore", "session-restore", "turn-restore", base, base)
+	createClarificationBundleMessage(
+		t, repo, "message-restore", "task-restore", "session-restore", "turn-restore",
+		"pending-restore", "q1", base,
+	)
+	responses := map[string]interface{}{
+		"q1": map[string]interface{}{"question_id": "q1", "custom_text": "continue"},
+	}
+
+	_, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx, "pending-restore", "answered", responses,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("complete before restore: claimed=%v err=%v", claimed, err)
+	}
+	restored, err := repo.RestoreActiveClarificationBundle(ctx, "pending-restore", "answered")
+	if err != nil || !restored {
+		t.Fatalf("restore: restored=%v err=%v", restored, err)
+	}
+	message, err := repo.GetMessage(ctx, "message-restore")
+	if err != nil {
+		t.Fatalf("GetMessage after restore: %v", err)
+	}
+	if message.Metadata["status"] != "pending" || message.Metadata["response"] != nil {
+		t.Fatalf("restored metadata = %#v, want pending without response", message.Metadata)
+	}
+
+	_, claimed, err = repo.CompleteActiveClarificationBundle(
+		ctx, "pending-restore", "answered", responses,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("retry completion: claimed=%v err=%v", claimed, err)
+	}
+}
+
+func TestRestoreActiveClarificationBundleDoesNotReactivateSupersededTurn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 13, 45, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-restore-old", "session-restore-old")
+	createPendingActionTurn(t, repo, "task-restore-old", "session-restore-old", "turn-restore-old", base, base)
+	createClarificationBundleMessage(
+		t, repo, "message-restore-old", "task-restore-old", "session-restore-old", "turn-restore-old",
+		"pending-restore-old", "q1", base,
+	)
+	_, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-restore-old",
+		"answered",
+		map[string]interface{}{"q1": map[string]interface{}{"question_id": "q1"}},
+	)
+	if err != nil || !claimed {
+		t.Fatalf("complete before supersession: claimed=%v err=%v", claimed, err)
+	}
+	createPendingActionTurn(
+		t, repo, "task-restore-old", "session-restore-old", "turn-restore-new",
+		base.Add(time.Second), base.Add(time.Second),
+	)
+
+	restored, err := repo.RestoreActiveClarificationBundle(
+		ctx, "pending-restore-old", "answered",
+	)
+	if err != nil {
+		t.Fatalf("RestoreActiveClarificationBundle: %v", err)
+	}
+	if restored {
+		t.Fatal("superseded terminal bundle was restored")
 	}
 }

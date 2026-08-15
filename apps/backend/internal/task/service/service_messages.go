@@ -22,6 +22,7 @@ const (
 
 type activeClarificationBundleCompleter interface {
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
+	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string) (bool, error)
 }
 
 // CreateMessage creates a new message on an agent session
@@ -782,23 +783,38 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 	return nil
 }
 
-// CompleteActiveClarificationBundle atomically transitions a detached,
-// current-turn bundle and publishes message updates only for the winning claim.
+// CompleteActiveClarificationBundle atomically transitions a current-turn
+// bundle. The caller publishes the returned messages only after response
+// delivery succeeds, so a failed detached resume can be restored for retry.
 func (s *Service) CompleteActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, status string,
 	responses map[string]interface{},
+) ([]*models.Message, bool, error) {
+	completer, ok := s.messages.(activeClarificationBundleCompleter)
+	if !ok {
+		return nil, false, errors.New("message repository does not support atomic clarification completion")
+	}
+	return completer.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
+}
+
+// RestoreActiveClarificationBundle reopens a terminal bundle after detached
+// resume publication fails, preserving an idempotent HTTP retry path.
+func (s *Service) RestoreActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, terminalStatus string,
 ) (bool, error) {
 	completer, ok := s.messages.(activeClarificationBundleCompleter)
 	if !ok {
-		return false, errors.New("message repository does not support atomic clarification completion")
+		return false, errors.New("message repository does not support clarification restore")
 	}
-	messages, claimed, err := completer.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
-	if err != nil || !claimed {
-		return claimed, err
-	}
+	return completer.RestoreActiveClarificationBundle(ctx, pendingID, terminalStatus)
+}
+
+// PublishClarificationBundleUpdates exposes a completed bundle only after its
+// same-turn delivery or detached resume event has succeeded.
+func (s *Service) PublishClarificationBundleUpdates(ctx context.Context, messages []*models.Message) {
 	for _, message := range messages {
 		s.publishMessageEvent(ctx, events.MessageUpdated, message)
 	}
-	return true, nil
 }

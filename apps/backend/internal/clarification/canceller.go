@@ -101,6 +101,7 @@ func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.
 
 func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) int {
 	pendingIDs := c.store.CancelSession(sessionID)
+	changedBundles := 0
 
 	handled := make(map[string]bool, len(pendingIDs))
 	for _, id := range pendingIDs {
@@ -111,13 +112,15 @@ func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) 
 				zap.Error(err))
 			continue
 		}
-		c.markMessagesDetached(ctx, msgs, id)
+		if c.markMessagesDetached(ctx, msgs, id) {
+			changedBundles++
+		}
 		handled[id] = true
 	}
 
 	msgs, err := c.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil || len(msgs) == 0 {
-		return len(pendingIDs)
+		return changedBundles
 	}
 
 	byPendingID := make(map[string][]*taskmodels.Message)
@@ -128,7 +131,6 @@ func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) 
 		}
 		byPendingID[pid] = append(byPendingID[pid], msg)
 	}
-	changedBundles := len(pendingIDs)
 	for pid, bundle := range byPendingID {
 		if c.markMessagesDetached(ctx, bundle, pid) {
 			changedBundles++
@@ -150,6 +152,7 @@ func (c *Canceller) DetachSessionAndNotify(ctx context.Context, sessionID string
 // instead of preserving the deferred-answer UX.
 func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string) int {
 	pendingIDs := c.store.CancelSession(sessionID)
+	changedBundles := 0
 
 	handled := make(map[string]bool, len(pendingIDs))
 	for _, id := range pendingIDs {
@@ -157,13 +160,15 @@ func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string
 		if err != nil || len(msgs) == 0 {
 			continue
 		}
-		c.markMessagesExpired(ctx, msgs, id)
+		if c.markMessagesExpired(ctx, msgs, id) {
+			changedBundles++
+		}
 		handled[id] = true
 	}
 
 	msgs, err := c.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil || len(msgs) == 0 {
-		return len(pendingIDs)
+		return changedBundles
 	}
 
 	byPendingID := make(map[string][]*taskmodels.Message)
@@ -174,7 +179,6 @@ func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string
 		}
 		byPendingID[pid] = append(byPendingID[pid], msg)
 	}
-	changedBundles := len(pendingIDs)
 	for pid, bundle := range byPendingID {
 		if c.markMessagesExpired(ctx, bundle, pid) {
 			changedBundles++

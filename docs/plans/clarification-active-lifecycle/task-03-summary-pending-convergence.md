@@ -80,5 +80,9 @@ actual files, then update task/plan status.
   `task.status_summary.updated` replacement. Boot and task-list assembly now invoke it.
 - Added restore, ordinary-message, deletion, loader-error, CAS-contention, boot, and task-list
   regressions.
+- PR review follow-up preserves the last valid summary snapshot when a task disappears during a
+  rejected-CAS reload, avoiding a nil overwrite and spurious missing-summary rebuild. CAS retries also
+  reload session state before re-deriving pending ownership.
 - `cd apps/backend && go test ./internal/task/statussummary ./internal/task/service ./internal/backendapp`
   passed. The focused task-handler reconciliation test also passed.
+- Full `go test ./internal/task/service -count=1` passed after the follow-up (291.044s).

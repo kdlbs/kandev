@@ -51,10 +51,44 @@ type rejectingStatusSummaryRepository struct {
 	rejected  bool
 }
 
+type vanishingStatusSummaryRepository struct {
+	repository.TaskStatusSummaryRepository
+	compareCalls int
+}
+
+func (r *vanishingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
+	context.Context,
+	*statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	r.compareCalls++
+	return false, nil
+}
+
+func (r *vanishingStatusSummaryRepository) LoadTaskStatusSummaries(
+	context.Context,
+	[]string,
+) (map[string]*statussummary.TaskStatusSummary, error) {
+	return map[string]*statussummary.TaskStatusSummary{}, nil
+}
+
 type authoritativePendingMessageRepository struct {
 	repository.MessageRepository
 	actions map[string]models.TaskPendingAction
 	calls   int
+}
+
+type statusSummarySessionRepository struct {
+	repository.SessionRepository
+	sessions []*models.TaskSession
+	calls    int
+}
+
+func (r *statusSummarySessionRepository) ListTaskSessions(
+	context.Context,
+	string,
+) ([]*models.TaskSession, error) {
+	r.calls++
+	return r.sessions, nil
 }
 
 func (r *authoritativePendingMessageRepository) GetPendingActionsBySessionIDs(
@@ -342,6 +376,11 @@ func TestReconcileTaskStatusSummariesReReadsPendingAfterCASRejection(t *testing.
 		TaskID: task.ID,
 		State:  models.TaskSessionStateWaitingForInput,
 	}
+	sessionRepo := &statusSummarySessionRepository{
+		SessionRepository: repo,
+		sessions:          []*models.TaskSession{session},
+	}
+	svc.sessions = sessionRepo
 	got, err := svc.ReconcileTaskStatusSummaries(
 		ctx,
 		[]*models.Task{task},
@@ -359,5 +398,96 @@ func TestReconcileTaskStatusSummariesReReadsPendingAfterCASRejection(t *testing.
 	}
 	if pendingMessages.calls != 1 {
 		t.Fatalf("authoritative pending reads = %d, want 1", pendingMessages.calls)
+	}
+	if sessionRepo.calls != 1 {
+		t.Fatalf("authoritative session reads = %d, want 1", sessionRepo.calls)
+	}
+}
+
+func TestReconcileTaskStatusSummariesReReadsSessionStateAfterCASRejection(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	stored := statussummary.TaskStatusSummary{Revision: 4}
+	accepted, err := repo.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
+		TaskID: "task-1", WorkspaceID: "ws-1", Summary: stored,
+	})
+	if err != nil || !accepted {
+		t.Fatalf("seed task status summary: accepted=%v err=%v", accepted, err)
+	}
+	svc.statusSummaries = &rejectingStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		competing: statussummary.StoredTaskStatusSummary{
+			TaskID:      "task-1",
+			WorkspaceID: "ws-1",
+			Summary: statussummary.TaskStatusSummary{
+				Revision:      5,
+				PendingAction: string(models.TaskPendingActionClarification),
+			},
+		},
+	}
+	pendingMessages := &authoritativePendingMessageRepository{
+		MessageRepository: repo,
+		actions: map[string]models.TaskPendingAction{
+			"session-1": models.TaskPendingActionClarification,
+		},
+	}
+	svc.messages = pendingMessages
+	sessionRepo := &statusSummarySessionRepository{
+		SessionRepository: repo,
+		sessions: []*models.TaskSession{{
+			ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateCompleted,
+		}},
+	}
+	svc.sessions = sessionRepo
+	staleSession := &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput,
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{{ID: "task-1", WorkspaceID: "ws-1"}},
+		map[string][]*models.TaskSession{"task-1": {staleSession}},
+		map[string]models.TaskPendingAction{
+			"session-1": models.TaskPendingActionClarification,
+		},
+		map[string]*statussummary.TaskStatusSummary{"task-1": &stored},
+	)
+	if err != nil {
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
+	}
+	repaired := got["task-1"]
+	if repaired == nil || repaired.Revision != 6 || repaired.PendingAction != "" {
+		t.Fatalf("summary after session-state refresh = %+v, want revision 6 without pending", repaired)
+	}
+	if pendingMessages.calls != 1 || sessionRepo.calls != 1 {
+		t.Fatalf("retry refresh calls: pending=%d sessions=%d, want 1 each", pendingMessages.calls, sessionRepo.calls)
+	}
+}
+
+func TestReconcileTaskStatusSummariesKeepsSnapshotWhenTaskVanishesDuringRetry(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	vanishing := &vanishingStatusSummaryRepository{TaskStatusSummaryRepository: repo}
+	svc.statusSummaries = vanishing
+	stored := &statussummary.TaskStatusSummary{
+		Revision:      4,
+		PendingAction: string(models.TaskPendingActionClarification),
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		context.Background(),
+		[]*models.Task{{ID: "deleted-task", WorkspaceID: "ws-1"}},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{"deleted-task": stored},
+	)
+	if err != nil {
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
+	}
+	if got["deleted-task"] != stored {
+		t.Fatalf("summary after vanished retry = %+v, want original snapshot", got["deleted-task"])
+	}
+	if vanishing.compareCalls != 1 {
+		t.Fatalf("compare calls = %d, want 1 without spurious rebuild", vanishing.compareCalls)
 	}
 }
