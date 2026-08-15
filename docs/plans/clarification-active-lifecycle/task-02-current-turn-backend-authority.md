@@ -126,6 +126,9 @@ blockers/risks, and update task/plan status.
 - Follow-up review remediation represents a wired no-active-turn snapshot explicitly during
   clarification-pause cancellation. A first turn created during detachment now rejects the stale pause
   just like a successor to an existing turn; the unwired turn-service fallback stays unchanged.
+- Later review remediation keeps a failed reserved-turn rollback unresolved in memory, quarantining
+  ready handling and later prompt admission until restart recovery. Detach and expiry repository work
+  now reuse the fresh detached 30-second persistence context instead of stripping every deadline.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - Final review remediation makes that durable detach an atomic `UPDATE ... RETURNING` claim over the
@@ -147,3 +150,8 @@ blockers/risks, and update task/plan status.
 - The explicit no-turn cancellation regression and the existing successor-turn case passed ten
   focused repetitions; the full orchestrator and clarification suites passed, and changed-code
   `golangci-lint` reported zero issues.
+- Failed-rollback quarantine plus bounded detach/expiry context regressions passed ten focused
+  repetitions.
+- Task-session HTTP and WebSocket list handlers now return an internal error when authoritative pending
+  projection fails instead of silently presenting every session as clean; the focused dual-transport
+  regression and changed-code Go lint passed.

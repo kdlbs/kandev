@@ -3981,8 +3981,10 @@ func (s *Service) rollbackReservedPromptTurn(ctx context.Context, sessionID, tur
 	}
 	rolledBack, err := s.turnService.RollbackReservedTurn(ctx, sessionID, turnID)
 	if err != nil {
-		s.resolveReservedPromptTurn(sessionID, turnID, false)
-		s.logger.Warn("failed to roll back reserved prompt turn",
+		// The database outcome can be ambiguous (for example, a commit error).
+		// Keep the live reservation unresolved so ready handling waits and later
+		// prompts remain blocked until restart recovery reconciles durable state.
+		s.logger.Error("failed to roll back reserved prompt turn; session remains quarantined",
 			zap.String("session_id", sessionID),
 			zap.String("turn_id", turnID),
 			zap.Error(err))

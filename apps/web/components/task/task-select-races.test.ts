@@ -22,6 +22,8 @@ const PENDING_TASK_ID = "task-pending";
 const ORIGINAL_SESSION_ID = "sess-original";
 const PENDING_SESSION_ID = "sess-pending";
 const ORIGINAL_ENV_ID = "env-original";
+const SUMMARY_UPDATED_AT = "2026-08-15T15:00:00Z";
+const NEWER_SUMMARY_UPDATED_AT = "2026-08-15T15:00:01Z";
 
 function makeSelectionHarness(args: {
   activeTaskId: string;
@@ -187,7 +189,7 @@ describe("selectTaskWithLayout pending summary races", () => {
       primarySessionId: PENDING_SESSION_ID,
       statusSummary: {
         revision: 1,
-        updated_at: "2026-08-15T15:00:00Z",
+        updated_at: SUMMARY_UPDATED_AT,
         pending_action: "clarification" as const,
       },
     };
@@ -212,7 +214,7 @@ describe("selectTaskWithLayout pending summary races", () => {
       ...initialTask,
       statusSummary: {
         revision: 2,
-        updated_at: "2026-08-15T15:00:01Z",
+        updated_at: NEWER_SUMMARY_UPDATED_AT,
         pending_action: "permission",
       },
     };
@@ -231,6 +233,10 @@ describe("selectTaskWithLayout pending summary races", () => {
     expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID);
     expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
   });
+});
+
+describe("selectTaskWithLayout same-action summary race", () => {
+  beforeEach(() => vi.clearAllMocks());
 
   it("falls back to the task route when a same-action revision can have a new owner", async () => {
     const initialTask = {
@@ -238,7 +244,7 @@ describe("selectTaskWithLayout pending summary races", () => {
       primarySessionId: PENDING_SESSION_ID,
       statusSummary: {
         revision: 1,
-        updated_at: "2026-08-15T15:00:00Z",
+        updated_at: SUMMARY_UPDATED_AT,
         pending_action: "clarification" as const,
       },
     };
@@ -263,7 +269,7 @@ describe("selectTaskWithLayout pending summary races", () => {
       ...initialTask,
       statusSummary: {
         revision: 2,
-        updated_at: "2026-08-15T15:00:01Z",
+        updated_at: NEWER_SUMMARY_UPDATED_AT,
         pending_action: "clarification",
       },
     };
@@ -283,6 +289,53 @@ describe("selectTaskWithLayout pending summary races", () => {
   });
 });
 
+describe("selectTaskWithLayout deleted-task race", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("leaves selection inert when the pending task projection disappears", async () => {
+    const initialTask = {
+      id: PENDING_TASK_ID,
+      primarySessionId: PENDING_SESSION_ID,
+      statusSummary: {
+        revision: 1,
+        updated_at: SUMMARY_UPDATED_AT,
+        pending_action: "clarification" as const,
+      },
+    };
+    const { state, store, setActiveTask } = makeSelectionHarness({
+      activeTaskId: ORIGINAL_TASK_ID,
+      activeSessionId: ORIGINAL_SESSION_ID,
+      taskRows: [initialTask],
+    });
+    const switchToSession = vi.fn();
+    const { loadTaskSessionsForTask, resolveLoad } = makeDeferredSessionLoader();
+
+    selectTaskWithLayout({
+      taskId: PENDING_TASK_ID,
+      task: initialTask,
+      store,
+      switchToSession,
+      loadTaskSessionsForTask,
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+    state.kanban.tasks = [];
+    resolveLoad([
+      {
+        id: PENDING_SESSION_ID,
+        task_id: PENDING_TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+      } as TaskSession,
+    ]);
+    await flushTaskSelection();
+
+    expect(switchToSession).not.toHaveBeenCalled();
+    expect(setActiveTask).not.toHaveBeenCalled();
+    expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+  });
+});
+
 describe("selectTaskWithLayout rejected pending-load races", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -293,7 +346,7 @@ describe("selectTaskWithLayout rejected pending-load races", () => {
         primarySessionId,
         statusSummary: {
           revision: 1,
-          updated_at: "2026-08-15T15:00:00Z",
+          updated_at: SUMMARY_UPDATED_AT,
           pending_action: "clarification" as const,
         },
       };
@@ -318,7 +371,7 @@ describe("selectTaskWithLayout rejected pending-load races", () => {
         ...initialTask,
         statusSummary: {
           revision: 2,
-          updated_at: "2026-08-15T15:00:01Z",
+          updated_at: NEWER_SUMMARY_UPDATED_AT,
           pending_action: "permission",
         },
       };

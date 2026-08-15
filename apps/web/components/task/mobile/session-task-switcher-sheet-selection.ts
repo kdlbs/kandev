@@ -21,7 +21,7 @@ type SelectionActions = {
   navigate?: (taskId: string) => void;
   onOpenChange: (open: boolean) => void;
   isSelectionCurrent?: () => boolean;
-  getTaskPendingSnapshot?: (taskId: string) => TaskPendingSelectionSnapshot;
+  getTaskPendingSnapshot?: (taskId: string) => TaskPendingSelectionSnapshot | undefined;
 };
 
 type SelectableTask = {
@@ -57,14 +57,15 @@ function selectionIsCurrent(actions: SelectionActions): boolean {
   return actions.isSelectionCurrent?.() ?? true;
 }
 
-function pendingActionIsCurrent(
+function pendingActionState(
   actions: SelectionActions,
   taskId: string,
   initial: TaskPendingSelectionSnapshot,
-): boolean {
-  const current = actions.getTaskPendingSnapshot?.(taskId);
-  if (!current) return true;
-  return taskPendingSelectionMatches(initial, current);
+): "current" | "changed" | "missing" {
+  if (!actions.getTaskPendingSnapshot) return "current";
+  const current = actions.getTaskPendingSnapshot(taskId);
+  if (!current) return "missing";
+  return taskPendingSelectionMatches(initial, current) ? "current" : "changed";
 }
 
 export async function selectPendingTaskFromSheet(
@@ -92,7 +93,9 @@ export async function selectPendingTaskFromSheet(
     pendingAction: params.taskPendingAction,
   };
   if (!selectionIsCurrent(params)) return;
-  if (!pendingActionIsCurrent(params, params.taskId, initialSnapshot)) {
+  const pendingState = pendingActionState(params, params.taskId, initialSnapshot);
+  if (pendingState === "missing") return;
+  if (pendingState === "changed") {
     params.setActiveTask(params.taskId);
     navigate(params.taskId);
     params.onOpenChange(false);

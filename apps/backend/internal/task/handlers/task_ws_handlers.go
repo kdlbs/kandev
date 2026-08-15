@@ -42,8 +42,14 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 		map[string][]*models.TaskSession{taskID: sessions},
 	)
 	if pendingErr != nil {
-		h.logger.Warn("get task session pending actions failed, degrading gracefully", zap.Error(pendingErr))
-		pendingActionsBySession = map[string]models.TaskPendingAction{}
+		h.logger.Error("get task session pending actions failed", zap.Error(pendingErr))
+		return ws.NewError(
+			msg.ID,
+			msg.Action,
+			ws.ErrorCodeInternalError,
+			"Failed to load task session pending actions",
+			nil,
+		)
 	}
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	for _, session := range sessions {

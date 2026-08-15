@@ -33,12 +33,21 @@ type failingPromptTurnReconciler struct {
 	err error
 }
 
+type failingReservedTurnRollback struct {
+	TurnService
+	err error
+}
+
 func (s failingReservedTurnPublisher) PublishReservedTurn(context.Context, *models.Turn) error {
 	return s.err
 }
 
 func (s failingPromptTurnReconciler) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
 	return 0, s.err
+}
+
+func (s failingReservedTurnRollback) RollbackReservedTurn(context.Context, string, string) (bool, error) {
+	return false, s.err
 }
 
 func (failingReservedTurnPublisher) GetActiveTurn(context.Context, string) (*models.Turn, error) {
@@ -396,6 +405,31 @@ func TestRejectedReservedTurnClearsPrivateCache(t *testing.T) {
 	successorID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false)
 	if err != nil || successorID == "" || successorID == turnID {
 		t.Fatalf("successor after rollback: id=%q rejected=%q err=%v", successorID, turnID, err)
+	}
+}
+
+func TestFailedReservedTurnRollbackKeepsSessionQuarantined(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	if err != nil {
+		t.Fatalf("reserve turn: %v", err)
+	}
+	reservation := svc.reservedPromptTurn("session1")
+	rollbackErr := errors.New("ambiguous rollback commit")
+	svc.turnService = failingReservedTurnRollback{TurnService: svc.turnService, err: rollbackErr}
+
+	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
+	if pending := svc.reservedPromptTurnID("session1"); pending != turnID {
+		t.Fatalf("reservation after failed rollback = %q, want quarantine %q", pending, turnID)
+	}
+	select {
+	case <-reservation.done:
+		t.Fatal("failed rollback resolved the reservation waiter")
+	default:
+	}
+	if _, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false); !errors.Is(err, ErrAgentPromptInProgress) {
+		t.Fatalf("new prompt after failed rollback error = %v, want %v", err, ErrAgentPromptInProgress)
 	}
 }
 

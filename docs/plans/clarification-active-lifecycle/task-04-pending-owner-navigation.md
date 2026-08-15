@@ -104,6 +104,10 @@ update task/plan status.
   through the task-only fallback. Desktop releases the outgoing layout; mobile activates the task,
   navigates, and closes the existing inset drawer. Three focused suites passed 55 tests with zero lint
   warnings, typecheck, and the i18n ratchet.
+- Final Codex review leaves selection inert when the task projection itself disappears during an
+  authoritative load, while retaining the task-only fallback when a still-present task changes pending
+  owner. Desktop and mobile race regressions passed in the 57-test focused run, followed by zero-warning
+  focused lint, typecheck, and the i18n ratchet.
 - Six shared desktop/mobile selection and removal suites passed 75 tests; web typecheck, zero-warning
   full lint, and the i18n ratchet passed.
 - `cd apps && pnpm install --frozen-lockfile` passed.

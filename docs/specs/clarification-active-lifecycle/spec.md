@@ -88,7 +88,8 @@ hiding the action the icon represents.
   pending owner outranks remembered-session and primary-session preferences. If the task still
   advertises pending input but no matching input-capable owner exists, activation releases the outgoing
   session layout and fails closed to the task route without guessing a session. Normal preference order
-  returns only for a clean task.
+  returns only for a clean task. If the task projection disappears while that authoritative load is in
+  flight, desktop and phone leave the selection inert instead of navigating to a deleted task.
 
 ## Data model
 
@@ -172,6 +173,8 @@ session they can already access. Session selection does not broaden task visibil
 
 - Active-state repository read fails: workflow guarding fails closed, and projections keep the last
   known pending value. A later message event or list/boot read retries convergence.
+- A forced task-session list cannot project authoritative pending actions: fail the HTTP or WebSocket
+  request instead of returning a successful list with empty pending ownership.
 - Summary compare-and-set loses a race: reload the newer summary, reapply authoritative pending state,
   and retry within a bounded loop. Never overwrite unrelated newer summary fields.
 - Summary repair persists but its WebSocket publication fails: the initiating response carries the
@@ -183,6 +186,11 @@ session they can already access. Session selection does not broaden task visibil
   server error instead of reporting false success.
 - Persisting the dispatch-attempt marker fails: roll back the reserved successor before making any
   external executor call, restore the still-current bundle, and return a retryable server error.
+- Reserved-successor rollback fails or has an ambiguous durable outcome: keep the live reservation
+  unresolved so ready handling waits and later prompt admission remains blocked until restart recovery
+  reconciles the row.
+- Clarification detachment and expiry persistence ignore request cancellation but always use a fresh
+  bounded context, so a database lock cannot hold the per-session pause guard indefinitely.
 - Agentctl accepts a detached resume but durable successor publication fails: return a non-retryable
   server error, keep the claimed bundle terminal, and make later rollback fail closed so the accepted
   answer cannot be dispatched again in-process.
@@ -280,11 +288,21 @@ session they can already access. Session selection does not broaden task visibil
   the successor dispatch resolves, **THEN** the handler revalidates prompt generation and the stale
   predecessor cannot complete the successor or run `on_turn_complete` against it; if reservation
   rollback leaves that predecessor generation authoritative, its ready event completes normally.
+- **GIVEN** reserved-successor deletion returns an error, **WHEN** rollback handling completes, **THEN**
+  the reservation waiter remains unresolved and another prompt cannot enter that session before
+  restart recovery.
+- **GIVEN** a cancelled request triggers clarification detach or expiry, **WHEN** repository work
+  begins, **THEN** it uses a non-cancelled context with a finite deadline.
 - **GIVEN** startup cannot reconcile an unpublished prompt reservation, **WHEN** the orchestrator starts,
   **THEN** startup returns an error before watcher, scheduler, or prompt admission begins.
 - **GIVEN** pending ownership changes while desktop or mobile task selection loads sessions, **WHEN** the
   delayed load settles, **THEN** Kandev ignores its stale owner choice but still opens the selected task
   through the task-only fallback, and the mobile sheet closes.
+- **GIVEN** the selected task projection disappears while desktop or mobile session loading is in
+  flight, **WHEN** the delayed load settles, **THEN** Kandev leaves task and session selection unchanged.
+- **GIVEN** authoritative pending-action projection fails while listing a task's sessions, **WHEN** the
+  HTTP or WebSocket list request completes, **THEN** it returns an internal error rather than a false
+  clean-session response.
 - **GIVEN** two request identities produce terminal and pending events close together, **WHEN** the
   projector refreshes, **THEN** its result matches current repository state rather than event order.
 

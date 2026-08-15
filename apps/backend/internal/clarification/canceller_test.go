@@ -12,10 +12,16 @@ import (
 )
 
 type stubMessageStore struct {
-	messages        map[string][]*taskmodels.Message
-	activeBySession map[string][]*taskmodels.Message
-	activeErr       error
-	updated         []*taskmodels.Message
+	messages          map[string][]*taskmodels.Message
+	activeBySession   map[string][]*taskmodels.Message
+	activeErr         error
+	updated           []*taskmodels.Message
+	activeHasDeadline bool
+	activeContextErr  error
+	detachHasDeadline bool
+	detachContextErr  error
+	expireHasDeadline bool
+	expireContextErr  error
 }
 
 func (s *stubMessageStore) GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error) {
@@ -38,7 +44,9 @@ func (s *stubMessageStore) FindMessagesByPendingID(_ context.Context, pendingID 
 	return msgs, nil
 }
 
-func (s *stubMessageStore) FindActiveClarificationMessagesBySessionID(_ context.Context, sessionID string) ([]*taskmodels.Message, error) {
+func (s *stubMessageStore) FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error) {
+	_, s.activeHasDeadline = ctx.Deadline()
+	s.activeContextErr = ctx.Err()
 	if s.activeErr != nil {
 		return nil, s.activeErr
 	}
@@ -59,10 +67,12 @@ func (s *stubMessageStore) FindActiveClarificationMessagesBySessionID(_ context.
 }
 
 func (s *stubMessageStore) DetachActiveClarificationMessagesBySessionID(
-	_ context.Context,
+	ctx context.Context,
 	sessionID string,
 ) ([]*taskmodels.Message, error) {
-	active, err := s.FindActiveClarificationMessagesBySessionID(context.Background(), sessionID)
+	_, s.detachHasDeadline = ctx.Deadline()
+	s.detachContextErr = ctx.Err()
+	active, err := s.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -79,10 +89,12 @@ func (s *stubMessageStore) DetachActiveClarificationMessagesBySessionID(
 }
 
 func (s *stubMessageStore) ExpireActiveClarificationBundle(
-	_ context.Context,
+	ctx context.Context,
 	sessionID, pendingID string,
 ) ([]*taskmodels.Message, error) {
-	active, err := s.FindActiveClarificationMessagesBySessionID(context.Background(), sessionID)
+	_, s.expireHasDeadline = ctx.Deadline()
+	s.expireContextErr = ctx.Err()
+	active, err := s.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -200,6 +212,39 @@ func TestCanceller_ExpireSessionAndNotify_MarksExpired(t *testing.T) {
 	if got, _ := updated.Metadata["status"].(string); got != "expired" {
 		t.Errorf("expected status=expired, got %q", got)
 	}
+}
+
+func TestCanceller_PersistenceUsesFreshBoundedContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	t.Run("detach", func(t *testing.T) {
+		c, repo, _ := newTestCanceller(t, map[string][]*taskmodels.Message{})
+		c.DetachSessionAndNotify(ctx, "s1")
+		if !repo.detachHasDeadline || repo.detachContextErr != nil {
+			t.Fatalf("detach context deadline=%v err=%v, want fresh bounded context",
+				repo.detachHasDeadline, repo.detachContextErr)
+		}
+	})
+
+	t.Run("expiry", func(t *testing.T) {
+		message := &taskmodels.Message{
+			ID: "m1", TaskSessionID: "s1",
+			Metadata: map[string]any{"status": "pending", "pending_id": "pending-1"},
+		}
+		c, repo, _ := newTestCanceller(t, map[string][]*taskmodels.Message{
+			"pending-1": {message},
+		})
+		c.ExpireSessionAndNotify(ctx, "s1")
+		if !repo.activeHasDeadline || repo.activeContextErr != nil {
+			t.Fatalf("expiry lookup context deadline=%v err=%v, want fresh bounded context",
+				repo.activeHasDeadline, repo.activeContextErr)
+		}
+		if !repo.expireHasDeadline || repo.expireContextErr != nil {
+			t.Fatalf("expiry update context deadline=%v err=%v, want fresh bounded context",
+				repo.expireHasDeadline, repo.expireContextErr)
+		}
+	})
 }
 
 // TestCanceller_NoMessagesToUpdate confirms that a cancel with no pending

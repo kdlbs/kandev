@@ -255,6 +255,14 @@ All task gates passed:
   during detachment is preserved, matching the existing successor-turn protection; both focused races
   passed ten repetitions, followed by the full orchestrator and clarification suites and zero-issue
   changed-code backend lint.
+- Later bot review: failed reserved-turn rollback keeps its live reservation unresolved, blocking ready
+  handling and prompt admission until restart recovery; clarification detach and expiry repository
+  operations now use fresh detached 30-second contexts. Both focused regressions passed ten times.
+- Final Codex review: task-session HTTP and WebSocket lists fail closed when authoritative pending-action
+  projection fails. Desktop and mobile async selection also remain inert when the selected task
+  projection disappears, avoiding navigation to a deleted task. The dual-transport handler regression,
+  57 focused web tests, zero-warning focused web lint, typecheck, i18n ratchet, and changed-code Go lint
+  passed.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

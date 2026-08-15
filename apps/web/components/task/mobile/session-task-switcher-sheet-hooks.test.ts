@@ -397,6 +397,60 @@ describe("selectTaskFromSheet summary races", () => {
   });
 });
 
+describe("selectTaskFromSheet deleted-task race", () => {
+  it("leaves the sheet unchanged when the pending task projection disappears", async () => {
+    const taskId = "task-deleted-race";
+    let resolveLoad: (sessions: TaskSession[]) => void = () => undefined;
+    const loadTaskSessionsForTask = vi.fn(
+      () =>
+        new Promise<TaskSession[]>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    const setActiveSession = vi.fn();
+    const setActiveTask = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+
+    selectTaskFromSheet({
+      taskId,
+      task: {
+        primarySessionId: "primary",
+        statusSummary: {
+          revision: 1,
+          updated_at: UPDATED_AT,
+          pending_action: "clarification",
+        },
+      },
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask,
+      navigate,
+      onOpenChange,
+      getTaskPendingSnapshot: () => undefined,
+    });
+    resolveLoad([
+      {
+        id: "deleted-owner",
+        task_id: taskId,
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+      } as TaskSession,
+    ]);
+    await Promise.resolve();
+
+    expect(setActiveSession).not.toHaveBeenCalled();
+    expect(setActiveTask).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+});
+
 describe("selectTaskFromSheet sheet lifecycle", () => {
   it("invalidates a pending selection when the sheet closes and reopens", async () => {
     let resolveLoad: (sessions: TaskSession[]) => void = () => undefined;

@@ -425,8 +425,10 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
         setActiveTask,
         setActiveSession,
         loadTaskSessionsForTask,
-        getTaskPendingSnapshot: (selectedTaskId) =>
-          taskPendingSelectionSnapshot(findSheetTask(store.getState(), selectedTaskId)),
+        getTaskPendingSnapshot: (selectedTaskId) => {
+          const selectedTask = findSheetTask(store.getState(), selectedTaskId);
+          return selectedTask ? taskPendingSelectionSnapshot(selectedTask) : undefined;
+        },
         navigate: replaceTaskUrl,
         onOpenChange,
       });

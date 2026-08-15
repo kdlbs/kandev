@@ -36,7 +36,8 @@ func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) 
 	// Draining live waiters and durable detachment are separate concerns. The
 	// repository owns the atomic current-turn/status claim for persisted rows.
 	c.store.CancelSession(sessionID)
-	writeCtx := context.WithoutCancel(ctx)
+	writeCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
 	messages, err := c.repo.DetachActiveClarificationMessagesBySessionID(writeCtx, sessionID)
 	if err != nil {
 		c.logger.Error("failed to detach current clarification bundles",
@@ -52,7 +53,8 @@ func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) 
 	// rechecks that exact pending ID, current-turn ownership, and pending status
 	// inside one UPDATE serialized with answers and successor turns.
 	c.store.CancelSession(sessionID)
-	writeCtx := context.WithoutCancel(ctx)
+	writeCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
 	messages, err := c.repo.FindActiveClarificationMessagesBySessionID(writeCtx, sessionID)
 	if err != nil {
 		c.logger.Warn("failed to load current clarification bundles for expiry",
