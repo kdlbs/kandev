@@ -68,8 +68,9 @@ func (r *Repository) insertMessageRow(
 }
 
 // insertMessageWithSessionLock serializes message insertion with rollback of
-// the message's turn on PostgreSQL. SQLite's writer pool already provides the
-// equivalent serialization.
+// the message's turn on PostgreSQL. SQLite's writer pool is configured with a
+// single connection in db.OpenSQLite, which provides equivalent serialization.
+// If SQLite ever allows concurrent writers, add the equivalent session lock.
 func (r *Repository) insertMessageWithSessionLock(
 	ctx context.Context,
 	message *models.Message,

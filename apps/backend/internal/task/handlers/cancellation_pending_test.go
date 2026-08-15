@@ -136,7 +136,7 @@ func TestHTTPListTaskSessions_StampsCancellationPending(t *testing.T) {
 	require.True(t, response.Sessions[0].CancellationPending)
 }
 
-func TestListTaskSessionsFailsWhenPendingProjectionFails(t *testing.T) {
+func TestListTaskSessionsDegradesWhenPendingProjectionFails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	session := &models.TaskSession{
 		ID: "sess-pending", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput,
@@ -160,7 +160,11 @@ func TestListTaskSessionsFailsWhenPendingProjectionFails(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodGet, "/tasks/task-1/sessions", nil)
 		c.Params = gin.Params{{Key: "id", Value: "task-1"}}
 		h.httpListTaskSessions(c)
-		require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var response dto.ListTaskSessionSummariesResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+		require.Len(t, response.Sessions, 1)
+		require.Nil(t, response.Sessions[0].PendingAction)
 	})
 
 	t.Run("websocket", func(t *testing.T) {
@@ -168,8 +172,10 @@ func TestListTaskSessionsFailsWhenPendingProjectionFails(t *testing.T) {
 		require.NoError(t, err)
 		response, err := h.doListTaskSessions(context.Background(), request, "task-1")
 		require.NoError(t, err)
-		payload := wsWorkflowError(t, response)
-		require.Equal(t, string(ws.ErrorCodeInternalError), payload.Code)
+		var body dto.ListTaskSessionSummariesResponse
+		require.NoError(t, response.ParsePayload(&body))
+		require.Len(t, body.Sessions, 1)
+		require.Nil(t, body.Sessions[0].PendingAction)
 	})
 }
 

@@ -42,16 +42,8 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 		map[string][]*models.TaskSession{taskID: sessions},
 	)
 	if pendingErr != nil {
-		// Pending ownership routes the drawer to the input-capable session.
-		// Returning incomplete ownership can hide the action on a clean session.
-		h.logger.Error("get task session pending actions failed", zap.Error(pendingErr))
-		return ws.NewError(
-			msg.ID,
-			msg.Action,
-			ws.ErrorCodeInternalError,
-			"Failed to resolve task session pending actions",
-			nil,
-		)
+		h.logger.Warn("get task session pending actions failed, degrading gracefully", zap.Error(pendingErr))
+		pendingActionsBySession = map[string]models.TaskPendingAction{}
 	}
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	for _, session := range sessions {

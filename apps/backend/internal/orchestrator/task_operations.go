@@ -3377,13 +3377,11 @@ func (options promptTaskOptions) executorContext(ctx context.Context) context.Co
 	return context.WithoutCancel(ctx)
 }
 
-func (options promptTaskOptions) failureContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if options.preservePromptContext {
-		// Preserve a small bounded window for state rollback after the dispatch
-		// deadline expires; otherwise a cancelled context can leave RUNNING state.
-		return context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
-	}
-	return ctx, func() {}
+func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	// Preserve a small bounded window for state rollback after either the
+	// dispatch deadline or an ordinary transport request expires; otherwise a
+	// cancelled caller context can leave RUNNING state behind.
+	return context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
 }
 
 // promptTask is PromptTask's implementation. Its options carry queued-dispatch
