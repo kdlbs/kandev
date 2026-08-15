@@ -100,6 +100,9 @@ blockers/risks, and update task/plan status.
   in-memory terminal snapshot.
 - Detached HTTP resume now preserves a 30-second context through the executor and uses dispatch-only
   acknowledgement, so request completion cannot wait for the full agent turn.
+- Detached resume now defers successor-turn persistence until agentctl acknowledges dispatch. A real
+  orchestrator/SQLite regression proves failed dispatch leaves the claimed clarification bundle current
+  and restorable instead of recording a superseding empty turn.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - Final review remediation makes that durable detach an atomic `UPDATE ... RETURNING` claim over the
@@ -113,3 +116,5 @@ blockers/risks, and update task/plan status.
   `KANDEV_TEST_POSTGRES_DSN` was unset; it remains enabled for PostgreSQL CI.
 - The same exact package command passed again after review remediation; changed-code `golangci-lint`
   reported zero issues against merge base `8c9456074a2f61abec48ddd8742ec81635faa16e`.
+- After dispatch-acknowledgement remediation, the repository, clarification, and orchestrator package
+  command passed again; focused detached-resume tests and changed-code `golangci-lint` also passed.

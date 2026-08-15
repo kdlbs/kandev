@@ -164,7 +164,10 @@ func (s *Service) ResumeDetachedClarification(
 		AnswerText:   request.AnswerText,
 		Rejected:     request.Rejected,
 		RejectReason: request.RejectReason,
-	}, true, promptTaskOptions{preservePromptContext: true})
+	}, true, promptTaskOptions{
+		preservePromptContext:  true,
+		deferTurnUntilDispatch: true,
+	})
 }
 
 func (s *Service) resumeDetachedClarification(ctx context.Context, data clarificationAnsweredData) error {

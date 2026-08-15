@@ -3257,6 +3257,9 @@ type promptTaskOptions struct {
 	lifecyclePrompt       bool
 	afterClaim            func() error
 	preservePromptContext bool
+	// deferTurnUntilDispatch keeps a failed detached resume from superseding
+	// the clarification bundle it must restore.
+	deferTurnUntilDispatch bool
 }
 
 func (options promptTaskOptions) executorContext(ctx context.Context) context.Context {
@@ -3366,7 +3369,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 
 	session, rollback, err := s.claimPromptDispatch(
 		ctx, taskID, sessionID, options.claimEntryID, options.lifecyclePrompt,
-		options.afterClaim, session, foregroundClaim,
+		options.deferTurnUntilDispatch, options.afterClaim, session, foregroundClaim,
 	)
 	if err != nil {
 		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
@@ -3384,13 +3387,12 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// minutes. Callers that only need bounded dispatch acknowledgement preserve
 	// their context explicitly.
 	promptCtx := options.executorContext(ctx)
+	onDispatched := s.promptDispatchCallback(
+		promptCtx, taskID, sessionID, options.deferTurnUntilDispatch, foregroundDispatch,
+	)
 	result, err := s.executor.PromptWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
-		func() {
-			if s.acceptForegroundDispatch(foregroundDispatch) {
-				s.publishForegroundActivityChanged(promptCtx, taskID, sessionID)
-			}
-		}, session,
+		onDispatched, session,
 	)
 	if err != nil {
 		failureCtx, cancel := options.failureContext(ctx)
@@ -3480,6 +3482,27 @@ func (s *Service) rollbackForegroundDispatchOnFailure(
 	}
 }
 
+func (s *Service) promptDispatchCallback(
+	ctx context.Context,
+	taskID, sessionID string,
+	deferTurnUntilDispatch bool,
+	dispatch *foregroundDispatch,
+) func() {
+	return func() {
+		if deferTurnUntilDispatch {
+			// A detached clarification must remain restorable if agentctl rejects
+			// the answer. Create its successor turn only after acceptance; agentctl
+			// acknowledges before it runs the prompt, so output still has a turn.
+			turnCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
+			defer cancel()
+			s.startTurnForSession(turnCtx, sessionID)
+		}
+		if s.acceptForegroundDispatch(dispatch) {
+			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+		}
+	}
+}
+
 // trySwitchModelForPrompt keeps foreground admission consistent when a model
 // switch either dispatches the prompt itself or fails before reaching the agent.
 func (s *Service) trySwitchModelForPrompt(ctx context.Context, taskID, sessionID, model, prompt string, session *models.TaskSession, dispatch *foregroundDispatch) (*PromptResult, bool, error) {
@@ -3510,6 +3533,7 @@ func (s *Service) claimPromptDispatch(
 	ctx context.Context,
 	taskID, sessionID, claimEntryID string,
 	lifecyclePrompt bool,
+	deferTurnUntilDispatch bool,
 	afterClaim func() error,
 	session *models.TaskSession,
 	foregroundClaim *foregroundClaim,
@@ -3526,7 +3550,9 @@ func (s *Service) claimPromptDispatch(
 	if err != nil {
 		return nil, promptClaimRollback{}, err
 	}
-	rollback.turnID, rollback.createdTurn = s.startTurnForSessionWithOwnership(ctx, sessionID)
+	if !deferTurnUntilDispatch {
+		rollback.turnID, rollback.createdTurn = s.startTurnForSessionWithOwnership(ctx, sessionID)
+	}
 	return claimed, rollback, nil
 }
 

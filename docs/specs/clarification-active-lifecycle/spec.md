@@ -42,8 +42,9 @@ hiding the action the icon represents.
   rejected without resuming the agent.
 - An affirmative response to a detached current-turn bundle returns success only after the
   orchestrator accepts one resume dispatch within a bounded wait. The response waits for prompt
-  acknowledgement, not agent-turn completion. A rejection persists terminal status without resuming
-  the agent.
+  acknowledgement, not agent-turn completion. Its successor turn becomes durable only after that
+  acknowledgement, so a rejected dispatch leaves the clarification turn current and restorable. A
+  rejection persists terminal status without resuming the agent.
 - Every response atomically claims current-turn ownership before it can reach a live waiter or request
   a detached resume. Terminal message updates are published only after delivery succeeds. If detached
   resume acceptance fails, the endpoint returns an error and restores the still-current bundle to
@@ -197,7 +198,7 @@ session they can already access. Session selection does not broaden task visibil
   **THEN** the server returns conflict and does not resume or otherwise prompt the agent.
 - **GIVEN** a detached current-turn answer is not accepted by the orchestrator, **WHEN** the response
   endpoint fails, **THEN** it returns a server error, keeps the question answerable, and a later retry
-  delivers exactly one accepted resume request.
+  delivers exactly one accepted resume request without a failed-dispatch turn superseding the bundle.
 - **GIVEN** two request identities produce terminal and pending events close together, **WHEN** the
   projector refreshes, **THEN** its result matches current repository state rather than event order.
 

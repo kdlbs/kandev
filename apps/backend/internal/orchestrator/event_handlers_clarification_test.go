@@ -113,6 +113,124 @@ func TestResumeDetachedClarificationReportsPromptFailure(t *testing.T) {
 	}
 }
 
+func TestResumeDetachedClarificationDispatchFailureLeavesBundleRestorable(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-retry", "session-retry", "step-1")
+	seedExecutorRunning(t, repo, "session-retry", "task-retry", "exec-retry")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session-retry",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	completedAt := startedAt.Add(time.Second)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-clarification",
+		TaskSessionID: "session-retry",
+		TaskID:        "task-retry",
+		StartedAt:     startedAt,
+		CompletedAt:   &completedAt,
+	}); err != nil {
+		t.Fatalf("create clarification turn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID:            "message-clarification",
+		TaskSessionID: "session-retry",
+		TaskID:        "task-retry",
+		TurnID:        "turn-clarification",
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypeClarificationRequest,
+		Metadata: map[string]interface{}{
+			"pending_id":  "pending-retry",
+			"question_id": "q1",
+			"status":      "pending",
+		},
+		CreatedAt: startedAt,
+	}); err != nil {
+		t.Fatalf("create clarification message: %v", err)
+	}
+	claimedMessages, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-retry",
+		"answered",
+		map[string]interface{}{"q1": map[string]interface{}{"question_id": "q1"}},
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim clarification bundle: claimed=%v err=%v", claimed, err)
+	}
+
+	dispatchErr := errors.New("prompt dispatch failed")
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptErr:              dispatchErr,
+	}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	err = svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-retry",
+		SessionID:  "session-retry",
+		PendingID:  "pending-retry",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if !errors.Is(err, dispatchErr) {
+		t.Fatalf("resume error = %v, want %v", err, dispatchErr)
+	}
+
+	restored, err := repo.RestoreActiveClarificationBundle(
+		ctx,
+		"pending-retry",
+		"answered",
+		claimedMessages,
+	)
+	if err != nil || !restored {
+		t.Fatalf("restore after failed dispatch: restored=%v err=%v", restored, err)
+	}
+	turns, err := repo.ListTurnsBySession(ctx, "session-retry")
+	if err != nil {
+		t.Fatalf("list turns: %v", err)
+	}
+	if len(turns) != 1 || turns[0].ID != "turn-clarification" {
+		t.Fatalf("turns after failed dispatch = %#v, want only original clarification turn", turns)
+	}
+
+	_, claimed, err = repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-retry",
+		"answered",
+		map[string]interface{}{"q1": map[string]interface{}{"question_id": "q1"}},
+	)
+	if err != nil || !claimed {
+		t.Fatalf("reclaim clarification bundle: claimed=%v err=%v", claimed, err)
+	}
+	agentMgr.mu.Lock()
+	agentMgr.promptErr = nil
+	agentMgr.mu.Unlock()
+	if err := svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-retry",
+		SessionID:  "session-retry",
+		PendingID:  "pending-retry",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	}); err != nil {
+		t.Fatalf("retry detached resume: %v", err)
+	}
+	turns, err = repo.ListTurnsBySession(ctx, "session-retry")
+	if err != nil {
+		t.Fatalf("list turns after retry: %v", err)
+	}
+	if len(turns) != 2 || turns[1].ID != "turn-session-retry" {
+		t.Fatalf("turns after accepted retry = %#v, want one successor turn", turns)
+	}
+}
+
 func TestResumeDetachedClarificationUsesBoundedDispatchOnlyPrompt(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-bounded", "session-bounded", "step-1")
