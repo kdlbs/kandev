@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -17,6 +18,10 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
+
+// ErrInstanceNotFound identifies an already-removed agentctl instance. Runtime
+// teardown treats this as an idempotent success after a lost response or retry.
+var ErrInstanceNotFound = errors.New("agentctl instance not found")
 
 // ControlClient is a client for the agentctl control server API.
 // It manages creation and deletion of agent instances.
@@ -304,7 +309,18 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 			Error string `json:"error"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			if resp.StatusCode == http.StatusNotFound {
+				return fmt.Errorf("instance %q: %w", instanceID, ErrInstanceNotFound)
+			}
 			return fmt.Errorf("failed to decode error response: %w", err)
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf(
+				"failed to delete instance: %s (status %d): %w",
+				errResp.Error,
+				resp.StatusCode,
+				ErrInstanceNotFound,
+			)
 		}
 		return fmt.Errorf("failed to delete instance: %s (status %d)", errResp.Error, resp.StatusCode)
 	}
@@ -327,7 +343,7 @@ func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*In
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("instance %q not found", instanceID)
+		return nil, fmt.Errorf("instance %q not found: %w", instanceID, ErrInstanceNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to get instance: status %d", resp.StatusCode)

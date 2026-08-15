@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -340,6 +341,149 @@ func TestResumeSession_RollsBackStartingWhenLaunchFails(t *testing.T) {
 	}
 	if !strings.Contains(current.ErrorMessage, launchErr.Error()) {
 		t.Fatalf("session error = %q, want launch error", current.ErrorMessage)
+	}
+}
+
+func TestResumeSession_CreatesDockerEnvironmentBeforeLifecycleLaunch(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+	repo.sessions["sess-1"].ExecutorID = models.ExecutorIDLocalDocker
+	repo.executors[models.ExecutorIDLocalDocker] = &models.Executor{
+		ID: models.ExecutorIDLocalDocker, Type: models.ExecutorTypeLocalDocker, Status: models.ExecutorStatusActive,
+	}
+
+	manager := &mockAgentManager{launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+		environment, err := repo.GetTaskEnvironmentByTaskID(ctx, req.TaskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if environment == nil || environment.ID != req.TaskEnvironmentID {
+			t.Fatalf("environment during resumed lifecycle launch = %#v, want %q", environment, req.TaskEnvironmentID)
+		}
+		if environment.Status != models.TaskEnvironmentStatusCreating {
+			t.Fatalf("environment status during resumed lifecycle launch = %q, want creating", environment.Status)
+		}
+		return &LaunchAgentResponse{
+			AgentExecutionID: "execution-docker", ContainerID: "container-docker",
+			WorkspacePath: "/workspace", Status: v1.AgentStatusStarting,
+		}, nil
+	}}
+	executor := newTestExecutor(t, manager, repo)
+
+	if _, err := executor.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+
+	environment, err := repo.GetTaskEnvironmentByTaskID(context.Background(), "task-1")
+	if err != nil || environment == nil {
+		t.Fatalf("final environment = %#v, %v", environment, err)
+	}
+	if environment.Status != models.TaskEnvironmentStatusReady || environment.ContainerID != "container-docker" {
+		t.Fatalf("final environment = %#v, want ready Docker container", environment)
+	}
+	if len(repo.createTaskEnvironmentCalls) != 1 {
+		t.Fatalf("CreateTaskEnvironment calls = %d, want one reservation", len(repo.createTaskEnvironmentCalls))
+	}
+}
+
+func TestResumeSession_DockerLaunchFailureRemovesReservationAndRuntimeSecrets(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+	repo.sessions["sess-1"].ExecutorID = models.ExecutorIDLocalDocker
+	repo.executors[models.ExecutorIDLocalDocker] = &models.Executor{
+		ID: models.ExecutorIDLocalDocker, Type: models.ExecutorTypeLocalDocker, Status: models.ExecutorStatusActive,
+	}
+
+	launchErr := errors.New("Docker resume failed")
+	var deletedEnvironmentID string
+	manager := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+		deleteRuntimeSecretsFunc: func(_ context.Context, environmentID, _, _ string) error {
+			deletedEnvironmentID = environmentID
+			return nil
+		},
+	}
+	executor := newTestExecutor(t, manager, repo)
+
+	_, err := executor.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeSession error = %v, want launch failure", err)
+	}
+	if deletedEnvironmentID == "" {
+		t.Fatal("reserved environment runtime secrets were not deleted")
+	}
+	if environment, getErr := repo.GetTaskEnvironmentByTaskID(context.Background(), "task-1"); getErr != nil || environment != nil {
+		t.Fatalf("environment after failed resume = %#v, %v; want removed", environment, getErr)
+	}
+	if repo.sessions["sess-1"].State != models.TaskSessionStateFailed {
+		t.Fatalf("session state after failed resume = %q, want failed", repo.sessions["sess-1"].State)
+	}
+}
+
+func TestResumeSession_SerializesFirstLocalEnvironmentAcrossSessions(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].ExecutorID = models.ExecutorIDLocal
+	repo.executors[models.ExecutorIDLocal] = &models.Executor{
+		ID: models.ExecutorIDLocal, Type: models.ExecutorTypeLocal, Status: models.ExecutorStatusActive,
+	}
+	now := time.Now().UTC()
+	repo.sessions["sess-2"] = &models.TaskSession{
+		ID: "sess-2", TaskID: "task-1", AgentProfileID: "profile-1",
+		ExecutorID: models.ExecutorIDLocal, State: models.TaskSessionStateWaitingForInput,
+		StartedAt: now, UpdatedAt: now,
+	}
+	repo.executorsRunning["sess-2"] = &models.ExecutorRunning{
+		ID: "sess-2", SessionID: "sess-2", TaskID: "task-1", ResumeToken: "token-2",
+	}
+	var launchedEnvironmentIDs []string
+	manager := &mockAgentManager{launchAgentFunc: func(
+		_ context.Context,
+		req *LaunchAgentRequest,
+	) (*LaunchAgentResponse, error) {
+		if req.TaskEnvironmentID == "" {
+			t.Fatal("resume reached lifecycle launch without a stable task environment ID")
+		}
+		launchedEnvironmentIDs = append(launchedEnvironmentIDs, req.TaskEnvironmentID)
+		return &LaunchAgentResponse{
+			AgentExecutionID: "exec-" + req.SessionID,
+			WorkspacePath:    "/workspace/" + req.SessionID,
+			Status:           v1.AgentStatusStarting,
+		}, nil
+	}}
+	executor := newTestExecutor(t, manager, repo)
+
+	var wg sync.WaitGroup
+	errorsBySession := make([]error, 2)
+	sessions := []*models.TaskSession{repo.sessions["sess-1"], repo.sessions["sess-2"]}
+	for index, session := range sessions {
+		wg.Add(1)
+		go func(index int, session *models.TaskSession) {
+			defer wg.Done()
+			_, errorsBySession[index] = executor.ResumeSession(context.Background(), session, false)
+		}(index, session)
+	}
+	wg.Wait()
+	for index, err := range errorsBySession {
+		if err != nil {
+			t.Fatalf("resume %d: %v", index, err)
+		}
+	}
+	if len(launchedEnvironmentIDs) != 2 || launchedEnvironmentIDs[0] == "" ||
+		launchedEnvironmentIDs[0] != launchedEnvironmentIDs[1] {
+		t.Fatalf("launched environment IDs = %v, want one shared stable ID", launchedEnvironmentIDs)
+	}
+	if len(repo.createTaskEnvironmentCalls) != 1 {
+		t.Fatalf("CreateTaskEnvironment calls = %d, want 1", len(repo.createTaskEnvironmentCalls))
+	}
+	for _, sessionID := range []string{"sess-1", "sess-2"} {
+		if got := repo.sessions[sessionID].TaskEnvironmentID; got != launchedEnvironmentIDs[0] {
+			t.Fatalf("%s environment ID = %q, want %q", sessionID, got, launchedEnvironmentIDs[0])
+		}
 	}
 }
 
@@ -917,6 +1061,40 @@ func TestResumeSession_PropagatesTaskEnvironmentID(t *testing.T) {
 	}
 	if capturedReq.WorkspaceID != "workspace-1" {
 		t.Errorf("WorkspaceID = %q, want workspace-1 for resumed credential resolution", capturedReq.WorkspaceID)
+	}
+}
+
+func TestResumeSession_ReusesInheritedTaskEnvironment(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	parentEnvironment := &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "task-parent", Status: models.TaskEnvironmentStatusReady,
+		ExecutorType: string(models.ExecutorTypeLocal), WorkspacePath: "/workspace/parent",
+	}
+	repo.taskEnvironments[parentEnvironment.ID] = parentEnvironment
+	repo.sessions["sess-1"].TaskEnvironmentID = parentEnvironment.ID
+
+	var capturedReq *LaunchAgentRequest
+	agentMgr := &mockAgentManager{launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+		capturedReq = req
+		return &LaunchAgentResponse{
+			AgentExecutionID: "exec-child", WorkspacePath: parentEnvironment.WorkspacePath,
+			Status: v1.AgentStatusStarting,
+		}, nil
+	}}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+	if capturedReq == nil || capturedReq.TaskEnvironmentID != parentEnvironment.ID {
+		t.Fatalf("launch task environment = %#v, want inherited %q", capturedReq, parentEnvironment.ID)
+	}
+	if len(repo.createTaskEnvironmentCalls) != 0 {
+		t.Fatalf("CreateTaskEnvironment calls = %d, want inherited environment reuse", len(repo.createTaskEnvironmentCalls))
+	}
+	if got := repo.taskEnvironments[parentEnvironment.ID]; got == nil || got.TaskID != "task-parent" {
+		t.Fatalf("inherited environment owner = %#v, want parent task", got)
 	}
 }
 

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -41,17 +43,99 @@ func remoteWorkspaceProjectionFromLaunch(req *LaunchRequest) ([]WorkspaceReposit
 		if spec.RepositoryURL == "" {
 			return nil, fmt.Errorf("remote repository %q has no clone URL", spec.RepoName)
 		}
-		branch := spec.CheckoutBranch
-		if branch == "" {
-			branch = spec.BaseBranch
+		destination, err := remoteWorkspaceEntryName(spec.RepoName, spec.BaseBranch, spec.CheckoutBranch)
+		if err != nil {
+			return nil, err
 		}
-		name, branchSlug := worktree.SanitizeRepoDirName(spec.RepoName), worktree.SanitizeBranchSlug(branch)
-		if name == "" || branchSlug == "" {
-			return nil, fmt.Errorf("remote repository %q has unsafe runtime name", spec.RepoName)
-		}
-		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch, RemoteContribution: spec.RemoteContribution})
+		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: destination, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch, RemoteContribution: spec.RemoteContribution})
 	}
 	return projection, nil
+}
+
+func remoteWorkspaceEntryName(repoName, baseBranch, checkoutBranch string) (string, error) {
+	branch := checkoutBranch
+	if branch == "" {
+		branch = baseBranch
+	}
+	name, branchSlug := worktree.SanitizeRepoDirName(repoName), worktree.SanitizeBranchSlug(branch)
+	if name == "" || branchSlug == "" {
+		return "", fmt.Errorf("remote repository %q has unsafe runtime name", repoName)
+	}
+	return name + "-" + branchSlug, nil
+}
+
+func validatePhysicalTaskHostPositions(repositories []WorkspaceRepositorySpec) (bool, error) {
+	hasPhysicalMapping := false
+	allPhysicallyMapped := true
+	physicalPositions := make(map[int]struct{}, len(repositories))
+	for _, repository := range repositories {
+		if repository.TaskHostPosition == nil {
+			allPhysicallyMapped = false
+			continue
+		}
+		hasPhysicalMapping = true
+		position := *repository.TaskHostPosition
+		if position < 0 {
+			return false, fmt.Errorf("repository %q has invalid physical task-host position %d", repository.RepositoryID, position)
+		}
+		if _, exists := physicalPositions[position]; exists {
+			return false, fmt.Errorf("duplicate physical task-host repository position %d", position)
+		}
+		physicalPositions[position] = struct{}{}
+	}
+	if hasPhysicalMapping && !allPhysicallyMapped {
+		return false, fmt.Errorf("physical task-host repository mapping is incomplete")
+	}
+	return hasPhysicalMapping, nil
+}
+
+// taskHostWorkspaceProjection converts durable host-side workspace sources to
+// the paths visible inside the task host's runtime. Docker establishes the
+// primary repository at /workspace and materializes durable siblings below it;
+// forwarding host paths would leave agentctl watching nonexistent directories.
+func taskHostWorkspaceProjection(runtimeName agentruntime.Runtime, info *WorkspaceInfo) (string, []string, error) {
+	if info == nil {
+		return "", nil, fmt.Errorf("workspace info is required")
+	}
+	if runtimeName != agentruntime.RuntimeDocker {
+		return info.WorkspacePath, workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories), nil
+	}
+	if len(info.WorkspaceFolders) > 0 {
+		return "", nil, fmt.Errorf("docker task hosts do not support host workspace folders")
+	}
+	repositories := append([]WorkspaceRepositorySpec(nil), info.WorkspaceRepositories...)
+	hasPhysicalMapping, err := validatePhysicalTaskHostPositions(repositories)
+	if err != nil {
+		return "", nil, err
+	}
+	sort.SliceStable(repositories, func(i, j int) bool {
+		if hasPhysicalMapping {
+			return *repositories[i].TaskHostPosition < *repositories[j].TaskHostPosition
+		}
+		return repositories[i].Position < repositories[j].Position
+	})
+	roots := make([]string, 0, len(repositories))
+	seen := make(map[string]struct{}, len(repositories))
+	for index, repository := range repositories {
+		physicalPosition := index
+		if hasPhysicalMapping {
+			physicalPosition = *repository.TaskHostPosition
+		}
+		root := dockerWorkspacePath
+		if physicalPosition > 0 {
+			entry, err := remoteWorkspaceEntryName(repository.RepoName, repository.BaseBranch, repository.CheckoutBranch)
+			if err != nil {
+				return "", nil, err
+			}
+			root = path.Join(dockerWorkspacePath, entry)
+		}
+		if _, exists := seen[root]; exists {
+			continue
+		}
+		seen[root] = struct{}{}
+		roots = append(roots, root)
+	}
+	return dockerWorkspacePath, roots, nil
 }
 
 type workspaceRepositoryClient interface {

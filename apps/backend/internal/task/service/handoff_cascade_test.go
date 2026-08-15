@@ -124,12 +124,21 @@ type recordingCleanupCoordinator struct {
 	started               []string
 	cancelled             []string
 	cleaned               []string
+	lspCleaned            []string
+	lspCleanupErr         error
 }
 
 func (c *recordingCleanupCoordinator) CleanupTaskResources(_ context.Context, taskID string, _ bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cleaned = append(c.cleaned, taskID)
+}
+
+func (c *recordingCleanupCoordinator) CleanupTaskLSP(_ context.Context, taskID, reason string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lspCleaned = append(c.lspCleaned, taskID+":"+reason)
+	return c.lspCleanupErr
 }
 
 func (c *recordingCleanupCoordinator) PrepareTaskResourceCleanup(
@@ -177,6 +186,39 @@ func (c *recordingCleanupCoordinator) CancelPreparedTaskResourceCleanup(_ contex
 	return nil
 }
 
+func TestArchiveTaskTreeStopsTaskLSPBeforeMutation(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	coordinator := &recordingCleanupCoordinator{}
+	svc := newCascadeService(t, tasks, newCascadeWSGroupRepo())
+	svc.SetTaskResourceCleaner(coordinator)
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("ArchiveTaskTree: %v", err)
+	}
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	if len(coordinator.lspCleaned) != 1 || coordinator.lspCleaned[0] != "root:task_archived" {
+		t.Fatalf("task LSP cleanup = %v", coordinator.lspCleaned)
+	}
+}
+
+func TestArchiveTaskTreeFailsBeforeMutationWhenTaskLSPCleanupFails(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	coordinator := &recordingCleanupCoordinator{lspCleanupErr: errors.New("LSP cleanup failed")}
+	svc := newCascadeService(t, tasks, newCascadeWSGroupRepo())
+	svc.SetTaskResourceCleaner(coordinator)
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", false); err == nil {
+		t.Fatal("ArchiveTaskTree succeeded despite task LSP cleanup failure")
+	}
+	root, err := tasks.GetTask(context.Background(), "root")
+	if err != nil || root.ArchivedAt != nil {
+		t.Fatalf("task mutated after cleanup failure: task=%#v err=%v", root, err)
+	}
+}
+
 func TestDeleteTaskTree_MembershipReleaseFailureCancelsEveryPreparedCleanup(t *testing.T) {
 	tasks := newFakeTaskRepo()
 	tasks.addTask("root", "", "ws-1")
@@ -215,6 +257,27 @@ func TestDeleteTaskTree_MembershipReleaseFailureCancelsEveryPreparedCleanup(t *t
 	}
 	if task, getErr := tasks.GetTask(context.Background(), "root"); getErr != nil || task == nil {
 		t.Fatalf("root task mutated after release failure: task=%#v err=%v", task, getErr)
+	}
+}
+
+func TestDeleteTaskTreePrepareFailureCancelsFailedCleanupReservation(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	prepareErr := errors.New("cleanup inventory unavailable")
+	coordinator := &recordingCleanupCoordinator{prepareErr: prepareErr}
+	svc := NewHandoffService(
+		&fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, nil, nil,
+	)
+	svc.SetTaskResourceCleaner(coordinator)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); !errors.Is(err, prepareErr) {
+		t.Fatalf("DeleteTaskTree error = %v, want preparation failure", err)
+	}
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	if len(coordinator.prepared) != 1 || len(coordinator.cancelled) != 1 ||
+		coordinator.cancelled[0] != coordinator.prepared[0] {
+		t.Fatalf("prepared=%v cancelled=%v, want failed reservation cancelled", coordinator.prepared, coordinator.cancelled)
 	}
 }
 

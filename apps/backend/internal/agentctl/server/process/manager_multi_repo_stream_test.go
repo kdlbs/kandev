@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -105,6 +106,28 @@ func TestManager_RepoSubpaths(t *testing.T) {
 		if !want[s] {
 			t.Errorf("unexpected repo subpath %q", s)
 		}
+	}
+}
+
+func TestManager_RepoSubpathsPreservesDurableSourceOrder(t *testing.T) {
+	taskRoot := t.TempDir()
+	sourceA, cleanupA := setupTestRepo(t)
+	t.Cleanup(cleanupA)
+	sourceB, cleanupB := setupTestRepo(t)
+	t.Cleanup(cleanupB)
+	if err := os.Symlink(sourceA, filepath.Join(taskRoot, "repo-a")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+	if err := os.Symlink(sourceB, filepath.Join(taskRoot, "repo-b")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir: taskRoot, WorkspaceSourceRoots: []string{sourceB, sourceA},
+	}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+	if got := mgr.RepoSubpaths(); !slices.Equal(got, []string{"repo-b", "repo-a"}) {
+		t.Fatalf("RepoSubpaths() = %v, want durable order [repo-b repo-a]", got)
 	}
 }
 

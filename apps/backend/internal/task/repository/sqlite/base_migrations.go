@@ -178,6 +178,10 @@ func (r *Repository) runMigrations() error {
 	}
 	// Must run BEFORE migrateTaskEnvironmentsRemoveAgentExecutionID, which copies task_dir_name into the recreated table.
 	r.migrate.Apply("task_environments.task_dir_name", `ALTER TABLE task_environments ADD COLUMN task_dir_name TEXT DEFAULT ''`)
+	// Add task-owned runtime credential references before the table rebuild so
+	// legacy databases preserve them through the explicit copy below.
+	r.migrate.Apply("task_environments.agentctl_auth_secret_id", `ALTER TABLE task_environments ADD COLUMN agentctl_auth_secret_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_environments.agentctl_bootstrap_secret_id", `ALTER TABLE task_environments ADD COLUMN agentctl_bootstrap_secret_id TEXT DEFAULT ''`)
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
@@ -350,6 +354,26 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_status_summaries.workspace", `
 		CREATE INDEX IF NOT EXISTS idx_task_status_summaries_workspace
 			ON task_status_summaries(workspace_id)`)
+
+	r.migrate.Apply("task_lsp_languages.table", taskLSPSchemaDDL)
+	r.migrate.Apply("task_lsp_languages.runtime_incarnation", `
+		ALTER TABLE task_lsp_languages ADD COLUMN runtime_incarnation TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_lsp_languages.runtime_started_at", `
+		ALTER TABLE task_lsp_languages ADD COLUMN runtime_started_at TIMESTAMP`)
+	r.migrate.Apply("task_lsp_languages.runtime_revision", `
+		ALTER TABLE task_lsp_languages ADD COLUMN runtime_revision BIGINT NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_lsp_languages.process_absent_generation", `
+		ALTER TABLE task_lsp_languages ADD COLUMN process_absent_generation BIGINT NOT NULL DEFAULT 0`)
+	r.migrate.Apply("task_lsp_languages.process_absent_generation.backfill", `
+		UPDATE task_lsp_languages
+		SET process_absent_generation = generation
+		WHERE generation > 0 AND process_absent_generation = 0 AND (
+			phase = 'off' OR (
+				phase = 'error' AND error_code IN (
+					'binary_unavailable', 'process_start_failed', 'start_canceled', 'process_exited'
+				)
+			)
+		)`)
 
 	if err := r.clearRecoveredAgentErrors(); err != nil {
 		return err
@@ -858,6 +882,8 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			workspace_path TEXT DEFAULT '',
 			container_id TEXT DEFAULT '',
 			sandbox_id TEXT DEFAULT '',
+			agentctl_auth_secret_id TEXT DEFAULT '',
+			agentctl_bootstrap_secret_id TEXT DEFAULT '',
 			task_dir_name TEXT DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
@@ -867,6 +893,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			id, task_id, repository_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, worktree_id, worktree_path, worktree_branch,
 			workspace_path, container_id, sandbox_id,
+			COALESCE(agentctl_auth_secret_id, ''), COALESCE(agentctl_bootstrap_secret_id, ''),
 			COALESCE(task_dir_name, ''), created_at, updated_at
 		FROM task_environments`,
 		`DROP TABLE task_environments`,

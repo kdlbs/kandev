@@ -1,4 +1,5 @@
 import { expect, vi, type Mock } from "vitest";
+import { filePathToUri } from "./file-uri";
 type LspManager = (typeof import("./lsp-client-manager"))["lspClientManager"];
 
 export type LspManagerMocks = {
@@ -151,17 +152,18 @@ export function createLspManagerHarness(manager: LspManager, mocks: LspManagerMo
       textDocumentSync: { openClose: true, change: 1 },
     },
   ) {
-    const release = manager.connect(sessionId, "typescript");
+    const release = manager.connect(sessionId, sessionId, "typescript");
     const socket = FakeWebSocket.instances.at(-1);
     if (!socket) throw new Error("expected an LSP WebSocket");
     socket.open();
-    socket.emitMessage(JSON.stringify({ status: "ready", workspacePath }));
-    const initializeRequest = JSON.parse(socket.sent[0]) as { id: number };
     socket.emitMessage(
       JSON.stringify({
-        jsonrpc: "2.0",
-        id: initializeRequest.id,
-        result: { capabilities },
+        status: "attached",
+        language: "typescript",
+        generation: 1,
+        workspaceUri: workspacePath ? filePathToUri(workspacePath) : null,
+        workspaceFolders: [],
+        serverCapabilities: capabilities,
       }),
     );
     await vi.waitFor(() => {

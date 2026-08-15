@@ -327,6 +327,7 @@ test:
 test-windows:
 	@echo "Running Windows-sensitive packages..."
 	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/...
+	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/lsp -run '^TestDocumentWorkspace(Rejects(UntrustedUNC|InRootUNCReparse)BeforeResolution|CanonicalizesSelectedRootReparseBeforeBrowserAccess)$$'
 	@echo "Running Windows port-collision tests..."
 	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
 	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse

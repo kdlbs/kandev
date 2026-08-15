@@ -293,6 +293,60 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	}
 }
 
+func TestTaskLSPResolvesInheritedEnvironmentWithTaskSpecificWorkspace(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	for _, taskID := range []string{"task-child", "task-unrelated"} {
+		if err := repo.CreateTask(ctx, &models.Task{
+			ID: taskID, WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123",
+			Title: taskID, Priority: "medium",
+		}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", taskID, err)
+		}
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "task-123", ExecutorType: string(models.ExecutorTypeLocal),
+		WorkspacePath: "/physical/parent", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-child", TaskID: "task-child", TaskEnvironmentID: "env-parent",
+		RepositorySnapshot: map[string]interface{}{"path": "/physical/parent/child-worktree"},
+		State:              models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	environment, err := svc.GetTaskEnvironmentForTaskLSP(ctx, "task-child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if environment == nil || environment.ID != "env-parent" {
+		t.Fatalf("inherited environment = %#v", environment)
+	}
+	info, err := svc.GetWorkspaceInfoForTaskLSP(ctx, "task-child", "env-parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.TaskID != "task-child" || info.TaskEnvironmentID != "env-parent" ||
+		info.WorkspacePath != "/physical/parent/child-worktree" {
+		t.Fatalf("task-specific inherited workspace = %#v", info)
+	}
+	unrelated, err := svc.GetTaskEnvironmentForTaskLSP(ctx, "task-unrelated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unrelated != nil {
+		t.Fatalf("unrelated task inherited environment = %#v", unrelated)
+	}
+	if _, err := svc.GetWorkspaceInfoForTaskLSP(ctx, "task-unrelated", "env-parent"); err == nil {
+		t.Fatal("unrelated task resolved inherited workspace")
+	}
+}
+
 func TestApplyTaskEnvironmentToWorkspaceInfoUsesEnvironmentProfileAsFallback(t *testing.T) {
 	info := &lifecycle.WorkspaceInfo{}
 	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{
@@ -315,6 +369,19 @@ func TestApplyTaskEnvironmentToWorkspaceInfoUsesEnvironmentProfileAsFallback(t *
 	})
 	if info.ExecutorProfileID != "session-profile" {
 		t.Fatalf("ExecutorProfileID = %q after session value, want session-profile", info.ExecutorProfileID)
+	}
+}
+
+func TestApplyTaskEnvironmentToWorkspaceInfoProjectsRuntimeSecretRefs(t *testing.T) {
+	info := &lifecycle.WorkspaceInfo{}
+	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{
+		ID: "env-1", AgentctlAuthSecretID: "auth-ref", AgentctlBootstrapSecretID: "nonce-ref",
+	})
+	if got := info.Metadata[lifecycle.MetadataKeyAuthTokenSecret]; got != "auth-ref" {
+		t.Fatalf("auth secret ref = %#v", got)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret]; got != "nonce-ref" {
+		t.Fatalf("bootstrap secret ref = %#v", got)
 	}
 }
 
@@ -850,14 +917,16 @@ func TestGetWorkspaceInfoForSession_IncludesEnvironmentReconnectMetadata(t *test
 	}
 
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
-		ID:            "env-123",
-		TaskID:        "task-123",
-		ExecutorType:  string(models.ExecutorTypeLocalDocker),
-		Status:        models.TaskEnvironmentStatusReady,
-		WorkspacePath: "/host/repo",
-		ContainerID:   "container-from-env",
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:                        "env-123",
+		TaskID:                    "task-123",
+		ExecutorType:              string(models.ExecutorTypeLocalDocker),
+		Status:                    models.TaskEnvironmentStatusReady,
+		WorkspacePath:             "/host/repo",
+		ContainerID:               "container-from-env",
+		AgentctlAuthSecretID:      "environment-secret-token",
+		AgentctlBootstrapSecretID: "environment-secret-nonce",
+		CreatedAt:                 now,
+		UpdatedAt:                 now,
 	}); err != nil {
 		t.Fatalf("failed to create task environment: %v", err)
 	}
@@ -912,11 +981,11 @@ func TestGetWorkspaceInfoForSession_IncludesEnvironmentReconnectMetadata(t *test
 	if info.Metadata[lifecycle.MetadataKeyContainerID] != "container-from-running" {
 		t.Fatalf("container metadata = %v, want container-from-running", info.Metadata[lifecycle.MetadataKeyContainerID])
 	}
-	if info.Metadata[lifecycle.MetadataKeyAuthTokenSecret] != "secret-token" {
-		t.Fatalf("auth secret metadata missing: %v", info.Metadata)
+	if info.Metadata[lifecycle.MetadataKeyAuthTokenSecret] != "environment-secret-token" {
+		t.Fatalf("task-owned auth secret metadata missing: %v", info.Metadata)
 	}
-	if info.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "secret-nonce" {
-		t.Fatalf("nonce secret metadata missing: %v", info.Metadata)
+	if info.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] != "environment-secret-nonce" {
+		t.Fatalf("task-owned nonce secret metadata missing: %v", info.Metadata)
 	}
 	if info.Metadata[lifecycle.MetadataKeyImageTagOverride] != "kandev:test" {
 		t.Fatalf("image override metadata missing: %v", info.Metadata)
@@ -1081,6 +1150,46 @@ func TestGetWorkspaceInfoForEnvironment(t *testing.T) {
 	}
 	if info.TaskEnvironmentID != "env-123" {
 		t.Errorf("TaskEnvironmentID = %q, want env-123", info.TaskEnvironmentID)
+	}
+}
+
+func TestGetWorkspaceInfoForEnvironmentWithoutSessionUsesTaskEnvironment(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-task-owned", TaskID: "task-123",
+		ExecutorType: string(models.ExecutorTypeLocal), ExecutorProfileID: "executor-profile",
+		WorkspacePath: "/host/task-owned", TaskDirName: "task-owned_ab12",
+		ContainerID: "container-task-owned", Status: models.TaskEnvironmentStatusReady,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForEnvironment(ctx, "env-task-owned")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForEnvironment returned error: %v", err)
+	}
+	if info.TaskID != "task-123" || info.TaskEnvironmentID != "env-task-owned" {
+		t.Fatalf("task ownership = %q/%q", info.TaskID, info.TaskEnvironmentID)
+	}
+	if info.SessionID != "" {
+		t.Fatalf("SessionID = %q, want empty task-owned transport", info.SessionID)
+	}
+	if info.WorkspacePath != "/host/task-owned" || info.TaskDirName != "task-owned_ab12" {
+		t.Fatalf("workspace = %q (%q)", info.WorkspacePath, info.TaskDirName)
+	}
+	if info.ExecutorType != string(models.ExecutorTypeLocal) {
+		t.Fatalf("ExecutorType = %q", info.ExecutorType)
+	}
+	if info.AgentProfileID != "" || info.ExecutionProfileID != "" || info.AgentID != "" {
+		t.Fatalf("task-owned fallback inherited agent identity: %#v", info)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyContainerID]; got != "container-task-owned" {
+		t.Fatalf("container metadata = %v", got)
 	}
 }
 

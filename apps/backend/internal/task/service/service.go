@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -73,6 +74,16 @@ type TaskExecutionStopper interface {
 	// RegisterExecutionStopOwner records exact teardown ownership before a
 	// terminal session mutation. It never replaces the explicit stop call.
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
+}
+
+// TaskLSPLifecycle is the task-owned language-server cleanup/recovery seam.
+// Callers provide only a task resolved by the service; session and execution
+// identifiers never cross this ownership boundary.
+type TaskLSPLifecycle interface {
+	CancelTaskOperations(taskID string)
+	CleanupTask(ctx context.Context, taskID, reason string) error
+	ReconcileTask(ctx context.Context, taskID string) error
+	WorkspaceSourcesChanged(ctx context.Context, taskID string) error
 }
 
 // TaskRowLivenessProber classifies an executors_running row's backing-process
@@ -219,6 +230,7 @@ var (
 	ErrWorkspaceSourceConflict    = errors.New("workspace source conflict")
 	ErrWorkspaceSourceActive      = errors.New("workspace source task is active")
 	ErrUnsupportedWorkspaceSource = errors.New("unsupported workspace source")
+	ErrTaskLSPAdmissionBlocked    = errors.New("task environment lifecycle transition in progress")
 	ErrWorkspaceSourceMaterialize = errors.New("workspace source materialization failed")
 )
 
@@ -290,6 +302,8 @@ type Service struct {
 	discoveryConfig             RepositoryDiscoveryConfig
 	worktreeCleanup             WorktreeCleanup
 	executionStopper            TaskExecutionStopper
+	taskLSP                     TaskLSPLifecycle
+	taskEnvironmentResetGuard   TaskEnvironmentResetGuard
 	rowLivenessProber           TaskRowLivenessProber
 	contextWindowResetter       func(context.Context, string) error
 	cleanupActivity             TaskResourceCleanupActivityGate
@@ -297,6 +311,12 @@ type Service struct {
 	workspaceSourceMaterializer WorkspaceSourceMaterializer
 	workspaceSourceLocksMu      sync.Mutex
 	workspaceSourceLocks        map[string]*sync.Mutex
+	taskLSPAdmissionMu          sync.Mutex
+	taskLSPAdmissions           map[string]*taskLSPAdmissionGate
+	taskEnvLSPAdmissionMu       sync.Mutex
+	taskEnvLSPAdmissions        map[string]*sync.RWMutex
+	workspaceTaskAdmissionMu    sync.Mutex
+	workspaceTaskAdmissions     map[string]*sync.RWMutex
 	providerProber              ProviderDefaultBranchProber
 	gitArchiveCapture           GitArchiveCapture
 	workflowStepCreator         WorkflowStepCreator
@@ -308,6 +328,7 @@ type Service struct {
 	quickChatDir                string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher               *branchFetcher
 	envDestroyer                EnvironmentDestroyer
+	runtimeSecretDeleter        TaskEnvironmentRuntimeSecretDeleter
 	sessionRunningChecker       SessionRunningChecker
 	remoteBranchLister          RemoteBranchLister
 	repoCloneLocation           RepoCloneLocation
@@ -348,6 +369,10 @@ type Service struct {
 	cleanupWorkerWake   chan struct{}
 	cleanupRunsMu       sync.Mutex
 	cleanupRuns         map[*taskResourceCleanupRun]struct{}
+	cleanupPrepMu       sync.Mutex
+	cleanupPreparations map[string]*taskResourceCleanupPreparationLease
+	cleanupPrepWG       sync.WaitGroup
+	cleanupPrepClosed   bool
 	// repoResolveMu serializes the check-then-create sections of
 	// FindOrCreateRepository and FindOrCreateRepositoryByLocalPath so two
 	// resolvers racing to register the same not-yet-known repository (by
@@ -356,6 +381,239 @@ type Service struct {
 	// within this backend process only — this backend is single-process per
 	// SQLite database, so that is the complete threat model today.
 	repoResolveMu sync.Mutex
+}
+
+// AcquireTaskLSPAdmission holds shared task admission while a language-server
+// launch probes or acquires runtime resources. Environment reset and terminal
+// task mutations hold the exclusive side through LSP cleanup and durable row
+// mutation, so a queued start cannot recreate resources behind teardown.
+func (s *Service) AcquireTaskLSPAdmission(
+	ctx context.Context,
+	taskID string,
+) (func(), error) {
+	if err := context.Cause(ctx); err != nil {
+		return nil, err
+	}
+	gate := s.taskLSPAdmissionLock(taskID)
+	if !gate.TryRLock() {
+		return nil, ErrTaskLSPAdmissionBlocked
+	}
+	environment, err := s.GetTaskEnvironmentForTaskLSP(ctx, taskID)
+	if err != nil {
+		gate.RUnlock()
+		return nil, err
+	}
+	var environmentLock *sync.RWMutex
+	if environment != nil && environment.ID != "" {
+		environmentLock = s.taskLSPEnvironmentAdmissionLock(environment.ID)
+		if !environmentLock.TryRLock() {
+			gate.RUnlock()
+			return nil, ErrTaskLSPAdmissionBlocked
+		}
+	}
+	if err := context.Cause(ctx); err != nil {
+		if environmentLock != nil {
+			environmentLock.RUnlock()
+		}
+		gate.RUnlock()
+		return nil, err
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			if environmentLock != nil {
+				environmentLock.RUnlock()
+			}
+			gate.RUnlock()
+		})
+	}, nil
+}
+
+func (s *Service) taskLSPAdmissionLock(taskID string) *taskLSPAdmissionGate {
+	s.taskLSPAdmissionMu.Lock()
+	defer s.taskLSPAdmissionMu.Unlock()
+	if s.taskLSPAdmissions == nil {
+		s.taskLSPAdmissions = make(map[string]*taskLSPAdmissionGate)
+	}
+	lock := s.taskLSPAdmissions[taskID]
+	if lock == nil {
+		lock = &taskLSPAdmissionGate{}
+		s.taskLSPAdmissions[taskID] = lock
+	}
+	return lock
+}
+
+func (s *Service) acquireTaskLSPMutation(taskID string) func() {
+	gate := s.taskLSPAdmissionLock(taskID)
+	return gate.Lock(func() {
+		if s.taskLSP != nil {
+			s.taskLSP.CancelTaskOperations(taskID)
+		}
+	})
+}
+
+// taskLSPAdmissionGate publishes writer intent before waiting for current
+// readers. That closes the gap where a terminal mutation could cancel active
+// LSP work yet lose a race to one new admission before the writer blocked it.
+type taskLSPAdmissionGate struct {
+	stateMu sync.Mutex
+	rw      sync.RWMutex
+	writers int
+}
+
+func (g *taskLSPAdmissionGate) TryRLock() bool {
+	g.stateMu.Lock()
+	defer g.stateMu.Unlock()
+	if g.writers != 0 {
+		return false
+	}
+	g.rw.RLock()
+	return true
+}
+
+func (g *taskLSPAdmissionGate) RUnlock() {
+	g.rw.RUnlock()
+}
+
+func (g *taskLSPAdmissionGate) Lock(interrupt func()) func() {
+	g.stateMu.Lock()
+	g.writers++
+	g.stateMu.Unlock()
+	if interrupt != nil {
+		interrupt()
+	}
+	g.rw.Lock()
+	return func() {
+		g.rw.Unlock()
+		g.stateMu.Lock()
+		g.writers--
+		g.stateMu.Unlock()
+	}
+}
+
+func (s *Service) acquireTaskLSPMutations(taskIDs []string) func() {
+	ordered := append([]string(nil), taskIDs...)
+	sort.Strings(ordered)
+	releases := make([]func(), 0, len(ordered))
+	previous := ""
+	for _, taskID := range ordered {
+		if taskID == "" || taskID == previous {
+			continue
+		}
+		previous = taskID
+		releases = append(releases, s.acquireTaskLSPMutation(taskID))
+	}
+	return func() {
+		for index := len(releases) - 1; index >= 0; index-- {
+			releases[index]()
+		}
+	}
+}
+
+func (s *Service) workspaceTaskAdmissionLock(workspaceID string) *sync.RWMutex {
+	s.workspaceTaskAdmissionMu.Lock()
+	defer s.workspaceTaskAdmissionMu.Unlock()
+	if s.workspaceTaskAdmissions == nil {
+		s.workspaceTaskAdmissions = make(map[string]*sync.RWMutex)
+	}
+	lock := s.workspaceTaskAdmissions[workspaceID]
+	if lock == nil {
+		lock = &sync.RWMutex{}
+		s.workspaceTaskAdmissions[workspaceID] = lock
+	}
+	return lock
+}
+
+func (s *Service) acquireWorkspaceTaskCreation(workspaceID string) func() {
+	if workspaceID == "" {
+		return func() {}
+	}
+	lock := s.workspaceTaskAdmissionLock(workspaceID)
+	lock.RLock()
+	return lock.RUnlock
+}
+
+func (s *Service) acquireWorkspaceTaskDeletion(workspaceID string) func() {
+	if workspaceID == "" {
+		return func() {}
+	}
+	lock := s.workspaceTaskAdmissionLock(workspaceID)
+	lock.Lock()
+	return lock.Unlock
+}
+
+func (s *Service) taskLSPEnvironmentAdmissionLock(environmentID string) *sync.RWMutex {
+	s.taskEnvLSPAdmissionMu.Lock()
+	defer s.taskEnvLSPAdmissionMu.Unlock()
+	if s.taskEnvLSPAdmissions == nil {
+		s.taskEnvLSPAdmissions = make(map[string]*sync.RWMutex)
+	}
+	lock := s.taskEnvLSPAdmissions[environmentID]
+	if lock == nil {
+		lock = &sync.RWMutex{}
+		s.taskEnvLSPAdmissions[environmentID] = lock
+	}
+	return lock
+}
+
+func (s *Service) acquireTaskLSPEnvironmentMutation(environmentID string) func() {
+	lock := s.taskLSPEnvironmentAdmissionLock(environmentID)
+	lock.Lock()
+	return lock.Unlock
+}
+
+func (s *Service) acquireTaskLSPEnvironmentMutationForTask(
+	ctx context.Context,
+	taskID string,
+) (func(), error) {
+	environment, err := s.GetTaskEnvironmentForTaskLSP(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if environment == nil || environment.ID == "" {
+		return func() {}, nil
+	}
+	return s.acquireTaskLSPEnvironmentMutation(environment.ID), nil
+}
+
+func (s *Service) acquireTaskLSPEnvironmentMutations(
+	ctx context.Context,
+	taskIDs []string,
+) (func(), error) {
+	environmentIDs := make([]string, 0, len(taskIDs))
+	for _, taskID := range taskIDs {
+		environment, err := s.GetTaskEnvironmentForTaskLSP(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve task %s physical environment: %w", taskID, err)
+		}
+		if environment != nil && environment.ID != "" {
+			environmentIDs = append(environmentIDs, environment.ID)
+		}
+	}
+	return s.acquireTaskLSPEnvironmentMutationIDs(environmentIDs), nil
+}
+
+func (s *Service) acquireTaskLSPEnvironmentMutationIDs(environmentIDs []string) func() {
+	unique := make(map[string]struct{}, len(environmentIDs))
+	for _, environmentID := range environmentIDs {
+		if environmentID != "" {
+			unique[environmentID] = struct{}{}
+		}
+	}
+	ordered := make([]string, 0, len(unique))
+	for environmentID := range unique {
+		ordered = append(ordered, environmentID)
+	}
+	sort.Strings(ordered)
+	releases := make([]func(), 0, len(ordered))
+	for _, environmentID := range ordered {
+		releases = append(releases, s.acquireTaskLSPEnvironmentMutation(environmentID))
+	}
+	return func() {
+		for index := len(releases) - 1; index >= 0; index-- {
+			releases[index]()
+		}
+	}
 }
 
 // SetAttachmentService wires the file-backed prompt attachment owner into the
@@ -465,6 +723,105 @@ func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) 
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
+}
+
+// SetTaskLSPLifecycle wires the task-owned language-server controller.
+func (s *Service) SetTaskLSPLifecycle(lifecycle TaskLSPLifecycle) {
+	s.taskLSP = lifecycle
+}
+
+// TaskEnvironmentResetGuard protects physical environments referenced by a
+// wider workspace ownership boundary, such as an inherited workspace group.
+type TaskEnvironmentResetGuard interface {
+	ValidateTaskEnvironmentReset(ctx context.Context, taskID, environmentID string) error
+}
+
+// SetTaskEnvironmentResetGuard wires the cross-task workspace owner used by
+// ResetTaskEnvironment before any runtime resource is touched.
+func (s *Service) SetTaskEnvironmentResetGuard(guard TaskEnvironmentResetGuard) {
+	s.taskEnvironmentResetGuard = guard
+}
+
+// CleanupTaskLSP exposes the task-owned cleanup hook to cascade composition.
+// It accepts only a task ID and semantic reason; runtime/session identifiers
+// remain private to the LSP controller.
+func (s *Service) CleanupTaskLSP(ctx context.Context, taskID, reason string) error {
+	if s.taskLSP == nil {
+		return nil
+	}
+	return s.taskLSP.CleanupTask(ctx, taskID, reason)
+}
+
+// StopTaskLSP durably suspends task-owned language servers before task stop
+// returns. The environment transition and cleanup share one exclusive
+// admission window, so a queued Start cannot recreate a task host after the
+// cleanup boundary. A later agent launch marks the environment ready and the
+// environment-ready callback reconciles the preserved per-language policy.
+func (s *Service) StopTaskLSP(ctx context.Context, taskID, reason string) error {
+	releaseMutation := s.acquireTaskLSPMutation(taskID)
+	defer releaseMutation()
+
+	environment, err := s.GetTaskEnvironmentForTaskLSP(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get task environment before LSP stop: %w", err)
+	}
+	releaseEnvironmentMutation := func() {}
+	if environment != nil && environment.ID != "" {
+		releaseEnvironmentMutation = s.acquireTaskLSPEnvironmentMutation(environment.ID)
+	}
+	defer releaseEnvironmentMutation()
+	ownershipTransfer, err := s.prepareTaskEnvironmentForLSPStop(ctx, taskID, environment)
+	if err != nil {
+		return err
+	}
+	if s.taskLSP == nil {
+		return nil
+	}
+	if err := s.taskLSP.CleanupTask(ctx, taskID, reason); err != nil {
+		return s.rollbackTaskEnvironmentOwnershipAfterFailure(ctx, ownershipTransfer, err)
+	}
+	return nil
+}
+
+func (s *Service) prepareTaskEnvironmentForLSPStop(
+	ctx context.Context,
+	taskID string,
+	environment *models.TaskEnvironment,
+) (*workspaceEnvironmentOwnershipTransfer, error) {
+	if environment == nil {
+		return nil, nil
+	}
+	current, err := s.taskEnvironments.GetTaskEnvironment(ctx, environment.ID)
+	if err != nil {
+		return nil, fmt.Errorf("reload task environment before LSP stop: %w", err)
+	}
+	if current == nil || current.TaskID != taskID {
+		return nil, nil
+	}
+	shared, err := s.hasOtherLiveTasksForEnvironment(ctx, taskID, current)
+	if err != nil {
+		return nil, fmt.Errorf("check shared task environment before LSP stop: %w", err)
+	}
+	if shared {
+		return s.preserveTaskEnvironmentForLiveBorrower(ctx, taskID, current)
+	}
+	if current.Status == models.TaskEnvironmentStatusStopped {
+		return nil, nil
+	}
+	current.Status = models.TaskEnvironmentStatusStopped
+	if err := s.taskEnvironments.UpdateTaskEnvironment(ctx, current); err != nil {
+		return nil, fmt.Errorf("mark task environment stopped before LSP cleanup: %w", err)
+	}
+	return nil, nil
+}
+
+// ReconcileTaskLSP is used by task resume/cascade composition without
+// exposing the controller or a runtime execution identifier.
+func (s *Service) ReconcileTaskLSP(ctx context.Context, taskID string) error {
+	if s.taskLSP == nil {
+		return nil
+	}
+	return s.taskLSP.ReconcileTask(ctx, taskID)
 }
 
 // SetRowLivenessProber wires the runtime-aware executors_running liveness probe

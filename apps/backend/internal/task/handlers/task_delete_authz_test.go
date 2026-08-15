@@ -156,6 +156,19 @@ func TestHTTPDeleteTaskDeniesForeignTask(t *testing.T) {
 	}
 }
 
+func TestHTTPResetTaskEnvironmentDeniesForeignTaskAsNotFound(t *testing.T) {
+	repo := &authzDeleteRepo{}
+	h := newAuthzTaskHandlers(t, repo)
+
+	c, rec := authzDeleteRequest(t, "user-a", "task-b")
+	c.Request.Method = http.MethodPost
+	h.httpResetTaskEnvironment(c)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign environment reset: status = %d body = %s, want 404", rec.Code, rec.Body.String())
+	}
+}
+
 // TestHTTPDeleteTaskDeniesForeignTaskThroughCascade covers the shape backendapp
 // actually ships: with a HandoffService wired the handler never calls
 // Service.DeleteTask, so the guard that carries this route lives on the cascade.

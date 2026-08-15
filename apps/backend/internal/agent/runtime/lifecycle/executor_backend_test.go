@@ -92,3 +92,18 @@ func TestToAgentExecutionCapturesDefensiveRuntimeEnvironment(t *testing.T) {
 	got["PATH"] = "/mutated"
 	require.Equal(t, "/tmp/kandev-shim:/usr/bin", execution.RuntimeEnvironment()["PATH"])
 }
+
+func TestToAgentExecutionCapturesDefensiveMetadata(t *testing.T) {
+	requestMetadata := map[string]interface{}{"request": "original"}
+	execution := (&ExecutorInstance{
+		InstanceID: "execution",
+		Metadata:   map[string]interface{}{"runtime": "value"},
+	}).ToAgentExecution(&ExecutorCreateRequest{Metadata: requestMetadata})
+
+	require.Equal(t, map[string]interface{}{
+		"request": "original",
+		"runtime": "value",
+	}, execution.MetadataSnapshot())
+	execution.setMetadataValue("persisted", "secret-ref")
+	require.Equal(t, map[string]interface{}{"request": "original"}, requestMetadata)
+}

@@ -22,6 +22,7 @@ import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/wor
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
+import { TaskLspTopbarControl } from "@/components/lsp/task-lsp-topbar-control";
 import { isDebugUI } from "@/lib/config";
 import { useTranslation } from "react-i18next";
 
@@ -77,7 +78,7 @@ const TaskTopBar = memo(function TaskTopBar({
   return (
     <header
       data-testid="task-topbar"
-      className="@container/topbar grid h-10 shrink-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-2 overflow-hidden px-3 py-1 border-b border-border"
+      className="@container/topbar grid h-10 shrink-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-2 overflow-hidden border-b border-border px-3 py-1 [@media(pointer:coarse)]:h-12"
     >
       <TopBarLeft
         taskId={taskId}
@@ -366,6 +367,7 @@ function TopBarRight({
   const { t } = useTranslation();
   return (
     <div className="flex items-center justify-self-end gap-2 [&_button]:whitespace-nowrap">
+      <TaskLspTopbarControl taskId={taskId ?? null} />
       <TopbarMetrics activeSessionId={activeSessionId} size="sm" />
       {!isArchived && (
         <TopbarCluster

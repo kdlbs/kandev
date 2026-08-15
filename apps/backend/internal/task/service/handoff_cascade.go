@@ -206,9 +206,24 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	} else {
 		all = []string{rootID}
 	}
-	cleanupOps, err := s.prepareCascadeResourceCleanup(ctx, all, cascadeID, models.TaskResourceCleanupTriggerCascadeArchive)
+	releaseLSPMutations := s.acquireTaskLSPMutationGuards(all)
+	defer releaseLSPMutations()
+	releaseEnvironmentMutations, err := s.acquireTaskLSPEnvironmentMutationGuards(ctx, all)
 	if err != nil {
 		return out, err
+	}
+	defer releaseEnvironmentMutations()
+	ownershipTransfers, err := s.preserveTaskEnvironmentsForTerminalMutation(ctx, all)
+	if err != nil {
+		return out, err
+	}
+	cleanupOps, err := s.prepareCascadeResourceCleanup(ctx, all, cascadeID, models.TaskResourceCleanupTriggerCascadeArchive)
+	if err != nil {
+		return out, s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(ctx, ownershipTransfers, err)
+	}
+	if err := s.cleanupTaskLSPBeforeMutation(ctx, all, "task_archived"); err != nil {
+		s.cancelCascadeResourceCleanupRange(ctx, all, cleanupOps)
+		return out, s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(ctx, ownershipTransfers, err)
 	}
 
 	// Cancel active runs first. Failures are logged and skipped — a
@@ -222,8 +237,14 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	for i := len(all) - 1; i >= 0; i-- {
 		ok, err := s.tasks.ArchiveTaskIfActive(ctx, all[i], cascadeID)
 		if err != nil {
-			s.cancelCascadeResourceCleanupRange(ctx, all[:i+1], cleanupOps)
-			return out, fmt.Errorf("archive %s: %w", all[i], err)
+			s.resolveCascadeResourceCleanupRange(ctx, all[:i+1], cleanupOps)
+			archiveErr := fmt.Errorf("archive %s: %w", all[i], err)
+			archiveErr = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
+				ctx,
+				ownershipTransfersForTasks(ownershipTransfers, all[:i+1]),
+				archiveErr,
+			)
+			return out, archiveErr
 		}
 		if ok {
 			out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, all[i])
@@ -297,12 +318,28 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 	if err != nil {
 		return nil, err
 	}
-	ownershipTransfers, err := s.transferSharedWorkspaceEnvironmentOwnership(ctx, all)
+	releaseLSPMutations := s.acquireTaskLSPMutationGuards(all)
+	defer releaseLSPMutations()
+	releaseEnvironmentMutations, err := s.acquireTaskLSPEnvironmentMutationGuards(ctx, all)
 	if err != nil {
 		return out, err
 	}
+	defer releaseEnvironmentMutations()
+	ownershipTransfers, err := s.preserveTaskEnvironmentsForTerminalMutation(ctx, all)
+	if err != nil {
+		return out, err
+	}
+	groupTransfers, err := s.transferSharedWorkspaceEnvironmentOwnership(ctx, all)
+	if err != nil {
+		return out, s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(ctx, ownershipTransfers, err)
+	}
+	ownershipTransfers = append(ownershipTransfers, groupTransfers...)
 	cleanupOps, err := s.prepareCascadeResourceCleanup(ctx, all, cascadeID, models.TaskResourceCleanupTriggerCascadeDelete)
 	if err != nil {
+		return out, s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(ctx, ownershipTransfers, err)
+	}
+	if err := s.cleanupTaskLSPBeforeMutation(ctx, all, "task_deleted"); err != nil {
+		s.cancelCascadeResourceCleanupRange(ctx, all, cleanupOps)
 		return out, s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(ctx, ownershipTransfers, err)
 	}
 
@@ -336,11 +373,13 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 		// rows are still queryable for the gather step. The actual destroy work
 		// runs async after this returns. Delete cascade removes the env row.
 		if err := s.tasks.DeleteTask(ctx, all[i]); err != nil {
-			s.cancelCascadeResourceCleanupRange(ctx, all[:i+1], cleanupOps)
+			s.resolveCascadeResourceCleanupRange(ctx, all[:i+1], cleanupOps)
 			deleteErr := fmt.Errorf("delete %s: %w", all[i], err)
-			if len(out.ArchivedTaskIDs) == 0 {
-				deleteErr = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(ctx, ownershipTransfers, deleteErr)
-			}
+			deleteErr = s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
+				ctx,
+				ownershipTransfersForTasks(ownershipTransfers, all[:i+1]),
+				deleteErr,
+			)
 			return out, deleteErr
 		}
 		if operationID := cleanupOps[all[i]]; operationID != "" {
@@ -361,6 +400,70 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, casc
 		}
 	}
 	return out, nil
+}
+
+func (s *HandoffService) cleanupTaskLSPBeforeMutation(
+	ctx context.Context,
+	taskIDs []string,
+	reason string,
+) error {
+	cleaner, ok := s.resourceCleaner.(taskLSPMutationCleaner)
+	if !ok {
+		return nil
+	}
+	for _, taskID := range taskIDs {
+		if err := cleaner.CleanupTaskLSP(ctx, taskID, reason); err != nil {
+			return fmt.Errorf("stop task language servers for %s: %w", taskID, err)
+		}
+	}
+	return nil
+}
+
+func (s *HandoffService) acquireTaskLSPMutationGuards(taskIDs []string) func() {
+	guard, ok := s.resourceCleaner.(taskLSPMutationGuard)
+	if !ok {
+		return func() {}
+	}
+	ordered := append([]string(nil), taskIDs...)
+	sort.Strings(ordered)
+	releases := make([]func(), 0, len(ordered))
+	previous := ""
+	for _, taskID := range ordered {
+		if taskID == "" || taskID == previous {
+			continue
+		}
+		previous = taskID
+		if release := guard.acquireTaskLSPMutation(taskID); release != nil {
+			releases = append(releases, release)
+		}
+	}
+	return func() {
+		for index := len(releases) - 1; index >= 0; index-- {
+			releases[index]()
+		}
+	}
+}
+
+func (s *HandoffService) acquireTaskLSPEnvironmentMutationGuards(
+	ctx context.Context,
+	taskIDs []string,
+) (func(), error) {
+	guard, ok := s.resourceCleaner.(taskLSPEnvironmentMutationGuard)
+	if !ok {
+		return func() {}, nil
+	}
+	return guard.acquireTaskLSPEnvironmentMutations(ctx, taskIDs)
+}
+
+func (s *HandoffService) preserveTaskEnvironmentsForTerminalMutation(
+	ctx context.Context,
+	taskIDs []string,
+) ([]workspaceEnvironmentOwnershipTransfer, error) {
+	guard, ok := s.resourceCleaner.(taskLSPEnvironmentMutationGuard)
+	if !ok {
+		return nil, nil
+	}
+	return guard.preserveTaskEnvironmentsForTerminalMutation(ctx, taskIDs)
 }
 
 // transferSharedWorkspaceEnvironmentOwnership moves a materialized environment
@@ -474,6 +577,23 @@ func (s *HandoffService) rollbackWorkspaceEnvironmentOwnershipAfterFailure(
 	return errors.Join(cause, fmt.Errorf("rollback shared workspace environment ownership: %w", rollbackErr))
 }
 
+func ownershipTransfersForTasks(
+	transfers []workspaceEnvironmentOwnershipTransfer,
+	taskIDs []string,
+) []workspaceEnvironmentOwnershipTransfer {
+	owners := make(map[string]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		owners[taskID] = struct{}{}
+	}
+	selected := make([]workspaceEnvironmentOwnershipTransfer, 0, len(transfers))
+	for _, transfer := range transfers {
+		if _, ok := owners[transfer.oldOwnerTaskID]; ok {
+			selected = append(selected, transfer)
+		}
+	}
+	return selected
+}
+
 func (s *HandoffService) rollbackWorkspaceEnvironmentOwnershipTransfers(
 	ctx context.Context,
 	transfers []workspaceEnvironmentOwnershipTransfer,
@@ -573,11 +693,11 @@ func (s *HandoffService) prepareCascadeResourceCleanup(
 	for _, taskID := range taskIDs {
 		operationID := string(trigger) + ":" + cascadeID + ":" + taskID
 		deleteEnvironmentRow := trigger == models.TaskResourceCleanupTriggerCascadeDelete
+		operations[taskID] = operationID
 		if err := coordinator.PrepareTaskResourceCleanup(ctx, taskID, trigger, operationID, deleteEnvironmentRow); err != nil {
 			s.cancelCascadeResourceCleanupRange(ctx, taskIDs, operations)
 			return nil, fmt.Errorf("prepare cleanup %s: %w", taskID, err)
 		}
-		operations[taskID] = operationID
 	}
 	return operations, nil
 }
@@ -589,6 +709,31 @@ func (s *HandoffService) cancelCascadeResourceCleanupRange(
 ) {
 	for _, taskID := range taskIDs {
 		s.cancelCascadeResourceCleanup(ctx, operations[taskID])
+	}
+}
+
+func (s *HandoffService) resolveCascadeResourceCleanupRange(
+	ctx context.Context,
+	taskIDs []string,
+	operations map[string]string,
+) {
+	resolver, ok := s.resourceCleaner.(taskResourceCleanupResolver)
+	if !ok {
+		// Older focused cleaners can still provide prepare/start/cancel without
+		// durable outcome probing. Their mutation errors are known synchronous
+		// failures, so retain the previous safe cancellation behavior.
+		s.cancelCascadeResourceCleanupRange(ctx, taskIDs, operations)
+		return
+	}
+	for _, taskID := range taskIDs {
+		operationID := operations[taskID]
+		if operationID == "" {
+			continue
+		}
+		if err := resolver.ResolvePreparedTaskResourceCleanup(ctx, operationID); err != nil {
+			s.logf().Error("resolve cascade resource cleanup",
+				zap.String("operation_id", operationID), zap.Error(err))
+		}
 	}
 }
 
@@ -675,6 +820,7 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 			// archived_at=null to put the card back on the kanban, same
 			// as ArchiveTaskTree publishes per archived task.
 			s.publishUpdatedTask(ctx, id)
+			s.reconcileTaskLSP(ctx, id)
 		} else {
 			out.SkippedTaskIDs = append(out.SkippedTaskIDs, id)
 		}
@@ -728,6 +874,7 @@ func (s *HandoffService) unarchiveManualRoot(ctx context.Context, root *models.T
 	}
 	out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, root.ID)
 	s.publishUpdatedTask(ctx, root.ID)
+	s.reconcileTaskLSP(ctx, root.ID)
 	// Legacy archives never released group memberships, but the group may
 	// have been cleaned since (e.g. by a later cascade on another member).
 	// Restore the group's materialized workspace if it was cleaned. Best
@@ -744,6 +891,19 @@ func (s *HandoffService) unarchiveManualRoot(ctx context.Context, root *models.T
 		}
 	}
 	return out, nil
+}
+
+func (s *HandoffService) reconcileTaskLSP(ctx context.Context, taskID string) {
+	reconciler, ok := s.resourceCleaner.(interface {
+		ReconcileTaskLSP(context.Context, string) error
+	})
+	if !ok {
+		return
+	}
+	if err := reconciler.ReconcileTaskLSP(ctx, taskID); err != nil {
+		s.logf().Warn("failed to reconcile task language servers after unarchive",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
 }
 
 func (s *HandoffService) cancelArchiveResourceCleanup(ctx context.Context, taskID string) error {

@@ -337,17 +337,22 @@ type RemoteStatusProvider interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID           string
-	TaskID               string
-	TaskTitle            string
-	SessionID            string
-	TaskEnvironmentID    string // Env this execution belongs to (shared across sessions in same task)
-	AgentProfileID       string
-	OfficeAgentProfileID string
-	WorkspacePath        string
-	WorkspaceSourceRoots []string
-	Protocol             string
-	Env                  map[string]string
+	InstanceID        string
+	TaskID            string
+	TaskTitle         string
+	SessionID         string
+	TaskEnvironmentID string // Env this execution belongs to (shared across sessions in same task)
+	IsTaskHost        bool   // Internal task-environment service host; never session-owned
+	// RequireExistingInstance permits transport reattachment only. Executors
+	// must return errTaskHostRuntimeNotFound instead of creating or resuming a
+	// physical task-host runtime when the stable instance is absent.
+	RequireExistingInstance bool
+	AgentProfileID          string
+	OfficeAgentProfileID    string
+	WorkspacePath           string
+	WorkspaceSourceRoots    []string
+	Protocol                string
+	Env                     map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
@@ -406,6 +411,11 @@ type ExecutorInstance struct {
 	// Empty for standalone (launcher-owned token wired via cfg.Agent.StandaloneAuthToken)
 	// and Sprites (no agentctl auth).
 	AuthToken string
+	// ControlAuthToken is the effective Docker container-wide credential used
+	// for runtime cleanup. Unlike AuthToken, it is populated even when a
+	// reconnect reused an unchanged token and no durable secret rewrite is
+	// needed.
+	ControlAuthToken string
 
 	// BootstrapNonce is the one-time nonce injected into Docker container env.
 	// It is persisted so a restarted container can complete a fresh handshake
@@ -415,9 +425,12 @@ type ExecutorInstance struct {
 
 // ToAgentExecution converts a ExecutorInstance to an AgentExecution.
 func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentExecution {
-	metadata := req.Metadata
-	if metadata == nil {
-		metadata = make(map[string]interface{})
+	// Seed from one map only. Adding two attacker-influenced lengths can wrap
+	// before make evaluates the allocation size; Go grows the map safely while
+	// the runtime metadata is merged below.
+	metadata := make(map[string]interface{}, len(req.Metadata))
+	for key, value := range req.Metadata {
+		metadata[key] = value
 	}
 	// Merge runtime metadata
 	for k, v := range ri.Metadata {
@@ -444,6 +457,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
 		TaskEnvironmentID:    req.TaskEnvironmentID,
+		IsTaskHost:           req.IsTaskHost,
 		AgentProfileID:       req.AgentProfileID,
 		OfficeAgentProfileID: req.OfficeAgentProfileID,
 		AgentID:              agentID,

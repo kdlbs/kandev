@@ -1223,6 +1223,10 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if req.ACPSessionID == "" {
 		runtimeProgress = progressRecorder.Callback(progressRecorder.Len())
 	}
+	releaseCredentials := m.lockTaskEnvironmentCredentials(
+		reqWithWorktree.ExecutorType, reqWithWorktree.TaskEnvironmentID,
+	)
+	defer releaseCredentials()
 	execReq, execInstance, rt, err := m.launchBuildExecutorRequest(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo, mainRepoGitDir, worktreeID, worktreeBranch, runtimeProgress)
 	if err != nil {
 		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
@@ -1379,9 +1383,11 @@ func (m *Manager) registerAndPublishExecution(
 		}
 		return err
 	}
+	if err := m.persistRuntimeSecrets(ctx, execInstance, execution); err != nil {
+		m.rollbackRegisteredLaunchAfterPersistFailure(rt, execInstance, execution)
+		return fmt.Errorf("persist runtime credentials: %w", err)
+	}
 	m.setRuntimeInterest(execution.SessionID, true)
-
-	m.persistRuntimeSecrets(ctx, execInstance, execution)
 
 	go m.pollOneRemoteStatus(context.Background(), execution)
 

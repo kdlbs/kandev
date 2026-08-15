@@ -2567,8 +2567,17 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 
-	// Stop all agents for this task
-	if err := s.executor.StopByTaskID(ctx, taskID, reason, force); err != nil {
+	// Stop all agents for this task. Task-owned cleanup still runs when no
+	// session execution exists (or session teardown fails), because the LSP
+	// host is intentionally independent from session runtime ownership.
+	stopErr := s.executor.StopByTaskID(ctx, taskID, reason, force)
+	var cleanupErr error
+	if s.taskStopCleanup != nil {
+		if err := s.taskStopCleanup(ctx, taskID, reason); err != nil {
+			cleanupErr = fmt.Errorf("clean up task-owned runtimes: %w", err)
+		}
+	}
+	if err := errors.Join(stopErr, cleanupErr); err != nil {
 		return err
 	}
 
@@ -2620,7 +2629,19 @@ func (s *Service) StopTaskForCoordinator(ctx context.Context, taskID string) (Co
 			accepted++
 		}
 	}
-	if accepted > 0 {
+	cleanupSucceeded := true
+	if s.taskStopCleanup != nil {
+		blockingSessionID, sessionsKnown := s.otherWorkingSessionID(ctx, taskID, "")
+		if !sessionsKnown || blockingSessionID != "" {
+			cleanupSucceeded = false
+		} else {
+			if cleanupErr := s.taskStopCleanup(ctx, taskID, coordinatorMCPStopReason); cleanupErr != nil {
+				failures = append(failures, fmt.Errorf("coordinator stop: clean up task-owned runtimes: %w", cleanupErr))
+				cleanupSucceeded = false
+			}
+		}
+	}
+	if accepted > 0 && cleanupSucceeded {
 		// This helper owns Office/archive/active-state guards and publishes
 		// through the task-service adapter. Remaining working sessions still
 		// block REVIEW on a partial stop.

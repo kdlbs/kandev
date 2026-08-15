@@ -29,6 +29,7 @@ type AppStatusDrawerContextValue = {
   connectionOnly: boolean;
   drawerOpen: boolean;
   openStatusDrawer: () => void;
+  openLspStatusDrawer: (language?: string) => void;
   setStatusDrawerOpen: (open: boolean) => void;
 };
 
@@ -40,6 +41,7 @@ const unavailableDrawer: AppStatusDrawerContextValue = {
   connectionOnly: false,
   drawerOpen: false,
   openStatusDrawer: () => {},
+  openLspStatusDrawer: () => {},
   setStatusDrawerOpen: () => {},
 };
 
@@ -77,7 +79,7 @@ export function AppStatusDrawerTrigger({
       size={buttonProps.size ?? "icon"}
       className={cn(
         "relative h-11 w-11 cursor-pointer",
-        drawerTriggerVisibilityClass(drawer.connectionOnly),
+        drawerTriggerVisibilityClass(),
         issueActive && (drawer.issueSeverity === "lost" ? "text-destructive" : "text-amber-500"),
         className,
       )}
@@ -103,15 +105,16 @@ export function AppStatusDrawerTrigger({
 /**
  * The trigger must be visible exactly where `useDrawerSurface` picks the drawer
  * over the inline bar, or the drawer becomes unreachable and the status surface
- * disappears. `md:hidden` tracks the hook's mobile boundary; the connection-only
- * variant additionally covers the tablet clause up to the desktop boundary.
+ * disappears. Coarse-pointer tablets use the drawer through the `lg` boundary,
+ * including non-task routes that have no task-topbar fallback.
  */
-function drawerTriggerVisibilityClass(connectionOnly: boolean) {
-  return connectionOnly ? "lg:hidden" : "md:hidden";
+function drawerTriggerVisibilityClass() {
+  return "lg:hidden";
 }
 
 export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) {
   const [drawerOpen, setStatusDrawerOpen] = useState(false);
+  const [focusedLspLanguage, setFocusedLspLanguage] = useState<string | null>(null);
   const pathname = usePathname();
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -119,9 +122,11 @@ export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) 
   const issueSeverity = useAppStore((state) => state.connection.issueSeverity);
   const appStatusBarEnabled = useAppStore((state) => state.userSettings.appStatusBarEnabled);
   const { isMobile, isTablet, isFullDesktop } = useResponsiveBreakpoint();
-  const connectionOnly = !appStatusBarEnabled && issueSeverity !== "none";
-  const useDrawerSurface = isMobile || (isTablet && connectionOnly);
-  const drawerEnabled = useDrawerSurface && (appStatusBarEnabled || connectionOnly);
+  const taskDrawerEnabled = Boolean(activeTaskId) && (isMobile || isTablet);
+  const connectionOnly = !appStatusBarEnabled && issueSeverity !== "none" && !taskDrawerEnabled;
+  const useDrawerSurface = isMobile || isTablet;
+  const drawerEnabled =
+    useDrawerSurface && (appStatusBarEnabled || connectionOnly || taskDrawerEnabled);
   const inlineStatusBarVisible = !useDrawerSurface && appStatusBarEnabled;
 
   useLayoutEffect(() => {
@@ -135,7 +140,10 @@ export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) 
   }, [inlineStatusBarVisible]);
 
   useEffect(() => {
-    if (!drawerEnabled) setStatusDrawerOpen(false);
+    if (!drawerEnabled) {
+      setStatusDrawerOpen(false);
+      setFocusedLspLanguage(null);
+    }
   }, [drawerEnabled]);
 
   const drawer = useMemo<AppStatusDrawerContextValue>(
@@ -145,9 +153,19 @@ export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) 
       connectionOnly,
       drawerOpen,
       openStatusDrawer: () => {
-        if (drawerEnabled) setStatusDrawerOpen(true);
+        if (!drawerEnabled) return;
+        setFocusedLspLanguage(null);
+        setStatusDrawerOpen(true);
       },
-      setStatusDrawerOpen,
+      openLspStatusDrawer: (language) => {
+        if (!drawerEnabled) return;
+        setFocusedLspLanguage(language ?? null);
+        setStatusDrawerOpen(true);
+      },
+      setStatusDrawerOpen: (open) => {
+        setStatusDrawerOpen(open);
+        if (!open) setFocusedLspLanguage(null);
+      },
     }),
     [connectionOnly, drawerEnabled, drawerOpen, issueSeverity],
   );
@@ -168,8 +186,12 @@ export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) 
             <AppStatusDrawer
               {...surfaceProps}
               open={drawerOpen}
-              onOpenChange={setStatusDrawerOpen}
+              onOpenChange={(open) => {
+                setStatusDrawerOpen(open);
+                if (!open) setFocusedLspLanguage(null);
+              }}
               connectionOnly={connectionOnly}
+              focusLspLanguage={focusedLspLanguage}
             />
           ) : (
             <AppStatusBar {...surfaceProps} density={isFullDesktop ? "full" : "compact"} />

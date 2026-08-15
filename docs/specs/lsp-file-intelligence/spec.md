@@ -1,7 +1,7 @@
 ---
-status: building
+status: shipped
 created: 2026-07-09
-updated: 2026-08-11
+updated: 2026-08-12
 owner: tbd
 ---
 
@@ -9,258 +9,672 @@ owner: tbd
 
 ## Why
 
-Users inspect and edit code inside Kandev task file tabs, but code navigation and analysis otherwise require opening an external editor. Lightweight language-server intelligence lets users understand a project without leaving the task.
+Users need project-aware diagnostics and navigation inside Kandev without repeatedly paying a
+language server's startup and project-analysis cost as they move between files, sessions, panels,
+or browsers. Long Kotlin imports make a browser- or editor-owned lifecycle especially disruptive
+and obscure the actual task-level work that is still running.
 
 ## What
 
-- Desktop Monaco file editors can connect to Language Server Protocol servers for:
-  - TypeScript and JavaScript via `typescript-language-server`
-  - Python via `pyright-langserver`
-  - Go via `gopls`
-  - Rust via `rust-analyzer`
-  - Kotlin via the official `kotlin-lsp`; Kotlin is marked experimental while its upstream server is alpha
-- Wired editor capabilities are diagnostics and the server-advertised completion, hover, go-to-definition, references, signature-help, and semantic-token providers.
-- Global editor settings select languages that auto-start, languages Kandev may auto-install, and per-language configuration returned through `workspace/configuration`. Saving changed configuration updates the existing server through `workspace/didChangeConfiguration` without waiting for an idle disconnect or process restart.
-- A user can manually start or stop the current file's server from the effective status control. Manual enablement is remembered in browser local storage for that session and language. An explicit Stop suppresses global auto-start for that session and language in the current browser runtime until the user explicitly starts it again; it does not rewrite the global preference or affect another browser window.
-- The current editor's LSP status surface distinguishes process launch, protocol readiness, and server-reported project work:
-  - after the task host reports `ready`, it says that the server process started and that Kandev is waiting for the LSP `initialize` response;
-  - while initialization is pending, it shows locally measured elapsed time without treating that time as server-reported indexing progress;
-  - after 60 seconds without an initialize response, it says initialization is taking longer than usual, keeps the connection alive, and retains the Stop action;
-  - Kotlin's long-running state explains that Kotlin LSP may be importing a Gradle project and that cross-file features remain unavailable until initialization completes, without promising an ETA;
-  - when the server reports standard LSP work-done progress, it shows the server title, optional message, optional percentage, elapsed time, and the number of concurrent work items;
-  - when the server reports no work progress, it says so instead of inventing an indexing state, percentage, or time remaining.
-- The LSP status location is a portable editor preference:
-  - `toolbar` is the default and keeps the control beside the current Monaco editor's actions;
-  - `status_bar` moves the active Monaco editor's control and live summary into the application status bar when **Show status bar** is on for a fine-pointer layout;
-  - if **Show status bar** is off or the layout uses a coarse pointer, Kandev falls back to the editor toolbar without overwriting the saved preference;
-  - the status-bar item follows only an active, mounted Monaco text editor's session and language and is not a global dashboard of every live server; loading, binary/static, diff, CodeMirror, unsupported, and non-file panels do not expose it.
-- The effective status control remains disclosure-first:
-  - fine-pointer toolbar and status-bar controls open the same anchored progress popover;
-  - coarse-pointer Monaco layouts use the toolbar and open an inset bottom drawer with the same status, progress, and Start, Stop, or Retry action;
-  - phone file viewing remains LSP-free and does not render the control.
-- A connected server remains connected while project work is active. Progress never replaces the ready connection state or disables document synchronization and editor providers.
-- Progress copy warns that cross-file results may be incomplete while server-reported analysis is active. Completion means only that the reported work item ended; it does not guarantee that every reference, dependency, or project module is resolved.
-- Server-reported project titles and messages remain fully readable and wrap within the LSP status surface, including URL-, path-, and identifier-like text without ordinary break points. The desktop popover and coarse-pointer tablet drawer do not clip, truncate, or horizontally overflow this text.
-- Kotlin supports auto-start but not auto-install. `kotlin-lsp` must already be available on the task host's `PATH`.
-- Rust auto-install is available only on supported macOS and Linux task hosts. Windows can still run a manually installed `rust-analyzer` from the task host's `PATH`; when no installer is available on the actual task host, the task-host stream reports that condition separately and the UI directs the user to manual installation even before the global preference is enabled.
-- The boot runtime advertises the task-host-independent language set that may be saved as a global auto-install preference. The main backend must not filter that preference using its own OS; agentctl is the final authority because it runs on the selected task host.
-- Language servers run through the task's `agentctl`, with the task workspace as their working directory. This keeps project files, dependencies, and server execution in the same environment.
-- Binary discovery and npm/Go auto-install resolve commands and installation results with that same task environment, including task-provided `PATH`, `GOBIN`, `GOPATH`, `HOME`, and Windows `USERPROFILE` values. Command and Go result lookup ignore relative directory entries so repository-controlled paths cannot become executable search roots.
-- The managed npm/release cache derives its absolute root from the merged task environment's `HOME`, not from agentctl's parent-process home before executor overrides are applied.
-- Managed npm-server lookup resolves the concrete platform launcher, including PATHEXT-backed `.cmd` shims on Windows, both immediately after installation and on later starts.
-- TypeScript/JavaScript LSP providers use a dedicated registration guard. Monaco's built-in providers are wrapped before runtime suppression begins, including when Monaco loads after the LSP handshake, and are suppressed only for models owned by the corresponding active LSP connection. Unrelated sessions and models retain Monaco's built-ins.
-- Monaco file navigation handles session-scoped LSP targets and regular task-workspace `file://` targets through Kandev tabs. Targets outside the active workspace are reported as unhandled so Monaco's other opener behavior can continue.
-- Completion requests translate Monaco invocation, trigger-character, and incomplete-result context into the corresponding LSP enum values and forward the trigger character when present. A server item without `textEdit` receives Monaco's current-word insertion range; explicit LSP `TextEdit` and `InsertReplaceEdit` ranges remain authoritative.
-- Successful Monaco file saves synchronize every matching open language-server document to the newest editor snapshot, then notify servers that requested `textDocument/didSave`. When that live snapshot still matches the persisted snapshot, the persisted text is included only for servers that advertise `includeText`. If editing advanced while persistence was in flight, the newer buffer stays dirty and synchronized and the optional stale save text is omitted so the language server cannot be rewound. Failed saves emit no save notification.
-- V1 task-host support is limited to Local PC and local Docker executors. Remote Docker, SSH, and Sprites report an unsupported-executor state.
-- Each active browser WebSocket owns one language-server process. The browser shares a connection for the same session and language inside one window and closes it after its idle timeout; separate browser windows may own separate processes.
-- The backend caps active LSP WebSocket connections at 8 by default. `KANDEV_LSP_MAX_CONNECTIONS` overrides the cap.
-- Language-server processes and npm/Go auto-install commands are owned by the existing agentctl process manager. Instance teardown cancels and drains install work, then reaps full process trees on Unix and Windows before releasing resources.
-- During auto-install, one pending task-host WebSocket read cancels the connection-owned installer context if the browser stops or disconnects. After a successful install, that same read becomes the bridge's first inbound frame so readiness handoff does not race or lose an initialize request.
-- Agentctl must deliver the bounded `installing` status before acquiring auto-install work. If that write fails or times out, it closes the stream without starting the installer because no live consumer can observe or control the operation.
-- Kandev-managed npm and release binaries live under the task host's `~/.kandev/lsp-servers`; `gopls` is installed through the task host's Go toolchain. No managed server cache lives inside a checked-out project.
-- LSP JSON-RPC bodies are limited to 16 MiB across stdio and WebSocket transport; stdio headers are bounded separately. Oversized frames close the affected connection instead of allocating unbounded memory.
-- Every task-host LSP WebSocket write has a five-second deadline, including installing, installed, failure, ready, close, and bridged JSON-RPC frames. A stalled browser peer cannot retain the stream handler or its owned language-server process indefinitely.
-- Each browser-to-server stdio frame has a 30-second write cutoff, and stdout-forwarder termination closes stdin immediately. A language server that stops reading cannot leave the bridge handler or its owned process pinned indefinitely.
-- Mobile file viewing does not start language servers in the background.
+- Kandev provides task-host language-server intelligence for TypeScript/JavaScript, Python, Go,
+  Rust, and experimental Kotlin. Monaco uses the capabilities each initialized server advertises:
+  diagnostics, completion, hover, definition, references, signature help, and semantic tokens.
+- There is exactly one logical lifecycle per `(task_id, language)`. Every session, editor, tab,
+  browser, and device authorized for that task observes and controls the same language server.
+  No user-visible LSP contract is keyed by `session_id`.
+- Each language has a task policy:
+  - **Inherit default** follows the global auto-start default after bounded task-host discovery
+    detects that language.
+  - **Keep warm** starts or restores the server whenever the task environment is available,
+    regardless of open files, and keeps it running until a task-level transition stops it.
+  - **Disabled** keeps the language off and prevents editor mounts, reconnects, and global defaults
+    from reacquiring it.
+- Explicit **Start** sets **Keep warm** and converges toward a running server. Explicit **Stop**
+  sets **Disabled**, cancels pending recovery, gracefully stops the server when possible, and
+  reaps its process tree. **Restart** preserves the current policy, explains that project analysis
+  may run again, stops the current generation completely, and creates exactly one new generation.
+- Opening or closing a file, changing the active file or panel, switching sessions in the same
+  task, unmounting an editor, closing a browser attachment, navigating, reconnecting, reloading,
+  or passing the former two-minute idle boundary never changes task policy or stops a warm server.
+- A backend or browser may reattach to an initialized task-host generation. If the task host no
+  longer exists, Kandev reports recovery and starts at most one replacement generation when the
+  effective policy requires it. Missing backend cache state is not absence: an existing-only
+  physical reattachment that cannot launch or resume resources precedes every replacement.
+- Supported project languages are discovered without opening a matching file. Discovery reads
+  names and extensions only; it never starts or installs a language server, evaluates a manifest,
+  or triggers a project import. Each scan is limited to two seconds, 10,000 filesystem entries,
+  and depth six beneath the task root and ordered repository roots. It does not follow directory
+  symlinks and skips `.git`, `.kandev`, `node_modules`, `vendor`, `target`, `build`, `dist`, and
+  `.gradle`. A truncated scan is visible as partial rather than as a false complete result.
+- The task control lists every status-visible supported language so a user can start one even when
+  discovery is pending or finds no matching file. Every language is visible by default. A global
+  user preference may hide individual languages from task aggregate/status surfaces without
+  changing discovery, task policy, process state, or the current-language editor shortcut.
+  Detected, explicitly configured, running, queued, importing, restart-required, and failed visible
+  languages are considered relevant for the aggregate summary.
+- Global editor settings remain defaults for auto-start, permission to auto-install, and the JSON
+  configuration returned through `workspace/configuration`. Auto-start now reacts to task
+  discovery and task-environment readiness, not to a file mount. Saving configuration updates one
+  live task-host server through `workspace/didChangeConfiguration` without spawning another.
+- The old LSP status-location preference no longer moves or hides lifecycle ownership. The editor
+  toolbar is always a shortcut for its current supported language, while the task aggregate uses
+  the application status surface. Stored legacy `lsp_status_location` values are ignored during
+  compatibility migration and do not change either surface.
+- With the Application status bar enabled, a stable compact task item remains visible whenever the
+  task has a relevant language, even when another file, an unsupported file, or a non-file panel is
+  active. One relevant language can read `Kotlin · Importing 4m`; multiple live languages can read
+  `LSP · 2 running`. Server text and elapsed time are evidence, not inferred completion.
+- Opening the task aggregate shows one compact collapsible row per visible language. The collapsed
+  summary preserves language, lifecycle state, and detection evidence; expanding a row reveals
+  policy, effective policy, server-reported work, elapsed time, generation, start time, last
+  stop/restart reason, initiator, actionable errors, and Start/Stop/Restart controls. The task
+  policy picker uses the shared select control. A Restart confirmation states that the current
+  server and analysis are discarded and a project import may run again.
+- When the Application status bar is disabled or no language is relevant enough for its compact
+  item, an always-discoverable task/workspace action opens the same controller. This action remains
+  available when every language is hidden and directs the user to visibility settings. The editor
+  toolbar shortcut delegates to that controller, force-shows its current language for that
+  disclosure, and never creates a separate lifecycle.
+- Phone and coarse-pointer tablet layouts expose the same task value and actions through the
+  existing Status drawer or task action. The language rows render inline in that drawer rather
+  than opening another drawer. Touch targets are at least 44 px; the drawer has one scroll owner,
+  honors safe areas and dynamic viewport height, remains contained, and causes no document-level
+  horizontal overflow.
+- The phone file viewer does not attach a protocol client or start a language server because a file
+  opened. A user can still inspect policy and explicitly Start, Stop, or Restart the task server
+  from the task-level mobile surface.
+- Lifecycle presentation distinguishes admission, installation, process launch, process started,
+  the LSP `initialize` request, server-reported work, initialized ready/idle, stopping, unsupported,
+  unavailable, and error states. It never calls a started process ready before `initialize`
+  succeeds.
+- Initialization has no automatic timeout. After 60 seconds the UI calls out a long wait while
+  retaining Stop. Kotlin may name Gradle import as a possible cause, but Kandev never invents an
+  indexing percentage, completion signal, or ETA.
+- Standard LSP work-done `begin`, `report`, and `end` events are shown with server title, optional
+  message, optional clamped percentage, local elapsed time, and concurrent-work count. The oldest
+  active item is primary; unrelated percentages are never averaged. Ending one item means only
+  that the server ended that item.
+- A task host stores one initialized JSON-RPC peer per language and multiplexes browser
+  attachments. It remaps request IDs by attachment and generation, handles client-side protocol
+  requests centrally, and caches capabilities, progress, and diagnostics for reconnecting
+  attachments. A browser never sends `initialize`, `shutdown`, or `exit` as an ownership action.
+- Shared document synchronization is deterministic. One canonical task-host URI is open upstream;
+  duplicate attachment opens add references without rewinding text, accepted changes receive
+  monotonically increasing upstream versions in arrival order, and the last accepted change is the
+  server's analysis overlay. The final document attachment may send `didClose`, but that does not
+  stop the server. Kandev does not overwrite another editor's unsaved buffer. Every browser-originated
+  file URI is canonicalized and must resolve inside the backend-authorized task workspace or one of
+  its repository roots; sibling paths, traversal, and symlink escapes fail before upstream traffic.
+  Lexical task-root and authority/volume checks happen before filesystem resolution. Trusted
+  task-host setup opens and pins one OS root handle per authorized root before any browser attaches,
+  then derives and verifies the canonical identity from that same pinned handle. It never resolves
+  one root lookup and reopens the resulting pathname as authority. Windows junction and mount-point
+  roots therefore cannot defer their redirect until a browser child lookup. Browser authorization uses only
+  handle-relative inspection, including across concurrent ancestor replacement. Symlink and Windows
+  reparse targets are projected into the authorized root set before target lookup, with valid
+  cross-root links switching pinned handles, so neither a direct UNC URI nor an in-root redirect to an
+  untrusted share can trigger network access merely by being rejected. Missing document tails stop
+  lookup at the first absent component. Since LSP servers consume pathnames rather than file handles,
+  task-environment containment remains responsible for replacement after authorization completes.
+- Successful saves first synchronize the newest live editor snapshot, then send `didSave` only
+  when the server requested it. Stale persisted text is omitted if editing advanced while the save
+  was in flight; failed saves send no save notification.
+- TypeScript/JavaScript built-ins are suppressed only for task/session Monaco models whose active
+  external server advertises the replacement capability. Other tasks, sessions, models, and
+  unadvertised features keep Monaco's built-ins.
+- Multi-repository tasks use one server. The task workspace is `rootUri`; ordered repository roots
+  are `workspaceFolders`. A source-root change uses `workspace/didChangeWorkspaceFolders` when the
+  server supports it; otherwise the current generation stays usable for its old scope and the task
+  status becomes `restart_required` until the user restarts. A change to the physical task workspace
+  root always requires an explicit restart because process working directory, `rootUri`, and
+  attachment scope are initialize-time state; folder notifications never pretend to rebind them.
+- The canonical `TaskEnvironment` is only a runtime target. All sessions of the task use it. An
+  inherited-workspace task may share the physical environment and task-host process with another
+  task, but never its language-server slot: agentctl keys runtime, progress, configuration, and
+  workspace roots by `(task_id, language)`. Membership is proven from durable session state before
+  runtime access. If an environment is replaced, Kandev proves the old generation is reaped before
+  automatically starting one new generation in the replacement. An unresolved old runtime blocks
+  the new launch with an actionable error instead of risking duplicate imports.
+- Local PC/Worktree and Local Docker task environments are supported. Remote Docker, SSH, Sprites,
+  missing, and unknown executors fail closed before Kandev acquires capacity or starts/resumes task
+  resources. Backend capability data, not a frontend executor-name allowlist, owns that decision.
+- Capacity counts task/language processes that are starting, live, or stopping. It does not count
+  browser attachments, editor leases, detected languages, or queued desired state. The default is
+  eight; `KANDEV_LSP_MAX_SERVERS` overrides it. The legacy `KANDEV_LSP_MAX_CONNECTIONS` value is a
+  deprecated fallback only when the new variable is unset. Desired servers wait visibly for a slot
+  without starting/resuming a task host and are reconsidered when a slot is released. Slot release
+  reserves the next entry atomically and promotes it asynchronously under controller lifecycle, so
+  stopping one task never waits for another task's installer or launch. A canceled promotion returns
+  its reservation exactly once and advances the queue. Startup reserves every persisted generation
+  that may still own a process before fallible runtime inspection; inspection frees it only after
+  authoritative absence, while a confirmed stop releases the matching durable/runtime identity. A
+  transient recovery error therefore cannot make admission exceed the configured cap. A newer
+  accepted queued generation for the same task/language is authoritative over an older startup
+  inventory generation; stale adoption cannot erase that queue entry, resurrect the retired
+  generation, or bypass the cap.
+- Binary discovery, managed installation, and execution retain existing task-host trust
+  boundaries. Kandev never executes a server from a repository or relative `PATH` entry. Managed
+  npm/release binaries live under the task host's `~/.kandev/lsp-servers`; `gopls` uses the task
+  host's Go toolchain. Kotlin remains manual-install-only. Rust auto-install remains limited to
+  supported macOS and Linux task hosts.
+- Task stop, archive, and delete cancel pending starts/recovery, clear active progress, and
+  terminate every LSP process descendant owned by that task. If another live task shares the
+  departing owner's physical environment, Kandev transfers environment ownership to that borrower
+  and preserves its task-host process and independent language slots. The surviving host purges the
+  departing task's stopped slots, snapshots, subscriptions, diagnostic/capability caches, and
+  workspace projection. With no live borrower, and on environment teardown, Kandev reaps the full
+  task-host process tree. A temporary task stop or archive preserves policy and history for resume;
+  task deletion cascades the task-language records.
+- The task-scoped controller carries server-stamped initiator metadata (`user`, `agent`, or
+  `automatic`) and reason codes. A future task-scoped MCP tool must call this controller with task
+  ownership derived from its execution; it must not accept a caller-selected task/session ID or
+  create a hidden language server. No MCP tool is included in this scope.
 
-## User settings
+Decision: [ADR-2026-08-05-task-scoped-lsp-ownership](../../decisions/2026-08-05-task-scoped-lsp-ownership.md).
 
-Existing user-setting fields are the durable global policy:
+## Data model
 
-| JSON field                   | Type                    | Meaning                                                                                                                              |
-| ---------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `lsp_auto_start_languages`   | `string[]`              | Languages that connect when a matching file opens.                                                                                   |
-| `lsp_auto_install_languages` | `string[]`              | Languages Kandev may install when their server binary is missing. Kotlin and platform-unsupported installers are rejected.           |
-| `lsp_server_configs`         | `object`                | Per-language JSON returned through `workspace/configuration` and pushed to a live server through `workspace/didChangeConfiguration`. |
-| `lsp_status_location`        | `toolbar \| status_bar` | Preferred LSP status surface. Missing or invalid values normalize to `toolbar`; runtime capability fallbacks do not rewrite it.      |
+`task_lsp_languages` stores durable policy and lifecycle evidence. Rows are created only when a
+language is detected, explicitly configured, or has lifecycle evidence; task snapshots synthesize
+default entries for the remaining supported registry languages.
 
-There is no durable per-task or per-session LSP policy in V1. Manual toolbar state is browser-local and does not override another browser window.
+| Field                      | Type               | Contract                                                                                                        |
+| -------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `task_id`                  | string             | Composite primary key; FK to `tasks.id` with cascade delete.                                                    |
+| `language`                 | string             | Composite primary key; one of the registered LSP language IDs.                                                  |
+| `policy`                   | enum               | `inherit`, `keep_warm`, or `disabled`; default `inherit`.                                                       |
+| `detected`                 | boolean            | Result from the latest completed/partial bounded scan.                                                          |
+| `detection_state`          | enum               | `unknown`, `scanning`, `complete`, `partial`, or `unavailable`.                                                 |
+| `detection_scanned_at`     | timestamp nullable | Start time of the latest completed/partial scan.                                                                |
+| `detection_truncated`      | boolean            | True when any scan budget stopped traversal.                                                                    |
+| `phase`                    | enum               | Current durable lifecycle projection described below.                                                           |
+| `generation`               | unsigned integer   | Monotonic task/language process-generation identity.                                                            |
+| `revision`                 | unsigned integer   | Monotonic projection revision used to reject stale REST/WS data.                                                |
+| `process_started_at`       | timestamp nullable | Time the current/last generation's OS process started.                                                          |
+| `initialize_started_at`    | timestamp nullable | Time its `initialize` request began.                                                                            |
+| `ready_at`                 | timestamp nullable | Time its initialize response succeeded.                                                                         |
+| `last_transition_at`       | timestamp          | Time `phase` or activity last changed.                                                                          |
+| `last_action`              | enum               | `start`, `stop`, `restart`, `set_policy`, or `reconcile`.                                                       |
+| `last_action_at`           | timestamp nullable | Time the last controller action was accepted.                                                                   |
+| `last_stop_reason`         | string             | Stable reason code for the last stop, including user, task, environment, or crash reasons.                      |
+| `last_restart_reason`      | string             | Stable reason code for the last restart/recovery.                                                               |
+| `last_initiator`           | enum               | `user`, `agent`, or `automatic`; stamped by a trusted adapter.                                                  |
+| `restart_required`         | boolean            | True when workspace/runtime changes need an explained user restart while the current process may remain usable. |
+| `restart_required_reason`  | string             | Stable reason code; empty when `restart_required` is false.                                                     |
+| `error_code`               | string             | Empty outside an active failure; localized by the UI.                                                           |
+| `error_message`            | string             | Optional authorized task-host detail; rendered as text.                                                         |
+| `created_at`, `updated_at` | timestamp          | Row audit timestamps.                                                                                           |
+
+Active progress tokens, server capabilities, cached diagnostics, open documents, downstream
+attachment IDs, task-environment IDs, and execution IDs are runtime-only. They are keyed by
+task-host language generation, never persisted as browser/session ownership, and never returned as
+task ownership fields.
+
+Global settings retain these meanings:
+
+| JSON field                    | Type       | Meaning                                                                                |
+| ----------------------------- | ---------- | -------------------------------------------------------------------------------------- |
+| `lsp_auto_start_languages`    | `string[]` | Default languages enabled by an `inherit` policy after detection.                      |
+| `lsp_auto_install_languages`  | `string[]` | Languages whose missing registered server Kandev may install on a supported task host. |
+| `lsp_status_hidden_languages` | `string[]` | Languages omitted from aggregate task status surfaces; all are visible by default.     |
+| `lsp_server_configs`          | object     | Per-language JSON used for `workspace/configuration` and live configuration changes.   |
 
 ## API surface
 
-### Browser-facing stream
+All browser routes are task-scoped:
 
-`GET /lsp/:sessionId?language=<language>`
+| Method and path                                    | Request                | Result                                                                  |
+| -------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------- | ------------- | ----------------------------------------- |
+| `GET /api/v1/tasks/:taskId/lsp`                    | none                   | Every supported language plus task aggregate metadata.                  |
+| `PUT /api/v1/tasks/:taskId/lsp/:language/policy`   | `{ "policy": "inherit" | "keep_warm"                                                             | "disabled" }` | Accepted authoritative language snapshot. |
+| `POST /api/v1/tasks/:taskId/lsp/:language/start`   | empty                  | Sets Keep warm and returns the accepted/queued/current snapshot.        |
+| `POST /api/v1/tasks/:taskId/lsp/:language/stop`    | empty                  | Sets Disabled and returns the stopping/off snapshot.                    |
+| `POST /api/v1/tasks/:taskId/lsp/:language/restart` | empty                  | Preserves policy and returns the single replacement operation snapshot. |
+| `GET /lsp/tasks/:taskId/:language/attach`          | WebSocket upgrade      | Non-owning feature/document attachment to the current generation.       |
 
-The main backend resolves or restores the task execution, checks executor support and global capacity, authenticates to that execution's agentctl instance, and proxies WebSocket frames.
+Mutation bodies never accept `task_id`, `session_id`, task-environment/execution identity,
+generation, initiator, or reason. Invalid language/policy returns `400`; an invisible task returns
+the normal not-found response; Restart of a disabled/off server returns `409`. A policy mutation
+can succeed while its runtime snapshot is visibly `queued`, `unsupported`, `waiting_for_task`, or
+`error`; those states do not cause a hidden execution attempt.
 
-### Task-host stream
-
-`GET /api/v1/lsp/stream?language=<language>&autoInstall=<bool>`
-
-This authenticated agentctl route resolves or installs the binary, starts it in the task workspace, converts WebSocket JSON messages to LSP stdio framing, and converts LSP stdio responses back to WebSocket messages.
-
-Before JSON-RPC traffic begins, the task-host stream can emit:
+A language snapshot has this stable shape (nullable timestamps and empty error details omitted):
 
 ```json
-{ "status": "installing", "language": "python" }
-{ "status": "installed", "language": "python" }
-{ "status": "ready", "workspacePath": "/abs/task/worktree" }
-{ "status": "install_failed", "language": "python", "error": "..." }
+{
+  "task_id": "task-id",
+  "language": "kotlin",
+  "detected": true,
+  "detection_state": "complete",
+  "detection_truncated": false,
+  "policy": "keep_warm",
+  "effective_policy": "keep_warm",
+  "phase": "initializing",
+  "activity": "server_work",
+  "generation": 4,
+  "revision": 19,
+  "process_started_at": "2026-08-05T10:00:00Z",
+  "initialize_started_at": "2026-08-05T10:00:01Z",
+  "progress": [
+    {
+      "token": "initialize-4",
+      "title": "Importing Gradle project",
+      "message": "Resolving dependencies",
+      "percentage": 42,
+      "started_at": "2026-08-05T10:00:01Z",
+      "updated_at": "2026-08-05T10:04:00Z"
+    }
+  ],
+  "last_action": "start",
+  "last_initiator": "user",
+  "restart_required": false
+}
 ```
 
-Application close codes are:
+The backend publishes semantic `task.lsp_state_changed` events, mapped to browser
+`task.lsp.changed` messages carrying one full language snapshot. Clients ignore a lower revision.
+The first successful attachment frame is a non-LSP envelope containing `status: "attached"`, the
+language, generation, workspace URI/folders, and initialized server capabilities. Raw LSP feature
+traffic follows. Lifecycle/progress snapshots can arrive before attachment readiness; closing the
+attachment releases only its request/document references.
 
-| Code   | Meaning                                                                    |
-| ------ | -------------------------------------------------------------------------- |
-| `4001` | Auto-installable server binary missing and auto-install was not requested. |
-| `4002` | Session, execution, or agentctl stream unavailable.                        |
-| `4003` | Auto-install failed.                                                       |
-| `4004` | Executor unsupported in V1.                                                |
-| `4005` | Active LSP connection cap reached.                                         |
-| `4006` | Language server exit or unexpected LSP proxy stream failure.               |
-| `4007` | Server binary missing and the task host has no supported installer.        |
-| `4008` | Language-server process failed to start.                                   |
+The internal controller seam used by HTTP, lifecycle recovery, and a future MCP adapter exposes
+task snapshot, policy mutation, `start|stop|restart` control, attachment, task teardown, and task
+reconciliation operations. Every exported human-facing operation authorizes `taskID` first. Each
+control call receives origin metadata from its trusted adapter; origin is not copied from request
+arguments. A future in-session adapter resolves `taskID` from `AgentExecution` before invoking the
+same seam.
 
-The browser translates categorical close statuses from the close code instead of rendering transport prose. A preceding `install_failed` status payload may retain its actionable task-host diagnostic when the stream then closes with `4003`; without that payload, `4003` uses the localized installation-failure fallback. A JSON-RPC initialization rejection preserves the server-provided `error.message`.
+## State machine
 
-### Browser LSP progress contract
+`phase` is one of:
 
-The browser advertises standard LSP `window.workDoneProgress` support and includes a client-generated `workDoneToken` in `initialize`. This lets servers such as JetBrains Kotlin LSP report project-import phases before the initialize response.
+| Phase              | Meaning                                                                      |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `off`              | No process or pending start exists.                                          |
+| `waiting_for_task` | Policy wants a server, but the canonical task environment is not ready.      |
+| `queued`           | Runtime is supported and desired, but no process-capacity slot is available. |
+| `installing`       | A permitted Kandev-managed server installation is active.                    |
+| `starting`         | Capacity is held and the task host is launching the registered process.      |
+| `process_started`  | The OS process and stdio bridge exist; `initialize` has not started.         |
+| `initializing`     | The task host sent `initialize` and is awaiting its response.                |
+| `ready`            | `initialize` succeeded; feature requests are accepted.                       |
+| `stopping`         | New work is rejected while shutdown and process-tree reaping complete.       |
+| `error`            | The desired operation failed or bounded automatic recovery was exhausted.    |
+| `unsupported`      | The task executor is ineligible; no task resource was started or resumed.    |
 
-The browser accepts both server-created progress tokens through `window/workDoneProgress/create` and `$/progress` notifications for the initialize token. Tokens can be strings or numbers and are scoped to one browser-owned session, language, and connection generation.
+`activity` is orthogonal: `server_work` exists only while one or more valid server-reported
+work-done tokens are active; otherwise it is `idle`. A server can therefore be `initializing` with
+reported work or `ready` with reported work without Kandev conflating that evidence with protocol
+readiness. `restart_required` is also an overlay rather than a process phase: a ready generation can
+continue serving its previous workspace scope while clearly requiring an explained restart.
 
-Supported work-done payloads are:
+The controller serializes commands per `(task_id, language)`. Concurrent duplicate commands while
+one transition is active coalesce. Non-terminal different commands linearize in accepted order.
+Automatic task and settings reconciliation reloads the durable language row inside that same lane
+before deciding effective policy or touching a runtime, so a queued stale snapshot cannot stop a
+server enabled by a newer accepted user action.
+Fired recovery callbacks also enter the lane before revalidating their recovery epoch, reloading
+state, inspecting or recovering the task host, and deciding whether to relaunch. A canceled callback
+therefore becomes a no-op, while an explicit control accepted after an in-flight recovery remains
+the final transition and cannot be stopped by recovery's stale policy snapshot.
+Explicit Stop, Disabled policy, and terminal task cleanup interrupt an accepted Start/install so
+shutdown never waits indefinitely behind startup; the terminal transition is the final desired
+state and process-tree proof. A restart first proves the old generation stopped, then admits one new
+monotonic generation. Lifecycle-owned work queued behind a detached request is removed and releases
+its reservation when controller shutdown cancels it; already-running lifecycle work remains joined.
+Retrying the same task-host command after a transport timeout is idempotent.
 
-| Kind     | Observable behavior                                                                              |
-| -------- | ------------------------------------------------------------------------------------------------ |
-| `begin`  | Adds or replaces the token with its title, message, optional percentage, and local start time.   |
-| `report` | Updates only the matching active token; an omitted percentage preserves its last reported value. |
-| `end`    | Removes only the matching active token and records the server's optional completion message.     |
+Controller startup must read the full durable task/language inventory before task-LSP operations
+can pass their readiness gate. If that authoritative read fails, the gate returns the same sticky
+startup error for every operation until backend restart; Kandev must not admit work against an
+empty capacity ledger or start a background retry behind apparently usable controls. After a
+successful inventory read, every possibly-live generation is reserved before fallible runtime
+inspection begins. If cleanup marks that captured generation absent or deletion removes its row
+after the inventory snapshot, the serialized reload releases only the exact stale or proven-absent
+generation before runtime admission; it cannot resurrect a phantom slot or release a newer live
+generation. If the serialized ledger already contains a newer queued generation for the same key,
+the stale inventory generation cannot replace or remove it.
 
-Percentages are clamped to 0–100 for presentation. Unknown tokens, malformed payloads, and late notifications from a replaced connection are ignored.
+Capacity uses durable generation-scoped process-presence evidence rather than inferring ownership
+from the current display error. Proven absence survives later task-host, watch, and reconciliation
+errors and backend restart; allocating a new generation clears that proof. If Restart allocates a
+replacement generation but task-host access fails before the replacement command runs, the
+task/language keeps its reservation because the previous generation may still be alive. No queued
+language may be promoted until absence is proved.
 
-No backend or task-host payload transforms are required: both WebSocket proxy hops transport the JSON-RPC body unchanged.
+Startup registers watches from a post-reconciliation durable inventory. A watch failure may record
+`task_host_watch_lost` only if the current row still has a server-bearing phase and nonzero
+generation; a stale pre-reconcile row must not replace `off`, `queued`, `waiting_for_task`, or
+`unsupported` state. If that controller-local error cannot be persisted, the still-current failed
+watch leaves the normal bounded recovery sequence armed rather than disappearing without future
+work. A replacement watch's initial snapshot may replay the current task-host revision; that equal
+high-water snapshot is accepted only to heal `task_host_watch_lost`, while older observations and
+equal observations in every other state remain stale.
 
-## Readiness and progress state
+An unexpected process or task-host stream failure keeps the desired policy and attempts automatic
+recovery after 1, 5, and 30 seconds. A generation that remains ready for five minutes resets that
+budget. After three failed recoveries, the phase stays `error` with explicit Restart available;
+there is no unbounded crash loop. An initialize request that remains alive is not a crash and is
+never auto-restarted or timed out. A transient durable-state read failure at the five-minute reset
+does not consume a recovery attempt or discard the reset; the read retries after 1, 5, then at most
+every 30 seconds until the current epoch can be confirmed or newer lifecycle evidence invalidates
+it.
 
-- Connection readiness remains the existing lifecycle (`connecting`, `installing`, `starting`, `ready`, `stopping`, `unavailable`, or `error`).
-- The task-host `ready` handshake means the executable has launched and the JSON-RPC bridge can begin; it does not mean the language server has completed LSP initialization.
-- Initialization is locally observable from the initialize request until its response. The UI shows locale-aware elapsed time even when the server sends no progress payload.
-- The 60-second long-running presentation is derived only from elapsed wall time. It does not change connection state, cancel the request, restart the server, or assert that the server is indexing.
-- Work-done progress is runtime-only activity attached to a live connection. Multiple active tokens are a flat list because LSP defines no parent/child relationship.
-- The oldest active work item is the primary summary; additional active items are shown as a count. Percentages from unrelated work items are never averaged.
-- The most recently ended item can remain visible as “server-reported work finished” for the lifetime of that connection. It is not described as project-wide success.
-- Stop, idle disconnect, crash, socket close, connection replacement, and retry clear all active and completed progress. A replacement generation starts with no inherited work state.
-- Progress activity is scoped to the current editor's session and language. It is not a global task-wide language-server dashboard.
+Recovery and ready-budget-reset timer callbacks acquire controller-lifecycle ownership before any
+store or runtime access and validate their current timer epoch. Controller shutdown cancels
+callback admission, stops timers that have not fired, and joins callbacks already in flight;
+recovery command execution retains that owned lifecycle context. A recovery request received while
+an attempt is still marked running is coalesced and retained for the next bounded backoff; releasing
+the language command lane before callback bookkeeping completes cannot strand a keep-warm language
+in `error` or `off` without its remaining retry. New crash evidence invalidates a ready-budget reset
+even when its timer callback has already fired; a stale Ready read cannot reset attempts after the
+new recovery has consumed its backoff. Fired ready-reset work and watch-loss state plus recovery
+scheduling use the same owned per-language command lane as runtime observations and controls, so a
+durable crash and its backoff cannot be split around a concurrent budget reset.
 
-## State and persistence
+Concurrent and retried controller shutdown calls wait for the same lifecycle-generation join. If
+one caller times out, a later caller must continue waiting rather than report success early. Timer
+validity includes an immutable registration identity as well as its local epoch, preventing a
+committed callback from a deleted recovery/discovery entry from consuming a replacement entry that
+reused the same epoch value.
 
-- User settings persist in the existing user-settings store.
-- Manual enablement persists only in browser local storage under the session and language.
-- Processes, open documents, diagnostics, and semantic-token caches are runtime-only.
-- Save notifications are runtime-only and follow confirmed workspace persistence; they are not emitted for closed documents, failed writes, or servers that did not request them.
-- A missing server starts only when a supported file is opened and auto-start or a toolbar action requests it.
-- Closing the browser connection stops its process; stopping the task reaps every owned language-server process even if a browser connection remains open.
+An explicit Start or Restart begins a new user-requested recovery epoch and therefore resets any
+exhausted automatic retry budget for that task/language. A delayed task-host watch snapshot cannot
+reacquire capacity or replace Off after Stop has cancelled that watch.
+
+## Permissions
+
+- Any authenticated human who can access the task can read and operate its LSP controls under the
+  existing task/workspace ownership rules. Authorization runs before policy, environment,
+  execution, installer, capacity, or attachment access, so hidden task IDs cannot be enumerated.
+- Browser handlers derive `task_id` from the authorized route. They stamp initiator `user` and do
+  not accept an origin override.
+- Automatic discovery, recovery, capacity wakeups, source changes, and lifecycle cleanup use an
+  internal trusted origin after resolving a real task record.
+- A future in-session MCP caller derives task ownership from its trusted `AgentExecution` scope and
+  reaches the same controller. Agent-provided task/session IDs and initiator values are ignored or
+  rejected. No identity-free fallback is allowed when execution ownership cannot be resolved.
+- The task-host control/watch/attachment APIs remain protected by the execution's agentctl secret;
+  they are not public browser endpoints. The backend supplies task identity in an authenticated
+  internal transport header after authorization; JSON bodies cannot supply or override it.
 
 ## Failure modes
 
-- **Unsupported executor:** the file toolbar reports that the task host is unsupported and no process starts.
-- **Missing Kotlin server:** the UI tells the user to install `kotlin-lsp` on the task host; it does not offer or retry auto-install.
-- **Missing auto-installable server:** the UI reports a localized missing-server status or shows install progress when auto-install is enabled. Editors settings keep each language's installation command, prerequisites, and destination visible beside its auto-install control.
-- **Installer failure:** the UI preserves the detailed task-host installer error after the WebSocket's generic close frame so toolchain, network, and package output remains actionable.
-- **Task-only toolchain:** binary lookup, installer execution, and installed-binary discovery use the task runtime environment instead of the agentctl host environment.
-- **Windows npm launcher:** installation and later cache lookup return the executable npm shim selected through PATHEXT rather than an unlaunchable extensionless path.
-- **Windows Go workspace:** when `GOBIN`, `GOPATH`, and `HOME` are unset, post-install discovery checks the task environment's `USERPROFILE\go\bin` for the executable written by Go's default Windows workspace.
-- **Relative Go binary directory:** relative `GOBIN`, individual `GOPATH` entries, `HOME`, and `USERPROFILE` values are ignored; only absolute task-host directories may supply an installed `gopls` result.
-- **Unsupported Rust installer:** Windows rejects Rust auto-install with `4007`, the UI directs the user to install the server manually, and agentctl continues to discover a manually installed `rust-analyzer` from the task environment.
-- **Cold Monaco initialization:** TypeScript built-ins are wrapped before model-scoped LSP suppression is registered; the LSP provider registration guard does not depend on suppression state.
-- **Capacity exceeded:** the UI reports that too many language servers are active; the backend rejects the request before starting or resuming its supported task host.
-- **Process start failure:** agentctl logs the task-host execution error, closes with categorical `4008` and no transport prose, and the UI shows a localized start-failure status with Retry.
-- **Server crash:** the connection closes with categorical `4006`, Monaco providers and markers are cleaned up, and the status shows the localized server-exited message with a Retry action. Only intentional stop or idle teardown returns to Off.
-- **Initialize rejection:** when the server rejects the JSON-RPC `initialize` request, the UI preserves its `error.message` instead of stringifying the error object as `[object Object]`.
-- **No progress support or reports:** initialization still shows an indeterminate state and elapsed time; after initialize succeeds, the status surface says the server has not reported background analysis progress.
-- **Initialize response is slow or never arrives:** the UI confirms that the process launched, changes to a long-running initialization warning after 60 seconds, and keeps Stop available. Kandev does not automatically kill a cold project import or claim that the server is indexing.
-- **Indeterminate progress:** the UI shows the server title/message and elapsed time without a percentage or ETA.
-- **Malformed or stale progress:** the client ignores the payload and preserves the current connection and valid work items.
-- **Cross-file intelligence remains incomplete after ready:** the UI does not claim that the server is still indexing unless a work item is active; the status surface explains that project import, dependencies, or module resolution may require investigation.
-- **Task stop:** agentctl closes process admission and reaps the language-server process tree before releasing task resources.
-- **Instance teardown during auto-install:** agentctl cancels the install, removes an unpublished partial release download, drains the shared cache mutation, and reaps npm/Go descendants before releasing task resources.
-- **Browser disconnect during auto-install:** the task-host read watcher cancels and drains that connection's owned install instead of allowing npm, Go, or release downloads to continue without a consumer.
-- **Unread install status:** if the browser cannot receive the initial `installing` frame, agentctl closes the connection and returns before starting npm, Go, or release install work.
-- **Stalled browser peer:** bounded task-host WebSocket writes fail and enter the existing connection cleanup path, including stopping a language-server process that was started before its ready frame could be delivered.
-- **Stalled language-server stdin:** stdout-forwarder termination releases an active stdin write immediately; otherwise the write cutoff closes stdin and enters owned-process cleanup after 30 seconds.
-- **Unknown language:** no LSP control is shown.
+- **Unsupported/unknown executor:** policy remains visible, phase is `unsupported`, and no capacity,
+  task execution, agentctl instance, installer, or server is launched.
+- **Task environment unavailable:** desired state becomes `waiting_for_task`; read-only status and
+  discovery do not materialize a task environment. Resume/ready triggers one reconciliation.
+- **Capacity exhausted:** desired state becomes `queued` before execution creation. Slot release
+  wakes queued task/language keys deterministically by accepted action time, then task ID/language.
+- **Missing binary:** an auto-installable language installs only when global permission allows it.
+  Kotlin and platform-ineligible Rust installs show manual setup guidance. Installer failure keeps
+  bounded task-host detail and does not fall back to a project binary.
+- **Start failure or server crash:** the process tree is reaped, progress/capability/diagnostic
+  state for that generation is cleared, and bounded recovery follows the state-machine policy.
+- **Initialize rejection:** phase becomes `error` and preserves the server's JSON-RPC error message
+  as text. A slow but live initialize remains `initializing` with increasing elapsed time.
+- **Browser/attachment disconnect:** outstanding attachment requests are cancelled or forgotten,
+  its document references are released, and the task-host server and progress remain alive. Live
+  task/language/session attachment intent survives browser transport replacement, and all sessions
+  rebind to the single replacement connection.
+- **Backend watch disconnect/restart:** the task host retains the generation. Recovery adopts its
+  snapshot and capacity before controls or background settings/discovery can consider a new start.
+  A cache miss first probes for the existing physical task host without creating or resuming one.
+  This existing-only probe uses stable task/environment identity and physical reconnect data without
+  loading launch-time executor profiles, repository credentials, managed-cache state, or remote
+  resume preflight. A genuinely new launch still resolves and validates every launch input. Stale
+  backend progress is cleared only if no matching live generation exists.
+- **Agentctl/task-host loss:** its process manager reaps descendants. The backend records the loss
+  and uses bounded recovery only after the old runtime is known dead.
+- **Environment replacement ambiguity:** Kandev blocks the replacement launch until the old
+  generation is confirmed stopped or its execution is dead; it never optimistically runs both.
+- **Shared physical environment:** stopping a borrowing task stops only that task's language slots.
+  Stopping, archiving, or deleting the environment owner transfers the environment to one live
+  borrower before mutation and preserves the physical task host plus every other task's independent
+  slot. After stop proof, cleanup purges only the departing task's in-host slots, snapshots,
+  subscriptions, caches, and workspace projection. When no live borrower remains, or the environment
+  itself is torn down, cleanup reaps the physical task host and every descendant.
+- **Workspace roots change:** supported dynamic folder updates keep the generation; otherwise the
+  task reports `restart_required` without silently discarding an expensive import. Refresh holds
+  task/environment admission through runtime and durable-state updates, and config commit plus live
+  application is serialized per task, so an older refresh cannot restore removed roots after a newer
+  refresh. Terminal cleanup either follows the refresh and purges it or blocks the refresh before
+  runtime access.
+- **Task stop/archive/delete:** cleanup cancels starts/recovery before runtime teardown. Failure of
+  graceful LSP control falls back to the task environment's full process-tree cleanup. Delete
+  removes the persistent row only after cleanup ownership is registered. Direct and cascade
+  terminal mutations publish exclusive admission intent and cancel active runtime readers before
+  waiting, then persist a prepared cleanup barrier before inventory reads. Abandoned barriers are
+  cancelled after a bounded interval even when transition-marker persistence failed.
+- **Task-host startup:** the runtime registration remains internal until agentctl readiness and
+  task-environment credential persistence both commit. A failed rollback keeps the cleanup handle
+  private and recovery retries physical teardown before permitting replacement.
+- **Malformed/stale protocol data:** oversized 16 MiB JSON-RPC frames, malformed progress, unknown
+  tokens, lower revisions, old generations, and responses for detached request IDs are rejected
+  without mutating current state.
+- **Concurrent edits:** duplicate `didOpen` cannot rewind the canonical overlay. Later accepted
+  changes are ordered for analysis, but Kandev does not claim collaborative editing or merge one
+  browser's unsaved buffer into another.
+
+## Persistence guarantees
+
+Task policy, language detection summary, generation, revision, lifecycle timestamps, stable reason
+codes, initiator category, and current error projection survive browser and backend restarts in
+`task_lsp_languages`. Global defaults, configuration, and status visibility remain in user
+settings. Hiding a language is presentational and never owns or overrides task policy. Browser
+local storage does not own or override task policy; legacy session/language enablement keys are
+ignored and removed when encountered.
+
+A living task-host agentctl retains the process, initialized JSON-RPC peer, active progress,
+capabilities, diagnostic cache, and open-document broker across browser and ordinary backend
+reconnects. Those are runtime facts, not durable promises: agentctl or environment teardown clears
+them. Backend recovery then increments generation and reports one replacement start if policy still
+requires a server.
+
+The browser retains task/language/session attachment leases independently of its current transport
+generation. Task event registration is acknowledged before the LSP view performs its post-subscribe
+authoritative refresh, so an event between initial HTTP hydration and subscription establishment
+cannot leave stable stale state indefinitely.
+
+A temporary task stop or archive stops runtime state but preserves task policy and historical
+evidence. Unarchive/resume waits for a supported canonical environment, reruns bounded discovery,
+and reconciles effective policy. Task delete cascades the task-language rows. No process survives
+task-environment cleanup merely because a browser remains connected.
 
 ## Scenarios
 
-- **GIVEN** Kotlin auto-start is enabled and `kotlin-lsp` is on a Local PC task host's `PATH`, **WHEN** a `.kt` or `.kts` file opens, **THEN** the toolbar reaches ready and Monaco registers Kotlin providers.
-- **GIVEN** a language server was acquired by global auto-start, **WHEN** the user explicitly stops it and a matching editor remounts or its configuration changes, **THEN** the server stays Off for that session and language until the user explicitly starts it again.
-- **GIVEN** `kotlin-lsp` is missing, **WHEN** Kotlin LSP starts, **THEN** the connection closes with `4007` and the UI shows Kotlin-specific manual setup guidance without attempting installation.
-- **GIVEN** an auto-installable server is missing and the task-host close reason contains backend prose, **WHEN** the browser handles `4001` in a non-English locale, **THEN** it renders the localized missing-server catalog message rather than the transport reason.
-- **GIVEN** a language supports configurable auto-install, **WHEN** the user opens Editors settings, **THEN** its installation command, prerequisites, or managed destination are visible in the language card without requiring pointer hover.
-- **GIVEN** a local Docker task, **WHEN** an LSP starts, **THEN** the binary is resolved and executed inside the container rather than on the main backend host.
-- **GIVEN** Go and `GOBIN` are available only through the task runtime environment, **WHEN** Kandev discovers or installs `gopls`, **THEN** lookup, `go install`, and result discovery all use those task values.
-- **GIVEN** a Windows Local PC task uses Go's defaults with only `USERPROFILE` set, **WHEN** `go install` publishes `gopls.exe`, **THEN** Kandev discovers it under `USERPROFILE\go\bin` and completes auto-install successfully.
-- **GIVEN** the executor overrides `HOME`, **WHEN** Kandev discovers or installs an npm/release-managed language server, **THEN** cache lookup and publication use that task home rather than agentctl's parent-process home.
-- **GIVEN** an npm-managed language server is installed on Windows, **WHEN** installation completes or a later connection reuses the cache, **THEN** Kandev returns and launches the concrete PATHEXT-resolved shim.
-- **GIVEN** Kandev runs on Windows and Rust auto-install is enabled, **WHEN** a Linux Local Docker task needs `rust-analyzer`, **THEN** the preference reaches its Linux agentctl and installation can proceed; a Windows Local PC agentctl reports `4007` with manual-install guidance while continuing to run a manually installed binary.
-- **GIVEN** agentctl reports a detailed npm, Go, or release installation failure and then closes with the generic install-failed code, **WHEN** the browser handles both frames, **THEN** the detailed installer error remains visible.
-- **GIVEN** agentctl closes with `4003` and generic task-host prose but no preceding detailed installation payload, **WHEN** the browser handles that close in a non-English locale, **THEN** it renders the localized installation-failure fallback instead of the transport reason.
-- **GIVEN** TypeScript LSP initializes while Monaco is still loading, **WHEN** Monaco's lazy TypeScript providers register, **THEN** built-ins are wrapped only for features Kandev can replace and explicitly guarded LSP providers remain active.
-- **GIVEN** one session has an active TypeScript LSP and another session or model does not, **WHEN** Monaco requests TypeScript intelligence for either model, **THEN** built-ins are suppressed only for an advertised external provider on the model owned by that connection and remain available to unrelated models and unadvertised or unwired features.
-- **GIVEN** a server omits completion, hover, definition, references, or signature-help capability, **WHEN** Kandev registers Monaco providers, **THEN** it sends no requests for that optional method and leaves the corresponding TypeScript/JavaScript built-in available; advertised providers register and suppress only their matching built-in feature.
-- **GIVEN** a server validly returns an empty semantic-token array, **WHEN** Monaco requests full document semantic tokens, **THEN** Kandev returns a completed empty token payload without scheduling periodic retries; a later server-requested semantic-token refresh remains supported.
-- **GIVEN** Monaco requests completion manually, after a trigger character, or for an incomplete result, **WHEN** the provider sends `textDocument/completion`, **THEN** the server receives LSP trigger kinds `1`, `2`, or `3` respectively and the trigger character for kind `2`.
-- **GIVEN** the server returns a completion list with `isIncomplete: true`, **WHEN** Monaco receives it and the user keeps typing, **THEN** Kandev preserves that incomplete marker so Monaco requests refreshed results with LSP trigger kind `3`.
-- **GIVEN** the server advertises completion trigger characters and returns standard LSP completion kinds, **WHEN** Monaco registers and renders that provider, **THEN** it invokes automatic completion only for the advertised characters and uses the matching Monaco category for every standard kind.
-- **GIVEN** the server omits signature-help capability, **WHEN** Monaco providers register, **THEN** Kandev does not register or call signature help; when the capability is present, Kandev preserves its advertised trigger and retrigger characters.
-- **GIVEN** a completion item omits `textEdit`, **WHEN** Monaco renders or accepts it, **THEN** Kandev uses the current word at the requested position as its insertion range; an explicit server `TextEdit` or `InsertReplaceEdit` range overrides that fallback and preserves Monaco's corresponding single or dual range.
-- **GIVEN** a live server was initialized with one per-language configuration, **WHEN** the user saves different LSP JSON in Editors settings, **THEN** the existing connection answers future `workspace/configuration` requests with the new value and sends `workspace/didChangeConfiguration` without spawning another server.
-- **GIVEN** an open Monaco document has a debounced content change and its server requests save synchronization, **WHEN** Kandev successfully persists the current editor snapshot, **THEN** the server receives the final `textDocument/didChange` before `textDocument/didSave` for its canonical task-host URI and receives that persisted snapshot on the save notification only when it requests `includeText`; a rejected write sends no save notification.
-- **GIVEN** the user types again while a file save is in flight, **WHEN** the older snapshot finishes persisting, **THEN** the newer editor snapshot remains dirty and is the language server's current document, while `textDocument/didSave` omits the stale optional text instead of rewinding the document.
-- **GIVEN** an SSH, Sprites, or remote-Docker task, **WHEN** a user starts LSP, **THEN** the UI reports an unsupported executor and no language-server or task execution is started or resumed for that request.
-- **GIVEN** the configured connection cap is reached, **WHEN** another editor starts LSP for a stopped supported task, **THEN** the new connection closes with `4005` before Kandev starts or resumes that task host.
-- **GIVEN** a discovered language-server executable cannot be launched, **WHEN** agentctl starts it, **THEN** the task-host error stays in logs while the browser receives `4008` with no reason and shows the localized start-failure status.
-- **GIVEN** a language server rejects `initialize` with a JSON-RPC error object, **WHEN** the browser handles that response, **THEN** the error state shows the server's `error.message` rather than `[object Object]`.
-- **GIVEN** two task/session connections have active providers, placeholder models, or diagnostics, **WHEN** one connection stops or crashes, **THEN** cleanup removes only that connection's state and leaves the other connection fully functional.
-- **GIVEN** an initialized language server exits unexpectedly, **WHEN** agentctl closes the WebSocket with `4006` and no transport prose, **THEN** its editor shows the localized server-exited error with Retry rather than presenting the server as intentionally off.
-- **GIVEN** two sessions expose the same task-host file URI (for example two Docker tasks rooted at `/workspace`), **WHEN** both files are open, **THEN** Monaco keeps session-scoped models and content while both language servers receive the clean task-host URI.
-- **GIVEN** a connection is replaced for the same session and language, **WHEN** callbacks from the old connection arrive late, **THEN** they cannot close, initialize, or clean up the replacement generation.
-- **GIVEN** session workspace metadata hydrates after the LSP connection, **WHEN** the client opens or navigates to a document, **THEN** it uses the canonical workspace URI and repository subpaths from the task-host ready handshake, including after that LSP connection stops.
-- **GIVEN** a definition or reference target is nested beneath unloaded folders, **WHEN** Monaco navigates to that file, **THEN** the Files tree loads and expands every ancestor and marks the target as active.
-- **GIVEN** an attached-repository file is already open under the task-root-relative identity supplied by the Files tree, **WHEN** Monaco navigates to the same file through an LSP definition or reference, **THEN** Kandev activates and scrolls that existing editor instead of opening a second repository-scoped tab.
-- **GIVEN** two task sessions have the same repository file open, **WHEN** the user selects a content-search hit scoped to one active session, **THEN** both the pending cursor and immediate mounted-editor reveal target only that session's model.
-- **GIVEN** Monaco's built-in intelligence returns a regular `file://` target inside the active task workspace, **WHEN** its editor opener runs, **THEN** Kandev opens the matching task file; a target outside that workspace is reported as unhandled instead of being swallowed.
-- **GIVEN** the task host has launched a language-server process, **WHEN** the LSP `initialize` response is still pending, **THEN** the current editor's status surface distinguishes the launched process from protocol readiness and shows increasing elapsed time with no ETA.
-- **GIVEN** a non-English or pseudo locale is active, **WHEN** initialization or server work shows elapsed time, **THEN** its hour, minute, and second units and their composition come from that locale's catalog.
-- **GIVEN** Kotlin LSP has not answered `initialize` for 60 seconds, **WHEN** the user opens its status, **THEN** the UI says initialization is taking longer than usual, identifies Gradle project import as a possible cause, keeps Stop available, and does not restart or time out the server automatically.
-- **GIVEN** Kotlin LSP reports initialize work with a title, message, and percentage, **WHEN** `begin` and `report` notifications arrive, **THEN** the current editor shows the latest server text, the clamped percentage, and elapsed time while its connection continues initializing or remains ready.
-- **GIVEN** a server reports an indeterminate work item, **WHEN** it omits percentage, **THEN** the UI shows activity and elapsed time without fabricating percentage or time remaining.
-- **GIVEN** two work-done tokens are active, **WHEN** either token reports or ends, **THEN** only that token changes and the UI continues to show the oldest active item plus the remaining active count.
-- **GIVEN** the final active token ends, **WHEN** the connection remains open, **THEN** the UI records that server-reported work finished without claiming all project references are complete.
-- **GIVEN** a connection has active or completed work progress, **WHEN** it stops, crashes, retries, or is replaced, **THEN** the replacement connection starts without stale progress from the old generation.
-- **GIVEN** initialize has completed and no work item is active, **WHEN** cross-file references are still missing, **THEN** the UI says the server has not reported ongoing analysis rather than labeling the condition as indexing.
-- **GIVEN** a fine-pointer Monaco editor, **WHEN** the user opens the LSP status control, **THEN** an anchored popover presents connection readiness, project progress, and the available lifecycle action.
-- **GIVEN** an LSP server reports a project-progress title or message containing a long URL, path, or identifier without ordinary break points, **WHEN** the user opens either desktop progress popover or the coarse-pointer tablet drawer, **THEN** the full text wraps within that surface without clipping, truncation, or horizontal overflow.
-- **GIVEN** the saved LSP status location is `status_bar`, **Show status bar** is on, and a supported Monaco file is active on a fine-pointer layout, **WHEN** the editor renders, **THEN** the toolbar control is absent and one reorderable status-bar item shows that active file's language and live LSP summary.
-- **GIVEN** the saved LSP status location is `status_bar`, **WHEN** **Show status bar** is off or the current Monaco layout uses a coarse pointer, **THEN** the toolbar control remains available and the saved `status_bar` preference is unchanged.
-- **GIVEN** the active panel changes from a supported Monaco file to a non-file panel or unsupported file, **WHEN** the status bar is the preferred location, **THEN** the LSP status-bar item hides rather than showing another session or language.
-- **GIVEN** a supported filename is routed to a loading, binary/static, diff, or CodeMirror surface, **WHEN** the status bar is the preferred location, **THEN** no LSP status-bar item or inert Start/Retry action is exposed until an actual Monaco text editor mounts.
-- **GIVEN** a coarse-pointer tablet Monaco editor, **WHEN** the user taps the LSP status control, **THEN** an inset bottom drawer presents the same progress and lifecycle action with a touch-sized trigger and no document-level horizontal overflow.
-- **GIVEN** an LSP server has spawned descendants, **WHEN** the task stops, **THEN** agentctl reaps the full process tree.
-- **GIVEN** auto-install is downloading or running npm/Go, **WHEN** the agentctl instance is torn down, **THEN** the install is canceled and drained without publishing a partial binary or leaving descendants, and its `1001` WebSocket close carries no task-host prose so the browser uses localized connection-close copy.
-- **GIVEN** a repository contains `.kandev/lsp-servers/kotlin-lsp`, **WHEN** Kotlin LSP starts, **THEN** Kandev ignores that project-controlled executable.
-- **GIVEN** a mobile viewport, **WHEN** a supported file opens, **THEN** the mobile viewer does not start an LSP process invisibly.
+### Ownership and controls
+
+- **GIVEN** a Local PC task containing Kotlin sources and no open file, **WHEN** the user chooses
+  Start for Kotlin from the task control, **THEN** policy becomes Keep warm and one Kotlin process
+  begins initialization before any Kotlin editor mounts.
+- **GIVEN** a warm Kotlin generation, **WHEN** the user switches to an unsupported file, chat,
+  review, terminal, or another panel and advances beyond two minutes, **THEN** the same generation
+  remains live and no new initialize/import occurs.
+- **GIVEN** two sessions of one task, **WHEN** each opens a Kotlin file, **THEN** both use the same
+  task/language generation and the task host has one Kotlin process.
+- **GIVEN** two browser surfaces authorized for one task, **WHEN** both attach to Kotlin, **THEN**
+  request/document traffic is isolated by attachment while the process and generation count stay
+  one.
+- **GIVEN** a running task server, **WHEN** the browser reloads or reconnects, **THEN** the task
+  status and editor providers reattach without another process start or project import.
+- **GIVEN** a running generation, **WHEN** the user confirms Restart once, **THEN** the old process
+  is reaped before exactly one next generation initializes and the UI records user/restart reason.
+- **GIVEN** Kotlin is running or queued, **WHEN** the user chooses Stop, **THEN** policy becomes
+  Disabled, recovery is cancelled, the process is reaped, and later file/editor mounts do not
+  reacquire it.
+- **GIVEN** policy is Inherit and global Kotlin auto-start is off, **WHEN** Kotlin is detected,
+  **THEN** Kotlin remains off; enabling the global default starts it once without opening a file.
+- **GIVEN** concurrent Start, Stop, and Restart calls for one task/language, **WHEN** the controller
+  accepts them, **THEN** snapshots expose monotonic revisions, duplicate commands coalesce, the
+  final policy matches acceptance order, and at most one process exists.
+- **GIVEN** task or settings reconciliation captured Disabled before the user enabled a language,
+  **WHEN** the enable completes before reconciliation enters that language lane, **THEN**
+  reconciliation reloads Keep warm and leaves the newly ready generation running.
+
+### Status and progress
+
+- **GIVEN** Kotlin reports Gradle import progress, **WHEN** another file or panel is active, **THEN**
+  the application status item remains visible with server text/elapsed time and its disclosure
+  retains Stop and Restart controls.
+- **GIVEN** two task languages are live, **WHEN** the status bar renders, **THEN** it shows one
+  aggregate item such as `LSP · 2 running`, not one item per active editor.
+- **GIVEN** the user opens the task disclosure, **WHEN** its language rows render, **THEN** each row
+  starts as a compact summary and independently expands to reveal the task policy and lifecycle
+  actions through shared design-system controls.
+- **GIVEN** Go is hidden in editor settings, **WHEN** task status renders or reloads, **THEN** Go is
+  omitted from aggregate counts and rows while its discovery, policy, generation, and process state
+  are unchanged.
+- **GIVEN** Go is hidden from task status, **WHEN** a Go Monaco editor opens its toolbar shortcut,
+  **THEN** that disclosure includes and focuses Go so the editor shortcut remains functional.
+- **GIVEN** every language is hidden, **WHEN** a task view renders, **THEN** the task/workspace status
+  action stays discoverable and explains how to manage language visibility in settings.
+- **GIVEN** the Application status bar is disabled, **WHEN** any task view is open, **THEN** a task
+  or workspace action can open every visible supported language and its controls without a
+  supported file.
+- **GIVEN** the server process started but has not received an initialize response, **WHEN** status
+  renders, **THEN** it distinguishes process start from initialization and shows elapsed time with
+  no ETA.
+- **GIVEN** Kotlin initialize remains live for 60 seconds, **WHEN** status renders, **THEN** it names
+  Gradle import only as a possible cause, retains Stop, and does not time out or restart.
+- **GIVEN** a server reports title/message/percentage through work-done progress, **WHEN** another
+  attachment or browser opens status, **THEN** it sees the same generation-scoped work item with a
+  clamped percentage and elapsed time.
+- **GIVEN** a server reports no work-done events, **WHEN** initialize succeeds, **THEN** status says
+  ready/idle rather than inventing indexing work or completion.
+- **GIVEN** a prior Stop or Restart, **WHEN** disclosure opens later, **THEN** it shows generation,
+  started-at/elapsed evidence, stable last reason, and initiator category.
+
+### Discovery, environments, and recovery
+
+- **GIVEN** a large repository, symlink loop, or ignored dependency tree, **WHEN** language
+  discovery runs, **THEN** it remains inside the entry/depth/time budgets, never follows the loop,
+  starts no LSP, and reports partial results when truncated.
+- **GIVEN** a task has multiple repositories, **WHEN** one language starts, **THEN** one initialize
+  request uses the task root and the ordered repository roots as workspace folders.
+- **GIVEN** repository roots change and the server cannot update workspace folders dynamically,
+  **WHEN** discovery refreshes, **THEN** the running generation stays alive and status requires an
+  explained Restart rather than silently reimporting.
+- **GIVEN** a task environment is stopped while policy is Keep warm, **WHEN** task cleanup runs,
+  **THEN** the process tree is reaped and policy persists; one new generation starts only after the
+  task environment later becomes ready.
+- **GIVEN** a task is archived, **WHEN** archive cleanup commits, **THEN** every task LSP is stopped
+  and progress cleared; unarchive does not start anything until a supported environment is ready.
+- **GIVEN** a task is deleted, **WHEN** deletion completes, **THEN** all task LSP process trees are
+  reaped and `task_lsp_languages` rows cascade away.
+- **GIVEN** a backend restart while agentctl and Kotlin remain alive, **WHEN** recovery reconciles,
+  **THEN** it adopts the same generation/progress and does not repeat initialize/import.
+- **GIVEN** backend memory loses the task-host handle while its process remains alive, **WHEN** a
+  read or Ensure occurs, **THEN** Kandev reattaches to that stable physical host before permitting
+  any replacement process.
+- **GIVEN** a task host may still exist after its launch-time executor profile was deleted, **WHEN**
+  cleanup probes the physical runtime, **THEN** Kandev performs an existing-only inspection without
+  reloading that profile, stops the process tree when present, and still requires the profile before
+  any later new launch.
+- **GIVEN** Start is blocked in install or task-host launch, **WHEN** Stop, Disabled policy, or task
+  teardown is accepted, **THEN** the blocked work is cancelled and the terminal transition proceeds
+  without waiting for startup to finish.
+- **GIVEN** agentctl died during a backend restart, **WHEN** policy still wants Kotlin, **THEN**
+  recovery proves the old runtime dead and starts exactly one next generation.
+- **GIVEN** a language server crashes repeatedly, **WHEN** Keep warm remains effective, **THEN**
+  Kandev retries at 1, 5, and 30 seconds and then leaves an actionable error without an unbounded
+  process loop.
+- **GIVEN** the task/language server cap is full, **WHEN** another task requests Start, **THEN** it
+  queues before task-host resume, counts no browser lease, and starts once when a real server slot
+  is released.
+- **GIVEN** task A releases a capacity slot while queued task B has a slow installer, **WHEN** A's
+  Stop completes, **THEN** A returns after its own durable stop proof without waiting for B; B's
+  promotion remains controller-owned and cancellation cannot leak its reserved slot.
+- **GIVEN** startup cannot inspect a persisted generation that may still be alive, **WHEN** another
+  task requests Start, **THEN** the ambiguous generation keeps its capacity reservation until
+  authoritative absence or a confirmed stop prevents over-admission.
+- **GIVEN** startup captured generation 1 before it surrendered capacity and generation 2 queued,
+  **WHEN** stale inventory adoption resumes, **THEN** generation 2 remains queued, the retired
+  generation is not made active, and no server starts above the configured cap.
+- **GIVEN** an SSH, Sprites, Remote Docker, unknown, or missing environment, **WHEN** Start is
+  requested, **THEN** status is unsupported and no capacity, execution, installer, or process is
+  acquired.
+- **GIVEN** a Local Docker task, **WHEN** its task-level control starts Kotlin, **THEN** discovery,
+  binary lookup, initialization, and process execution occur inside that container and remain
+  shared by all task sessions.
+
+### Editor and protocol behavior
+
+- **GIVEN** two attachments open the same canonical file, **WHEN** the second sends `didOpen`,
+  **THEN** the task host adds a reference without sending a duplicate upstream open or rewinding
+  the first attachment's newer text.
+- **GIVEN** two attachments edit one open file, **WHEN** changes arrive, **THEN** upstream versions
+  increase in arrival order and the latest accepted text is analyzed without overwriting either
+  browser's local buffer.
+- **GIVEN** two sessions share one task/language connection and its browser transport closes,
+  **WHEN** either session establishes the replacement transport, **THEN** both live session leases
+  rebind and continue routing through one upstream generation.
+- **GIVEN** two sessions reference one document, **WHEN** one session releases its final attachment
+  lease before its editor cleanup runs, **THEN** that session's document references are drained
+  before routing membership and the remaining session can close the final upstream document.
+- **GIVEN** initial task-LSP HTTP hydration completes before the task WebSocket subscription ACK,
+  **WHEN** lifecycle state changes in that interval, **THEN** a post-ACK authoritative refresh
+  converges the view even if the event itself was not delivered.
+- **GIVEN** the last editor closes a document while policy is Keep warm, **WHEN** `didClose` is sent,
+  **THEN** document diagnostics may clear but the language-server generation remains running.
+- **GIVEN** a successful file save races with later typing, **WHEN** persistence returns, **THEN**
+  the server stays synchronized to the newer buffer and stale optional `didSave.text` is omitted.
+- **GIVEN** TypeScript LSP is active for one task model, **WHEN** Monaco requests intelligence for
+  another task/session model, **THEN** built-ins are suppressed only for the model and capabilities
+  covered by the active external server.
+- **GIVEN** an LSP definition targets another file under any task repository root, **WHEN** the user
+  invokes navigation, **THEN** Kandev opens or focuses that file in the initiating task/session
+  model and does not expose the task-host path as a browser ownership key.
+- **GIVEN** a server sends an oversized frame, stale generation response, malformed progress, or
+  response for a detached request, **WHEN** the task host processes it, **THEN** it rejects that
+  data without corrupting the live task/language state.
+
+### Mobile and security
+
+- **GIVEN** a phone task view, **WHEN** the user opens Status, **THEN** task language policy, state,
+  progress, errors, and 44 px controls appear in independently collapsible inline rows in the one
+  safe-area-aware drawer.
+- **GIVEN** a phone opens a Kotlin file while Kotlin policy is Disabled, **WHEN** the viewer mounts,
+  **THEN** no LSP attachment or process starts; the separate task Status control can still Start it.
+- **GIVEN** a coarse-pointer tablet, **WHEN** the task control opens, **THEN** the same shared rows
+  use one contained drawer scroll owner with no document-level horizontal overflow.
+- **GIVEN** a repository contains `.kandev/lsp-servers/kotlin-lsp` or a relative executable path,
+  **WHEN** Kotlin starts, **THEN** Kandev ignores it and uses only the trusted registry/cache/PATH
+  boundaries.
+- **GIVEN** an unauthorized browser requests another task's LSP snapshot, action, or attachment,
+  **WHEN** the route handles it, **THEN** authorization fails before runtime lookup and leaks no
+  task, environment, generation, or binary evidence.
+- **GIVEN** an authorized attachment sends a document URI that traverses, names a sibling path, or
+  resolves through a symlink outside the task's canonical roots, **WHEN** the task host handles it,
+  **THEN** it rejects the message before the language server receives any request or notification.
+- **GIVEN** an in-root Windows reparse point targets an untrusted UNC share, **WHEN** an attachment
+  names a document beneath that redirect, **THEN** the task host rejects the target before any DNS,
+  SMB, or target-filesystem lookup.
+- **GIVEN** a backend-selected Windows workspace root is itself a junction or mount point, **WHEN**
+  the task host configures the generation, **THEN** it records the canonical identity from the same
+  root handle it pins before browser attachment, and later document traffic cannot reopen or rebind
+  that root.
+- **GIVEN** a checked document ancestor is replaced by a symlink or reparse point while authorization
+  is walking the path, **WHEN** the next component is inspected, **THEN** handle-relative traversal
+  fails closed without touching an outside root or untrusted network authority.
+- **GIVEN** overlapping authoritative browser refreshes for the same task, **WHEN** an older refresh
+  fails after a newer refresh has begun and the newer refresh succeeds, **THEN** the accepted snapshot
+  is not paired with the older transport error, while newer failed controls remain protected from
+  older successful refreshes.
 
 ## Out of scope
 
-- Remote Docker, SSH, and Sprites executor support.
-- Durable per-task/session enablement and deny lists.
-- Sharing one server process across browser windows.
-- Rename, code actions, document symbols, formatting, and workspace-edit application.
-- CodeMirror/mobile LSP parity.
-- A global dashboard across every session/language connection; the application status-bar item represents only the active Monaco file.
-- Estimated time remaining, predicted completion, or any guarantee that a percentage maps linearly to project readiness.
-- Inferring actual indexing state, percentage, or completion from `window/logMessage`, `window/showMessage`, process output, elapsed time, or language-specific text heuristics. Elapsed time is used only to disclose that initialization is long-running.
-- Request-scoped partial-result streaming, `partialResultToken`, `$/cancelRequest`, and progress cancellation.
-- Bootstrapping project dependencies such as Gradle import, `npm install`, `go mod download`, or Python virtual environments.
-- Replacing external editors or embedded VS Code.
+- Implementing a task-scoped LSP MCP tool or exposing LSP intelligence directly to agents.
+- Language intelligence inside the phone CodeMirror viewer; mobile receives lifecycle controls and
+  status only.
+- SSH, Sprites, Remote Docker, or other remote-executor LSP support.
+- Collaborative editing, cross-browser buffer merging, or remote cursor presence.
+- Invented indexing percentages, project-completion guarantees, or ETAs when the server does not
+  report them.
+- More than one language-server process for the same task/language, including per-repository or
+  per-session processes.
 
-## References
+## Implementation plan
 
-- Kotlin LSP documentation: <https://kotlinlang.org/docs/kotlin-lsp.html>
-- Kotlin LSP repository: <https://github.com/Kotlin/kotlin-lsp>
-- Kotlin LSP slow-initialize report: <https://github.com/Kotlin/kotlin-lsp/issues/148>
-- Kotlin LSP never-completing initialize report: <https://github.com/Kotlin/kotlin-lsp/issues/189>
+[Task-scoped LSP lifecycle implementation plan](../../plans/task-scoped-lsp-lifecycle/plan.md)

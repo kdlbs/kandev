@@ -35,6 +35,28 @@ type joinCleanupBarrier struct {
 	stopped   chan struct{}
 }
 
+type recordedRuntimeSecretDelete struct {
+	environmentID     string
+	authSecretID      string
+	bootstrapSecretID string
+}
+
+type recordingRuntimeSecretDeleter struct {
+	calls []recordedRuntimeSecretDelete
+}
+
+func (d *recordingRuntimeSecretDeleter) DeleteTaskEnvironmentRuntimeSecrets(
+	_ context.Context,
+	environmentID, authSecretID, bootstrapSecretID string,
+) error {
+	d.calls = append(d.calls, recordedRuntimeSecretDelete{
+		environmentID:     environmentID,
+		authSecretID:      authSecretID,
+		bootstrapSecretID: bootstrapSecretID,
+	})
+	return nil
+}
+
 func newJoinCleanupBarrier() *joinCleanupBarrier {
 	return &joinCleanupBarrier{
 		started: make(chan struct{}), cancelled: make(chan struct{}),
@@ -57,6 +79,31 @@ func (b *joinCleanupBarrier) CleanupWorktrees(ctx context.Context, _ []*worktree
 
 type recordingLegacyCleanup struct {
 	calls int
+}
+
+type failingCascadeMutationRepository struct {
+	repository.TaskRepository
+	workspaceEnvironmentRepository
+	failTaskID  string
+	failArchive bool
+	failDelete  bool
+}
+
+func (r *failingCascadeMutationRepository) ArchiveTaskIfActive(
+	ctx context.Context,
+	taskID, cascadeID string,
+) (bool, error) {
+	if r.failArchive && taskID == r.failTaskID {
+		return false, errors.New("injected archive failure")
+	}
+	return r.TaskRepository.ArchiveTaskIfActive(ctx, taskID, cascadeID)
+}
+
+func (r *failingCascadeMutationRepository) DeleteTask(ctx context.Context, taskID string) error {
+	if r.failDelete && taskID == r.failTaskID {
+		return errors.New("injected delete failure")
+	}
+	return r.TaskRepository.DeleteTask(ctx, taskID)
 }
 
 func (c *recordingLegacyCleanup) OnTaskDeleted(context.Context, string) error {
@@ -108,6 +155,30 @@ type blockingResumeCleanupRepository struct {
 type commitThenErrorTaskRepository struct {
 	repository.TaskRepository
 	err error
+}
+
+type commitThenErrorCascadeRepository struct {
+	repository.TaskRepository
+	workspaceEnvironmentRepository
+	err error
+}
+
+func (r *commitThenErrorCascadeRepository) ArchiveTaskIfActive(
+	ctx context.Context,
+	taskID, cascadeID string,
+) (bool, error) {
+	ok, err := r.TaskRepository.ArchiveTaskIfActive(ctx, taskID, cascadeID)
+	if err != nil {
+		return false, err
+	}
+	return ok, r.err
+}
+
+func (r *commitThenErrorCascadeRepository) DeleteTask(ctx context.Context, taskID string) error {
+	if err := r.TaskRepository.DeleteTask(ctx, taskID); err != nil {
+		return err
+	}
+	return r.err
 }
 
 func (r *commitThenErrorTaskRepository) DeleteTask(ctx context.Context, id string) error {
@@ -192,6 +263,47 @@ func TestTaskMutationCommitThenErrorKeepsCleanupRunnable(t *testing.T) {
 				if getErr != nil || task.ArchivedAt == nil {
 					t.Fatalf("archive did not commit: task=%#v err=%v", task, getErr)
 				}
+			}
+		})
+	}
+}
+
+func TestCascadeMutationCommitThenErrorKeepsCleanupRunnable(t *testing.T) {
+	for _, operation := range []string{"delete", "archive"} {
+		t.Run(operation, func(t *testing.T) {
+			taskSvc, repo := setupOfficeTest(t)
+			taskSvc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+			ctx := context.Background()
+			taskID := "task-cascade-commit-then-error-" + operation
+			seedCleanupTaskAndSession(t, repo, taskID, "session-cascade-commit-then-error-"+operation)
+			commitErr := errors.New("transport lost after cascade commit")
+			mutations := &commitThenErrorCascadeRepository{
+				TaskRepository: repo, workspaceEnvironmentRepository: repo, err: commitErr,
+			}
+			handoff := NewHandoffService(mutations, repo, nil, nil, nil, nil)
+			handoff.SetTaskResourceCleaner(taskSvc)
+
+			if operation == "delete" {
+				_, err := handoff.DeleteTaskTree(ctx, taskID, false)
+				if !errors.Is(err, commitErr) {
+					t.Fatalf("DeleteTaskTree error = %v, want %v", err, commitErr)
+				}
+			} else {
+				_, err := handoff.ArchiveTaskTree(ctx, taskID, false)
+				if !errors.Is(err, commitErr) {
+					t.Fatalf("ArchiveTaskTree error = %v, want %v", err, commitErr)
+				}
+			}
+
+			waitForCleanupDone(t, taskSvc)
+			var state models.TaskResourceCleanupState
+			if err := repo.DB().QueryRowContext(ctx, `
+				SELECT state FROM task_resource_cleanup_jobs WHERE task_id = ?
+			`, taskID).Scan(&state); err != nil {
+				t.Fatalf("load cleanup state: %v", err)
+			}
+			if state != models.TaskResourceCleanupStateSucceeded {
+				t.Fatalf("cleanup state = %q, want succeeded", state)
 			}
 		})
 	}
@@ -804,6 +916,73 @@ func TestDeleteInheritedSubtaskPreservesChildMaterializedWorkspaceForParent(t *t
 	}
 }
 
+func TestPartialCascadeFailureRestoresOnlyUnmutatedEnvironmentOwners(t *testing.T) {
+	actions := []struct {
+		name string
+		run  func(context.Context, *HandoffService) error
+	}{
+		{name: "archive", run: func(ctx context.Context, handoff *HandoffService) error {
+			_, err := handoff.ArchiveTaskTree(ctx, "root-task", true)
+			return err
+		}},
+		{name: "delete", run: func(ctx context.Context, handoff *HandoffService) error {
+			_, err := handoff.DeleteTaskTree(ctx, "root-task", true)
+			return err
+		}},
+	}
+	for _, action := range actions {
+		t.Run(action.name, func(t *testing.T) {
+			taskSvc, repo := setupOfficeTest(t)
+			ctx := context.Background()
+			seedParentChildWorkspace(t, repo, "ws-partial-cascade", "wf-partial-cascade", "root-task", "child-task")
+			for _, taskID := range []string{"root-borrower", "child-borrower"} {
+				if err := repo.CreateTask(ctx, &models.Task{
+					ID: taskID, WorkspaceID: "ws-partial-cascade", WorkflowID: "wf-partial-cascade",
+					WorkflowStepID: "step-1", Title: taskID, Priority: "medium",
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, pair := range []struct{ environmentID, ownerTaskID, borrowerTaskID string }{
+				{environmentID: "env-root", ownerTaskID: "root-task", borrowerTaskID: "root-borrower"},
+				{environmentID: "env-child", ownerTaskID: "child-task", borrowerTaskID: "child-borrower"},
+			} {
+				if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+					ID: pair.environmentID, TaskID: pair.ownerTaskID, Status: models.TaskEnvironmentStatusReady,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+					ID: "session-" + pair.borrowerTaskID, TaskID: pair.borrowerTaskID,
+					State: models.TaskSessionStateCompleted, TaskEnvironmentID: pair.environmentID,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			failingRepo := &failingCascadeMutationRepository{
+				TaskRepository: repo, workspaceEnvironmentRepository: repo,
+				failTaskID: "root-task", failArchive: action.name == "archive", failDelete: action.name == "delete",
+			}
+			handoff := NewHandoffService(failingRepo, repo, nil, nil, nil, nil)
+			handoff.SetTaskResourceCleaner(taskSvc)
+
+			if err := action.run(ctx, handoff); err == nil {
+				t.Fatalf("%s cascade unexpectedly succeeded", action.name)
+			}
+			for environmentID, ownerTaskID := range map[string]string{
+				"env-root": "root-task", "env-child": "child-borrower",
+			} {
+				environment, err := repo.GetTaskEnvironment(ctx, environmentID)
+				if err != nil || environment == nil || environment.TaskID != ownerTaskID {
+					t.Fatalf("%s owner after partial %s = %#v, err=%v, want %s",
+						environmentID, action.name, environment, err, ownerTaskID)
+				}
+			}
+		})
+	}
+}
+
 func TestDeleteInheritedSubtaskBlockedWhenNoSurvivorCanOwnSharedEnvironment(t *testing.T) {
 	_, repo := setupOfficeTest(t)
 	ctx := context.Background()
@@ -897,6 +1076,40 @@ func TestDeleteInheritedSubtaskRestoresSharedEnvironmentOwnershipOnEarlyAbort(t 
 				t.Fatalf("aborted deletion stranded environment ownership: env=%#v err=%v", env, err)
 			}
 		})
+	}
+}
+
+func TestCascadeDeleteCleanupPersistsLegacyRuntimeSecretReferences(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	const taskID = "task-cascade-secret-cleanup"
+	seedCleanupTaskAndSession(t, repo, taskID, "session-cascade-secret-cleanup")
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-cascade-secret-cleanup", TaskID: taskID,
+		ExecutorType:              string(models.ExecutorTypeLocal),
+		AgentctlAuthSecretID:      "legacy-auth-secret-id",
+		AgentctlBootstrapSecretID: "legacy-bootstrap-secret-id",
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	secretDeleter := &recordingRuntimeSecretDeleter{}
+	taskSvc.SetTaskEnvironmentRuntimeSecretDeleter(secretDeleter)
+	taskSvc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+	handoff := NewHandoffService(repo, repo, nil, nil, nil, nil)
+	handoff.SetTaskResourceCleaner(taskSvc)
+
+	if _, err := handoff.DeleteTaskTree(ctx, taskID, true); err != nil {
+		t.Fatalf("DeleteTaskTree: %v", err)
+	}
+	waitForCleanupDone(t, taskSvc)
+
+	want := recordedRuntimeSecretDelete{
+		environmentID:     "env-cascade-secret-cleanup",
+		authSecretID:      "legacy-auth-secret-id",
+		bootstrapSecretID: "legacy-bootstrap-secret-id",
+	}
+	if len(secretDeleter.calls) != 1 || secretDeleter.calls[0] != want {
+		t.Fatalf("runtime secret cleanup calls = %#v, want [%#v]", secretDeleter.calls, want)
 	}
 }
 

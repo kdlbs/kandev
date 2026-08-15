@@ -10,6 +10,11 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
+type TaskLSPWorkspaceProjection struct {
+	WorkspacePath  string
+	WorkspaceRoots []string
+}
+
 // MaterializedWorktree describes a worktree just created on disk by the
 // branch materializer. Used by NotifyWorktreeMaterialized to push a
 // frontend-visible event so the session's worktree tabs and Changes panel
@@ -118,6 +123,101 @@ func (m *Manager) RescanWorkspaceForSession(ctx context.Context, sessionID, work
 		zap.String("execution_id", execution.ID),
 		zap.String("work_dir", workDir))
 	return nil
+}
+
+// RescanWorkspaceForTaskHost rebinds the dedicated task-host tracker graph to
+// the environment's current durable workspace projection. Task hosts outlive
+// sessions, so their launch-time root list cannot remain authoritative after a
+// user attaches, removes, or reorders task workspace sources.
+func (m *Manager) RescanWorkspaceForTaskHost(ctx context.Context, taskID, taskEnvironmentID string) error {
+	execution, exists, err := m.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
+	if err != nil || !exists || execution == nil {
+		return err
+	}
+	if m.workspaceInfoProvider == nil {
+		return fmt.Errorf("workspace info provider not configured")
+	}
+	info, err := m.taskLSPWorkspaceInfo(ctx, taskID, taskEnvironmentID)
+	if err != nil {
+		return fmt.Errorf("get current workspace info for task host: %w", err)
+	}
+	if info == nil || info.TaskEnvironmentID != taskEnvironmentID {
+		return fmt.Errorf("workspace info did not resolve task environment %s", taskEnvironmentID)
+	}
+	if info.WorkspacePath == "" {
+		return fmt.Errorf("task environment %s has no workspace path", taskEnvironmentID)
+	}
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return fmt.Errorf("task-host execution has no agentctl client")
+	}
+
+	newPath, newRoots, err := taskHostWorkspaceProjection(execution.RuntimeName, info)
+	if err != nil {
+		return fmt.Errorf("project task-host workspace: %w", err)
+	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+	oldPath := execution.WorkspacePath
+	oldRoots := append([]string(nil), execution.WorkspaceSourceRoots...)
+	execution.WorkspacePath = newPath
+	execution.WorkspaceSourceRoots = append([]string(nil), newRoots...)
+	if err := client.RescanWorkspace(ctx, newPath, newRoots); err != nil {
+		execution.WorkspacePath = oldPath
+		execution.WorkspaceSourceRoots = oldRoots
+		return fmt.Errorf("rescan task-host workspace via agentctl: %w", err)
+	}
+	return nil
+}
+
+// TaskLSPWorkspaceForTaskHost resolves one task's runtime-visible roots without
+// mutating the physical task host's repository tracker graph. Multiple tasks
+// sharing an environment can therefore retain independent LSP scopes.
+func (m *Manager) TaskLSPWorkspaceForTaskHost(
+	ctx context.Context,
+	taskID, taskEnvironmentID string,
+) (*TaskLSPWorkspaceProjection, error) {
+	execution, exists, err := m.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
+	if err != nil || !exists || execution == nil {
+		return nil, err
+	}
+	if m.workspaceInfoProvider == nil {
+		return nil, fmt.Errorf("workspace info provider not configured")
+	}
+	info, err := m.taskLSPWorkspaceInfo(ctx, taskID, taskEnvironmentID)
+	if err != nil {
+		return nil, fmt.Errorf("get task LSP workspace info: %w", err)
+	}
+	if info == nil || info.TaskEnvironmentID != taskEnvironmentID {
+		return nil, fmt.Errorf("workspace info did not resolve task environment %s", taskEnvironmentID)
+	}
+	workspacePath, roots, err := taskHostWorkspaceProjection(execution.RuntimeName, info)
+	if err != nil {
+		return nil, fmt.Errorf("project task LSP workspace: %w", err)
+	}
+	if workspacePath == "" {
+		return nil, fmt.Errorf("task environment %s has no workspace path", taskEnvironmentID)
+	}
+	if len(roots) == 0 {
+		roots = []string{workspacePath}
+	}
+	return &TaskLSPWorkspaceProjection{
+		WorkspacePath: workspacePath, WorkspaceRoots: append([]string(nil), roots...),
+	}, nil
+}
+
+type taskLSPWorkspaceInfoProvider interface {
+	GetWorkspaceInfoForTaskLSP(ctx context.Context, taskID, taskEnvironmentID string) (*WorkspaceInfo, error)
+}
+
+func (m *Manager) taskLSPWorkspaceInfo(
+	ctx context.Context,
+	taskID, taskEnvironmentID string,
+) (*WorkspaceInfo, error) {
+	if provider, ok := m.workspaceInfoProvider.(taskLSPWorkspaceInfoProvider); ok {
+		return provider.GetWorkspaceInfoForTaskLSP(ctx, taskID, taskEnvironmentID)
+	}
+	return m.workspaceInfoProvider.GetWorkspaceInfoForEnvironment(ctx, taskEnvironmentID)
 }
 
 func optionalWorkspaceSourceRoots(current []string, roots [][]string) []string {

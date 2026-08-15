@@ -229,6 +229,61 @@ func newCoordinatorStopTestService(
 	return svc
 }
 
+func TestStopTaskCleansTaskLSPBeforeReview(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "execution1")
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task1", v1.TaskStateInProgress)
+	agentManager := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := newCoordinatorStopTestService(repo, taskRepo, agentManager)
+
+	cleanupCalls := 0
+	svc.SetOnTaskStopCleanup(func(_ context.Context, taskID, reason string) error {
+		cleanupCalls++
+		if taskID != "task1" || reason != "user_stop" {
+			t.Fatalf("cleanup task=%q reason=%q", taskID, reason)
+		}
+		if taskRepo.updatedStates[taskID] == v1.TaskStateReview {
+			t.Fatal("task moved to review before task LSP cleanup")
+		}
+		return nil
+	})
+
+	if err := svc.StopTask(ctx, "task1", "user_stop", false); err != nil {
+		t.Fatalf("StopTask: %v", err)
+	}
+	if cleanupCalls != 1 {
+		t.Fatalf("cleanup calls = %d, want 1", cleanupCalls)
+	}
+	if got := taskRepo.updatedStates["task1"]; got != v1.TaskStateReview {
+		t.Fatalf("task state = %q, want REVIEW", got)
+	}
+}
+
+func TestStopTaskCleansTaskLSPWhenNoSessionExecutionExists(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task1", v1.TaskStateInProgress)
+	svc := newCoordinatorStopTestService(repo, taskRepo, &mockAgentManager{repoForExecutionLookup: repo})
+
+	cleanupCalls := 0
+	svc.SetOnTaskStopCleanup(func(_ context.Context, taskID, reason string) error {
+		cleanupCalls++
+		if taskID != "task1" || reason != "user_stop" {
+			t.Fatalf("cleanup task=%q reason=%q", taskID, reason)
+		}
+		return nil
+	})
+
+	_ = svc.StopTask(ctx, "task1", "user_stop", false)
+	if cleanupCalls != 1 {
+		t.Fatalf("cleanup calls = %d, want task-owned cleanup despite no session execution", cleanupCalls)
+	}
+}
+
 func TestStopTaskForCoordinator_StopsAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -279,6 +334,67 @@ func TestStopTaskForCoordinator_StopsAndIsIdempotent(t *testing.T) {
 	}
 	if repeat.Status != CoordinatorTaskStopStatusNotRunning {
 		t.Fatalf("repeat status = %q, want %q", repeat.Status, CoordinatorTaskStopStatusNotRunning)
+	}
+}
+
+func TestStopTaskForCoordinatorCleansTaskLSPBeforeReview(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "execution1")
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task1", v1.TaskStateInProgress)
+	service := newCoordinatorStopTestService(
+		repo, taskRepo, &mockAgentManager{repoForExecutionLookup: repo},
+	)
+
+	cleanupCalls := 0
+	service.SetOnTaskStopCleanup(func(_ context.Context, taskID, reason string) error {
+		cleanupCalls++
+		if taskID != "task1" || reason != coordinatorMCPStopReason {
+			t.Fatalf("cleanup task=%q reason=%q", taskID, reason)
+		}
+		if taskRepo.updatedStates[taskID] == v1.TaskStateReview {
+			t.Fatal("task moved to review before task LSP cleanup")
+		}
+		return nil
+	})
+
+	result, err := service.StopTaskForCoordinator(ctx, "task1")
+	if err != nil {
+		t.Fatalf("StopTaskForCoordinator: %v", err)
+	}
+	if result.Status != CoordinatorTaskStopStatusStopped || cleanupCalls != 1 {
+		t.Fatalf("result=%#v cleanup calls=%d", result, cleanupCalls)
+	}
+	if got := taskRepo.updatedStates["task1"]; got != v1.TaskStateReview {
+		t.Fatalf("task state = %q, want REVIEW", got)
+	}
+}
+
+func TestStopTaskForCoordinatorCleansTaskLSPWhenNoSessionIsRunning(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task1", v1.TaskStateInProgress)
+	service := newCoordinatorStopTestService(
+		repo, taskRepo, &mockAgentManager{repoForExecutionLookup: repo},
+	)
+	cleanupCalls := 0
+	service.SetOnTaskStopCleanup(func(_ context.Context, taskID, reason string) error {
+		cleanupCalls++
+		if taskID != "task1" || reason != coordinatorMCPStopReason {
+			t.Fatalf("cleanup task=%q reason=%q", taskID, reason)
+		}
+		return nil
+	})
+
+	result, err := service.StopTaskForCoordinator(ctx, "task1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != CoordinatorTaskStopStatusNotRunning || cleanupCalls != 1 {
+		t.Fatalf("result=%#v cleanup calls=%d", result, cleanupCalls)
 	}
 }
 

@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -25,6 +27,7 @@ import (
 const dockerWorkspacePath = "/workspace"
 const dockerStopContainerTimeout = 30 * time.Second
 const dockerFallbackCleanupTimeout = dockerStopContainerTimeout + 5*time.Second
+const reuseExistingProcessMetadataKey = "reuse_existing_process"
 
 // getMetadataString retrieves a string value from metadata map.
 func getMetadataString(metadata map[string]interface{}, key string) string {
@@ -35,6 +38,14 @@ func getMetadataString(metadata map[string]interface{}, key string) string {
 		return v
 	}
 	return ""
+}
+
+func getMetadataBool(metadata map[string]interface{}, key string) bool {
+	if metadata == nil {
+		return false
+	}
+	value, _ := metadata[key].(bool)
+	return value
 }
 
 // getMetadataStringMap extracts a map[string]string at key from metadata. The
@@ -90,6 +101,19 @@ type DockerExecutor struct {
 	docker       *docker.Client
 	containerMgr *ContainerManager
 	activity     *activity.Coordinator
+
+	containerAuthMu     sync.Mutex
+	containerAuthStates map[string]*containerAuthState
+}
+
+// containerAuthState serializes the one-shot credential handshake for one
+// physical container. refs is guarded by DockerExecutor.containerAuthMu; the
+// remaining fields are guarded by mu.
+type containerAuthState struct {
+	mu        sync.Mutex
+	refs      int
+	authToken string
+	retired   bool
 }
 
 // NewDockerExecutor creates a new Docker runtime.
@@ -174,9 +198,29 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 	if req.OnProgress != nil {
 		defer reportCreateInstanceProgress(req, &err)()
 	}
+	if req.RequireExistingInstance {
+		if req.PreviousExecutionID == "" {
+			return nil, errTaskHostRuntimeNotFound
+		}
+		reconnected, reconnectErr := r.reconnectToContainer(ctx, dockerClient, req)
+		if reconnectErr != nil {
+			return nil, reconnectErr
+		}
+		return reconnected, nil
+	}
 
 	if reconnected, ok := r.tryReconnect(baseCtx, dockerClient, req); ok {
 		return reconnected, nil
+	}
+	if req.IsTaskHost {
+		// Task hosts are services inside the task environment's existing
+		// container. Discovery may race initial environment materialization; it
+		// must wait instead of provisioning a second container without an agent
+		// runtime identity.
+		return nil, fmt.Errorf(
+			"%w: Docker task host requires a materialized task container",
+			ErrSessionWorkspaceNotReady,
+		)
 	}
 
 	r.seedSessionDir(baseCtx, req)
@@ -191,6 +235,7 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 	}
 
 	containerIP, _ := dockerClient.GetContainerIP(baseCtx, result.ContainerID)
+	r.rememberContainerAuth(result.ContainerID, result.AuthToken)
 	r.logger.Info("docker instance created",
 		zap.String("instance_id", req.InstanceID),
 		zap.String("container_id", result.ContainerID),
@@ -287,17 +332,18 @@ func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result
 		metadata["worktree_branch"] = getMetadataString(req.Metadata, MetadataKeyWorktreeBranch)
 	}
 	return &ExecutorInstance{
-		InstanceID:     req.InstanceID,
-		TaskID:         req.TaskID,
-		SessionID:      req.SessionID,
-		RuntimeName:    r.Name(),
-		Client:         result.Client,
-		ContainerID:    result.ContainerID,
-		ContainerIP:    containerIP,
-		WorkspacePath:  dockerWorkspacePath,
-		Metadata:       metadata,
-		AuthToken:      result.AuthToken,
-		BootstrapNonce: result.BootstrapNonce,
+		InstanceID:       req.InstanceID,
+		TaskID:           req.TaskID,
+		SessionID:        req.SessionID,
+		RuntimeName:      r.Name(),
+		Client:           result.Client,
+		ContainerID:      result.ContainerID,
+		ContainerIP:      containerIP,
+		WorkspacePath:    dockerWorkspacePath,
+		Metadata:         metadata,
+		AuthToken:        result.AuthToken,
+		ControlAuthToken: result.AuthToken,
+		BootstrapNonce:   result.BootstrapNonce,
 	}
 }
 
@@ -308,7 +354,13 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 	if err != nil {
 		return nil, err
 	}
-	info, containerIP, err := r.ensureContainerRunning(ctx, dockerClient, containerRef)
+	var info *docker.ContainerInfo
+	var containerIP string
+	if req.RequireExistingInstance {
+		info, containerIP, err = r.inspectRunningContainer(ctx, dockerClient, containerRef)
+	} else {
+		info, containerIP, err = r.ensureContainerRunning(ctx, dockerClient, containerRef)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -335,22 +387,55 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 	if conn.authToken != "" && conn.authToken != req.AuthToken {
 		refreshedAuthToken = conn.authToken
 	}
+	metadata := map[string]interface{}{
+		MetadataKeyIsRemote:             true,
+		MetadataKeyContainerID:          info.ID,
+		reuseExistingProcessMetadataKey: conn.reusingProcess,
+	}
+	if req.IsTaskHost {
+		// StopInstance needs this trusted request property before the instance is
+		// merged into AgentExecution metadata. A failed task-host reconnect must
+		// delete only its agentctl instance, never the shared task container.
+		metadata["task_host"] = true
+	}
 	return &ExecutorInstance{
-		InstanceID:    req.InstanceID,
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		RuntimeName:   r.Name(),
-		Client:        client,
-		ContainerID:   info.ID,
-		ContainerIP:   containerIP,
-		WorkspacePath: dockerWorkspacePath,
-		Metadata: map[string]interface{}{
-			MetadataKeyIsRemote:      true,
-			MetadataKeyContainerID:   info.ID,
-			"reuse_existing_process": conn.reusingProcess,
-		},
-		AuthToken: refreshedAuthToken,
+		InstanceID:       req.InstanceID,
+		TaskID:           req.TaskID,
+		SessionID:        req.SessionID,
+		RuntimeName:      r.Name(),
+		Client:           client,
+		ContainerID:      info.ID,
+		ContainerIP:      containerIP,
+		WorkspacePath:    dockerWorkspacePath,
+		Metadata:         metadata,
+		AuthToken:        refreshedAuthToken,
+		ControlAuthToken: conn.authToken,
 	}, nil
+}
+
+// inspectRunningContainer proves physical absence without starting a stopped
+// environment. A normal ensure may resume it later when task policy demands a
+// warm server; an existing-only lookup never creates or resumes resources.
+func (r *DockerExecutor) inspectRunningContainer(
+	ctx context.Context,
+	dockerClient *docker.Client,
+	containerRef string,
+) (*docker.ContainerInfo, string, error) {
+	info, err := dockerClient.GetContainerInfo(ctx, containerRef)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return nil, "", errTaskHostRuntimeNotFound
+		}
+		return nil, "", fmt.Errorf("failed to inspect container %s: %w", containerRef, err)
+	}
+	if info.State != containerStateRunning {
+		return nil, "", errTaskHostRuntimeNotFound
+	}
+	containerIP, err := dockerClient.GetContainerIP(ctx, info.ID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get IP for container %s: %w", info.ID, err)
+	}
+	return info, containerIP, nil
 }
 
 // ensureContainerRunning inspects containerRef, starts it if it's stopped,
@@ -401,38 +486,157 @@ type reconnectControlClient interface {
 	CreateInstance(context.Context, *agentctl.CreateInstanceRequest) (*agentctl.CreateInstanceResponse, error)
 }
 
+type instanceControlDeleter interface {
+	DeleteInstance(context.Context, string) error
+}
+
+func deleteDockerTaskHostInstance(ctx context.Context, control instanceControlDeleter, instanceID string) error {
+	err := control.DeleteInstance(ctx, instanceID)
+	if errors.Is(err, agentctl.ErrInstanceNotFound) {
+		return nil
+	}
+	return err
+}
+
 // bringupAgentctl health-checks agentctl on the container, finds (or creates)
 // the agent instance, transparently re-handshakes on a 401, and returns the
 // resolved instance endpoint for the user-facing client.
 func (r *DockerExecutor) bringupAgentctl(ctx context.Context, dockerClient *docker.Client, containerID, containerIP string, req *ExecutorCreateRequest) (reconnectAgentctlConn, error) {
 	controlHost, controlPort := resolveDockerEndpoint(ctx, dockerClient, containerID, AgentCtlPort, containerIP, r.logger)
-	ctl := agentctl.NewControlClient(controlHost, controlPort, r.logger,
-		agentctl.WithControlAuthToken(req.AuthToken))
-	if err := r.waitForAgentctlHealth(ctx, ctl); err != nil {
-		return reconnectAgentctlConn{}, fmt.Errorf("agentctl not healthy in container %s: %w", containerID, err)
-	}
-
-	authToken := req.AuthToken
-	instanceID := reconnectInstanceID(req, req.PreviousExecutionID)
-	instancePort, reusingProcess, err := r.findExistingInstance(ctx, dockerClient, ctl, req, containerID, containerIP, instanceID, authToken)
-	if err != nil && req.BootstrapNonce != "" && isAgentctlAuthError(err) {
-		var handshakeErr error
-		authToken, handshakeErr = ctl.Handshake(ctx, req.BootstrapNonce)
-		if handshakeErr != nil {
-			return reconnectAgentctlConn{}, fmt.Errorf("agentctl auth failed and re-handshake failed in container %s: %w", containerID, handshakeErr)
+	return r.withContainerAuth(containerID, req.AuthToken, func(authToken string) (reconnectAgentctlConn, error) {
+		ctl := agentctl.NewControlClient(controlHost, controlPort, r.logger,
+			agentctl.WithControlAuthToken(authToken))
+		if err := r.waitForAgentctlHealth(ctx, ctl); err != nil {
+			return reconnectAgentctlConn{}, fmt.Errorf("agentctl not healthy in container %s: %w", containerID, err)
 		}
-		instancePort, reusingProcess, err = r.findExistingInstance(ctx, dockerClient, ctl, req, containerID, containerIP, instanceID, authToken)
+
+		instanceID := reconnectInstanceID(req, req.PreviousExecutionID)
+		instancePort, reusingProcess, err := r.findExistingInstance(
+			ctx, dockerClient, ctl, req, containerID, containerIP, instanceID, authToken,
+		)
+		if err != nil && req.BootstrapNonce != "" && isAgentctlAuthError(err) {
+			var handshakeErr error
+			authToken, handshakeErr = ctl.Handshake(ctx, req.BootstrapNonce)
+			if handshakeErr != nil {
+				return reconnectAgentctlConn{}, fmt.Errorf(
+					"agentctl auth failed and re-handshake failed in container %s: %w",
+					containerID, handshakeErr,
+				)
+			}
+			instancePort, reusingProcess, err = r.findExistingInstance(
+				ctx, dockerClient, ctl, req, containerID, containerIP, instanceID, authToken,
+			)
+		}
+		if err != nil {
+			return reconnectAgentctlConn{}, fmt.Errorf("failed to find instance in container %s: %w", containerID, err)
+		}
+		instanceHost, resolvedInstancePort := resolveDockerEndpoint(
+			ctx, dockerClient, containerID, instancePort, containerIP, r.logger,
+		)
+		return reconnectAgentctlConn{
+			instanceHost: instanceHost, instancePort: resolvedInstancePort,
+			authToken: authToken, reusingProcess: reusingProcess,
+		}, nil
+	})
+}
+
+// withContainerAuth serializes credential recovery per container. The
+// bootstrap nonce is one-shot: after one caller rotates the token, every later
+// session/task-host reconnect must adopt that token rather than replaying the
+// consumed nonce with stale durable input.
+func (r *DockerExecutor) withContainerAuth(
+	containerID, fallbackToken string,
+	connect func(authToken string) (reconnectAgentctlConn, error),
+) (reconnectAgentctlConn, error) {
+	state := r.acquireContainerAuthState(containerID)
+	state.mu.Lock()
+	defer func() {
+		state.mu.Unlock()
+		r.releaseContainerAuthState(containerID, state)
+	}()
+	if state.retired {
+		return reconnectAgentctlConn{}, fmt.Errorf("container %s auth state was retired after removal", containerID)
 	}
-	if err != nil {
-		return reconnectAgentctlConn{}, fmt.Errorf("failed to find instance in container %s: %w", containerID, err)
+	authToken := state.authToken
+	if authToken == "" {
+		authToken = fallbackToken
 	}
-	instanceHost, resolvedInstancePort := resolveDockerEndpoint(ctx, dockerClient, containerID, instancePort, containerIP, r.logger)
-	return reconnectAgentctlConn{
-		instanceHost:   instanceHost,
-		instancePort:   resolvedInstancePort,
-		authToken:      authToken,
-		reusingProcess: reusingProcess,
-	}, nil
+	result, err := connect(authToken)
+	if err == nil && result.authToken != "" {
+		state.authToken = result.authToken
+	}
+	return result, err
+}
+
+func (r *DockerExecutor) acquireContainerAuthState(containerID string) *containerAuthState {
+	r.containerAuthMu.Lock()
+	defer r.containerAuthMu.Unlock()
+	if r.containerAuthStates == nil {
+		r.containerAuthStates = make(map[string]*containerAuthState)
+	}
+	state := r.containerAuthStates[containerID]
+	if state == nil {
+		state = &containerAuthState{}
+		r.containerAuthStates[containerID] = state
+	}
+	state.refs++
+	return state
+}
+
+func (r *DockerExecutor) releaseContainerAuthState(containerID string, state *containerAuthState) {
+	r.containerAuthMu.Lock()
+	defer r.containerAuthMu.Unlock()
+	state.refs--
+	if state.refs == 0 && state.retired && r.containerAuthStates[containerID] == state {
+		delete(r.containerAuthStates, containerID)
+	}
+}
+
+func (r *DockerExecutor) rememberContainerAuth(containerID, authToken string) {
+	if containerID == "" || authToken == "" {
+		return
+	}
+	state := r.acquireContainerAuthState(containerID)
+	state.mu.Lock()
+	if !state.retired {
+		state.authToken = authToken
+	}
+	state.mu.Unlock()
+	r.releaseContainerAuthState(containerID, state)
+}
+
+func (r *DockerExecutor) forgetContainerAuth(containerID string) {
+	if containerID == "" {
+		return
+	}
+	r.containerAuthMu.Lock()
+	state := r.containerAuthStates[containerID]
+	if state == nil {
+		r.containerAuthMu.Unlock()
+		return
+	}
+	state.mu.Lock()
+	state.authToken = ""
+	state.retired = true
+	state.mu.Unlock()
+	if state.refs == 0 {
+		delete(r.containerAuthStates, containerID)
+	}
+	r.containerAuthMu.Unlock()
+}
+
+func (r *DockerExecutor) clearContainerAuth() {
+	r.containerAuthMu.Lock()
+	for containerID, state := range r.containerAuthStates {
+		state.mu.Lock()
+		state.authToken = ""
+		state.retired = true
+		state.mu.Unlock()
+		if state.refs == 0 {
+			delete(r.containerAuthStates, containerID)
+		}
+	}
+	r.containerAuthMu.Unlock()
 }
 
 func reconnectInstanceID(req *ExecutorCreateRequest, previousExecutionID string) string {
@@ -490,6 +694,17 @@ func (r *DockerExecutor) findExistingInstance(
 	// Try to get the existing instance by its ID
 	instance, err := ctl.GetInstance(ctx, prevExecutionID)
 	if err == nil && instance != nil && instance.Port > 0 {
+		if req.RequireExistingInstance {
+			instanceHost, instancePort := resolveDockerEndpoint(
+				ctx, dockerClient, containerID, instance.Port, containerIP, r.logger,
+			)
+			client := agentctl.NewClient(instanceHost, instancePort, r.logger,
+				agentctl.WithAuthToken(authToken))
+			defer client.Close()
+			status, statusErr := client.GetStatus(ctx)
+			processRunning := statusErr == nil && status != nil && status.IsAgentRunning()
+			return instance.Port, processRunning, nil
+		}
 		if hasManagedGitHubBrokerEnv(req.Env) {
 			instanceHost, instancePort := resolveDockerEndpoint(
 				ctx, dockerClient, containerID, instance.Port, containerIP, r.logger)
@@ -514,6 +729,12 @@ func (r *DockerExecutor) findExistingInstance(
 	}
 	if err != nil && isAgentctlAuthError(err) {
 		return 0, false, err
+	}
+	if req.RequireExistingInstance && (err == nil || errors.Is(err, agentctl.ErrInstanceNotFound)) {
+		return 0, false, errTaskHostRuntimeNotFound
+	}
+	if req.RequireExistingInstance {
+		return 0, false, fmt.Errorf("inspect existing task-host instance: %w", err)
 	}
 
 	// Instance not found — create a new instance in the existing container
@@ -668,6 +889,19 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	if instance.ContainerID == "" {
 		return nil // No container to stop
 	}
+	if getMetadataBool(instance.Metadata, "task_host") {
+		// A task host owns one agentctl instance inside the task environment's
+		// shared container; it never owns the container itself. DELETE triggers
+		// StopForTeardown, which reaps the LSP process tree while preserving every
+		// session and the durable workspace in that task environment.
+		if err := r.deleteTaskHostInstance(ctx, instance); err != nil {
+			return fmt.Errorf("failed to delete task-host agentctl instance: %w", err)
+		}
+		r.logger.Info("deleted task-host instance and preserved docker task environment",
+			zap.String("container_id", instance.ContainerID),
+			zap.String("instance_id", instance.InstanceID))
+		return nil
+	}
 
 	// Plain "stop the agent" runs (e.g. user clicks Stop, then later wants to
 	// resume) must not stop the Docker container after agentctl stopped cleanly.
@@ -699,6 +933,7 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 		if removeErr := dockerClient.RemoveContainer(cleanupCtx, instance.ContainerID, true); removeErr != nil {
 			return fmt.Errorf("failed to remove container after kill: %w", removeErr)
 		}
+		r.forgetContainerAuth(instance.ContainerID)
 		return nil
 	}
 
@@ -706,6 +941,7 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 		if err := containerMgr.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout); err != nil {
 			return fmt.Errorf("failed to stop and remove container: %w", err)
 		}
+		r.forgetContainerAuth(instance.ContainerID)
 		return nil
 	}
 
@@ -718,6 +954,23 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	}
 
 	return nil
+}
+
+func (r *DockerExecutor) deleteTaskHostInstance(ctx context.Context, instance *ExecutorInstance) error {
+	dockerClient, _, err := r.ensureClient()
+	if err != nil {
+		return fmt.Errorf("docker unavailable: %w", err)
+	}
+	controlHost, controlPort := resolveDockerEndpoint(
+		ctx, dockerClient, instance.ContainerID, AgentCtlPort, instance.ContainerIP, r.logger,
+	)
+	authToken := instance.ControlAuthToken
+	if authToken == "" {
+		authToken = instance.AuthToken
+	}
+	control := agentctl.NewControlClient(controlHost, controlPort, r.logger,
+		agentctl.WithControlAuthToken(authToken))
+	return deleteDockerTaskHostInstance(ctx, control, instance.InstanceID)
 }
 
 // shouldTeardownDockerContainer extends terminal cleanup with stale execution
@@ -752,6 +1005,7 @@ func (r *DockerExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstanc
 func (r *DockerExecutor) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.clearContainerAuth()
 
 	if r.docker != nil {
 		err := r.docker.Close()

@@ -272,6 +272,26 @@ type taskResourceCleanupCoordinator interface {
 	CancelPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
 }
 
+type taskResourceCleanupResolver interface {
+	ResolvePreparedTaskResourceCleanup(ctx context.Context, operationID string) error
+}
+
+type taskLSPMutationCleaner interface {
+	CleanupTaskLSP(ctx context.Context, taskID, reason string) error
+}
+
+type taskLSPMutationGuard interface {
+	acquireTaskLSPMutation(taskID string) func()
+}
+
+type taskLSPEnvironmentMutationGuard interface {
+	acquireTaskLSPEnvironmentMutations(ctx context.Context, taskIDs []string) (func(), error)
+	preserveTaskEnvironmentsForTerminalMutation(
+		ctx context.Context,
+		taskIDs []string,
+	) ([]workspaceEnvironmentOwnershipTransfer, error)
+}
+
 // SetTaskResourceCleaner wires the resource teardown surface invoked by
 // cascade archive/delete to release containers / sandboxes / worktrees.
 // Optional — when nil the cascade does not tear down runtime resources.

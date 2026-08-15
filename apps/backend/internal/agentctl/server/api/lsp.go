@@ -1,498 +1,362 @@
 package api
 
 import (
-	"bufio"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
+	"path/filepath"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	tasklsp "github.com/kandev/kandev/internal/agentctl/server/lsp"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
-	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/lsp/protocol"
-	tools "github.com/kandev/kandev/internal/tools/installer"
-	"go.uber.org/zap"
 )
 
 const (
-	lspCloseBinaryNotFound         = 4001
-	lspCloseInstallFailed          = 4003
-	lspCloseServerExited           = 4006
-	lspCloseAutoInstallUnsupported = 4007
-	lspCloseStartFailed            = 4008
-
-	lspLanguageTypeScript    = "typescript"
-	lspLanguagePython        = "python"
-	lspLanguageGo            = "go"
-	lspLanguageRust          = "rust"
-	lspLanguageKey           = "language"
-	lspStatusKey             = "status"
-	lspStatusInstalling      = "installing"
-	lspStatusInstalled       = "installed"
-	lspStatusInstallFailed   = "install_failed"
-	lspStatusReady           = "ready"
-	lspWorkspacePathJSONKey  = "workspacePath"
-	lspWorkspaceURIJSONKey   = "workspaceUri"
-	lspRepoSubpathsJSONKey   = "repoSubpaths"
-	lspStdinWriteTimeout     = 30 * time.Second
 	lspWebSocketWriteTimeout = 5 * time.Second
+	taskLSPTaskIDHeader      = "X-Kandev-LSP-Task-ID"
 )
 
-var errLSPStdinWriteTimeout = errors.New("LSP stdin write timed out")
-
-type lspServerProcess struct {
-	id     string
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	done   <-chan struct{}
-	// forwarderDone keeps caller-owned stdout open until its sole reader exits.
-	forwarderDone <-chan struct{}
-}
-
-type lspClientRead struct {
-	message []byte
-	err     error
-}
-
-type lspInstallerRegistry interface {
-	BinaryPath(language string) (string, error)
-	StrategyFor(language string) (tools.Strategy, error)
-}
-
-type lspInstallCoordinator struct {
-	mu     sync.Mutex
-	active map[string]chan struct{}
-}
-
-func newLSPInstallCoordinator() *lspInstallCoordinator {
-	return &lspInstallCoordinator{active: make(map[string]chan struct{})}
-}
-
-func (c *lspInstallCoordinator) run(ctx context.Context, key string, install func() (string, error)) (string, error) {
-	for {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		c.mu.Lock()
-		wait, busy := c.active[key]
-		if !busy {
-			wait = make(chan struct{})
-			c.active[key] = wait
-			c.mu.Unlock()
-			defer c.release(key, wait)
-			return install()
-		}
-		c.mu.Unlock()
-		select {
-		case <-wait:
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
-	}
-}
-
-func (c *lspInstallCoordinator) release(key string, completed chan struct{}) {
-	c.mu.Lock()
-	if c.active[key] == completed {
-		delete(c.active, key)
-		close(completed)
-	}
-	c.mu.Unlock()
-}
-
-// lspInstallMutationKey groups installers by the files they can rewrite.
-// npm updates prefix-wide metadata, while Go and release installs only
-// collide when they publish the same binary target.
-func lspInstallMutationKey(language string) string {
-	binary, _ := installer.LspCommand(language)
-	switch language {
-	case lspLanguageTypeScript, lspLanguagePython:
-		return "npm-prefix"
-	case lspLanguageGo:
-		return "go:" + binary
-	case lspLanguageRust:
-		return "release:" + binary
-	default:
-		return "language:" + language
-	}
-}
-
-var sharedLSPInstallCoordinator = newLSPInstallCoordinator()
-
-func (s *Server) handleLSPStreamWS(c *gin.Context) {
-	language := c.Query("language")
-	if language == "" {
-		c.JSON(http.StatusBadRequest, gin.H{errKey: "language query parameter is required"})
+func (s *Server) handleTaskLSPSnapshot(c *gin.Context) {
+	taskID, ok := taskLSPTaskID(c)
+	if !ok {
 		return
 	}
-	if !installer.IsSupported(language) {
-		c.JSON(http.StatusBadRequest, gin.H{errKey: fmt.Sprintf("unsupported language: %s", language)})
+	language, ok := taskLSPLanguage(c)
+	if !ok {
 		return
 	}
+	c.JSON(http.StatusOK, s.lspManager.SnapshotForTask(taskID, language))
+}
 
+func (s *Server) handleTaskLSPDiscovery(c *gin.Context) {
+	taskID, ok := taskLSPTaskID(c)
+	if !ok {
+		return
+	}
+	c.JSON(http.StatusOK, tasklsp.DiscoverLanguagesAtRoots(
+		c.Request.Context(), s.lspManager.DiscoveryRootsForTask(taskID),
+	))
+}
+
+func (s *Server) handleTaskLSPWorkspaceRefresh(c *gin.Context) {
+	taskID, ok := taskLSPTaskID(c)
+	if !ok {
+		return
+	}
+	var body tasklspWorkspaceBody
+	if err := decodeStrictJSON(c, &body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: err.Error()})
+		return
+	}
+	result, err := s.lspManager.UpdateWorkspaceForTask(taskID, body.WorkspacePath, body.WorkspaceRoots)
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{errKey: err.Error(), "result": result})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+type tasklspWorkspaceBody struct {
+	WorkspacePath  string   `json:"workspace_path"`
+	WorkspaceRoots []string `json:"workspace_roots,omitempty"`
+}
+
+type taskLSPStartBody struct {
+	Generation    uint64          `json:"generation"`
+	AutoInstall   bool            `json:"auto_install"`
+	Configuration json.RawMessage `json:"configuration,omitempty"`
+}
+
+type taskLSPStopBody struct {
+	Generation uint64 `json:"generation,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+type taskLSPConfigurationBody struct {
+	Generation    uint64          `json:"generation"`
+	Configuration json.RawMessage `json:"configuration"`
+}
+
+func (s *Server) handleTaskLSPStart(c *gin.Context)   { s.handleTaskLSPStartAction(c, false) }
+func (s *Server) handleTaskLSPRestart(c *gin.Context) { s.handleTaskLSPStartAction(c, true) }
+
+func (s *Server) handleTaskLSPStartAction(c *gin.Context, restart bool) {
+	taskID, ok := taskLSPTaskID(c)
+	if !ok {
+		return
+	}
+	language, ok := taskLSPLanguage(c)
+	if !ok {
+		return
+	}
+	var body taskLSPStartBody
+	if err := decodeStrictJSON(c, &body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: err.Error()})
+		return
+	}
+	request := tasklsp.StartRequest{
+		TaskID: taskID, Language: language, Generation: body.Generation,
+		AutoInstall: body.AutoInstall, Configuration: body.Configuration,
+	}
+	var (
+		snapshot tasklsp.Snapshot
+		err      error
+	)
+	if restart {
+		snapshot, err = s.lspManager.Restart(c.Request.Context(), request)
+	} else {
+		snapshot, err = s.lspManager.Start(c.Request.Context(), request)
+	}
+	writeTaskLSPResult(c, snapshot, err)
+}
+
+func (s *Server) handleTaskLSPStop(c *gin.Context) {
+	taskID, ok := taskLSPTaskID(c)
+	if !ok {
+		return
+	}
+	language, ok := taskLSPLanguage(c)
+	if !ok {
+		return
+	}
+	var body taskLSPStopBody
+	if err := decodeStrictJSON(c, &body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: err.Error()})
+		return
+	}
+	snapshot, err := s.lspManager.Stop(c.Request.Context(), tasklsp.StopRequest{
+		TaskID: taskID, Language: language, Generation: body.Generation, Reason: body.Reason,
+	})
+	writeTaskLSPResult(c, snapshot, err)
+}
+
+func (s *Server) handleTaskLSPPurge(c *gin.Context) {
+	taskID, ok := taskLSPTaskID(c)
+	if !ok {
+		return
+	}
+	if err := s.lspManager.PurgeTask(taskID); err != nil {
+		c.JSON(http.StatusConflict, gin.H{errKey: err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (s *Server) handleTaskLSPConfiguration(c *gin.Context) {
+	taskID, ok := taskLSPTaskID(c)
+	if !ok {
+		return
+	}
+	language, ok := taskLSPLanguage(c)
+	if !ok {
+		return
+	}
+	var body taskLSPConfigurationBody
+	if err := decodeStrictJSON(c, &body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: err.Error()})
+		return
+	}
+	snapshot, err := s.lspManager.UpdateConfiguration(c.Request.Context(), tasklsp.ConfigurationRequest{
+		TaskID: taskID, Language: language, Generation: body.Generation, Configuration: body.Configuration,
+	})
+	writeTaskLSPResult(c, snapshot, err)
+}
+
+func (s *Server) handleTaskLSPWatch(c *gin.Context) {
+	taskID, ok := taskLSPTaskID(c)
+	if !ok {
+		return
+	}
+	language, ok := taskLSPLanguage(c)
+	if !ok {
+		return
+	}
 	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		s.logger.Error("LSP: failed to upgrade WebSocket", zap.Error(err))
+		return
+	}
+	conn.SetReadLimit(4 << 10)
+	updates, unsubscribe := s.lspManager.SubscribeForTask(taskID, language)
+	defer unsubscribe()
+	defer func() { _ = conn.Close() }()
+	clientClosed := make(chan struct{})
+	go func() {
+		defer close(clientClosed)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+	for {
+		select {
+		case snapshot, open := <-updates:
+			if !open {
+				return
+			}
+			if err := conn.SetWriteDeadline(time.Now().Add(lspWebSocketWriteTimeout)); err != nil {
+				return
+			}
+			if err := conn.WriteJSON(snapshot); err != nil {
+				return
+			}
+		case <-clientClosed:
+			return
+		case <-c.Request.Context().Done():
+			return
+		}
+	}
+}
+
+func (s *Server) handleTaskLSPAttach(c *gin.Context) {
+	attachment, ok := s.openTaskLSPAttachment(c)
+	if !ok {
+		return
+	}
+	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		attachment.Close()
 		return
 	}
 	conn.SetReadLimit(protocol.MaxMessageBytes)
+	writerDone := make(chan struct{})
+	go writeTaskLSPAttachment(conn, attachment, writerDone)
+	readTaskLSPAttachment(conn, attachment)
+	<-writerDone
+}
 
-	binaryPath, err := s.lspInstaller.BinaryPath(language)
+func (s *Server) openTaskLSPAttachment(c *gin.Context) (*tasklsp.Attachment, bool) {
+	taskID, ok := taskLSPTaskID(c)
+	if !ok {
+		return nil, false
+	}
+	language, ok := taskLSPLanguage(c)
+	if !ok {
+		return nil, false
+	}
+	generation, err := strconv.ParseUint(c.Query("generation"), 10, 64)
+	if err != nil || generation == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: "generation query parameter must be a positive integer"})
+		return nil, false
+	}
+	attachment, err := s.lspManager.AttachForTask(taskID, language, generation)
 	if err != nil {
-		autoInstall := lspAutoInstallRequested(c)
-		if !installer.CanAutoInstall(language) {
-			_ = writeLSPMessage(conn, websocket.CloseMessage, websocket.FormatCloseMessage(
-				lspCloseAutoInstallUnsupported,
-				"auto-install unsupported on task host",
-			))
-			_ = conn.Close()
+		status := http.StatusConflict
+		if errors.Is(err, tasklsp.ErrManagerClosed) || errors.Is(err, process.ErrManagerStopping) {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{errKey: err.Error()})
+		return nil, false
+	}
+	return attachment, true
+}
+
+func writeTaskLSPAttachment(conn *websocket.Conn, attachment *tasklsp.Attachment, done chan<- struct{}) {
+	defer close(done)
+	defer func() { _ = conn.Close() }()
+	for message := range attachment.Messages() {
+		if err := conn.SetWriteDeadline(time.Now().Add(lspWebSocketWriteTimeout)); err != nil {
 			return
 		}
-		s.handleLSPBinaryNotFound(
-			c.Request.Context(),
-			conn,
-			language,
-			autoInstall,
-			err,
-		)
-		return
-	}
-
-	s.handleLSPBridge(conn, language, binaryPath, nil)
-}
-
-func lspAutoInstallRequested(c *gin.Context) bool {
-	value := c.Query("autoInstall")
-	return value == "1" || strings.EqualFold(value, "true")
-}
-
-func (s *Server) handleLSPBinaryNotFound(ctx context.Context, conn *websocket.Conn, language string, autoInstall bool, binaryErr error) {
-	if !autoInstall {
-		_ = writeLSPMessage(conn, websocket.CloseMessage, websocket.FormatCloseMessage(lspCloseBinaryNotFound, binaryErr.Error()))
-		_ = conn.Close()
-		return
-	}
-
-	if err := writeLSPJSONMessage(conn, map[string]string{lspStatusKey: lspStatusInstalling, lspLanguageKey: language}); err != nil {
-		s.logger.Warn("failed to send LSP installing status", zap.String("language", language), zap.Error(err))
-		_ = conn.Close()
-		return
-	}
-
-	installCtx, cancelInstall := context.WithCancel(ctx)
-	firstClientRead := readFirstLSPClientMessage(conn, cancelInstall)
-	binaryPath, err := s.awaitOrInstallLSP(installCtx, language)
-	cancelInstall()
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, process.ErrManagerStopping) {
-			s.logger.Debug("LSP auto-install canceled", zap.String("language", language))
-			_ = writeLSPMessage(conn, websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, ""))
-			_ = conn.Close()
+		if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
 			return
 		}
-		s.logger.Error("LSP auto-install failed", zap.String("language", language), zap.Error(err))
-		if writeErr := writeLSPJSONMessage(conn, map[string]string{lspStatusKey: lspStatusInstallFailed, lspLanguageKey: language, errKey: err.Error()}); writeErr != nil {
-			s.logger.Warn("failed to send LSP install failure status", zap.String("language", language), zap.Error(writeErr))
-		}
-		_ = writeLSPMessage(conn, websocket.CloseMessage, websocket.FormatCloseMessage(lspCloseInstallFailed, "install failed"))
-		_ = conn.Close()
-		return
-	}
-
-	if err := writeLSPJSONMessage(conn, map[string]string{lspStatusKey: lspStatusInstalled, lspLanguageKey: language}); err != nil {
-		s.logger.Warn("failed to send LSP installed status", zap.String("language", language), zap.Error(err))
-	}
-
-	s.handleLSPBridge(conn, language, binaryPath, firstClientRead)
-}
-
-func readFirstLSPClientMessage(conn *websocket.Conn, cancel context.CancelFunc) <-chan lspClientRead {
-	result := make(chan lspClientRead, 1)
-	go func() {
-		_, message, err := conn.ReadMessage()
-		cancel()
-		result <- lspClientRead{message: message, err: err}
-	}()
-	return result
-}
-
-func (s *Server) handleLSPBridge(
-	conn *websocket.Conn,
-	language string,
-	binaryPath string,
-	firstClientRead <-chan lspClientRead,
-) {
-	server, err := s.startLSPServer(language, binaryPath)
-	if err != nil {
-		s.logger.Error("LSP: failed to start language server", zap.String("language", language), zap.Error(err))
-		_ = writeLSPMessage(
-			conn,
-			websocket.CloseMessage,
-			websocket.FormatCloseMessage(lspCloseStartFailed, ""),
-		)
-		_ = conn.Close()
-		return
-	}
-
-	ready := map[string]any{
-		lspStatusKey:            lspStatusReady,
-		lspWorkspacePathJSONKey: s.cfg.WorkDir,
-		lspWorkspaceURIJSONKey:  workspaceFileURI(s.cfg.WorkDir),
-		lspRepoSubpathsJSONKey:  s.procMgr.RepoSubpaths(),
-	}
-	if err := writeLSPJSONMessage(conn, ready); err != nil {
-		s.stopLSPServer(server)
-		_ = conn.Close()
-		return
-	}
-
-	s.runLSPBridge(conn, language, server, firstClientRead)
-}
-
-// workspaceFileURI converts the task host's native workspace path into the
-// canonical file URI consumed by both the language server and browser editor.
-// Detecting drive and UNC forms here keeps path semantics on the task host
-// instead of accidentally applying the browser machine's operating system.
-func workspaceFileURI(path string) string {
-	normalized := path
-	isDrivePath := len(path) >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/')
-	isUNCPath := strings.HasPrefix(path, `\\`)
-	if isDrivePath || isUNCPath {
-		normalized = strings.ReplaceAll(path, `\`, "/")
-	}
-	if strings.HasPrefix(normalized, "//") {
-		parts := strings.Split(strings.TrimPrefix(normalized, "//"), "/")
-		if len(parts) >= 2 && parts[0] != "" {
-			return strictFileURL(parts[0], "/"+strings.Join(parts[1:], "/"), false)
-		}
-	}
-	isDriveURI := len(normalized) >= 3 && normalized[1] == ':' && normalized[2] == '/'
-	if isDriveURI {
-		normalized = "/" + normalized
-	}
-	return strictFileURL("", normalized, isDriveURI)
-}
-
-func strictFileURL(host, filePath string, preserveDriveColon bool) string {
-	segments := strings.Split(filePath, "/")
-	encoded := make([]string, len(segments))
-	for i, segment := range segments {
-		encoded[i] = strictURISegment(segment)
-	}
-	if preserveDriveColon && len(segments) > 1 {
-		encoded[1] = segments[1]
-	}
-	return (&url.URL{
-		Scheme:  "file",
-		Host:    host,
-		Path:    filePath,
-		RawPath: strings.Join(encoded, "/"),
-	}).String()
-}
-
-func strictURISegment(segment string) string {
-	const hex = "0123456789ABCDEF"
-	var encoded strings.Builder
-	for _, value := range []byte(segment) {
-		if (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
-			(value >= '0' && value <= '9') || strings.ContainsRune("-._~", rune(value)) {
-			encoded.WriteByte(value)
-			continue
-		}
-		encoded.WriteByte('%')
-		encoded.WriteByte(hex[value>>4])
-		encoded.WriteByte(hex[value&0x0f])
-	}
-	return encoded.String()
-}
-
-func (s *Server) startLSPServer(language, binaryPath string) (*lspServerProcess, error) {
-	binary, args := installer.LspCommand(language)
-	if binaryPath != "" {
-		binary = binaryPath
-	}
-
-	sessionID := s.cfg.SessionID
-	if sessionID == "" {
-		sessionID = s.cfg.InstanceID
-	}
-	if sessionID == "" {
-		sessionID = "lsp"
-	}
-	proc, err := s.procMgr.StartPipedProcess(process.PipedStartRequest{
-		SessionID:  sessionID,
-		Kind:       types.ProcessKindCustom,
-		ScriptName: "lsp-" + language,
-		Command:    binary,
-		Args:       args,
-		WorkingDir: s.cfg.WorkDir,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to start %s: %w", binary, err)
-	}
-
-	return &lspServerProcess{id: proc.ID, stdin: proc.Stdin, stdout: proc.Stdout, done: proc.Done}, nil
-}
-
-func (s *Server) stopLSPServer(server *lspServerProcess) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	s.stopLSPServerWithContext(ctx, server)
-}
-
-func (s *Server) stopLSPServerWithContext(ctx context.Context, server *lspServerProcess) {
-	_ = server.stdin.Close()
-	if err := s.procMgr.StopProcess(ctx, process.StopProcessRequest{ProcessID: server.id}); err != nil {
-		s.logger.Debug("LSP process already stopped", zap.String("process_id", server.id), zap.Error(err))
-	}
-	timedOut := false
-	select {
-	case <-server.done:
-	case <-ctx.Done():
-		timedOut = true
-		s.logger.Warn("timed out waiting for LSP process teardown", zap.String("process_id", server.id))
-	}
-	if timedOut {
-		_ = server.stdout.Close()
-	}
-	if server.forwarderDone != nil {
-		<-server.forwarderDone
-	}
-	if !timedOut {
-		_ = server.stdout.Close()
 	}
 }
 
-func (s *Server) runLSPBridge(
-	conn *websocket.Conn,
-	language string,
-	server *lspServerProcess,
-	firstClientRead <-chan lspClientRead,
-) {
-	done := make(chan struct{})
-	server.forwarderDone = done
-
-	go func() {
-		defer close(done)
-		defer func() { _ = conn.Close() }()
-		defer func() { _ = server.stdin.Close() }()
-		reader := bufio.NewReader(server.stdout)
-		for {
-			msg, err := protocol.ReadMessage(reader)
-			if err != nil {
-				if err != io.EOF {
-					s.logger.Debug("LSP stdout read error", zap.String("language", language), zap.Error(err))
-				}
-				_ = writeLSPMessage(
-					conn,
-					websocket.CloseMessage,
-					websocket.FormatCloseMessage(lspCloseServerExited, ""),
-				)
-				return
-			}
-			if wErr := writeLSPMessage(conn, websocket.TextMessage, msg); wErr != nil {
-				s.logger.Debug("LSP WebSocket write error", zap.String("language", language), zap.Error(wErr))
-				return
-			}
-		}
-	}()
-
+func readTaskLSPAttachment(conn *websocket.Conn, attachment *tasklsp.Attachment) {
 	for {
-		var msg []byte
-		var err error
-		if firstClientRead != nil {
-			result := <-firstClientRead
-			firstClientRead = nil
-			msg, err = result.message, result.err
-		} else {
-			_, msg, err = conn.ReadMessage()
-		}
+		messageType, message, err := conn.ReadMessage()
 		if err != nil {
-			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				s.logger.Debug("LSP WebSocket read error", zap.String("language", language), zap.Error(err))
+			break
+		}
+		if messageType == websocket.TextMessage {
+			if err := attachment.Handle(message); err != nil {
+				break
 			}
-			break
-		}
-
-		if err := writeLSPStdinFrame(server.stdin, msg); err != nil {
-			s.logger.Debug("LSP stdin write error", zap.String("language", language), zap.Error(err))
-			break
 		}
 	}
-
+	attachment.Close()
 	_ = conn.Close()
-	s.stopLSPServer(server)
 }
 
-func writeLSPStdinFrame(stdin io.WriteCloser, msg []byte) error {
-	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(msg))
-	frame := make([]byte, 0, len(header)+len(msg))
-	frame = append(frame, header...)
-	frame = append(frame, msg...)
-	return writeLSPStdinWithTimeout(stdin, frame, lspStdinWriteTimeout)
+func taskLSPLanguage(c *gin.Context) (string, bool) {
+	language := c.Param("language")
+	if !installer.IsSupported(language) {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: fmt.Sprintf("unsupported language: %s", language)})
+		return "", false
+	}
+	return language, true
 }
 
-func writeLSPStdinWithTimeout(stdin io.WriteCloser, data []byte, timeout time.Duration) error {
-	closeResult := make(chan error, 1)
-	timer := time.AfterFunc(timeout, func() {
-		closeResult <- stdin.Close()
-	})
-	written, writeErr := stdin.Write(data)
-	if !timer.Stop() {
-		return errors.Join(errLSPStdinWriteTimeout, writeErr, <-closeResult)
+func taskLSPTaskID(c *gin.Context) (string, bool) {
+	taskID := strings.TrimSpace(c.GetHeader(taskLSPTaskIDHeader))
+	if taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: "task LSP task identity header is required"})
+		return "", false
 	}
-	if writeErr != nil {
-		return writeErr
+	return taskID, true
+}
+
+func decodeStrictJSON(c *gin.Context, target any) error {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("invalid request body: %w", err)
 	}
-	if written != len(data) {
-		return io.ErrShortWrite
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("invalid request body: multiple JSON values")
 	}
 	return nil
 }
 
-func writeLSPMessage(conn *websocket.Conn, messageType int, data []byte) error {
-	if err := conn.SetWriteDeadline(time.Now().Add(lspWebSocketWriteTimeout)); err != nil {
-		return err
+func writeTaskLSPResult(c *gin.Context, snapshot tasklsp.Snapshot, err error) {
+	if err == nil {
+		c.JSON(http.StatusOK, snapshot)
+		return
 	}
-	return conn.WriteMessage(messageType, data)
+	status := http.StatusUnprocessableEntity
+	switch {
+	case errors.Is(err, tasklsp.ErrStaleGeneration), errors.Is(err, tasklsp.ErrRuntimeNotReady):
+		status = http.StatusConflict
+	case errors.Is(err, tasklsp.ErrManagerClosed), errors.Is(err, process.ErrManagerStopping):
+		status = http.StatusServiceUnavailable
+	case strings.Contains(err.Error(), "generation must"), strings.Contains(err.Error(), "configuration must"):
+		status = http.StatusBadRequest
+	}
+	c.JSON(status, gin.H{errKey: err.Error(), "snapshot": snapshot})
 }
 
-func (s *Server) awaitOrInstallLSP(ctx context.Context, language string) (string, error) {
-	installCtx, release, err := s.procMgr.BeginOwnedOperation(ctx)
-	if err != nil {
-		return "", err
+func taskLSPWorkspaceFolders(workDir string, repositorySubpaths ...string) []tasklsp.WorkspaceFolder {
+	root := filepath.Clean(workDir)
+	roots := make([]string, 0, len(repositorySubpaths))
+	seen := make(map[string]bool, len(repositorySubpaths))
+	for _, subpath := range repositorySubpaths {
+		if subpath == "" || filepath.IsAbs(subpath) {
+			continue
+		}
+		candidate := filepath.Clean(filepath.Join(root, subpath))
+		relative, err := filepath.Rel(root, candidate)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		roots = append(roots, candidate)
 	}
-	defer release()
-
-	return sharedLSPInstallCoordinator.run(installCtx, lspInstallMutationKey(language), func() (string, error) {
-		if binaryPath, err := s.lspInstaller.BinaryPath(language); err == nil {
-			return binaryPath, nil
-		}
-		strategy, err := s.lspInstaller.StrategyFor(language)
-		if err != nil {
-			return "", err
-		}
-		result, err := strategy.Install(installCtx)
-		if err != nil {
-			return "", err
-		}
-		return result.BinaryPath, nil
-	})
+	return tasklsp.WorkspaceFoldersAtRoots(root, roots)
 }
 
-func writeLSPJSONMessage(conn *websocket.Conn, data any) error {
-	msg, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	return writeLSPMessage(conn, websocket.TextMessage, msg)
+// workspaceFileURI applies task-host path semantics, including Windows drive
+// and UNC forms, while strictly escaping reserved URI characters.
+func workspaceFileURI(path string) string {
+	return tasklsp.WorkspaceFileURI(path)
 }

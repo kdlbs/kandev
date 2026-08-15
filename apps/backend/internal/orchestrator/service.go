@@ -144,6 +144,8 @@ type taskQueuePromotionPublisher interface {
 	PublishTaskQueuePromoted(ctx context.Context, task *models.Task)
 }
 
+type TaskStopCleanupFunc func(ctx context.Context, taskID, reason string) error
+
 // WorkflowMeta is the subset of workflow fields needed at step entry
 // (agent profile default + optional workflow-level prompt).
 type WorkflowMeta struct {
@@ -307,6 +309,7 @@ type sessionExecutorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	DeleteTaskEnvironment(ctx context.Context, id string) error
 }
 
 // ClaimTaskTitleSession claims the first-turn generated-title handoff for a
@@ -364,6 +367,8 @@ type Service struct {
 	// Task event publisher for emitting task.updated events.
 	// Task service owns the rich payload; orchestrator delegates.
 	taskEvents TaskEventPublisher
+	// taskStopCleanup reaps task-owned non-session runtimes before REVIEW.
+	taskStopCleanup TaskStopCleanupFunc
 
 	// sessionAccessCheck enforces per-user workspace scoping on the
 	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
@@ -936,6 +941,18 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 // receives the primary_session_id.
 func (s *Service) SetOnPrimarySessionSet(fn executor.PrimarySessionSetFunc) {
 	s.executor.SetOnPrimarySessionSet(fn)
+}
+
+// SetOnTaskEnvironmentReady wires task-level consumers after canonical
+// environment persistence.
+func (s *Service) SetOnTaskEnvironmentReady(fn executor.TaskEnvironmentReadyFunc) {
+	s.executor.SetOnTaskEnvironmentReady(fn)
+}
+
+// SetOnTaskStopCleanup wires cleanup for task-owned runtimes that are not
+// represented by active sessions, such as task-scoped language servers.
+func (s *Service) SetOnTaskStopCleanup(fn TaskStopCleanupFunc) {
+	s.taskStopCleanup = fn
 }
 
 // SetRepoCloner sets the repository cloner and updater on the executor, enabling automatic

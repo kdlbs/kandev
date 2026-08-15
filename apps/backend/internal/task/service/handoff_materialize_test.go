@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -100,6 +101,26 @@ func TestMarkOwnerSessionMaterialized_FlipsOwnership(t *testing.T) {
 	}
 	if g.MaterializedKind != orchmodels.WorkspaceGroupKindSingleRepo {
 		t.Errorf("kind = %q", g.MaterializedKind)
+	}
+}
+
+func TestValidateTaskEnvironmentResetBlocksMaterializedWorkspaceGroup(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("owner", "", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	groups.groups["g1"] = &orchmodels.WorkspaceGroup{
+		ID: "g1", WorkspaceID: "ws-1", OwnerTaskID: "owner",
+		MaterializedEnvironmentID: "env-shared",
+	}
+	groups.members["g1"] = map[string]string{"owner": orchmodels.WorkspaceMemberRoleOwner}
+	svc := newMaterializerService(t, tasks, groups, newFakeSessionReader())
+
+	err := svc.ValidateTaskEnvironmentReset(context.Background(), "owner", "env-shared")
+	if !errors.Is(err, ErrEnvironmentShared) {
+		t.Fatalf("materialized group reset validation = %v, want ErrEnvironmentShared", err)
+	}
+	if err := svc.ValidateTaskEnvironmentReset(context.Background(), "owner", "env-other"); err != nil {
+		t.Fatalf("unrelated environment reset was blocked: %v", err)
 	}
 }
 

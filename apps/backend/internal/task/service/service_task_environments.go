@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -27,6 +28,15 @@ type EnvironmentDestroyer interface {
 	// GetContainerLiveStatus returns a real-time snapshot of a Docker container,
 	// or nil when the executor type doesn't have a container layer.
 	GetContainerLiveStatus(ctx context.Context, containerID string) (*ContainerLiveStatus, error)
+}
+
+// TaskEnvironmentRuntimeSecretDeleter removes internal control credentials
+// after runtime teardown and before the durable environment owner is deleted.
+type TaskEnvironmentRuntimeSecretDeleter interface {
+	DeleteTaskEnvironmentRuntimeSecrets(
+		ctx context.Context,
+		taskEnvironmentID, authSecretID, bootstrapSecretID string,
+	) error
 }
 
 // ContainerLiveStatus mirrors lifecycle.ContainerLiveStatus for the task service
@@ -78,12 +88,21 @@ type SessionRunningChecker interface {
 // on the task is still actively running and the caller must stop it first.
 var ErrSessionRunning = errors.New("active session is running on this task; stop it before resetting the environment")
 
+// ErrEnvironmentShared is returned when another live task still references
+// the physical environment. Resetting from one task would destroy warm LSP and
+// workspace state owned by the other task.
+var ErrEnvironmentShared = errors.New("environment is shared by another active task; release the shared workspace before resetting it")
+
 // ErrNoEnvironment is returned when the task has no TaskEnvironment to reset.
 var ErrNoEnvironment = errors.New("no environment exists for this task")
 
 // SetEnvironmentDestroyer wires the runtime-resource destroyer used by ResetTaskEnvironment.
 func (s *Service) SetEnvironmentDestroyer(d EnvironmentDestroyer) {
 	s.envDestroyer = d
+}
+
+func (s *Service) SetTaskEnvironmentRuntimeSecretDeleter(d TaskEnvironmentRuntimeSecretDeleter) {
+	s.runtimeSecretDeleter = d
 }
 
 // SetSessionRunningChecker wires a custom running-session guard. When unset, the
@@ -97,6 +116,9 @@ func (s *Service) SetSessionRunningChecker(c SessionRunningChecker) {
 // the task has no environment yet. Callers (e.g. Executor Settings popover)
 // poll this endpoint to surface live state changes.
 func (s *Service) GetTaskEnvironmentLiveStatus(ctx context.Context, taskID string) (*ContainerLiveStatus, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
 	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil || env == nil {
 		return nil, err
@@ -116,6 +138,9 @@ func (s *Service) GetTaskEnvironmentLiveStatus(ctx context.Context, taskID strin
 // the popover polls this endpoint and a per-poll SSH dial would be both
 // slow and a lot of TCP traffic.
 func (s *Service) GetSSHLiveStatus(ctx context.Context, taskID string) (*SSHLiveStatus, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
 	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil || env == nil {
 		return nil, err
@@ -259,7 +284,70 @@ func sessionBlocksEnvironmentReset(state models.TaskSessionState) bool {
 // GetTaskEnvironmentByTaskID returns the active task environment for a task.
 // Returns nil if no environment exists yet.
 func (s *Service) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
 	return s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+}
+
+// GetTaskEnvironmentForTaskLSP resolves the physical environment a task is
+// allowed to use for its own LSP namespace. Most tasks own the row directly;
+// inherited/shared-workspace tasks prove membership through one of their
+// durable sessions instead of borrowing the environment owner's LSP state.
+func (s *Service) GetTaskEnvironmentForTaskLSP(
+	ctx context.Context,
+	taskID string,
+) (*models.TaskEnvironment, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
+	if s.taskEnvironments == nil {
+		return nil, nil
+	}
+	owned, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil || owned != nil {
+		return owned, err
+	}
+	return s.getInheritedTaskEnvironmentForLSP(ctx, taskID)
+}
+
+func (s *Service) getInheritedTaskEnvironmentForLSP(
+	ctx context.Context,
+	taskID string,
+) (*models.TaskEnvironment, error) {
+	if s.sessions == nil {
+		return nil, nil
+	}
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task sessions for LSP environment: %w", err)
+	}
+	seenEnvironmentIDs := make(map[string]struct{})
+	var environment *models.TaskEnvironment
+	for _, session := range sessions {
+		if session == nil || session.TaskEnvironmentID == "" {
+			continue
+		}
+		if _, seen := seenEnvironmentIDs[session.TaskEnvironmentID]; seen {
+			continue
+		}
+		seenEnvironmentIDs[session.TaskEnvironmentID] = struct{}{}
+		candidate, lookupErr := s.taskEnvironments.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+		if errors.Is(lookupErr, taskrepo.ErrTaskEnvironmentNotFound) {
+			continue
+		}
+		if lookupErr != nil {
+			return nil, fmt.Errorf("resolve inherited task LSP environment: %w", lookupErr)
+		}
+		if candidate == nil {
+			continue
+		}
+		if environment != nil && environment.ID != candidate.ID {
+			return nil, fmt.Errorf("task %s references multiple physical environments", taskID)
+		}
+		environment = candidate
+	}
+	return environment, nil
 }
 
 // ResetTaskEnvironment tears down the task's current environment (container/sandbox/worktree)
@@ -275,12 +363,24 @@ func (s *Service) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string)
 // If opts.PushBranch is set, the branch is pushed before teardown; a failed push
 // aborts the reset and leaves the environment intact so the user can investigate.
 func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts ResetOptions) error {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return err
+	}
+	releaseReset := s.acquireTaskLSPMutation(taskID)
+	defer releaseReset()
 	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("lookup environment: %w", err)
 	}
 	if env == nil {
 		return ErrNoEnvironment
+	}
+	releaseEnvironmentReset := s.acquireTaskLSPEnvironmentMutation(env.ID)
+	defer releaseEnvironmentReset()
+	if s.taskEnvironmentResetGuard != nil {
+		if err := s.taskEnvironmentResetGuard.ValidateTaskEnvironmentReset(ctx, taskID, env.ID); err != nil {
+			return err
+		}
 	}
 
 	// Fail closed: if the running-session check itself errors (DB hiccup,
@@ -293,6 +393,13 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 	}
 	if running {
 		return ErrSessionRunning
+	}
+	shared, err := s.hasOtherLiveTasksForEnvironment(ctx, taskID, env)
+	if err != nil {
+		return fmt.Errorf("check shared environment sessions before reset: %w", err)
+	}
+	if shared {
+		return ErrEnvironmentShared
 	}
 
 	s.logger.Info("resetting task environment",
@@ -312,8 +419,16 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 			return fmt.Errorf("push branch before reset: %w", err)
 		}
 	}
+	if s.taskLSP != nil {
+		if err := s.taskLSP.CleanupTask(ctx, taskID, "task_environment_reset"); err != nil {
+			return fmt.Errorf("stop task language servers before environment reset: %w", err)
+		}
+	}
 
 	if err := s.teardownEnvironmentResources(ctx, env); err != nil {
+		return err
+	}
+	if err := s.deleteTaskEnvironmentRuntimeSecrets(ctx, env); err != nil {
 		return err
 	}
 
@@ -323,6 +438,26 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 	s.logger.Info("task environment reset complete",
 		zap.String("task_id", taskID),
 		zap.String("env_id", env.ID))
+	return nil
+}
+
+func (s *Service) deleteTaskEnvironmentRuntimeSecrets(ctx context.Context, env *models.TaskEnvironment) error {
+	if env == nil || env.ID == "" {
+		return nil
+	}
+	needsCleanup := env.ExecutorType == string(models.ExecutorTypeLocalDocker) ||
+		env.AgentctlAuthSecretID != "" || env.AgentctlBootstrapSecretID != ""
+	if !needsCleanup {
+		return nil
+	}
+	if s.runtimeSecretDeleter == nil {
+		return fmt.Errorf("runtime secret deleter not configured; preserve task environment %s", env.ID)
+	}
+	if err := s.runtimeSecretDeleter.DeleteTaskEnvironmentRuntimeSecrets(
+		ctx, env.ID, env.AgentctlAuthSecretID, env.AgentctlBootstrapSecretID,
+	); err != nil {
+		return fmt.Errorf("delete task environment runtime secrets: %w", err)
+	}
 	return nil
 }
 

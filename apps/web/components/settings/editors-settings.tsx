@@ -11,7 +11,6 @@ import { SettingsTarget } from "@/components/settings/settings-target";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { EditableCard } from "@/components/settings/editable-card";
-import { LspStatusLocationSetting } from "@/components/settings/lsp-status-location-setting";
 import {
   EditorForm,
   type EditorFormState,
@@ -397,6 +396,7 @@ function getEditorsSaveRevision(state: EditorsSettingsState): string {
     defaultEditorId: state.defaultEditorId,
     lspAutoStartLanguages: state.lspAutoStartLanguages,
     lspAutoInstallLanguages: state.lspAutoInstallLanguages,
+    lspStatusHiddenLanguages: state.lspStatusHiddenLanguages,
     lspStatusLocation: state.lspStatusLocation,
     lspConfigStrings: state.lspConfigStrings,
   });
@@ -414,7 +414,8 @@ export function EditorsSettings() {
   const saveDefaultRequest = useSaveRequest(state);
   const { createRequest, updateRequest, deleteRequest } = useEditorRequests(state, applyEditors);
   const { updateLspConfigString } = useLspConfigActions(setLspConfigStrings, setLspConfigErrors);
-  const { toggleAutoStart, toggleAutoInstall } = useLspLanguageToggles(state);
+  const { toggleAutoStart, toggleAutoInstall, toggleStatusVisibility } =
+    useLspLanguageToggles(state);
   const isDirty = isEditorsSettingsDirty(state);
   const saveRevision = getEditorsSaveRevision(state);
   const hasInvalidConfig = Object.keys(state.lspConfigErrors).length > 0;
@@ -458,13 +459,11 @@ export function EditorsSettings() {
             lspAutoInstallLanguages={state.lspAutoInstallLanguages}
             baselineLspAutoStart={state.baselineLspAutoStart}
             baselineLspAutoInstall={state.baselineLspAutoInstall}
+            lspStatusHiddenLanguages={state.lspStatusHiddenLanguages}
+            baselineLspStatusHiddenLanguages={state.baselineLspStatusHiddenLanguages}
             toggleAutoStart={toggleAutoStart}
             toggleAutoInstall={toggleAutoInstall}
-          />
-          <LspStatusLocationSetting
-            value={state.lspStatusLocation}
-            baseline={state.baselineLspStatusLocation}
-            onChange={state.setLspStatusLocation}
+            toggleStatusVisibility={toggleStatusVisibility}
           />
           <LspServerConfigSection
             lspConfigStrings={state.lspConfigStrings}

@@ -119,14 +119,26 @@ type Manager struct {
 	// launches. See manager_base_branches.go.
 	baseBranchProvider BaseBranchProvider
 
-	// secretStore encrypts/decrypts runtime auth tokens (e.g., agentctl handshake tokens).
-	// Used to persist tokens across backend restarts for remote executor recovery.
+	// secretStore resolves user-selected profile and environment credentials.
+	// Production wires a user-visible filter so internal runtime IDs cannot be
+	// referenced by project-controlled configuration.
 	secretStore secrets.SecretStore
+	// runtimeSecretStore encrypts task-environment-owned agentctl control
+	// credentials. It bypasses the user-visible filter but is never used for
+	// profile or environment resolution.
+	runtimeSecretStore secrets.SecretStore
 
 	// runningWriter persists the executors_running row in lockstep with executionStore.
 	// See SetExecutorRunningWriter and persistence.go. The lifecycle manager is the
 	// only component allowed to write the lifecycle-owned columns of this table.
 	runningWriter ExecutorRunningWriter
+	// taskEnvironmentRuntimeSecretWriter persists encrypted Docker control
+	// secret references at the task-environment ownership boundary. Unlike an
+	// executors_running row, this owner remains present when only the task host
+	// is live and every user session has stopped.
+	taskEnvironmentRuntimeSecretWriter TaskEnvironmentRuntimeSecretWriter
+	taskEnvironmentCredentialMu        sync.Mutex
+	taskEnvironmentCredentialLocks     map[string]*taskEnvironmentCredentialLock
 
 	// executorProfileReader resolves the executor profile bound to a task
 	// environment so user shell terminals can be given the same profile env
@@ -463,9 +475,15 @@ func (m *Manager) SetPreparerRegistry(registry *PreparerRegistry) {
 	m.preparerRegistry = registry
 }
 
-// SetSecretStore sets the secret store for encrypting runtime auth tokens.
+// SetSecretStore sets the filtered store used for user-selected credentials.
 func (m *Manager) SetSecretStore(store secrets.SecretStore) {
 	m.secretStore = store
+}
+
+// SetRuntimeSecretStore sets the internal store used only for lifecycle-owned
+// agentctl control credentials.
+func (m *Manager) SetRuntimeSecretStore(store secrets.SecretStore) {
+	m.runtimeSecretStore = store
 }
 
 // SetAgentProfileReader wires the reader the launch-prep SkillDeployer uses

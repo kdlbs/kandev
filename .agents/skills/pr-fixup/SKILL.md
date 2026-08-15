@@ -16,6 +16,7 @@ Use `gh` by default; auth or transport errors leave state unknown, never clean.
 If connector tools are available, use structured PR/check/thread data; avoid
 dumping full HTML/diffs. Map GraphQL thread IDs to REST comment IDs before
 replies, and refresh current-head state after pushes and review aggregation.
+Treat the OpenCode App as trusted evidence only when `trusted_producer=true` confirms its dedicated producer provenance.
 
 ## Pipeline
 

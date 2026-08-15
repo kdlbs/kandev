@@ -584,7 +584,9 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 		for _, folder := range folders {
 			if folder != nil {
-				info.WorkspaceFolders = append(info.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: folder.DisplayName, LocalPath: folder.LocalPath})
+				info.WorkspaceFolders = append(info.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{
+					Name: folder.DisplayName, LocalPath: folder.LocalPath, Position: folder.Position,
+				})
 			}
 		}
 	}
@@ -639,6 +641,12 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		if running.ContainerID != "" {
 			ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = running.ContainerID
 		}
+	}
+	// The task environment is the durable owner for Docker control
+	// credentials. Re-apply it after legacy session metadata so a stale
+	// executors_running mirror cannot override a rotated task-owned reference.
+	if taskEnv != nil {
+		applyTaskEnvironmentRuntimeSecretsToWorkspaceInfo(info, taskEnv)
 	}
 	if session.ExecutorID != "" {
 		exec, err := s.executors.GetExecutor(ctx, session.ExecutorID)
@@ -705,6 +713,7 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 		taskRepository, repository := projection.taskRepository, projection.repository
 		spec := lifecycle.WorkspaceRepositorySpec{
 			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
+			Position:   taskRepository.Position,
 			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
@@ -713,6 +722,10 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 			spec.WorktreeID = worktree.WorktreeID
 			spec.BranchSlug = worktree.BranchSlug
 			spec.BranchIdentitySlug = worktree.BranchSlug
+			if info.ExecutorType == string(models.ExecutorTypeLocalDocker) {
+				physicalPosition := worktree.Position
+				spec.TaskHostPosition = &physicalPosition
+			}
 		}
 		info.WorkspaceRepositories = append(info.WorkspaceRepositories, spec)
 	}
@@ -854,6 +867,9 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	// while the ID still pointed at the stale row — a mismatch downstream
 	// reconcilers and progress events would key off the wrong env.
 	info.TaskEnvironmentID = env.ID
+	if info.ExecutorType == "" {
+		info.ExecutorType = env.ExecutorType
+	}
 	if info.ExecutorProfileID == "" {
 		info.ExecutorProfileID = env.ExecutorProfileID
 	}
@@ -865,6 +881,19 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	}
 	if env.SandboxID != "" {
 		ensureWorkspaceMetadata(info)["sprite_name"] = env.SandboxID
+	}
+	applyTaskEnvironmentRuntimeSecretsToWorkspaceInfo(info, env)
+}
+
+func applyTaskEnvironmentRuntimeSecretsToWorkspaceInfo(
+	info *lifecycle.WorkspaceInfo,
+	env *models.TaskEnvironment,
+) {
+	if env.AgentctlAuthSecretID != "" {
+		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyAuthTokenSecret] = env.AgentctlAuthSecretID
+	}
+	if env.AgentctlBootstrapSecretID != "" {
+		ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyBootstrapNonceSecret] = env.AgentctlBootstrapSecretID
 	}
 }
 
@@ -956,7 +985,105 @@ func (s *Service) GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnviro
 		}
 		return info, nil
 	}
-	return nil, fmt.Errorf("task environment %s has no linked task session", taskEnvironmentID)
+	return s.getTaskOwnedWorkspaceInfo(ctx, env)
+}
+
+// GetWorkspaceInfoForTaskLSP projects task-specific roots and settings onto a
+// validated physical environment. Shared-workspace borrowers therefore keep
+// independent LSP namespaces while executing inside the same task host.
+func (s *Service) GetWorkspaceInfoForTaskLSP(
+	ctx context.Context,
+	taskID, taskEnvironmentID string,
+) (*lifecycle.WorkspaceInfo, error) {
+	environment, err := s.GetTaskEnvironmentForTaskLSP(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if environment == nil || environment.ID != taskEnvironmentID {
+		return nil, fmt.Errorf("task %s is not a member of task environment %s", taskID, taskEnvironmentID)
+	}
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task sessions for LSP workspace: %w", err)
+	}
+	matching := make([]*models.TaskSession, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && session.TaskEnvironmentID == taskEnvironmentID {
+			matching = append(matching, session)
+		}
+	}
+	if len(matching) == 0 {
+		if environment.TaskID != taskID {
+			return nil, fmt.Errorf("task %s has no session in task environment %s", taskID, taskEnvironmentID)
+		}
+		return s.getTaskOwnedWorkspaceInfo(ctx, environment)
+	}
+	sort.SliceStable(matching, func(i, j int) bool {
+		if !matching[i].StartedAt.Equal(matching[j].StartedAt) {
+			return matching[i].StartedAt.After(matching[j].StartedAt)
+		}
+		if !matching[i].UpdatedAt.Equal(matching[j].UpdatedAt) {
+			return matching[i].UpdatedAt.After(matching[j].UpdatedAt)
+		}
+		return matching[i].ID > matching[j].ID
+	})
+	info, err := s.GetWorkspaceInfoForSession(ctx, taskID, matching[0].ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateBorrowedTaskHostRepositoryMapping(taskID, environment, info); err != nil {
+		return nil, err
+	}
+	return info, nil
+}
+
+func validateBorrowedTaskHostRepositoryMapping(
+	taskID string,
+	environment *models.TaskEnvironment,
+	info *lifecycle.WorkspaceInfo,
+) error {
+	if environment == nil || environment.TaskID == taskID ||
+		environment.ExecutorType != string(models.ExecutorTypeLocalDocker) || info == nil {
+		return nil
+	}
+	for _, repository := range info.WorkspaceRepositories {
+		if repository.TaskHostPosition == nil {
+			return fmt.Errorf(
+				"task %s has no physical repository mapping for %s in task environment %s",
+				taskID, repository.RepositoryID, environment.ID,
+			)
+		}
+	}
+	return nil
+}
+
+func (s *Service) getTaskOwnedWorkspaceInfo(
+	ctx context.Context,
+	env *models.TaskEnvironment,
+) (*lifecycle.WorkspaceInfo, error) {
+	info := &lifecycle.WorkspaceInfo{
+		TaskID: env.TaskID, TaskEnvironmentID: env.ID,
+		WorkspacePath: env.WorkspacePath, TaskDirName: env.TaskDirName,
+		ExecutorType: env.ExecutorType,
+	}
+	applyTaskEnvironmentToWorkspaceInfo(info, env)
+	if s.workspaceFolders != nil {
+		folders, err := s.workspaceFolders.ListTaskWorkspaceFolders(ctx, env.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("list task workspace folders: %w", err)
+		}
+		for _, folder := range folders {
+			if folder != nil {
+				info.WorkspaceFolders = append(info.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{
+					Name: folder.DisplayName, LocalPath: folder.LocalPath, Position: folder.Position,
+				})
+			}
+		}
+	}
+	if err := s.populateWorkspaceRepositorySpecs(ctx, env.TaskID, env.Repos, info); err != nil {
+		return nil, err
+	}
+	return info, nil
 }
 
 func isExecutorRunningNotFoundError(err error) bool {

@@ -86,6 +86,8 @@ type Manager struct {
 	cfg    *config.InstanceConfig
 	logger *logger.Logger
 
+	backgroundWork atomic.Int64
+
 	// Process state
 	cmd                *exec.Cmd
 	processLifecycle   processLifecycleHandle
@@ -225,6 +227,25 @@ type Manager struct {
 	killGroupFn      func(int) error
 	waitGroupExitFn  func(context.Context, int) bool
 	managerWaitFn    func(context.Context, <-chan struct{}, time.Duration) bool
+}
+
+// BeginBackgroundWork marks instance-owned work that must survive browser and
+// request inactivity. The returned release function is safe to call more than
+// once.
+func (m *Manager) BeginBackgroundWork() func() {
+	m.backgroundWork.Add(1)
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			m.backgroundWork.Add(-1)
+		})
+	}
+}
+
+// HasBackgroundWork reports whether instance-owned work still requires this
+// task host. It is consumed by the instance idle reaper.
+func (m *Manager) HasBackgroundWork() bool {
+	return m.backgroundWork.Load() > 0
 }
 
 // ErrManagerStopping indicates that process admission is closed for teardown.
@@ -772,15 +793,48 @@ func (m *Manager) ListProcesses(sessionID string) []ProcessInfo {
 // per-repo tracker discovered at construction time. Empty for single-repo
 // workspaces. Used by callers that want to fan an op out across repos.
 func (m *Manager) RepoSubpaths() []string {
-	_, trackers := m.snapshotTrackers()
-	out := make([]string, 0, len(trackers))
+	m.repoTrackersMu.RLock()
+	trackers := append([]*WorkspaceTracker(nil), m.repoTrackers...)
+	roots := append([]string(nil), m.workspaceSourceRoots...)
+	m.repoTrackersMu.RUnlock()
+	type rankedRepository struct {
+		name string
+		rank int
+	}
+	ranked := make([]rankedRepository, 0, len(trackers))
 	for _, t := range trackers {
 		if t.repositoryName != "" {
-			out = append(out, t.repositoryName)
+			ranked = append(ranked, rankedRepository{
+				name: t.repositoryName,
+				rank: workspaceSourceRank(t.workDir, roots),
+			})
 		}
 	}
-	sort.Strings(out)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].rank != ranked[j].rank {
+			return ranked[i].rank < ranked[j].rank
+		}
+		return ranked[i].name < ranked[j].name
+	})
+	out := make([]string, 0, len(ranked))
+	for _, repository := range ranked {
+		out = append(out, repository.name)
+	}
 	return out
+}
+
+func workspaceSourceRank(path string, roots []string) int {
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(path))
+	if err != nil {
+		resolved = filepath.Clean(path)
+	}
+	for index, root := range roots {
+		relative, relErr := filepath.Rel(root, resolved)
+		if relErr == nil && !pathEscapesRoot(relative) {
+			return index
+		}
+	}
+	return len(roots)
 }
 
 // RepositoryScopes returns the stable scope order used by unpinned Git API

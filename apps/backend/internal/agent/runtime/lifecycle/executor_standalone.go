@@ -2,7 +2,9 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"go.uber.org/zap"
@@ -24,6 +26,11 @@ type StandaloneExecutor struct {
 	authToken         string // per-launch auth token from launcher
 	logger            *logger.Logger
 	interactiveRunner *process.InteractiveRunner
+}
+
+type taskHostStandaloneControl interface {
+	GetInstance(context.Context, string) (*agentctl.InstanceInfo, error)
+	CreateInstance(context.Context, *agentctl.CreateInstanceRequest) (*agentctl.CreateInstanceResponse, error)
 }
 
 // NewStandaloneExecutor creates a new standalone runtime.
@@ -160,7 +167,16 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		zap.String("req_protocol", req.Protocol),
 		zap.String("createReq_protocol", createReq.Protocol))
 
-	resp, err := r.ctl.CreateInstance(ctx, createReq)
+	var resp *agentctl.CreateInstanceResponse
+	var reused bool
+	var err error
+	if req.IsTaskHost {
+		resp, reused, err = ensureStandaloneTaskHostInstance(
+			ctx, r.ctl, createReq, req.RequireExistingInstance,
+		)
+	} else {
+		resp, err = r.ctl.CreateInstance(ctx, createReq)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create standalone instance: %w", err)
 	}
@@ -187,7 +203,8 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	r.logger.Debug("standalone instance created",
 		zap.String("instance_id", req.InstanceID),
 		zap.Int("port", resp.Port),
-		zap.String("workspace", req.WorkspacePath))
+		zap.String("workspace", req.WorkspacePath),
+		zap.Bool("reused", reused))
 
 	return &ExecutorInstance{
 		InstanceID:           req.InstanceID,
@@ -200,6 +217,52 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		WorkspacePath:        req.WorkspacePath,
 		Metadata:             metadata,
 	}, nil
+}
+
+func ensureStandaloneTaskHostInstance(
+	ctx context.Context,
+	control taskHostStandaloneControl,
+	request *agentctl.CreateInstanceRequest,
+	requireExisting bool,
+) (*agentctl.CreateInstanceResponse, bool, error) {
+	existing, err := control.GetInstance(ctx, request.ID)
+	if err == nil {
+		return validateStandaloneTaskHostInstance(existing, request)
+	}
+	if !errors.Is(err, agentctl.ErrInstanceNotFound) {
+		return nil, false, fmt.Errorf("inspect existing task-host instance: %w", err)
+	}
+	if requireExisting {
+		return nil, false, errTaskHostRuntimeNotFound
+	}
+	created, createErr := control.CreateInstance(ctx, request)
+	if createErr == nil {
+		return created, false, nil
+	}
+	// If two backend processes briefly overlap during restart, exactly one wins
+	// creation. Re-read the stable ID and attach to the winner instead of
+	// launching a second instance under another identity.
+	existing, getErr := control.GetInstance(ctx, request.ID)
+	if getErr == nil {
+		return validateStandaloneTaskHostInstance(existing, request)
+	}
+	return nil, false, createErr
+}
+
+func validateStandaloneTaskHostInstance(
+	existing *agentctl.InstanceInfo,
+	request *agentctl.CreateInstanceRequest,
+) (*agentctl.CreateInstanceResponse, bool, error) {
+	if existing == nil || existing.Port <= 0 {
+		return nil, false, errors.New("existing task-host instance is unavailable")
+	}
+	if filepath.Clean(existing.WorkspacePath) != filepath.Clean(request.WorkspacePath) {
+		return nil, false, fmt.Errorf(
+			"task-host instance workspace mismatch: got %q, want %q",
+			existing.WorkspacePath, request.WorkspacePath,
+		)
+	}
+	return &agentctl.CreateInstanceResponse{ID: existing.ID, Port: existing.Port}, true, nil
 }
 
 func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {

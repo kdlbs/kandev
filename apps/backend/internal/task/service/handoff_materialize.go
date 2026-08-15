@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -26,6 +27,23 @@ func (s *HandoffService) GetSharedGroupEnvironment(ctx context.Context, taskID s
 		return ""
 	}
 	return g.MaterializedEnvironmentID
+}
+
+// ValidateTaskEnvironmentReset prevents a task-local reset from invalidating
+// the durable environment pointer owned by an active workspace group. Group
+// teardown remains the cleanup owner for that physical environment.
+func (s *HandoffService) ValidateTaskEnvironmentReset(ctx context.Context, taskID, environmentID string) error {
+	if s.wsGroups == nil || taskID == "" || environmentID == "" {
+		return nil
+	}
+	group, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("resolve workspace group before environment reset: %w", err)
+	}
+	if group != nil && group.MaterializedEnvironmentID == environmentID {
+		return ErrEnvironmentShared
+	}
+	return nil
 }
 
 // MarkOwnerSessionMaterialized records the materialized workspace on a
