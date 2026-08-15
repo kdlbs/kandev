@@ -252,8 +252,32 @@ func TestSessionCodeStatsProtoRoundTrip(t *testing.T) {
 		LinesDeletedCommitted:   40,
 		LinesAddedPeakPending:   15,
 		LinesDeletedPeakPending: 3,
+		CommittedLinesAvailable: true,
 	}
 	proto := stats.toProto()
+	require.Equal(t, stats, sessionCodeStatsFromProto(proto))
+}
+
+// A session that predates commit-capture activation reports
+// CommittedLinesAvailable == false, not a real measurement, for committed
+// lines — the wire contract must round-trip that unavailability exactly,
+// not silently present it as a real zero-change session. LinesAddedCommitted/
+// LinesDeletedCommitted stay plain int64 (not pointers) because they are
+// already-shipped public SDK fields (ADR 0043's additive-only DTO contract);
+// see SessionCodeStats' doc comment.
+func TestSessionCodeStatsProtoRoundTrip_CommittedLinesUnavailable(t *testing.T) {
+	stats := SessionCodeStats{
+		SessionID:               "session-legacy",
+		LinesAddedCommitted:     0,
+		LinesDeletedCommitted:   0,
+		LinesAddedPeakPending:   7,
+		LinesDeletedPeakPending: 1,
+		CommittedLinesAvailable: false,
+	}
+	proto := stats.toProto()
+	if proto.GetCommittedLinesAvailable() {
+		t.Errorf("proto.CommittedLinesAvailable = true, want false")
+	}
 	require.Equal(t, stats, sessionCodeStatsFromProto(proto))
 }
 

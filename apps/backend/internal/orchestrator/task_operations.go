@@ -2995,7 +2995,7 @@ func (s *Service) CaptureArchiveSnapshot(ctx context.Context, sessionID string) 
 	}
 
 	// Capture commits - baseBranch can be used for merge-base even if baseCommit is empty
-	if !s.captureArchiveCommits(ctx, sessionID, baseCommit, baseBranch) {
+	if !s.captureCommitsForTrigger(ctx, sessionID, baseCommit, baseBranch, commitCaptureTriggerArchive) {
 		// Agent not running, skip diff capture as well
 		return nil
 	}
@@ -3043,26 +3043,105 @@ func (s *Service) resolveArchiveBaseCommitAndBranch(ctx context.Context, session
 	return "", baseBranch, nil
 }
 
-// captureArchiveCommits fetches and saves commits from baseCommit to HEAD.
-// If targetBranch is provided, uses dynamic merge-base for accurate filtering.
-// Returns false if the agent is not running (caller should skip remaining capture).
-func (s *Service) captureArchiveCommits(ctx context.Context, sessionID, baseCommit, targetBranch string) bool {
+// captureCommitsForTrigger fetches commits from baseCommit to HEAD and
+// persists them tagged with trigger (see persistSessionCommit). If
+// targetBranch is provided, uses dynamic merge-base for accurate filtering.
+// Returns false if the agent is not running (caller should skip remaining
+// capture that also needs it, e.g. archive's diff capture).
+func (s *Service) captureCommitsForTrigger(ctx context.Context, sessionID, baseCommit, targetBranch string, trigger commitCaptureTrigger) bool {
 	logResult, err := s.agentManager.GetGitLog(ctx, sessionID, baseCommit, 0, targetBranch) // 0 = no limit
 	if err != nil {
-		s.logger.Warn("failed to capture git log for archive",
+		s.logger.Warn("failed to capture git log",
 			zap.String("session_id", sessionID),
+			zap.String("trigger", string(trigger)),
 			zap.Error(err))
 		return true // Continue with diff capture even if log fails
 	}
 	if logResult == nil {
-		s.logger.Debug("agent not running, skipping archive snapshot capture",
-			zap.String("session_id", sessionID))
+		s.logger.Debug("agent not running, skipping commit capture",
+			zap.String("session_id", sessionID),
+			zap.String("trigger", string(trigger)))
 		return false
 	}
+	s.recordCommitCaptureFetchFailures(sessionID, trigger, logResult)
 	if logResult.Success && len(logResult.Commits) > 0 {
-		s.saveArchiveCommits(ctx, sessionID, logResult.Commits)
+		s.persistCommits(ctx, sessionID, trigger, logResult.Commits)
 	}
 	return true
+}
+
+// recordCommitCaptureFetchFailures makes a GetGitLog-level failure
+// observable instead of silently dropping it. logResult can fail two ways
+// that are otherwise indistinguishable from "nothing to capture this time":
+// a total result-level failure (logResult.Success == false, single-repo git
+// command failure or every repo failed in a multi-repo fan-out), or a
+// partial multi-repo failure (Success == true because at least one repo
+// succeeded, but PerRepoErrors names the ones that didn't). A multi-repo
+// total failure sets BOTH Success == false AND populates PerRepoErrors for
+// every repo (see agentctl/server/api/git.go's mergeGitLogResults), so this
+// records one failure per PerRepoErrors entry when present, and only falls
+// back to counting the top-level Success == false once when PerRepoErrors is
+// empty (the single-repo case) - never both, to avoid double-counting.
+func (s *Service) recordCommitCaptureFetchFailures(sessionID string, trigger commitCaptureTrigger, logResult *client.GitLogResult) {
+	if len(logResult.PerRepoErrors) > 0 {
+		for _, repoErr := range logResult.PerRepoErrors {
+			recordCommitCaptureFetchFailed(trigger)
+			s.logger.Warn("git log capture failed for repository",
+				zap.String("session_id", sessionID),
+				zap.String("trigger", string(trigger)),
+				zap.String("repository_name", repoErr.RepositoryName),
+				zap.String("error", repoErr.Error))
+		}
+		return
+	}
+	if !logResult.Success {
+		recordCommitCaptureFetchFailed(trigger)
+		s.logger.Warn("git log capture reported failure",
+			zap.String("session_id", sessionID),
+			zap.String("trigger", string(trigger)),
+			zap.String("error", logResult.Error))
+	}
+}
+
+// captureSessionCommitsSweep reconciles task_session_commits against
+// agentctl while the agent process is still alive. The live event-driven
+// path (handleGitCommitCreated) can miss a commit that was pushed just
+// before agentctl's next poll tick (see filterLocalCommits' upstream-commit
+// filter), and this sweep is the only trigger guaranteed to run with the
+// agent still running - unlike archive capture, whose GetGitLog call
+// usually finds the agent process already gone. Cost is one
+// `git log --shortstat base..HEAD`, the same command agentctl's own poller
+// already runs on every tick. Best-effort: errors are logged and swallowed,
+// matching captureGitStatusSnapshot alongside which this is called.
+//
+// Called from handleAgentCompletedLocked while it holds the per-session
+// cancel-in-flight mutex (acquireCancelInFlightGuard) - the same mutex
+// stopTaskSessionForCoordinator and DeleteSession need to serve a user's
+// Stop/Cancel/Delete for this session. GetGitLog is a real git shellout
+// through agentctl with no bound of its own beyond the agentctl HTTP
+// client's 60s default timeout, so an undecorated ctx here could hold that
+// mutex - and therefore Stop/Cancel/Delete - for up to a minute on every
+// single turn completion. Bound it the same way the pre-existing archive
+// capture call site already does (service_tasks.go's CaptureArchiveSnapshot:
+// "Use a bounded timeout to prevent blocking the archive operation if
+// agentctl is stuck"). A timeout here falls through the existing
+// warn-and-continue path in captureCommitsForTrigger; archive capture
+// remains the reconciliation pass, so nothing is permanently lost.
+func (s *Service) captureSessionCommitsSweep(ctx context.Context, sessionID string) {
+	sweepCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	baseCommit, baseBranch, err := s.resolveArchiveBaseCommitAndBranch(sweepCtx, sessionID)
+	if err != nil {
+		s.logger.Debug("failed to resolve base commit for commit sweep",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if baseCommit == "" && baseBranch == "" {
+		return
+	}
+	s.captureCommitsForTrigger(sweepCtx, sessionID, baseCommit, baseBranch, commitCaptureTriggerSweep)
 }
 
 // captureGitStatusSnapshot fetches the current (cached) git status from agentctl
@@ -3217,11 +3296,13 @@ func parseCommitTime(s string) time.Time {
 	return t.UTC()
 }
 
-// saveArchiveCommits persists commits to the database for archive purposes.
-func (s *Service) saveArchiveCommits(ctx context.Context, sessionID string, commits []*client.GitCommitInfo) {
+// persistCommits persists a batch of commits fetched via GetGitLog, tagged
+// with trigger. Shared by archive capture and the per-turn reconcile sweep
+// (captureSessionCommitsSweep) - see persistSessionCommit for the
+// idempotent single-commit write and writer-health counters.
+func (s *Service) persistCommits(ctx context.Context, sessionID string, trigger commitCaptureTrigger, commits []*client.GitCommitInfo) {
 	for _, commit := range commits {
-		if err := s.repo.CreateSessionCommit(ctx, &models.SessionCommit{
-			SessionID:     sessionID,
+		s.persistSessionCommit(ctx, sessionID, trigger, &models.SessionCommit{
 			CommitSHA:     commit.CommitSHA,
 			ParentSHA:     commit.ParentSHA,
 			AuthorName:    commit.AuthorName,
@@ -3231,16 +3312,43 @@ func (s *Service) saveArchiveCommits(ctx context.Context, sessionID string, comm
 			FilesChanged:  commit.FilesChanged,
 			Insertions:    commit.Insertions,
 			Deletions:     commit.Deletions,
-		}); err != nil {
-			s.logger.Warn("failed to save commit for archive",
-				zap.String("session_id", sessionID),
-				zap.String("commit_sha", commit.CommitSHA),
-				zap.Error(err))
-		}
+		})
 	}
-	s.logger.Debug("saved archive commits",
+	s.logger.Debug("persisted commits",
 		zap.String("session_id", sessionID),
+		zap.String("trigger", string(trigger)),
 		zap.Int("count", len(commits)))
+}
+
+// persistSessionCommit is the single write path shared by the live commit
+// event (handleGitCommitCreated), the per-turn reconcile sweep
+// (captureSessionCommitsSweep), and archive capture (saveArchiveCommits). It
+// records writer-health counters (commit_capture_*, see
+// commit_capture_metrics.go) so a trigger that silently stops firing is
+// observable, and treats CreateSessionCommit reporting a duplicate
+// (session_id, commit_sha) as a normal outcome, not a failure - the same
+// underlying git commit is expected to be observed by more than one trigger.
+func (s *Service) persistSessionCommit(ctx context.Context, sessionID string, trigger commitCaptureTrigger, commit *models.SessionCommit) {
+	if s.repo == nil {
+		return
+	}
+	recordCommitCaptureObserved(trigger)
+	commit.SessionID = sessionID
+	inserted, err := s.repo.CreateSessionCommit(ctx, commit)
+	if err != nil {
+		recordCommitCaptureFailed(trigger)
+		s.logger.Warn("failed to persist session commit",
+			zap.String("session_id", sessionID),
+			zap.String("commit_sha", commit.CommitSHA),
+			zap.String("trigger", string(trigger)),
+			zap.Error(err))
+		return
+	}
+	if inserted {
+		recordCommitCaptureInserted(trigger)
+	} else {
+		recordCommitCaptureDuplicate(trigger)
+	}
 }
 
 // PromptTask sends a follow-up prompt to a running agent for a task session.

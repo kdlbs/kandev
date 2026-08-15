@@ -255,21 +255,14 @@ func TestDeleteProfileEndpoint(t *testing.T) {
 		}
 	})
 
-	// KNOWN DEFECT, asserted as-is rather than fixed here: this test is
-	// test-only work. controller.DeleteProfile classifies the missing-source
-	// lookup with a `strings.Contains(err.Error(), "agent profile not found")`
-	// check, but the sqlite store returns sql.ErrNoRows from GetAgentProfile
-	// (its soft-delete tests pin that), so the message never matches and the
-	// error falls through as a 500. The sibling helper isProfileNotFoundErr in
-	// the same file already handles both shapes and is what DuplicateProfile
-	// uses. When DeleteProfile is switched to it, this expectation becomes 404
-	// with an "agent profile not found" body.
-	t.Run("unknown profile currently reports 500 instead of 404", func(t *testing.T) {
+	// The source lookup reports a missing row as sql.ErrNoRows, so classifying
+	// it by message alone silently drops through to the 500 branch.
+	t.Run("unknown profile is 404", func(t *testing.T) {
 		repo := newFakeSettingsRepo()
 		hub := &duplicateHub{}
 		router := newSettingsRouter(t, repo, hub)
 		response := doSettingsRequest(router, http.MethodDelete, "/api/v1/agent-profiles/missing", "")
-		requireErrorBody(t, response, http.StatusInternalServerError, "failed to delete profile")
+		requireErrorBody(t, response, http.StatusNotFound, "agent profile not found")
 		if len(hub.actions()) != 0 {
 			t.Fatalf("failed delete broadcast %v", hub.actions())
 		}

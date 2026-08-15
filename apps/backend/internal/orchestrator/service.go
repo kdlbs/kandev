@@ -288,7 +288,7 @@ type sessionExecutorStore interface {
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	DeleteLiveMonitorSnapshots(ctx context.Context, sessionID string) error
 	UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
-	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
+	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error)
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error
 	// Session listing + delete

@@ -493,7 +493,7 @@ export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: str
       icon={<IconBrandAzure className="h-5 w-5" />}
       title={t("azuredevops:integrationTitle")}
       description={t("azuredevops:integrationDescription")}
-      action={<AzureDevOpsEnabledControl />}
+      action={<AzureDevOpsEnabledControl workspaceId={workspaceId} />}
     >
       <Card>
         <CardContent className="space-y-4 pt-6">

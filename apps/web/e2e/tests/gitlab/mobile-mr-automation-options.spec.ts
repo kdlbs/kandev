@@ -5,6 +5,7 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import type { Locator } from "@playwright/test";
+import { dwell } from "../../helpers/causal-waits";
 
 const MR_IID = 211;
 
@@ -19,7 +20,12 @@ async function expectTouchTarget(locator: Locator, label: string) {
 // A boundingBox() measured mid-animation reports the pre-settle scaled-down
 // size, not the final CSS size — wait past the animation before measuring.
 async function waitForDropdownSettled(page: import("@playwright/test").Page) {
-  await page.waitForTimeout(200);
+  await dwell(
+    page,
+    200,
+    "library-timer",
+    "@kandev/ui's DropdownMenuContent runs a 100ms zoom-in entrance animation that publishes nothing on completion, and a boundingBox read mid-animation reports the pre-settle scaled size",
+  );
 }
 
 async function seedTaskWithLinkedMR(apiClient: ApiClient, seedData: SeedData, title: string) {

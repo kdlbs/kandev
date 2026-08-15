@@ -21,18 +21,56 @@ export function isCandidate(repoPath) {
 }
 
 /**
- * Candidate paths matching `filter` (a `--diff-filter` value) between `base` and
- * the working tree.
+ * Only Playwright E2E sources, for the sleep ratchet.
+ *
+ * The exact complement of the `e2e/` exclusion in {@link isCandidate}: the i18n
+ * guard skips this tree because tests build fixtures out of literals on purpose,
+ * and the sleep guard exists only for this tree. `.spec.ts` files are the
+ * *primary* target here rather than an exclusion, which is why this cannot be
+ * expressed as options on the other predicate.
+ *
+ * `causal-waits.ts` is not excluded here. Exemption belongs to the eslint config
+ * (`SLEEP_EXEMPT_FILES`), so the editor, the preview and the gate all read one
+ * list; filtering it out at selection time as well would be a second place to
+ * keep in sync, and the one that fails silently.
+ */
+export function isE2eCandidate(repoPath) {
+  if (!repoPath.startsWith(WEB_PREFIX)) return false;
+  const rel = repoPath.slice(WEB_PREFIX.length);
+  return rel.startsWith("e2e/") && /\.tsx?$/.test(rel);
+}
+
+/**
+ * Every path matching `filter` (a `--diff-filter` value) between `base` and the
+ * working tree, unfiltered.
  *
  * `--find-renames` explicitly: rename detection defaults on since Git 2.9, but a
  * repo with diff.renames=false would report a moved file as ADDED, and an added
  * file is judged whole — demanding a full migration for a plain `git mv`.
  */
+export function changedPaths(base, filter, cwd) {
+  return (
+    git(["diff", "--name-only", "--find-renames", `--diff-filter=${filter}`, base], { cwd })
+      .split("\n")
+      .map((line) => line.trim())
+      // `"".split("\n")` is `[""]`, so a no-match diff would otherwise yield one
+      // empty "path". Both predicates reject it, but this function is exported and
+      // its next caller should not have to know that.
+      .filter(Boolean)
+  );
+}
+
+/**
+ * Candidate UI-source paths matching `filter`.
+ *
+ * A pure delegation to {@link changedPaths} + {@link isCandidate}: the i18n
+ * ratchet's file selection is byte-for-byte what it was before the sleep ratchet
+ * needed the same git invocation with a different predicate. Kept as its own
+ * export rather than inlined at the call site so that stays true by
+ * construction.
+ */
 export function changedFiles(base, filter, cwd) {
-  return git(["diff", "--name-only", "--find-renames", `--diff-filter=${filter}`, base], { cwd })
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(isCandidate);
+  return changedPaths(base, filter, cwd).filter(isCandidate);
 }
 
 /**

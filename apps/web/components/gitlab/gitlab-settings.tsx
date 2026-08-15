@@ -439,7 +439,7 @@ function GitLabConnectionCard(props: ConnectionCardProps) {
       icon={<IconBrandGitlab className="h-4 w-4" />}
       action={
         <div className="flex items-center gap-2">
-          <GitLabEnabledControl />
+          <GitLabEnabledControl workspaceId={workspaceId} />
           <Button
             variant="outline"
             size="sm"

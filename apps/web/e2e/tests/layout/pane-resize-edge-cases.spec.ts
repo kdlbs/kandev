@@ -33,7 +33,18 @@ test.describe("Pane resize edge cases", () => {
       if (!matching) throw new Error("files group not found");
       matching.api.maximize();
     });
-    await testPage.waitForTimeout(150);
+    // Wait for the maximized layout to be applied rather than for a number.
+    // `hasMaximizedGroup()` flips synchronously inside `maximize()`, so polling
+    // it would guard nothing; the group growing is the consequence that has to
+    // land before exiting is a real round trip. Measured, maximize takes this
+    // group from the 600px set above to ~1000px -- it does not fill the
+    // container, so this asserts growth rather than a proportion.
+    await expect
+      .poll(() => getDockviewGroupWidth(testPage, "files"), {
+        timeout: 5_000,
+        message: `files group never grew past its pre-maximize ${before}px`,
+      })
+      .toBeGreaterThan(before + 50);
     await testPage.evaluate(() => {
       type GroupApi = { exitMaximized: () => void };
       type Group = { id: string; panels: { id: string }[]; api: GroupApi };
@@ -67,10 +78,31 @@ test.describe("Pane resize edge cases", () => {
     const errors: string[] = [];
     testPage.on("pageerror", (err) => errors.push(err.message));
 
-    await testPage.locator("body").click({ position: { x: 5, y: 5 } });
-    const mod = process.platform === "darwin" ? "Meta" : "Control";
-    await testPage.keyboard.press(`${mod}+b`);
-    await testPage.waitForTimeout(250);
+    // This used to press Ctrl+B and sleep 250ms. Ctrl+B does nothing:
+    // `CONFIGURABLE_SHORTCUTS.TOGGLE_SIDEBAR` defaults to `UNBOUND_SHORTCUT`,
+    // so the binding exists only for users who set one. Nothing downstream
+    // asserted on the sidebar, so the test has been resizing with the sidebar
+    // still open -- a duplicate of the case above rather than the edge case it
+    // is named for. Collapse it through the store instead; the subject here is
+    // the resize, not how the collapse was triggered.
+    await testPage.evaluate(() => {
+      type StoreWindow = Window & {
+        __KANDEV_E2E_STORE__?: {
+          getState: () => { setAppSidebarCollapsed: (collapsed: boolean) => void };
+        };
+      };
+      const store = (window as StoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) throw new Error("E2E store bridge missing");
+      store.getState().setAppSidebarCollapsed(true);
+    });
+    // Assert the collapse instead of budgeting for it: this fails if the flag
+    // stops reaching the DOM, where the old sleep could not. The 300ms width
+    // animation that follows is deliberately not waited out -- the assertions
+    // below are "no page error" and "layout still healthy", neither of which
+    // reads geometry.
+    await expect(testPage.getByTestId("app-sidebar")).toHaveAttribute("data-collapsed", "true", {
+      timeout: 5_000,
+    });
 
     await resizeColumnViaSplitview(testPage, "right", 600);
     await session.expectLayoutHealthy();

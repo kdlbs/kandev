@@ -5,6 +5,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { dwell } from "../../helpers/causal-waits";
 
 /**
  * Seed a task whose mock-agent script emits enough distinct messages to
@@ -285,7 +286,12 @@ test.describe("Transcript auto-scroll toggle", () => {
     // was already scrolled away from before disabling, not progression.
     await toggleAfter.click();
     await expect(toggleAfter).toHaveAttribute("aria-pressed", "true");
-    await testPage.waitForTimeout(300);
+    await dwell(
+      testPage,
+      300,
+      "negative-assertion",
+      'asserts a negative (no jump to bottom); there is no event for "the scroll that must not happen", so a regression needs the smooth-scroll window to elapse before the position is sampled',
+    );
     expect(await listAfter.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 20);
   });
 
@@ -317,7 +323,12 @@ test.describe("Transcript auto-scroll toggle", () => {
     // already existed below their view before they disabled.
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
-    await testPage.waitForTimeout(300);
+    await dwell(
+      testPage,
+      300,
+      "negative-assertion",
+      'asserts a negative (no jump to bottom); there is no event for "the scroll that must not happen", so a regression needs the smooth-scroll window to elapse before the position is sampled',
+    );
     expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 20);
     expect(await list.evaluate((el) => el.scrollTop)).toBeLessThan(targetScrollTop + 20);
   });
@@ -353,7 +364,12 @@ test.describe("Transcript auto-scroll toggle", () => {
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
-    await testPage.waitForTimeout(300);
+    await dwell(
+      testPage,
+      300,
+      "negative-assertion",
+      'asserts a negative (no jump to bottom); there is no event for "the scroll that must not happen", so a regression needs the smooth-scroll window to elapse before the position is sampled',
+    );
     expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
   });
 

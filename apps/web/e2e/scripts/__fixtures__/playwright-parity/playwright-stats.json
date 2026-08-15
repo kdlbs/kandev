@@ -1,0 +1,6 @@
+{
+  "expected": 2,
+  "skipped": 1,
+  "unexpected": 2,
+  "flaky": 2
+}

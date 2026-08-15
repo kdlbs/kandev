@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { dwell } from "../../helpers/causal-waits";
 
 const OVERLAY_SCROLLBAR_SELECTOR =
   "[data-slot='scroll-area-scrollbar'][data-orientation='vertical']";
@@ -419,9 +420,12 @@ test.describe("sidebar scrolling", () => {
       });
       await expect(navigationDialog).toBeVisible();
 
-      // Let the old 60-frame sidebar reveal budget expire while the settings
-      // blocker keeps the task sidebar out of the DOM.
-      await testPage.waitForTimeout(1_500);
+      await dwell(
+        testPage,
+        1_500,
+        "product-timer",
+        "the regression under test is a frame-count reveal budget expiring while the sidebar is absent from the DOM; the budget's expiry is the event and nothing renders to signal it",
+      );
       await navigationDialog.getByRole("button", { name: "Discard and leave" }).click();
 
       await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));

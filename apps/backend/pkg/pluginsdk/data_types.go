@@ -690,12 +690,25 @@ func sessionFilterFromProto(p *pluginv1.SessionFilter) SessionFilter {
 // SessionCodeStats is the Go-native mirror of
 // kandev.plugin.v1.SessionCodeStats — a computed per-session code-change
 // summary, never the raw commit/snapshot rows.
+//
+// CommittedLinesAvailable is false (with LinesAddedCommitted/
+// LinesDeletedCommitted reading 0) for a session that predates
+// commit-capture activation and has no observed commits — capture wasn't
+// running yet, so that zero cannot be told apart from a real zero-change
+// session. This is a separate bool rather than making the existing fields
+// pointers: they are already-shipped public SDK fields (ADR 0043's
+// additive-only DTO contract), and changing their Go type from int64 to
+// *int64 would be a source-compatibility break for any plugin rebuilding
+// against a new SDK version. See internal/analytics/models.SessionCodeStats
+// for the full contract (that internal type is not part of the public
+// plugin surface and keeps its own *int64 representation).
 type SessionCodeStats struct {
 	SessionID               string
 	LinesAddedCommitted     int64
 	LinesDeletedCommitted   int64
 	LinesAddedPeakPending   int64
 	LinesDeletedPeakPending int64
+	CommittedLinesAvailable bool
 }
 
 func (s SessionCodeStats) toProto() *pluginv1.SessionCodeStats {
@@ -705,6 +718,7 @@ func (s SessionCodeStats) toProto() *pluginv1.SessionCodeStats {
 		LinesDeletedCommitted:   s.LinesDeletedCommitted,
 		LinesAddedPeakPending:   s.LinesAddedPeakPending,
 		LinesDeletedPeakPending: s.LinesDeletedPeakPending,
+		CommittedLinesAvailable: s.CommittedLinesAvailable,
 	}
 }
 
@@ -718,6 +732,7 @@ func sessionCodeStatsFromProto(p *pluginv1.SessionCodeStats) SessionCodeStats {
 		LinesDeletedCommitted:   p.GetLinesDeletedCommitted(),
 		LinesAddedPeakPending:   p.GetLinesAddedPeakPending(),
 		LinesDeletedPeakPending: p.GetLinesDeletedPeakPending(),
+		CommittedLinesAvailable: p.GetCommittedLinesAvailable(),
 	}
 }
 

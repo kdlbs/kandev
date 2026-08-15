@@ -12,6 +12,10 @@ test.describe("Mobile GitHub integration settings", () => {
     const accessCard = testPage.getByTestId("github-workspace-access-card");
     await expect(accessCard).toBeVisible();
     await expect(accessCard).toHaveAttribute("data-slot", "card");
+    const accessContentPaddingTop = await accessCard
+      .locator('[data-slot="card-content"]')
+      .evaluate((element) => getComputedStyle(element).paddingTop);
+    expect(Number.parseFloat(accessContentPaddingTop)).toBeLessThan(24);
     await expect(testPage.locator("#github-enabled")).toHaveAttribute("aria-checked", "true");
     expect(
       await testPage.evaluate(

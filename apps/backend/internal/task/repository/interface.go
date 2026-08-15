@@ -319,7 +319,7 @@ type GitSnapshotRepository interface {
 	GetLatestGitSnapshotsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]*models.GitSnapshot, error)
 	GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error)
-	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
+	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error)
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error

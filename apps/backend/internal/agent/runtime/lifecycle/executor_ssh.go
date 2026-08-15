@@ -378,7 +378,10 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	// Keep only the managed broker values in the long-lived remote process.
 	// sshAgentctlLaunchEnv adds the bootstrap credentials required for the
 	// authenticated control handshake without forwarding profile secrets.
-	env := sshAgentctlLaunchEnv(managedGitHubBrokerEnv(req.Env), nonce)
+	env := sshAgentctlLaunchEnv(
+		managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin)),
+		nonce,
+	)
 	shell := sshShellForRemote(req.Metadata, platform)
 	controlPort, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
 	if err != nil {
@@ -396,7 +399,9 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 		return 0, 0, nil, "", ierr
 	}
-	instancePort, ierr := createRemoteAgentInstance(ctx, client, controlPort, taskDir, req, authToken, r.logger)
+	instancePort, ierr := createRemoteAgentInstance(
+		ctx, client, controlPort, taskDir, agentctlBin, req, authToken, r.logger,
+	)
 	if ierr != nil {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 		r.report(req.OnProgress, "Creating agent instance", PrepareStepFailed, ierr.Error())

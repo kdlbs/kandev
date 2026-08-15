@@ -2,7 +2,7 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -34,7 +34,7 @@ async function seedPinnedQueueTask(
 
   await session.sendMessage("/slow 30s");
   await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-  await testPage.waitForTimeout(500);
+  await waitForComposerQueueMode(testPage);
 
   const editor = testPage.locator(".tiptap.ProseMirror").first();
   await typeWhileBusy(testPage, editor, "queued while pinned");

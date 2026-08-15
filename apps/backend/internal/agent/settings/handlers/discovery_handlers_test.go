@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/settings/controller"
@@ -62,13 +63,6 @@ func TestListAvailableAgentsEndpointIncludesUninstalledAgents(t *testing.T) {
 
 // TestGetAgentModelsEndpoint covers the two reachable outcomes of
 // /agent-models/:agentName.
-//
-// KNOWN DEFECT, asserted as-is rather than fixed here (test-only work): the
-// handler's controller.ErrAgentNotFound -> 404 branch is unreachable, because
-// FetchDynamicModels reports an unknown agent with a fresh fmt.Errorf rather
-// than the sentinel. An unknown agent therefore surfaces as a 500 carrying the
-// raw message. When FetchDynamicModels is switched to the sentinel, the second
-// expectation below becomes 404 / "agent not found".
 func TestGetAgentModelsEndpoint(t *testing.T) {
 	t.Run("registered agent without a probe reports not_configured", func(t *testing.T) {
 		router, _, reg := newSettingsHarness(t, newFakeSettingsRepo(), nil)
@@ -85,10 +79,18 @@ func TestGetAgentModelsEndpoint(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown agent currently reports 500 instead of 404", func(t *testing.T) {
+	// FetchDynamicModels returns controller.ErrAgentNotFound for an agent the
+	// registry does not know, which is the sentinel the handler's 404 branch
+	// matches on. The body is the handler's fixed message: unlike the 500
+	// branch it must not echo the controller error, so the caller-supplied
+	// agent name never reaches the wire.
+	t.Run("unknown agent is 404 with a fixed body", func(t *testing.T) {
 		router := newSettingsRouter(t, newFakeSettingsRepo(), nil)
 		response := doSettingsRequest(router, http.MethodGet, "/api/v1/agent-models/ghost", "")
-		requireErrorBody(t, response, http.StatusInternalServerError, `agent "ghost" not found`)
+		requireErrorBody(t, response, http.StatusNotFound, "agent not found")
+		if strings.Contains(response.Body.String(), "ghost") {
+			t.Errorf("404 body %s echoes the raw error", response.Body.String())
+		}
 	})
 }
 

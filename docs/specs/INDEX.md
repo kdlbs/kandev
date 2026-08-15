@@ -81,6 +81,8 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [subtask-reparenting-drag-drop](tasks/subtask-reparenting-drag-drop.md) | building |
 | [subtask-completion-trigger](tasks/subtask-completion-trigger.md) | draft |
 | [task-dependencies](task-dependencies/spec.md) | draft |
+| [task-dependencies - create dialog selector](task-dependencies/create-dialog-dependency-selector.md) | implemented |
+| [task-dependencies - create dialog advanced settings](task-dependencies/create-dialog-advanced-settings.md) | shipped |
 | [subtree-controls](tasks/subtree-controls.md) | shipped |
 | [blocked-task-escalation](tasks/blocked-task-escalation.md) | draft |
 | [runtime-cleanup](tasks/runtime-cleanup.md) | draft |
@@ -153,6 +155,7 @@ Per-workspace credentials and triage triggers for external services.
 | [creation](workspaces/creation.md) | building |
 | [deletion](workspaces/deletion.md) | shipped |
 | [local-repositories](workspaces/local-repositories.md) | shipped |
+| [worktree-branch-templates](workspaces/worktree-branch-templates.md) | building |
 | [repository-secrets](workspaces/repository-secrets.md) | shipped |
 | [secret-scope-transfer](workspaces/secret-scope-transfer.md) | shipped |
 
@@ -169,13 +172,16 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 
 | Spec | Status |
 |---|---|
+| [workspace-active-first-order](ui/workspace-active-first-order.md) | shipped |
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
 | [github-saved-query-defaults](ui/github-saved-query-defaults.md) | shipped |
+| [pr-detail-header-width](pr-detail-header-width/spec.md) | shipped |
 | [pr-task-status-summary](ui/pr-task-status-summary.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |
+| [clarification-context](ui/clarification-context.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
 | [acp-model-configuration-summary](ui/acp-model-configuration-summary.md) | shipped |

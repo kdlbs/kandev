@@ -15,6 +15,11 @@ import {
 const WORKSPACE_ID = "ws-1";
 const WORKSPACES_HREF = "/settings/workspaces";
 const WORKSPACES = [{ id: WORKSPACE_ID, name: "Main Workspace" }];
+const ORDERED_WORKSPACES = [
+  { id: "ws-first", name: "First" },
+  { id: "ws-active", name: "Active" },
+  { id: "ws-last", name: "Last" },
+];
 // Hoisted so the filter tests can build fixtures without re-spelling the
 // display name (sonar duplicate-literal rule).
 const AGENT_DISPLAY_NAME = "Claude Code";
@@ -46,6 +51,17 @@ function integrationsTabOf(tabs: readonly SettingsMenuNode[]): SettingsMenuNode 
 }
 
 describe("buildWorkspacesBranch", () => {
+  it("places the active workspace first without disturbing the remaining order", () => {
+    const branch = buildWorkspacesBranch(ORDERED_WORKSPACES, "ws-active");
+
+    expect(branch.map((workspace) => workspace.key)).toEqual([
+      "workspace:ws-active",
+      "workspace:ws-first",
+      "workspace:ws-last",
+    ]);
+    expect(branch[0].badge).toBe("active");
+  });
+
   it("hangs each workspace's tabs under it, minus its own overview page", () => {
     const [workspace] = buildWorkspacesBranch(WORKSPACES);
 
@@ -126,24 +142,41 @@ describe("buildWorkspacesBranch integration visibility", () => {
     const [workspace] = buildWorkspacesBranch(
       WORKSPACES,
       null,
-      new Set(["azure-devops", "linear"] as const),
+      () => new Set(["azure-devops", "linear"] as const),
     );
 
     expect(integrationSlugsOf(workspace.children ?? [])).toEqual(["azure-devops", "linear"]);
+  });
+
+  it("resolves the visible set per workspace, since the toggles are per workspace", () => {
+    // Disabling GitHub in one workspace must not strip it from another's
+    // branch, which is exactly what a single shared set used to do.
+    const branch = buildWorkspacesBranch(
+      [
+        { id: "ws-1", name: "First" },
+        { id: "ws-2", name: "Second" },
+      ],
+      null,
+      (workspaceId) =>
+        workspaceId === "ws-1" ? new Set(["jira"] as const) : new Set(["github"] as const),
+    );
+
+    expect(integrationSlugsOf(branch[0].children ?? [])).toEqual(["jira"]);
+    expect(integrationSlugsOf(branch[1].children ?? [])).toEqual(["github"]);
   });
 
   it("never consults whether an integration is configured — the badge owns that", () => {
     // Nothing about credentials reaches this builder: an integration the user
     // has never connected is listed exactly like a connected one, so the
     // visible set is the only thing that can remove a row.
-    const [workspace] = buildWorkspacesBranch(WORKSPACES, null, new Set(["github"] as const));
+    const [workspace] = buildWorkspacesBranch(WORKSPACES, null, () => new Set(["github"] as const));
 
     expect(integrationSlugsOf(workspace.children ?? [])).toEqual(["github"]);
   });
 
   it("leaves the Integrations row navigable when the set hides all of them", () => {
     // An empty branch would otherwise render a chevron opening onto nothing.
-    const [workspace] = buildWorkspacesBranch(WORKSPACES, null, new Set());
+    const [workspace] = buildWorkspacesBranch(WORKSPACES, null, () => new Set());
     const integrations = integrationsTabOf(workspace.children ?? []);
 
     expect(integrations?.children).toEqual([]);

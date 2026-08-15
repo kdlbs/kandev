@@ -237,6 +237,12 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 					fieldMax:       status.Max,
 				})
 		}
+		if errors.Is(err, messagequeue.ErrTaskInactive) {
+			// The task was archived or deleted between the caller's
+			// authorization and the queue admission; do not queue a message
+			// that would be orphaned behind the task's purge.
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Task is no longer active", nil)
+		}
 		if errors.Is(err, errQueuedAttachmentRollback) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to roll back queued attachment", nil)
 		}
