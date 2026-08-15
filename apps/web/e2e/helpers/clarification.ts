@@ -111,6 +111,7 @@ export async function seedSecondaryClarificationTask(
   await expect
     .poll(async () => (await apiClient.getTask(task.id)).primary_session_id ?? null, {
       message: "clean original session should remain primary",
+      timeout: 30_000,
     })
     .toBe(task.session_id);
   await expect
@@ -129,4 +130,15 @@ export async function seedSecondaryClarificationTask(
     primarySessionId: task.session_id,
     clarificationSessionId: secondary.session_id,
   };
+}
+
+export async function activeSessionId(page: Page): Promise<string | null> {
+  return page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __KANDEV_E2E_STORE__?: { getState: () => { tasks: { activeSessionId: string | null } } };
+        }
+      ).__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? null,
+  );
 }

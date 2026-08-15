@@ -23,6 +23,17 @@ export type SwitchToSessionFn = (
   oldSessionId: string | null | undefined,
 ) => void;
 
+type PendingTask = {
+  taskPendingAction?: TaskPendingAction | null;
+  statusSummary?: { pending_action?: TaskPendingAction | null } | null;
+};
+
+export function effectiveTaskPendingAction(
+  task: PendingTask | undefined,
+): TaskPendingAction | null | undefined {
+  return task?.statusSummary != null ? task.statusSummary.pending_action : task?.taskPendingAction;
+}
+
 function getTaskSessionIds(state: AppState, taskId: string): string[] {
   return (state.taskSessionsByTask?.itemsByTaskId?.[taskId] ?? []).map((session) => session.id);
 }
@@ -202,12 +213,13 @@ export async function prepareAndSwitchTask(
   }
 }
 
-export function selectTaskWithLayout(params: {
+type SelectTaskWithLayoutParams = {
   taskId: string;
   task:
     | {
         primarySessionId?: string | null;
         taskPendingAction?: TaskPendingAction | null;
+        statusSummary?: { pending_action?: TaskPendingAction | null } | null;
         isArchived?: boolean;
       }
     | undefined;
@@ -217,12 +229,15 @@ export function selectTaskWithLayout(params: {
   setActiveTask: (taskId: string) => void;
   setPreparingTaskId: (id: string | null) => void;
   navigateToTask?: (taskId: string) => void;
-}): void {
+};
+
+export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
   const state = store.getState();
   const selectionToken = nextTaskSelectionToken();
   const oldSessionId = state.tasks.activeSessionId;
   const navigateToTask = params.navigateToTask ?? replaceTaskUrl;
+  const taskPendingAction = effectiveTaskPendingAction(task);
   const selectionGuard = createTaskSelectionGuard(store, taskId, selectionToken);
   if (isDebug()) {
     debug("selectTaskWithLayout: entry", {
@@ -247,10 +262,10 @@ export function selectTaskWithLayout(params: {
       taskSessionsById: state.taskSessions.items,
     });
     const hasEnvId = !!state.environmentIdBySessionId[targetSessionId];
-    if (hasEnvId && !task.taskPendingAction) {
+    if (hasEnvId && !taskPendingAction) {
       selectionGuard.dispose();
       switchToSession(taskId, targetSessionId, oldSessionId);
-      loadTaskSessionsForTask(taskId);
+      void loadTaskSessionsForTask(taskId).catch(() => undefined);
       navigateToTask(taskId);
       return;
     }
@@ -260,7 +275,7 @@ export function selectTaskWithLayout(params: {
         const resolvedSessionId = resolveTaskSessionId({
           sessions,
           preferredSessionId: targetSessionId,
-          taskPendingAction: task.taskPendingAction,
+          taskPendingAction,
         });
         switchToSession(taskId, resolvedSessionId, oldSessionId);
         navigateToTask(taskId);
@@ -277,7 +292,7 @@ export function selectTaskWithLayout(params: {
       const sessionId = resolveTaskSessionId({
         sessions,
         preferredSessionId: "",
-        taskPendingAction: task?.taskPendingAction,
+        taskPendingAction,
       });
       if (sessionId) {
         switchToSession(taskId, sessionId, currentOldSessionId);

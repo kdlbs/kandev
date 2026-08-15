@@ -24,10 +24,10 @@ spec: "../../specs/clarification-active-lifecycle/spec.md"
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web test -- lib/utils/pending-clarification.test.ts components/task/task-select-helpers.test.ts components/task/mobile/session-task-switcher-sheet-hooks.test.ts
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm run i18n:check
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web test -- lib/utils/pending-clarification.test.ts components/task/task-select-helpers.test.ts components/task/mobile/session-task-switcher-sheet-hooks.test.ts)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm run i18n:check)
 ```
 
 ## Files likely touched
@@ -46,8 +46,7 @@ Task 03.
 
 ## Parallelism
 
-Sequential. Desktop and phone must share one resolver and the server projection established by Task
-03.
+Sequential. Desktop and phone must share one resolver and the server projection established by Task 03.
 
 ## Inputs
 
@@ -74,9 +73,9 @@ update task/plan status.
 
 ## Results
 
-- Clarification discovery now follows the newest durable turn, treats the newest bundle's terminal
-  state as authoritative, remains deletion-proof, and gates unavailable turn history on the compact
-  session pending action while retaining legacy no-turn behavior.
+- Clarification discovery now follows the newest durable turn, keeps earlier active bundles visible
+  when a newer bundle is terminal, remains deletion-proof, and gates unavailable turn history on the
+  compact session pending action while retaining legacy no-turn behavior.
 - Added one shared pending-owner resolver. Desktop waits for session loading when a task advertises
   input, including non-task routes; phone selection waits, navigates to the owning session, then
   closes the drawer, with safe load-failure fallback.

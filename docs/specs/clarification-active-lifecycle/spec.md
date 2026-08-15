@@ -130,7 +130,8 @@ session they can already access. Session selection does not broaden task visibil
 
 - Message history remains durable and is not destructively rewritten merely because a newer turn
   exists.
-- Active clarification state is reconstructable after restart from message status plus current-turn
+- Active clarification state is reconstructable after restart from message status plus the newest
+  durable turn.
 - Current-turn ownership is reconstructable from durable turn rows even when a turn has no remaining
   messages.
 - Task summaries are caches. Boot and task-list reads correct a stale persisted `pending_action` with

@@ -23,9 +23,9 @@ spec: "../../specs/clarification-active-lifecycle/spec.md"
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run tests/task/sidebar-pending-question.spec.ts
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm e2e:run tests/task/sidebar-pending-question.spec.ts)
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts)
 ```
 
 The focused commands are expected to exit nonzero in this RED task. Record the exact failing

@@ -5,7 +5,7 @@
  */
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { seedSecondaryClarificationTask } from "../../helpers/clarification";
+import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
@@ -23,17 +23,6 @@ function pendingID(message: ClarificationMessage): string | null {
 
 async function clarificationMessages(apiClient: ApiClient, sessionId: string) {
   return (await apiClient.listSessionMessages(sessionId)).messages as ClarificationMessage[];
-}
-
-async function activeSessionId(page: import("@playwright/test").Page): Promise<string | null> {
-  return page.evaluate(
-    () =>
-      (
-        window as unknown as {
-          __KANDEV_E2E_STORE__?: { getState: () => { tasks: { activeSessionId: string | null } } };
-        }
-      ).__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? null,
-  );
 }
 
 async function waitForSessionWaitingForInput(

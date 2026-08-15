@@ -177,12 +177,14 @@ export function filterVisibleMessages(
   messages: Message[],
   toolCallIds: Set<string>,
   subagentChildIds: Set<string>,
+  currentTurnId?: string | null,
 ): Message[] {
   const filtered = messages.filter((message) => {
     if (subagentChildIds.has(message.id) || isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {
       const metadata = message.metadata as ClarificationRequestMetadata | undefined;
-      return !!metadata?.status && metadata.status !== "pending";
+      if (metadata?.status && metadata.status !== "pending") return true;
+      return typeof currentTurnId === "string" && message.turn_id !== currentTurnId;
     }
     if (
       message.type === "status" &&

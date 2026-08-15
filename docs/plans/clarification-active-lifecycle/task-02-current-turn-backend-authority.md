@@ -34,7 +34,7 @@ repository's PostgreSQL CI job.
 ## Files likely touched
 
 - `apps/backend/internal/task/repository/sqlite/message.go`
-- `apps/backend/internal/task/repository/sqlite/message_test.go`
+- `apps/backend/internal/task/repository/sqlite/message_active_clarification_test.go`
 - `apps/backend/internal/task/repository/sqlite/message_crud_coverage_test.go`
 - `apps/backend/internal/task/repository/sqlite/message_pending_postgres_test.go`
 - `apps/backend/internal/task/repository/interface.go`

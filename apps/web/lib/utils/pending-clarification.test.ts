@@ -197,7 +197,7 @@ describe("current-turn clarification ownership", () => {
     ).toEqual(["current-a", "current-b"]);
   });
 
-  it("lets the newest clarification bundle's terminal state win", () => {
+  it("keeps an earlier pending bundle visible when a newer bundle is terminal", () => {
     const messages = [
       message({
         id: "pending",
@@ -212,7 +212,11 @@ describe("current-turn clarification ownership", () => {
         metadata: { pending_id: "pending-2", status: "rejected" },
       }),
     ];
-    expect(findPendingClarification(messages, { currentTurnId: CURRENT_TURN_ID })).toBeNull();
+    const scope = { currentTurnId: CURRENT_TURN_ID };
+    expect(findPendingClarification(messages, scope)?.id).toBe("pending");
+    expect(findPendingClarificationGroup(messages, scope).map((item) => item.id)).toEqual([
+      "pending",
+    ]);
   });
 });
 

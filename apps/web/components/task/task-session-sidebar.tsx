@@ -22,7 +22,11 @@ import { useSidebarSelection, SidebarBulkDialogs } from "./task-session-sidebar-
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
-import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
+import {
+  buildSwitchToSession,
+  effectiveTaskPendingAction,
+  selectTaskWithLayout,
+} from "./task-select-helpers";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
@@ -320,7 +324,7 @@ function useSidebarTaskSelection(params: {
       const task = findSidebarTask(state, taskId);
       const onTaskRoute =
         !!pathname && (pathname.startsWith("/t/") || pathname.startsWith("/office/tasks/"));
-      if (!onTaskRoute && (!task?.taskPendingAction || task.isArchived)) {
+      if (!onTaskRoute && (!effectiveTaskPendingAction(task) || task?.isArchived)) {
         setActiveTask(taskId);
         router.push(linkToTask(taskId));
         return;

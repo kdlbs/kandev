@@ -294,7 +294,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 	}
 
 	refreshPending := p.loadPendingActions != nil &&
-		(!state.pendingObserved || isPendingSensitiveEvent(event.Type))
+		(!state.pendingObserved || isPendingSensitiveEvent(event.Type, data))
 	if refreshPending {
 		pendingChanged, refreshErr := p.refreshPendingLocked(ctx, taskID, state)
 		if refreshErr != nil {

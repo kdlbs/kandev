@@ -262,6 +262,8 @@ describe("selectTaskWithLayout selection guard cleanup", () => {
 });
 
 describe("selectTaskWithLayout old-session changes", () => {
+  beforeEach(() => vi.clearAllMocks());
+
   it("keeps a pending selection alive when only the old session id changes", async () => {
     vi.mocked(launchSession).mockResolvedValue({} as never);
     const sessionlessTaskId = "task-sessionless";

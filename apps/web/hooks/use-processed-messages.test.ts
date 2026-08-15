@@ -6,6 +6,7 @@ import {
   type MessageType,
 } from "@/lib/types/http";
 import type { RichMetadata } from "@/components/task/chat/types";
+import { filterVisibleMessages } from "./processed-message-filtering";
 import {
   buildGroupedRenderItems,
   buildTodoItems,
@@ -74,6 +75,31 @@ function bootResumed(id: string): Message {
     status: "exited",
   });
 }
+
+describe("filterVisibleMessages clarification history", () => {
+  it("keeps a superseded pending clarification as inert transcript history", () => {
+    const superseded = {
+      ...makeMessage("old-question", "clarification_request", {
+        status: "pending",
+        agent_disconnected: true,
+      }),
+      turn_id: "turn-old",
+    };
+    const current = {
+      ...makeMessage("current-question", "clarification_request", { status: "pending" }),
+      turn_id: "turn-current",
+    };
+
+    expect(
+      filterVisibleMessages(
+        [superseded, current],
+        new Set<string>(),
+        new Set<string>(),
+        "turn-current",
+      ).map((message) => message.id),
+    ).toEqual(["old-question"]);
+  });
+});
 
 describe("isAgentBootResumeMessage", () => {
   it("returns true for script_execution agent_boot with is_resuming=true", () => {

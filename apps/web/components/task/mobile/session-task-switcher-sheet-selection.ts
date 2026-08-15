@@ -2,7 +2,11 @@ import { replaceTaskUrl } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
-import { resolvePreferredSessionId, resolveTaskSessionId } from "../task-select-helpers";
+import {
+  effectiveTaskPendingAction,
+  resolvePreferredSessionId,
+  resolveTaskSessionId,
+} from "../task-select-helpers";
 
 type SelectionActions = {
   loadTaskSessionsForTask: (taskId: string) => Promise<TaskSession[]>;
@@ -10,6 +14,7 @@ type SelectionActions = {
   setActiveTask: (taskId: string) => void;
   navigate?: (taskId: string) => void;
   onOpenChange: (open: boolean) => void;
+  isSelectionCurrent?: () => boolean;
 };
 
 type SelectableTask = {
@@ -24,6 +29,12 @@ type SelectionState = {
   environmentIdBySessionId: Record<string, string>;
   taskSessionsById: Record<string, TaskSession>;
 };
+
+let taskSelectionSequence = 0;
+
+function selectionIsCurrent(actions: SelectionActions): boolean {
+  return actions.isSelectionCurrent?.() ?? true;
+}
 
 export async function selectPendingTaskFromSheet(
   params: {
@@ -43,6 +54,7 @@ export async function selectPendingTaskFromSheet(
   } catch (error) {
     console.error("Failed to load pending task sessions:", error);
   }
+  if (!selectionIsCurrent(params)) return;
   if (targetSessionId) {
     params.setActiveSession(params.taskId, targetSessionId);
   } else {
@@ -56,6 +68,7 @@ async function selectTaskWithoutPrimarySession(taskId: string, actions: Selectio
   const navigate = actions.navigate ?? replaceTaskUrl;
   try {
     const sessions = await actions.loadTaskSessionsForTask(taskId);
+    if (!selectionIsCurrent(actions)) return;
     const sessionId = sessions[0]?.id ?? null;
     if (sessionId) {
       actions.setActiveSession(taskId, sessionId);
@@ -66,6 +79,7 @@ async function selectTaskWithoutPrimarySession(taskId: string, actions: Selectio
     const { request } = buildPrepareRequest(taskId);
     try {
       const response = await launchSession(request);
+      if (!selectionIsCurrent(actions)) return;
       if (response.session_id) {
         actions.setActiveSession(taskId, response.session_id);
         navigate(taskId);
@@ -78,6 +92,7 @@ async function selectTaskWithoutPrimarySession(taskId: string, actions: Selectio
   } catch (error) {
     console.error("Failed to load sessions for task:", error);
   }
+  if (!selectionIsCurrent(actions)) return;
   actions.setActiveTask(taskId);
   navigate(taskId);
   actions.onOpenChange(false);
@@ -91,6 +106,12 @@ export function selectTaskFromSheet(
   } & SelectionActions,
 ): void {
   const { taskId, task, state } = params;
+  taskSelectionSequence += 1;
+  const selectionToken = taskSelectionSequence;
+  const guardedParams = {
+    ...params,
+    isSelectionCurrent: () => selectionToken === taskSelectionSequence,
+  };
   const navigate = params.navigate ?? replaceTaskUrl;
   if (task?.isArchived) {
     params.setActiveTask(taskId);
@@ -98,8 +119,7 @@ export function selectTaskFromSheet(
     params.onOpenChange(false);
     return;
   }
-  const pendingAction =
-    task?.statusSummary != null ? task.statusSummary.pending_action : task?.taskPendingAction;
+  const pendingAction = effectiveTaskPendingAction(task);
   const preferredSessionId = task?.primarySessionId
     ? resolvePreferredSessionId({
         taskId,
@@ -111,7 +131,7 @@ export function selectTaskFromSheet(
     : "";
   if (pendingAction) {
     void selectPendingTaskFromSheet({
-      ...params,
+      ...guardedParams,
       preferredSessionId,
       taskPendingAction: pendingAction,
     });
@@ -119,10 +139,10 @@ export function selectTaskFromSheet(
   }
   if (preferredSessionId) {
     params.setActiveSession(taskId, preferredSessionId);
-    void params.loadTaskSessionsForTask(taskId);
+    void params.loadTaskSessionsForTask(taskId).catch(() => undefined);
     navigate(taskId);
     params.onOpenChange(false);
     return;
   }
-  void selectTaskWithoutPrimarySession(taskId, params);
+  void selectTaskWithoutPrimarySession(taskId, guardedParams);
 }

@@ -12,19 +12,20 @@ import (
 	"github.com/kandev/kandev/internal/events"
 )
 
-func isPendingSensitiveEvent(eventType string) bool {
+func isPendingSensitiveEvent(eventType string, data map[string]interface{}) bool {
 	switch eventType {
 	case events.TaskUpdated,
 		events.TaskSessionStateChanged,
 		events.MessageAdded,
-		events.MessageUpdated,
-		events.MessageDeleted,
 		events.ClarificationAnswered,
 		events.ClarificationPrimaryAnswered,
 		events.ClarificationCancelled,
 		events.ClarificationStaleDismissed,
 		events.PermissionRequestReceived:
 		return true
+	case events.MessageUpdated, events.MessageDeleted:
+		messageType := strings.ToLower(stringField(data, "type"))
+		return pendingActionForMessage(messageType, boolValue(data["requests_input"])) != ""
 	default:
 		return false
 	}

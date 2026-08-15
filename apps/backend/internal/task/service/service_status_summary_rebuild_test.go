@@ -51,6 +51,20 @@ type rejectingStatusSummaryRepository struct {
 	rejected  bool
 }
 
+type authoritativePendingMessageRepository struct {
+	repository.MessageRepository
+	actions map[string]models.TaskPendingAction
+	calls   int
+}
+
+func (r *authoritativePendingMessageRepository) GetPendingActionsBySessionIDs(
+	context.Context,
+	[]string,
+) (map[string]models.TaskPendingAction, error) {
+	r.calls++
+	return r.actions, nil
+}
+
 func (r *rejectingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
 	ctx context.Context,
 	stored *statussummary.StoredTaskStatusSummary,
@@ -288,7 +302,7 @@ func TestReconcileTaskStatusSummariesRepairsExistingPendingOnly(t *testing.T) {
 	}
 }
 
-func TestReconcileTaskStatusSummariesReloadsAfterCASRejection(t *testing.T) {
+func TestReconcileTaskStatusSummariesReReadsPendingAfterCASRejection(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	createTaskWithoutRepositories(t, ctx, repo)
@@ -314,12 +328,24 @@ func TestReconcileTaskStatusSummariesReloadsAfterCASRejection(t *testing.T) {
 			},
 		},
 	}
+	pendingMessages := &authoritativePendingMessageRepository{
+		MessageRepository: repo,
+		actions: map[string]models.TaskPendingAction{
+			"session-1": models.TaskPendingActionClarification,
+		},
+	}
+	svc.messages = pendingMessages
 
 	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: task.ID,
+		State:  models.TaskSessionStateWaitingForInput,
+	}
 	got, err := svc.ReconcileTaskStatusSummaries(
 		ctx,
 		[]*models.Task{task},
-		map[string][]*models.TaskSession{},
+		map[string][]*models.TaskSession{task.ID: {session}},
 		map[string]models.TaskPendingAction{},
 		map[string]*statussummary.TaskStatusSummary{"task-1": &stored},
 	)
@@ -327,7 +353,11 @@ func TestReconcileTaskStatusSummariesReloadsAfterCASRejection(t *testing.T) {
 		t.Fatalf("reconcile after CAS rejection: %v", err)
 	}
 	repaired := got[task.ID]
-	if repaired == nil || repaired.Revision != 6 || repaired.PendingAction != "" || repaired.QueuedPromptCount != 9 {
+	if repaired == nil || repaired.Revision != 5 ||
+		repaired.PendingAction != string(models.TaskPendingActionClarification) || repaired.QueuedPromptCount != 9 {
 		t.Fatalf("summary after CAS rejection = %+v", repaired)
+	}
+	if pendingMessages.calls != 1 {
+		t.Fatalf("authoritative pending reads = %d, want 1", pendingMessages.calls)
 	}
 }

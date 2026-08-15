@@ -448,8 +448,8 @@ export function useProcessedMessages(
   );
 
   const visibleMessages = useMemo(
-    () => filterVisibleMessages(messages, toolCallIds, subagentChildIds),
-    [messages, toolCallIds, subagentChildIds],
+    () => filterVisibleMessages(messages, toolCallIds, subagentChildIds, options.currentTurnId),
+    [messages, toolCallIds, subagentChildIds, options.currentTurnId],
   );
 
   const taskDescriptionMessage: Message | null = useMemo(() => {

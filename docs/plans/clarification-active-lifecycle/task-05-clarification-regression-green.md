@@ -28,10 +28,10 @@ spec: "../../specs/clarification-active-lifecycle/spec.md"
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run tests/task/sidebar-pending-question.spec.ts
-cd apps/web && pnpm e2e:run --no-build tests/chat/clarification.spec.ts -- --grep "timeout detaches clarification"
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm e2e:run tests/task/sidebar-pending-question.spec.ts)
+(cd apps/web && pnpm e2e:run --no-build tests/chat/clarification.spec.ts -- --grep "timeout detaches clarification")
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts)
 git diff --check
 ```
 

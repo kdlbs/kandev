@@ -6,21 +6,30 @@ import {
   selectTaskWithLayout,
 } from "./task-select-helpers";
 
+const TASK_ID = "task-A";
+const PRIMARY = "sess-primary";
+const SECONDARY = "secondary";
+const OTHER_SESSION_ID = "other-session";
+const PRIMARY_ENV_ID = "env-primary";
+const SECONDARY_ENV_ID = "env-secondary";
+const NEWER_AT = "2026-08-14T12:02:00Z";
+const OLDER_AT = "2026-08-14T12:01:00Z";
+
 describe("resolveTaskSessionId", () => {
   const sessions = [
     {
-      id: "secondary",
-      task_id: "task-A",
+      id: SECONDARY,
+      task_id: TASK_ID,
       state: "WAITING_FOR_INPUT",
       pending_action: "clarification",
-      updated_at: "2026-08-14T12:02:00Z",
+      updated_at: NEWER_AT,
     },
     {
       id: "primary",
-      task_id: "task-A",
+      task_id: TASK_ID,
       state: "WAITING_FOR_INPUT",
       is_primary: true,
-      updated_at: "2026-08-14T12:01:00Z",
+      updated_at: OLDER_AT,
     },
   ] as TaskSession[];
 
@@ -31,7 +40,7 @@ describe("resolveTaskSessionId", () => {
         preferredSessionId: "primary",
         taskPendingAction: "clarification",
       }),
-    ).toBe("secondary");
+    ).toBe(SECONDARY);
   });
 
   it("ignores a matching action on a terminal session", () => {
@@ -48,10 +57,10 @@ describe("resolveTaskSessionId", () => {
     expect(
       resolveTaskSessionId({
         sessions,
-        preferredSessionId: "secondary",
+        preferredSessionId: SECONDARY,
         taskPendingAction: null,
       }),
-    ).toBe("secondary");
+    ).toBe(SECONDARY);
   });
 });
 
@@ -122,9 +131,6 @@ function makeEnvStore(
   } as unknown as StoreApi<AppState>;
 }
 
-const TASK_ID = "task-A";
-const PRIMARY = "sess-primary";
-
 function makeKanbanStore(args: {
   activeTaskId?: string | null;
   activeSessionId: string | null;
@@ -176,26 +182,26 @@ async function flushTaskSelection() {
 describe("selectTaskWithLayout pending owner", () => {
   it("loads sessions before switching even when the primary environment is known", async () => {
     const store = makeKanbanStore({
-      activeSessionId: "other-session",
-      envIds: { [PRIMARY]: "env-primary", secondary: "env-secondary" },
+      activeSessionId: OTHER_SESSION_ID,
+      envIds: { [PRIMARY]: PRIMARY_ENV_ID, [SECONDARY]: SECONDARY_ENV_ID },
     });
     const switchToSession = vi.fn();
     const loadTaskSessionsForTask = vi.fn(
       async () =>
         [
           {
-            id: "secondary",
+            id: SECONDARY,
             task_id: TASK_ID,
             state: "WAITING_FOR_INPUT",
             pending_action: "clarification",
-            updated_at: "2026-08-14T12:02:00Z",
+            updated_at: NEWER_AT,
           },
           {
             id: PRIMARY,
             task_id: TASK_ID,
             state: "WAITING_FOR_INPUT",
             is_primary: true,
-            updated_at: "2026-08-14T12:01:00Z",
+            updated_at: OLDER_AT,
           },
         ] as TaskSession[],
     );
@@ -213,7 +219,102 @@ describe("selectTaskWithLayout pending owner", () => {
     expect(switchToSession).not.toHaveBeenCalled();
     await flushTaskSelection();
     expect(loadTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID);
-    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, "secondary", "other-session");
+    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, SECONDARY, OTHER_SESSION_ID);
+  });
+
+  it("uses the status-summary pending owner when the legacy field is empty", async () => {
+    const store = makeKanbanStore({
+      activeSessionId: OTHER_SESSION_ID,
+      envIds: { [PRIMARY]: PRIMARY_ENV_ID, [SECONDARY]: SECONDARY_ENV_ID },
+    });
+    const switchToSession = vi.fn();
+    const loadTaskSessionsForTask = vi.fn(
+      async () =>
+        [
+          {
+            id: SECONDARY,
+            task_id: TASK_ID,
+            state: "WAITING_FOR_INPUT",
+            pending_action: "clarification",
+            started_at: NEWER_AT,
+            updated_at: NEWER_AT,
+          },
+          {
+            id: PRIMARY,
+            task_id: TASK_ID,
+            state: "WAITING_FOR_INPUT",
+            is_primary: true,
+            started_at: OLDER_AT,
+            updated_at: OLDER_AT,
+          },
+        ] as TaskSession[],
+    );
+
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: {
+        primarySessionId: PRIMARY,
+        statusSummary: { pending_action: "clarification" },
+      },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask,
+      setActiveTask: vi.fn(),
+      setPreparingTaskId: vi.fn(),
+    });
+
+    expect(switchToSession).not.toHaveBeenCalled();
+    await flushTaskSelection();
+    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, SECONDARY, OTHER_SESSION_ID);
+  });
+});
+
+describe("selectTaskWithLayout pending summary authority", () => {
+  it("lets an explicit summary clear override a stale legacy pending field", () => {
+    const store = makeKanbanStore({
+      activeSessionId: OTHER_SESSION_ID,
+      envIds: { [PRIMARY]: PRIMARY_ENV_ID },
+    });
+    const switchToSession = vi.fn();
+
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: {
+        primarySessionId: PRIMARY,
+        taskPendingAction: "clarification",
+        statusSummary: {},
+      },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask: vi.fn(async () => []),
+      setActiveTask: vi.fn(),
+      setPreparingTaskId: vi.fn(),
+    });
+
+    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, OTHER_SESSION_ID);
+  });
+
+  it("handles a rejected background refresh after an immediate selection", async () => {
+    const store = makeKanbanStore({
+      activeSessionId: OTHER_SESSION_ID,
+      envIds: { [PRIMARY]: PRIMARY_ENV_ID },
+    });
+    const switchToSession = vi.fn();
+
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: { primarySessionId: PRIMARY },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+      setActiveTask: vi.fn(),
+      setPreparingTaskId: vi.fn(),
+    });
+
+    await flushTaskSelection();
+    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, OTHER_SESSION_ID);
   });
 });
 

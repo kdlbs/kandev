@@ -104,19 +104,69 @@ func TestProjectorRefreshesPendingAfterEveryPendingSensitiveMessage(t *testing.T
 		t.Fatalf("armed summary = %+v", got)
 	}
 
-	for _, eventType := range []string{events.MessageAdded, events.MessageDeleted} {
+	for _, event := range []struct {
+		eventType   string
+		messageType string
+	}{
+		{eventType: events.MessageAdded, messageType: "text"},
+		{eventType: events.MessageDeleted, messageType: messageTypeClarificationRequest},
+	} {
 		actions = map[string]string{}
-		if err := projector.HandleEvent(context.Background(), message(eventType, "text")); err != nil {
-			t.Fatalf("refresh after %s: %v", eventType, err)
+		if err := projector.HandleEvent(context.Background(), message(event.eventType, event.messageType)); err != nil {
+			t.Fatalf("refresh after %s: %v", event.eventType, err)
 		}
 		if got := store.summary("task-current"); got == nil || got.PendingAction != "" {
-			t.Fatalf("pending after %s = %+v, want cleared", eventType, got)
+			t.Fatalf("pending after %s = %+v, want cleared", event.eventType, got)
 		}
 
 		actions = map[string]string{"session-1": pendingClarification}
 		if err := projector.HandleEvent(context.Background(), message(events.MessageAdded, messageTypeClarificationRequest)); err != nil {
-			t.Fatalf("re-arm after %s: %v", eventType, err)
+			t.Fatalf("re-arm after %s: %v", event.eventType, err)
 		}
+	}
+}
+
+func TestProjectorSkipsPendingRefreshForStreamingMessageUpdates(t *testing.T) {
+	store := newProjectorTestStore()
+	actions := map[string]string{}
+	loaderCalls := 0
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		LoadPendingActions: func(context.Context, string) (map[string]string, error) {
+			loaderCalls++
+			return actions, nil
+		},
+	})
+	ctx := context.Background()
+	event := func(messageType string) *bus.Event {
+		return bus.NewEvent(events.MessageUpdated, "test", map[string]interface{}{
+			"task_id":      "task-streaming",
+			"workspace_id": "workspace-1",
+			"session_id":   "session-1",
+			"author_type":  "agent",
+			"type":         messageType,
+		})
+	}
+	if err := projector.HandleEvent(ctx, bus.NewEvent(events.TaskUpdated, "test", map[string]interface{}{
+		"task_id": "task-streaming", "workspace_id": "workspace-1",
+	})); err != nil {
+		t.Fatalf("initialize projection: %v", err)
+	}
+	loaderCalls = 0
+
+	if err := projector.HandleEvent(ctx, event("message")); err != nil {
+		t.Fatalf("streaming message update: %v", err)
+	}
+	if loaderCalls != 0 {
+		t.Fatalf("pending loader calls after streaming update = %d, want 0", loaderCalls)
+	}
+
+	actions = map[string]string{"session-1": pendingClarification}
+	if err := projector.HandleEvent(ctx, event(messageTypeClarificationRequest)); err != nil {
+		t.Fatalf("clarification update: %v", err)
+	}
+	if loaderCalls != 1 {
+		t.Fatalf("pending loader calls after clarification update = %d, want 1", loaderCalls)
 	}
 }
 

@@ -53,7 +53,7 @@ export function findPendingClarification(
   const scoped = clarificationMessagesInScope(messages, scope);
   for (let i = scoped.length - 1; i >= 0; i--) {
     if (scoped[i].type !== "clarification_request") continue;
-    return isPendingClarificationMessage(scoped[i]) ? scoped[i] : null;
+    if (isPendingClarificationMessage(scoped[i])) return scoped[i];
   }
   return null;
 }

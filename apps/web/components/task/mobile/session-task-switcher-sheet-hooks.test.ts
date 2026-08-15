@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { toSheetItem } from "./session-task-switcher-sheet-item";
-import { selectPendingTaskFromSheet } from "./session-task-switcher-sheet-selection";
+import {
+  selectPendingTaskFromSheet,
+  selectTaskFromSheet,
+} from "./session-task-switcher-sheet-selection";
 import type { TaskSession } from "@/lib/types/http";
 
 type SheetTask = Parameters<typeof toSheetItem>[0];
@@ -226,5 +229,75 @@ describe("selectPendingTaskFromSheet", () => {
       onOpenChange: () => order.push("close"),
     });
     expect(order).toEqual(["session:primary", "navigate", "close"]);
+  });
+});
+
+describe("selectTaskFromSheet races", () => {
+  it("ignores an older pending selection that resolves after a newer tap", async () => {
+    let resolveTaskA: (sessions: TaskSession[]) => void = () => undefined;
+    let resolveTaskB: (sessions: TaskSession[]) => void = () => undefined;
+    const loadTaskSessionsForTask = vi.fn(
+      (taskId: string) =>
+        new Promise<TaskSession[]>((resolve) => {
+          if (taskId === "task-a") resolveTaskA = resolve;
+          else resolveTaskB = resolve;
+        }),
+    );
+    const setActiveSession = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+    const shared = {
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask: vi.fn(),
+      navigate,
+      onOpenChange,
+    };
+
+    selectTaskFromSheet({
+      ...shared,
+      taskId: "task-a",
+      task: { primarySessionId: "primary-a", taskPendingAction: "clarification" },
+    });
+    selectTaskFromSheet({
+      ...shared,
+      taskId: "task-b",
+      task: { primarySessionId: "primary-b", taskPendingAction: "clarification" },
+    });
+
+    resolveTaskB([
+      {
+        id: "owner-b",
+        task_id: "task-b",
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+        started_at: UPDATED_AT,
+        updated_at: UPDATED_AT,
+      } as TaskSession,
+    ]);
+    await Promise.resolve();
+    resolveTaskA([
+      {
+        id: "owner-a",
+        task_id: "task-a",
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+        started_at: UPDATED_AT,
+        updated_at: UPDATED_AT,
+      } as TaskSession,
+    ]);
+    await Promise.resolve();
+
+    expect(setActiveSession).toHaveBeenCalledTimes(1);
+    expect(setActiveSession).toHaveBeenCalledWith("task-b", "owner-b");
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith("task-b");
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

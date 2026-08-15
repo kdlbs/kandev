@@ -65,8 +65,15 @@ func (s *Service) reconcileExistingSummaries(
 		if task == nil || task.ID == "" || summaries[task.ID] == nil {
 			continue
 		}
-		action := pendingActionForTask(sessionsByTask[task.ID], pendingBySession)
-		summaries[task.ID] = s.reconcileExistingSummary(ctx, task, summaries[task.ID], action)
+		sessions := sessionsByTask[task.ID]
+		action := pendingActionForTask(sessions, pendingBySession)
+		summaries[task.ID] = s.reconcileExistingSummary(
+			ctx,
+			task,
+			sessions,
+			summaries[task.ID],
+			action,
+		)
 	}
 }
 
@@ -157,6 +164,7 @@ const maxSummaryReconcileAttempts = 3
 func (s *Service) reconcileExistingSummary(
 	ctx context.Context,
 	task *models.Task,
+	sessions []*models.TaskSession,
 	current *statussummary.TaskStatusSummary,
 	pendingAction string,
 ) *statussummary.TaskStatusSummary {
@@ -195,6 +203,12 @@ func (s *Service) reconcileExistingSummary(
 			return current
 		}
 		current = rows[task.ID]
+		pendingBySession, err := s.GetPendingActionsForSessions(ctx, taskSessionIDs(sessions))
+		if err != nil {
+			s.logSummaryRepairFailure(task.ID, "reload pending", err)
+			return current
+		}
+		pendingAction = pendingActionForTask(sessions, pendingBySession)
 	}
 	if current != nil && current.PendingAction != pendingAction {
 		s.logSummaryRepairFailure(task.ID, "persist", fmt.Errorf("exhausted compare-and-set retries"))

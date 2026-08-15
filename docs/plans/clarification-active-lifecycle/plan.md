@@ -148,7 +148,8 @@ bundle detached, a newer bundle rejected, and a later completion republishing th
 - **What:** only newest-durable-turn clarification rows are active; older-turn pending rows are
   excluded, missing status remains pending only in that turn, deleting every newer-turn message does
   not reactivate history, and SQLite/PostgreSQL agree.
-  - **Files:** `apps/backend/internal/task/repository/sqlite/message_test.go` and new
+  - **Files:** `apps/backend/internal/task/repository/sqlite/message_active_clarification_test.go`,
+    `apps/backend/internal/task/repository/sqlite/message_crud_coverage_test.go`, and
     `apps/backend/internal/task/repository/sqlite/message_pending_postgres_test.go`
   - **How:** real database tests create two turns with pending rows, delete every message in the newer
     turn, and verify the active finder and compact pending projection still exclude the older bundle.
