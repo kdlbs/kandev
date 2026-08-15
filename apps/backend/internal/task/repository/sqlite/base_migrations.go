@@ -215,8 +215,11 @@ func (r *Repository) runMigrations() error {
 		SET provider_host = 'https://github.com'
 		WHERE LOWER(TRIM(provider)) = 'github'
 			AND TRIM(COALESCE(provider_host, '')) = ''`)
-	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}'`)
-	r.migrate.Apply("repositories.worktree_branch_template.backfill", `UPDATE repositories SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'`)
+	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT ''`)
+	r.migrate.Apply("repositories.worktree_branch_template.backfill", `
+		UPDATE repositories
+		SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'
+		WHERE TRIM(COALESCE(worktree_branch_template, '')) = ''`)
 	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)
 	r.migrate.Apply("task_plans.implementation_started_session_id", `ALTER TABLE task_plans ADD COLUMN implementation_started_session_id TEXT`)
 	r.migrate.Apply("task_plans.implementation_started_by", `ALTER TABLE task_plans ADD COLUMN implementation_started_by TEXT`)

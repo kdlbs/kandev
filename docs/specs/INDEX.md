@@ -154,6 +154,7 @@ Per-workspace credentials and triage triggers for external services.
 | [creation](workspaces/creation.md) | building |
 | [deletion](workspaces/deletion.md) | shipped |
 | [local-repositories](workspaces/local-repositories.md) | shipped |
+| [worktree-branch-templates](workspaces/worktree-branch-templates.md) | building |
 | [repository-secrets](workspaces/repository-secrets.md) | shipped |
 | [secret-scope-transfer](workspaces/secret-scope-transfer.md) | shipped |
 
