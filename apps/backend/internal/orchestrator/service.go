@@ -358,6 +358,33 @@ func (s *Service) ClaimTaskTitleSession(ctx context.Context, taskID, sessionID s
 	return owned, nil
 }
 
+type reservedPromptTurn struct {
+	id       string
+	done     chan struct{}
+	resolved sync.Once
+	accepted bool
+}
+
+func newReservedPromptTurn(id string) *reservedPromptTurn {
+	return &reservedPromptTurn{id: id, done: make(chan struct{})}
+}
+
+func (r *reservedPromptTurn) resolve(accepted bool) {
+	r.resolved.Do(func() {
+		r.accepted = accepted
+		close(r.done)
+	})
+}
+
+func (r *reservedPromptTurn) wait(ctx context.Context) (bool, error) {
+	select {
+	case <-r.done:
+		return r.accepted, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+}
+
 // Service is the main orchestrator service
 type Service struct {
 	config       ServiceConfig
@@ -605,8 +632,9 @@ type Service struct {
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
 	// reservedPromptTurns keeps durably created turns private until agentctl
-	// accepts their prompt. Message persistence may use the ID, but another
-	// prompt must not adopt it before turn.started is published.
+	// accepts their prompt. Each reservation broadcasts its accepted-or-rolled-
+	// back result so a concurrent ready event can wait, then revalidate prompt
+	// generation before touching turn or workflow state.
 	reservedPromptTurns sync.Map
 
 	// dispatchingQueued tracks the pre-acceptance reservation for the exact
@@ -1512,7 +1540,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 	}
 
 	if reserve {
-		s.reservedPromptTurns.Store(sessionID, turn.ID)
+		s.reservedPromptTurns.Store(sessionID, newReservedPromptTurn(turn.ID))
 		return turn.ID, true, turn, nil
 	}
 	s.activeTurns.Store(sessionID, turn.ID)
@@ -1521,9 +1549,30 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 }
 
 func (s *Service) reservedPromptTurnID(sessionID string) string {
-	turnID, _ := s.reservedPromptTurns.Load(sessionID)
-	id, _ := turnID.(string)
-	return id
+	reservation := s.reservedPromptTurn(sessionID)
+	if reservation == nil {
+		return ""
+	}
+	return reservation.id
+}
+
+func (s *Service) reservedPromptTurn(sessionID string) *reservedPromptTurn {
+	value, ok := s.reservedPromptTurns.Load(sessionID)
+	if !ok {
+		return nil
+	}
+	reservation, _ := value.(*reservedPromptTurn)
+	return reservation
+}
+
+func (s *Service) resolveReservedPromptTurn(sessionID, turnID string, accepted bool) bool {
+	reservation := s.reservedPromptTurn(sessionID)
+	if reservation == nil || reservation.id != turnID {
+		return false
+	}
+	s.reservedPromptTurns.CompareAndDelete(sessionID, reservation)
+	reservation.resolve(accepted)
+	return true
 }
 
 // completeTurnForSession closes any open turn for the session.

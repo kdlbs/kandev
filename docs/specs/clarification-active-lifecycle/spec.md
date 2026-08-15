@@ -48,6 +48,9 @@ hiding the action the icon represents.
   at-most-once boundary: a crash can no longer prove whether agentctl accepted the prompt, so restart
   preserves the successor and keeps the claimed bundle terminal. Acknowledgement clears the recovery
   metadata and publishes the reservation, and HTTP success requires that durable publication. If the
+  predecessor's delayed ready event overlaps this private reservation, ready handling waits for the
+  reservation to resolve and then revalidates prompt generation before touching turn or workflow state.
+  It cannot complete the reserved successor or run predecessor completion actions against it. If the
   attempt marker cannot be persisted, dispatch does not occur and the answer remains retryable. If
   agentctl synchronously rejects the prompt, the reservation is rolled back and the answer can be
   restored. If agentctl accepts the prompt but publication fails, the endpoint returns a server error
@@ -190,6 +193,9 @@ session they can already access. Session selection does not broaden task visibil
 - Backend stops after the attempt marker but before dispatch acknowledgement: startup fails closed,
   preserves the successor as authoritative, and keeps its exact clarification claim terminal. Output
   referencing the reservation provides the same conservative authority even without the marker.
+- A delayed predecessor ready event arrives between the attempt marker and agentctl acknowledgement:
+  wait for the live reservation outcome, then reject the event if its prompt generation was superseded;
+  never complete the reserved successor or evaluate predecessor workflow completion against it.
 
 ## Persistence guarantees
 
@@ -250,6 +256,9 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** the backend stops after marking a detached-answer dispatch attempted but before observing
   acknowledgement, **WHEN** it starts again, **THEN** it preserves the successor as current and keeps
   the exact claimed rows terminal rather than risking duplicate answer dispatch.
+- **GIVEN** a predecessor ready event arrives while a detached-answer successor is reserved, **WHEN**
+  the successor dispatch resolves, **THEN** the handler revalidates prompt generation and the stale
+  predecessor cannot complete the successor or run `on_turn_complete` against it.
 - **GIVEN** two request identities produce terminal and pending events close together, **WHEN** the
   projector refreshes, **THEN** its result matches current repository state rather than event order.
 

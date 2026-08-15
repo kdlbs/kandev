@@ -10,7 +10,8 @@ import (
 // turnAuthorityPredicate excludes an empty successor reservation until prompt
 // dispatch is attempted or published. An attempt marker or referencing message
 // is durable evidence that the prompt may have been accepted before a crash, so
-// that turn remains current.
+// that turn remains current. The orchestrator keeps its live reservation private
+// from ready handling until dispatch resolution.
 func turnAuthorityPredicate(driverName, turnAlias string) string {
 	pending := turnDispatchPendingPredicate(driverName, turnAlias)
 	attempted := turnDispatchAttemptedPredicate(driverName, turnAlias)

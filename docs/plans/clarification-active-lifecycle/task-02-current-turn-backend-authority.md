@@ -114,6 +114,9 @@ blockers/risks, and update task/plan status.
   executor call. Startup preserves an attempted empty successor as dispatch-ambiguous authority;
   marker-write failure rolls back before dispatch, while known synchronous rejection can still restore
   the claimed clarification.
+- Ready-race remediation gives each live reservation an accepted-or-rolled-back completion signal.
+  `agent.ready` waits on that signal outside the cancellation guard, reacquires the guard, and
+  revalidates prompt generation before it can settle turns or run workflow completion.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - Final review remediation makes that durable detach an atomic `UPDATE ... RETURNING` claim over the

@@ -3789,11 +3789,11 @@ func (s *Service) promptDispatchCallback(
 					zap.String("turn_id", reservedTurn.ID),
 					zap.Error(publicationErr))
 			}
-			s.reservedPromptTurns.CompareAndDelete(sessionID, reservedTurn.ID)
 			// The pre-dispatch attempt marker makes restart recovery and rollback
 			// fail closed even if this post-acceptance publication fails.
 			s.activeTurns.Store(sessionID, reservedTurn.ID)
 			s.bindAcceptedDispatchTurn(sessionID, reservedTurn.ID)
+			s.resolveReservedPromptTurn(sessionID, reservedTurn.ID, true)
 		}
 		outcome.recordAccepted(publicationErr)
 		if s.acceptForegroundDispatch(dispatch) {
@@ -3944,14 +3944,14 @@ func (s *Service) rollbackReservedPromptTurn(ctx context.Context, sessionID, tur
 	}
 	rolledBack, err := s.turnService.RollbackReservedTurn(ctx, sessionID, turnID)
 	if err != nil {
-		s.reservedPromptTurns.CompareAndDelete(sessionID, turnID)
+		s.resolveReservedPromptTurn(sessionID, turnID, false)
 		s.logger.Warn("failed to roll back reserved prompt turn",
 			zap.String("session_id", sessionID),
 			zap.String("turn_id", turnID),
 			zap.Error(err))
 		return
 	}
-	s.reservedPromptTurns.CompareAndDelete(sessionID, turnID)
+	s.resolveReservedPromptTurn(sessionID, turnID, false)
 	if rolledBack {
 		s.activeTurns.CompareAndDelete(sessionID, turnID)
 		return

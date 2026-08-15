@@ -241,6 +241,9 @@ All task gates passed:
 - At-most-once remediation: immediately before external executor dispatch, a durable attempt marker
   makes restart recovery fail closed across the acceptance/publication crash window. Marker-write
   failure rolls back before dispatch; known synchronous rejection remains safely rollback-eligible.
+- Ready-race remediation: live reservations broadcast acceptance or rollback. An overlapping ready
+  event waits for that result and revalidates prompt generation, preventing a delayed predecessor from
+  completing the successor or running workflow completion against it.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

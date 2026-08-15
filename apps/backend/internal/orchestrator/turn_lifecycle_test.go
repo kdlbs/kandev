@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
@@ -223,7 +224,7 @@ func TestAcceptedReservationStaysActiveWhenPublicationWriteFails(t *testing.T) {
 		TurnService: svc.turnService,
 		err:         errors.New("turn metadata write failed"),
 	}
-	svc.reservedPromptTurns.Store("session1", reserved.ID)
+	svc.reservedPromptTurns.Store("session1", newReservedPromptTurn(reserved.ID))
 
 	svc.promptDispatchCallback(
 		context.Background(), "task1", "session1", reserved, nil, &promptDispatchOutcome{},
@@ -235,6 +236,55 @@ func TestAcceptedReservationStaysActiveWhenPublicationWriteFails(t *testing.T) {
 	}
 	if pending := svc.reservedPromptTurnID("session1"); pending != "" {
 		t.Fatalf("private reservation cache = %q, want cleared after agentctl acceptance", pending)
+	}
+}
+
+func TestAgentReadyWaitsForReservedPromptGeneration(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	agentMgr := svc.agentManager.(*mockAgentManager)
+	agentMgr.currentPromptExecutionID = "exec1"
+	agentMgr.currentPromptGeneration.Store(1)
+
+	turnID, _, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	if err != nil {
+		t.Fatalf("reserve successor turn: %v", err)
+	}
+	reserved.Metadata = map[string]interface{}{
+		models.TurnMetaKeyPromptDispatchPending:   true,
+		models.TurnMetaKeyPromptDispatchAttempted: true,
+	}
+	if err := repo.UpdateTurn(ctx, reserved); err != nil {
+		t.Fatalf("mark successor dispatch attempted: %v", err)
+	}
+
+	readyDone := make(chan struct{})
+	go func() {
+		svc.handleAgentReady(ctx, watcher.AgentEventData{
+			TaskID: "task1", SessionID: "session1",
+			AgentExecutionID: "exec1", PromptGeneration: 1,
+		})
+		close(readyDone)
+	}()
+	select {
+	case <-readyDone:
+		t.Fatal("predecessor ready completed the reserved successor before dispatch resolution")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	agentMgr.currentPromptGeneration.Store(2)
+	svc.promptDispatchCallback(ctx, "task1", "session1", reserved, nil, &promptDispatchOutcome{})()
+	select {
+	case <-readyDone:
+	case <-time.After(time.Second):
+		t.Fatal("predecessor ready did not resume after dispatch resolution")
+	}
+	turn, err := repo.GetTurn(ctx, turnID)
+	if err != nil {
+		t.Fatalf("load successor after predecessor ready: %v", err)
+	}
+	if turn.CompletedAt != nil {
+		t.Fatalf("predecessor ready completed reserved successor at %v", turn.CompletedAt)
 	}
 }
 

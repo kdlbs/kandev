@@ -452,27 +452,70 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			lock.Unlock()
 		}
 	}()
-	for s.isCancelInFlight(data.SessionID) {
-		// The cancellation owner temporarily releases this mutex while the
-		// lifecycle manager waits for terminal stream frames. Do not complete
-		// the still-running turn in that window, but also do not discard this
-		// ready event: if cancellation fails, it is the event that must finish
-		// the unchanged turn and drain its queue.
+	waitedForReservation := false
+	for {
+		for s.isCancelInFlight(data.SessionID) {
+			// The cancellation owner temporarily releases this mutex while the
+			// lifecycle manager waits for terminal stream frames. Do not complete
+			// the still-running turn in that window, but also do not discard this
+			// ready event: if cancellation fails, it is the event that must finish
+			// the unchanged turn and drain its queue.
+			lock.Unlock()
+			guardLocked = false
+			if err := s.waitForCancelInFlight(context.WithoutCancel(ctx), data.SessionID); err != nil {
+				// A cancellation error does not make this ready event stale. The
+				// owner may have failed before mutating session/turn state; once the
+				// operation is gone, re-read both below and let this event settle its
+				// captured turn. Returning here would strand the turn and any queued
+				// peer message with no future ready event to drain it.
+				s.logger.Warn("cancellation failed while agent.ready was waiting; re-evaluating the captured turn",
+					zap.String("task_id", data.TaskID),
+					zap.String("session_id", data.SessionID),
+					zap.Error(err))
+			}
+			lock.Lock()
+			guardLocked = true
+		}
+
+		reservation := s.reservedPromptTurn(data.SessionID)
+		if reservation == nil {
+			break
+		}
+		waitedForReservation = true
 		lock.Unlock()
 		guardLocked = false
-		if err := s.waitForCancelInFlight(context.WithoutCancel(ctx), data.SessionID); err != nil {
-			// A cancellation error does not make this ready event stale. The
-			// owner may have failed before mutating session/turn state; once the
-			// operation is gone, re-read both below and let this event settle its
-			// captured turn. Returning here would strand the turn and any queued
-			// peer message with no future ready event to drain it.
-			s.logger.Warn("cancellation failed while agent.ready was waiting; re-evaluating the captured turn",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.SessionID),
-				zap.Error(err))
-		}
+		waitCtx, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx),
+			detachedClarificationDispatchTimeout+promptFailureCleanupTimeout,
+		)
+		accepted, waitErr := reservation.wait(waitCtx)
+		cancel()
 		lock.Lock()
 		guardLocked = true
+		if waitErr != nil {
+			s.logger.Warn("agent.ready timed out waiting for reserved prompt dispatch",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("turn_id", reservation.id),
+				zap.Error(waitErr))
+			return
+		}
+		if !accepted {
+			s.logger.Debug("ignoring agent.ready that overlapped a rolled-back prompt reservation",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("turn_id", reservation.id))
+			return
+		}
+	}
+	if waitedForReservation {
+		if data.PromptGeneration == 0 {
+			s.logger.Debug("ignoring generationless agent.ready that overlapped a prompt reservation",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID))
+			return
+		}
+		turnAtEventFire, turnSnapshotErr = s.peekActiveTurnID(ctx, data.SessionID)
 	}
 
 	// Re-validate now that the guard is held: a concurrent interrupt (or
