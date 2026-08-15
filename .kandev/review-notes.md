@@ -22,6 +22,19 @@
   guard reporting `ok`; it now fails. Neutering `recordUnresolvable` makes the
   two new tests the only failures.
 
+- `apps/backend/internal/testutil/envscan_test.go:484` — QA round 6's boundary
+  test pinned only *half* of what its own comment claimed. It asserted that an
+  unreadable const spec does not poison its block, but every declaration in its
+  snippet was one name per spec, so a hoist of `recordUnresolvable` from name
+  level to **spec** level was inert and the test passed unchanged. Verified by
+  mutation in review round 7: with the spec-level hoist applied, the whole
+  `internal/testutil` suite passed and both live package guards reported `ok` —
+  the same blind spot the test was written to close, one level down. The
+  snippet now also declares `bazEnv, unit = "BAZ", timeout`, a multi-name spec
+  whose second name is unreadable, so the covered read of `bazEnv` fails under
+  a spec-level hoist. Both hoists are now killed by this one test, and each is
+  the only failure under its mutant. Test-only, no guard behaviour change.
+
 ## Follow-up tasks created (out of scope for this PR)
 
 None.
@@ -41,6 +54,6 @@ None. Two round-5 design assumptions were put to review and are **confirmed**:
   An argument-less read carries no name, so a name-based guard structurally
   cannot classify it; both are stated in the guard's doc comment.
 
-Note for whoever updates the task plan: section 10's build-tag limitation now
-has this second spelling closed as well, and section 14 gains this review round.
-The plan was left untouched by this phase.
+The task plan was brought up to date in QA round 6 (sections 6, 8, 10, 13 and
+14), so section 10's build-tag limitation records both spellings and section 14
+records every round.
