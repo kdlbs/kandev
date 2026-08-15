@@ -201,7 +201,7 @@ describe("loadPlugins — bundle lifecycle", () => {
     errorSpy.mockRestore();
   });
 
-  it("revokes registrations made before an initialize failure", async () => {
+  it("keeps registrations made before an initialize failure (spec.md:816)", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const pluginId = "plugin-partial-initialize";
     const importer = fakeImporterFor({
@@ -220,7 +220,11 @@ describe("loadPlugins — bundle lifecycle", () => {
       importer,
     );
 
-    expect(pluginRegistry.getNavItems().find((item) => item.id === "partial-nav")).toBeUndefined();
+    expect(pluginRegistry.getNavItems()).toContainEqual({
+      id: "partial-nav",
+      label: "Partial",
+      path: "/partial",
+    });
     pluginRegistry.unregisterPlugin(pluginId);
     errorSpy.mockRestore();
   });

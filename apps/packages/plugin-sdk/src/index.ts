@@ -577,7 +577,7 @@ export interface PluginRegistry {
     label: string;
     path: string;
     icon?: PluginIcon;
-    section?: "main" | "settings" | "integrations";
+    section?: "main" | "settings" | "integrations" | "sidebar-footer";
   }): void;
   registerSettingsRoute(path: string, component: Component): void;
   registerComponent(slot: string, component: Component<{ slotProps?: unknown }>): void;
