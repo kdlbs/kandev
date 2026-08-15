@@ -250,7 +250,6 @@ func TestUpsert_EqualRankOneOutcomeChangeTracksInputsNotSilent(t *testing.T) {
 	ctx := context.Background()
 	t0 := time.Now().UTC()
 
-	prURL := "https://pr/1"
 	if _, err := repo.Upsert(ctx, delivery.UpsertInput{
 		TaskID: taskID, RepositoryID: repoID, WorkspaceID: wsID,
 		Classification: delivery.Classification{Outcome: delivery.OutcomePRMerge, Basis: delivery.BasisDefaultBranchUnknown, Rank: 1},
@@ -258,7 +257,6 @@ func TestUpsert_EqualRankOneOutcomeChangeTracksInputsNotSilent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("first upsert (degraded pr_merge): %v", err)
 	}
-	_ = prURL
 
 	// Detached, ahead=0 everywhere, still degraded: re-evaluates to
 	// no_delivery_observed at the same rank 1.

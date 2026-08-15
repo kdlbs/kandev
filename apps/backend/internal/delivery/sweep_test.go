@@ -307,6 +307,102 @@ func TestRunPass_EndToEnd(t *testing.T) {
 	}
 }
 
+// TestRunPass_AncestrySkippedWhenNoSessionHasMovingHead covers spec
+// "Default-branch observation § Ancestry precondition" and
+// "delivery_ledger_ancestry_skipped_total" (spec.md:1797-1801), composed
+// through the real Sweep with a real, non-nil AncestryChecker rather than
+// the nil used by every other RunPass test in this file — every prior
+// test passed nil, which left runAncestryIfDue and both ancestry counters
+// effectively unexercised. Here the pair's one session shows a single
+// snapshot (no distinct non-empty heads of its own), so the precondition
+// is not met: the skipped counter must increment and the checkout must
+// never even be resolved, proven via the calls counter rather than merely
+// asserting Errored=false (which a different bug could also produce).
+func TestRunPass_AncestrySkippedWhenNoSessionHasMovingHead(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-1", "ws-1")
+	if _, err := db.Exec(db.Rebind(`UPDATE repositories SET default_branch = ? WHERE id = ?`), "main", "repo-1"); err != nil {
+		t.Fatalf("set default_branch: %v", err)
+	}
+	seedTaskSession(t, db, "sess-1", "task-1", "repo-1")
+	seedGitSnapshot(t, db, "snap-1", "sess-1", "feature", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 3, time.Now().UTC())
+
+	checkoutCalls := 0
+	ancestry := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: t.TempDir(), calls: &checkoutCalls}}
+	sweep := delivery.NewSweep(repo, ancestry, nil)
+
+	skippedBefore := readExpvarInt(t, "delivery_ledger_ancestry_skipped_total")
+	errorsBefore := readExpvarInt(t, "delivery_ledger_ancestry_errors_total")
+
+	sweep.RunPass(context.Background())
+
+	if delta := readExpvarInt(t, "delivery_ledger_ancestry_skipped_total") - skippedBefore; delta != 1 {
+		t.Fatalf("ancestry_skipped delta = %d, want 1", delta)
+	}
+	if delta := readExpvarInt(t, "delivery_ledger_ancestry_errors_total") - errorsBefore; delta != 0 {
+		t.Fatalf("ancestry_errors delta = %d, want 0 (skipped, not attempted)", delta)
+	}
+	if checkoutCalls != 0 {
+		t.Fatalf("checkout resolved %d times, want 0: a skipped precondition must never reach the checker", checkoutCalls)
+	}
+	row := readLedgerRow(t, db, "task-1", "repo-1")
+	if row.ReachedAt.Valid {
+		t.Fatalf("reached_default_at = %v, want NULL: no ancestry attempt means no ancestor_of_default observation", row.ReachedAt)
+	}
+}
+
+// TestRunPass_GenuineAncestorReachesDefaultViaSweep covers the same spec
+// sections as the skipped test above from the opposite side: a real
+// ancestor relation, composed end-to-end through Sweep.RunPass, a real
+// git repository (the same fixture ancestry_test.go's unit tests use),
+// and a real AncestryChecker — not merely AncestryChecker.Check in
+// isolation. The pair's one session shows two distinct non-empty heads
+// (satisfying the moving-head precondition); the more recent of the two
+// is the git repo's actual HEAD, which is trivially an ancestor of its
+// own default branch. This is the missing link test-supervisor flagged:
+// spec.md:2041-2050 warns that "a test that omits the relation is
+// asserting nothing", and no prior test joined AncestryChecker to the
+// evaluator through the sweep.
+func TestRunPass_GenuineAncestorReachesDefaultViaSweep(t *testing.T) {
+	work, defaultBranch := newAncestryTestRepo(t)
+	head := runGit(t, work, "rev-parse", "HEAD")
+
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-1", "ws-1")
+	if _, err := db.Exec(db.Rebind(`UPDATE repositories SET default_branch = ? WHERE id = ?`), defaultBranch, "repo-1"); err != nil {
+		t.Fatalf("set default_branch: %v", err)
+	}
+	seedTaskSession(t, db, "sess-1", "task-1", "repo-1")
+	older := time.Now().UTC().Add(-time.Hour)
+	newer := time.Now().UTC()
+	// Two distinct non-empty heads for the same session satisfies the
+	// moving-head precondition; the older, unrelated value never reaches
+	// git (only the most recent snapshot's head is selected), so it does
+	// not need to resolve to a real commit.
+	seedGitSnapshot(t, db, "snap-old", "sess-1", "feature", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1, older)
+	seedGitSnapshot(t, db, "snap-new", "sess-1", "feature", head, 2, newer)
+
+	ancestry := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work}}
+	sweep := delivery.NewSweep(repo, ancestry, nil)
+
+	sweep.RunPass(context.Background())
+
+	row := readLedgerRow(t, db, "task-1", "repo-1")
+	if !row.ReachedAt.Valid {
+		t.Fatal("reached_default_at = NULL, want set: HEAD is trivially an ancestor of its own default branch")
+	}
+	if row.ReachedBasis.String != string(delivery.ReachedBasisAncestorOfDefault) {
+		t.Fatalf("reached_default_basis = %q, want %q", row.ReachedBasis.String, delivery.ReachedBasisAncestorOfDefault)
+	}
+	if row.ReachedRef.String != head {
+		t.Fatalf("reached_default_ref = %q, want %q (the selected session head)", row.ReachedRef.String, head)
+	}
+}
+
 // TestRunPass_OrphanedProviderRowMissingTaskExcludedFromUpsert covers spec
 // "Candidate pairs" / "Scenarios": a github_task_prs row whose task_id
 // matches no tasks row is excluded from candidacy before ever reaching the

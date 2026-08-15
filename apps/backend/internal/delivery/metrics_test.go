@@ -67,6 +67,39 @@ func TestComputeStallSignal_DanglingRepositoryIDExcludedFromComparand(t *testing
 	}
 }
 
+// TestComputeStallSignal_ExceedsThresholdWithValidComparand covers the
+// firing state Review round 1 finding #4 flagged as untested: every
+// existing TestComputeStallSignal_* case keeps StallSeconds at 0 (an
+// empty/dangling/deleted/unattributed comparand), so nothing before this
+// proved the >900s branch (spec.md:2179-2183) actually computes a
+// positive value once a valid, live session drives the comparand ahead
+// of the ledger's last_evaluated_at.
+func TestComputeStallSignal_ExceedsThresholdWithValidComparand(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-1", "ws-1")
+	if _, err := repo.Upsert(context.Background(), delivery.UpsertInput{
+		TaskID: "task-1", RepositoryID: "repo-1", WorkspaceID: "ws-1",
+		Classification: delivery.Classification{Outcome: delivery.OutcomeUnknown, Basis: delivery.BasisNoObservations, Rank: 2},
+		EvaluatedAt:    time.Now().UTC().Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	// A live session on a real, non-deleted repository: it drives the
+	// comparand to ~now, an hour ahead of the ledger's last_evaluated_at.
+	seedTaskSession(t, db, "sess-live", "task-1", "repo-1")
+
+	sig := repo.ComputeStallSignal(context.Background())
+	if sig.LedgerErr != nil || sig.ComparandErr != nil {
+		t.Fatalf("sig = %+v, want no errors", sig)
+	}
+	const stallThresholdSeconds = 900
+	if sig.StallSeconds <= stallThresholdSeconds {
+		t.Fatalf("stall_seconds = %d, want > %d (session is ~1h ahead of last_evaluated_at)", sig.StallSeconds, stallThresholdSeconds)
+	}
+}
+
 func TestComputeStallSignal_SoftDeletedRepositorySessionExcludedFromComparand(t *testing.T) {
 	repo, db := newTestRepo(t)
 	seedWorkspace(t, db, "ws-1")
@@ -169,7 +202,15 @@ func TestComputeStallSignal_ComparandQueryErrorReportsUnknownStall(t *testing.T)
 	}
 }
 
-func TestCountUnattributedSessions_IsAGaugeNotSummedAcrossCalls(t *testing.T) {
+// TestSessionsUnattributedGauge_PublishesLatestNotAccumulated replaces a
+// prior tautological version of this test (Review round 1 recommended
+// item) that only asserted CountUnattributedSessions returns the same
+// number when called twice in a row — true of any pure query and never
+// touching setSessionsUnattributedGauge (metrics.go:53) at all. This
+// drives the gauge through two real Sweep.RunPass calls with a shrinking
+// unattributed-session count and asserts the published expvar reflects
+// only the latest pass (a Set, not an Add).
+func TestSessionsUnattributedGauge_PublishesLatestNotAccumulated(t *testing.T) {
 	repo, db := newTestRepo(t)
 	seedWorkspace(t, db, "ws-1")
 	seedTask(t, db, "task-1", "ws-1")
@@ -177,16 +218,18 @@ func TestCountUnattributedSessions_IsAGaugeNotSummedAcrossCalls(t *testing.T) {
 	seedTaskSession(t, db, "s2", "task-1", "")
 	seedTaskSession(t, db, "s3", "task-1", "")
 
-	ctx := context.Background()
-	n1, err := repo.CountUnattributedSessions(ctx)
-	if err != nil {
-		t.Fatalf("count 1: %v", err)
+	sweep := delivery.NewSweep(repo, nil, nil)
+	sweep.RunPass(context.Background())
+	if got := readExpvarInt(t, "delivery_ledger_sessions_unattributed_total"); got != 3 {
+		t.Fatalf("gauge after first pass = %d, want 3", got)
 	}
-	n2, err := repo.CountUnattributedSessions(ctx)
-	if err != nil {
-		t.Fatalf("count 2: %v", err)
+
+	if _, err := db.Exec(db.Rebind(`DELETE FROM task_sessions WHERE id IN (?, ?)`), "s2", "s3"); err != nil {
+		t.Fatalf("delete sessions: %v", err)
 	}
-	if n1 != 3 || n2 != 3 {
-		t.Fatalf("n1=%d n2=%d, want 3 both times (gauge, not accumulated)", n1, n2)
+
+	sweep.RunPass(context.Background())
+	if got := readExpvarInt(t, "delivery_ledger_sessions_unattributed_total"); got != 1 {
+		t.Fatalf("gauge after second pass = %d, want 1 (a gauge reflects the latest count, not 3+1 accumulated)", got)
 	}
 }
