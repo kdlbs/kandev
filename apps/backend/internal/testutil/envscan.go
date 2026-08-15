@@ -18,13 +18,19 @@ import (
 // same-package constant. Callers use it to guard a hermetic-environment test
 // scrub against silently falling behind new environment reads.
 //
-// os.Getenv and os.LookupEnv are always treated as environment reads. A
-// package that funnels its reads through its own single-argument accessor
-// (for example (*GitOperator).environmentValue, which falls back to
-// os.Environ) must name that accessor in extraReaders, or the guard sees only
-// the minority of its reads and the assurance is hollow. Names in
-// extraReaders match on the selector alone, so any receiver counts, as does a
-// plain package-level function of the same name.
+// os.Getenv and os.LookupEnv are always treated as environment reads. They are
+// matched on the literal identifier os, so a file that imports os under an
+// alias or through a dot import is not scanned; no file in this repository
+// does either, and a review of one that did would be the place to catch it.
+//
+// A package that funnels its reads through its own accessor (for example
+// (*GitOperator).environmentValue, which falls back to os.Environ) must name
+// that accessor in extraReaders, or the guard sees only the minority of its
+// reads and the assurance is hollow. Names in extraReaders match on the
+// selector alone, so any receiver counts, as does a plain package-level
+// function of the same name. Only the first argument is read, so an accessor
+// that later grows a second parameter stays covered rather than silently
+// dropping every one of its call sites out of the scan.
 func AssertEnvReadsCovered(t testing.TB, scrubbed, exempt []string, extraReaders ...string) {
 	t.Helper()
 	fileSet := token.NewFileSet()
@@ -141,12 +147,16 @@ func stringConstants(files []*ast.File) map[string]string {
 }
 
 // envReadCalls collects every os.Getenv / os.LookupEnv call in a file, plus
-// every single-argument call to one of the caller-declared extraReaders.
+// every call to one of the caller-declared extraReaders. Any call carrying at
+// least one argument qualifies, because resolveEnvName only ever reads the
+// first: pinning this to exactly one argument meant that adding a fallback
+// parameter to an accessor dropped all of its call sites from the scan without
+// failing a single test.
 func envReadCalls(file *ast.File, extraReaders map[string]bool) []*ast.CallExpr {
 	var calls []*ast.CallExpr
 	ast.Inspect(file, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || len(call.Args) != 1 {
+		if !ok || len(call.Args) == 0 {
 			return true
 		}
 		if isEnvRead(call.Fun, extraReaders) {
