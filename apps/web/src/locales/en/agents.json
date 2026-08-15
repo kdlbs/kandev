@@ -234,5 +234,18 @@
   "duplicateProfileNamed": "Duplicate {{name}}",
   "duplicateProfileSuccess": "Profile duplicated",
   "duplicateSaveBlocked": "Settings are still saving. Try again in a moment.",
-  "failedToDuplicateProfile": "Failed to duplicate profile"
+  "failedToDuplicateProfile": "Failed to duplicate profile",
+  "dynamicProfileDisabled": "Dynamic agent routing is disabled.",
+  "dynamicProfileDescription": "Choose an ordered list of concrete profiles for fallback execution.",
+  "dynamicProfileSettings": "Dynamic profile settings",
+  "dynamicCandidates": "Candidates",
+  "dynamicCandidatesDescription": "Candidates run in order. The next candidate is used only when the configured error action allows it.",
+  "addDynamicCandidate": "Add candidate",
+  "noDynamicCandidates": "Add at least one concrete profile.",
+  "moveDynamicCandidateUp": "Move candidate up",
+  "moveDynamicCandidateDown": "Move candidate down",
+  "removeDynamicCandidate": "Remove candidate",
+  "dynamicCandidatePickerDescription": "Choose a concrete profile that is eligible for dynamic routing.",
+  "dynamicProfileSaved": "Dynamic profile saved.",
+  "savingProfile": "Saving..."
 }

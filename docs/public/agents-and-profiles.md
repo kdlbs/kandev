@@ -93,6 +93,27 @@ change makes a saved option value unsupported, Kandev removes that value after
 a successful resolution; a failed resolution keeps the draft unchanged so you
 can retry it.
 
+### Use a dynamic profile
+
+> [!EXPERIMENTAL]
+> Dynamic agent routing is disabled in production by default. Enable
+> `features.dynamicAgentRouting` under **Settings > System > Feature Toggles**
+> and restart Kandev before creating or using a dynamic profile.
+
+Choose the **Dynamic** agent family when you create a profile. Add concrete
+profiles in the order that Kandev must try them. The logical dynamic profile
+stays selected in the task and utility binding, while each launch uses one
+concrete candidate behind the scenes. Candidates must be enabled, launchable
+profiles. Dynamic profiles and rich Office profiles cannot be candidates.
+
+Provider errors that occur before a result can use the configured action, such
+as retrying the current candidate or trying the next candidate. A started turn
+with an ambiguous result does not switch providers automatically. If no
+candidate is eligible, the session waits for a recovery action. After the
+current turn settles, use **Retry current agent** or **Try next agent** in the
+session recovery surface. These actions use the current route generation, so a
+stale browser action does not replace a newer route decision.
+
 ### Monitor capability and subscription status
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.

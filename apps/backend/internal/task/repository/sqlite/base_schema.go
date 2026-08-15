@@ -20,6 +20,7 @@ func (r *Repository) initSchema() error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initDynamicRoutingSchema,
 		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
 		r.initGitSchema,
@@ -44,6 +45,53 @@ func (r *Repository) initSchema() error {
 		}
 	}
 	return nil
+}
+
+func (r *Repository) initDynamicRoutingSchema() error {
+	_, err := r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS dynamic_route_states (
+			session_id TEXT PRIMARY KEY,
+			logical_profile_id TEXT NOT NULL,
+			execution_profile_id TEXT NOT NULL DEFAULT '',
+			route_generation BIGINT NOT NULL DEFAULT 0,
+			profile_version BIGINT NOT NULL DEFAULT 0,
+			state TEXT NOT NULL DEFAULT 'selecting',
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		);
+
+		CREATE TABLE IF NOT EXISTS dynamic_route_attempts (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			logical_profile_id TEXT NOT NULL,
+			execution_profile_id TEXT NOT NULL DEFAULT '',
+			route_generation BIGINT NOT NULL,
+			profile_version BIGINT NOT NULL,
+			reason TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			UNIQUE (session_id, route_generation),
+			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_dynamic_route_attempts_session
+			ON dynamic_route_attempts(session_id, route_generation);
+
+		CREATE TABLE IF NOT EXISTS dynamic_resource_circuits (
+			resource_key TEXT PRIMARY KEY,
+			state TEXT NOT NULL,
+			until_at TIMESTAMP,
+			code TEXT NOT NULL DEFAULT '',
+			probe_until TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS dynamic_installation_keys (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			key_bytes BLOB NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		);
+	`)
+	return err
 }
 
 const taskResourceCleanupSchemaDDL = `
@@ -621,6 +669,8 @@ func (r *Repository) initMessageTurnSchema() error {
 		task_id TEXT NOT NULL,
 		started_at TIMESTAMP NOT NULL,
 		completed_at TIMESTAMP,
+		execution_profile_id TEXT NOT NULL DEFAULT '',
+		route_generation BIGINT NOT NULL DEFAULT 0,
 		metadata TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
@@ -680,6 +730,10 @@ const sessionWorktreeSchemaDDL = `
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,
 		execution_profile_id TEXT NOT NULL DEFAULT '',
+		route_generation INTEGER NOT NULL DEFAULT 0,
+		route_state TEXT NOT NULL DEFAULT '',
+		route_reason TEXT NOT NULL DEFAULT '',
+		downstream_acp_session_id TEXT NOT NULL DEFAULT '',
 		executor_id TEXT DEFAULT '',
 		executor_profile_id TEXT DEFAULT '',
 		environment_id TEXT DEFAULT '',

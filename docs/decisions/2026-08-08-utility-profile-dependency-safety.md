@@ -1,6 +1,6 @@
 # ADR-2026-08-08-utility-profile-dependency-safety: Warn Before Breaking Utility Profile Bindings
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-14)
 **Date:** 2026-08-08
 **Area:** backend, frontend, protocol
 
@@ -12,6 +12,16 @@ uses an in-use confirmation flow for other dependents. Legacy utility settings a
 representation when an old agent/model pair matches no profile or several profiles.
 
 ## Decision
+
+### Amendment (2026-08-14)
+
+Utility bindings may name concrete or dynamic profiles. Dynamic candidate
+references also participate in the same dependency dialog. A confirmed removal
+keeps the stored reference: a missing logical dynamic profile makes the utility
+binding unconfigured, while a missing concrete candidate makes only that route
+ineligible. The dynamic conductor can select another configured candidate; this
+is routing authorized by the selected profile, not an implicit utility-profile
+replacement.
 
 Profile dependency checks include utility-agent bindings.
 
@@ -29,7 +39,7 @@ Profile dependency checks include utility-agent bindings.
 Utility binding persistence has an explicit state separate from the profile ID:
 
 - `inherit`: a built-in action uses the user default.
-- `explicit`: the row names a concrete profile.
+- `explicit`: the row names an eligible concrete or dynamic profile.
 - `unconfigured`: migration or a prior profile change left no executable profile.
 
 The migration keeps legacy agent/model values as read-only inputs. It writes `explicit` only when

@@ -22,6 +22,7 @@ import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import type { Agent, ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/types/http";
 import { ProfileMcpConfigCard } from "./profile-mcp-config-card";
 import { profilePermissionValues } from "@/lib/agent-permissions";
+import { DynamicAgentProfileEditor } from "@/components/settings/dynamic-agent-profile-editor";
 import {
   isProfileDirty,
   toAgentProfilePatch,
@@ -221,6 +222,19 @@ export function ProfilesCard({
   onToastError,
 }: ProfilesCardProps) {
   const { t } = useTranslation();
+  const dynamicProfile = draftAgent.name === "dynamic" ? draftAgent.profiles[0] : undefined;
+
+  if (dynamicProfile) {
+    return (
+      <DynamicAgentProfileEditor
+        agent={draftAgent}
+        profile={dynamicProfile}
+        showSave={false}
+        onDraftChange={(patch) => onProfileChange(dynamicProfile.id, patch)}
+      />
+    );
+  }
+
   return (
     <SettingsCard isDirty={isAgentDirty}>
       <CardHeader className="flex flex-row items-center justify-between">

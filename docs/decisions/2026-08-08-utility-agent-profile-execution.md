@@ -1,6 +1,6 @@
 # ADR-2026-08-08-utility-agent-profile-execution: Utility Agents Use Execution Profiles
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-14)
 **Date:** 2026-08-08
 **Area:** backend, frontend, protocol
 
@@ -14,9 +14,20 @@ agent, and a provider may request permission after the caller can no longer resp
 
 ## Decision
 
+### Amendment (2026-08-14)
+
+[ADR-2026-08-13-dynamic-agent-profile-routing](2026-08-13-dynamic-agent-profile-routing.md)
+extends eligible utility selections to dynamic profiles. The utility caller
+still supplies one logical `agent_profile_id`; a shared resolver either launches
+the concrete profile or delegates to the dynamic conductor. Dynamic routing may
+select another configured concrete candidate under its own policy. The durable
+utility call records both the logical selection and concrete
+`execution_profile_id`. The permission and fail-closed rules below apply to
+each selected concrete attempt.
+
 Utility-agent configuration stores an `agent_profile_id`, not an independent agent/model pair. A
 built-in action may inherit the user's default utility profile; a built-in override and every custom
-utility agent reference one concrete, global agent profile. At invocation start, the backend resolves
+utility agent reference one eligible concrete or dynamic global agent profile. At invocation start, the backend resolves
 that profile and uses its complete launch-affecting configuration for both host-sessionless and
 task-session-bound utility execution.
 

@@ -63,6 +63,21 @@ type Agent interface {
 	InstallScript() string
 }
 
+// VirtualAgent marks an agent family that is visible to settings and profile
+// configuration but cannot launch an inference process itself.
+type VirtualAgent interface {
+	Agent
+	IsVirtual() bool
+}
+
+// IsVirtualAgent reports whether an agent is a non-launchable virtual family.
+// Keeping this as an optional capability lets existing concrete agents remain
+// unchanged while callers can fail closed at launch and discovery boundaries.
+func IsVirtualAgent(agent Agent) bool {
+	virtual, ok := agent.(VirtualAgent)
+	return ok && virtual.IsVirtual()
+}
+
 // InferenceAgent is an optional capability marker for agents that support
 // one-shot LLM inference via the host utility manager. The actual model list
 // is populated dynamically from the ACP probe — agents no longer declare a

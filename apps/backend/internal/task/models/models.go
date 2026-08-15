@@ -1110,14 +1110,20 @@ func copyMetadata(m map[string]any) map[string]any {
 // A turn starts when a user sends a prompt and ends when the agent completes,
 // cancels, or errors.
 type Turn struct {
-	ID            string                 `json:"id"`
-	TaskSessionID string                 `json:"session_id"`
-	TaskID        string                 `json:"task_id"`
-	StartedAt     time.Time              `json:"started_at"`
-	CompletedAt   *time.Time             `json:"completed_at,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt     time.Time              `json:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
+	ID            string `json:"id"`
+	TaskSessionID string `json:"session_id"`
+	TaskID        string `json:"task_id"`
+	// ExecutionProfileID and RouteGeneration are immutable attribution for the
+	// concrete route that started this turn. They are kept alongside the
+	// existing metadata during the compatibility migration so old rows remain
+	// readable.
+	ExecutionProfileID string                 `json:"execution_profile_id,omitempty"`
+	RouteGeneration    int64                  `json:"route_generation,omitempty"`
+	StartedAt          time.Time              `json:"started_at"`
+	CompletedAt        *time.Time             `json:"completed_at,omitempty"`
+	Metadata           map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
 }
 
 // ReviewStatus represents the review state of a TaskSession. The zero value
@@ -1191,31 +1197,35 @@ type SessionBranchInfo struct {
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
-	ID                   string                 `json:"id"`
-	TaskID               string                 `json:"task_id"`
-	Name                 string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
-	AgentExecutionID     string                 `json:"agent_execution_id"`   // Docker container/agent execution
-	ContainerID          string                 `json:"container_id"`         // Docker container ID for cleanup
-	AgentProfileID       string                 `json:"agent_profile_id"`     // ID of the agent profile used
-	ExecutionProfileID   string                 `json:"execution_profile_id"` // Concrete profile used for this execution
-	ExecutorID           string                 `json:"executor_id"`
-	ExecutorProfileID    string                 `json:"executor_profile_id"`
-	EnvironmentID        string                 `json:"environment_id"`
-	RepositoryID         string                 `json:"repository_id"`   // Primary repository (for backward compatibility)
-	BaseBranch           string                 `json:"base_branch"`     // Primary base branch (for backward compatibility)
-	BaseCommitSHA        string                 `json:"base_commit_sha"` // Git commit SHA at session start (for cumulative diff)
-	WorkspacePath        string                 `json:"workspace_path"`  // Effective task workspace root; legacy repo-less sessions may use the picked host folder
-	Worktrees            []*TaskEnvironmentRepo `json:"-"`               // Environment repository rows for this session's workspace
-	AgentProfileSnapshot map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
-	ExecutorSnapshot     map[string]interface{} `json:"executor_snapshot,omitempty"`
-	EnvironmentSnapshot  map[string]interface{} `json:"environment_snapshot,omitempty"`
-	RepositorySnapshot   map[string]interface{} `json:"repository_snapshot,omitempty"`
-	State                TaskSessionState       `json:"state"`
-	ErrorMessage         string                 `json:"error_message,omitempty"`
-	Metadata             map[string]interface{} `json:"metadata,omitempty"`
-	StartedAt            time.Time              `json:"started_at"`
-	CompletedAt          *time.Time             `json:"completed_at,omitempty"`
-	UpdatedAt            time.Time              `json:"updated_at"`
+	ID                     string                 `json:"id"`
+	TaskID                 string                 `json:"task_id"`
+	Name                   string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
+	AgentExecutionID       string                 `json:"agent_execution_id"`   // Docker container/agent execution
+	ContainerID            string                 `json:"container_id"`         // Docker container ID for cleanup
+	AgentProfileID         string                 `json:"agent_profile_id"`     // ID of the agent profile used
+	ExecutionProfileID     string                 `json:"execution_profile_id"` // Concrete profile used for this execution
+	RouteGeneration        int64                  `json:"route_generation,omitempty"`
+	RouteState             string                 `json:"route_state,omitempty"`
+	RouteReason            string                 `json:"route_reason,omitempty"`
+	DownstreamACPSessionID string                 `json:"downstream_acp_session_id,omitempty"`
+	ExecutorID             string                 `json:"executor_id"`
+	ExecutorProfileID      string                 `json:"executor_profile_id"`
+	EnvironmentID          string                 `json:"environment_id"`
+	RepositoryID           string                 `json:"repository_id"`   // Primary repository (for backward compatibility)
+	BaseBranch             string                 `json:"base_branch"`     // Primary base branch (for backward compatibility)
+	BaseCommitSHA          string                 `json:"base_commit_sha"` // Git commit SHA at session start (for cumulative diff)
+	WorkspacePath          string                 `json:"workspace_path"`  // Effective task workspace root; legacy repo-less sessions may use the picked host folder
+	Worktrees              []*TaskEnvironmentRepo `json:"-"`               // Environment repository rows for this session's workspace
+	AgentProfileSnapshot   map[string]interface{} `json:"agent_profile_snapshot,omitempty"`
+	ExecutorSnapshot       map[string]interface{} `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot    map[string]interface{} `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot     map[string]interface{} `json:"repository_snapshot,omitempty"`
+	State                  TaskSessionState       `json:"state"`
+	ErrorMessage           string                 `json:"error_message,omitempty"`
+	Metadata               map[string]interface{} `json:"metadata,omitempty"`
+	StartedAt              time.Time              `json:"started_at"`
+	CompletedAt            *time.Time             `json:"completed_at,omitempty"`
+	UpdatedAt              time.Time              `json:"updated_at"`
 
 	// Environment reference
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
@@ -1237,20 +1247,33 @@ type TaskSession struct {
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
-		"id":                  s.ID,
-		"task_id":             s.TaskID,
-		"agent_execution_id":  s.AgentExecutionID,
-		"container_id":        s.ContainerID,
-		"agent_profile_id":    s.AgentProfileID,
-		"executor_id":         s.ExecutorID,
-		"executor_profile_id": s.ExecutorProfileID,
-		"environment_id":      s.EnvironmentID,
-		"repository_id":       s.RepositoryID,
-		"base_branch":         s.BaseBranch,
-		"base_commit_sha":     s.BaseCommitSHA,
-		"state":               string(s.State),
-		"started_at":          s.StartedAt,
-		"updated_at":          s.UpdatedAt,
+		"id":                   s.ID,
+		"task_id":              s.TaskID,
+		"agent_execution_id":   s.AgentExecutionID,
+		"container_id":         s.ContainerID,
+		"agent_profile_id":     s.AgentProfileID,
+		"execution_profile_id": s.ExecutionProfileID,
+		"executor_id":          s.ExecutorID,
+		"executor_profile_id":  s.ExecutorProfileID,
+		"environment_id":       s.EnvironmentID,
+		"repository_id":        s.RepositoryID,
+		"base_branch":          s.BaseBranch,
+		"base_commit_sha":      s.BaseCommitSHA,
+		"state":                string(s.State),
+		"started_at":           s.StartedAt,
+		"updated_at":           s.UpdatedAt,
+	}
+	if s.RouteGeneration > 0 {
+		result["route_generation"] = s.RouteGeneration
+	}
+	if s.RouteState != "" {
+		result["route_state"] = s.RouteState
+	}
+	if s.RouteReason != "" {
+		result["route_reason"] = s.RouteReason
+	}
+	if s.DownstreamACPSessionID != "" {
+		result["downstream_acp_session_id"] = s.DownstreamACPSessionID
 	}
 	if worktrees := s.WorktreesAPI(); len(worktrees) > 0 {
 		result["worktrees"] = worktrees

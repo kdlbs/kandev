@@ -81,6 +81,13 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
 Kandev remembers draft or recently used repository, branch, executor, and profile choices. Review the restored values before submitting, especially after changing workspace.
 
+When the selected profile is dynamic, the task keeps one logical profile and one
+session tab while Kandev chooses a concrete candidate in the configured order.
+Provider errors before a result may move execution to the next configured
+candidate. Kandev does not switch candidates after an ambiguous started turn.
+If the route has no eligible candidate, wait for the current turn to settle and
+use the session's **Retry current agent** or **Try next agent** recovery action.
+
 Creating a repository is available only in an unlocked, single-repository **New Task** form. Kandev rejects an existing target path, creates no initial files or commit, registers the repository in the workspace, and switches the task to a direct **Local** executor profile. If no direct Local profile is available, repository creation stays disabled. Add more repository rows only after selecting existing repositories; empty multi-repository worktrees are not supported.
 
 > **Local changes:** creating a fresh local branch can discard dirty files only after explicit consent. Save or commit important work before approving it.

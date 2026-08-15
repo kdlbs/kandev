@@ -93,6 +93,56 @@ func newTurnLifecycleTestService(t *testing.T) (*Service, *sqliterepo.Repository
 	return svc, repo
 }
 
+func TestApplyRouteActionRejectsActiveTurn(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	if _, err := svc.turnService.StartTurn(ctx, "session1"); err != nil {
+		t.Fatalf("start turn: %v", err)
+	}
+	svc.SetRouteActionHandler(func(context.Context, RouteActionRequest) (*RouteActionResult, error) {
+		t.Fatal("route action handler must not run while a turn is active")
+		return nil, nil
+	})
+
+	_, err := svc.ApplyRouteAction(ctx, RouteActionRequest{
+		SessionID: "session1",
+		Action:    RouteActionRetry,
+	})
+	if !errors.Is(err, ErrRouteActionActiveTurn) {
+		t.Fatalf("ApplyRouteAction error = %v, want %v", err, ErrRouteActionActiveTurn)
+	}
+}
+
+func TestApplyRouteActionRunsAfterTurnSettles(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	turn, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("start turn: %v", err)
+	}
+	if err := svc.turnService.CompleteTurn(ctx, turn.ID); err != nil {
+		t.Fatalf("complete turn: %v", err)
+	}
+	want := &RouteActionResult{SessionID: "session1", State: "starting"}
+	svc.SetRouteActionHandler(func(_ context.Context, request RouteActionRequest) (*RouteActionResult, error) {
+		if request.Action != RouteActionTryNext {
+			t.Fatalf("route action = %q, want %q", request.Action, RouteActionTryNext)
+		}
+		return want, nil
+	})
+
+	got, err := svc.ApplyRouteAction(ctx, RouteActionRequest{
+		SessionID: "session1",
+		Action:    RouteActionTryNext,
+	})
+	if err != nil {
+		t.Fatalf("ApplyRouteAction: %v", err)
+	}
+	if got != want {
+		t.Fatalf("ApplyRouteAction result = %#v, want %#v", got, want)
+	}
+}
+
 // TestStartTurnAdoptsExistingDBTurn covers the dual-creation leak that left
 // zombie turns whenever service.CreateMessage lazily started a turn for an
 // inbound user message and the orchestrator's PromptTask then started another.

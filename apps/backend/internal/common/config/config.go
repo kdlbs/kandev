@@ -379,6 +379,11 @@ type FeaturesConfig struct {
 	// opts in.
 	Auth bool `mapstructure:"auth" json:"auth"`
 
+	// DynamicAgentRouting gates dynamic profile configuration, execution
+	// routing, and the shared route health service. It is disabled in every
+	// embedded profile until the complete feature is ready.
+	DynamicAgentRouting bool `mapstructure:"dynamic_agent_routing" json:"dynamicAgentRouting"`
+
 	// ClaudeBackgroundPromptHandoff gates the high-risk experiment that lets a
 	// claude-acp session accept a successor prompt after an adapter-attested
 	// foreground handoff while background work remains live. It is off in every

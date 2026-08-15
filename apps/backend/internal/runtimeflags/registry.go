@@ -69,6 +69,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.dynamicAgentRouting",
+			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
+			Kind:        KindFeature,
+			Label:       "Dynamic agent routing",
+			Description: "Enables reusable dynamic agent profiles and provider-error routing across task, utility, and Office execution.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Dynamic routing can change the concrete provider used by a logical session and is still experimental. " +
+				"Enable it only on a controlled installation and review route recovery behavior before using it for unattended work.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicAgentRouting },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicAgentRouting = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.claudeBackgroundPromptHandoff",
 			EnvVar:      "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF",
 			Kind:        KindFeature,

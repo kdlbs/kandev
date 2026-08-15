@@ -1578,5 +1578,15 @@
   "sessionActionResume": "Resuming session",
   "sessionActionSetPrimary": "Set primary",
   "sessionActionStop": "Stopping session",
-  "sessionActionSuccessful": "{{action}} successful"
+  "sessionActionSuccessful": "{{action}} successful",
+  "dynamicRouteWaiting": "No eligible agent is available.",
+  "dynamicRouteActionRequired": "This route needs a recovery action.",
+  "dynamicRouteRetry": "Retry current agent",
+  "dynamicRouteTryNext": "Try next agent",
+  "dynamicRouteRetrying": "Retrying agent...",
+  "dynamicRouteTryNexting": "Trying next agent...",
+  "dynamicRouteReasonCandidateOrder": "Selected by profile order",
+  "dynamicRouteReasonNoEligibleCandidate": "No eligible candidate",
+  "dynamicRouteReasonProviderUnavailable": "Provider unavailable",
+  "dynamicRouteReasonQuotaLimited": "Provider usage limit"
 }

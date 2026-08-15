@@ -89,8 +89,10 @@ func copyAgent(a *models.Agent) *models.Agent {
 }
 
 func (f *fakeStore) CreateAgent(_ context.Context, a *models.Agent) error {
-	f.nextAgentID++
-	a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
+	if a.ID == "" {
+		f.nextAgentID++
+		a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
+	}
 	stored := copyAgent(a)
 	f.agents[a.ID] = stored
 	f.byName[a.Name] = stored
@@ -368,6 +370,35 @@ func TestProfileReconciler_SeedsDefaultProfile(t *testing.T) {
 	}
 	if p.Mode != "default" {
 		t.Errorf("mode = %q, want default", p.Mode)
+	}
+}
+
+func TestProfileReconciler_SeedsDynamicVirtualFamily(t *testing.T) {
+	st := newFakeStore()
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	reg := registry.NewRegistry(log)
+	reg.LoadDefaults()
+	r := NewProfileReconciler(
+		&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}},
+		reg,
+		st,
+		log,
+	)
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	parent, err := st.GetAgentByName(context.Background(), agents.DynamicAgentID)
+	if err != nil {
+		t.Fatalf("dynamic family lookup: %v", err)
+	}
+	if parent.ID != agents.DynamicAgentID {
+		t.Fatalf("dynamic family ID = %q, want stable ID %q", parent.ID, agents.DynamicAgentID)
+	}
+	if len(st.created) != 0 {
+		t.Fatalf("dynamic family seeded a concrete profile: %+v", st.created)
 	}
 }
 
@@ -839,8 +870,8 @@ func TestProfileReconciler_LogsOrphanCleanupSummary(t *testing.T) {
 		t.Fatalf("expected 1 summary log, got %d", len(entries))
 	}
 	fields := entries[0].ContextMap()
-	if fields["db_agent_count"] != int64(1) {
-		t.Errorf("db_agent_count = %v, want 1", fields["db_agent_count"])
+	if fields["db_agent_count"] != int64(2) {
+		t.Errorf("db_agent_count = %v, want 2 including the dynamic virtual family", fields["db_agent_count"])
 	}
 	if fields["orphan_agent_count"] != int64(1) {
 		t.Errorf("orphan_agent_count = %v, want 1", fields["orphan_agent_count"])

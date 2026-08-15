@@ -44,8 +44,36 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionSetPrimary, h.wsSetPrimarySession)
 	d.RegisterFunc(ws.ActionSessionSetPlanMode, h.wsSetPlanMode)
 	d.RegisterFunc(ws.ActionSessionRename, h.wsRenameSession)
+	d.RegisterFunc(ws.ActionSessionRouteAction, h.wsRouteAction)
 	d.RegisterFunc(ws.ActionGitHubCheckSessionPR, h.wsCheckSessionPR)
 	d.RegisterFunc(ws.ActionGitLabCheckSessionMR, h.wsCheckSessionMR)
+}
+
+type wsRouteActionRequest struct {
+	SessionID          string `json:"session_id"`
+	Action             string `json:"action"`
+	ExpectedGeneration int64  `json:"expected_generation"`
+}
+
+func (h *Handlers) wsRouteAction(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsRouteActionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	result, err := h.service.ApplyRouteAction(ctx, orchestrator.RouteActionRequest{
+		SessionID: req.SessionID, Action: orchestrator.RouteAction(req.Action),
+		ExpectedGeneration: req.ExpectedGeneration,
+	})
+	if err != nil {
+		var conflict *orchestrator.RouteActionConflictError
+		if errors.As(err, &conflict) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), map[string]interface{}{
+				"route": conflict.Result,
+			})
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
 // WS handlers

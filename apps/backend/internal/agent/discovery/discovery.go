@@ -70,6 +70,9 @@ func LoadRegistry(ctx context.Context, reg *registry.Registry, log *logger.Logge
 	agentList := make([]agents.Agent, 0, len(enabled))
 
 	for _, ag := range enabled {
+		if agents.IsVirtualAgent(ag) {
+			continue
+		}
 		// Gather discovery info from the agent.
 		result, err := ag.IsInstalled(ctx)
 		if err != nil {

@@ -1,0 +1,269 @@
+package sqlite
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"time"
+
+	"github.com/google/uuid"
+
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+)
+
+var _ dynamicruntime.Persistence = (*Repository)(nil)
+
+func (r *Repository) SaveRouteState(ctx context.Context, state dynamicruntime.RouteState) error {
+	updatedAt := state.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO dynamic_route_states (
+			session_id, logical_profile_id, execution_profile_id,
+			route_generation, profile_version, state, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			logical_profile_id = excluded.logical_profile_id,
+			execution_profile_id = excluded.execution_profile_id,
+			route_generation = excluded.route_generation,
+			profile_version = excluded.profile_version,
+			state = excluded.state,
+			updated_at = excluded.updated_at
+	`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
+		state.Generation, state.ProfileVersion, state.Status, updatedAt)
+	return err
+}
+
+// ClaimRouteState advances a route generation only when the durable row still
+// has the caller's expected generation. The insert path is reserved for the
+// initial generation, so a restart cannot accidentally reset an existing
+// session to generation one.
+func (r *Repository) ClaimRouteState(ctx context.Context, expectedGeneration int64, state dynamicruntime.RouteState) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO dynamic_route_states (
+			session_id, logical_profile_id, execution_profile_id,
+			route_generation, profile_version, state, updated_at
+		) SELECT ?, ?, ?, ?, ?, ?, ?
+			WHERE ? = 0 AND NOT EXISTS (
+				SELECT 1 FROM dynamic_route_states WHERE session_id = ?
+			)
+		ON CONFLICT(session_id) DO UPDATE SET
+			logical_profile_id = excluded.logical_profile_id,
+			execution_profile_id = excluded.execution_profile_id,
+			route_generation = excluded.route_generation,
+			profile_version = excluded.profile_version,
+			state = excluded.state,
+			updated_at = excluded.updated_at
+		WHERE dynamic_route_states.route_generation = ?
+	`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
+		state.Generation, state.ProfileVersion, state.Status, state.UpdatedAt,
+		expectedGeneration, state.SessionID, expectedGeneration)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+// RecordRouteDecision commits the generation claim and immutable attempt row
+// together. A stale claim returns dynamicruntime.ErrStaleGeneration.
+func (r *Repository) RecordRouteDecision(ctx context.Context, decision dynamicruntime.RouteDecision, state dynamicruntime.RouteState) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO dynamic_route_states (
+			session_id, logical_profile_id, execution_profile_id,
+			route_generation, profile_version, state, updated_at
+		) SELECT ?, ?, ?, ?, ?, ?, ?
+			WHERE ? = 0 AND NOT EXISTS (
+				SELECT 1 FROM dynamic_route_states WHERE session_id = ?
+			)
+		ON CONFLICT(session_id) DO UPDATE SET
+			logical_profile_id = excluded.logical_profile_id,
+			execution_profile_id = excluded.execution_profile_id,
+			route_generation = excluded.route_generation,
+			profile_version = excluded.profile_version,
+			state = excluded.state,
+			updated_at = excluded.updated_at
+		WHERE dynamic_route_states.route_generation = ?
+	`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
+		state.Generation, state.ProfileVersion, state.Status, state.UpdatedAt,
+		state.Generation-1, state.SessionID, state.Generation-1)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return dynamicruntime.ErrStaleGeneration
+	}
+	createdAt := decisionReasonTime(decision, state)
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO dynamic_route_attempts (
+			id, session_id, logical_profile_id, execution_profile_id,
+			route_generation, profile_version, reason, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`), uuid.New().String(), decision.SessionID, decision.LogicalProfileID,
+		decision.ExecutionProfileID, decision.Generation, decision.ProfileVersion,
+		decision.Reason, createdAt); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func decisionReasonTime(_ dynamicruntime.RouteDecision, state dynamicruntime.RouteState) time.Time {
+	if !state.UpdatedAt.IsZero() {
+		return state.UpdatedAt
+	}
+	return time.Now().UTC()
+}
+
+func (r *Repository) AppendRouteAttempt(ctx context.Context, attempt dynamicruntime.RouteAttempt) error {
+	createdAt := attempt.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO dynamic_route_attempts (
+			id, session_id, logical_profile_id, execution_profile_id,
+			route_generation, profile_version, reason, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`), uuid.New().String(), attempt.SessionID, attempt.LogicalProfileID,
+		attempt.ExecutionProfileID, attempt.Generation, attempt.ProfileVersion,
+		attempt.Reason, createdAt)
+	return err
+}
+
+func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dynamicruntime.RouteState, error) {
+	state := &dynamicruntime.RouteState{}
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT session_id, logical_profile_id, execution_profile_id,
+			route_generation, profile_version, state, updated_at
+		FROM dynamic_route_states WHERE session_id = ?
+	`), sessionID).Scan(
+		&state.SessionID, &state.LogicalProfileID, &state.ExecutionProfileID,
+		&state.Generation, &state.ProfileVersion, &state.Status, &state.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return state, nil
+}
+
+func (r *Repository) SaveCircuit(ctx context.Context, snapshot dynamicruntime.CircuitSnapshot) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO dynamic_resource_circuits
+			(resource_key, state, until_at, code, probe_until, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(resource_key) DO UPDATE SET
+			state = excluded.state,
+			until_at = excluded.until_at,
+			code = excluded.code,
+			probe_until = excluded.probe_until,
+			updated_at = excluded.updated_at
+	`), snapshot.Key, snapshot.State, nullableTime(snapshot.Until), snapshot.Code,
+		nullableTime(snapshot.ProbeUntil), time.Now().UTC())
+	return err
+}
+
+func (r *Repository) LoadCircuits(ctx context.Context) ([]dynamicruntime.CircuitSnapshot, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT resource_key, state, until_at, code, probe_until
+		FROM dynamic_resource_circuits
+		WHERE state <> ? ORDER BY resource_key
+	`), dynamicruntime.CircuitClosed)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var snapshots []dynamicruntime.CircuitSnapshot
+	for rows.Next() {
+		var snapshot dynamicruntime.CircuitSnapshot
+		var until, probeUntil sql.NullTime
+		var state string
+		var code string
+		if err := rows.Scan(&snapshot.Key, &state, &until, &code, &probeUntil); err != nil {
+			return nil, err
+		}
+		snapshot.State = dynamicruntime.CircuitState(state)
+		snapshot.Code = routingerr.Code(code)
+		if until.Valid {
+			snapshot.Until = until.Time
+		}
+		if probeUntil.Valid {
+			snapshot.ProbeUntil = probeUntil.Time
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	return snapshots, rows.Err()
+}
+
+func (r *Repository) LoadOrCreate(ctx context.Context) ([]byte, error) {
+	var key []byte
+	err := r.ro.QueryRowContext(ctx, `SELECT key_bytes FROM dynamic_installation_keys WHERE id = 1`).Scan(&key)
+	if err == nil {
+		return append([]byte(nil), key...), nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+	key = make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO dynamic_installation_keys (id, key_bytes, created_at) VALUES (1, ?, ?)
+	`), key, time.Now().UTC())
+	if err != nil {
+		// Another process may have won the first insert. Read its stable key.
+		if readErr := r.ro.QueryRowContext(ctx, `SELECT key_bytes FROM dynamic_installation_keys WHERE id = 1`).Scan(&key); readErr == nil {
+			return append([]byte(nil), key...), nil
+		}
+		return nil, err
+	}
+	return key, nil
+}
+
+func nullableTime(value time.Time) interface{} {
+	if value.IsZero() {
+		return nil
+	}
+	return value
+}
+
+func (r *Repository) ListRouteAttempts(ctx context.Context, sessionID string) ([]dynamicruntime.RouteAttempt, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT session_id, logical_profile_id, execution_profile_id,
+			route_generation, profile_version, reason, created_at
+		FROM dynamic_route_attempts
+		WHERE session_id = ? ORDER BY route_generation ASC
+	`), sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	attempts := make([]dynamicruntime.RouteAttempt, 0)
+	for rows.Next() {
+		var attempt dynamicruntime.RouteAttempt
+		if err := rows.Scan(&attempt.SessionID, &attempt.LogicalProfileID,
+			&attempt.ExecutionProfileID, &attempt.Generation, &attempt.ProfileVersion,
+			&attempt.Reason, &attempt.CreatedAt); err != nil {
+			return nil, err
+		}
+		attempts = append(attempts, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return attempts, nil
+}

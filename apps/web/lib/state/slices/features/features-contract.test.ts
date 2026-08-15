@@ -16,6 +16,10 @@ function backendFeatureKeys(source: string): string[] {
 }
 
 describe("feature flag repository contract", () => {
+  it("keeps dynamic agent routing disabled by default", () => {
+    expect(defaultFeatureFlags.dynamicAgentRouting).toBe(false);
+  });
+
   it("keeps frontend defaults equal to backend FeaturesConfig JSON keys", async () => {
     const backendConfig = await readFile(backendConfigPath, "utf8");
 

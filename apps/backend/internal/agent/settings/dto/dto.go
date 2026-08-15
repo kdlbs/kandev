@@ -9,6 +9,7 @@ import (
 type AgentProfileDTO struct {
 	ID               string `json:"id"`
 	AgentID          string `json:"agent_id"`
+	Kind             string `json:"kind"`
 	Name             string `json:"name"`
 	AgentDisplayName string `json:"agent_display_name"`
 	Model            string `json:"model"`
@@ -41,9 +42,28 @@ type AgentProfileDTO struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	// BillingType is computed at read time from credential files — not stored in the DB.
 	// Values: "api_key" | "subscription". Empty for agents that don't support billing type detection.
-	BillingType string    `json:"billing_type,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	BillingType string                  `json:"billing_type,omitempty"`
+	CreatedAt   time.Time               `json:"created_at"`
+	UpdatedAt   time.Time               `json:"updated_at"`
+	Dynamic     *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
+}
+
+// DynamicAgentProfileDTO is the versioned routing document attached to a
+// profile whose kind is "dynamic". Candidates stay opaque profile IDs on the
+// wire; the server resolves and validates their safe display data.
+type DynamicAgentProfileDTO struct {
+	Version    int64                      `json:"version"`
+	Candidates []DynamicAgentCandidateDTO `json:"candidates"`
+}
+
+// DynamicAgentCandidateDTO is one ordered concrete execution profile and its
+// provider-error actions. Rules are keyed by normalized semantic error code or
+// the shorthand on_provider_error default.
+type DynamicAgentCandidateDTO struct {
+	Position           int               `json:"position"`
+	ExecutionProfileID string            `json:"execution_profile_id"`
+	Enabled            bool              `json:"enabled"`
+	Rules              map[string]string `json:"rules,omitempty"`
 }
 
 // GetWorkspaceID lets struct-shaped profile payloads (e.g. the MCP event-bus

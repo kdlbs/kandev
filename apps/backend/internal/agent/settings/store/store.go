@@ -69,3 +69,14 @@ type Repository interface {
 
 	Close() error
 }
+
+// DynamicProfileRepository is the optional extension implemented by settings
+// stores that persist the dynamic profile document. Keeping it separate from
+// Repository lets small controller fakes and plugin adapters retain the
+// existing profile contract while dynamic routing is rolled out.
+type DynamicProfileRepository interface {
+	CreateDynamicAgentProfile(ctx context.Context, profile *models.DynamicAgentProfile, routes []models.DynamicAgentRoute) error
+	GetDynamicAgentProfile(ctx context.Context, profileID string) (*models.DynamicAgentProfile, []models.DynamicAgentRoute, error)
+	UpdateDynamicAgentProfile(ctx context.Context, profile *models.DynamicAgentProfile, expectedVersion int64, routes []models.DynamicAgentRoute) error
+	ListDynamicProfileReferencesByExecutionProfile(ctx context.Context, profileID string) ([]models.DynamicProfileReference, error)
+}

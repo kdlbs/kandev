@@ -7,7 +7,13 @@
 // `app/actions/agents.ts` and `lib/ws/handlers/agents.ts`.
 
 import type { ProfileEnvVar } from "@/lib/types/http";
-import type { AgentProfile, AgentProfilePayload, CLIFlag } from "@/lib/types/agent-profile";
+import type {
+  AgentProfile,
+  AgentProfileKind,
+  AgentProfilePayload,
+  CLIFlag,
+  DynamicAgentProfile,
+} from "@/lib/types/agent-profile";
 import { agentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
 
 type RawProfile = Partial<AgentProfilePayload> & Partial<AgentProfile> & Record<string, unknown>;
@@ -47,6 +53,41 @@ function pickConfigOptions(raw: RawProfile): Record<string, string> | undefined 
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
+function pickDynamic(raw: RawProfile): DynamicAgentProfile | undefined {
+  const value = raw.dynamic;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const document = value as Record<string, unknown>;
+  const version = typeof document.version === "number" ? document.version : 0;
+  const candidates = Array.isArray(document.candidates) ? document.candidates : [];
+  return {
+    version,
+    candidates: candidates.flatMap((candidate) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+      const item = candidate as Record<string, unknown>;
+      const executionProfileId = item.executionProfileId ?? item.execution_profile_id;
+      const position = item.position;
+      if (typeof executionProfileId !== "string" || typeof position !== "number") return [];
+      const rules = item.rules;
+      return [
+        {
+          position,
+          executionProfileId: agentProfileId(executionProfileId),
+          enabled: typeof item.enabled === "boolean" ? item.enabled : true,
+          rules:
+            rules && typeof rules === "object" && !Array.isArray(rules)
+              ? Object.fromEntries(
+                  Object.entries(rules).filter(
+                    (entry): entry is [string, string] =>
+                      typeof entry[0] === "string" && typeof entry[1] === "string",
+                  ),
+                )
+              : {},
+        },
+      ];
+    }),
+  };
+}
+
 /**
  * Convert a kanban snake_case payload (or a partially-camelCased one) into
  * the canonical `AgentProfile`. Office-orchestration fields are left
@@ -54,8 +95,11 @@ function pickConfigOptions(raw: RawProfile): Record<string, string> | undefined 
  */
 export function normalizeAgentProfile(raw: unknown): AgentProfile {
   const profile = (raw ?? {}) as RawProfile;
+  const kind = pickString(profile, "kind", "kind");
+  const dynamic = pickDynamic(profile);
   return {
     id: agentProfileId(pickString(profile, "id", "id")),
+    ...(kind === "dynamic" || kind === "concrete" ? { kind: kind as AgentProfileKind } : {}),
     name: pickString(profile, "name", "name"),
     agentId: pickString(profile, "agentId", "agent_id"),
     agentDisplayName: pickString(profile, "agentDisplayName", "agent_display_name"),
@@ -79,6 +123,7 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     userModified: (profile.userModified ?? profile.user_modified) as boolean | undefined,
     createdAt: pickString(profile, "createdAt", "created_at"),
     updatedAt: pickString(profile, "updatedAt", "updated_at"),
+    ...(dynamic ? { dynamic } : {}),
   };
 }
 
@@ -101,6 +146,7 @@ export function toAgentProfilePayload(
 ): Partial<AgentProfilePayload> {
   const payload: Partial<AgentProfilePayload> = {};
   setPayloadField(payload, "id", profile.id);
+  setPayloadField(payload, "kind", profile.kind);
   setPayloadField(payload, "name", profile.name);
   setPayloadField(payload, "agent_id", profile.agentId);
   setPayloadField(payload, "agent_display_name", profile.agentDisplayName);
@@ -119,5 +165,16 @@ export function toAgentProfilePayload(
   setPayloadField(payload, "user_modified", profile.userModified);
   setPayloadField(payload, "created_at", profile.createdAt);
   setPayloadField(payload, "updated_at", profile.updatedAt);
+  if (profile.dynamic) {
+    payload.dynamic = {
+      version: profile.dynamic.version,
+      candidates: profile.dynamic.candidates.map((candidate) => ({
+        position: candidate.position,
+        execution_profile_id: candidate.executionProfileId,
+        enabled: candidate.enabled,
+        rules: candidate.rules,
+      })),
+    };
+  }
   return payload;
 }

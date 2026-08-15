@@ -10,15 +10,23 @@ Decisions:
 
 - [ADR-2026-08-08-provider-neutral-agent-error-recovery](../../decisions/2026-08-08-provider-neutral-agent-error-recovery.md)
 - [ADR-2026-07-29-agent-stall-user-controlled-recovery](../../decisions/2026-07-29-agent-stall-user-controlled-recovery.md)
+- [ADR-2026-08-13-dynamic-agent-profile-routing](../../decisions/2026-08-13-dynamic-agent-profile-routing.md)
+
+Routing behavior is specified in
+[Dynamic Agent Routing](../agents/dynamic-agent-routing.md). Interactive
+recovery applies to concrete profiles, while configured routing applies to
+dynamic profiles in both Kanban and Office. Older Office-specific table and
+endpoint names below describe the current implementation to migrate; they do
+not retain product ownership of routing.
 
 ## Why
 
 Codex, Claude, OpenCode, and future agent CLIs report equivalent provider
 failures through different ACP frames and diagnostic streams. Users need
-temporary capacity failures to recover with honest progress. Kanban sessions
-need conservative interactive retry, while unattended Office runs need durable
-configured fallback and scheduler recovery. Both must classify the provider
-failure consistently without sharing the same retry policy.
+temporary capacity failures to recover with honest progress. Concrete-profile
+sessions need conservative interactive retry, while dynamic profiles need
+durable configured fallback and recovery in Kanban and Office. Both must
+classify provider failures consistently without sharing the same retry policy.
 
 ## What
 
@@ -37,15 +45,15 @@ failure consistently without sharing the same retry policy.
 - The classifier distinguishes temporary model capacity from an invalid or
   unavailable model, and short rate throttling from subscription or plan quota
   exhaustion.
-- An explicit execution context selects either Kanban interactive recovery or
-  Office unattended routing. Only high-confidence, current-prompt evidence can
-  authorize Kanban automatic retry or Office post-start fallback. Inactivity
-  alone never classifies a provider failure.
+- The assigned profile kind selects either concrete-profile interactive
+  recovery or dynamic-profile routing. Only high-confidence, current-prompt
+  evidence can authorize automatic retry or a post-start route change.
+  Inactivity alone never classifies a provider failure.
 - Classifier rules are deterministic and fixture-driven. Adding another known
   error example normally adds a sanitized fixture and registry rule rather than
   an orchestrator, UI, or agent-type branch.
 
-### Kanban interactive recovery
+### Concrete-profile interactive recovery
 
 - `network_unavailable`, `provider_overloaded`, `provider_unavailable`,
   `model_capacity`, and confirmed short `rate_limited` failures are eligible for
@@ -59,8 +67,8 @@ failure consistently without sharing the same retry policy.
 - Kandev makes at most five automatic attempts. Nominal backoff is 5, 10, 20,
   40, and 60 seconds with bounded jitter. A trustworthy short provider retry
   hint can lengthen the next delay.
-- Kandev never silently changes the selected model, account, agent, or provider,
-  and never purchases capacity.
+- Kandev never changes the selected model, account, agent, or provider for a
+  concrete profile, and never purchases capacity.
 - Exactly one backend schedule owns retry for a session and prompt generation.
   A successful attempt clears recovery state. Exhaustion transitions to the
   existing manual Resume and Start fresh choices.
@@ -74,11 +82,12 @@ failure consistently without sharing the same retry policy.
 - An unknown error fails closed to generic manual recovery. Raw unclassified
   evidence is not presented as trusted provider guidance.
 
-### Office unattended routing
+### Dynamic-profile routing
 
-- Office consumes the shared code through its own routing policy. It never uses
-  Kanban's short prompt timer or retry-attempt budget.
-- The short same-route phase applies to every Office run, even when provider
+- A dynamic profile consumes the shared classification through its configured
+  routing policy in Kanban or Office. It does not use the concrete profile's
+  interactive prompt timer or retry-attempt budget.
+- The short same-route phase applies to every dynamic run, even when provider
   fallback is disabled. Fallback after exhaustion still requires an enabled,
   explicitly configured alternative.
 - Network interruption, temporary provider unavailability/overload, model
@@ -86,7 +95,7 @@ failure consistently without sharing the same retry policy.
   same execution profile after nominal 5, 10, and 20 second delays with jitter.
 - During that short phase the failed provider is not degraded or excluded from
   the run's route cycle. Three failed retries promote it to a degraded route;
-  Office may then fall through to the next configured execution profile.
+  the router may then fall through to the next configured execution profile.
 - The retry attempt has one owning run, while the short cooldown is scoped to the
   affected workspace/provider/model. Concurrent runs wait for that cooldown and
   do not independently retry or switch providers. Success releases them;
@@ -95,7 +104,7 @@ failure consistently without sharing the same retry policy.
   and model/configuration errors bypass the short phase and immediately use the
   configured fallback policy.
 - A route with auth, inactive-subscription, missing-configuration, or invalid
-  model evidence remains `user_action_required`; Office may try another route,
+  model evidence remains `user_action_required`; the router may try another route,
   but does not schedule the blocked route itself.
 - Renewable quota exhaustion bypasses the same-route short phase, falls through
   to the next configured route, and leaves the affected route in durable
@@ -103,15 +112,15 @@ failure consistently without sharing the same retry policy.
   backoff when no reset is known.
 - Short rate limits, overload, and availability failures carry durable
   provider-health retry state only after the short same-route phase is
-  exhausted. A validated reset hint wins; otherwise Office uses its
+  exhausted. A validated reset hint wins; otherwise the router uses its
   minute-scale 2, 5, 10, 20, and 60-minute backoff with jitter.
-- When all routes are exhausted, Office durably parks the run as waiting for
+- When all routes are exhausted, Kandev durably parks the run as waiting for
   provider capacity or blocked for provider action. The scheduler wakes waiting
   runs, while blocked runs surface settings/inbox remediation.
 - Non-provider run failures retain Office's separate generic scheduler retry
   budget and CEO escalation. They are not reclassified as provider capacity.
 - A pre-progress short retry may re-drive the exact prompt. After assistant or
-  tool progress, Office retries through a fresh same-provider session that first
+  tool progress, the router retries through a fresh same-provider session that first
   inspects durable task and worktree state. Ambiguous prompt delivery is never
   automatically repeated.
 
@@ -204,7 +213,7 @@ owner column to provider health.
   advance to the next configured provider. It carries the expected route-attempt
   sequence so a timer race cannot advance twice.
 
-## Kanban state machine
+## Concrete-profile state machine
 
 | State | Trigger | Next state |
 | --- | --- | --- |
@@ -217,10 +226,10 @@ owner column to provider health.
 | `dispatching` | Hard/unknown failure or budget exhausted | manual recovery / `exhausted` |
 
 Only the backend advances this state machine. The frontend renders it and sends
-explicit user actions. Office retains the provider-route and task-resolution
-state machines in [Office Provider Routing](../office/routing.md).
+explicit user actions. Dynamic profiles use the route state machine in
+[Dynamic Agent Routing](../agents/dynamic-agent-routing.md).
 
-## Office short-retry state machine
+## Dynamic-profile short-retry state machine
 
 | State | Trigger | Next state |
 | --- | --- | --- |

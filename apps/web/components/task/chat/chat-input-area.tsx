@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { resolveComposerWorkspaceId } from "./composer-workspace";
 import { t } from "@/lib/i18n";
 import { ChatStatusBar, resolveStatusRowTaskId } from "./chat-status-bar";
+import { DynamicRouteRecovery } from "./dynamic-route-recovery";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -461,6 +462,7 @@ export function ChatInputArea({
       data-testid="chat-input-area"
       className={cn("bg-card flex-shrink-0 px-2 pb-2 pt-1", surfaceClassName)}
     >
+      <DynamicRouteRecovery session={panelState.session} />
       <QueueAffordance
         sessionId={resolvedSessionId}
         canDrain={canDrainQueue}

@@ -7,3 +7,7 @@ import "errors"
 // "the profile never existed" (caller passed a bad ID). Wrapped — caller uses
 // errors.Is.
 var ErrAgentProfileDeleted = errors.New("agent profile soft-deleted")
+
+// ErrDynamicProfileVersionConflict means a dynamic profile was edited after
+// the caller read its version. The caller must reload before retrying.
+var ErrDynamicProfileVersionConflict = errors.New("dynamic profile version conflict")

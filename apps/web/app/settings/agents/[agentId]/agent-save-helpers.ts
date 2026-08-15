@@ -85,6 +85,19 @@ export type DraftProfile = AgentProfile & {
 
 export type DraftAgent = Omit<Agent, "profiles"> & { profiles: DraftProfile[]; isNew?: boolean };
 
+function dynamicProfilePayload(profile: DraftProfile) {
+  if (profile.kind !== "dynamic" && !profile.dynamic) return undefined;
+  return {
+    version: profile.dynamic?.version ?? 1,
+    candidates: (profile.dynamic?.candidates ?? []).map((candidate, position) => ({
+      position,
+      execution_profile_id: candidate.executionProfileId,
+      enabled: candidate.enabled,
+      rules: candidate.rules,
+    })),
+  };
+}
+
 export const parseProfileMcpServers = (raw: string): Record<string, McpServerDef> => {
   if (!raw.trim()) return {};
   const parsed = JSON.parse(raw) as unknown;
@@ -212,6 +225,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
     profiles: draftAgent.profiles.map((profile) => ({
       name: profile.name,
       model: profile.model,
+      kind: profile.kind,
       fallback_model: profile.fallbackModel ?? "",
       auto_fallback: profile.autoFallback ?? false,
       mode: profile.mode,
@@ -221,6 +235,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       cli_flags: profile.cliFlags ?? [],
       command_prefix: profile.commandPrefix ?? "",
       env_vars: profile.envVars ?? [],
+      dynamic: dynamicProfilePayload(profile),
     })),
   });
 
@@ -290,6 +305,7 @@ async function savePersistedProfile(
     return updateAgentProfileAction(profile.id, {
       name: profile.name,
       model: profile.model,
+      kind: profile.kind,
       fallback_model: profile.fallbackModel ?? "",
       auto_fallback: profile.autoFallback ?? false,
       mode: profile.mode,
@@ -299,6 +315,7 @@ async function savePersistedProfile(
       cli_flags: profile.cliFlags ?? [],
       command_prefix: profile.commandPrefix ?? "",
       env_vars: profile.envVars ?? [],
+      dynamic: dynamicProfilePayload(profile),
     });
   }
   const { mcp_config: _pendingMcp, ...persistedProfile } = savedProfile as DraftProfile;
@@ -324,6 +341,7 @@ async function saveExistingProfiles(
         const createdProfile = await createAgentProfileAction(savedAgent.id, {
           name: profile.name,
           model: profile.model,
+          kind: profile.kind,
           fallback_model: profile.fallbackModel ?? "",
           auto_fallback: profile.autoFallback ?? false,
           mode: profile.mode,
@@ -333,6 +351,7 @@ async function saveExistingProfiles(
           cli_flags: profile.cliFlags ?? [],
           command_prefix: profile.commandPrefix ?? "",
           env_vars: profile.envVars ?? [],
+          dynamic: dynamicProfilePayload(profile),
         });
         profileIds.set(profile.id, createdProfile.id);
         persistedSubmittedIds.add(profile.id);
@@ -507,16 +526,30 @@ function isProfileCliConfigDirty(draft: DraftProfile, saved: AgentProfile): bool
   );
 }
 
+function isProfileIdentityDirty(draft: DraftProfile, saved: AgentProfile): boolean {
+  return [
+    (draft.kind ?? "concrete") !== (saved.kind ?? "concrete"),
+    JSON.stringify(draft.dynamic ?? null) !== JSON.stringify(saved.dynamic ?? null),
+    draft.name !== saved.name,
+    draft.model !== saved.model,
+    (draft.mode ?? "") !== (saved.mode ?? ""),
+    (draft.fallbackModel ?? "") !== (saved.fallbackModel ?? ""),
+    (draft.autoFallback ?? false) !== (saved.autoFallback ?? false),
+  ].some(Boolean);
+}
+
+function isProfileSettingsDirty(draft: DraftProfile, saved: AgentProfile): boolean {
+  return (
+    areConfigOptionsEqual(draft.configOptions, saved.configOptions) === false ||
+    arePermissionsDirty(draft, saved)
+  );
+}
+
 export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boolean {
   if (!saved) return true;
   return (
-    draft.name !== saved.name ||
-    draft.model !== saved.model ||
-    (draft.mode ?? "") !== (saved.mode ?? "") ||
-    (draft.fallbackModel ?? "") !== (saved.fallbackModel ?? "") ||
-    (draft.autoFallback ?? false) !== (saved.autoFallback ?? false) ||
-    !areConfigOptionsEqual(draft.configOptions, saved.configOptions) ||
-    arePermissionsDirty(draft, saved) ||
+    isProfileIdentityDirty(draft, saved) ||
+    isProfileSettingsDirty(draft, saved) ||
     isProfileCliConfigDirty(draft, saved)
   );
 }

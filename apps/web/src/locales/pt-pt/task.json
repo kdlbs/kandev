@@ -1564,5 +1564,15 @@
   "sessionActionResume": "A retomar sessão",
   "sessionActionSetPrimary": "Definir como principal",
   "sessionActionStop": "A parar sessão",
-  "sessionActionSuccessful": "{{action}} concluído"
+  "sessionActionSuccessful": "{{action}} concluído",
+  "dynamicRouteWaiting": "Não existe um agente elegível disponível.",
+  "dynamicRouteActionRequired": "Esta rota precisa de uma ação de recuperação.",
+  "dynamicRouteRetry": "Repetir agente atual",
+  "dynamicRouteTryNext": "Tentar próximo agente",
+  "dynamicRouteRetrying": "A repetir agente...",
+  "dynamicRouteTryNexting": "A tentar próximo agente...",
+  "dynamicRouteReasonCandidateOrder": "Selecionado pela ordem do perfil",
+  "dynamicRouteReasonNoEligibleCandidate": "Nenhum candidato elegível",
+  "dynamicRouteReasonProviderUnavailable": "Fornecedor indisponível",
+  "dynamicRouteReasonQuotaLimited": "Limite de utilização do fornecedor"
 }

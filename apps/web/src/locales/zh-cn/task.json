@@ -1564,5 +1564,15 @@
   "sessionActionResume": "恢复会话中",
   "sessionActionSetPrimary": "设为主要会话",
   "sessionActionStop": "停止会话中",
-  "sessionActionSuccessful": "{{action}}成功"
+  "sessionActionSuccessful": "{{action}}成功",
+  "dynamicRouteWaiting": "没有可用的合格代理。",
+  "dynamicRouteActionRequired": "此路由需要恢复操作。",
+  "dynamicRouteRetry": "重试当前代理",
+  "dynamicRouteTryNext": "尝试下一个代理",
+  "dynamicRouteRetrying": "正在重试代理...",
+  "dynamicRouteTryNexting": "正在尝试下一个代理...",
+  "dynamicRouteReasonCandidateOrder": "按配置文件顺序选择",
+  "dynamicRouteReasonNoEligibleCandidate": "没有合格的候选项",
+  "dynamicRouteReasonProviderUnavailable": "提供商不可用",
+  "dynamicRouteReasonQuotaLimited": "提供商使用量限制"
 }

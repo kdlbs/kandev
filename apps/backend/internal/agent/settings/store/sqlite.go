@@ -119,9 +119,30 @@ func (r *sqliteRepository) initSchema() error {
 		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
 	);
 
+	CREATE TABLE IF NOT EXISTS dynamic_agent_profiles (
+		profile_id TEXT PRIMARY KEY,
+		version INTEGER NOT NULL DEFAULT 1,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS dynamic_agent_routes (
+		dynamic_profile_id TEXT NOT NULL,
+		position INTEGER NOT NULL,
+		execution_profile_id TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		rules_json TEXT NOT NULL DEFAULT '{}',
+		PRIMARY KEY (dynamic_profile_id, position),
+		FOREIGN KEY (dynamic_profile_id) REFERENCES dynamic_agent_profiles(profile_id) ON DELETE CASCADE,
+		FOREIGN KEY (execution_profile_id) REFERENCES agent_profiles(id) ON DELETE RESTRICT
+	);
+
 	DROP INDEX IF EXISTS idx_agents_name;
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
 	CREATE INDEX IF NOT EXISTS idx_agent_profiles_agent_id ON agent_profiles(agent_id);
+	CREATE INDEX IF NOT EXISTS idx_dynamic_agent_routes_execution_profile
+		ON dynamic_agent_routes(execution_profile_id);
 	`
 	// Note: indexes on new office-enrichment columns (workspace_id, role,
 	// reports_to) are created later in migrateOfficeEnrichmentColumns —
@@ -522,6 +543,173 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	// callers' in-memory copy consistent with the row.
 	profile.Enabled = true
 	return r.insertAgentProfile(ctx, r.db, profile)
+}
+
+var _ DynamicProfileRepository = (*sqliteRepository)(nil)
+
+// CreateDynamicAgentProfile writes the dynamic document and its ordered route
+// rows in one transaction. The parent agent_profiles row is created by the
+// controller first; this transaction is the optimistic-routing document's
+// atomic unit.
+func (r *sqliteRepository) CreateDynamicAgentProfile(
+	ctx context.Context,
+	profile *models.DynamicAgentProfile,
+	routes []models.DynamicAgentRoute,
+) error {
+	if profile == nil || profile.ProfileID == "" {
+		return fmt.Errorf("dynamic profile ID is required")
+	}
+	if profile.Version <= 0 {
+		profile.Version = 1
+	}
+	now := time.Now().UTC()
+	if profile.CreatedAt.IsZero() {
+		profile.CreatedAt = now
+	}
+	profile.UpdatedAt = now
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO dynamic_agent_profiles (profile_id, version, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`), profile.ProfileID, profile.Version, profile.CreatedAt, profile.UpdatedAt); err != nil {
+		return err
+	}
+	if err := insertDynamicRoutes(ctx, tx, profile.ProfileID, routes); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func insertDynamicRoutes(ctx context.Context, tx *sqlx.Tx, profileID string, routes []models.DynamicAgentRoute) error {
+	for _, route := range routes {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			INSERT INTO dynamic_agent_routes
+				(dynamic_profile_id, position, execution_profile_id, enabled, rules_json)
+			VALUES (?, ?, ?, ?, ?)
+		`), profileID, route.Position, route.ExecutionProfileID,
+			dialect.BoolToInt(route.Enabled), route.RulesJSON); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *sqliteRepository) GetDynamicAgentProfile(
+	ctx context.Context,
+	profileID string,
+) (*models.DynamicAgentProfile, []models.DynamicAgentRoute, error) {
+	profile := &models.DynamicAgentProfile{}
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT profile_id, version, created_at, updated_at
+		FROM dynamic_agent_profiles WHERE profile_id = ?
+	`), profileID).Scan(&profile.ProfileID, &profile.Version, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
+		return nil, nil, err
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT dynamic_profile_id, position, execution_profile_id, enabled, rules_json
+		FROM dynamic_agent_routes WHERE dynamic_profile_id = ? ORDER BY position ASC
+	`), profileID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	routes := make([]models.DynamicAgentRoute, 0)
+	for rows.Next() {
+		var route models.DynamicAgentRoute
+		var enabled int
+		if err := rows.Scan(&route.DynamicProfileID, &route.Position, &route.ExecutionProfileID, &enabled, &route.RulesJSON); err != nil {
+			return nil, nil, err
+		}
+		route.Enabled = enabled != 0
+		routes = append(routes, route)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return profile, routes, nil
+}
+
+// UpdateDynamicAgentProfile replaces the complete route document only when
+// expectedVersion still owns the row. The new version and route replacement
+// commit together, so readers never observe a partially edited candidate list.
+func (r *sqliteRepository) UpdateDynamicAgentProfile(
+	ctx context.Context,
+	profile *models.DynamicAgentProfile,
+	expectedVersion int64,
+	routes []models.DynamicAgentRoute,
+) error {
+	if profile == nil || profile.ProfileID == "" {
+		return fmt.Errorf("dynamic profile ID is required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE dynamic_agent_profiles
+		SET version = version + 1, updated_at = ?
+		WHERE profile_id = ? AND version = ?
+	`), now, profile.ProfileID, expectedVersion)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrDynamicProfileVersionConflict
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM dynamic_agent_routes WHERE dynamic_profile_id = ?`), profile.ProfileID); err != nil {
+		return err
+	}
+	if err := insertDynamicRoutes(ctx, tx, profile.ProfileID, routes); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	profile.Version = expectedVersion + 1
+	profile.UpdatedAt = now
+	return nil
+}
+
+func (r *sqliteRepository) ListDynamicProfileReferencesByExecutionProfile(
+	ctx context.Context,
+	profileID string,
+) ([]models.DynamicProfileReference, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT p.id, p.name, p.deleted_at
+		FROM dynamic_agent_routes r
+		JOIN agent_profiles p ON p.id = r.dynamic_profile_id
+		WHERE r.execution_profile_id = ?
+		ORDER BY p.name, p.id
+	`), profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	refs := make([]models.DynamicProfileReference, 0)
+	seen := make(map[string]struct{})
+	for rows.Next() {
+		var ref models.DynamicProfileReference
+		if err := rows.Scan(&ref.ProfileID, &ref.Name, &ref.DeletedAt); err != nil {
+			return nil, err
+		}
+		if _, ok := seen[ref.ProfileID]; ok {
+			continue
+		}
+		seen[ref.ProfileID] = struct{}{}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
 }
 
 // DuplicateAgentProfile creates an independent copy of a profile in a single

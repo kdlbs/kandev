@@ -234,5 +234,18 @@
   "duplicateProfileSuccess": "智能体配置已复制",
   "duplicateSaveBlocked": "设置仍在保存，请稍后重试。",
   "failedToDuplicateProfile": "复制智能体配置失败",
-  "noProfilesYetShort": "暂无配置"
+  "noProfilesYetShort": "暂无配置",
+  "dynamicProfileDisabled": "动态代理路由已禁用。",
+  "dynamicProfileDescription": "选择按顺序执行的具体配置，以便在失败时切换。",
+  "dynamicProfileSettings": "动态配置设置",
+  "dynamicCandidates": "候选配置",
+  "dynamicCandidatesDescription": "候选配置按顺序执行。只有在配置的错误操作允许时，才会使用下一个候选配置。",
+  "addDynamicCandidate": "添加候选配置",
+  "noDynamicCandidates": "至少添加一个具体配置。",
+  "moveDynamicCandidateUp": "上移候选配置",
+  "moveDynamicCandidateDown": "下移候选配置",
+  "removeDynamicCandidate": "移除候选配置",
+  "dynamicCandidatePickerDescription": "选择一个符合动态路由条件的具体配置。",
+  "dynamicProfileSaved": "动态配置已保存。",
+  "savingProfile": "正在保存..."
 }

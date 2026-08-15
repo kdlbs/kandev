@@ -10,14 +10,14 @@ owner: cfl
 
 Kandev has execution profiles (configuration templates for a concrete CLI, account, model, flags, environment, and MCP setup) but also needs persistent, stateful Office agents. Without a stable Office identity, switching a provider also risks switching or copying the agent's role, instructions, skills, permissions, budget, and history.
 
-Office therefore treats a workspace-scoped rich `agent_profiles` row as a stable Office identity and selects a separate concrete execution profile for each launch. Both row types remain in the unified table established by ADR 0005, but they have different responsibilities. Office agents run inside a narrow capability-scoped runtime, call kandev through a structured CLI rather than raw curl, and expose per-agent dashboards with run history, costs, and per-run detail pages.
+Office therefore treats a workspace-scoped rich `agent_profiles` row as a stable Office identity and selects a separate execution agent profile. The selected profile can be concrete or dynamic. A dynamic profile resolves a concrete profile for each launch through the shared routing mechanism used by Kanban. These profile kinds remain in the unified table established by ADR 0005, but they have different responsibilities. Office agents run inside a narrow capability-scoped runtime, call kandev through a structured CLI rather than raw curl, and expose per-agent dashboards with run history, costs, and per-run detail pages.
 
 ## What
 
 ### Agent instances
 
 - An Office agent is a persistent `agent_profiles` row scoped by `workspace_id`; its row ID is the logical `agent_profile_id` referenced by assignments, instructions, skills, budgets, permissions, and Office history.
-- A launch separately resolves an `execution_profile_id` from the agent's effective tier and provider order. The referenced execution profile owns the concrete CLI runtime configuration.
+- An Office agent selects an execution agent profile. A concrete selection launches directly. A dynamic selection resolves an `execution_profile_id` from the dynamic profile; the resolved concrete profile owns the CLI runtime configuration.
 - The Office identity owns:
   - **Name**: human-readable label ("CEO", "Frontend Worker", "QA Bot").
   - **Role**: `ceo`, `worker`, `specialist`, `assistant`, or `reviewer`. Determines default permissions and UI treatment.
@@ -30,8 +30,8 @@ Office therefore treats a workspace-scoped rich `agent_profiles` row as a stable
   - **Executor preference**: optional executor override for this agent.
   - **Channels**: optional external messaging channels (Telegram, Slack).
 - Multiple Office agents can use the same execution profile without sharing Office instructions, skills, permissions, budgets, or history.
-- Changing an agent's tier or provider order changes future execution-profile resolution without changing the Office identity.
-- Provider routing and failover are specified in [routing](./routing.md).
+- Changing an agent's selected execution profile changes future resolution without changing the Office identity.
+- Provider order, mappings, fallback, and shared health belong to [Dynamic Agent Routing](../agents/dynamic-agent-routing.md), not to Office settings.
 
 ### Hierarchy
 
@@ -82,6 +82,7 @@ id: "abc-123"
 name: CEO
 role: ceo
 agent_profile_id: "prof_abc123"
+execution_agent_profile_id: "dyn_frontier"
 reports_to: ""
 icon: crown
 permissions: '{"can_create_tasks":true,"can_assign_tasks":true,"can_create_agents":true}'
@@ -90,6 +91,16 @@ max_concurrent_sessions: 1
 desired_skills: '["memory","delegation-playbook"]'
 executor_preference: ""
 ```
+
+`agent_profile_id` identifies the Office agent itself.
+`execution_agent_profile_id` references the concrete or dynamic profile used to
+run it.
+
+The workspace-scoped Office identity row persists this selection in
+`agent_profiles.execution_agent_profile_id`, an empty-by-default soft reference
+to another global or compatible same-workspace profile. It is not a cascading
+foreign key because confirmed profile deletion retains stale bindings for
+explicit repair. A missing or disabled selection makes launches fail closed.
 
 ### Agent runtime (DB)
 
@@ -105,17 +116,25 @@ office_agent_runtime
 
 Runtime state must survive restarts (a budget-paused agent stays paused). Not user-editable, not exported. On startup, the reconciliation service merges filesystem config with this DB state: missing runtime rows are created with `status=idle`; orphaned rows (no YAML) are deleted.
 
-### Office identities and execution profiles
+### Office identities and execution agent profiles
 
 Office identities and execution profiles stay in the existing `agent_profiles` DB table, as required by ADR 0005, but launch resolution does not treat them as the same logical object:
 
 - A workspace-scoped rich row is the Office identity. Its `agent_profile_id` remains stable across provider changes and is used for hierarchy, instructions, skills, Office permissions, budgets, costs, and task/run ownership.
-- A concrete execution profile is selected per launch and recorded as `execution_profile_id`. It owns the registered CLI/provider, credentials and environment, model, mode, ACP config options, CLI flags, CLI permission behavior, passthrough mode, and MCP configuration.
-- Global shallow profiles are the normal execution-profile choices. Existing same-workspace rows may remain selectable for upgrade compatibility when they carry a valid CLI configuration.
-- An execution profile from another workspace cannot be selected.
-- Non-Office launches remain compatible: when no distinct execution profile is supplied, runtime treats `execution_profile_id = agent_profile_id`.
+- The Office identity references one execution agent profile. A concrete profile launches directly. A dynamic profile owns reusable routing policy and resolves a concrete profile per launch.
+- The resolved concrete profile is recorded as `execution_profile_id`. It owns the registered CLI/provider, credentials and environment, model, mode, ACP config options, CLI flags, CLI permission behavior, passthrough mode, and MCP configuration.
+- Global shallow concrete and dynamic profiles are the normal execution-agent choices. Existing same-workspace rows may remain selectable for upgrade compatibility when valid.
+- An execution agent profile from another workspace cannot be selected.
+- Profile callers pass one selected profile ID to the shared execution resolver.
+  For a concrete selection, the resolved `execution_profile_id` equals that ID.
+  For a dynamic selection, the logical selected profile remains dynamic while
+  the conductor records the concrete candidate as `execution_profile_id`.
+  Callers do not resolve candidates or branch on profile kind.
+- The profile `kind` describes the execution family. The Office identity role
+  is separate. An Office identity can bind to a concrete or dynamic execution
+  profile, but a rich Office identity cannot appear in a dynamic candidate list.
 
-The CLI-shaped columns on rich Office rows remain in the schema for compatibility with ADR 0005 and existing data, but they are not authoritative for routed Office launches. New Office configuration changes select tiers and provider order instead of copying CLI runtime fields into the identity row.
+The CLI-shaped columns on rich Office rows remain in the schema for compatibility with ADR 0005 and existing data, but they are not authoritative for Office launches. New Office configuration selects a concrete or dynamic execution agent profile instead of copying CLI runtime fields or routing rules into the identity row.
 
 ### Instructions
 

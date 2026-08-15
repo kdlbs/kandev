@@ -562,6 +562,12 @@ func startAgentInfrastructure(
 		return false
 	}
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
+	orchestratorSvc.SetRouteActionHandler(dynamicRouteActionHandler(
+		repos.Task,
+		repos.AgentSettings,
+		services.DynamicProfileResolver,
+	))
+	orchestratorSvc.SetProfileExecutionResolver(services.DynamicProfileResolver)
 
 	// Wire the soft-deleted-profile pre-flight into the watcher dispatch.
 	// Orphan watchers (their agent profile was soft-deleted by the

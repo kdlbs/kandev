@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -19,6 +20,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/secrets"
 )
+
+const dynamicProfileKind = "dynamic"
 
 type CreateProfileRequest struct {
 	AgentID        string
@@ -40,6 +43,7 @@ type CreateProfileRequest struct {
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string
+	Dynamic       *dto.DynamicAgentProfileDTO
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -57,6 +61,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	displayName, err := c.resolveDisplayName(agentConfig, agent.Name)
 	if err != nil {
 		return nil, err
+	}
+	if agent.Name == agents.DynamicAgentID {
+		return c.createDynamicProfile(ctx, agent, displayName, req)
 	}
 	cliFlags := cliFlagsFromDTO(req.CLIFlags)
 	if req.CLIFlags == nil {
@@ -98,6 +105,109 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	return &result, nil
 }
 
+func (c *Controller) createDynamicProfile(
+	ctx context.Context,
+	agent *models.Agent,
+	displayName string,
+	req CreateProfileRequest,
+) (*dto.AgentProfileDTO, error) {
+	if !c.dynamicAgentRoutingEnabled {
+		return nil, ErrDynamicAgentRoutingDisabled
+	}
+	if err := validateDynamicAgentProfile(req.Dynamic); err != nil {
+		return nil, err
+	}
+	profile := &models.AgentProfile{
+		AgentID:          agent.ID,
+		Name:             strings.TrimSpace(req.Name),
+		AgentDisplayName: displayName,
+		Enabled:          true,
+		CLIFlags:         []models.CLIFlag{},
+		EnvVars:          []models.ProfileEnvVar{},
+		UserModified:     true,
+	}
+	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
+		return nil, err
+	}
+	routes, err := c.validateDynamicCandidates(ctx, profile.ID, req.Dynamic)
+	if err != nil {
+		_ = c.repo.DeleteAgentProfile(ctx, profile.ID)
+		return nil, err
+	}
+	dynamicRepo, err := c.dynamicProfileRepository()
+	if err != nil {
+		_ = c.repo.DeleteAgentProfile(ctx, profile.ID)
+		return nil, err
+	}
+	dynamic := &models.DynamicAgentProfile{ProfileID: profile.ID, Version: 1}
+	if err := dynamicRepo.CreateDynamicAgentProfile(ctx, dynamic, routes); err != nil {
+		_ = c.repo.DeleteAgentProfile(ctx, profile.ID)
+		return nil, err
+	}
+	result := toProfileDTO(profile)
+	result.Dynamic, err = dynamicProfileDTO(dynamic, routes)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Controller) dynamicProfileRepository() (store.DynamicProfileRepository, error) {
+	dynamicRepo, ok := c.repo.(store.DynamicProfileRepository)
+	if !ok {
+		return nil, fmt.Errorf("dynamic profile store is unavailable")
+	}
+	return dynamicRepo, nil
+}
+
+func (c *Controller) validateDynamicCandidates(
+	ctx context.Context,
+	profileID string,
+	dynamic *dto.DynamicAgentProfileDTO,
+) ([]models.DynamicAgentRoute, error) {
+	routes, err := dynamicRoutesFromDTO(profileID, dynamic)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(routes))
+	for _, route := range routes {
+		if route.ExecutionProfileID == profileID {
+			return nil, fmt.Errorf("%w: a profile cannot reference itself", ErrDynamicProfileCandidate)
+		}
+		if _, ok := seen[route.ExecutionProfileID]; ok {
+			return nil, fmt.Errorf("%w: duplicate execution profile %q", ErrDynamicProfileCandidate, route.ExecutionProfileID)
+		}
+		seen[route.ExecutionProfileID] = struct{}{}
+		candidate, err := c.repo.GetAgentProfileIncludingDeleted(ctx, route.ExecutionProfileID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("%w: profile %q was not found", ErrDynamicProfileCandidate, route.ExecutionProfileID)
+			}
+			return nil, err
+		}
+		if candidate.DeletedAt != nil {
+			return nil, fmt.Errorf("%w: profile %q is deleted", ErrDynamicProfileCandidate, route.ExecutionProfileID)
+		}
+		candidateAgent, err := c.repo.GetAgent(ctx, candidate.AgentID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: profile %q has no agent family", ErrDynamicProfileCandidate, route.ExecutionProfileID)
+		}
+		if candidate.AgentID == agents.DynamicAgentID || candidateAgent.Name == agents.DynamicAgentID {
+			return nil, fmt.Errorf("%w: dynamic profiles cannot be candidates", ErrDynamicProfileCandidate)
+		}
+		if candidate.WorkspaceID != "" || candidate.Role != "" {
+			return nil, fmt.Errorf("%w: rich Office profiles cannot be candidates", ErrDynamicProfileCandidate)
+		}
+		if candidate.AutoFallback {
+			return nil, fmt.Errorf("%w: AutoFallback profiles cannot be candidates", ErrDynamicProfileCandidate)
+		}
+		if _, ok := c.agentRegistry.GetInferenceAgent(candidateAgent.Name); !ok {
+			return nil, fmt.Errorf("%w: profile %q is not launchable", ErrDynamicProfileCandidate, route.ExecutionProfileID)
+		}
+	}
+	return routes, nil
+}
+
 // seedCLIFlags builds the default cli_flags list for a new profile from the
 // agent's curated PermissionSettings() catalogue. Only entries that target a
 // CLI flag are included; per-flag metadata (description, flag text, default
@@ -137,6 +247,87 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
+const (
+	dynamicRouteActionRetrySame = "retry_same"
+	dynamicRouteActionTryNext   = "try_next"
+	dynamicRouteActionStop      = "stop"
+)
+
+func validateDynamicAgentProfile(profile *dto.DynamicAgentProfileDTO) error {
+	if profile == nil || len(profile.Candidates) == 0 {
+		return ErrDynamicProfileCandidatesRequired
+	}
+	for position, candidate := range profile.Candidates {
+		if candidate.Position != position {
+			return fmt.Errorf("%w: candidate %d has position %d", ErrDynamicProfilePositions, position, candidate.Position)
+		}
+		if strings.TrimSpace(candidate.ExecutionProfileID) == "" {
+			return fmt.Errorf("%w: candidate %d has no execution profile", ErrDynamicProfileCandidate, position)
+		}
+		for key, action := range candidate.Rules {
+			if strings.TrimSpace(key) == "" {
+				return fmt.Errorf("%w: empty rule key", ErrDynamicProfileRule)
+			}
+			switch strings.TrimSpace(action) {
+			case dynamicRouteActionRetrySame, dynamicRouteActionTryNext, dynamicRouteActionStop:
+			default:
+				return fmt.Errorf("%w: %s=%s", ErrDynamicProfileRule, key, action)
+			}
+		}
+	}
+	return nil
+}
+
+func dynamicRoutesFromDTO(profileID string, profile *dto.DynamicAgentProfileDTO) ([]models.DynamicAgentRoute, error) {
+	if err := validateDynamicAgentProfile(profile); err != nil {
+		return nil, err
+	}
+	routes := make([]models.DynamicAgentRoute, 0, len(profile.Candidates))
+	for _, candidate := range profile.Candidates {
+		rules := make(map[string]string, len(candidate.Rules))
+		for key, action := range candidate.Rules {
+			rules[strings.TrimSpace(key)] = strings.TrimSpace(action)
+		}
+		rulesJSON, err := json.Marshal(rules)
+		if err != nil {
+			return nil, fmt.Errorf("marshal dynamic route rules: %w", err)
+		}
+		routes = append(routes, models.DynamicAgentRoute{
+			DynamicProfileID:   profileID,
+			Position:           candidate.Position,
+			ExecutionProfileID: strings.TrimSpace(candidate.ExecutionProfileID),
+			Enabled:            candidate.Enabled,
+			RulesJSON:          string(rulesJSON),
+		})
+	}
+	return routes, nil
+}
+
+func dynamicProfileDTO(profile *models.DynamicAgentProfile, routes []models.DynamicAgentRoute) (*dto.DynamicAgentProfileDTO, error) {
+	if profile == nil {
+		return nil, nil
+	}
+	result := &dto.DynamicAgentProfileDTO{
+		Version:    profile.Version,
+		Candidates: make([]dto.DynamicAgentCandidateDTO, 0, len(routes)),
+	}
+	for _, route := range routes {
+		rules := map[string]string{}
+		if strings.TrimSpace(route.RulesJSON) != "" {
+			if err := json.Unmarshal([]byte(route.RulesJSON), &rules); err != nil {
+				return nil, fmt.Errorf("decode dynamic route rules: %w", err)
+			}
+		}
+		result.Candidates = append(result.Candidates, dto.DynamicAgentCandidateDTO{
+			Position:           route.Position,
+			ExecutionProfileID: route.ExecutionProfileID,
+			Enabled:            route.Enabled,
+			Rules:              rules,
+		})
+	}
+	return result, nil
+}
+
 type UpdateProfileRequest struct {
 	ID             string
 	Name           *string
@@ -158,6 +349,7 @@ type UpdateProfileRequest struct {
 	// CommandPrefix replaces the value when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the desired value on save.
 	CommandPrefix *string
+	Dynamic       *dto.DynamicAgentProfileDTO
 	Force         bool
 }
 
@@ -166,13 +358,34 @@ func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 		req.FallbackModel == nil && req.AutoFallback == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
-		req.CommandPrefix == nil
+		req.CommandPrefix == nil && req.Dynamic == nil
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
 	profile, err := c.repo.GetAgentProfile(ctx, req.ID)
 	if err != nil {
 		return nil, ErrAgentProfileNotFound
+	}
+	isDynamic := profileKind(profile) == dynamicProfileKind
+	if isDynamic && req.Dynamic != nil && !c.dynamicAgentRoutingEnabled {
+		return nil, ErrDynamicAgentRoutingDisabled
+	}
+	var (
+		dynamicRepo   store.DynamicProfileRepository
+		dynamicRoutes []models.DynamicAgentRoute
+	)
+	if isDynamic && req.Dynamic != nil {
+		if req.Dynamic.Version <= 0 {
+			return nil, fmt.Errorf("dynamic profile version is required")
+		}
+		dynamicRoutes, err = c.validateDynamicCandidates(ctx, profile.ID, req.Dynamic)
+		if err != nil {
+			return nil, err
+		}
+		dynamicRepo, err = c.dynamicProfileRepository()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if req.Name != nil {
 		profile.Name = *req.Name
@@ -207,6 +420,13 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		profile.CLIPassthrough = *req.CLIPassthrough
 	}
 	if req.Enabled != nil {
+		dynamicRefs, err := c.listDynamicProfileReferences(ctx, req.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !*req.Enabled && !req.Force && len(dynamicRefs) > 0 {
+			return nil, &ErrProfileInUseDetail{DynamicProfiles: dynamicRefs}
+		}
 		if !*req.Enabled && !req.Force && c.utilityDeps != nil {
 			refs, err := c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, req.ID)
 			if err != nil {
@@ -254,6 +474,16 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		return nil, err
 	}
 	result := toProfileDTO(profile)
+	if dynamicRepo != nil {
+		dynamic := &models.DynamicAgentProfile{ProfileID: profile.ID}
+		if err := dynamicRepo.UpdateDynamicAgentProfile(ctx, dynamic, req.Dynamic.Version, dynamicRoutes); err != nil {
+			return nil, err
+		}
+		result.Dynamic, err = dynamicProfileDTO(dynamic, dynamicRoutes)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &result, nil
 }
 
@@ -574,6 +804,13 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 // Neither branch disables anything: DeleteProfile disables referencing
 // automations before the row goes away and referencing watchers after it does.
 func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID string, force bool) error {
+	dynamicRefs, err := c.listDynamicProfileReferences(ctx, profileID)
+	if err != nil {
+		return err
+	}
+	if !force && len(dynamicRefs) > 0 {
+		return &ErrProfileInUseDetail{DynamicProfiles: dynamicRefs}
+	}
 	routingTierRefs, err := c.listRoutingTierReferences(ctx, profileID)
 	if err != nil {
 		return err
@@ -591,7 +828,7 @@ func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID strin
 	}
 	if c.sessionChecker == nil {
 		if !force && len(utilityRefs) > 0 {
-			return &ErrProfileInUseDetail{UtilityAgents: utilityRefs}
+			return &ErrProfileInUseDetail{UtilityAgents: utilityRefs, DynamicProfiles: dynamicRefs}
 		}
 		return nil
 	}
@@ -629,10 +866,11 @@ func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID strin
 		// and a schedule fails quietly, hours later, with nobody watching.
 		if len(activeTasks) > 0 || len(watcherRefs) > 0 || len(automationRefs) > 0 || len(utilityRefs) > 0 {
 			return &ErrProfileInUseDetail{
-				ActiveSessions: activeTasks,
-				Watchers:       watcherRefs,
-				Automations:    automationRefs,
-				UtilityAgents:  utilityRefs,
+				ActiveSessions:  activeTasks,
+				Watchers:        watcherRefs,
+				Automations:     automationRefs,
+				UtilityAgents:   utilityRefs,
+				DynamicProfiles: dynamicRefs,
 			}
 		}
 	}
@@ -651,6 +889,26 @@ func (c *Controller) listRoutingTierReferences(ctx context.Context, profileID st
 		return nil, err
 	}
 	return refs, nil
+}
+
+func (c *Controller) listDynamicProfileReferences(ctx context.Context, profileID string) ([]DynamicProfileReference, error) {
+	dynamicRepo, ok := c.repo.(store.DynamicProfileRepository)
+	if !ok {
+		return nil, nil
+	}
+	refs, err := dynamicRepo.ListDynamicProfileReferencesByExecutionProfile(ctx, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("check dynamic profiles using this profile: %w", err)
+	}
+	out := make([]DynamicProfileReference, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, DynamicProfileReference{
+			ID:      ref.ProfileID,
+			Name:    ref.Name,
+			Deleted: ref.DeletedAt != nil,
+		})
+	}
+	return out, nil
 }
 
 // disableReferencingAutomations turns off every automation bound to the profile
@@ -793,10 +1051,47 @@ func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentD
 	return result
 }
 
+// decorateAgentDTO attaches the dynamic document only after the parent
+// profile list has been assembled. Concrete profiles stay on the existing
+// lightweight path, while settings clients get the version and ordered
+// candidates for dynamic profiles without reading secrets.
+func (c *Controller) decorateAgentDTO(ctx context.Context, result *dto.AgentDTO) error {
+	if result == nil {
+		return nil
+	}
+	dynamicRepo, ok := c.repo.(store.DynamicProfileRepository)
+	if !ok {
+		for _, profile := range result.Profiles {
+			if profile.Kind == dynamicProfileKind {
+				return fmt.Errorf("dynamic profile store is unavailable")
+			}
+		}
+		return nil
+	}
+	for index := range result.Profiles {
+		if result.Profiles[index].Kind != dynamicProfileKind {
+			continue
+		}
+		config, routes, err := dynamicRepo.GetDynamicAgentProfile(ctx, result.Profiles[index].ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		result.Profiles[index].Dynamic, err = dynamicProfileDTO(config, routes)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 	return dto.AgentProfileDTO{
 		ID:               profile.ID,
 		AgentID:          profile.AgentID,
+		Kind:             profileKind(profile),
 		Name:             profile.Name,
 		AgentDisplayName: profile.AgentDisplayName,
 		Model:            profile.Model,
@@ -816,6 +1111,13 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		CreatedAt:        profile.CreatedAt,
 		UpdatedAt:        profile.UpdatedAt,
 	}
+}
+
+func profileKind(profile *models.AgentProfile) string {
+	if profile != nil && profile.AgentID == agents.DynamicAgentID {
+		return dynamicProfileKind
+	}
+	return "concrete"
 }
 
 func cliFlagsToDTO(in []models.CLIFlag) []dto.CLIFlagDTO {

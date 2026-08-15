@@ -42,6 +42,9 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	if v := os.Getenv("KANDEV_FEATURES_AUTH"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_AUTH = %q after prod ApplyProfile; want %q", v, "false")
 	}
+	if v := os.Getenv("KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING"); v != "false" {
+		t.Errorf("KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING = %q after prod ApplyProfile; want %q", v, "false")
+	}
 	if v := os.Getenv("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF"); v != "false" {
 		t.Errorf(
 			"KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF = %q after prod ApplyProfile; want %q",

@@ -50,7 +50,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0042 | [Project shell output and fetch it on demand](0042-project-shell-output-and-fetch-on-demand.md)                                    | accepted   | backend, frontend, protocol | 2026-07-16 |
 | 0043 | [Plugins read/write kandev data via capability-gated Host gRPC RPCs](0043-plugin-host-data-api.md)                                  | accepted   | backend, protocol           | 2026-07-17 |
 | 2026-07-14-typed-utility-chat-sessions | [Typed Utility Chats Share the Quick Chat Session Model](2026-07-14-typed-utility-chat-sessions.md) | accepted   | backend, frontend           | 2026-07-14 |
-| 2026-07-15-office-agent-execution-profile-routing | [Separate Office identity from routed execution profiles](2026-07-15-office-agent-execution-profile-routing.md) | proposed | backend, frontend | 2026-07-15 |
+| 2026-07-15-office-agent-execution-profile-routing | [Separate Office identity from routed execution profiles](2026-07-15-office-agent-execution-profile-routing.md) | superseded by 2026-08-13-dynamic-agent-profile-routing | backend, frontend | 2026-07-15 |
 | 0044 | [ACP agent compatibility dialects](0044-acp-agent-compatibility-dialects.md)                                                        | accepted   | backend, protocol           | 2026-07-16 |
 | 0045 | [Install-wide storage maintenance uses typed ownership providers and quarantine](0045-install-wide-storage-maintenance.md)          | accepted (amended 2026-07-22) | backend, frontend, infra | 2026-07-14 |
 | 0046 | [Settings route save coordinator](0046-settings-route-save-coordinator.md)                                                          | accepted (amended 2026-08-09) | frontend                    | 2026-07-14 |
@@ -68,7 +68,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-06-plugin-code-host-dashboard-parity | [Code-Host Plugins Reuse Native Dashboard Primitives](2026-08-06-plugin-code-host-dashboard-parity.md) | accepted | frontend, protocol | 2026-08-06 |
 | 2026-08-10-plugin-change-request-mutations | [Route Native Change-Request Mutations Through Providers](2026-08-10-plugin-change-request-mutations.md) | accepted | frontend, protocol | 2026-08-10 |
 | 2026-08-12-plugin-localization-contract | [Host-Scoped Plugin Localization](2026-08-12-plugin-localization-contract.md) | accepted | frontend, protocol | 2026-08-12 |
-| 2026-07-18-turn-configuration-snapshots | [Attribute runtime configuration to turns](2026-07-18-turn-configuration-snapshots.md) | accepted | backend, frontend | 2026-07-18 |
+| 2026-07-18-turn-configuration-snapshots | [Attribute runtime configuration to turns](2026-07-18-turn-configuration-snapshots.md) | accepted (amended 2026-08-13) | backend, frontend | 2026-07-18 |
 | 2026-07-22-gpg-signed-release-tags | [GPG-signed release tags](2026-07-22-gpg-signed-release-tags.md) | accepted | infra, workflow | 2026-07-22 |
 | 2026-07-19-reject-mcp-actions-on-raw-websocket | [Reject MCP Actions on the Raw WebSocket](2026-07-19-reject-mcp-actions-on-raw-websocket.md) | accepted | backend, protocol | 2026-07-19 |
 | 2026-07-19-workspace-symlink-entries | [Treat Nested Workspace Symlinks as Entries](2026-07-19-workspace-symlink-entries.md) | accepted | backend, infra | 2026-07-19 |
@@ -124,9 +124,9 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-02-single-owner-agent-task-titles | [Assign Agent Task Titles to One Session](2026-08-02-single-owner-agent-task-titles.md) | accepted | backend, frontend, protocol, workflow | 2026-08-02 |
 | 2026-08-02-agent-terminal-diagnostics-over-stderr | [Capture Agent Terminal Diagnostics From Managed Stderr](2026-08-02-agent-terminal-diagnostics-over-stderr.md) | accepted | backend, frontend, protocol, security | 2026-08-02 |
 | 2026-08-07-allowlisted-provider-action-links | [Allowlisted Provider Action Links](2026-08-07-allowlisted-provider-action-links.md) | accepted | backend, frontend, protocol, security | 2026-08-07 |
-| 2026-08-08-provider-neutral-agent-error-recovery | [Separate Agent Error Evidence From Recovery Policy](2026-08-08-provider-neutral-agent-error-recovery.md) | accepted | backend, frontend, protocol | 2026-08-08 |
-| 2026-08-08-utility-agent-profile-execution | [Utility Agents Use Execution Profiles](2026-08-08-utility-agent-profile-execution.md) | accepted | backend, frontend, protocol | 2026-08-08 |
-| 2026-08-08-utility-profile-dependency-safety | [Warn Before Breaking Utility Profile Bindings](2026-08-08-utility-profile-dependency-safety.md) | accepted | backend, frontend, protocol | 2026-08-08 |
+| 2026-08-08-provider-neutral-agent-error-recovery | [Separate Agent Error Evidence From Recovery Policy](2026-08-08-provider-neutral-agent-error-recovery.md) | accepted (amended 2026-08-13) | backend, frontend, protocol | 2026-08-08 |
+| 2026-08-08-utility-agent-profile-execution | [Utility Agents Use Execution Profiles](2026-08-08-utility-agent-profile-execution.md) | accepted (amended 2026-08-14) | backend, frontend, protocol | 2026-08-08 |
+| 2026-08-08-utility-profile-dependency-safety | [Warn Before Breaking Utility Profile Bindings](2026-08-08-utility-profile-dependency-safety.md) | accepted (amended 2026-08-14) | backend, frontend, protocol | 2026-08-08 |
 | 2026-08-02-class-aware-git-subprocess-admission | [Class-Aware Git Subprocess Admission](2026-08-02-class-aware-git-subprocess-admission.md) | accepted | backend, agentctl, observability | 2026-08-02 |
 | 2026-08-02-isolate-replaceable-session-stream-traffic | [Isolate Replaceable Session Stream Traffic](2026-08-02-isolate-replaceable-session-stream-traffic.md) | accepted | backend, frontend, protocol | 2026-08-02 |
 | 2026-08-03-backend-owned-cancellation-progress | [Keep Cancellation Progress Backend Owned](2026-08-03-backend-owned-cancellation-progress.md) | accepted | backend, frontend, protocol | 2026-08-03 |
@@ -160,6 +160,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-10-remote-contribution-head-drift | [Separate Current Contribution and Local Checkout Histories](2026-08-10-remote-contribution-head-drift.md) | accepted (remote-action policy superseded, provider-error presentation amended) | backend, frontend, protocol, GitHub, GitLab | 2026-08-10 |
 | 2026-08-12-local-first-contribution-replacement | [Keep Remote Contribution Work Local-First](2026-08-12-local-first-contribution-replacement.md) | accepted | backend, frontend, protocol, security, GitHub, GitLab | 2026-08-12 |
 | 2026-08-13-provider-history-changes-enrichment | [Treat Provider History as Changes Enrichment](2026-08-13-provider-history-changes-enrichment.md) | accepted | frontend, GitHub, GitLab | 2026-08-13 |
+| 2026-08-13-dynamic-agent-profile-routing | [Unify Provider Routing Behind Dynamic Agent Profiles](2026-08-13-dynamic-agent-profile-routing.md) | accepted | backend, frontend, protocol, workflow | 2026-08-13 |
 | 2026-08-11-user-owned-status-bar-visibility | [Make Status Bar Visibility a Portable User Preference](2026-08-11-user-owned-status-bar-visibility.md) | accepted | backend, frontend, protocol | 2026-08-11 |
 | 2026-08-12-built-in-utility-default-inheritance | [Built-in Utility Actions Inherit the Global Profile by Default](2026-08-12-built-in-utility-default-inheritance.md) | superseded by 2026-08-12-empty-utility-bindings-inherit-default | backend, frontend | 2026-08-12 |
 | 2026-08-12-empty-utility-bindings-inherit-default | [Empty Built-in Utility Bindings Inherit the Default](2026-08-12-empty-utility-bindings-inherit-default.md) | accepted | backend, frontend | 2026-08-12 |

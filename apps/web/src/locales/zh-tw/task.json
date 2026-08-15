@@ -1514,5 +1514,15 @@
   "autopilotDescription": "代理程式會自主工作，只有在關鍵決策阻礙進展時才會向父任務詢問，然後等待答覆再繼續。",
   "autopilotInfoLabel": "了解自動駕駛模式",
   "autopilotSidebarDescription": "自動駕駛任務",
-  "autopilotChatDescription": "自動駕駛已啟用。代理程式只會向父任務詢問關鍵決策。"
+  "autopilotChatDescription": "自動駕駛已啟用。代理程式只會向父任務詢問關鍵決策。",
+  "dynamicRouteWaiting": "沒有可用的合格代理程式。",
+  "dynamicRouteActionRequired": "此路由需要復原操作。",
+  "dynamicRouteRetry": "重試目前代理程式",
+  "dynamicRouteTryNext": "嘗試下一個代理程式",
+  "dynamicRouteRetrying": "正在重試代理程式...",
+  "dynamicRouteTryNexting": "正在嘗試下一個代理程式...",
+  "dynamicRouteReasonCandidateOrder": "依設定檔順序選取",
+  "dynamicRouteReasonNoEligibleCandidate": "沒有合格的候選項目",
+  "dynamicRouteReasonProviderUnavailable": "供應商無法使用",
+  "dynamicRouteReasonQuotaLimited": "供應商使用量限制"
 }

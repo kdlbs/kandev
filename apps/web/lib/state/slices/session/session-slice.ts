@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- session state intentionally keeps its coordinated actions together. */
 import type { StateCreator } from "zustand";
 import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
@@ -135,10 +136,25 @@ function mergeCancellationProjection(
 /** Merge an incoming session update with an existing session, preserving nullable fields. */
 function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
   const cancellation = mergeCancellationProjection(existing, incoming);
+  const incomingRouteGeneration = incoming.route_generation;
+  const existingRouteGeneration = existing.route_generation;
+  const routeIsStale =
+    incomingRouteGeneration !== undefined &&
+    existingRouteGeneration !== undefined &&
+    incomingRouteGeneration < existingRouteGeneration;
   return {
     ...existing,
     ...incoming,
     ...cancellation,
+    ...(routeIsStale
+      ? {
+          execution_profile_id: existing.execution_profile_id,
+          route_generation: existing.route_generation,
+          route_state: existing.route_state,
+          route_reason: existing.route_reason,
+          downstream_acp_session_id: existing.downstream_acp_session_id,
+        }
+      : {}),
     agent_profile_snapshot: incoming.agent_profile_snapshot ?? existing.agent_profile_snapshot,
     worktree_id: incoming.worktree_id ?? existing.worktree_id,
     worktree_path: incoming.worktree_path ?? existing.worktree_path,

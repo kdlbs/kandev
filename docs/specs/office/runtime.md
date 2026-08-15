@@ -260,7 +260,7 @@ Recovery and runtime-action authorization splits across three actors: human user
 - **`affected_tasks` snapshot on `agent_paused_after_failures`**: NOT recomputed when listed tasks are reassigned away. The snapshot is intentionally point-in-time so the user resolves the pause entry as a whole.
 - **`scheduled_retry` runs**: not produced in v1. Every adapter error is terminal; the wakeup is stamped `failed` with no follow-up scheduled. The `scheduled_retry` status is reserved for a future classifier.
 
-See also: [`office/routing.md`](routing.md) for the provider-routing error codes consumed at launch / dispatch time, and [`office/scheduler.md`](scheduler.md) for wakeup queue semantics and the staleness check that cancels superseded wakeups.
+See also: [Dynamic Agent Routing](../agents/dynamic-agent-routing.md) for provider routing and [`office/scheduler.md`](scheduler.md) for wakeup queue semantics and the staleness check that cancels superseded wakeups.
 
 ## Scenarios
 

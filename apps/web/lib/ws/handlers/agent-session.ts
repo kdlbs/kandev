@@ -230,6 +230,11 @@ const CARRIED_WHEN_DEFINED = [
   "supports_steering",
   "cancellation_pending",
   "cancellation_revision",
+  "execution_profile_id",
+  "route_generation",
+  "route_state",
+  "route_reason",
+  "downstream_acp_session_id",
 ] as const;
 
 /** Copy each CARRIED_WHEN_DEFINED field onto `update` only when the payload defines it. */

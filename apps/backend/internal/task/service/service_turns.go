@@ -37,13 +37,15 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 	defer unlock()
 
 	turn := &models.Turn{
-		ID:            uuid.New().String(),
-		TaskSessionID: sessionID,
-		TaskID:        session.TaskID,
-		StartedAt:     time.Now().UTC(),
-		Metadata:      runtimeConfigSnapshotMetadata(session),
-		CreatedAt:     time.Now().UTC(),
-		UpdatedAt:     time.Now().UTC(),
+		ID:                 uuid.New().String(),
+		TaskSessionID:      sessionID,
+		TaskID:             session.TaskID,
+		ExecutionProfileID: session.ExecutionProfileID,
+		RouteGeneration:    session.RouteGeneration,
+		StartedAt:          time.Now().UTC(),
+		Metadata:           runtimeConfigSnapshotMetadata(session),
+		CreatedAt:          time.Now().UTC(),
+		UpdatedAt:          time.Now().UTC(),
 	}
 
 	if err := s.turns.CreateTurn(ctx, turn); err != nil {
@@ -71,14 +73,16 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 	}
 	now := time.Now().UTC()
 	turn := &models.Turn{
-		ID:            uuid.New().String(),
-		TaskSessionID: session.ID,
-		TaskID:        session.TaskID,
-		StartedAt:     now,
-		CompletedAt:   &now,
-		Metadata:      runtimeConfigSnapshotMetadata(session),
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:                 uuid.New().String(),
+		TaskSessionID:      session.ID,
+		TaskID:             session.TaskID,
+		ExecutionProfileID: session.ExecutionProfileID,
+		RouteGeneration:    session.RouteGeneration,
+		StartedAt:          now,
+		CompletedAt:        &now,
+		Metadata:           runtimeConfigSnapshotMetadata(session),
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	if err := s.turns.CreateTurn(ctx, turn); err != nil {
 		return nil, fmt.Errorf("failed to create completed turn: %w", err)
@@ -359,14 +363,16 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 		return
 	}
 	payload := map[string]interface{}{
-		"id":           turn.ID,
-		"session_id":   turn.TaskSessionID,
-		"task_id":      turn.TaskID,
-		"started_at":   turn.StartedAt,
-		"completed_at": turn.CompletedAt,
-		"metadata":     turn.Metadata,
-		"created_at":   turn.CreatedAt,
-		"updated_at":   turn.UpdatedAt,
+		"id":                   turn.ID,
+		"session_id":           turn.TaskSessionID,
+		"task_id":              turn.TaskID,
+		"execution_profile_id": turn.ExecutionProfileID,
+		"route_generation":     turn.RouteGeneration,
+		"started_at":           turn.StartedAt,
+		"completed_at":         turn.CompletedAt,
+		"metadata":             turn.Metadata,
+		"created_at":           turn.CreatedAt,
+		"updated_at":           turn.UpdatedAt,
 	}
 	if hadOutput != nil {
 		payload["had_output"] = *hadOutput

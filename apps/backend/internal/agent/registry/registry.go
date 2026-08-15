@@ -64,6 +64,7 @@ func NewRegistry(log *logger.Logger) *Registry {
 // LoadDefaults loads default agent configurations
 func (r *Registry) LoadDefaults() {
 	all := []agents.Agent{
+		agents.NewDynamicAgent(),
 		agents.NewAuggie(),
 		agents.NewClaudeACP(),
 		agents.NewCodexACP(),
@@ -134,7 +135,7 @@ func (r *Registry) GetDefault() (agents.Agent, error) {
 	// Collect enabled agents and sort by DisplayOrder for deterministic fallback
 	var enabled []agents.Agent
 	for _, ag := range r.agents {
-		if ag.Enabled() {
+		if ag.Enabled() && !agents.IsVirtualAgent(ag) {
 			enabled = append(enabled, ag)
 		}
 	}

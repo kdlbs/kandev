@@ -72,6 +72,9 @@ func BuildCatalogForHost(enabledAgents []agents.Agent, currentOS, homeDir string
 	}
 
 	for _, ag := range enabledAgents {
+		if agents.IsVirtualAgent(ag) {
+			continue
+		}
 		auth := ag.RemoteAuth()
 		if auth == nil {
 			continue

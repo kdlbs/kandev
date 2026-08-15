@@ -1,8 +1,18 @@
 # ADR-2026-08-08-provider-neutral-agent-error-recovery: Separate Agent Error Evidence From Recovery Policy
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-13)
 **Date:** 2026-08-08
 **Area:** backend, frontend, protocol
+
+## Amendment (2026-08-13)
+
+[ADR-2026-08-13-dynamic-agent-profile-routing](2026-08-13-dynamic-agent-profile-routing.md)
+changes which boundary selects recovery policy. Concrete profiles use the
+interactive same-profile policy. Dynamic profiles use configured routing and
+durable shared health in either Kanban or Office. References below to “Kanban
+interactive” mean a concrete-profile session; references to “Office unattended
+routing” mean a dynamic-profile session. The provider-neutral evidence and
+classification contracts remain unchanged.
 
 ## Context
 

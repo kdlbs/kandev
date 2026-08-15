@@ -132,13 +132,14 @@ Filesystem layout:
 
 **Skill injection**: skills for agent sessions are written into the agent's worktree (CWD) before each session. Skill content can come from the DB (inline skills created via UI), the filesystem (imported from GitHub/skills.sh), or bundled (shipped with the kandev binary). All routes inject into the agent-specific skill path under the worktree. See [office agents](./agents.md#skill-injection).
 
-**Office identities and execution profiles** share the existing kandev `agent_profiles` DB table but have separate responsibilities. The workspace-scoped rich row owns Office identity and metadata; provider routing references a concrete execution profile for each launch instead of copying runtime configuration into the Office row. Filesystem export format:
+**Office identities and execution agent profiles** share the existing kandev `agent_profiles` DB table but have separate responsibilities. The workspace-scoped rich row owns Office identity and metadata. It selects a concrete or dynamic execution agent profile. A dynamic profile uses the shared routing mechanism to resolve a concrete launch profile instead of copying runtime configuration or routing rules into the Office row. Filesystem export format:
 
 ```yaml
 # agents/ceo.yml
 name: CEO
 role: ceo
 agent_profile_id: "prof_abc123"
+execution_agent_profile_id: "dyn_frontier"
 desired_skills: [memory, delegation-playbook]
 ```
 
@@ -161,8 +162,8 @@ When a user opens `/office`, the backend checks both DB and filesystem state via
 **Onboarding wizard** is a full-page (not modal) 5-step flow:
 
 1. **Welcome + Workspace** - workspace name (default "Default Workspace") and task prefix (default "KAN", explained as "Tasks will be numbered KAN-1, KAN-2, etc.").
-2. **Tier Agent Profiles** - Frontier / Balanced / Economy profile selectors with hover help explaining where each tier family is used when the coordinator creates or schedules agents.
-3. **Create CEO Agent** - agent name (default "CEO"), coordinator agent profile dropdown (Claude, Codex, etc.), executor preference (Local / Docker / Sprites) with descriptions, and coordinator tier selector defaulting to Frontier.
+2. **Execution Agent Profile** - select an existing concrete or dynamic profile for the CEO, with a link to create a dynamic profile in Agent settings.
+3. **Create CEO Agent** - agent name (default "CEO"), execution agent profile dropdown, and executor preference (Local / Docker / Sprites) with descriptions.
 4. **First Task** - editable starter task prefilled with title "Setup Workspace" and a CEO brief that asks the agent to inspect `https://github.com/org/repo` (replaceable by the user), create one project per repository, create the needed agent team, give agents responsibilities and permissions, then propose follow-up tasks/subtasks for human approval before creating them. `[Back] [Skip] [Next]`; Skip clears the starter task.
 5. **Review & Launch** - summary card of what will be created. `[Back] [Create & Launch]`.
 
@@ -170,7 +171,7 @@ When a user opens `/office`, the backend checks both DB and filesystem state via
 1. Office workspace: `kandev.yml` on filesystem + DB row in `workspaces` + system office workflow (7 steps).
 2. CEO Office identity with `role=ceo`, full Office permissions, and bundled skills (kandev-protocol, memory, kandev-projects).
 3. Agent runtime row `status=idle` in `office_agent_runtime`.
-4. Workspace provider routing seed: automatic fallback disabled by default, default tier persisted from the coordinator tier selector, and Frontier / Balanced / Economy mapped to authoritative execution profile IDs so launches use the complete selected CLI configuration and profile deletion is blocked while referenced.
+4. CEO execution-profile binding: the selected concrete or dynamic profile is persisted. Office does not create workspace provider mappings or routing rules. Legacy routing rows, when present from an older build, remain stored but inactive and hidden.
 5. First task if not skipped: assigned to the CEO, `status=todo`; a `task_assigned` wakeup is enqueued so the scheduler picks it up. The task brief tells the CEO to create the required projects, including one per repository, and propose follow-up tasks for human approval before creating them.
 6. Onboarding state marked completed in the DB.
 

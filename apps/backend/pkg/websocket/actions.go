@@ -88,6 +88,7 @@ const (
 	ActionSessionSetPrimary   = "session.set_primary"
 	ActionSessionSetPlanMode  = "session.set_plan_mode"
 	ActionSessionRename       = "session.rename"
+	ActionSessionRouteAction  = "session.route_action"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"
@@ -228,6 +229,11 @@ const (
 	ActionSessionTodosUpdated         = "session.todos_updated"
 	ActionSessionPromptUsage          = "session.prompt_usage"
 	ActionSessionPollModeChanged      = "session.poll_mode_changed"
+	ActionSessionRouteChanging        = "session.route_changing"
+	ActionSessionRouteChanged         = "session.route_changed"
+	ActionSessionCapabilitiesReplaced = "session.capabilities_replaced"
+	ActionSessionRouteWaiting         = "session.route_waiting"
+	ActionSessionRoutePending         = "session.route_pending"
 	ActionInputRequested              = "input.requested"
 	ActionRepositoryCreated           = "repository.created"
 	ActionRepositoryUpdated           = "repository.updated"

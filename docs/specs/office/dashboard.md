@@ -171,7 +171,7 @@ The dashboard is a read-mostly surface scoped to a single workspace. Authorizati
   - `POST /inbox/dismiss`: requires the `MarkFixedHandler` to be wired (`503` otherwise) and resolves under `user_id = "default"`.
   - Settings mutation (`PATCH /workspaces/:wsId/settings`): no gate today; UI-only.
 - **Activity feed entries** carry `actor_type ∈ {user, agent, system}` and `actor_id` (user id, agent instance id, or literal `"system"`). The feed does not redact entries per viewer — every workspace member sees the full log.
-- **Routing endpoints** (`/workspaces/:wsId/routing*`, `/agents/:id/route`, `/runs/:id/attempts`) are scoped the same way; their authorization rules live in `office/routing.md`.
+- **Route status** is read from the shared dynamic-session route API and is scoped through the Office task/run. Office does not expose routing-policy mutation endpoints; those permissions belong to agent profile settings as specified in [Dynamic Agent Routing](../agents/dynamic-agent-routing.md).
 
 See `agents/` spec for the role → permission defaults and the no-escalation rule that governs the underlying permission keys.
 

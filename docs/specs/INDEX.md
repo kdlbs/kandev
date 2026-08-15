@@ -21,7 +21,7 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [tasks](office/tasks.md) | draft |
 | [scheduler](office/scheduler.md) | draft |
 | [runtime](office/runtime.md) | draft |
-| [routing](office/routing.md) | draft |
+| [routing](office/routing.md) | archived |
 | [costs](office/costs.md) | in-progress |
 | [dashboard](office/dashboard.md) | draft |
 | [live-updates](office/live-updates.md) | draft |
@@ -119,6 +119,8 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [profile-disable](agents/profile-disable.md) | draft |
 | [settings-profile-layout](agents/settings-profile-layout.md) | shipped |
 | [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
+| [dynamic-agent-routing](agents/dynamic-agent-routing.md) | draft |
+| [dynamic-agent-telemetry-routing](agents/dynamic-agent-telemetry-routing.md) | draft |
 | [utility-agent-profiles](agents/utility-agent-profiles.md) | approved |
 | [collapsible-agent-blocks](agents/collapsible-agent-blocks.md) | draft |
 | [roles](agents/roles.md) | shipped |

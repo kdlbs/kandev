@@ -1148,15 +1148,20 @@ func (s *Service) publishTaskSessionStateChanged(
 		foregroundActivity = string(activity)
 	}
 	eventData := map[string]interface{}{
-		metaKeyTaskID:            taskID,
-		metaKeySessionID:         sessionID,
-		"old_state":              string(oldState),
-		metaKeyNewState:          string(nextState),
-		"error_message":          errorMessage,
-		metaKeyAgentProfileID:    agentProfileID,
-		"agent_profile_snapshot": session.AgentProfileSnapshot,
-		"is_passthrough":         session.IsPassthrough,
-		"is_primary":             session.IsPrimary,
+		metaKeyTaskID:               taskID,
+		metaKeySessionID:            sessionID,
+		"old_state":                 string(oldState),
+		metaKeyNewState:             string(nextState),
+		"error_message":             errorMessage,
+		metaKeyAgentProfileID:       agentProfileID,
+		"agent_profile_snapshot":    session.AgentProfileSnapshot,
+		"execution_profile_id":      session.ExecutionProfileID,
+		"route_generation":          session.RouteGeneration,
+		"route_state":               session.RouteState,
+		"route_reason":              session.RouteReason,
+		"downstream_acp_session_id": session.DownstreamACPSessionID,
+		"is_passthrough":            session.IsPassthrough,
+		"is_primary":                session.IsPrimary,
 		// Carry activity only while the durable session is RUNNING. Every other
 		// state gets an explicit null so partial client-store merges clear a
 		// previously-live busy signal during settlement or teardown.

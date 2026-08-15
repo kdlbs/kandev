@@ -1,0 +1,168 @@
+package dynamic
+
+import (
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+)
+
+func TestEngineSelectsFixedOrderAndFencesGenerations(t *testing.T) {
+	now := time.Unix(100, 0)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	profile := Profile{
+		ID:      "dynamic-1",
+		Version: 4,
+		Candidates: []Candidate{
+			{ID: "disabled", Enabled: false, BindingKey: "disabled"},
+			{ID: "open", Enabled: true, BindingKey: "open"},
+			{ID: "fallback", Enabled: true, BindingKey: "fallback"},
+		},
+	}
+	engine.Circuits().Open("open", now.Add(time.Hour), routingerr.CodeProviderUnavailable)
+
+	decision, err := engine.Select("session-1", profile, 0, "")
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if decision.ExecutionProfileID != "fallback" || decision.Generation != 1 || decision.ProfileVersion != 4 {
+		t.Fatalf("decision = %#v", decision)
+	}
+	if _, err := engine.Select("session-1", profile, 0, ""); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("stale select error = %v, want %v", err, ErrStaleGeneration)
+	}
+	engine.Circuits().Open("open", now.Add(-time.Second), routingerr.CodeProviderUnavailable)
+	decision, err = engine.Select("session-1", profile, 1, "fallback")
+	if err != nil {
+		t.Fatalf("Try next select: %v", err)
+	}
+	if decision.ExecutionProfileID != "open" || decision.Generation != 2 {
+		t.Fatalf("try next decision = %#v", decision)
+	}
+}
+
+func TestEngineAppliesCandidateErrorActions(t *testing.T) {
+	profile := Profile{
+		ID:      "dynamic-1",
+		Version: 1,
+		Candidates: []Candidate{
+			{ID: "first", Enabled: true, BindingKey: "first", Rules: map[string]Action{
+				string(routingerr.CodeQuotaLimited): ActionTryNext,
+				string(routingerr.CodeRateLimited):  ActionRetrySame,
+				string(routingerr.CodeTask):         ActionStop,
+			}},
+			{ID: "second", Enabled: true, BindingKey: "second"},
+		},
+	}
+	engine := NewEngine()
+	if got := engine.ActionFor(profile, "first", routingerr.CodeQuotaLimited); got != ActionTryNext {
+		t.Fatalf("quota action = %q, want %q", got, ActionTryNext)
+	}
+	if got := engine.ActionFor(profile, "first", routingerr.CodeRateLimited); got != ActionRetrySame {
+		t.Fatalf("rate action = %q, want %q", got, ActionRetrySame)
+	}
+	if got := engine.ActionFor(profile, "first", routingerr.CodeTask); got != ActionStop {
+		t.Fatalf("task action = %q, want %q", got, ActionStop)
+	}
+	if got := engine.ActionFor(profile, "second", routingerr.CodeQuotaLimited); got != ActionStop {
+		t.Fatalf("unconfigured action = %q, want %q", got, ActionStop)
+	}
+}
+
+func TestEngineRetrySameKeepsTheFailedCandidate(t *testing.T) {
+	profile := Profile{
+		ID: "dynamic-1", Version: 1,
+		Candidates: []Candidate{
+			{ID: "first", Enabled: true, Rules: map[string]Action{
+				string(routingerr.CodeRateLimited): ActionRetrySame,
+			}},
+			{ID: "second", Enabled: true},
+		},
+	}
+	engine := NewEngine()
+	initial, err := engine.Select("session-1", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	initialDecision, err := engine.ApplyFailure(
+		"session-1", profile, initial.Generation, initial.ExecutionProfileID,
+		&routingerr.Error{Code: routingerr.CodeRateLimited},
+	)
+	if err != nil {
+		t.Fatalf("ApplyFailure: %v", err)
+	}
+	if initialDecision.ExecutionProfileID != "first" || initialDecision.Generation != 2 {
+		t.Fatalf("retry decision = %#v, want first at generation 2", initialDecision)
+	}
+}
+
+func TestBindingFingerprinterUsesOpaqueStableHMACKeys(t *testing.T) {
+	key := []byte("installation-secret")
+	fingerprinter := NewBindingFingerprinter(key)
+	descriptor := CredentialBindingDescriptor{
+		Version:              1,
+		AgentFamilyID:        "claude-acp",
+		AuthenticationMethod: "subscription",
+		CredentialSourceKind: "credential_file",
+		CredentialLocator:    "home:claude",
+		ExecutorNamespace:    "local",
+		AuthorizationScope:   "messages",
+		WorkspaceScope:       "workspace-1",
+	}
+	a := fingerprinter.Fingerprint(descriptor)
+	b := fingerprinter.Fingerprint(descriptor)
+	if a == "" || a != b || len(a) != 64 {
+		t.Fatalf("fingerprints = %q and %q", a, b)
+	}
+	changed := descriptor
+	changed.WorkspaceScope = "workspace-2"
+	if a == fingerprinter.Fingerprint(changed) {
+		t.Fatal("different binding scopes shared a fingerprint")
+	}
+	if containsSensitive(a, "installation-secret") || containsSensitive(a, "home:claude") {
+		t.Fatal("fingerprint exposed descriptor material")
+	}
+	if fallback := fingerprinter.FallbackFingerprint("profile-1"); fallback != "profile:profile-1" {
+		t.Fatalf("fallback fingerprint = %q", fallback)
+	}
+}
+
+func TestCredentialBindingResolverCanonicalizesAndFallsBackToProfileScope(t *testing.T) {
+	resolver := NewCredentialBindingResolver([]byte("installation-secret"))
+	base := CredentialBindingDescriptor{
+		Version: 1, AgentFamilyID: "Claude-ACP", AuthenticationMethod: "Subscription",
+		CredentialSourceKind: "credential_file", CredentialLocator: " home:claude ",
+	}
+	if resolver.Fingerprint(base) != resolver.Fingerprint(CredentialBindingDescriptor{
+		Version: 1, AgentFamilyID: "claude-acp", AuthenticationMethod: "subscription",
+		CredentialSourceKind: "credential_file", CredentialLocator: "home:claude",
+	}) {
+		t.Fatal("canonical descriptors produced different fingerprints")
+	}
+	if got := resolver.Resolve(CredentialBindingDescriptor{}, "profile-1"); got != "profile:profile-1" {
+		t.Fatalf("fallback binding = %q", got)
+	}
+}
+
+func TestCircuitProbeLeaseIsExclusive(t *testing.T) {
+	now := time.Unix(200, 0)
+	registry := NewCircuitRegistry(WithCircuitClock(func() time.Time { return now }))
+	registry.Open("provider:claude", now.Add(-time.Second), routingerr.CodeQuotaLimited)
+	lease, ok := registry.AcquireProbe("provider:claude", time.Minute)
+	if !ok || lease.Key != "provider:claude" {
+		t.Fatalf("first probe lease = %#v, ok=%v", lease, ok)
+	}
+	if _, ok := registry.AcquireProbe("provider:claude", time.Minute); ok {
+		t.Fatal("second worker acquired the same half-open probe")
+	}
+	registry.ReleaseProbe(lease, false, time.Second)
+	now = now.Add(2 * time.Second)
+	if _, ok := registry.AcquireProbe("provider:claude", time.Minute); !ok {
+		t.Fatal("probe lease was not released after failure backoff")
+	}
+}
+
+func containsSensitive(value, sensitive string) bool {
+	return sensitive != "" && len(value) >= len(sensitive) && value == sensitive
+}

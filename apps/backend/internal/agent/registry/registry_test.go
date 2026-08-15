@@ -257,6 +257,25 @@ func TestRegistry_LoadDefaults(t *testing.T) {
 	if !reg.Exists("grok-acp") {
 		t.Error("expected default agent 'grok-acp' to be loaded")
 	}
+	if !reg.Exists(agents.DynamicAgentID) {
+		t.Errorf("expected virtual agent family %q to be loaded", agents.DynamicAgentID)
+	}
+	for _, ia := range reg.ListInferenceAgents() {
+		if ia.(agents.Agent).ID() == agents.DynamicAgentID {
+			t.Fatal("dynamic virtual family must not be exposed as an inference agent")
+		}
+	}
+}
+
+func TestRegistry_GetDefaultDoesNotSelectVirtualFamily(t *testing.T) {
+	log := newTestLogger()
+	reg := NewRegistry(log)
+	if err := reg.Register(agents.NewDynamicAgent()); err != nil {
+		t.Fatalf("register dynamic family: %v", err)
+	}
+	if _, err := reg.GetDefault(); err == nil {
+		t.Fatal("GetDefault selected the non-launchable dynamic family")
+	}
 }
 
 func TestRegistry_List_OrderedByDisplayOrder(t *testing.T) {

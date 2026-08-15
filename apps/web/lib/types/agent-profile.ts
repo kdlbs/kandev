@@ -28,6 +28,20 @@ export type CLIFlag = {
 
 export type BillingType = "api_key" | "subscription";
 
+export type AgentProfileKind = "concrete" | "dynamic";
+
+export type DynamicAgentCandidate = {
+  position: number;
+  executionProfileId: AgentProfileId;
+  enabled: boolean;
+  rules: Record<string, string>;
+};
+
+export type DynamicAgentProfile = {
+  version: number;
+  candidates: DynamicAgentCandidate[];
+};
+
 export type UtilizationWindow = {
   label: string;
   utilization_pct: number;
@@ -54,6 +68,10 @@ export type AgentStatus = "idle" | "working" | "paused" | "stopped" | "pending_a
 export type AgentProfile = {
   // --- Identity ---
   id: AgentProfileId;
+  /** The execution family. Dynamic profiles own routing, not a subprocess. */
+  kind?: AgentProfileKind;
+  /** Versioned routing document for the dynamic execution family. */
+  dynamic?: DynamicAgentProfile;
   name: string;
   /** ID of the agent (CLI) this profile belongs to. */
   agentId: string;
@@ -159,6 +177,7 @@ export type OfficeAgentProfile = AgentProfile &
 export type AgentProfilePayload = {
   id: string;
   agent_id: string;
+  kind?: AgentProfileKind;
   name: string;
   agent_display_name: string;
   model: string;
@@ -176,4 +195,13 @@ export type AgentProfilePayload = {
   user_modified?: boolean;
   created_at: string;
   updated_at: string;
+  dynamic?: {
+    version: number;
+    candidates: Array<{
+      position: number;
+      execution_profile_id: string;
+      enabled: boolean;
+      rules?: Record<string, string>;
+    }>;
+  };
 };

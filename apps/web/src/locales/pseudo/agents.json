@@ -234,5 +234,18 @@
   "duplicateProfileNamed": "Ďũƥĺĩćàţē {{name}}",
   "duplicateProfileSuccess": "Ƥŕōƒĩĺē ďũƥĺĩćàţēď",
   "duplicateSaveBlocked": "Śēţţĩńĝś àŕē śţĩĺĺ śàvĩńĝ. Ţŕŷ àĝàĩń ĩń à ḿōḿēńţ.",
-  "failedToDuplicateProfile": "Ƒàĩĺēď ţō ďũƥĺĩćàţē ƥŕōƒĩĺē"
+  "failedToDuplicateProfile": "Ƒàĩĺēď ţō ďũƥĺĩćàţē ƥŕōƒĩĺē",
+  "dynamicProfileDisabled": "Ðýńàṁĩć àĝēńţ ŕōũţĩńĝ ĩś đĩśàƀĺēđ.",
+  "dynamicProfileDescription": "Çħōōśē àń ōŕđēŕēđ ĺĩśţ ōƒ ćōńćŕēţē ƥŕōƒĩĺēś  for ƒàĺĺƀàćƙ ēẋēćũţĩōń.",
+  "dynamicProfileSettings": "Ðýńàṁĩć ƥŕōƒĩĺē śēţţĩńĝś",
+  "dynamicCandidates": "Çàńđĩđàţēś",
+  "dynamicCandidatesDescription": "Çàńđĩđàţēś ŕũń ĩń ōŕđēŕ. Ŧħē ńēẋţ ćàńđĩđàţē ĩś ũśēđ ōńĺý ẅħēń ţħē ćōńƒĩĝũŕēđ ēŕŕōŕ àćţĩōń àĺĺōẅś ĩţ.",
+  "addDynamicCandidate": "Àđđ ćàńđĩđàţē",
+  "noDynamicCandidates": "Àđđ àţ ĺēàśţ ōńē ćōńćŕēţē ƥŕōƒĩĺē.",
+  "moveDynamicCandidateUp": "Mōṽē ćàńđĩđàţē ũƥ",
+  "moveDynamicCandidateDown": "Mōṽē ćàńđĩđàţē đōẅń",
+  "removeDynamicCandidate": "Ŕēṁōṽē ćàńđĩđàţē",
+  "dynamicCandidatePickerDescription": "Çħōōśē à ćōńćŕēţē ƥŕōƒĩĺē ţħàţ ĩś ēĺĩĝĩƀĺē  for đýńàṁĩć ŕōũţĩńĝ.",
+  "dynamicProfileSaved": "Ðýńàṁĩć ƥŕōƒĩĺē śàṽēđ.",
+  "savingProfile": "Śàṽĩńĝ..."
 }

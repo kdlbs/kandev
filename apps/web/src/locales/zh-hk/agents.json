@@ -221,5 +221,18 @@
   "watcherKindGithubIssue": "GitHub 議題",
   "watcherKindGithubReview": "GitHub PR 審查",
   "watcherKindJira": "Jira",
-  "watcherKindLinear": "Linear"
+  "watcherKindLinear": "Linear",
+  "dynamicProfileDisabled": "動態代理程式路由已停用。",
+  "dynamicProfileDescription": "選擇按順序執行的具體設定檔，以便在失敗時切換。",
+  "dynamicProfileSettings": "動態設定檔設定",
+  "dynamicCandidates": "候選設定檔",
+  "dynamicCandidatesDescription": "候選設定檔按順序執行。只有在已設定的錯誤動作允許時，才會使用下一個候選設定檔。",
+  "addDynamicCandidate": "新增候選設定檔",
+  "noDynamicCandidates": "至少新增一個具體設定檔。",
+  "moveDynamicCandidateUp": "上移候選設定檔",
+  "moveDynamicCandidateDown": "下移候選設定檔",
+  "removeDynamicCandidate": "移除候選設定檔",
+  "dynamicCandidatePickerDescription": "選擇符合動態路由條件的具體設定檔。",
+  "dynamicProfileSaved": "動態設定檔已儲存。",
+  "savingProfile": "正在儲存..."
 }

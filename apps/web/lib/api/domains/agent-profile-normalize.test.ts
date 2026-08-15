@@ -47,6 +47,7 @@ const expectedCamelCaseProfile = {
   updatedAt: "2026-01-02T00:00:00Z",
 };
 
+// eslint-disable-next-line max-lines-per-function -- keeps the canonical wire-shape matrix together.
 describe("normalizeAgentProfile", () => {
   it("converts snake_case wire payload to canonical camelCase", () => {
     const result = normalizeAgentProfile(snakeCaseWirePayload);
@@ -136,6 +137,36 @@ describe("normalizeAgentProfile", () => {
     expect(result.fallbackModel).toBe("");
     expect(result.autoFallback).toBe(false);
   });
+
+  it("normalizes a dynamic profile document and preserves candidate order", () => {
+    const result = normalizeAgentProfile({
+      id: "dynamic-profile",
+      kind: "dynamic",
+      dynamic: {
+        version: 4,
+        candidates: [
+          {
+            position: 0,
+            execution_profile_id: "primary",
+            enabled: true,
+            rules: { auth_required: "try_next" },
+          },
+        ],
+      },
+    });
+    expect(result.kind).toBe("dynamic");
+    expect(result.dynamic).toEqual({
+      version: 4,
+      candidates: [
+        {
+          position: 0,
+          executionProfileId: "primary",
+          enabled: true,
+          rules: { auth_required: "try_next" },
+        },
+      ],
+    });
+  });
 });
 
 describe("toAgentProfilePayload", () => {
@@ -193,5 +224,34 @@ describe("toAgentProfilePayload", () => {
     expect(disabled.enabled).toBe(false);
     const omitted = toAgentProfilePayload({ id: toAgentProfileId(SAMPLE_ID) });
     expect("enabled" in omitted).toBe(false);
+  });
+
+  it("serializes dynamic candidates with opaque profile IDs", () => {
+    const payload = toAgentProfilePayload({
+      id: toAgentProfileId("dynamic-profile"),
+      kind: "dynamic",
+      dynamic: {
+        version: 2,
+        candidates: [
+          {
+            position: 0,
+            executionProfileId: toAgentProfileId("primary"),
+            enabled: true,
+            rules: { rate_limited: "retry_same" },
+          },
+        ],
+      },
+    });
+    expect(payload.dynamic).toEqual({
+      version: 2,
+      candidates: [
+        {
+          position: 0,
+          execution_profile_id: "primary",
+          enabled: true,
+          rules: { rate_limited: "retry_same" },
+        },
+      ],
+    });
   });
 });

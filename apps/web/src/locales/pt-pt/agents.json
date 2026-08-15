@@ -221,5 +221,18 @@
   "watcherKindLinear": "Linear",
   "collapseAgentProfiles": "Recolher perfis de {{name}}",
   "expandAgentProfiles": "Expandir perfis de {{name}}",
-  "noProfilesYetShort": "Sem perfis ainda"
+  "noProfilesYetShort": "Sem perfis ainda",
+  "dynamicProfileDisabled": "O encaminhamento dinâmico de agentes está desativado.",
+  "dynamicProfileDescription": "Escolha uma lista ordenada de perfis concretos para execução alternativa.",
+  "dynamicProfileSettings": "Definições do perfil dinâmico",
+  "dynamicCandidates": "Candidatos",
+  "dynamicCandidatesDescription": "Os candidatos são executados por ordem. O candidato seguinte só é usado quando a ação de erro configurada o permite.",
+  "addDynamicCandidate": "Adicionar candidato",
+  "noDynamicCandidates": "Adicione pelo menos um perfil concreto.",
+  "moveDynamicCandidateUp": "Mover candidato para cima",
+  "moveDynamicCandidateDown": "Mover candidato para baixo",
+  "removeDynamicCandidate": "Remover candidato",
+  "dynamicCandidatePickerDescription": "Escolha um perfil concreto elegível para encaminhamento dinâmico.",
+  "dynamicProfileSaved": "Perfil dinâmico guardado.",
+  "savingProfile": "A guardar..."
 }
