@@ -37,24 +37,26 @@ hiding the action the icon represents.
 - The chat's Skip action rejects the exact visible bundle through the existing response endpoint. A
   live waiter receives the rejection in the same turn. A detached current-turn bundle is persisted as
   rejected without resuming the agent.
-- An affirmative response to a detached current-turn bundle persists the answer and publishes one
-  resume event. A rejection persists terminal status without publishing a resume event.
-- Every response atomically claims current-turn ownership before it can reach a live waiter or publish
+- An affirmative response to a detached current-turn bundle returns success only after the
+  orchestrator synchronously accepts one resume request. A rejection persists terminal status without
+  resuming the agent.
+- Every response atomically claims current-turn ownership before it can reach a live waiter or request
   a detached resume. Terminal message updates are published only after delivery succeeds. If detached
-  resume publication fails, the endpoint returns an error and restores the still-current bundle to
+  resume acceptance fails, the endpoint returns an error and restores the still-current bundle to
   pending so the same answer can be retried.
 - A current-turn bundle remains answerable while any sibling question is pending. Recovery claims only
   those pending rows, preserves siblings already made terminal by an earlier partial write, and restores
   only the claimed rows if detached delivery fails.
 - Any response to a superseded or terminal bundle returns conflict, performs no message mutation, and
-  publishes no resume event. Current clients close their obsolete local overlay through the existing
+  initiates no agent resume. Current clients close their obsolete local overlay through the existing
   conflict handling.
 - Persisted task status summaries reconcile `pending_action` against current-turn repository state on
   source events and task-list/boot reads. Existing summaries are repaired, not only missing rows.
 - When a task row advertises a pending action, desktop and phone task activation load the task's
   sessions and select the newest input-capable session whose `pending_action` matches the task action.
-  This pending owner outranks remembered-session and primary-session preferences. Normal preference
-  order returns when no matching pending owner exists.
+  This pending owner outranks remembered-session and primary-session preferences. If the task still
+  advertises pending input but no matching input-capable owner exists, activation fails closed to the
+  task route without guessing a session. Normal preference order returns only for a clean task.
 
 ## Data model
 
@@ -86,11 +88,11 @@ No new route or response field.
   the status summary and legacy fallback fields.
 - `POST /api/v1/clarification/:pendingId/respond` uses one state-based contract:
   - `active_live`: answer or rejection returns success and is delivered to the same-turn waiter.
-  - `active_detached`: an answer returns success, persists, and publishes one resume event; rejection
-    returns success, persists, and publishes no resume event. If resume publication fails, an answer
-    returns a server error and the still-current bundle remains answerable for retry.
+  - `active_detached`: an answer returns success only after the orchestrator accepts one resume request;
+    rejection returns success and persists without resuming the agent. If resume acceptance fails, an
+    answer returns a server error and the still-current bundle remains answerable for retry.
   - `superseded_history` or `terminal`: answer or rejection returns conflict, performs no write, and
-    publishes no resume event.
+    initiates no agent resume.
 - `POST /api/v1/clarification/:pendingId/cancel` remains the low-level cancellation path for a request
   still owned by the in-memory clarification store. The chat Skip control uses `/respond` with
   `rejected=true`, including for detached requests.
@@ -110,7 +112,7 @@ Transitions:
 - Request creation enters `active_live`.
 - Wait timeout, disconnect, or turn teardown moves `active_live -> active_detached` once.
 - Successful answer delivery, Skip, cancel, expiry, or deletion moves either active state to
-  `terminal` for that exact `pending_id`. A failed detached answer publication returns to
+  `terminal` for that exact `pending_id`. A failed detached resume acceptance returns to
   `active_detached` while the same turn remains current.
 - Acceptance of a newer turn moves any older pending bundle to `superseded_history` operationally;
   no history rewrite is required.
@@ -132,7 +134,7 @@ session they can already access. Session selection does not broaden task visibil
   corrected summary; other clients converge on their next event or read.
 - A stale browser submits an older-turn answer: return conflict, do not update runtime ownership, and
   do not dispatch a prompt.
-- Detached resume context resolution or event publication fails: use a non-cancelled write context,
+- Detached resume context resolution or orchestrator acceptance fails: use a non-cancelled write context,
   withhold terminal message events, restore the still-current bundle to pending, and return a retryable
   server error instead of reporting false success.
 - Historical partial terminalization leaves pending and terminal siblings in one current-turn bundle:
@@ -178,9 +180,9 @@ session they can already access. Session selection does not broaden task visibil
   Kandev selects the secondary session, closes the drawer when applicable, and shows the question.
 - **GIVEN** a stale browser still displays a superseded question, **WHEN** it submits an answer,
   **THEN** the server returns conflict and does not resume or otherwise prompt the agent.
-- **GIVEN** a detached current-turn answer cannot publish its resume event, **WHEN** the response
+- **GIVEN** a detached current-turn answer is not accepted by the orchestrator, **WHEN** the response
   endpoint fails, **THEN** it returns a server error, keeps the question answerable, and a later retry
-  publishes exactly one successful resume event.
+  delivers exactly one accepted resume request.
 - **GIVEN** two request identities produce terminal and pending events close together, **WHEN** the
   projector refreshes, **THEN** its result matches current repository state rather than event order.
 

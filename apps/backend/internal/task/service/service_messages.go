@@ -803,7 +803,7 @@ func (s *Service) CompleteActiveClarificationBundle(
 }
 
 // RestoreActiveClarificationBundle reopens a terminal bundle after detached
-// resume publication fails, preserving an idempotent HTTP retry path.
+// resume acceptance fails, preserving an idempotent HTTP retry path.
 func (s *Service) RestoreActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, terminalStatus string,
@@ -822,7 +822,7 @@ func (s *Service) RestoreActiveClarificationBundle(
 }
 
 // PublishClarificationBundleUpdates exposes a completed bundle only after its
-// same-turn delivery or detached resume event has succeeded.
+// same-turn delivery or detached resume has been accepted.
 func (s *Service) PublishClarificationBundleUpdates(ctx context.Context, messages []*models.Message) {
 	for _, message := range messages {
 		s.publishMessageEvent(ctx, events.MessageUpdated, message)

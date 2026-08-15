@@ -64,9 +64,12 @@ func (s *stubMessageStore) UpdateMessage(_ context.Context, m *taskmodels.Messag
 }
 
 type stubEventBus struct {
-	events      []*bus.Event
-	publishErr  error
-	contextErrs []error
+	events            []*bus.Event
+	publishErr        error
+	contextErrs       []error
+	resumeRequests    []DetachedClarificationResume
+	resumeErr         error
+	resumeContextErrs []error
 }
 
 func (s *stubEventBus) Publish(ctx context.Context, _ string, ev *bus.Event) error {
@@ -76,6 +79,15 @@ func (s *stubEventBus) Publish(ctx context.Context, _ string, ev *bus.Event) err
 	}
 	s.events = append(s.events, ev)
 	return nil
+}
+
+func (s *stubEventBus) ResumeDetachedClarification(
+	ctx context.Context,
+	request DetachedClarificationResume,
+) error {
+	s.resumeContextErrs = append(s.resumeContextErrs, ctx.Err())
+	s.resumeRequests = append(s.resumeRequests, request)
+	return s.resumeErr
 }
 
 func newTestCanceller(t *testing.T, msgs map[string][]*taskmodels.Message) (*Canceller, *stubMessageStore, *stubEventBus) {

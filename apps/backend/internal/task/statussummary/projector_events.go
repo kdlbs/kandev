@@ -219,6 +219,16 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	}
 	state.current = cloneSummary(summary)
 	state.revision = summary.Revision
+	applySummaryBaseline(state, summary)
+	if summary.Git != nil {
+		if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.queuedCount = summary.QueuedPromptCount
 	state.taskPending = summary.PendingAction
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -235,15 +245,11 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if summary.Git != nil {
 		copy := *summary.Git
 		state.gitBaseline = &copy
-		if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
-			return err
-		}
 	}
 	if summary.PullRequest != nil {
 		copy := *summary.PullRequest
 		state.prBaseline = &copy
 	}
-	return nil
 }
 
 // rebaseProjectionStateFromCurrent rebuilds all derived source state from the
@@ -254,40 +260,20 @@ func rebaseProjectionStateFromCurrent(state *projectionState) {
 		return
 	}
 	current := state.current
-	state.queuedCount = current.QueuedPromptCount
 	state.sessions = make(map[string]sessionObservation)
 	state.activityObserved = false
-	if current.PrimarySession != nil && current.PrimarySession.ID != "" {
-		state.sessions[current.PrimarySession.ID] = sessionObservation{
-			id:        current.PrimarySession.ID,
-			state:     current.PrimarySession.State,
-			isPrimary: true,
-		}
-	}
 	state.pending = make(map[string]string)
 	state.pendingRequests = make(map[string]pendingRequestIdentity)
-	state.taskPending = current.PendingAction
 	state.pendingObserved = false
 	state.errors = make(map[string]*ActiveErrorSummary)
 	state.errorsObserved = false
-	if current.ActiveError != nil && current.ActiveError.SessionID != "" {
-		copy := *current.ActiveError
-		state.errors[current.ActiveError.SessionID] = &copy
-	}
 	state.git = make(map[string]GitSummary)
 	state.gitBaseline = nil
 	state.gitObserved = false
-	if current.Git != nil {
-		copy := *current.Git
-		state.gitBaseline = &copy
-	}
 	state.prs = make(map[string]pullRequestObservation)
 	state.prBaseline = nil
 	state.prObserved = false
-	if current.PullRequest != nil {
-		copy := *current.PullRequest
-		state.prBaseline = &copy
-	}
+	applySummaryBaseline(state, current)
 }
 
 func (p *Projector) restoreGitObservations(ctx context.Context, taskID string, state *projectionState) error {

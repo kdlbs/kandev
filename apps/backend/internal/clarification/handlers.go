@@ -56,7 +56,7 @@ type MessageCreator interface {
 	// when it still belongs to the session's current durable turn.
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*taskmodels.Message, bool, error)
 	// RestoreActiveClarificationBundle reopens a claimed bundle when detached
-	// resume publication fails, so the same response can be retried safely.
+	// resume acceptance fails, so the same response can be retried safely.
 	RestoreActiveClarificationBundle(
 		ctx context.Context,
 		pendingID, terminalStatus string,
@@ -71,31 +71,68 @@ type EventBus interface {
 	Publish(ctx context.Context, topic string, event *bus.Event) error
 }
 
+// DetachedClarificationResume contains the durable context required to resume
+// a session after its original clarification waiter has gone away.
+type DetachedClarificationResume struct {
+	TaskID       string
+	SessionID    string
+	PendingID    string
+	Question     string
+	AnswerText   string
+	Rejected     bool
+	RejectReason string
+}
+
+// DetachedClarificationResumer acknowledges whether the orchestrator accepted
+// a detached answer before the handler exposes the bundle as terminal.
+type DetachedClarificationResumer interface {
+	ResumeDetachedClarification(ctx context.Context, request DetachedClarificationResume) error
+}
+
 // Handlers provides HTTP handlers for clarification requests.
 type Handlers struct {
-	store          *Store
-	hub            Broadcaster
-	messageCreator MessageCreator
-	repo           messageStore
-	eventBus       EventBus
-	logger         *logger.Logger
+	store           *Store
+	hub             Broadcaster
+	messageCreator  MessageCreator
+	repo            messageStore
+	eventBus        EventBus
+	detachedResumer DetachedClarificationResumer
+	logger          *logger.Logger
 }
 
 // NewHandlers creates new clarification handlers.
-func NewHandlers(store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, eventBus EventBus, log *logger.Logger) *Handlers {
+func NewHandlers(
+	store *Store,
+	hub Broadcaster,
+	messageCreator MessageCreator,
+	repo messageStore,
+	eventBus EventBus,
+	detachedResumer DetachedClarificationResumer,
+	log *logger.Logger,
+) *Handlers {
 	return &Handlers{
-		store:          store,
-		hub:            hub,
-		messageCreator: messageCreator,
-		repo:           repo,
-		eventBus:       eventBus,
-		logger:         log.WithFields(zap.String("component", "clarification-handlers")),
+		store:           store,
+		hub:             hub,
+		messageCreator:  messageCreator,
+		repo:            repo,
+		eventBus:        eventBus,
+		detachedResumer: detachedResumer,
+		logger:          log.WithFields(zap.String("component", "clarification-handlers")),
 	}
 }
 
 // RegisterRoutes registers clarification HTTP routes.
-func RegisterRoutes(router *gin.Engine, store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, eventBus EventBus, log *logger.Logger) {
-	h := NewHandlers(store, hub, messageCreator, repo, eventBus, log)
+func RegisterRoutes(
+	router *gin.Engine,
+	store *Store,
+	hub Broadcaster,
+	messageCreator MessageCreator,
+	repo messageStore,
+	eventBus EventBus,
+	detachedResumer DetachedClarificationResumer,
+	log *logger.Logger,
+) {
+	h := NewHandlers(store, hub, messageCreator, repo, eventBus, detachedResumer, log)
 	api := router.Group("/api/v1/clarification")
 	api.POST("/request", h.httpCreateRequest)
 	api.GET("/:id", h.httpGetRequest)
@@ -402,14 +439,14 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 		return 0, ""
 	}
 
-	// User is providing an affirmative answer after the agent moved on. Update
-	// the clarification record and publish an event so the orchestrator resumes
-	// the agent with a new turn containing the answer.
-	h.logger.Info("clarification entry not found, using event fallback",
+	// User is providing an affirmative answer after the agent moved on. Ask the
+	// orchestrator to accept a new turn containing the answer before publishing
+	// the terminal clarification update.
+	h.logger.Info("clarification entry not found, using acknowledged resume fallback",
 		zap.String("pending_id", pendingID),
 		zap.String("error", deliveryErr.Error()))
 
-	if err := h.respondViaEventFallback(ctx, pendingID, body.Answers, body.Rejected, body.RejectReason); err != nil {
+	if err := h.resumeDetachedClarification(ctx, pendingID, body.Answers, body.Rejected, body.RejectReason); err != nil {
 		restored := h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
 		h.logger.Error("failed to resume detached clarification",
 			zap.String("pending_id", pendingID),
@@ -562,11 +599,11 @@ func stringFromMetadata(meta map[string]any, key string) string {
 	return ""
 }
 
-// respondViaEventFallback publishes a ClarificationAnswered event for the orchestrator
-// to resume the agent with a new turn. Used when the agent timed out.
-func (h *Handlers) respondViaEventFallback(ctx context.Context, pendingID string, answers []Answer, rejected bool, rejectReason string) error {
-	if h.eventBus == nil {
-		return errors.New("event bus unavailable")
+// resumeDetachedClarification synchronously asks the orchestrator to accept a new
+// turn. Used when the original clarification waiter has gone away.
+func (h *Handlers) resumeDetachedClarification(ctx context.Context, pendingID string, answers []Answer, rejected bool, rejectReason string) error {
+	if h.detachedResumer == nil {
+		return errors.New("detached clarification resumer unavailable")
 	}
 
 	clarificationCtx, err := h.resolveClarificationEventContext(ctx, pendingID)
@@ -583,24 +620,20 @@ func (h *Handlers) respondViaEventFallback(ctx context.Context, pendingID string
 
 	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
 
-	eventData := map[string]any{
-		"session_id":    clarificationCtx.SessionID,
-		"task_id":       clarificationCtx.TaskID,
-		"pending_id":    pendingID,
-		metaQuestionKey: clarificationCtx.QuestionSummary,
-		"answer_text":   answerText,
-		"rejected":      rejected,
-		"reject_reason": rejectReason,
+	request := DetachedClarificationResume{
+		SessionID:    clarificationCtx.SessionID,
+		TaskID:       clarificationCtx.TaskID,
+		PendingID:    pendingID,
+		Question:     clarificationCtx.QuestionSummary,
+		AnswerText:   answerText,
+		Rejected:     rejected,
+		RejectReason: rejectReason,
 	}
-	if err := h.eventBus.Publish(ctx, events.ClarificationAnswered, bus.NewEvent(
-		events.ClarificationAnswered,
-		"clarification-handlers",
-		eventData,
-	)); err != nil {
-		return fmt.Errorf("publish clarification answered event: %w", err)
+	if err := h.detachedResumer.ResumeDetachedClarification(ctx, request); err != nil {
+		return fmt.Errorf("resume detached clarification: %w", err)
 	}
 
-	h.logger.Info("clarification answered via event fallback (new turn)",
+	h.logger.Info("clarification answered via acknowledged fallback (new turn)",
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", clarificationCtx.SessionID),
 		zap.String("task_id", clarificationCtx.TaskID))

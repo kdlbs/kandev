@@ -146,7 +146,7 @@ func setupTestHandler(t *testing.T, msgs map[string][]*taskmodels.Message) (*Han
 	repo := &stubMessageStore{messages: msgs}
 	eventBus := &stubEventBus{}
 	messageCreator := &stubMessageCreator{repo: repo}
-	h := NewHandlers(store, nil, messageCreator, repo, eventBus, logger.Default())
+	h := NewHandlers(store, nil, messageCreator, repo, eventBus, eventBus, logger.Default())
 	return h, repo, eventBus, messageCreator
 }
 
@@ -221,11 +221,9 @@ func TestHttpRespond_RejectedAfterTimeout_NoNewTurn(t *testing.T) {
 	}
 }
 
-// TestHttpRespond_AnsweredAfterTimeout_PublishesEvent confirms that an
-// affirmative answer (option selected or custom text) still goes through
-// the fallback path and publishes the event so the orchestrator resumes
-// the agent — the user chose to continue, so a new turn is expected.
-func TestHttpRespond_AnsweredAfterTimeout_PublishesEvent(t *testing.T) {
+// TestHttpRespond_AnsweredAfterTimeoutAwaitsResume confirms that an affirmative
+// detached answer succeeds only after the orchestrator accepts the new turn.
+func TestHttpRespond_AnsweredAfterTimeoutAwaitsResume(t *testing.T) {
 	msgs := map[string][]*taskmodels.Message{
 		"pending-456": {{
 			ID:            "m2",
@@ -253,14 +251,15 @@ func TestHttpRespond_AnsweredAfterTimeout_PublishesEvent(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	answerEvents := 0
-	for _, ev := range eventBus.events {
-		if ev.Type == events.ClarificationAnswered {
-			answerEvents++
-		}
+	if len(eventBus.resumeRequests) != 1 {
+		t.Fatalf("resume requests = %d, want exactly 1", len(eventBus.resumeRequests))
 	}
-	if answerEvents != 1 {
-		t.Errorf("%s events = %d, want exactly 1", events.ClarificationAnswered, answerEvents)
+	request := eventBus.resumeRequests[0]
+	if request.TaskID != "t1" || request.SessionID != "s1" || request.PendingID != "pending-456" {
+		t.Fatalf("resume request identifiers = %+v", request)
+	}
+	if request.AnswerText != "User selected: [opt1]" {
+		t.Fatalf("resume answer text = %q", request.AnswerText)
 	}
 	if len(messageCreator.updates) != 1 || messageCreator.updates[0].status != "answered" {
 		t.Errorf("detached answer updates = %+v, want one answered write", messageCreator.updates)
@@ -285,18 +284,12 @@ func TestHttpRespond_DetachedAnswerPublishesOnlyForWinningClaim(t *testing.T) {
 	if first.Code != http.StatusOK || second.Code != http.StatusConflict {
 		t.Fatalf("response statuses = (%d, %d), want (200, 409)", first.Code, second.Code)
 	}
-	answeredEvents := 0
-	for _, event := range eventBus.events {
-		if event.Type == events.ClarificationAnswered {
-			answeredEvents++
-		}
-	}
-	if answeredEvents != 1 {
-		t.Fatalf("ClarificationAnswered events = %d, want 1", answeredEvents)
+	if len(eventBus.resumeRequests) != 1 {
+		t.Fatalf("detached resume requests = %d, want 1", len(eventBus.resumeRequests))
 	}
 }
 
-func TestHttpRespond_DetachedPublishFailureRestoresRetryableBundle(t *testing.T) {
+func TestHttpRespond_DetachedResumeFailureRestoresRetryableBundle(t *testing.T) {
 	msg := &taskmodels.Message{
 		ID: "message-retry", TaskID: "task-retry", TaskSessionID: "session-retry",
 		Metadata: map[string]any{
@@ -307,7 +300,7 @@ func TestHttpRespond_DetachedPublishFailureRestoresRetryableBundle(t *testing.T)
 	h, _, eventBus, messageCreator := setupTestHandler(t, map[string][]*taskmodels.Message{
 		"pending-retry": {msg},
 	})
-	eventBus.publishErr = errors.New("event bus unavailable")
+	eventBus.resumeErr = errors.New("orchestrator rejected resume")
 	body := RespondBody{Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}}}
 
 	cancelledCtx, cancel := context.WithCancel(context.Background())
@@ -317,13 +310,13 @@ func TestHttpRespond_DetachedPublishFailureRestoresRetryableBundle(t *testing.T)
 		t.Fatalf("first response status = %d, want 500; body=%s", first.Code, first.Body.String())
 	}
 	if got := msg.Metadata["status"]; got != "pending" {
-		t.Fatalf("status after failed publication = %v, want pending for retry", got)
+		t.Fatalf("status after failed resume = %v, want pending for retry", got)
 	}
 	if messageCreator.publishedBundles != 0 {
 		t.Fatalf("published terminal bundles after failed resume = %d, want 0", messageCreator.publishedBundles)
 	}
 
-	eventBus.publishErr = nil
+	eventBus.resumeErr = nil
 	second := runRespond(t, h, "pending-retry", body)
 	if second.Code != http.StatusOK {
 		t.Fatalf("retry status = %d, want 200; body=%s", second.Code, second.Body.String())
@@ -334,17 +327,17 @@ func TestHttpRespond_DetachedPublishFailureRestoresRetryableBundle(t *testing.T)
 	if messageCreator.publishedBundles != 1 {
 		t.Fatalf("published terminal bundles after retry = %d, want 1", messageCreator.publishedBundles)
 	}
-	if len(eventBus.events) != 1 || eventBus.events[0].Type != events.ClarificationAnswered {
-		t.Fatalf("successful resume events = %+v, want exactly one", eventBus.events)
+	if len(eventBus.resumeRequests) != 2 {
+		t.Fatalf("resume attempts = %d, want failed attempt plus retry", len(eventBus.resumeRequests))
 	}
-	for index, contextErr := range eventBus.contextErrs {
+	for index, contextErr := range eventBus.resumeContextErrs {
 		if contextErr != nil {
-			t.Fatalf("event publish %d used cancelled context: %v", index, contextErr)
+			t.Fatalf("resume attempt %d used cancelled context: %v", index, contextErr)
 		}
 	}
 }
 
-func TestHttpRespond_DetachedPublishFailureDoesNotPromiseRetryWhenRestoreFails(t *testing.T) {
+func TestHttpRespond_DetachedResumeFailureDoesNotPromiseRetryWhenRestoreFails(t *testing.T) {
 	for _, tt := range []struct {
 		name          string
 		restoreErr    error
@@ -364,7 +357,7 @@ func TestHttpRespond_DetachedPublishFailureDoesNotPromiseRetryWhenRestoreFails(t
 			h, _, eventBus, messageCreator := setupTestHandler(t, map[string][]*taskmodels.Message{
 				"pending-recovery": {msg},
 			})
-			eventBus.publishErr = errors.New("event bus unavailable")
+			eventBus.resumeErr = errors.New("orchestrator rejected resume")
 			messageCreator.restoreErr = tt.restoreErr
 			messageCreator.refuseRestore = tt.refuseRestore
 

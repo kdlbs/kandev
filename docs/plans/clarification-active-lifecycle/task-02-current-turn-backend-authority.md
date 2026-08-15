@@ -18,9 +18,9 @@ spec: "../../specs/clarification-active-lifecycle/spec.md"
   turn.
 - Detach/expiry fallback and workflow guarding consume that method; repeated detach writes and
   publishes nothing, while repository errors keep the workflow barrier closed.
-- A detached bundle in the current turn accepts a late answer with one resume event or a rejection
-  with no resume event. Any database-fallback answer or rejection for an older-turn or terminal bundle
-  returns conflict, performs no write, and emits no agent-resume event.
+- A detached bundle in the current turn accepts a late answer only after one acknowledged orchestrator
+  resume, or a rejection without resuming the agent. Any database-fallback answer or rejection for an
+  older-turn or terminal bundle returns conflict, performs no write, and initiates no agent resume.
 
 ## Verification
 
@@ -86,8 +86,10 @@ blockers/risks, and update task/plan status.
   events; repository errors fail closed.
 - PR review follow-up now claims durable current-turn ownership before live waiter delivery, withholds
   terminal message events until delivery succeeds, and restores a still-current detached bundle when
-  resume publication fails so the answer can be retried. SQLite concurrency, rollback, supersession,
-  cancelled-context, and PostgreSQL-dialect cases pin the behavior.
+  acknowledged resume acceptance fails so the answer can be retried. The detached HTTP path calls the
+  orchestrator synchronously, so executor rejection cannot be hidden by event-bus publication success.
+  SQLite concurrency, rollback, supersession, cancelled-context, and PostgreSQL-dialect cases pin the
+  behavior.
 - Detach and expiry counts now include only bundles whose messages changed. Malformed messages without
   their schema-required durable turn remain inert instead of becoming pending authority.
 - Final review remediation lets atomic response claims recover pending rows from a mixed-status bundle,

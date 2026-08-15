@@ -66,9 +66,9 @@ bundle detached, a newer bundle rejected, and a later completion republishing th
   rows. Preserve fail-closed behavior when the authoritative query fails.
 - In `apps/backend/internal/clarification/handlers.go`, validate the database-fallback response
   against active current-turn ownership before any fallback write. A detached current-turn answer
-  persists and publishes one resume event; a detached current-turn rejection persists without a
-  resume event. Any answer or rejection for a superseded/terminal bundle returns conflict without a
-  write or `clarification.answered` publication.
+  succeeds only after one synchronously acknowledged orchestrator resume; a detached current-turn
+  rejection persists without resuming the agent. Any answer or rejection for a superseded/terminal
+  bundle returns conflict without a write or agent resume.
 - Order durable turns identically by `started_at`, `created_at`, then `id` descending. Add an
   environment-gated PostgreSQL behavior test for the changed query. No migration or persisted-row
   rewrite.
@@ -163,7 +163,7 @@ bundle detached, a newer bundle rejected, and a later completion republishing th
   - **How:** focused fakes count writes/events, plus orchestrator service tests around the repository
     boundary.
 - **What:** current-turn detached response still resumes or dismisses as appropriate, but a stale
-  older-turn response returns conflict and emits no resume event.
+  older-turn response returns conflict and initiates no agent resume.
   - **File:** `apps/backend/internal/clarification/handlers_test.go`
   - **How:** handler-to-repository integration with persisted bundles and an empty in-memory store.
 - **What:** projector restore, newer ordinary message, terminal events, and CAS races converge to the
@@ -265,7 +265,7 @@ share projection semantics; task 05 spans all layers. Waves do not authorize sub
 - Read-time summary repair can race the live projector. Bounded CAS reload/retry and projector
   resynchronization must preserve newer unrelated summary fields.
 - A stale tab can submit after another tab starts a new turn. The response guard must run before any
-  fallback persistence or resume event.
+  fallback persistence or resume request.
 - Pending task selection adds an async list request to a formerly synchronous fast path. Existing
   selection tokens, external-navigation guard, layout cleanup, URL ordering, and phone drawer failure
   fallback must remain intact.

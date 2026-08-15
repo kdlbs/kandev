@@ -43,7 +43,7 @@ func isTerminalStatus(status string) bool {
 
 // markMessagesDetached unblocks WaitForResponse and keeps the clarification
 // interactive: status stays pending and agent_disconnected is set so the UI
-// can route a late answer through the event fallback path.
+// can route a late answer through the acknowledged resume fallback path.
 func (c *Canceller) markMessagesDetached(ctx context.Context, msgs []*taskmodels.Message, pendingID string) bool {
 	writeCtx := context.WithoutCancel(ctx)
 	changed := false
@@ -140,7 +140,7 @@ func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) 
 
 // DetachSessionAndNotify cancels in-memory WaitForResponse waiters for a session
 // and marks DB clarification messages as pending with agent_disconnected=true.
-// The overlay stays interactive; a late answer uses the event fallback path.
+// The overlay stays interactive; a late answer uses the acknowledged resume fallback path.
 func (c *Canceller) DetachSessionAndNotify(ctx context.Context, sessionID string) int {
 	return c.detachSessionBundles(ctx, sessionID)
 }

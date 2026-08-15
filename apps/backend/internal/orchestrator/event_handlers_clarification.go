@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -134,6 +135,40 @@ func (s *Service) handleClarificationAnswered(ctx context.Context, event *bus.Ev
 		return nil
 	}
 
+	if err := s.resumeDetachedClarification(ctx, data); err != nil {
+		s.logger.Error("failed to resume agent with clarification answer",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+	}
+	return nil
+}
+
+// ResumeDetachedClarification synchronously reports whether the orchestrator
+// accepted a detached answer. The HTTP handler keeps the durable bundle
+// retryable unless this call succeeds.
+func (s *Service) ResumeDetachedClarification(
+	ctx context.Context,
+	request clarification.DetachedClarificationResume,
+) error {
+	return s.resumeDetachedClarification(ctx, clarificationAnsweredData{
+		SessionID:    request.SessionID,
+		TaskID:       request.TaskID,
+		PendingID:    request.PendingID,
+		Question:     request.Question,
+		AnswerText:   request.AnswerText,
+		Rejected:     request.Rejected,
+		RejectReason: request.RejectReason,
+	})
+}
+
+func (s *Service) resumeDetachedClarification(ctx context.Context, data clarificationAnsweredData) error {
+	if data.SessionID == "" || data.TaskID == "" {
+		return errors.New("detached clarification resume missing session_id or task_id")
+	}
+	if err := s.authorizeTaskSessionPair(ctx, data.TaskID, data.SessionID); err != nil {
+		return err
+	}
 	prompt := buildClarificationPrompt(data)
 
 	s.logger.Info("resuming agent with clarification answer",
@@ -148,12 +183,10 @@ func (s *Service) handleClarificationAnswered(ctx context.Context, event *bus.Ev
 	s.writeTaskInProgressForRuntime(ctx, data.TaskID, data.SessionID)
 
 	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, false); err != nil {
-		if !s.retryClarificationAfterCancel(ctx, data, prompt, err) {
-			s.logger.Error("failed to resume agent with clarification answer",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.SessionID),
-				zap.Error(err))
+		if s.retryClarificationAfterCancel(ctx, data, prompt, err) {
+			return nil
 		}
+		return fmt.Errorf("prompt task with clarification answer: %w", err)
 	}
 	return nil
 }

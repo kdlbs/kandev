@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
@@ -91,6 +92,25 @@ func TestHandleClarificationAnswered(t *testing.T) {
 			t.Fatalf("expected nil error, got: %v", err)
 		}
 	})
+}
+
+func TestResumeDetachedClarificationReportsPromptFailure(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: true}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.eventBus = &recordingEventBus{}
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateCompleted)
+
+	err := svc.ResumeDetachedClarification(context.Background(), clarification.DetachedClarificationResume{
+		TaskID:     "t1",
+		SessionID:  "s1",
+		PendingID:  "pending-1",
+		Question:   "Which database?",
+		AnswerText: "User selected: PostgreSQL",
+	})
+	if err == nil {
+		t.Fatal("detached resume reported success after PromptTask failed")
+	}
 }
 
 func TestHandleClarificationStaleDismissed(t *testing.T) {
