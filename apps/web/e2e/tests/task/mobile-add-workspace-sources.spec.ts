@@ -58,10 +58,16 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
 
   // The "Add folder" control is gated on the task's primary executor binding.
   // Poll the backend directly for it rather than budgeting the later UI
-  // assertion for the async session launch that produces it.
+  // assertion for the async session launch that produces it. The budget sits on
+  // the backend cause, not on a UI shadow of it, so the "Add folder" assertion
+  // below keeps the default timeout. `primary_executor_type` is `omitempty`, so
+  // an unbound task omits the key entirely: assert truthiness, never
+  // `not.toBeNull()`, which `undefined` satisfies on the first poll.
   await expect
-    .poll(async () => (await apiClient.getTask(task.id)).primary_executor_type)
-    .not.toBeNull();
+    .poll(async () => (await apiClient.getTask(task.id)).primary_executor_type, {
+      timeout: 30_000,
+    })
+    .toBeTruthy();
 
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
