@@ -140,7 +140,7 @@ func TestCodexStrategy_Args(t *testing.T) {
 	// stdio server: command + args + env
 	for _, want := range []string{
 		`-c mcp_servers.kandev.url="http://localhost:1234/mcp"`,
-		`-c mcp_servers.kandev.default_tools_approval_mode="auto"`,
+		`-c mcp_servers.kandev.default_tools_approval_mode="approve"`,
 		`-c mcp_servers.github.command="npx"`,
 		`-c mcp_servers.github.args=["-y","@mcp/github"]`,
 		`-c mcp_servers.github.env={"GITHUB_TOKEN":"tok"}`,
@@ -183,7 +183,7 @@ func TestCodexStrategy_KandevPolicyIsAppliedPerLaunch(t *testing.T) {
 			t.Fatalf("unexpected error for %s: %v", url, err)
 		}
 		joined := strings.Join(art.Args, " ")
-		if !strings.Contains(joined, `mcp_servers.kandev.default_tools_approval_mode="auto"`) {
+		if !strings.Contains(joined, `mcp_servers.kandev.default_tools_approval_mode="approve"`) {
 			t.Errorf("launch for %s omitted Kandev approval policy: %s", url, joined)
 		}
 		if !strings.Contains(joined, `mcp_servers.kandev.url="`+url+`"`) {

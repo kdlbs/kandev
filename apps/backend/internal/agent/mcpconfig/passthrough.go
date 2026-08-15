@@ -170,7 +170,7 @@ type CodexStrategy struct{}
 
 const (
 	codexKandevServerName   = "kandev"
-	codexKandevApprovalMode = "auto"
+	codexKandevApprovalMode = "approve"
 )
 
 func (CodexStrategy) BuildPassthroughMCP(servers []types.McpServer, _ PassthroughPaths) (PassthroughArtifacts, error) {
