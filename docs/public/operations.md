@@ -311,8 +311,8 @@ The UI flow applies to the configured SQLite path:
 
 1. Stop or finish active agent sessions and preserve unpushed work.
 2. Open **Settings > System > Backups**, choose **Restore**, type `RESTORE`, and confirm.
-3. Kandev stops active executions, copies the selected snapshot to `<configured-database-path>.new`, checkpoints and closes the SQLite pool, removes `-wal` and `-shm` sidecars, and atomically renames the staged file over the configured database file.
-4. Quit and relaunch Kandev immediately. The restore job closes the pool so stale WAL frames cannot replay onto the restored file, and the backend must restart before database-backed work resumes.
+3. Kandev stops scheduling, active executions, and database-backed workers. It copies the selected snapshot to `<configured-database-path>.new`, validates the SQLite checkpoint result, and closes the pool. It then quarantines the configured database and its `-wal`/`-shm` sidecars before installing the staged file. If installation fails, Kandev restores the quarantined files.
+4. Click **Restart Kandev** in the success dialog. If automatic restart is unavailable, quit and relaunch Kandev manually. The backend must restart before database-backed work resumes.
 5. Check `/health`, **System > Status**, database schema version, secrets, and representative tasks.
 
 Restore does not roll back worktrees or remote/provider state. A database may therefore refer to files, containers, pull requests, or credentials from a different point in time. Reconcile them before restarting automation.

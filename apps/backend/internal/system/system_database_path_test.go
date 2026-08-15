@@ -75,6 +75,40 @@ func TestConfiguredDatabasePath_ProvideListsSiblingBackups(t *testing.T) {
 	}
 }
 
+func TestProvideWiresRestoreQuiesce(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "custom", "named.db")
+	pool := openSystemDatabasePathPool(t, databasePath)
+	t.Cleanup(func() { _ = pool.Close() })
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	calls := 0
+	cfg := &config.Config{
+		HomeDir: filepath.Join(root, "home"),
+		Database: config.DatabaseConfig{
+			Driver: "sqlite",
+			Path:   databasePath,
+		},
+	}
+	service := Provide(cfg, log, pool, nil, BuildInfo{}, Wiring{
+		RestoreQuiesce: func() error {
+			calls++
+			return nil
+		},
+	})
+	if service.Backups.RestoreQuiesce == nil {
+		t.Fatal("Backups.RestoreQuiesce is nil")
+	}
+	if err := service.Backups.RestoreQuiesce(); err != nil {
+		t.Fatalf("RestoreQuiesce: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("RestoreQuiesce calls = %d, want 1", calls)
+	}
+}
+
 func openSystemDatabasePathPool(t *testing.T, databasePath string) *db.Pool {
 	t.Helper()
 	writerRaw, err := db.OpenSQLite(databasePath)

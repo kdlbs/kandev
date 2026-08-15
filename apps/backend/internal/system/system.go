@@ -51,10 +51,13 @@ type BuildInfo struct {
 
 // Wiring supplies the runtime hooks and repositories owned by the wider
 // application. OrchestratorShutdown stops in-flight agent executions before
-// destructive resets; TaskSessions is the authoritative session reader used
-// by the install-wide sleep-inhibition service.
+// destructive resets. RestoreQuiesce stops the complete database-backed
+// runtime before a SQLite restore closes the shared pool. TaskSessions is the
+// authoritative session reader used by the install-wide sleep-inhibition
+// service.
 type Wiring struct {
 	OrchestratorShutdown func()
+	RestoreQuiesce       func() error
 	MessageQueue         queuesettings.Target
 	TaskSessions         sleepinhibition.SessionReader
 }
@@ -106,6 +109,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 
 	backupsSvc := backups.NewService(databasePath, pool, tracker, log)
 	backupsSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	backupsSvc.RestoreQuiesce = wiring.RestoreQuiesce
 
 	settingsStore, err := systemsettings.NewStore(pool)
 	if err != nil {

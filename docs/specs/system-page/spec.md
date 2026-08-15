@@ -251,7 +251,7 @@ The Message Queue settings GET is readable by members, while its PATCH is admin-
 - **VACUUM failure** — DB is unaffected (VACUUM is atomic); the job ends `failed` with the SQLite error string. Status page shows a recoverable error issue.
 - **Non-SQLite maintenance call** — `vacuum`, `optimize`, and `reset` jobs fail with `not supported for <driver> driver` before running SQLite-only SQL; factory reset also rejects before stopping active executions.
 - **Factory reset failure mid-run** — the pre-reset snapshot remains in the sibling SQLite backup directory. The user can restore it from the Backups page on the next boot. Recovery is documented inline in the failure UI.
-- **Restore failure** — original DB file is left untouched; restore writes to a temp file and atomic-renames only on success. A successful restore closes the pool and removes `-wal` and `-shm` sidecars before replacement so stale frames cannot replay onto the restored file.
+- **Restore failure** — the original DB file and SQLite sidecars remain available when checkpointing is busy, and are restored from quarantine when replacement fails; restore stages the snapshot, validates the checkpoint result, quarantines the originals, and rolls them back if installation fails. PostgreSQL restore is rejected before staging or shutdown.
 - **Log file missing / unreadable** — bundle creation continues with available
   sources, marks the result partial, and records the missing/unreadable backend
   source in `manifest.json`.
@@ -261,7 +261,7 @@ The Message Queue settings GET is readable by members, while its PATCH is admin-
 - `kandev_meta` writes are SQLite-atomic.
 - The SQLite backup directory is `backups/` under the parent of the configured database path. The default remains `<home>/data/backups/`.
 - Snapshot files in the SQLite backup directory are created via `VACUUM INTO <tmp>` then atomic-renamed. Partial files cannot appear.
-- Restore writes the snapshot to `<configured-database-path>.new`, stops active executions, checkpoints and closes the SQLite pool, removes `-wal` and `-shm` sidecars, and atomically renames the staged file over the configured database path. The frontend requires an immediate backend restart before database-backed work resumes.
+- Restore writes the snapshot to `<configured-database-path>.new`, stops scheduling, active executions, and database-backed workers, checkpoints and closes the SQLite pool, then quarantines the main file and `-wal`/`-shm` sidecars before installing the staged file. A failed replacement restores the quarantine. The frontend requires an immediate backend restart before database-backed work resumes.
 - Kandev does not migrate snapshots from another backup directory. It cannot prove that those files belong to the configured database.
 - The existing boot-time backup retention (newest 2) is preserved, but **only auto-snapshots are subject to it**. Snapshots are distinguished by filename prefix:
   - `kandev-<version>-<ts>.db` — created automatically on a version-change boot or as the pre-reset snapshot before factory reset. Pruned by the existing "keep newest 2" rule (operating only on files with the `kandev-` prefix).

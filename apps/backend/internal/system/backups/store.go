@@ -36,6 +36,8 @@ const RestoreConfirmToken = "RESTORE"
 // errRestoreConfirm is exported so handlers can map it to HTTP 400.
 var errRestoreConfirm = errors.New("restore requires confirm=RESTORE")
 
+var errRestoreUnsupported = errors.New("restore is only supported for SQLite")
+
 // ErrInvalidName is returned for filenames that contain path separators,
 // "..", or absolute prefixes.
 var ErrInvalidName = errors.New("invalid backup name")
@@ -46,18 +48,24 @@ var ErrInvalidName = errors.New("invalid backup name")
 // Restore intentionally does not attempt to re-exec the backend: the staged
 // DB file is written in place and the user is told (via the frontend dialog)
 // to quit and relaunch Kandev to load the restored data. Before replacing the
-// file, restore stops the orchestrator, checkpoints and closes the SQLite
-// pool, and removes the WAL sidecars. The previous syscall.Exec approach was
-// brittle under desktop launchers and `make dev` watchers, and left the web UI
-// disconnected from a fresh backend.
+// file, restore quiesces scheduling, active executions, and database-backed
+// workers, checkpoints and closes the SQLite pool, then replaces the main
+// database and sidecars with rollback protection. The previous syscall.Exec
+// approach was brittle under desktop launchers and `make dev` watchers, and
+// left the web UI disconnected from a fresh backend.
 type Service struct {
 	databasePath string
 	pool         *db.Pool
 	jobs         *jobs.Tracker
 	log          *logger.Logger
 
-	// OrchestratorShutdown stops active executions before restore closes the
-	// shared database pool. Wired by cmd/kandev; tests may leave it nil.
+	// RestoreQuiesce stops scheduling, active executions, and database-backed
+	// workers before restore closes the shared database pool. Wired by the
+	// backend composition root; tests may leave it nil.
+	RestoreQuiesce func() error
+
+	// OrchestratorShutdown is the legacy reset/restore hook. Restore uses it
+	// only when RestoreQuiesce is not wired.
 	OrchestratorShutdown func()
 
 	// failWritesForTest, when true, causes Restore's staged-write step to
@@ -208,6 +216,9 @@ func (s *Service) Restore(ctx context.Context, name, confirm string) (string, er
 	if confirm != RestoreConfirmToken {
 		return "", errRestoreConfirm
 	}
+	if err := s.ensureSQLiteRestore(); err != nil {
+		return "", err
+	}
 	abs, err := s.resolveSnapshotPath(name)
 	if err != nil {
 		return "", err
@@ -227,20 +238,21 @@ func (s *Service) runRestore(_ context.Context, snapshotPath string) (map[string
 		_ = os.Remove(stagedPath)
 		return nil, err
 	}
-	if s.OrchestratorShutdown != nil {
+	if s.RestoreQuiesce != nil {
+		if err := s.RestoreQuiesce(); err != nil {
+			_ = os.Remove(stagedPath)
+			return nil, fmt.Errorf("quiesce database for restore: %w", err)
+		}
+	} else if s.OrchestratorShutdown != nil {
 		s.OrchestratorShutdown()
 	}
 	if err := s.quiesceDatabase(); err != nil {
 		_ = os.Remove(stagedPath)
 		return nil, err
 	}
-	if err := removeSQLiteSidecars(s.databasePath); err != nil {
+	if err := s.replaceDatabase(stagedPath); err != nil {
 		_ = os.Remove(stagedPath)
 		return nil, err
-	}
-	if err := os.Rename(stagedPath, s.databasePath); err != nil {
-		_ = os.Remove(stagedPath)
-		return nil, fmt.Errorf("atomic rename failed: %w", err)
 	}
 	// Intentionally no auto-restart. The frontend dialog reads
 	// restart_required from the job result and prompts the user to quit and
@@ -251,19 +263,35 @@ func (s *Service) runRestore(_ context.Context, snapshotPath string) (map[string
 	}, nil
 }
 
+func (s *Service) ensureSQLiteRestore() error {
+	if s.pool == nil || s.pool.Writer() == nil {
+		return nil
+	}
+	driver := s.pool.Writer().DriverName()
+	if driver != dialect.SQLite3 {
+		return fmt.Errorf("%w: %s driver", errRestoreUnsupported, driver)
+	}
+	return nil
+}
+
 // quiesceDatabase flushes pending SQLite WAL frames and closes the shared
 // pool before the configured database file is replaced. Closing the pool is
 // intentional: the frontend receives restart_required and must relaunch the
 // backend before it accepts database-backed work again.
 func (s *Service) quiesceDatabase() error {
+	if err := s.ensureSQLiteRestore(); err != nil {
+		return err
+	}
 	if s.pool == nil || s.pool.Writer() == nil {
 		return nil
 	}
 	writer := s.pool.Writer()
-	if writer.DriverName() == dialect.SQLite3 {
-		if _, err := writer.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-			return fmt.Errorf("checkpoint sqlite WAL: %w", err)
-		}
+	var busy, logFrames, checkpointed int
+	if err := writer.QueryRowx("PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logFrames, &checkpointed); err != nil {
+		return fmt.Errorf("checkpoint sqlite WAL: %w", err)
+	}
+	if busy != 0 {
+		return fmt.Errorf("checkpoint sqlite WAL: busy (%d frames remain)", logFrames-checkpointed)
 	}
 	if err := s.pool.Close(); err != nil {
 		return fmt.Errorf("close database pool: %w", err)
@@ -271,15 +299,82 @@ func (s *Service) quiesceDatabase() error {
 	return nil
 }
 
-// removeSQLiteSidecars removes WAL files that could otherwise be replayed
-// against the newly restored main database file after restart.
-func removeSQLiteSidecars(databasePath string) error {
-	for _, suffix := range []string{"-wal", "-shm"} {
-		if err := os.Remove(databasePath + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove sqlite %s sidecar: %w", suffix, err)
+type restoreOriginalFile struct {
+	livePath       string
+	quarantinePath string
+}
+
+// replaceDatabase quarantines the live database and its sidecars before
+// installing the staged file. If installation fails, every quarantined file
+// is moved back before the error is returned. The quarantine is in the same
+// directory so each rename is atomic on the same filesystem.
+func (s *Service) replaceDatabase(stagedPath string) error {
+	return s.replaceDatabaseWith(stagedPath, os.Rename)
+}
+
+func (s *Service) replaceDatabaseWith(stagedPath string, rename func(string, string) error) error {
+	quarantineBase, err := createRestoreQuarantine(filepath.Dir(s.databasePath), filepath.Base(s.databasePath))
+	if err != nil {
+		return fmt.Errorf("create restore quarantine: %w", err)
+	}
+
+	originals := []restoreOriginalFile{
+		{livePath: s.databasePath, quarantinePath: quarantineBase},
+		{livePath: s.databasePath + "-wal", quarantinePath: quarantineBase + "-wal"},
+		{livePath: s.databasePath + "-shm", quarantinePath: quarantineBase + "-shm"},
+	}
+	moved := make([]restoreOriginalFile, 0, len(originals))
+	rollback := func(cause error) error {
+		var rollbackErrs []error
+		for i := len(moved) - 1; i >= 0; i-- {
+			original := moved[i]
+			if err := rename(original.quarantinePath, original.livePath); err != nil {
+				rollbackErrs = append(rollbackErrs, fmt.Errorf("restore %s: %w", original.livePath, err))
+			}
+		}
+		return errors.Join(cause, errors.Join(rollbackErrs...))
+	}
+
+	for _, original := range originals {
+		if _, err := os.Lstat(original.livePath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return rollback(fmt.Errorf("inspect %s: %w", original.livePath, err))
+		}
+		if err := rename(original.livePath, original.quarantinePath); err != nil {
+			return rollback(fmt.Errorf("quarantine %s: %w", original.livePath, err))
+		}
+		moved = append(moved, original)
+	}
+
+	if err := rename(stagedPath, s.databasePath); err != nil {
+		return rollback(fmt.Errorf("atomic rename failed: %w", err))
+	}
+
+	for _, original := range moved {
+		if err := os.Remove(original.quarantinePath); err != nil && !errors.Is(err, os.ErrNotExist) && s.log != nil {
+			s.log.Warn("backups: failed to remove quarantined database file",
+				zap.String("path", original.quarantinePath), zap.Error(err))
 		}
 	}
 	return nil
+}
+
+func createRestoreQuarantine(dir, base string) (string, error) {
+	f, err := os.CreateTemp(dir, "."+base+".restore-*")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := os.Remove(path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // writeStagedRestore copies snapshotPath to stagedPath. Honors

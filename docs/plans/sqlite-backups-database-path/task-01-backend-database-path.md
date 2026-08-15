@@ -18,7 +18,7 @@ Make the System Database and Backups services use the live SQLite file path. Kee
 
 - A custom SQLite filename is the reported database path and the restore destination.
 - Manual, pre-reset, and pre-migration snapshots use the `backups/` directory beside that file.
-- Restore stops active executions, closes the SQLite pool, removes WAL sidecars, and requires a restart before database-backed work resumes.
+- Restore quiesces scheduling, active executions, and database-backed workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement. PostgreSQL restore is rejected before staging or shutdown. A restart is required before database-backed work resumes.
 - The default `<home>/data/kandev.db` behavior and existing backup safety rules remain unchanged.
 
 ## Files likely touched
@@ -32,6 +32,7 @@ Make the System Database and Backups services use the live SQLite file path. Kee
 - `apps/backend/internal/system/database/stats_test.go`
 - `apps/backend/internal/system/database/reset.go`
 - `apps/backend/internal/system/database/path_test.go`
+- `apps/backend/internal/backendapp/restore_quiesce_test.go`
 
 ## Dependencies
 
@@ -84,3 +85,8 @@ Report the exact changed files and test counts. Include the expected red failure
   `database/stats.go`, `database/stats_test.go`, `database/reset.go`,
   `database/maintenance_test.go`, and `database/path_test.go`.
 - `git diff --check` passed.
+
+### Restore safety remediation
+
+- Red phase: the PostgreSQL path closed the pool, busy checkpoint rows were ignored, and replacement failures deleted live sidecars.
+- Green phase: restore safety tests pass for PostgreSQL rejection, busy checkpoint preservation, rollback of the main file and sidecars, and the complete quiescence callback.

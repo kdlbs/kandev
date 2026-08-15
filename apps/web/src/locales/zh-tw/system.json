@@ -228,7 +228,7 @@
   "restartUnsupportedHelp": "在部署預覽、非託管終端執行或不含重啟監督程式的啟動模式下，自動重啟不可用。",
   "restoreAction": "恢復",
   "restoreBody": "將 <1>{{name}}</1> 覆蓋到目前資料庫。暫存副本就緒後，需要你退出並重新啟動 Kandev 以載入新資料；後端不會自動重啟。",
-  "restoreCompleteBody": "<0>{{name}}</0> 已寫入目前資料庫。請退出並重新啟動 Kandev 以載入恢復的資料；正在執行的後端仍持有舊版本連線，重啟前會提供過期行。",
+  "restoreCompleteBody": "<0>{{name}}</0> 已寫入目前資料庫。請先重啟 Kandev，再繼續操作。資料庫連線池在重啟前保持關閉。如果自動重啟不可用，請手動退出並重新啟動 Kandev。",
   "restoreCompleteTitle": "恢復完成",
   "restoreFailed": "恢復失敗",
   "restorePlaceholder": "輸入 {{token}} 以確認",

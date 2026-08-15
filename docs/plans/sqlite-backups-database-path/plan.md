@@ -42,7 +42,7 @@ Update `apps/backend/internal/system/backups/store.go` so `Service` owns `databa
 
 Use `databasePath` directly for restore staging and replacement. Do not infer the filename `kandev.db`.
 
-Before replacement, stop active executions, checkpoint and close the shared SQLite pool, and remove its `-wal` and `-shm` sidecars. The frontend already requires a restart after restore, so the closed pool prevents stale WAL frames from replaying onto the restored file.
+Before replacement, quiesce scheduling, active executions, and database-backed workers. Validate the `wal_checkpoint(TRUNCATE)` result, close the shared SQLite pool, quarantine the main file and its `-wal`/`-shm` sidecars, and restore the quarantine if staged installation fails. Reject PostgreSQL restore before staging or shutdown. The frontend requires a restart after restore, so the closed pool prevents stale WAL frames from replaying onto the restored file.
 
 ### Database service
 
@@ -52,7 +52,7 @@ Use the exact path for the Database page, WAL statistics, last-backup time, and 
 
 ## Frontend
 
-No frontend code changes are required. The existing pages consume unchanged API fields and backup endpoints.
+Update the restore success dialog to state that the pool is closed and database-backed work is unavailable until restart. Use the existing restart action, with quit-and-relaunch guidance when automatic restart is unavailable.
 
 ## Public documentation
 
@@ -69,7 +69,13 @@ Update `apps/backend/AGENTS.md` so the backend backup convention names the confi
   **How:** construct `system.Provide` with a custom filename, register the routes, request the backup list, and assert the sibling snapshot appears.
 - **What:** restore stages and replaces the exact custom database filename.
   **File:** `apps/backend/internal/system/backups/path_test.go`.
-  **How:** restore known bytes through the service and assert the configured file changes, the orchestrator shutdown hook runs, the pool closes, sidecars are removed, and the default-home file remains absent.
+  **How:** restore known bytes through the service and assert the configured file changes, the quiescence hook runs, the pool closes, the replacement sidecars are gone, and the default-home file remains absent. Add regressions for PostgreSQL rejection, busy checkpoint preservation, and rollback after replacement failure.
+- **What:** restore quiescence stops every database writer before pool closure.
+  **File:** `apps/backend/internal/backendapp/restore_quiesce_test.go`.
+  **How:** assert scheduling, orchestrator, agents, and registered workers are all attempted and all stop errors are returned.
+- **What:** the restore success dialog directs the user to restart.
+  **File:** `apps/web/components/settings/system/system-confirmation-dialogs.test.tsx`.
+  **How:** render a succeeded restore job and assert the restart action is present while the normal close action is absent.
 - **What:** database statistics and pre-reset snapshots use the custom path and its sibling backup directory.
   **File:** `apps/backend/internal/system/database/path_test.go`.
   **How:** assert the reported path, WAL lookup, last-backup time, and pre-reset snapshot parent.
@@ -79,7 +85,7 @@ Update `apps/backend/AGENTS.md` so the backend backup convention names the confi
 
 ## E2E Tests
 
-No new browser test is planned. The frontend contract and rendering logic do not change. The new Go handler test exercises the HTTP response that the existing Backups page consumes.
+No new browser test is planned. The dialog keeps the existing shared responsive composition; this remediation changes localized success copy and invokes the existing restart flow. The focused component test covers the changed rendered action.
 
 ## Verification Results
 
@@ -91,6 +97,11 @@ No new browser test is planned. The frontend contract and rendering logic do not
 - `node --test scripts/validate-public-docs.test.mjs` passed 61 tests.
 - `node scripts/validate-public-docs.mjs` validated 41 published docs pages.
 - `git diff --check` passed.
+
+### Restore safety remediation
+
+- Red phase: PostgreSQL restore was accepted, a busy checkpoint was treated as success, and sidecars were deleted before a replacement failure could roll back.
+- Green phase: focused backend restore, system wiring, and quiescence tests pass after rejecting PostgreSQL, validating checkpoint rows, and using rollback-capable quarantine replacement.
 
 ## Implementation Waves And Parallel Candidates
 
