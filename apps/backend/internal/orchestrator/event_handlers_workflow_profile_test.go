@@ -280,6 +280,61 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 	}
 }
 
+type workflowMetaProbeCallback struct {
+	svc             *Service
+	step            *wfmodels.WorkflowStep
+	resolvedProfile string
+}
+
+func (c *workflowMetaProbeCallback) Execute(ctx context.Context, _ engine.ActionInput) (engine.ActionResult, error) {
+	c.resolvedProfile = c.svc.resolveStepAgentProfile(ctx, c.step)
+	return engine.ActionResult{}, nil
+}
+
+func TestSwitchWorkflowDispatcherSharesWorkflowMetaCacheWithAutoStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step2")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-a"
+	session.IsPrimary = true
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowAgentProfiles = []string{"profile-a", "profile-b"}
+	stepGetter.workflowPrompts["wf1"] = "workflow instructions"
+	step := &wfmodels.WorkflowStep{
+		ID:         "step2",
+		WorkflowID: "wf1",
+		Events:     wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
+	}
+	stepGetter.steps["step2"] = step
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.initWorkflowEngine()
+	probe := &workflowMetaProbeCallback{svc: svc, step: step}
+	svc.workflowEngine = engine.New(svc.workflowStore, engine.MapRegistry{
+		engine.ActionAutoStartAgent: probe,
+	})
+
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-1"); err != nil {
+		t.Fatalf("dispatcher returned error: %v", err)
+	}
+	if got := stepGetter.metaCalls(); got != 1 {
+		t.Fatalf("GetWorkflowMeta calls = %d, want 1 shared read", got)
+	}
+	if probe.resolvedProfile != "profile-a" {
+		t.Fatalf("callback resolved profile = %q, want cached profile-a", probe.resolvedProfile)
+	}
+}
+
 func TestSwitchSessionForStep(t *testing.T) {
 	ctx := context.Background()
 

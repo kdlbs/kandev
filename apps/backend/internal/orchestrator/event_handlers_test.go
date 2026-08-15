@@ -42,6 +42,7 @@ import (
 type mockStepGetter struct {
 	steps                  map[string]*wfmodels.WorkflowStep // stepID -> step
 	workflowAgentProfileID string                            // returned by GetWorkflowMeta
+	workflowAgentProfiles  []string                          // optional profiles returned per call
 	workflowPrompts        map[string]string                 // workflowID -> prompt
 	workflowMetaCalls      int                               // GetWorkflowMeta invocations
 	workflowMetaErr        error                             // optional error from GetWorkflowMeta
@@ -90,6 +91,7 @@ func (m *mockStepGetter) GetPreviousStepByPosition(_ context.Context, workflowID
 func (m *mockStepGetter) GetWorkflowMeta(_ context.Context, workflowID string) (WorkflowMeta, error) {
 	m.workflowMetaMu.Lock()
 	m.workflowMetaCalls++
+	callNumber := m.workflowMetaCalls
 	delay := m.workflowMetaDelay
 	m.workflowMetaMu.Unlock()
 	if delay > 0 {
@@ -102,8 +104,12 @@ func (m *mockStepGetter) GetWorkflowMeta(_ context.Context, workflowID string) (
 	if m.workflowPrompts != nil {
 		prompt = m.workflowPrompts[workflowID]
 	}
+	profileID := m.workflowAgentProfileID
+	if callNumber <= len(m.workflowAgentProfiles) {
+		profileID = m.workflowAgentProfiles[callNumber-1]
+	}
 	return WorkflowMeta{
-		AgentProfileID: m.workflowAgentProfileID,
+		AgentProfileID: profileID,
 		Prompt:         prompt,
 	}, nil
 }

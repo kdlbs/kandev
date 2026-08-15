@@ -97,6 +97,7 @@ func switchWorkflowDispatcher(svc *Service) engine.DispatchTriggerFn {
 		if eng == nil {
 			return nil // engine not initialised; treat as no-op
 		}
+		ctx = withWorkflowMetaCache(ctx)
 		var preloadedState *engine.MachineState
 		if trigger == engine.TriggerOnEnter {
 			var err error
