@@ -503,6 +503,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
 		{Name: toolKeyError, Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
+		{Name: "transport-lost", Description: "Simulate an ACP transport disconnect (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
 		{Name: "crash", Description: "Simulate agent crash"},
 		{Name: "all", Description: "Demonstrate all message types"},

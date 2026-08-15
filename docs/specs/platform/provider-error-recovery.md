@@ -78,9 +78,13 @@ failure consistently without sharing the same retry policy.
 
 - Office consumes the shared code through its own routing policy. It never uses
   Kanban's short prompt timer or retry-attempt budget.
-- The short same-route phase applies to every Office run, even when provider
-  fallback is disabled. Fallback after exhaustion still requires an enabled,
-  explicitly configured alternative.
+- The short same-route phase applies to supported Office retry codes, even when
+  provider fallback is disabled. Fallback after exhaustion still requires an
+  enabled, explicitly configured alternative.
+- `agent_transport_lost` is launch-only in Office. The launch path retries the
+  same execution profile three times, then stops routing that candidate without
+  degrading the provider or selecting a fallback. The post-start path declines
+  to handle this code, so the existing failure path handles the run.
 - Network interruption, temporary provider unavailability/overload, model
   capacity, and a validated rate-limit wait of at most 60 seconds first retry the
   same execution profile after nominal 5, 10, and 20 second delays with jitter.

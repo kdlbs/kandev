@@ -111,3 +111,41 @@ func TestHandleTransportLost_FailsExactlyNTimes(t *testing.T) {
 		t.Errorf("persisted attempt count = %d, want 2", got)
 	}
 }
+
+func TestHandleTransportLost_RecoversAfterFailureBudget(t *testing.T) {
+	const sid acp.SessionId = "recover-transport-lost-sess"
+	_ = os.Remove(transportLostCounterPath(sid))
+	t.Cleanup(func() { _ = os.Remove(transportLostCounterPath(sid)) })
+
+	updater := newCapturingUpdater()
+	a := newTransportLostTestAgent()
+	a.conn = updater
+
+	if _, err, handled := a.handleTransportLost(context.Background(), sid, "/transport-lost:1"); !handled || err == nil {
+		t.Fatalf("first attempt = handled %v, err %v, want handled transport error", handled, err)
+	}
+
+	response, err, handled := a.handleTransportLost(context.Background(), sid, "/transport-lost:1")
+	if !handled {
+		t.Fatal("recovery attempt handled = false, want true")
+	}
+	if err != nil {
+		t.Fatalf("recovery attempt error = %v, want nil", err)
+	}
+	if response.StopReason != acp.StopReasonEndTurn {
+		t.Fatalf("stop reason = %q, want end_turn", response.StopReason)
+	}
+	texts := updater.textMessages()
+	if len(texts) != 1 || !strings.Contains(texts[0], "Agent connection recovered") {
+		t.Fatalf("recovery text = %q, want one connection-recovered message", texts)
+	}
+}
+
+func TestMockAvailableCommandsIncludesTransportLost(t *testing.T) {
+	for _, command := range mockAvailableCommands() {
+		if command.Name == "transport-lost" {
+			return
+		}
+	}
+	t.Fatal("mockAvailableCommands does not advertise transport-lost")
+}
