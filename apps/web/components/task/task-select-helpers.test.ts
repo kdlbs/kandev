@@ -218,7 +218,7 @@ describe("selectTaskWithLayout pending owner", () => {
 
     expect(switchToSession).not.toHaveBeenCalled();
     await flushTaskSelection();
-    expect(loadTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID);
+    expect(loadTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, { force: true });
     expect(switchToSession).toHaveBeenCalledWith(TASK_ID, SECONDARY, OTHER_SESSION_ID);
   });
 
@@ -337,6 +337,27 @@ describe("selectTaskWithLayout pending summary authority", () => {
 
     await flushTaskSelection();
     expect(switchToSession).not.toHaveBeenCalled();
+    expect(setActiveTask).toHaveBeenCalledWith(TASK_ID);
+    expect(replaceTaskUrl).toHaveBeenCalledWith(TASK_ID);
+  });
+
+  it("uses the task-only fallback when pending-owner loading fails without a primary", async () => {
+    const store = makeKanbanStore({ activeSessionId: OTHER_SESSION_ID, envIds: {} });
+    const setActiveTask = vi.fn();
+
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: { taskPendingAction: "clarification" },
+      store,
+      switchToSession: vi.fn(),
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+
+    await flushTaskSelection();
     expect(setActiveTask).toHaveBeenCalledWith(TASK_ID);
     expect(replaceTaskUrl).toHaveBeenCalledWith(TASK_ID);
   });

@@ -13,6 +13,7 @@ import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { isInputCapableSessionState } from "@/lib/utils/task-pending-input";
+import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 
 const debug = createDebugLogger("dockview:task-select");
 let taskSelectionSequence = 0;
@@ -23,15 +24,63 @@ export type SwitchToSessionFn = (
   oldSessionId: string | null | undefined,
 ) => void;
 
+type TaskSessionLoader = (taskId: string, options?: { force?: boolean }) => Promise<TaskSession[]>;
+
 type PendingTask = {
   taskPendingAction?: TaskPendingAction | null;
-  statusSummary?: { pending_action?: TaskPendingAction | null } | null;
+  statusSummary?: {
+    revision?: number;
+    updated_at?: string;
+    pending_action?: TaskPendingAction | null;
+  } | null;
+};
+
+export type TaskPendingSelectionSnapshot = {
+  revision: number | null;
+  pendingAction: TaskPendingAction | null | undefined;
 };
 
 export function effectiveTaskPendingAction(
   task: PendingTask | undefined,
 ): TaskPendingAction | null | undefined {
   return task?.statusSummary != null ? task.statusSummary.pending_action : task?.taskPendingAction;
+}
+
+export function taskPendingSelectionSnapshot(
+  task: PendingTask | undefined,
+): TaskPendingSelectionSnapshot {
+  return {
+    revision: task?.statusSummary?.revision ?? null,
+    pendingAction: effectiveTaskPendingAction(task),
+  };
+}
+
+function taskPendingSelectionIsCurrent(
+  store: StoreApi<AppState>,
+  taskId: string,
+  initial: TaskPendingSelectionSnapshot,
+): boolean {
+  const state = store.getState();
+  const currentTask = findTaskInSnapshots(
+    taskId,
+    state.kanbanMulti?.snapshots ?? {},
+    state.kanban?.tasks ?? [],
+  );
+  if (!currentTask) {
+    // Legacy callers may not have a durable summary to revalidate. A summary-
+    // backed selection must fail closed if its task projection disappears.
+    return initial.revision === null;
+  }
+  const current = taskPendingSelectionSnapshot(currentTask);
+  return current.revision === initial.revision && current.pendingAction === initial.pendingAction;
+}
+
+function loadTaskSessionsForSelection(
+  loader: TaskSessionLoader,
+  taskId: string,
+  hasPendingAction: boolean,
+): Promise<TaskSession[]> {
+  return hasPendingAction ? loader(taskId, { force: true }) : loader(taskId);
 }
 
 function getTaskSessionIds(state: AppState, taskId: string): string[] {
@@ -150,9 +199,11 @@ function createTaskSelectionGuard(
   store: StoreApi<AppState>,
   taskId: string,
   selectionToken: number,
+  task: PendingTask | undefined,
   selectionSignal?: AbortSignal,
 ) {
   const startActiveTaskId = store.getState().tasks.activeTaskId ?? null;
+  const pendingSnapshot = taskPendingSelectionSnapshot(task);
   let activeTaskChangedExternally = false;
   const unsubscribe = store.subscribe((current, previous) => {
     const currentTaskId = current.tasks.activeTaskId ?? null;
@@ -170,6 +221,12 @@ function createTaskSelectionGuard(
         selectionSignal?.aborted ||
         taskSelectionWasSuperseded(selectionToken) ||
         activeTaskChangedExternally
+      ) {
+        return true;
+      }
+      if (
+        pendingSnapshot.pendingAction &&
+        !taskPendingSelectionIsCurrent(store, taskId, pendingSnapshot)
       ) {
         return true;
       }
@@ -226,13 +283,17 @@ type SelectTaskWithLayoutParams = {
     | {
         primarySessionId?: string | null;
         taskPendingAction?: TaskPendingAction | null;
-        statusSummary?: { pending_action?: TaskPendingAction | null } | null;
+        statusSummary?: {
+          revision?: number;
+          updated_at?: string;
+          pending_action?: TaskPendingAction | null;
+        } | null;
         isArchived?: boolean;
       }
     | undefined;
   store: StoreApi<AppState>;
   switchToSession: SwitchToSessionFn;
-  loadTaskSessionsForTask: (taskId: string) => Promise<TaskSession[]>;
+  loadTaskSessionsForTask: TaskSessionLoader;
   setActiveTask: (taskId: string) => void;
   setPreparingTaskId: (id: string | null) => void;
   navigateToTask?: (taskId: string) => void;
@@ -247,6 +308,21 @@ function openTaskWithoutSession(
   navigateToTask(params.taskId);
 }
 
+function logTaskSelection(
+  taskId: string,
+  primarySessionId: string | null | undefined,
+  oldSessionId: string | null | undefined,
+  previousTaskId: string | null | undefined,
+): void {
+  if (!isDebug()) return;
+  debug("selectTaskWithLayout: entry", {
+    taskId,
+    primarySessionId: primarySessionId ?? null,
+    oldSessionId: oldSessionId ?? null,
+    prevActiveTaskId: previousTaskId ?? null,
+  });
+}
+
 export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
   const state = store.getState();
@@ -258,16 +334,10 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
     store,
     taskId,
     selectionToken,
+    task,
     params.selectionSignal,
   );
-  if (isDebug()) {
-    debug("selectTaskWithLayout: entry", {
-      taskId,
-      primarySessionId: task?.primarySessionId ?? null,
-      oldSessionId: oldSessionId ?? null,
-      prevActiveTaskId: state.tasks.activeTaskId ?? null,
-    });
-  }
+  logTaskSelection(taskId, task?.primarySessionId, oldSessionId, state.tasks.activeTaskId);
   if (task?.isArchived) {
     selectionGuard.dispose();
     params.setActiveTask(taskId);
@@ -290,7 +360,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
       navigateToTask(taskId);
       return;
     }
-    void loadTaskSessionsForTask(taskId)
+    void loadTaskSessionsForSelection(loadTaskSessionsForTask, taskId, !!taskPendingAction)
       .then((sessions) => {
         if (selectionGuard.wasSuperseded()) return;
         const currentOldSessionId = store.getState().tasks.activeSessionId;
@@ -312,7 +382,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
       .finally(selectionGuard.dispose);
     return;
   }
-  void loadTaskSessionsForTask(taskId)
+  void loadTaskSessionsForSelection(loadTaskSessionsForTask, taskId, !!taskPendingAction)
     .then(async (sessions) => {
       if (selectionGuard.wasSuperseded()) return;
       const currentOldSessionId = store.getState().tasks.activeSessionId;
@@ -346,6 +416,9 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
       params.setActiveTask(taskId);
       navigateToTask(taskId);
     })
-    .finally(selectionGuard.dispose)
-    .catch(() => undefined);
+    .catch(() => {
+      if (selectionGuard.wasSuperseded()) return;
+      if (taskPendingAction) openTaskWithoutSession(params, navigateToTask);
+    })
+    .finally(selectionGuard.dispose);
 }

@@ -91,6 +91,102 @@ func TestPostgresCompleteActiveClarificationBundleClaimsOnce(t *testing.T) {
 	}
 }
 
+func TestPostgresDetachActiveClarificationMessagesClaimsCurrentRows(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 16, 0, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-detach-pg", "session-detach-pg")
+	createPendingActionTurn(
+		t, repo, "task-detach-pg", "session-detach-pg", "turn-detach-old-pg", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-detach-old-pg", "task-detach-pg", "session-detach-pg",
+		"turn-detach-old-pg", "pending-detach-old-pg", "q-old", base,
+	)
+	createPendingActionTurn(
+		t, repo, "task-detach-pg", "session-detach-pg", "turn-detach-current-pg",
+		base.Add(time.Minute), base.Add(time.Minute),
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-detach-current-pg", "task-detach-pg", "session-detach-pg",
+		"turn-detach-current-pg", "pending-detach-current-pg", "q-current",
+		base.Add(time.Minute),
+	)
+
+	updated, err := repo.DetachActiveClarificationMessagesBySessionID(ctx, "session-detach-pg")
+	if err != nil {
+		t.Fatalf("DetachActiveClarificationMessagesBySessionID: %v", err)
+	}
+	if ids := messageIDs(updated); len(ids) != 1 || ids[0] != "message-detach-current-pg" {
+		t.Fatalf("postgres detached message IDs = %v", ids)
+	}
+	message, err := repo.GetMessage(ctx, "message-detach-current-pg")
+	if err != nil {
+		t.Fatalf("GetMessage(current): %v", err)
+	}
+	if detached, _ := message.Metadata["agent_disconnected"].(bool); !detached {
+		t.Fatalf("postgres detached metadata = %#v", message.Metadata)
+	}
+	repeated, err := repo.DetachActiveClarificationMessagesBySessionID(ctx, "session-detach-pg")
+	if err != nil {
+		t.Fatalf("repeated postgres detach: %v", err)
+	}
+	if len(repeated) != 0 {
+		t.Fatalf("repeated postgres detach changed rows: %v", messageIDs(repeated))
+	}
+}
+
+func TestPostgresRestoreClarificationMessagesRechecksCurrentTurn(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 16, 30, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-restore-pg", "session-restore-pg")
+	createPendingActionTurn(
+		t, repo, "task-restore-pg", "session-restore-pg", "turn-restore-pg", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-restore-pg", "task-restore-pg", "session-restore-pg",
+		"turn-restore-pg", "pending-restore-pg", "q1", base,
+	)
+	claimedMessages, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-restore-pg",
+		"answered",
+		map[string]interface{}{"q1": map[string]interface{}{"question_id": "q1"}},
+	)
+	if err != nil || !claimed {
+		t.Fatalf("complete before postgres restore race: claimed=%v err=%v", claimed, err)
+	}
+	createPendingActionTurn(
+		t, repo, "task-restore-pg", "session-restore-pg", "turn-restore-successor-pg",
+		base.Add(time.Second), base.Add(time.Second),
+	)
+
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTxx: %v", err)
+	}
+	restoreErr := repo.restoreClarificationMessages(
+		ctx,
+		tx,
+		repo.db.DriverName(),
+		claimedMessages,
+		"answered",
+	)
+	_ = tx.Rollback()
+	if restoreErr == nil {
+		t.Fatal("postgres restore accepted a bundle after a successor turn became current")
+	}
+}
+
 func assertNoActivePostgresClarification(t *testing.T, ctx context.Context, repo *Repository) {
 	t.Helper()
 	active, err := repo.FindActiveClarificationMessagesBySessionID(ctx, "session-active-pg")

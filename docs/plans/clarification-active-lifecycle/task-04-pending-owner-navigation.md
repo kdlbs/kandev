@@ -89,6 +89,11 @@ update task/plan status.
 - Added one shared pending-owner resolver. Desktop waits for session loading when a task advertises
   input, including non-task routes; phone selection waits, navigates to the owning session, then
   closes the drawer, with safe load-failure fallback.
+- Final review remediation forces a no-cache session request for pending selections and rejects a
+  failed forced refresh instead of using a stale owner. Desktop and phone capture the click-time
+  summary revision/action and discard delayed session results after either value changes.
+- Focused races cover a newer summary arriving before the delayed HTTP continuation on both desktop
+  and phone; shared session-loader tests cover cached success and failed forced refresh.
 - `cd apps && pnpm install --frozen-lockfile` passed.
 - The exact three-file Vitest command passed: 3 files, 68 tests.
 - `cd apps/web && pnpm run typecheck` passed.

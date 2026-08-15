@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
-import type { TaskSession } from "@/lib/types/http";
+import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { releaseLayoutToDefault } from "@/lib/state/dockview-store";
 import { replaceTaskUrl } from "@/lib/links";
@@ -28,6 +28,16 @@ function makeSelectionHarness(args: {
   activeSessionId: string | null;
   envIds?: Record<string, string>;
   sessions?: Record<string, { id: string; task_id: string }>;
+  taskRows?: Array<{
+    id: string;
+    primarySessionId?: string | null;
+    taskPendingAction?: TaskPendingAction | null;
+    statusSummary?: {
+      revision: number;
+      updated_at: string;
+      pending_action?: TaskPendingAction | null;
+    } | null;
+  }>;
 }) {
   const listeners: Array<(state: AppState, previousState: AppState) => void> = [];
   const state = {
@@ -39,6 +49,8 @@ function makeSelectionHarness(args: {
     taskPRs: { byTaskId: {} as Record<string, unknown[]> },
     environmentIdBySessionId: args.envIds ?? {},
     taskSessions: { items: (args.sessions ?? {}) as Record<string, TaskSession> },
+    kanban: { tasks: args.taskRows ?? [] },
+    kanbanMulti: { snapshots: {} },
   };
   const snapshot = () => ({ ...state, tasks: { ...state.tasks } }) as unknown as AppState;
   const notify = (previousState: AppState) => {
@@ -161,6 +173,59 @@ describe("selectTaskWithLayout pending selection races", () => {
     resolveLoad([]);
     await flushTaskSelection();
 
+    expect(setActiveTask).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+  });
+});
+
+describe("selectTaskWithLayout pending summary races", () => {
+  it("ignores an owner response captured before a newer summary revision", async () => {
+    const initialTask = {
+      id: PENDING_TASK_ID,
+      primarySessionId: PENDING_SESSION_ID,
+      statusSummary: {
+        revision: 1,
+        updated_at: "2026-08-15T15:00:00Z",
+        pending_action: "clarification" as const,
+      },
+    };
+    const { state, store, setActiveTask } = makeSelectionHarness({
+      activeTaskId: ORIGINAL_TASK_ID,
+      activeSessionId: ORIGINAL_SESSION_ID,
+      taskRows: [initialTask],
+    });
+    const switchToSession = vi.fn();
+    const { loadTaskSessionsForTask, resolveLoad } = makeDeferredSessionLoader();
+
+    selectTaskWithLayout({
+      taskId: PENDING_TASK_ID,
+      task: initialTask,
+      store,
+      switchToSession,
+      loadTaskSessionsForTask,
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+    state.kanban.tasks[0] = {
+      ...initialTask,
+      statusSummary: {
+        revision: 2,
+        updated_at: "2026-08-15T15:00:01Z",
+        pending_action: "permission",
+      },
+    };
+    resolveLoad([
+      {
+        id: PENDING_SESSION_ID,
+        task_id: PENDING_TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+      } as TaskSession,
+    ]);
+    await flushTaskSelection();
+
+    expect(loadTaskSessionsForTask).toHaveBeenCalledWith(PENDING_TASK_ID, { force: true });
+    expect(switchToSession).not.toHaveBeenCalled();
     expect(setActiveTask).not.toHaveBeenCalledWith(PENDING_TASK_ID);
     expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
   });

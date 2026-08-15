@@ -41,36 +41,6 @@ func isTerminalStatus(status string) bool {
 	return false
 }
 
-// markMessagesDetached unblocks WaitForResponse and keeps the clarification
-// interactive: status stays pending and agent_disconnected is set so the UI
-// can route a late answer through the acknowledged resume fallback path.
-func (c *Canceller) markMessagesDetached(ctx context.Context, msgs []*taskmodels.Message, pendingID string) bool {
-	writeCtx := context.WithoutCancel(ctx)
-	changed := false
-	for _, msg := range msgs {
-		if msg.Metadata == nil {
-			msg.Metadata = map[string]any{}
-		}
-		if current, _ := msg.Metadata["status"].(string); isTerminalStatus(current) {
-			continue
-		}
-		if detached, _ := msg.Metadata["agent_disconnected"].(bool); detached {
-			continue
-		}
-		msg.Metadata["agent_disconnected"] = true
-		if err := c.repo.UpdateMessage(writeCtx, msg); err != nil {
-			c.logger.Warn("failed to update message with detached status",
-				zap.String("pending_id", pendingID),
-				zap.String("message_id", msg.ID),
-				zap.Error(err))
-			continue
-		}
-		changed = true
-		c.publishMessageUpdated(writeCtx, msg)
-	}
-	return changed
-}
-
 // markMessagesExpired updates the given messages to status=expired and publishes
 // a message.updated event for each one. It is idempotent: already-terminal
 // messages are skipped.
@@ -135,7 +105,25 @@ func (c *Canceller) updateCurrentSessionBundles(
 }
 
 func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) int {
-	return c.updateCurrentSessionBundles(ctx, sessionID, c.markMessagesDetached)
+	// Draining live waiters and durable detachment are separate concerns. The
+	// repository owns the atomic current-turn/status claim for persisted rows.
+	c.store.CancelSession(sessionID)
+	writeCtx := context.WithoutCancel(ctx)
+	messages, err := c.repo.DetachActiveClarificationMessagesBySessionID(writeCtx, sessionID)
+	if err != nil {
+		c.logger.Warn("failed to detach current clarification bundles",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return 0
+	}
+	bundles := make(map[string]struct{})
+	for _, message := range messages {
+		if pendingID := stringFromMetadata(message.Metadata, "pending_id"); pendingID != "" {
+			bundles[pendingID] = struct{}{}
+		}
+		c.publishMessageUpdated(writeCtx, message)
+	}
+	return len(bundles)
 }
 
 // DetachSessionAndNotify cancels in-memory WaitForResponse waiters for a session

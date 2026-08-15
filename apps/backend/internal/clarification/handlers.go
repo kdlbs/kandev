@@ -33,7 +33,16 @@ type messageStore interface {
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*taskmodels.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error)
 	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
+	DetachActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
 	UpdateMessage(ctx context.Context, message *taskmodels.Message) error
+}
+
+type clarificationStore interface {
+	CreateRequest(req *Request) (string, bool)
+	GetRequest(pendingID string) (*Request, bool)
+	WaitForResponse(ctx context.Context, pendingID string) (*Response, error)
+	Respond(pendingID string, response *Response) error
+	CancelRequest(pendingID string) bool
 }
 
 // Broadcaster interface for sending WebSocket notifications
@@ -92,7 +101,7 @@ type DetachedClarificationResumer interface {
 
 // Handlers provides HTTP handlers for clarification requests.
 type Handlers struct {
-	store           *Store
+	store           clarificationStore
 	hub             Broadcaster
 	messageCreator  MessageCreator
 	repo            messageStore
@@ -408,11 +417,15 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 		return http.StatusConflict, "response already submitted"
 	}
 	if !errors.Is(deliveryErr, ErrNotFound) {
-		h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
+		restored := h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
 		h.logger.Error("failed to deliver clarification response",
 			zap.String("pending_id", pendingID),
+			zap.Bool("restored", restored),
 			zap.Error(deliveryErr))
-		return http.StatusInternalServerError, "failed to deliver clarification response"
+		if restored {
+			return http.StatusInternalServerError, "failed to deliver clarification response; response can be retried"
+		}
+		return http.StatusInternalServerError, "failed to deliver clarification response and recover pending clarification state"
 	}
 	return h.deliverDetachedClarificationResponse(ctx, pendingID, body, claim, deliveryErr)
 }

@@ -22,6 +22,59 @@ const (
 	clarificationStatusResponding = "responding"
 )
 
+// DetachActiveClarificationMessagesBySessionID atomically marks only pending,
+// current-turn clarification rows as detached and returns the rows that changed.
+func (r *Repository) DetachActiveClarificationMessagesBySessionID(
+	ctx context.Context,
+	sessionID string,
+) ([]*models.Message, error) {
+	drv := r.db.DriverName()
+	query := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
+		WHERE task_session_id = ?
+		  AND type = 'clarification_request'
+		  AND COALESCE(%s, '') IN ('', 'pending')
+		  AND %s
+		  AND turn_id = (
+			SELECT id
+			FROM task_session_turns
+			WHERE task_session_id = task_session_messages.task_session_id
+			ORDER BY started_at DESC, created_at DESC, id DESC
+			LIMIT 1
+		  )
+		RETURNING id, task_session_id, task_id, turn_id, author_type, author_id,
+		          content, requests_input, type, metadata, created_at, updated_at
+	`, clarificationDetachedMetadataExpr(drv),
+		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
+		clarificationNotDetachedPredicate(drv))
+	rows, err := r.db.QueryxContext(ctx, r.db.Rebind(query), sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("detach active clarification messages: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	messages, _, err := scanMessageRows(rows, 0)
+	if err != nil {
+		return nil, fmt.Errorf("scan detached clarification messages: %w", err)
+	}
+	return messages, nil
+}
+
+func clarificationDetachedMetadataExpr(driverName string) string {
+	if dialect.IsPostgres(driverName) {
+		return "jsonb_set(metadata::jsonb, '{agent_disconnected}', 'true'::jsonb)::text"
+	}
+	return "json_set(metadata, '$.agent_disconnected', json('true'))"
+}
+
+func clarificationNotDetachedPredicate(driverName string) string {
+	value := dialect.JSONExtract(driverName, "task_session_messages.metadata", "agent_disconnected")
+	if dialect.IsPostgres(driverName) {
+		return fmt.Sprintf("COALESCE(%s, '') NOT IN ('true', '1')", value)
+	}
+	return fmt.Sprintf("COALESCE(%s, 0) != 1", value)
+}
+
 // CompleteActiveClarificationBundle atomically claims a current-turn pending
 // bundle and persists its terminal state. Exactly one concurrent responder can
 // transition the rows; superseded or already-terminal bundles return claimed=false.
@@ -197,6 +250,13 @@ func (r *Repository) restoreClarificationMessages(
 		UPDATE task_session_messages
 		SET metadata = ?, updated_at = ?
 		WHERE id = ? AND %s = ?
+		  AND turn_id = (
+			SELECT id
+			FROM task_session_turns
+			WHERE task_session_id = task_session_messages.task_session_id
+			ORDER BY started_at DESC, created_at DESC, id DESC
+			LIMIT 1
+		  )
 	`, statusExpr))
 	for _, message := range messages {
 		restoredMetadata := maps.Clone(message.Metadata)

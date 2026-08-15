@@ -32,6 +32,9 @@ hiding the action the icon represents.
   trigger projection refreshes; they are not a second source of pending truth.
 - Repeated detach/completion processing is a semantic no-op after a bundle is already detached. It
   emits no duplicate `message.updated` occurrence.
+- Detachment claims pending, non-detached rows from the current durable turn in one database update
+  and publishes only the rows that update returns. A concurrent answer or newer turn cannot be
+  overwritten by a stale read-modify-write detachment.
 - Resolving, rejecting, cancelling, expiring, or deleting one bundle changes only that bundle. It
   cannot clear or re-arm another bundle in the same session.
 - The chat's Skip action rejects the exact visible bundle through the existing response endpoint. A
@@ -54,10 +57,12 @@ hiding the action the icon represents.
 - Persisted task status summaries reconcile `pending_action` against current-turn repository state on
   source events and task-list/boot reads. Existing summaries are repaired, not only missing rows.
 - When a task row advertises a pending action, desktop and phone task activation load the task's
-  sessions and select the newest input-capable session whose `pending_action` matches the task action.
-  This pending owner outranks remembered-session and primary-session preferences. If the task still
-  advertises pending input but no matching input-capable owner exists, activation fails closed to the
-  task route without guessing a session. Normal preference order returns only for a clean task.
+  sessions from the server and select the newest input-capable session whose `pending_action` matches
+  the task action. Before applying that response, activation revalidates the task-summary revision and
+  pending action; a changed summary makes the delayed selection inert. This pending owner outranks
+  remembered-session and primary-session preferences. If the task still advertises pending input but
+  no matching input-capable owner exists, activation fails closed to the task route without guessing a
+  session. Normal preference order returns only for a clean task.
 
 ## Data model
 
@@ -139,6 +144,8 @@ session they can already access. Session selection does not broaden task visibil
 - Detached resume context resolution or orchestrator acceptance fails: use a non-cancelled write context,
   withhold terminal message events, restore the still-current bundle to pending, and return a retryable
   server error instead of reporting false success.
+- Live waiter delivery fails unexpectedly: restore the durable claim only if its turn remains current,
+  report whether retry state was recovered, and never restore it after a successor turn is accepted.
 - Historical partial terminalization leaves pending and terminal siblings in one current-turn bundle:
   complete the pending siblings without rewriting terminal history or returning a permanent conflict.
 - A malformed persisted pending row has no matching durable turn: drain any live in-memory waiter, but
@@ -146,6 +153,8 @@ session they can already access. Session selection does not broaden task visibil
   rather than treating it as current input authority.
 - Session loading fails during task activation: retain existing navigation fallback instead of
   stranding the user in the task drawer or on an unchanged URL.
+- A newer task-summary revision arrives while pending-owner loading is in flight: discard the delayed
+  owner result and let the newer projection drive the next activation.
 
 ## Persistence guarantees
 
@@ -179,7 +188,11 @@ session they can already access. Session selection does not broaden task visibil
   advances with no pending action and all unrelated fields remain unchanged.
 - **GIVEN** a task's secondary session owns a current clarification while the primary session is
   clean, **WHEN** the user activates the task from the desktop sidebar or phone task drawer, **THEN**
-  Kandev selects the secondary session, closes the drawer when applicable, and shows the question.
+  Kandev bypasses any cached session list, selects the secondary session, closes the drawer when
+  applicable, and shows the question.
+- **GIVEN** pending-owner loading began for one task-summary revision, **WHEN** a newer summary changes
+  the pending action before the session response is applied, **THEN** desktop and phone activation do
+  not navigate to the obsolete owner or close the phone drawer.
 - **GIVEN** a stale browser still displays a superseded question, **WHEN** it submits an answer,
   **THEN** the server returns conflict and does not resume or otherwise prompt the agent.
 - **GIVEN** a detached current-turn answer is not accepted by the orchestrator, **WHEN** the response

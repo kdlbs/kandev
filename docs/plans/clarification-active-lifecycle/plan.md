@@ -222,6 +222,9 @@ All task gates passed:
   remains env-gated and skipped locally without `KANDEV_TEST_POSTGRES_DSN`.
 - Summary convergence: status-summary, task-service, backend-app, and focused handler tests passed.
 - Frontend: 3 Vitest files / 68 tests, TypeScript, i18n, and frozen install passed.
+- Final review remediation: backend repository, clarification, and orchestrator packages passed;
+  changed backend lint reported zero issues. Six focused web files passed 108 tests, followed by
+  TypeScript, zero-warning full lint, i18n check, and i18n ratchet.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

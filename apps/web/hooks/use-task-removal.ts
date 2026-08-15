@@ -14,6 +14,11 @@ type TaskRemovalOptions = {
   useLayoutSwitch?: boolean;
 };
 
+export type TaskSessionLoadOptions = {
+  /** Ignore the local task-session cache and request an authoritative snapshot. */
+  force?: boolean;
+};
+
 type RemoveFromBoardOptions = {
   /**
    * The active task ID captured **before** the async delete/archive API call.
@@ -46,13 +51,14 @@ function cachedSessionsHaveEnvIds(sessions: TaskSession[]): boolean {
 async function loadTaskSessionsForTaskFromStore(
   store: StoreApi<AppState>,
   taskId: string,
+  options?: TaskSessionLoadOptions,
 ): Promise<TaskSession[]> {
   const state = store.getState();
   const cachedSessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-  if (state.taskSessionsByTask.loadedByTaskId[taskId]) {
+  if (!options?.force && state.taskSessionsByTask.loadedByTaskId[taskId]) {
     if (cachedSessionsHaveEnvIds(cachedSessions)) return cachedSessions;
   }
-  if (state.taskSessionsByTask.loadingByTaskId[taskId]) {
+  if (!options?.force && state.taskSessionsByTask.loadingByTaskId[taskId]) {
     return cachedSessions;
   }
   store.getState().setTaskSessionsLoading(taskId, true);
@@ -62,6 +68,7 @@ async function loadTaskSessionsForTaskFromStore(
     return response.sessions ?? [];
   } catch (error) {
     console.error("Failed to load task sessions:", error);
+    if (options?.force) throw error;
     return cachedSessions;
   } finally {
     store.getState().setTaskSessionsLoading(taskId, false);
@@ -292,7 +299,8 @@ function shouldSwitchAfterRemoval(
  */
 export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOptions) {
   const loadTaskSessionsForTask = useCallback(
-    (taskId: string) => loadTaskSessionsForTaskFromStore(store, taskId),
+    (taskId: string, options?: TaskSessionLoadOptions) =>
+      loadTaskSessionsForTaskFromStore(store, taskId, options),
     [store],
   );
 

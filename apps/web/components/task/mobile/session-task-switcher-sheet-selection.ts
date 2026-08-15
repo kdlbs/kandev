@@ -6,22 +6,32 @@ import {
   effectiveTaskPendingAction,
   resolvePreferredSessionId,
   resolveTaskSessionId,
+  taskPendingSelectionSnapshot,
+  type TaskPendingSelectionSnapshot,
 } from "../task-select-helpers";
 
 type SelectionActions = {
-  loadTaskSessionsForTask: (taskId: string) => Promise<TaskSession[]>;
+  loadTaskSessionsForTask: (
+    taskId: string,
+    options?: { force?: boolean },
+  ) => Promise<TaskSession[]>;
   setActiveSession: (taskId: string, sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
   navigate?: (taskId: string) => void;
   onOpenChange: (open: boolean) => void;
   isSelectionCurrent?: () => boolean;
+  getTaskPendingSnapshot?: (taskId: string) => TaskPendingSelectionSnapshot;
 };
 
 type SelectableTask = {
   isArchived?: boolean;
   primarySessionId?: string | null;
   taskPendingAction?: TaskPendingAction | null;
-  statusSummary?: { pending_action?: TaskPendingAction | null } | null;
+  statusSummary?: {
+    revision?: number;
+    updated_at?: string;
+    pending_action?: TaskPendingAction | null;
+  } | null;
 };
 
 type SelectionState = {
@@ -46,16 +56,28 @@ function selectionIsCurrent(actions: SelectionActions): boolean {
   return actions.isSelectionCurrent?.() ?? true;
 }
 
+function pendingSelectionIsCurrent(
+  actions: SelectionActions,
+  taskId: string,
+  initial: TaskPendingSelectionSnapshot,
+): boolean {
+  if (!selectionIsCurrent(actions)) return false;
+  const current = actions.getTaskPendingSnapshot?.(taskId);
+  if (!current) return true;
+  return current.revision === initial.revision && current.pendingAction === initial.pendingAction;
+}
+
 export async function selectPendingTaskFromSheet(
   params: {
     taskId: string;
     preferredSessionId: string;
     taskPendingAction: TaskPendingAction;
+    pendingSnapshot?: TaskPendingSelectionSnapshot;
   } & SelectionActions,
 ): Promise<void> {
   let targetSessionId = "";
   try {
-    const sessions = await params.loadTaskSessionsForTask(params.taskId);
+    const sessions = await params.loadTaskSessionsForTask(params.taskId, { force: true });
     targetSessionId = resolveTaskSessionId({
       sessions,
       preferredSessionId: params.preferredSessionId,
@@ -64,7 +86,11 @@ export async function selectPendingTaskFromSheet(
   } catch (error) {
     console.error("Failed to load pending task sessions:", error);
   }
-  if (!selectionIsCurrent(params)) return;
+  const initialSnapshot = params.pendingSnapshot ?? {
+    revision: null,
+    pendingAction: params.taskPendingAction,
+  };
+  if (!pendingSelectionIsCurrent(params, params.taskId, initialSnapshot)) return;
   if (targetSessionId) {
     params.setActiveSession(params.taskId, targetSessionId);
   } else {
@@ -130,6 +156,7 @@ export function selectTaskFromSheet(
     return;
   }
   const pendingAction = effectiveTaskPendingAction(task);
+  const pendingSnapshot = taskPendingSelectionSnapshot(task);
   const preferredSessionId = task?.primarySessionId
     ? resolvePreferredSessionId({
         taskId,
@@ -144,6 +171,7 @@ export function selectTaskFromSheet(
       ...guardedParams,
       preferredSessionId,
       taskPendingAction: pendingAction,
+      pendingSnapshot,
     });
     return;
   }

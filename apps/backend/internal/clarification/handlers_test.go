@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,6 +28,7 @@ type stubMessageCreator struct {
 	created          [][]Question
 	repo             *stubMessageStore
 	publishedBundles int
+	claimedMessages  []*taskmodels.Message
 	restoreErr       error
 	refuseRestore    bool
 }
@@ -94,7 +96,14 @@ func (s *stubMessageCreator) CompleteActiveClarificationBundle(
 		}{pendingID, questionID, status})
 		claimedMessages = append(claimedMessages, message)
 	}
-	return claimedMessages, len(claimedMessages) > 0, nil
+	returnedMessages := make([]*taskmodels.Message, 0, len(claimedMessages))
+	for _, message := range claimedMessages {
+		copyMessage := *message
+		copyMessage.Metadata = maps.Clone(message.Metadata)
+		returnedMessages = append(returnedMessages, &copyMessage)
+	}
+	s.claimedMessages = returnedMessages
+	return returnedMessages, len(returnedMessages) > 0, nil
 }
 
 func (s *stubMessageCreator) RestoreActiveClarificationBundle(
@@ -119,10 +128,21 @@ func (s *stubMessageCreator) RestoreActiveClarificationBundle(
 			return false, nil
 		}
 	}
-	for _, message := range claimedMessages {
-		questionID := stringFromMetadata(message.Metadata, "question_id")
-		message.Metadata["status"] = "pending"
-		delete(message.Metadata, "response")
+	for _, claimedMessage := range claimedMessages {
+		var storedMessage *taskmodels.Message
+		for _, candidate := range s.repo.messages[pendingID] {
+			if candidate.ID == claimedMessage.ID {
+				storedMessage = candidate
+				break
+			}
+		}
+		if storedMessage == nil || stringFromMetadata(storedMessage.Metadata, "status") != terminalStatus {
+			return false, nil
+		}
+		questionID := stringFromMetadata(storedMessage.Metadata, "question_id")
+		storedMessage.Metadata = maps.Clone(storedMessage.Metadata)
+		storedMessage.Metadata["status"] = "pending"
+		delete(storedMessage.Metadata, "response")
 		s.updates = append(s.updates, struct {
 			pendingID  string
 			questionID string
@@ -346,6 +366,9 @@ func TestHttpRespond_DetachedResumeFailureRestoresRetryableBundle(t *testing.T) 
 	}
 	if got := msg.Metadata["status"]; got != "pending" {
 		t.Fatalf("status after failed resume = %v, want pending for retry", got)
+	}
+	if got := messageCreator.claimedMessages[0].Metadata["status"]; got != "answered" {
+		t.Fatalf("restore mutated caller-owned claim status = %v, want answered", got)
 	}
 	if messageCreator.publishedBundles != 0 {
 		t.Fatalf("published terminal bundles after failed resume = %d, want 0", messageCreator.publishedBundles)

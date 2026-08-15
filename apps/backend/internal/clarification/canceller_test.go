@@ -58,6 +58,26 @@ func (s *stubMessageStore) FindActiveClarificationMessagesBySessionID(_ context.
 	return out, nil
 }
 
+func (s *stubMessageStore) DetachActiveClarificationMessagesBySessionID(
+	_ context.Context,
+	sessionID string,
+) ([]*taskmodels.Message, error) {
+	active, err := s.FindActiveClarificationMessagesBySessionID(context.Background(), sessionID)
+	if err != nil {
+		return nil, err
+	}
+	var changed []*taskmodels.Message
+	for _, message := range active {
+		if detached, _ := message.Metadata["agent_disconnected"].(bool); detached {
+			continue
+		}
+		message.Metadata["agent_disconnected"] = true
+		s.updated = append(s.updated, message)
+		changed = append(changed, message)
+	}
+	return changed, nil
+}
+
 func (s *stubMessageStore) UpdateMessage(_ context.Context, m *taskmodels.Message) error {
 	s.updated = append(s.updated, m)
 	return nil

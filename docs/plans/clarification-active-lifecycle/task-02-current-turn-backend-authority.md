@@ -102,6 +102,12 @@ blockers/risks, and update task/plan status.
   acknowledgement, so request completion cannot wait for the full agent turn.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
+- Final review remediation makes that durable detach an atomic `UPDATE ... RETURNING` claim over the
+  current turn, pending status, and non-detached marker. Restore writes recheck current-turn ownership
+  in the update itself, unexpected live-delivery failures distinguish recovered retry state, and test
+  doubles preserve caller-owned claim snapshots instead of mutating them in place.
+- SQLite and environment-gated PostgreSQL regressions cover one-shot detachment and the successor-turn
+  restore guard.
 - `cd apps/backend && go test ./internal/task/repository/sqlite ./internal/clarification ./internal/orchestrator`
   passed. The environment-gated PostgreSQL case skipped locally because
   `KANDEV_TEST_POSTGRES_DSN` was unset; it remains enabled for PostgreSQL CI.

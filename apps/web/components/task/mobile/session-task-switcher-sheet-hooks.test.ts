@@ -5,7 +5,7 @@ import {
   selectPendingTaskFromSheet,
   selectTaskFromSheet,
 } from "./session-task-switcher-sheet-selection";
-import type { TaskSession } from "@/lib/types/http";
+import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
 
 type SheetTask = Parameters<typeof toSheetItem>[0];
 type SheetCtx = Parameters<typeof toSheetItem>[1];
@@ -177,6 +177,27 @@ describe("toSheetItem queued prompt count", () => {
 describe("selectPendingTaskFromSheet", () => {
   it("waits for the owner session before navigating and closing", async () => {
     const order: string[] = [];
+    const loadTaskSessionsForTask = vi.fn(
+      async () =>
+        [
+          {
+            id: "secondary",
+            task_id: "task-1",
+            state: "WAITING_FOR_INPUT",
+            pending_action: "clarification",
+            started_at: UPDATED_AT,
+            updated_at: UPDATED_AT,
+          },
+          {
+            id: "primary",
+            task_id: "task-1",
+            state: "WAITING_FOR_INPUT",
+            is_primary: true,
+            started_at: UPDATED_AT,
+            updated_at: UPDATED_AT,
+          },
+        ] as TaskSession[],
+    );
     const setActiveSession = vi.fn((_taskId: string, sessionId: string) => {
       order.push(`session:${sessionId}`);
     });
@@ -184,27 +205,7 @@ describe("selectPendingTaskFromSheet", () => {
       taskId: "task-1",
       preferredSessionId: "primary",
       taskPendingAction: "clarification",
-      loadTaskSessionsForTask: vi.fn(
-        async () =>
-          [
-            {
-              id: "secondary",
-              task_id: "task-1",
-              state: "WAITING_FOR_INPUT",
-              pending_action: "clarification",
-              started_at: UPDATED_AT,
-              updated_at: UPDATED_AT,
-            },
-            {
-              id: "primary",
-              task_id: "task-1",
-              state: "WAITING_FOR_INPUT",
-              is_primary: true,
-              started_at: UPDATED_AT,
-              updated_at: UPDATED_AT,
-            },
-          ] as TaskSession[],
-      ),
+      loadTaskSessionsForTask,
       setActiveSession,
       setActiveTask: vi.fn(),
       navigate: () => order.push("navigate"),
@@ -212,6 +213,7 @@ describe("selectPendingTaskFromSheet", () => {
     });
 
     expect(setActiveSession).toHaveBeenCalledWith("task-1", "secondary");
+    expect(loadTaskSessionsForTask).toHaveBeenCalledWith("task-1", { force: true });
     expect(order).toEqual(["session:secondary", "navigate", "close"]);
   });
 
@@ -300,6 +302,65 @@ describe("selectTaskFromSheet races", () => {
     expect(navigate).toHaveBeenCalledWith("task-b");
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("selectTaskFromSheet summary races", () => {
+  it("ignores a delayed owner response after the task summary changes", async () => {
+    let resolveLoad: (sessions: TaskSession[]) => void = () => undefined;
+    const loadTaskSessionsForTask = vi.fn(
+      () =>
+        new Promise<TaskSession[]>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    let currentSnapshot: {
+      revision: number;
+      pendingAction: TaskPendingAction;
+    } = { revision: 1, pendingAction: "clarification" };
+    const setActiveSession = vi.fn();
+    const setActiveTask = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+
+    selectTaskFromSheet({
+      taskId: "task-summary-race",
+      task: {
+        primarySessionId: "primary",
+        statusSummary: {
+          revision: 1,
+          updated_at: UPDATED_AT,
+          pending_action: "clarification",
+        },
+      },
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask,
+      navigate,
+      onOpenChange,
+      getTaskPendingSnapshot: () => currentSnapshot,
+    });
+    currentSnapshot = { revision: 2, pendingAction: "permission" };
+    resolveLoad([
+      {
+        id: "old-owner",
+        task_id: "task-summary-race",
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+      } as TaskSession,
+    ]);
+    await Promise.resolve();
+
+    expect(loadTaskSessionsForTask).toHaveBeenCalledWith("task-summary-race", { force: true });
+    expect(setActiveSession).not.toHaveBeenCalled();
+    expect(setActiveTask).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 });
 

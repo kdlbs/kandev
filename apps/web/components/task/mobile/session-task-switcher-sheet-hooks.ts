@@ -17,6 +17,7 @@ import { repositorySlug } from "@/lib/repository-slug";
 import { mapSnapshotToKanban, sortByUpdatedAtDesc } from "./session-task-switcher-sheet-helpers";
 import { toSheetItem, type SheetItemCtx } from "./session-task-switcher-sheet-item";
 import { selectTaskFromSheet } from "./session-task-switcher-sheet-selection";
+import { taskPendingSelectionSnapshot } from "../task-select-helpers";
 import { useTranslation } from "react-i18next";
 
 function findSheetTask(
@@ -107,6 +108,7 @@ type SheetNavOptions = {
   store: ReturnType<typeof useAppStoreApi>;
   loadTaskSessionsForTask: (
     taskId: string,
+    options?: { force?: boolean },
   ) => Promise<Array<{ id: string; updated_at?: string | null }>>;
   setActiveSession: (taskId: string, sessionId: string) => void;
   setActiveTask: (taskId: string) => void;
@@ -423,6 +425,8 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
         setActiveTask,
         setActiveSession,
         loadTaskSessionsForTask,
+        getTaskPendingSnapshot: (selectedTaskId) =>
+          taskPendingSelectionSnapshot(findSheetTask(store.getState(), selectedTaskId)),
         navigate: replaceTaskUrl,
         onOpenChange,
       });
