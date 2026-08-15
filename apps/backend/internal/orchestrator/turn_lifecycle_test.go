@@ -349,6 +349,48 @@ func TestAgentReadyRevalidatesAfterReservedPromptRollback(t *testing.T) {
 	}
 }
 
+func TestAgentReadyWaitsForReservedTurnThenDropsGenerationlessEventOnRollback(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	agentMgr := svc.agentManager.(*mockAgentManager)
+	agentMgr.currentPromptExecutionID = "exec1"
+
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	if err != nil {
+		t.Fatalf("reserve successor turn: %v", err)
+	}
+	readyDone := make(chan struct{})
+	go func() {
+		svc.handleAgentReady(ctx, watcher.AgentEventData{
+			TaskID: "task1", SessionID: "session1",
+			AgentExecutionID: "exec1", PromptGeneration: 0,
+		})
+		close(readyDone)
+	}()
+	select {
+	case <-readyDone:
+		t.Fatal("generationless ready returned before reservation resolution")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
+	select {
+	case <-readyDone:
+	case <-time.After(time.Second):
+		t.Fatal("generationless ready did not resume after reservation rollback")
+	}
+	if _, err := repo.GetTurn(ctx, turnID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("rolled-back reserved turn remains: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("load session after generationless ready: %v", err)
+	}
+	if session.State != models.TaskSessionStateRunning {
+		t.Fatalf("generationless ready changed session state to %q", session.State)
+	}
+}
+
 func TestStartFailsClosedWhenPromptTurnRecoveryFails(t *testing.T) {
 	svc, _ := newTurnLifecycleTestService(t)
 	recoveryErr := errors.New("recover unpublished prompt turn")

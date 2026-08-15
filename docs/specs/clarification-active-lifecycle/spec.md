@@ -56,17 +56,19 @@ hiding the action the icon represents.
   reservation to resolve and then revalidates prompt generation before touching turn or workflow state.
   It cannot complete the reserved successor or run predecessor completion actions against it. When the
   reservation rolls back, a ready event whose predecessor generation still owns the session continues
-  through normal completion so the predecessor and its queue are not stranded. If the attempt marker
-  cannot be persisted, dispatch does not occur and the answer remains retryable. If agentctl
-  synchronously rejects the prompt, the reservation is rolled back and the answer can be restored. If
-  agentctl accepts the prompt but publication or later transport handling fails, the endpoint returns a
-  server error, performs normal prompt-failure cleanup, and keeps the claimed bundle terminal because
-  retrying could dispatch the answer twice. Startup
+  through normal completion so the predecessor and its queue are not stranded. A generationless ready
+  event that overlapped the reservation is dropped after resolution because ownership cannot be proven.
+  If the attempt marker cannot be persisted, dispatch does not occur and the answer remains retryable.
+  If agentctl synchronously rejects the prompt, the reservation is rolled back and the answer can be
+  restored. If agentctl accepts the prompt but publication or later transport handling fails, the
+  endpoint returns a server error, performs normal prompt-failure cleanup, and keeps the claimed bundle
+  terminal because retrying could dispatch the answer twice. Startup
   deletes only an empty, unattempted unpublished reservation and restores the exact clarification rows
   claimed for its dispatch; an attempt marker or message evidence instead proves dispatch ambiguity and
-  preserves the successor. If reservation reconciliation fails, orchestrator startup fails before
-  watcher, scheduler, or prompt admission starts; the next start retries recovery. A rejection persists
-  terminal status without resuming the agent.
+  preserves the successor. Recovery treats boolean `true`, strings `"true"` and `"1"`, and numeric `1`
+  as the same conservative attempted marker. If reservation reconciliation fails, orchestrator startup
+  fails before watcher, scheduler, or prompt admission starts; the next start retries recovery. A
+  rejection persists terminal status without resuming the agent.
 - Every response atomically claims current-turn ownership before it can reach a live waiter or request
   a detached resume. Terminal message updates are published only after delivery succeeds. If detached
   resume acceptance fails, the endpoint returns an error and restores the still-current bundle to
@@ -218,7 +220,8 @@ session they can already access. Session selection does not broaden task visibil
   wait for the live reservation outcome, then reject the event if its prompt generation was superseded;
   never complete the reserved successor or evaluate predecessor workflow completion against it. If the
   reservation rolls back and the predecessor generation still owns the session, process the ready event
-  normally instead of stranding the predecessor turn.
+  normally instead of stranding the predecessor turn. Drop a generationless event after the wait because
+  it cannot be correlated safely with the predecessor.
 - Unpublished-reservation reconciliation fails during startup: fail startup before event processing or
   prompt admission begins so no new turn can supersede an unrecovered clarification claim.
 
@@ -294,6 +297,11 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** reserved-successor deletion returns an error, **WHEN** rollback handling completes, **THEN**
   the reservation waiter remains unresolved and another prompt cannot enter that session before
   restart recovery.
+- **GIVEN** an unpublished reservation stores an attempted marker as boolean `true`, string `"true"` or
+  `"1"`, or numeric `1`, **WHEN** startup recovery runs, **THEN** it preserves the ambiguous successor
+  and clears recovery metadata instead of restoring the answer and deleting the turn.
+- **GIVEN** a generationless ready event waits on a live reservation, **WHEN** the reservation rolls
+  back, **THEN** Kandev drops the uncorrelatable event without changing session or workflow state.
 - **GIVEN** a cancelled request triggers clarification detach or expiry, **WHEN** repository work
   begins, **THEN** it uses a non-cancelled context with a finite deadline.
 - **GIVEN** startup cannot reconcile an unpublished prompt reservation, **WHEN** the orchestrator starts,

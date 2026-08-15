@@ -161,3 +161,6 @@ blockers/risks, and update task/plan status.
 - Final Codex review returns committed pending rows from restoration and publishes them before reporting
   a retryable resume rejection. The interleaved-refresh handler regression, repository restore cases,
   detached-resume orchestrator case, and service/adapter compile checks passed.
+- CodeRabbit remediation decodes boolean, string, and numeric attempted markers consistently with SQL,
+  preventing ambiguous accepted reservations from being deleted during recovery. Claude follow-up adds
+  direct coverage for dropping a generationless ready after rollback; both groups passed ten times.

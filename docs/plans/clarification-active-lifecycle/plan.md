@@ -272,6 +272,10 @@ All task gates passed:
   durable selection overview now matches task-only fallback for changed summaries and inert handling
   only when the task projection disappears. Broader clarification-focused handler, repository, and
   orchestrator tests passed, followed by zero-issue changed-code Go lint.
+- CodeRabbit and Claude follow-up align recovery's attempted-flag decoder with tolerant SQL semantics
+  and pin the generationless-ready drop after a reservation rollback. Boolean, string, and numeric flag
+  encodings plus adjacent recovery/ready races passed ten focused repetitions; broader recovery and
+  ready suites passed, followed by zero-issue changed-code Go lint.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

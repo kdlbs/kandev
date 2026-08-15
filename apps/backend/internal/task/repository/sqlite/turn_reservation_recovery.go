@@ -19,6 +19,8 @@ type unpublishedPromptTurn struct {
 	sessionID string
 }
 
+const metadataTrueString = "true"
+
 // ReconcileUnpublishedPromptTurns repairs durable reservations left behind by
 // a backend stop between turn insertion and prompt-dispatch acknowledgement.
 func (r *Repository) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error) {
@@ -92,7 +94,7 @@ func (r *Repository) reconcileUnpublishedPromptTurn(
 		return false, err
 	}
 	updatedAt := time.Now().UTC()
-	attempted, _ := metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool)
+	attempted := metadataFlagIsTrue(metadata[models.TurnMetaKeyPromptDispatchAttempted])
 	if attempted || referenced {
 		models.ClearPromptDispatchMetadata(metadata)
 		err = updateTurnMetadata(ctx, tx, r.db, turn.id, metadata, updatedAt)
@@ -109,6 +111,23 @@ func (r *Repository) reconcileUnpublishedPromptTurn(
 		return false, fmt.Errorf("commit unpublished prompt turn recovery: %w", err)
 	}
 	return true, nil
+}
+
+// metadataFlagIsTrue mirrors the SQL JSON predicates across supported
+// boolean, string, and numeric encodings of a true metadata flag.
+func metadataFlagIsTrue(value interface{}) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return typed == metadataTrueString || typed == "1"
+	case float64:
+		return typed == 1
+	case json.Number:
+		return typed.String() == "1"
+	default:
+		return false
+	}
 }
 
 func (r *Repository) loadUnpublishedPromptTurnMetadata(

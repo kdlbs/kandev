@@ -151,6 +151,43 @@ func TestReconcileUnpublishedPromptTurnsPreservesAmbiguousEmptyReservation(t *te
 	}
 }
 
+func TestReconcileUnpublishedPromptTurnsPreservesToleratedAttemptMarkers(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		value interface{}
+	}{
+		{name: "boolean", value: true},
+		{name: "string_true", value: metadataTrueString},
+		{name: "string_one", value: "1"},
+		{name: "number_one", value: float64(1)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newRepoForSessionTests(t)
+			ctx := context.Background()
+			taskID := "task-attempt-marker-" + tt.name
+			sessionID := "session-attempt-marker-" + tt.name
+			turnID := "turn-attempt-marker-" + tt.name
+			seedSessionForTurns(t, repo, taskID, sessionID)
+			createRecoveryTurn(t, repo, taskID, sessionID, turnID, time.Now().UTC(), map[string]interface{}{
+				models.TurnMetaKeyPromptDispatchPending:   true,
+				models.TurnMetaKeyPromptDispatchAttempted: tt.value,
+			})
+
+			reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
+			if err != nil || reconciled != 1 {
+				t.Fatalf("ReconcileUnpublishedPromptTurns = %d, %v; want 1, nil", reconciled, err)
+			}
+			turn, err := repo.GetTurn(ctx, turnID)
+			if err != nil {
+				t.Fatalf("attempted reservation was deleted: %v", err)
+			}
+			if _, exists := turn.Metadata[models.TurnMetaKeyPromptDispatchAttempted]; exists {
+				t.Fatalf("attempt marker was not cleared: %#v", turn.Metadata)
+			}
+		})
+	}
+}
+
 func TestDeleteTurnIfUnreferencedRemovesDefinitivelyRejectedAttempt(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
