@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,10 +62,11 @@ func TestHTTPTaskPRMutationsLegacyWorkspaceMismatch(t *testing.T) {
 			if err := store.CreateTaskPR(context.Background(), association); err != nil {
 				t.Fatalf("create legacy association: %v", err)
 			}
-			path := "/api/v1/github/task-prs/" + association.ID + "?workspace_id=ws-other"
+			path := "/api/v1/github/task-prs/" + association.ID
 			if tt.method == http.MethodPatch {
 				path += "/disposition"
 			}
+			path += "?workspace_id=ws-other"
 			request := httptest.NewRequest(tt.method, path, bytes.NewBufferString(tt.body))
 			request.Header.Set("Content-Type", "application/json")
 			response := httptest.NewRecorder()
@@ -72,6 +74,9 @@ func TestHTTPTaskPRMutationsLegacyWorkspaceMismatch(t *testing.T) {
 
 			if response.Code != http.StatusNotFound {
 				t.Fatalf("status = %d, body = %s, want 404", response.Code, response.Body.String())
+			}
+			if got := strings.TrimSpace(response.Body.String()); got != `{"error":"task PR not found"}` {
+				t.Fatalf("body = %s, want task PR not-found response", got)
 			}
 			tt.check(t, store, association.ID)
 		})

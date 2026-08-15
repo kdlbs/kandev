@@ -143,6 +143,19 @@ func TestSetTaskPRDispositionLegacyWorkspaceUsesTaskWorkspace(t *testing.T) {
 	if eventBus.publishedCount() != 1 {
 		t.Fatalf("published events = %d, want one update event", eventBus.publishedCount())
 	}
+	eventBus.mu.Lock()
+	event := eventBus.events[0]
+	eventBus.mu.Unlock()
+	eventPayload, ok := event.Data.(*TaskPR)
+	if !ok {
+		t.Fatalf("event payload type = %T, want *TaskPR", event.Data)
+	}
+	if eventPayload.WorkspaceID != "ws-owner" {
+		t.Fatalf("event workspace = %q, want ws-owner", eventPayload.WorkspaceID)
+	}
+	if eventPayload == updated {
+		t.Fatal("event payload aliases stored legacy association")
+	}
 }
 
 func TestSetTaskPRDispositionLegacyWorkspaceRequiresTaskResolver(t *testing.T) {

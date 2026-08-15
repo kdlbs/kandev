@@ -18,6 +18,8 @@ spec: "../../specs/task-pr-legacy-workspace-authorization/spec.md"
   unresolved owning task and produce no mutation, metric, or event side effect.
 - Modern and correctly resolved legacy associations preserve their existing
   success responses and event behavior without backfilling the association.
+- Legacy disposition events carry the derived workspace in an event-only copy,
+  while the stored association remains blank.
 
 ## Verification
 
@@ -82,13 +84,16 @@ risks, and synchronized task/plan status in the primary conversation.
   blank task IDs, and blank task workspaces return `ErrTaskPRNotFound` before
   authorization or mutation. Unrelated task lookup errors remain unchanged.
 - Wired the helper into detach and disposition before validation, writes,
-  metrics, or event publication. Legacy rows remain blank in
-  `github_task_prs.workspace_id`.
+  metrics, or event publication. Detach events use the resolved workspace, and
+  disposition events use an event-only copy with that workspace. Legacy rows
+  remain blank in `github_task_prs.workspace_id`.
+- Corrected the controller PATCH regression route to place `/disposition`
+  before the query string and assert the handler's task-PR not-found body.
 - Dependency PR #2614 remains open at `708d8d2`; this branch is intentionally
   stacked on `feature/tel-record-why-a-pul-p4w`.
 - Verification passed:
   - Focused authorization and mutation tests: 22 passed.
-  - `go test ./internal/github -run 'TaskPR' -count=1`: 121 passed.
+  - `go test ./internal/github -run 'TaskPR' -count=1`: 122 passed.
   - `go test ./internal/github -count=1`: 1,611 passed.
   - `git diff --check` passed.
   - PR review follow-up added a blank-task-ID fail-closed guard and reused the

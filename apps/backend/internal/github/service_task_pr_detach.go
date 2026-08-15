@@ -37,7 +37,8 @@ func (s *Service) DetachTaskPR(ctx context.Context, workspaceID, associationID s
 	if tp == nil {
 		return nil, ErrTaskPRNotFound
 	}
-	if err := s.authorizeTaskPRMutation(ctx, tp, workspaceID); err != nil {
+	resolvedWorkspaceID, err := s.authorizeTaskPRMutation(ctx, tp, workspaceID)
+	if err != nil {
 		return nil, err
 	}
 	if tp.DetachedAt != nil {
@@ -55,7 +56,7 @@ func (s *Service) DetachTaskPR(ctx context.Context, workspaceID, associationID s
 	}
 	if s.eventBus != nil {
 		event := bus.NewEvent(events.GitHubTaskPRDeleted, "github", &TaskPRDeletedEvent{
-			WorkspaceID:   workspaceID,
+			WorkspaceID:   resolvedWorkspaceID,
 			TaskID:        detached.TaskID,
 			AssociationID: detached.ID,
 		})

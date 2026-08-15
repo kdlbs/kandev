@@ -29,6 +29,8 @@ and preserves the workspace ownership rules in the authentication spec and
   behavior.
 - Authorization hardening SHALL NOT backfill or otherwise modify legacy
   `github_task_prs.workspace_id` values.
+- Mutation events for legacy associations SHALL carry the derived workspace
+  for routing while leaving the stored association workspace blank.
 
 ## Permissions
 

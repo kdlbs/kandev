@@ -85,12 +85,16 @@ before starting the task and record that dependency in the PR.
 ## Verification Results
 
 - Dependency PR #2614 remains open at `708d8d2`; this implementation is stacked
-  on `feature/tel-record-why-a-pul-p4w` and targets that branch.
+  on `feature/tel-record-why-a-pul-p4w` and targets the base-repository mirror
+  branch `stack/pr-2614-708d8d2`.
 - The focused authorization and mutation command passed: 22 tests.
-- `go test ./internal/github -run 'TaskPR' -count=1` passed: 121 tests.
+- `go test ./internal/github -run 'TaskPR' -count=1` passed: 122 tests.
 - `go test ./internal/github -count=1` passed: 1,611 tests.
 - PR review follow-up added a blank-task-ID fail-closed guard and reused the
   shared task-store test double.
+- Legacy disposition events carry the derived workspace in an event-only copy,
+  and the controller PATCH regression covers the correctly ordered route and
+  task-PR not-found body.
 - `git diff --check` passed.
 
 ## Implementation Waves And Parallel Candidates

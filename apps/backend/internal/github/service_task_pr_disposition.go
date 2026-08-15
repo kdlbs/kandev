@@ -51,7 +51,8 @@ func (s *Service) SetTaskPRDisposition(
 	if tp == nil {
 		return nil, ErrTaskPRNotFound
 	}
-	if err := s.authorizeTaskPRMutation(ctx, tp, workspaceID); err != nil {
+	resolvedWorkspaceID, err := s.authorizeTaskPRMutation(ctx, tp, workspaceID)
+	if err != nil {
 		return nil, err
 	}
 	if !patch.HasAny() {
@@ -74,7 +75,7 @@ func (s *Service) SetTaskPRDisposition(
 	if disposition != nil {
 		action = "set"
 	}
-	return s.writeTaskPRDisposition(ctx, associationID, patch, action)
+	return s.writeTaskPRDisposition(ctx, associationID, patch, action, resolvedWorkspaceID)
 }
 
 // normalizeDispositionPatch puts the raw caller-supplied DispositionPatch
@@ -121,7 +122,7 @@ func normalizeDispositionPatch(patch DispositionPatch) (DispositionPatch, error)
 // final values SetTaskPRDisposition computed for validation — see
 // Store.UpdateTaskPRDisposition for why (SEC-001).
 func (s *Service) writeTaskPRDisposition(
-	ctx context.Context, associationID string, patch DispositionPatch, action string,
+	ctx context.Context, associationID string, patch DispositionPatch, action, workspaceID string,
 ) (*TaskPR, error) {
 	if err := s.store.UpdateTaskPRDisposition(ctx, associationID, patch); err != nil {
 		return nil, err
@@ -136,7 +137,9 @@ func (s *Service) writeTaskPRDisposition(
 		return nil, ErrTaskPRNotFound
 	}
 	if s.eventBus != nil {
-		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", updated)
+		eventPayload := *updated
+		eventPayload.WorkspaceID = workspaceID
+		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", &eventPayload)
 		if err := s.eventBus.Publish(ctx, events.GitHubTaskPRUpdated, event); err != nil {
 			s.logger.Debug("failed to publish task PR updated event", zap.Error(err))
 		}

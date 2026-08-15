@@ -17,6 +17,7 @@ type authorizeTaskPRMutationCase struct {
 	authorizeErr     error
 	wantErr          error
 	wantAuthorized   string
+	wantResolved     string
 	wantTaskGetCalls int
 }
 
@@ -28,6 +29,7 @@ func TestAuthorizeTaskPRMutationWorkspace(t *testing.T) {
 			taskStore:      &fakeTaskIssueStore{task: &taskmodels.Task{WorkspaceID: "ws-other"}},
 			workspaceID:    "ws-modern",
 			wantAuthorized: "ws-modern",
+			wantResolved:   "ws-modern",
 		},
 		{
 			name:        "modern mismatch is not authorized",
@@ -41,6 +43,7 @@ func TestAuthorizeTaskPRMutationWorkspace(t *testing.T) {
 			taskStore:        &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-legacy", WorkspaceID: "ws-legacy"}},
 			workspaceID:      "ws-legacy",
 			wantAuthorized:   "ws-legacy",
+			wantResolved:     "ws-legacy",
 			wantTaskGetCalls: 1,
 		},
 		{
@@ -136,13 +139,13 @@ func runAuthorizeTaskPRMutationCases(t *testing.T, tests []authorizeTaskPRMutati
 				authorized = workspaceID
 				return tt.authorizeErr
 			})
-			err := svc.authorizeTaskPRMutation(context.Background(), tt.association, tt.workspaceID)
-			assertTaskPRAuthorizationResult(t, tt, err, authorized)
+			resolvedWorkspace, err := svc.authorizeTaskPRMutation(context.Background(), tt.association, tt.workspaceID)
+			assertTaskPRAuthorizationResult(t, tt, resolvedWorkspace, err, authorized)
 		})
 	}
 }
 
-func assertTaskPRAuthorizationResult(t *testing.T, tt authorizeTaskPRMutationCase, err error, authorized string) {
+func assertTaskPRAuthorizationResult(t *testing.T, tt authorizeTaskPRMutationCase, resolvedWorkspace string, err error, authorized string) {
 	t.Helper()
 	if tt.wantErr == nil && err != nil {
 		t.Fatalf("error = %v, want nil", err)
@@ -152,6 +155,9 @@ func assertTaskPRAuthorizationResult(t *testing.T, tt authorizeTaskPRMutationCas
 	}
 	if authorized != tt.wantAuthorized {
 		t.Fatalf("authorized workspace = %q, want %q", authorized, tt.wantAuthorized)
+	}
+	if resolvedWorkspace != tt.wantResolved {
+		t.Fatalf("resolved workspace = %q, want %q", resolvedWorkspace, tt.wantResolved)
 	}
 	if tt.taskStore != nil && tt.taskStore.getCalls != tt.wantTaskGetCalls {
 		t.Fatalf("GetTask calls = %d, want %d", tt.taskStore.getCalls, tt.wantTaskGetCalls)
