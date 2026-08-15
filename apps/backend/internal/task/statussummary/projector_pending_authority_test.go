@@ -216,6 +216,7 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 			Revision:      5,
 			UpdatedAt:     storedAt,
 			PendingAction: pendingClarification,
+			Git:           &GitSummary{ChangedFiles: 1},
 		},
 	}
 	store := &rejectingPendingProjectorStore{
@@ -228,6 +229,7 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 				UpdatedAt:         storedAt.Add(time.Second),
 				PendingAction:     pendingClarification,
 				QueuedPromptCount: 7,
+				Git:               &GitSummary{ChangedFiles: 2},
 			},
 		},
 	}
@@ -242,14 +244,18 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 	})
 
 	err := projector.HandleEvent(context.Background(), bus.NewEvent(events.TaskUpdated, "test", map[string]interface{}{
-		"task_id":      "task-cas",
-		"workspace_id": "workspace-1",
+		"task_id":               "task-cas",
+		"workspace_id":          "workspace-1",
+		"primary_session_id":    "session-current",
+		"primary_session_state": sessionStateRunning,
 	}))
 	if err != nil {
 		t.Fatalf("refresh after CAS rejection: %v", err)
 	}
 	got := base.summary("task-cas")
-	if got == nil || got.Revision != 7 || got.PendingAction != "" || got.QueuedPromptCount != 7 {
+	if got == nil || got.Revision != 7 || got.PendingAction != "" || got.QueuedPromptCount != 7 ||
+		got.Git == nil || got.Git.ChangedFiles != 2 || got.PrimarySession == nil ||
+		got.PrimarySession.ID != "session-current" {
 		t.Fatalf("summary after CAS retry = %+v", got)
 	}
 	if loaderCalls != 2 {

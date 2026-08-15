@@ -62,8 +62,7 @@ async function loadTaskSessionsForTaskFromStore(
     return response.sessions ?? [];
   } catch (error) {
     console.error("Failed to load task sessions:", error);
-    store.getState().setTaskSessionsForTask(taskId, []);
-    return [];
+    return cachedSessions;
   } finally {
     store.getState().setTaskSessionsLoading(taskId, false);
   }

@@ -246,6 +246,50 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	return nil
 }
 
+// rebaseProjectionStateFromCurrent rebuilds all derived source state from the
+// summary that won a rejected compare-and-set. Pending authority and the
+// triggering source event are refreshed by the caller before retrying.
+func rebaseProjectionStateFromCurrent(state *projectionState) {
+	if state.current == nil {
+		return
+	}
+	current := state.current
+	state.queuedCount = current.QueuedPromptCount
+	state.sessions = make(map[string]sessionObservation)
+	state.activityObserved = false
+	if current.PrimarySession != nil && current.PrimarySession.ID != "" {
+		state.sessions[current.PrimarySession.ID] = sessionObservation{
+			id:        current.PrimarySession.ID,
+			state:     current.PrimarySession.State,
+			isPrimary: true,
+		}
+	}
+	state.pending = make(map[string]string)
+	state.pendingRequests = make(map[string]pendingRequestIdentity)
+	state.taskPending = current.PendingAction
+	state.pendingObserved = false
+	state.errors = make(map[string]*ActiveErrorSummary)
+	state.errorsObserved = false
+	if current.ActiveError != nil && current.ActiveError.SessionID != "" {
+		copy := *current.ActiveError
+		state.errors[current.ActiveError.SessionID] = &copy
+	}
+	state.git = make(map[string]GitSummary)
+	state.gitBaseline = nil
+	state.gitObserved = false
+	if current.Git != nil {
+		copy := *current.Git
+		state.gitBaseline = &copy
+	}
+	state.prs = make(map[string]pullRequestObservation)
+	state.prBaseline = nil
+	state.prObserved = false
+	if current.PullRequest != nil {
+		copy := *current.PullRequest
+		state.prBaseline = &copy
+	}
+}
+
 func (p *Projector) restoreGitObservations(ctx context.Context, taskID string, state *projectionState) error {
 	if p.loadGitObservations == nil {
 		return nil

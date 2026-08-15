@@ -43,14 +43,14 @@ describe("resolveTaskSessionId", () => {
     ).toBe(SECONDARY);
   });
 
-  it("ignores a matching action on a terminal session", () => {
+  it("does not guess a fallback when the only matching owner is terminal", () => {
     expect(
       resolveTaskSessionId({
         sessions: [{ ...sessions[0], state: "COMPLETED" }, sessions[1]],
         preferredSessionId: "primary",
         taskPendingAction: "clarification",
       }),
-    ).toBe("primary");
+    ).toBe("");
   });
 
   it("preserves remembered and primary fallback for a clean task", () => {
@@ -306,9 +306,7 @@ describe("selectTaskWithLayout pending summary authority", () => {
       task: { primarySessionId: PRIMARY },
       store,
       switchToSession,
-      loadTaskSessionsForTask: vi.fn(async () => {
-        throw new Error("offline");
-      }),
+      loadTaskSessionsForTask: vi.fn(async () => []),
       setActiveTask: vi.fn(),
       setPreparingTaskId: vi.fn(),
     });
@@ -317,12 +315,13 @@ describe("selectTaskWithLayout pending summary authority", () => {
     expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, OTHER_SESSION_ID);
   });
 
-  it("falls back to the target session when pending-session loading fails", async () => {
+  it("does not choose a fallback session when pending-owner loading fails", async () => {
     const store = makeKanbanStore({
       activeSessionId: OTHER_SESSION_ID,
       envIds: { [PRIMARY]: PRIMARY_ENV_ID },
     });
     const switchToSession = vi.fn();
+    const setActiveTask = vi.fn();
 
     selectTaskWithLayout({
       taskId: TASK_ID,
@@ -332,12 +331,33 @@ describe("selectTaskWithLayout pending summary authority", () => {
       loadTaskSessionsForTask: vi.fn(async () => {
         throw new Error("offline");
       }),
-      setActiveTask: vi.fn(),
+      setActiveTask,
       setPreparingTaskId: vi.fn(),
     });
 
     await flushTaskSelection();
-    expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, OTHER_SESSION_ID);
+    expect(switchToSession).not.toHaveBeenCalled();
+    expect(setActiveTask).toHaveBeenCalledWith(TASK_ID);
+    expect(replaceTaskUrl).toHaveBeenCalledWith(TASK_ID);
+  });
+
+  it("navigates without launching when a pending task has no loaded owner", async () => {
+    const store = makeKanbanStore({ activeSessionId: OTHER_SESSION_ID, envIds: {} });
+    const setActiveTask = vi.fn();
+
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: { taskPendingAction: "clarification" },
+      store,
+      switchToSession: vi.fn(),
+      loadTaskSessionsForTask: vi.fn(async () => []),
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+
+    await flushTaskSelection();
+    expect(launchSession).not.toHaveBeenCalled();
+    expect(setActiveTask).toHaveBeenCalledWith(TASK_ID);
     expect(replaceTaskUrl).toHaveBeenCalledWith(TASK_ID);
   });
 });

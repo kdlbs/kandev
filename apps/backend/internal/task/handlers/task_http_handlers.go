@@ -463,8 +463,9 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 		map[string][]*models.TaskSession{c.Param("id"): sessions},
 	)
 	if pendingErr != nil {
-		h.logger.Warn("get task session pending actions failed", zap.Error(pendingErr))
-		pendingActionsBySession = map[string]models.TaskPendingAction{}
+		h.logger.Error("get task session pending actions failed", zap.Error(pendingErr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve task session pending actions"})
+		return
 	}
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	ids := make([]string, 0, len(sessions))

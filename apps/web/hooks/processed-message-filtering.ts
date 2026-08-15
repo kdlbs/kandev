@@ -5,6 +5,7 @@ import {
   type TaskPendingAction,
 } from "@/lib/types/http";
 import type { RichMetadata, ToolCallMetadata, TodoSnapshot } from "@/components/task/chat/types";
+import { isPendingClarificationMessage } from "@/lib/utils/pending-clarification";
 
 const VISIBLE_MESSAGE_TYPES: Set<string> = new Set([
   "message",
@@ -182,13 +183,7 @@ function findUnhydratedActiveClarification(
   if (currentTurnId !== undefined || pendingAction !== "clarification") return undefined;
   for (let index = messages.length - 1; index >= 0; index--) {
     const candidate = messages[index];
-    const metadata = candidate.metadata as ClarificationRequestMetadata | undefined;
-    if (
-      candidate.type === "clarification_request" &&
-      (!metadata?.status || metadata.status === "pending")
-    ) {
-      return candidate;
-    }
+    if (isPendingClarificationMessage(candidate)) return candidate;
   }
   return undefined;
 }
@@ -200,9 +195,9 @@ function isClarificationVisible(
   unhydratedActive: Message | undefined,
 ): boolean {
   const metadata = message.metadata as ClarificationRequestMetadata | undefined;
-  if (metadata?.status && metadata.status !== "pending") return true;
+  if (!isPendingClarificationMessage(message)) return true;
   if (currentTurnId !== undefined) {
-    return typeof currentTurnId === "string" && message.turn_id !== currentTurnId;
+    return currentTurnId === null || message.turn_id !== currentTurnId;
   }
   if (unhydratedActive) {
     const activeMetadata = unhydratedActive.metadata as ClarificationRequestMetadata | undefined;

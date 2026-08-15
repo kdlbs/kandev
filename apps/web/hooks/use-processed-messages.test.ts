@@ -101,7 +101,7 @@ describe("filterVisibleMessages clarification history", () => {
     ).toEqual(["old-question"]);
   });
 
-  it("hides a legacy pending clarification from transcript for the overlay", () => {
+  it("keeps malformed pending history visible when durable turn history is empty", () => {
     const pending = makeMessage("legacy-question", "clarification_request", {
       status: "pending",
     });
@@ -110,12 +110,12 @@ describe("filterVisibleMessages clarification history", () => {
       filterVisibleMessages([pending], new Set<string>(), new Set<string>(), null).map(
         (message) => message.id,
       ),
-    ).toEqual([]);
+    ).toEqual(["legacy-question"]);
     expect(
       findPendingClarificationGroup([pending], { currentTurnId: null }).map(
         (message) => message.id,
       ),
-    ).toEqual(["legacy-question"]);
+    ).toEqual([]);
   });
 
   it.each([null, "permission"] as const)(

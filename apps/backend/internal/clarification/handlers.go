@@ -410,11 +410,14 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 		zap.String("error", deliveryErr.Error()))
 
 	if err := h.respondViaEventFallback(ctx, pendingID, body.Answers, body.Rejected, body.RejectReason); err != nil {
-		h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
+		restored := h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
 		h.logger.Error("failed to resume detached clarification",
 			zap.String("pending_id", pendingID),
 			zap.Error(err))
-		return http.StatusInternalServerError, "failed to resume clarification; response can be retried"
+		if restored {
+			return http.StatusInternalServerError, "failed to resume clarification; response can be retried"
+		}
+		return http.StatusInternalServerError, "failed to resume clarification and recover pending clarification state"
 	}
 	h.messageCreator.PublishClarificationBundleUpdates(ctx, claim.messages)
 	return 0, ""
@@ -424,7 +427,7 @@ func (h *Handlers) restoreFailedClarificationClaim(
 	ctx context.Context,
 	pendingID, terminalStatus string,
 	claimedMessages []*taskmodels.Message,
-) {
+) bool {
 	restored, err := h.messageCreator.RestoreActiveClarificationBundle(
 		ctx,
 		pendingID,
@@ -435,12 +438,13 @@ func (h *Handlers) restoreFailedClarificationClaim(
 		h.logger.Error("failed to restore clarification after delivery failure",
 			zap.String("pending_id", pendingID),
 			zap.Error(err))
-		return
+		return false
 	}
 	if !restored {
 		h.logger.Warn("clarification claim was not restorable after delivery failure",
 			zap.String("pending_id", pendingID))
 	}
+	return restored
 }
 
 // validateRespondAnswers enforces the all-required gate **and** the question-id

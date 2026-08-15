@@ -27,6 +27,8 @@ type stubMessageCreator struct {
 	created          [][]Question
 	repo             *stubMessageStore
 	publishedBundles int
+	restoreErr       error
+	refuseRestore    bool
 }
 
 func (s *stubMessageCreator) CreateClarificationRequestMessages(
@@ -100,6 +102,12 @@ func (s *stubMessageCreator) RestoreActiveClarificationBundle(
 	pendingID, terminalStatus string,
 	claimedMessages []*taskmodels.Message,
 ) (bool, error) {
+	if s.restoreErr != nil {
+		return false, s.restoreErr
+	}
+	if s.refuseRestore {
+		return false, nil
+	}
 	if len(claimedMessages) == 0 {
 		return false, nil
 	}
@@ -333,6 +341,46 @@ func TestHttpRespond_DetachedPublishFailureRestoresRetryableBundle(t *testing.T)
 		if contextErr != nil {
 			t.Fatalf("event publish %d used cancelled context: %v", index, contextErr)
 		}
+	}
+}
+
+func TestHttpRespond_DetachedPublishFailureDoesNotPromiseRetryWhenRestoreFails(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		restoreErr    error
+		refuseRestore bool
+	}{
+		{name: "restore error", restoreErr: errors.New("database unavailable")},
+		{name: "claim no longer restorable", refuseRestore: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &taskmodels.Message{
+				ID: "message-recovery", TaskID: "task-recovery", TaskSessionID: "session-recovery",
+				Metadata: map[string]any{
+					"status": "pending", "pending_id": "pending-recovery", "question_id": "q1",
+					"question": map[string]any{"id": "q1", "prompt": "Continue?"},
+				},
+			}
+			h, _, eventBus, messageCreator := setupTestHandler(t, map[string][]*taskmodels.Message{
+				"pending-recovery": {msg},
+			})
+			eventBus.publishErr = errors.New("event bus unavailable")
+			messageCreator.restoreErr = tt.restoreErr
+			messageCreator.refuseRestore = tt.refuseRestore
+
+			rec := runRespond(t, h, "pending-recovery", RespondBody{
+				Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}},
+			})
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("response status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "can be retried") {
+				t.Fatalf("failed restore advertised an unsafe retry: %s", rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "recover pending clarification state") {
+				t.Fatalf("failed restore response = %s, want recovery failure", rec.Body.String())
+			}
+		})
 	}
 }
 

@@ -286,7 +286,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 			if refreshErr != nil {
 				return refreshErr
 			}
-			if err := p.persistPendingRefreshLocked(ctx, taskID, state, pendingChanged); err != nil {
+			if err := p.persistPendingRefreshLocked(ctx, taskID, state, pendingChanged, "", nil); err != nil {
 				return err
 			}
 		}
@@ -301,7 +301,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 			return refreshErr
 		}
 		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged
-		return p.persistPendingRefreshLocked(ctx, taskID, state, changed)
+		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
 	changed := p.applySourceEventLocked(state, event.Type, data)
@@ -319,6 +319,8 @@ func (p *Projector) persistPendingRefreshLocked(
 	taskID string,
 	state *projectionState,
 	changed bool,
+	eventType string,
+	eventData map[string]interface{},
 ) error {
 	if !changed {
 		return nil
@@ -331,8 +333,15 @@ func (p *Projector) persistPendingRefreshLocked(
 		if accepted {
 			return nil
 		}
+		// The rejected writer reloaded the winning summary into state.current.
+		// Rebase every derived source before replaying this event; otherwise stale
+		// observation maps can overwrite unrelated fields from the winner.
+		rebaseProjectionStateFromCurrent(state)
 		if _, err := p.refreshPendingLocked(ctx, taskID, state); err != nil {
 			return err
+		}
+		if eventType != "" {
+			p.applySourceEventLocked(state, eventType, eventData)
 		}
 	}
 	p.logger.Warn("exhausted CAS retries refreshing pending task status",

@@ -52,7 +52,8 @@ function clarificationMessagesInScope(
   messages: readonly Message[],
   scope?: PendingClarificationScope,
 ): readonly Message[] {
-  if (!scope || scope.currentTurnId === null) return messages;
+  if (!scope) return messages;
+  if (scope.currentTurnId === null) return [];
   if (scope.currentTurnId === undefined) {
     return scope.pendingAction === "clarification" ? messages : [];
   }
@@ -115,9 +116,10 @@ export function hasPendingClarification(
 export function hasPendingClarificationForSession(
   messagesBySession: Record<string, readonly Message[] | undefined>,
   sessionId?: string | null,
+  scope?: PendingClarificationScope,
 ): boolean {
   if (!sessionId) return false;
-  return hasPendingClarification(messagesBySession[sessionId]);
+  return hasPendingClarification(messagesBySession[sessionId], scope);
 }
 
 // --- Permission request helpers ---

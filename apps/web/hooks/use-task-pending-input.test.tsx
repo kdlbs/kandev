@@ -7,11 +7,13 @@ import {
   taskId as toTaskId,
   type Message,
   type TaskSession,
+  type Turn,
 } from "@/lib/types/http";
 import { useSessionPendingInput, useTaskPendingInput } from "./use-task-pending-input";
 
 const PRIMARY_SESSION_ID = "session-primary";
 const SECONDARY_SESSION_ID = "session-secondary";
+const BASE_TIMESTAMP = "2026-05-02T00:00:00Z";
 
 function message(overrides: Partial<Message>): Message {
   return {
@@ -21,7 +23,7 @@ function message(overrides: Partial<Message>): Message {
     author_type: "agent",
     content: "",
     type: "message",
-    created_at: "2026-05-02T00:00:00Z",
+    created_at: BASE_TIMESTAMP,
     ...overrides,
   };
 }
@@ -31,8 +33,8 @@ function session(id: string, state: TaskSession["state"]): TaskSession {
     id: toSessionId(id),
     task_id: toTaskId("task-1"),
     state,
-    started_at: "2026-05-02T00:00:00Z",
-    updated_at: "2026-05-02T00:00:00Z",
+    started_at: BASE_TIMESTAMP,
+    updated_at: BASE_TIMESTAMP,
   };
 }
 
@@ -40,12 +42,28 @@ function sessionWithPendingAction(id: string, action: "clarification" | "permiss
   return Object.assign(session(id, "WAITING_FOR_INPUT"), { pending_action: action });
 }
 
-function wrapper(messagesBySession: Record<string, Message[]> = {}, sessions: TaskSession[] = []) {
+function turn(id: string, sessionId: string, startedAt: string): Turn {
+  return {
+    id,
+    session_id: toSessionId(sessionId),
+    task_id: toTaskId("task-1"),
+    started_at: startedAt,
+    created_at: startedAt,
+    updated_at: startedAt,
+  };
+}
+
+function wrapper(
+  messagesBySession: Record<string, Message[]> = {},
+  sessions: TaskSession[] = [],
+  turnsBySession: Record<string, Turn[]> = {},
+) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <StateProvider
         initialState={{
           messages: { bySession: messagesBySession, metaBySession: {} },
+          turns: { bySession: turnsBySession, activeBySession: {} },
           taskSessions: {
             items: Object.fromEntries(sessions.map((item) => [item.id, item])),
           },
@@ -165,6 +183,40 @@ describe("useTaskPendingInput", () => {
         ),
       },
     );
+    expect(result.current).toEqual({ clarification: false, permission: false });
+  });
+});
+
+describe("useTaskPendingInput current-turn clarification authority", () => {
+  it("ignores a detached pending clarification from an older durable turn", () => {
+    const oldTurn = turn("turn-old", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
+    const currentTurn = turn("turn-current", PRIMARY_SESSION_ID, "2026-05-02T00:01:00Z");
+    const { result } = renderHook(
+      () => useTaskPendingInput(PRIMARY_SESSION_ID, { taskId: "task-1" }),
+      {
+        wrapper: wrapper(
+          {
+            [PRIMARY_SESSION_ID]: [
+              message({
+                id: "detached-old-question",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: oldTurn.id,
+                type: "clarification_request",
+                metadata: { status: "pending", agent_disconnected: true },
+              }),
+              message({
+                id: "newer-turn-message",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: currentTurn.id,
+              }),
+            ],
+          },
+          [session(PRIMARY_SESSION_ID, "RUNNING")],
+          { [PRIMARY_SESSION_ID]: [oldTurn, currentTurn] },
+        ),
+      },
+    );
+
     expect(result.current).toEqual({ clarification: false, permission: false });
   });
 });

@@ -61,7 +61,7 @@ export function resolveTaskSessionId(args: {
       (session) =>
         isInputCapableSessionState(session.state) && session.pending_action === taskPendingAction,
     );
-    if (owner) return owner.id;
+    return owner?.id ?? "";
   }
   return resolveLoadedSessionId(sessions, preferredSessionId);
 }
@@ -231,6 +231,14 @@ type SelectTaskWithLayoutParams = {
   navigateToTask?: (taskId: string) => void;
 };
 
+function openTaskWithoutSession(
+  params: SelectTaskWithLayoutParams,
+  navigateToTask: (taskId: string) => void,
+): void {
+  params.setActiveTask(params.taskId);
+  navigateToTask(params.taskId);
+}
+
 export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
   const state = store.getState();
@@ -278,18 +286,19 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
           preferredSessionId: targetSessionId,
           taskPendingAction,
         });
+        if (!resolvedSessionId) return openTaskWithoutSession(params, navigateToTask);
         switchToSession(taskId, resolvedSessionId, currentOldSessionId);
         navigateToTask(taskId);
       })
       .catch(() => {
         if (selectionGuard.wasSuperseded()) return;
+        if (taskPendingAction) return openTaskWithoutSession(params, navigateToTask);
         switchToSession(taskId, targetSessionId, store.getState().tasks.activeSessionId);
         navigateToTask(taskId);
       })
       .finally(selectionGuard.dispose);
     return;
   }
-
   void loadTaskSessionsForTask(taskId)
     .then(async (sessions) => {
       if (selectionGuard.wasSuperseded()) return;
@@ -304,6 +313,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
         navigateToTask(taskId);
         return;
       }
+      if (taskPendingAction) return openTaskWithoutSession(params, navigateToTask);
 
       const switched = await prepareAndSwitchTask(
         taskId,
@@ -318,11 +328,8 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
       }
       if (selectionGuard.wasSuperseded()) return;
 
-      // Failure path: prepareAndSwitchTask already called releaseLayoutToDefault
-      // before awaiting, so the outgoing env's layout is already saved and the
-      // dockview is showing the default layout. A second release here would
-      // overwrite the just-saved env layout with `api.toJSON()` (the default),
-      // losing the user's real layout for the originating task.
+      // prepareAndSwitchTask already saved and released the outgoing layout.
+      // Releasing again would overwrite it with the current default layout.
       params.setActiveTask(taskId);
       navigateToTask(taskId);
     })

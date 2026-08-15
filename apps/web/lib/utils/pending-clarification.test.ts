@@ -229,9 +229,9 @@ describe("clarification authority fallbacks", () => {
     );
   });
 
-  it("preserves legacy discovery when turn history is loaded but empty", () => {
+  it("treats loaded empty turn history as having no active clarification", () => {
     const messages = [message({ type: "clarification_request", metadata: { status: "pending" } })];
-    expect(findPendingClarification(messages, { currentTurnId: null })?.id).toBe("msg-1");
+    expect(findPendingClarification(messages, { currentTurnId: null })).toBeNull();
   });
 
   it("selects the newest durable turn with backend tie-break ordering", () => {
