@@ -465,6 +465,8 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 		map[string][]*models.TaskSession{c.Param("id"): sessions},
 	)
 	if pendingErr != nil {
+		// Pending ownership routes the drawer to the input-capable session.
+		// Returning incomplete ownership can hide the action on a clean session.
 		h.logger.Error("get task session pending actions failed", zap.Error(pendingErr))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve task session pending actions"})
 		return

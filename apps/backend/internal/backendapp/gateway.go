@@ -413,6 +413,9 @@ func loadTaskPendingActions(
 	if err != nil {
 		return nil, err
 	}
+	// Session state and pending actions are separate snapshots. A concurrent
+	// transition can briefly omit an owner; the next lifecycle/message event
+	// rebuilds the summary from fresh snapshots.
 	sessionIDs := make([]string, 0, len(sessions))
 	for _, session := range sessions {
 		if session == nil || (session.State != models.TaskSessionStateRunning &&

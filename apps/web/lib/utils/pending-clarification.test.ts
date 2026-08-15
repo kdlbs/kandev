@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type Message,
+  type Turn,
+} from "@/lib/types/http";
 import {
   findPendingClarification,
   findPendingClarificationGroup,
@@ -21,6 +26,17 @@ function message(overrides: Partial<Message>): Message {
     type: "message",
     created_at: "2026-05-02T00:00:00Z",
     ...overrides,
+  };
+}
+
+function turn(id: string, startedAt = TURN_TIMESTAMP, createdAt = TURN_TIMESTAMP): Turn {
+  return {
+    id,
+    session_id: toSessionId("session-1"),
+    task_id: toTaskId("task-1"),
+    started_at: startedAt,
+    created_at: createdAt,
+    updated_at: createdAt,
   };
 }
 
@@ -220,6 +236,23 @@ describe("current-turn clarification ownership", () => {
   });
 });
 
+describe("newestDurableTurnId load states", () => {
+  it("distinguishes unavailable, empty, and populated durable turn history", () => {
+    expect(newestDurableTurnId()).toBeUndefined();
+    expect(newestDurableTurnId([])).toBeNull();
+    expect(newestDurableTurnId([turn("turn-only")])).toBe("turn-only");
+  });
+
+  it("selects the turn with the later start time", () => {
+    expect(
+      newestDurableTurnId([
+        turn("turn-later-id", "2026-08-14T12:00:00Z"),
+        turn("turn-earlier-id", "2026-08-14T12:00:01Z"),
+      ]),
+    ).toBe("turn-earlier-id");
+  });
+});
+
 describe("clarification authority fallbacks", () => {
   it("uses compact session authority while turn history is unavailable", () => {
     const messages = [message({ type: "clarification_request", metadata: { status: "pending" } })];
@@ -234,6 +267,34 @@ describe("clarification authority fallbacks", () => {
     expect(findPendingClarification(messages, { currentTurnId: null })).toBeNull();
   });
 
+  it("applies every turn-authority state to direct pending checks", () => {
+    const old = message({
+      id: "old",
+      turn_id: "turn-old",
+      type: "clarification_request",
+      metadata: { status: "pending" },
+    });
+    const current = message({
+      id: "current",
+      turn_id: CURRENT_TURN_ID,
+      type: "clarification_request",
+      metadata: { status: "pending" },
+    });
+
+    expect(hasPendingClarification([old, current], { currentTurnId: null })).toBe(false);
+    expect(
+      hasPendingClarification([old, current], {
+        currentTurnId: undefined,
+        pendingAction: "clarification",
+      }),
+    ).toBe(true);
+    expect(hasPendingClarification([old, current], { currentTurnId: undefined })).toBe(false);
+    expect(hasPendingClarification([old, current], { currentTurnId: CURRENT_TURN_ID })).toBe(true);
+    expect(hasPendingClarification([old], { currentTurnId: CURRENT_TURN_ID })).toBe(false);
+  });
+});
+
+describe("newestDurableTurnId ordering", () => {
   it("selects the newest durable turn with backend tie-break ordering", () => {
     expect(
       newestDurableTurnId([
