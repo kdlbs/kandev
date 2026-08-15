@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
+import type { SecretListItem } from "../../../lib/types/http-secrets";
 
 const GLOBAL_VALUE = "e2e-copy-move-global-value";
 
@@ -37,15 +39,20 @@ async function submitCopyMove(
   page: import("@playwright/test").Page,
   secretName: string,
   mode: "Copy" | "Move",
-) {
+): Promise<SecretListItem> {
   await page.getByRole("button", { name: `Copy or move ${secretName}` }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   if (mode === "Move") {
     await dialog.getByRole("radio", { name: /Move/ }).click();
   }
+  const transferResponse = waitForHttp(page, "POST", /\/api\/v1\/secrets\/[^/]+\/(?:copy|move)$/, {
+    predicate: (response) => response.status() === 201,
+  });
   await dialog.getByRole("button", { name: mode, exact: true }).click();
+  const transferred = (await (await transferResponse).json()) as SecretListItem;
   await expect(dialog).toBeHidden();
+  return transferred;
 }
 
 async function waitForWorkspaceSecret(
@@ -84,7 +91,12 @@ test.describe("secrets-copy-move", () => {
     const global = (await apiClient.listSecrets()).find((secret) => secret.name === sourceName);
     expect(global?.id).toBeTruthy();
 
-    await submitCopyMove(testPage, sourceName, "Copy");
+    const transferred = await submitCopyMove(testPage, sourceName, "Copy");
+    expect(transferred).toMatchObject({
+      name: copiedName,
+      scope: "workspace",
+      workspace_id: seedData.workspaceId,
+    });
 
     // The source stays on the Global page; the copy appears in the workspace.
     await expect(testPage.getByText(sourceName, { exact: true })).toBeVisible();

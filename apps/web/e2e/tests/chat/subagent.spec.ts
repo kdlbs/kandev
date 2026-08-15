@@ -1,6 +1,43 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
+async function waitForPersistedSubagentMetrics(
+  apiClient: {
+    listSessionMessages: (sessionId: string) => Promise<{
+      messages: Array<{ metadata?: Record<string, unknown> }>;
+    }>;
+  },
+  sessionId: string,
+) {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.some((message) => {
+          const normalized = message.metadata?.normalized;
+          if (!normalized || typeof normalized !== "object") return false;
+          const subagentTask = (normalized as { subagent_task?: unknown }).subagent_task;
+          if (!subagentTask || typeof subagentTask !== "object") return false;
+          const metrics = subagentTask as {
+            duration_ms?: unknown;
+            total_tokens?: unknown;
+            tool_use_count?: unknown;
+          };
+          return (
+            metrics.duration_ms === 2200 &&
+            metrics.total_tokens === 9987 &&
+            metrics.tool_use_count === 3
+          );
+        });
+      },
+      {
+        timeout: 30_000,
+        message: "subagent completion metrics were not persisted in the session",
+      },
+    )
+    .toBe(true);
+}
+
 // Drives the mock-agent's `subagent` scenario (triggered by the `/e2e:subagent`
 // directive). The scenario emits a claude-style subagent (Task) tool call with
 // full result metadata, which the kandev adapter normalizes to a subagent_task
@@ -50,13 +87,25 @@ test.describe("Subagent card", () => {
       "Explore the codebase",
     );
 
-    // Metadata row of chips surfaces the completed subagent's metrics.
     // Chat idle means the outer turn is no longer streaming. The nested
-    // subagent completion event can still be hydrating into the card, so wait
-    // for that state boundary explicitly instead of relying on the default
-    // five-second assertion timeout.
+    // subagent completion event can still be hydrating into the card. Wait for
+    // the persisted message that causes the metadata row before checking the
+    // rendered consequence.
+    const sessionId = task.session_id ?? task.primary_session_id;
+    expect(sessionId).toBeTruthy();
+    if (!sessionId) throw new Error("agent task did not return a session id");
+    await waitForPersistedSubagentMetrics(apiClient, sessionId);
+
     const metadata = card.locator('[data-testid="subagent-meta"]');
-    await expect(metadata).toBeVisible({ timeout: 15_000 });
+    // A live update may have been missed while the page was hydrating. Once
+    // the backend state is present, one reload rehydrates the authoritative
+    // message list without turning this into an unbounded retry loop.
+    if (!(await metadata.isVisible())) {
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 15_000 });
+    }
+    await expect(metadata).toBeVisible();
     await expect(card.locator('[data-testid="subagent-meta-duration"]')).toContainText("2.2s");
     await expect(card.locator('[data-testid="subagent-meta-tokens"]')).toContainText("9,987");
     await expect(card.locator('[data-testid="subagent-meta-tools"]')).toContainText("3 tools");

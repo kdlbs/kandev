@@ -18,6 +18,20 @@ test.describe("Mobile task listing display preferences", () => {
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
     });
+    await expect
+      .poll(
+        async () => {
+          const persistedTask = await apiClient.getTask(task.id);
+          return persistedTask.repositories?.some(
+            (repository) => repository.repository_id === seedData.repositoryId,
+          );
+        },
+        {
+          message: "task repository association was not persisted before listing",
+          timeout: 15_000,
+        },
+      )
+      .toBe(true);
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
       owner: "kandev",
