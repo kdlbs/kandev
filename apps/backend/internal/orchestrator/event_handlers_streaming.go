@@ -197,6 +197,41 @@ func (s *Service) foregroundIdleOwnsCurrentPrompt(payload *lifecycle.AgentStream
 	return false
 }
 
+// streamEventIsStalePrompt proves that a generation-bearing stream event came
+// from a prompt that no longer owns the execution. Generation-zero providers
+// do not expose enough identity to make that determination, so their terminal
+// events use the normal settlement path.
+func (s *Service) streamEventIsStalePrompt(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil || payload.Data.PromptGeneration == 0 {
+		return false
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	if !ok {
+		return false
+	}
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
+	return !generationOwner.OwnsPromptGeneration(
+		payload.SessionID, executionID, payload.Data.PromptGeneration,
+	)
+}
+
+func (s *Service) completeTurnForStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload == nil {
+		return
+	}
+	s.completeTurnForTaskSessionWithSuccessorPolicy(
+		ctx,
+		payload.TaskID,
+		payload.SessionID,
+		s.streamEventIsStalePrompt(payload),
+	)
+}
+
 // handleAgentErrorEvent handles agentEventError events by creating an error message and completing the turn.
 func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	taskID := payload.TaskID
@@ -225,7 +260,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 				zap.Error(err))
 		}
 	}
-	s.completeTurnForTaskSession(ctx, taskID, sessionID)
+	s.completeTurnForStreamEvent(ctx, payload)
 }
 
 // handleSessionStatusEvent handles session_status events by storing resume token and creating a status message.
@@ -1888,7 +1923,7 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	s.saveAgentTextIfPresent(ctx, payload)
 	s.publishAgentPlanIfPresent(ctx, payload)
 	s.persistTurnPromptMetadata(ctx, payload, session)
-	s.completeTurnForTaskSession(ctx, payload.TaskID, payload.SessionID)
+	s.completeTurnForStreamEvent(ctx, payload)
 
 	// Publish agent turn message event so the office comment bridge can
 	// auto-post the agent's response as a task comment. Published here

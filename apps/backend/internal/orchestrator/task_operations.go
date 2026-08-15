@@ -3778,6 +3778,14 @@ func (s *Service) claimSessionRunningForPrompt(
 			State:     freshSession.State,
 		}
 	}
+	reservation := s.queuedDispatchReservationForEntry(sessionID, claimEntryID)
+	if reservation != nil && reservation.liveEligible.Load() {
+		// A Send Now reservation becomes replaceable only after this guarded
+		// session claim. Start/adopt its turn under the same guard so the phase
+		// and turn ownership cannot be observed half-way through the handoff.
+		s.startTurnForSessionWithOwnership(ctx, sessionID)
+		s.markAcceptedDispatchLiveLocked(sessionID, reservation)
+	}
 	// Remove only the pre-acceptance marker here. The accepted ownership record
 	// remains until the turn settles, so Send Now cannot cancel or duplicate
 	// this successor while the executor call is still in progress.

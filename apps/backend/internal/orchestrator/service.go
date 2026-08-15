@@ -1431,12 +1431,24 @@ func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) 
 }
 
 func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
+	s.completeTurnForTaskSessionWithSuccessorPolicy(ctx, taskID, sessionID, true)
+}
+
+// completeTurnForTaskSessionWithSuccessorPolicy reconciles active turns while
+// optionally preserving an accepted replacement. Only a stream event that has
+// been proven to belong to a superseded prompt may preserve that replacement;
+// the current successor's own terminal event must settle it normally.
+func (s *Service) completeTurnForTaskSessionWithSuccessorPolicy(
+	ctx context.Context,
+	taskID, sessionID string,
+	preserveAcceptedSuccessor bool,
+) {
 	// Stream-only completion of a cancelled predecessor must not wipe a
 	// Send Now / FIFO successor that has already claimed prompt ownership.
 	// The ready-path wrapper (completeTurnForSession) still clears the
 	// marker when the successor turn itself settles, so the next queue
 	// action is not blocked forever.
-	if s.acceptedDispatchInFlight(sessionID) {
+	if preserveAcceptedSuccessor && s.acceptedDispatchInFlight(sessionID) {
 		if successor := s.acceptedDispatchSuccessorTurn(sessionID); successor != "" {
 			if err := s.completeTurnsExcept(ctx, sessionID, successor); err != nil {
 				s.logger.Warn("failed to reconcile predecessor turn while successor dispatch is accepted",
@@ -1566,6 +1578,20 @@ func (s *Service) completeTurnsExcept(ctx context.Context, sessionID, keepTurnID
 		}
 		closed++
 	}
+	active, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		if isNoActiveTurnError(err) {
+			return fmt.Errorf("closed %d predecessor turns but successor %s was not found", closed, keepTurnID)
+		}
+		return fmt.Errorf("verify successor turn %s after closing %d predecessors: %w", keepTurnID, closed, err)
+	}
+	if active == nil {
+		return fmt.Errorf("closed %d predecessor turns but successor %s was not found", closed, keepTurnID)
+	}
+	if active.ID != keepTurnID {
+		return fmt.Errorf("closed %d predecessor turns but active turn is %s, want successor %s", closed, active.ID, keepTurnID)
+	}
+	s.activeTurns.Store(sessionID, keepTurnID)
 	return nil
 }
 

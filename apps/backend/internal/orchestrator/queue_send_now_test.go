@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -309,48 +311,79 @@ func TestSendQueuedNowConflictsAfterFIFOHandoffAccepted(t *testing.T) {
 }
 
 func TestStreamCompletePreservesAcceptedSendNowDispatch(t *testing.T) {
-	svc := &Service{logger: testLogger()}
-	reservation := svc.markQueuedDispatchInFlight("session-1", "dispatch-1")
-	tracked, err := svc.claimQueuedDispatchForExecution("session-1", "dispatch-1", reservation)
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	reservation := svc.markQueuedDispatchInFlight("session1", "dispatch-1")
+	tracked, err := svc.claimQueuedDispatchForExecution("session1", "dispatch-1", reservation)
 	if err != nil || !tracked {
 		t.Fatalf("claim accepted dispatch: tracked=%v err=%v", tracked, err)
 	}
-	if !svc.isCurrentQueuedDispatch("session-1", "dispatch-1") {
+	successor, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("start successor turn: %v", err)
+	}
+	reservation.bindSuccessorTurn(successor.ID)
+	if !svc.isCurrentQueuedDispatch("session1", "dispatch-1") {
 		t.Fatal("accepted send-now dispatch was not current before stream complete")
 	}
 
-	svc.completeTurnForTaskSession(context.Background(), "task-1", "session-1")
-	if !svc.isCurrentQueuedDispatch("session-1", "dispatch-1") {
+	svc.completeTurnForTaskSession(ctx, "task1", "session1")
+	if !svc.isCurrentQueuedDispatch("session1", "dispatch-1") {
 		t.Fatal("stream-only predecessor complete wiped accepted send-now dispatch")
 	}
-
-	svc.completeTurnForSession(context.Background(), "session-1")
-	if svc.isCurrentQueuedDispatch("session-1", "dispatch-1") {
+	active, err := svc.turnService.GetActiveTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get active turn: %v", err)
+	}
+	if active == nil || active.ID != successor.ID {
+		t.Fatalf("active successor = %#v, want %s", active, successor.ID)
+	}
+	svc.completeTurnForSession(ctx, "session1")
+	if svc.isCurrentQueuedDispatch("session1", "dispatch-1") {
 		t.Fatal("ready-path successor complete left accepted send-now dispatch blocking the next queue action")
 	}
 }
 
 func TestLiveSendNowSuccessorDoesNotConflictAndStaysProtected(t *testing.T) {
-	svc := &Service{logger: testLogger()}
-	reservation := svc.markQueuedDispatchInFlight("session-1", "dispatch-1")
-	if _, err := svc.claimQueuedDispatchForExecution("session-1", "dispatch-1", reservation); err != nil {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	reservation := svc.markQueuedDispatchInFlight("session1", "dispatch-1")
+	if _, err := svc.claimQueuedDispatchForExecution("session1", "dispatch-1", reservation); err != nil {
 		t.Fatalf("claim accepted dispatch: %v", err)
 	}
-	if !svc.isQueuedDispatchAccepted("session-1") {
+	successor, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("start successor turn: %v", err)
+	}
+	reservation.bindSuccessorTurn(successor.ID)
+	if !svc.isQueuedDispatchAccepted("session1") {
 		t.Fatal("handoff reservation should conflict before it is live")
 	}
 
-	svc.markAcceptedDispatchLive("session-1", reservation)
-	if svc.isQueuedDispatchAccepted("session-1") {
+	svc.markAcceptedDispatchLive("session1", reservation)
+	if svc.isQueuedDispatchAccepted("session1") {
 		t.Fatal("live send-now successor still reported as a handoff conflict")
 	}
-	if _, err := svc.pendingQueuedDispatchForSendNow("session-1"); err != nil {
+	if _, err := svc.pendingQueuedDispatchForSendNow("session1"); err != nil {
 		t.Fatalf("live successor blocked send-now restore: %v", err)
 	}
 
-	svc.completeTurnForTaskSession(context.Background(), "task-1", "session-1")
-	if !svc.isCurrentQueuedDispatch("session-1", "dispatch-1") {
+	svc.completeTurnForTaskSession(ctx, "task1", "session1")
+	if !svc.isCurrentQueuedDispatch("session1", "dispatch-1") {
 		t.Fatal("stream-only predecessor complete wiped live send-now dispatch")
+	}
+	active, err := svc.turnService.GetActiveTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get active successor turn: %v", err)
+	}
+	if active == nil || active.ID != successor.ID {
+		t.Fatalf("active successor = %#v, want %s", active, successor.ID)
 	}
 }
 
@@ -372,6 +405,7 @@ func TestSendQueuedNowCancelsLiveReplacementTurn(t *testing.T) {
 	allowFirstPrompt := make(chan struct{})
 	secondPromptEntered := make(chan struct{})
 	allowSecondPrompt := make(chan struct{})
+	var releaseFirstPrompt, releaseSecondPrompt, markSecondPrompt sync.Once
 	var promptCount atomic.Int32
 	agentMgr := &mockAgentManager{
 		isAgentRunning:         true,
@@ -383,7 +417,7 @@ func TestSendQueuedNowCancelsLiveReplacementTurn(t *testing.T) {
 				<-allowFirstPrompt
 				return &executor.PromptResult{}, nil
 			}
-			close(secondPromptEntered)
+			markSecondPrompt.Do(func() { close(secondPromptEntered) })
 			<-allowSecondPrompt
 			return &executor.PromptResult{}, nil
 		},
@@ -392,6 +426,11 @@ func TestSendQueuedNowCancelsLiveReplacementTurn(t *testing.T) {
 	svc.messageQueue.SetAutoMergeEnabled(false)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 	svc.messageCreator = &mockMessageCreator{}
+	t.Cleanup(func() {
+		releaseFirstPrompt.Do(func() { close(allowFirstPrompt) })
+		releaseSecondPrompt.Do(func() { close(allowSecondPrompt) })
+		svc.stopSendNowWorkers()
+	})
 
 	if _, err := svc.messageQueue.QueueMessageWithMetadata(
 		ctx, "session-1", "task-1", "first send now", "", messagequeue.QueuedByUser, false, nil, nil,
@@ -419,11 +458,190 @@ func TestSendQueuedNowCancelsLiveReplacementTurn(t *testing.T) {
 		t.Fatal("later send now did not cancel the live replacement turn")
 	}
 
-	close(allowFirstPrompt)
+	releaseFirstPrompt.Do(func() { close(allowFirstPrompt) })
 	select {
 	case <-secondPromptEntered:
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for later replacement prompt")
 	}
-	close(allowSecondPrompt)
+	releaseSecondPrompt.Do(func() { close(allowSecondPrompt) })
+}
+
+func TestSendQueuedNowConflictsBeforeReplacementClaimsPrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	preClaimEntered := make(chan struct{})
+	releasePreClaim := make(chan struct{})
+	var releasePreClaimOnce sync.Once
+	var executionLookupCalls atomic.Int32
+	promptDone := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptDone:             promptDone,
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			if executionLookupCalls.Add(1) == 1 {
+				close(preClaimEntered)
+				<-releasePreClaim
+			}
+			return "exec-1", nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.messageQueue.SetAutoMergeEnabled(false)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageCreator = &mockMessageCreator{}
+	t.Cleanup(func() {
+		releasePreClaimOnce.Do(func() { close(releasePreClaim) })
+		svc.stopSendNowWorkers()
+	})
+
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "session-1", "task-1", "first send now", "", messagequeue.QueuedByUser, false, nil, nil,
+	); err != nil {
+		t.Fatalf("queue first message: %v", err)
+	}
+	if _, err := svc.SendQueuedNow(ctx, "session-1", QueueSendNowScopeAll, ""); err != nil {
+		t.Fatalf("first send now: %v", err)
+	}
+	select {
+	case <-preClaimEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for replacement prompt claim barrier")
+	}
+
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "session-1", "task-1", "second send now", "", messagequeue.QueuedByUser, false, nil, nil,
+	); err != nil {
+		t.Fatalf("queue second message: %v", err)
+	}
+	if _, err := svc.SendQueuedNow(ctx, "session-1", QueueSendNowScopeAll, ""); !errors.Is(err, ErrSendNowConflict) {
+		t.Fatalf("send now while replacement is pre-claim error = %v, want %v", err, ErrSendNowConflict)
+	}
+
+	releasePreClaimOnce.Do(func() { close(releasePreClaim) })
+	select {
+	case <-promptDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first replacement prompt")
+	}
+}
+
+func TestStreamCompleteSettlesCurrentSendNowSuccessor(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+	agentMgr := &mockAgentManager{currentPromptExecutionID: "exec-1"}
+	agentMgr.currentPromptGeneration.Store(2)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	reservation := svc.markQueuedDispatchInFlight("session1", "dispatch-1")
+	if tracked, err := svc.claimQueuedDispatchForExecution("session1", "dispatch-1", reservation); err != nil || !tracked {
+		t.Fatalf("claim accepted dispatch: tracked=%v err=%v", tracked, err)
+	}
+	successor, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("start successor turn: %v", err)
+	}
+	reservation.bindSuccessorTurn(successor.ID)
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "task1",
+		SessionID:   "session1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             agentEventComplete,
+			PromptGeneration: 2,
+		},
+	})
+
+	active, err := svc.turnService.GetActiveTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get active successor turn: %v", err)
+	}
+	if active != nil {
+		t.Fatalf("current successor complete left turn %q active", active.ID)
+	}
+	if svc.acceptedDispatchInFlight("session1") {
+		t.Fatal("current successor complete left accepted dispatch marker active")
+	}
+}
+
+func TestStreamCompletePreservesSuccessorForStalePromptGeneration(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+	agentMgr := &mockAgentManager{currentPromptExecutionID: "exec-1"}
+	agentMgr.currentPromptGeneration.Store(2)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	reservation := svc.markQueuedDispatchInFlight("session1", "dispatch-1")
+	if tracked, err := svc.claimQueuedDispatchForExecution("session1", "dispatch-1", reservation); err != nil || !tracked {
+		t.Fatalf("claim accepted dispatch: tracked=%v err=%v", tracked, err)
+	}
+	successor, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("start successor turn: %v", err)
+	}
+	reservation.bindSuccessorTurn(successor.ID)
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "task1",
+		SessionID:   "session1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             agentEventComplete,
+			PromptGeneration: 1,
+		},
+	})
+
+	active, err := svc.turnService.GetActiveTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get active successor turn: %v", err)
+	}
+	if active == nil || active.ID != successor.ID {
+		t.Fatalf("stale predecessor complete changed active turn to %#v, want %s", active, successor.ID)
+	}
+	if !svc.acceptedDispatchInFlight("session1") {
+		t.Fatal("stale predecessor complete cleared accepted successor dispatch")
+	}
+}
+
+func TestCompleteTurnsExceptReportsIterationExhaustion(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	keep, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("start keep turn: %v", err)
+	}
+	for i := 0; i < 17; i++ {
+		if _, err := svc.turnService.StartTurn(ctx, "session1"); err != nil {
+			t.Fatalf("start predecessor turn %d: %v", i, err)
+		}
+	}
+
+	if err := svc.completeTurnsExcept(ctx, "session1", keep.ID); err == nil {
+		t.Fatal("completeTurnsExcept returned nil after hitting its iteration limit")
+	}
+	active, err := svc.turnService.GetActiveTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get active turn after exhaustion: %v", err)
+	}
+	if active == nil || active.ID == keep.ID {
+		t.Fatalf("iteration exhaustion incorrectly reported successor as settled: %#v", active)
+	}
 }
