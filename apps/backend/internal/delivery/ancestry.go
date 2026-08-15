@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
 )
 
@@ -59,6 +60,23 @@ type AncestryChecker struct {
 func (a *AncestryChecker) Check(ctx context.Context, repositoryID, defaultBranch, commit string) AncestryOutcome {
 	out := AncestryOutcome{Attempted: true, Commit: commit}
 	if !looksLikeCommitSHA(commit) {
+		out.Errored = true
+		return out
+	}
+	// repositories.default_branch is attacker-reachable through ordinary
+	// repository create/update requests and is not format-validated
+	// upstream of this seam either (Review round 2, finding #1). A
+	// flag-like value risks option-injection against refExists's rev-parse
+	// call, which cannot take a "--" separator (it would turn the argument
+	// into a pathspec). More dangerously, a value like "main~1" is not
+	// flag-like at all but is valid git revision syntax: appended to a ref
+	// that does exist (e.g. "refs/remotes/origin/main~1"), it resolves
+	// successfully to the wrong commit with no error, rather than failing
+	// as "does not exist" — defense-in-depth alongside the ingestion-time
+	// validation in task/service.applyRepositoryUpdates /
+	// CreateRepository, mirroring looksLikeCommitSHA's treatment of
+	// commit above.
+	if !securityutil.IsValidBranchName(defaultBranch) {
 		out.Errored = true
 		return out
 	}

@@ -161,6 +161,57 @@ func TestAncestryChecker_FlagLikeCommitIsRejectedBeforeReachingGit(t *testing.T)
 	}
 }
 
+// TestAncestryChecker_FlagLikeDefaultBranchIsRejectedBeforeReachingGit
+// covers Review round 2, finding #1 (SEC-005): repositories.default_branch
+// is attacker-reachable through ordinary repository create/update requests
+// and was never validated before reaching refExists as raw argv. Round 1's
+// finding #7 guarded the commit argument with looksLikeCommitSHA but left
+// defaultBranch unguarded — a flag-like value here risks option-injection
+// against `git rev-parse --verify --quiet <value>^{commit}`, which cannot
+// take a `--` separator (it would turn the argument into a pathspec), so
+// the fix must be validation before the call, mirroring looksLikeCommitSHA's
+// treatment of commit.
+func TestAncestryChecker_FlagLikeDefaultBranchIsRejectedBeforeReachingGit(t *testing.T) {
+	work, _ := newAncestryTestRepo(t)
+	head := runGit(t, work, "rev-parse", "HEAD")
+
+	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work}}
+	out := checker.Check(context.Background(), "repo-1", "-x", head)
+
+	if !out.Errored || out.Positive {
+		t.Fatalf("out = %+v, want Errored=true (a flag-like default branch must never reach the git subprocess)", out)
+	}
+}
+
+// TestAncestryChecker_RevisionSyntaxDefaultBranchIsRejectedBeforeReachingGit
+// covers the second, more dangerous consequence named in finding #1: a
+// value like "main~1" is not flag-like, but git parses it as revision syntax
+// (a parent-commit modifier) rather than a literal ref name. This is not a
+// theoretical concern — with a real second commit on the default branch,
+// "refs/remotes/origin/main~1^{commit}" resolves successfully (exit 0) to
+// the PARENT commit, silently, with no error at all: the exact
+// "nonexistent ref resolves to the wrong commit entirely" failure mode the
+// finding describes. A repo with only one commit cannot reproduce this
+// (main~1 has no parent to resolve to, so it fails safe by accident), so
+// this test seeds a second commit specifically to exercise the real defect.
+func TestAncestryChecker_RevisionSyntaxDefaultBranchIsRejectedBeforeReachingGit(t *testing.T) {
+	work, defaultBranch := newAncestryTestRepo(t)
+	writeFile(t, work, "second.txt", "second commit")
+	runGit(t, work, "add", "second.txt")
+	runGit(t, work, "commit", "-m", "second commit")
+	runGit(t, work, "push", "origin", defaultBranch)
+	runGit(t, work, "fetch", "origin")
+	head := runGit(t, work, "rev-parse", "HEAD")
+
+	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work}}
+	out := checker.Check(context.Background(), "repo-1", defaultBranch+"~1", head)
+
+	if !out.Errored || out.Positive {
+		t.Fatalf("out = %+v, want Errored=true (revision syntax must never reach the git subprocess as a literal ref, "+
+			"even when it happens to resolve to a real, but wrong, commit)", out)
+	}
+}
+
 func TestAncestryChecker_CheckoutResolverErrorIsAnAncestryError(t *testing.T) {
 	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{err: errTestCheckout}}
 	out := checker.Check(context.Background(), "repo-1", "main", "HEAD")
