@@ -17,6 +17,7 @@ import (
 	internaldb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -353,6 +354,19 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		}
 		return err
 	}
+	// Genesis ledger row. By this point applyAdmissionPlacement has already
+	// rewritten task.WorkflowStepID to the actual placement (feeder step when
+	// WIP diverted it), so this satisfies the spec's feeder-step scenario for
+	// free. A task created with no workflow writes nothing.
+	genesisCtx := steptelemetry.WithAttribution(ctx, genesisAttribution(ctx))
+	if err := r.recordStepTransition(genesisCtx, tx, stepTransitionInput{
+		taskID:           task.ID,
+		toWorkflowID:     task.WorkflowID,
+		toWorkflowStepID: task.WorkflowStepID,
+		occurredAt:       task.CreatedAt,
+	}); err != nil {
+		return err
+	}
 	if task.AssigneeAgentProfileID != "" && task.WorkflowStepID != "" {
 		return upsertRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
 	}
@@ -421,18 +435,23 @@ func lockWorkflowStepForCapacity(ctx context.Context, tx *sql.Tx, driver string,
 // upsertRunnerInTx writes (or replaces) a 'runner' participant row for
 // (stepID, taskID) inside the provided transaction. Mirrors
 // workflow.Repository.SetTaskRunner but reuses the caller's tx.
+//
+// rebind is the caller's r.db.Rebind — required on Postgres, where the raw
+// "?" placeholders below are not valid bind syntax (unlike SQLite, which
+// accepts them natively). Mirrors lockWorkflowStepForCapacity's pattern for
+// a free function that isn't a *Repository method.
 func upsertRunnerInTx(ctx context.Context, tx *sql.Tx, rebind func(string) string, stepID, taskID, agentProfileID string) error {
 	if stepID == "" || taskID == "" || agentProfileID == "" {
 		return nil
 	}
 	var existing string
 	err := tx.QueryRowContext(ctx, rebind(`SELECT id FROM workflow_step_participants
-		WHERE step_id = ? AND task_id = ? AND role = 'runner' LIMIT 1`,
-	), stepID, taskID).Scan(&existing)
+		WHERE step_id = ? AND task_id = ? AND role = 'runner' LIMIT 1`),
+		stepID, taskID).Scan(&existing)
 	if err == nil {
-		_, uerr := tx.ExecContext(ctx, rebind(
-			`UPDATE workflow_step_participants SET agent_profile_id = ? WHERE id = ?`,
-		), agentProfileID, existing)
+		_, uerr := tx.ExecContext(ctx,
+			rebind(`UPDATE workflow_step_participants SET agent_profile_id = ? WHERE id = ?`),
+			agentProfileID, existing)
 		return uerr
 	}
 	if err != sql.ErrNoRows {
@@ -441,8 +460,8 @@ func upsertRunnerInTx(ctx context.Context, tx *sql.Tx, rebind func(string) strin
 	id := uuid.New().String()
 	_, ierr := tx.ExecContext(ctx, rebind(`INSERT INTO workflow_step_participants
 		(id, step_id, task_id, role, agent_profile_id, decision_required, position)
-		VALUES (?, ?, ?, 'runner', ?, 0, 0)`,
-	), id, stepID, taskID, agentProfileID)
+		VALUES (?, ?, ?, 'runner', ?, 0, 0)`),
+		id, stepID, taskID, agentProfileID)
 	return ierr
 }
 
@@ -451,10 +470,10 @@ func clearRunnerInTx(ctx context.Context, tx *sql.Tx, rebind func(string) string
 	if stepID == "" || taskID == "" {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx, rebind(
-		`DELETE FROM workflow_step_participants
-		 WHERE step_id = ? AND task_id = ? AND role = 'runner'`,
-	), stepID, taskID)
+	_, err := tx.ExecContext(ctx,
+		rebind(`DELETE FROM workflow_step_participants
+		 WHERE step_id = ? AND task_id = ? AND role = 'runner'`),
+		stepID, taskID)
 	return err
 }
 
@@ -485,8 +504,6 @@ func (r *Repository) GetTask(ctx context.Context, id string) (*models.Task, erro
 // upsert/clear on workflow_step_participants inside the same tx as the
 // task UPDATE.
 func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
-	task.UpdatedAt = time.Now().UTC()
-
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
@@ -506,6 +523,20 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 }
 
 func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte) error {
+	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return err
+	}
+	// Stamped after the transactional read/lock above, not before BeginTx: on
+	// Postgres, readTaskStepInTx's FOR UPDATE blocks until this transaction's
+	// turn to touch the row, so the timestamp now reflects true serialization
+	// order. Stamping it earlier let two concurrent movers commit out of
+	// timestamp order relative to their actual commit order, which broke the
+	// (occurred_at, id) chain invariant under real concurrent load — SQLite's
+	// single-writer connection pool serializes callers regardless, so this
+	// was invisible until exercised against Postgres with real concurrency.
+	task.UpdatedAt = time.Now().UTC()
+
 	updateQuery := `
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
@@ -531,6 +562,18 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
+
+	if err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+		taskID:             task.ID,
+		fromWorkflowID:     fromWorkflowID,
+		fromWorkflowStepID: fromStepID,
+		toWorkflowID:       task.WorkflowID,
+		toWorkflowStepID:   task.WorkflowStepID,
+		occurredAt:         task.UpdatedAt,
+	}); err != nil {
+		return err
+	}
+
 	return syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
 }
 
@@ -912,7 +955,6 @@ func detachTaskQuery(driver string) string {
 // UpdateTaskIfWorkflowStepHasCapacity updates a task inside the same write
 // transaction that checks a WIP-limited target step's current occupancy.
 func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID, excludeTaskID string, limit int) error {
-	task.UpdatedAt = time.Now().UTC()
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
@@ -943,6 +985,15 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		return wfmodels.NewWIPLimitError(targetStepID, limit, occupants)
 	}
 
+	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return err
+	}
+	// See updateTaskTx's comment: stamped after the transactional lock, not
+	// before BeginTx, so occurred_at reflects true commit-serialization order
+	// under concurrent Postgres callers.
+	task.UpdatedAt = time.Now().UTC()
+
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
@@ -953,6 +1004,16 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+		taskID:             task.ID,
+		fromWorkflowID:     fromWorkflowID,
+		fromWorkflowStepID: fromStepID,
+		toWorkflowID:       task.WorkflowID,
+		toWorkflowStepID:   task.WorkflowStepID,
+		occurredAt:         task.UpdatedAt,
+	}); err != nil {
+		return err
 	}
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return err
@@ -970,7 +1031,6 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	destinationStepID string,
 	limit int,
 ) (bool, error) {
-	task.UpdatedAt = time.Now().UTC()
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
@@ -1016,6 +1076,15 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		  AND queued_for_step_id = ?`
 	}
 
+	fromWorkflowID, _, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return false, err
+	}
+	// See updateTaskTx's comment: stamped after the transactional lock, not
+	// before BeginTx, so occurred_at reflects true commit-serialization order
+	// under concurrent Postgres callers.
+	task.UpdatedAt = time.Now().UTC()
+
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
@@ -1031,6 +1100,16 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return false, nil
+	}
+	if err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+		taskID:             task.ID,
+		fromWorkflowID:     fromWorkflowID,
+		fromWorkflowStepID: fromStepID,
+		toWorkflowID:       task.WorkflowID,
+		toWorkflowStepID:   task.WorkflowStepID,
+		occurredAt:         task.UpdatedAt,
+	}); err != nil {
+		return false, err
 	}
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
@@ -2279,12 +2358,20 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	if task == nil {
 		return false, errors.New("restore task message rollback: task is nil")
 	}
-	updatedAt := time.Now().UTC()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return false, err
+	}
+	// See updateTaskTx's comment: stamped after the transactional lock, not
+	// before BeginTx, so occurred_at reflects true commit-serialization order
+	// under concurrent Postgres callers.
+	updatedAt := time.Now().UTC()
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks
@@ -2307,6 +2394,18 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	}
 	if rows == 0 {
 		return false, tx.Commit()
+	}
+	// workflow_id is not part of this UPDATE — a rollback restore only moves
+	// the step, never the workflow — so to_workflow_id equals from_workflow_id.
+	if err := r.recordStepTransition(ctx, tx, stepTransitionInput{
+		taskID:             task.ID,
+		fromWorkflowID:     fromWorkflowID,
+		fromWorkflowStepID: fromStepID,
+		toWorkflowID:       fromWorkflowID,
+		toWorkflowStepID:   task.WorkflowStepID,
+		occurredAt:         updatedAt,
+	}); err != nil {
+		return false, err
 	}
 	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err

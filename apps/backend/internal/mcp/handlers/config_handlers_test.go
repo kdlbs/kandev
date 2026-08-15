@@ -994,10 +994,11 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	}
 
 	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
-		"task_id":          "task-defer3",
-		"workflow_id":      "wf-defer3",
-		"workflow_step_id": "dst-step3",
-		"position":         0,
+		"task_id":           "task-defer3",
+		"workflow_id":       "wf-defer3",
+		"workflow_step_id":  "dst-step3",
+		"position":          0,
+		"sender_session_id": "sess-caller3",
 	})
 
 	resp, err := h.handleMoveTask(ctx, msg)
@@ -1005,6 +1006,7 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	assert.NotEqual(t, ws.MessageTypeError, resp.Type, "valid deferred move must succeed")
 	require.Len(t, queue.pendingMoves, 1)
 	assert.Equal(t, "dst-step3", queue.pendingMoves[0].WorkflowStepID)
+	assert.Equal(t, "sess-caller3", queue.pendingMoves[0].SenderSessionID)
 }
 
 func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {

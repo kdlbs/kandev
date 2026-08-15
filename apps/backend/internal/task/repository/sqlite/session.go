@@ -28,6 +28,61 @@ type taskSessionExecutor interface {
 
 // CreateTurn creates a new turn
 func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
+	stampTurnDefaults(turn)
+	return r.insertTurnRow(ctx, r.db, turn)
+}
+
+// CreateTurnWithStepStamp is documented on the TurnRepository interface. It
+// reads the task's current step inside a transaction that takes the same
+// readTaskStepInTx lock a step move takes, so the read and the turn insert
+// are serialized against concurrent movers of the same task row rather than
+// racing a plain unlocked GetTask against a later, separate insert. A
+// failure to open a transaction or read the step degrades to a plain,
+// unstamped insert — see the spec's failure-modes table: turn creation must
+// never fail because telemetry could not be resolved.
+func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
+	stampTurnDefaults(turn)
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, r.insertTurnRow(ctx, r.db, turn)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	_, stepID, found, stepErr := r.readTaskStepInTx(ctx, tx, turn.TaskID)
+	if stepErr != nil {
+		_ = tx.Rollback()
+		committed = true
+		return false, r.insertTurnRow(ctx, r.db, turn)
+	}
+
+	stamped := false
+	if found && stepID != "" {
+		if turn.Metadata == nil {
+			turn.Metadata = map[string]interface{}{}
+		}
+		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
+		stamped = true
+	}
+
+	if err := r.insertTurnRow(ctx, tx, turn); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	committed = true
+	return stamped, nil
+}
+
+// stampTurnDefaults fills in the ID/timestamp defaults CreateTurn and
+// CreateTurnWithStepStamp both need before inserting.
+func stampTurnDefaults(turn *models.Turn) {
 	if turn.ID == "" {
 		turn.ID = uuid.New().String()
 	}
@@ -39,7 +94,12 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 		turn.CreatedAt = now
 	}
 	turn.UpdatedAt = now
+}
 
+// insertTurnRow inserts turn's row via execer, which is either r.db (a plain,
+// non-transactional insert) or a *sql.Tx (participating in the caller's
+// transaction).
+func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecutor, turn *models.Turn) error {
 	metadataJSON := "{}"
 	if turn.Metadata != nil {
 		metadataBytes, err := json.Marshal(turn.Metadata)
@@ -49,7 +109,7 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 		metadataJSON = string(metadataBytes)
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err := execer.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt)

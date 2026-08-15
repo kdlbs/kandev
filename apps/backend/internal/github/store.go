@@ -587,6 +587,9 @@ func (s *Store) initSchemaData(legacyUpgrade bool) error {
 	if err := s.backfillPRWatchesRepositoryID(); err != nil {
 		return fmt.Errorf("backfill github_pr_watches.repository_id: %w", err)
 	}
+	if err := s.healTaskOwnedOrphans(); err != nil {
+		return err
+	}
 	if err := s.migrateTaskCIOptionsToPRScope(); err != nil {
 		return fmt.Errorf("migrate task CI options to PR scope: %w", err)
 	}

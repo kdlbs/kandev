@@ -258,8 +258,8 @@ func TestStoreLegacyMigrationSeedsExistingWorkspacesAndBackfillsOwnership(t *tes
 
 	assertStoredWorkspaceID(t, db, "github_pr_watches", "watch-owned", "ws-1")
 	assertStoredWorkspaceID(t, db, "github_task_prs", "pr-owned", "ws-2")
-	assertStoredWorkspaceID(t, db, "github_pr_watches", "watch-orphan", "")
-	assertStoredWorkspaceID(t, db, "github_task_prs", "pr-orphan", "")
+	assertRowDeleted(t, db, "github_pr_watches", "watch-orphan")
+	assertRowDeleted(t, db, "github_task_prs", "pr-orphan")
 	var targetLogin string
 	if err := db.GetContext(ctx, &targetLogin,
 		`SELECT target_login FROM github_review_watches WHERE id = 'review-watch-1'`); err != nil {
@@ -684,5 +684,19 @@ func assertStoredWorkspaceID(t *testing.T, db *sqlx.DB, table, id, want string) 
 	}
 	if got != want {
 		t.Fatalf("%s %s workspace_id = %q, want %q", table, id, got, want)
+	}
+}
+
+// assertRowDeleted asserts a row referencing a nonexistent task was removed
+// by the task-contribution orphan sweep rather than surviving with a
+// backfilled (empty) workspace_id.
+func assertRowDeleted(t *testing.T, db *sqlx.DB, table, id string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE id = ?`, id).Scan(&count); err != nil {
+		t.Fatalf("count %s %s: %v", table, id, err)
+	}
+	if count != 0 {
+		t.Fatalf("%s %s still present, want deleted as a task-contribution orphan", table, id)
 	}
 }

@@ -70,6 +70,7 @@
   "transientRetryReasonProviderOverloaded": "Provider overloaded",
   "transientRetryReasonProviderUnavailable": "Provider temporarily unavailable",
   "transientRetryReasonRateLimited": "Rate limited",
+  "transientRetryReasonAgentTransportLost": "Agent connection lost",
   "transientRetryReasonGeneric": "Provider error",
   "transientRetryIn": "Retrying in {{countdown}}",
   "transientRetryNow": "Retrying now…",

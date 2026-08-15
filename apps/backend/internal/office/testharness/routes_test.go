@@ -442,6 +442,126 @@ func TestSeedMessageRejectsUnknownSession(t *testing.T) {
 	}
 }
 
+// TestSeedMessagePersistsTurnMetadata covers the harness turn-metadata
+// contract: a later seed updates the pre-existing active turn's metadata, and
+// a seed without turn_metadata leaves existing metadata untouched.
+func TestSeedMessagePersistsTurnMetadata(t *testing.T) {
+	repo, sqlxDB := newTestRepo(t)
+	taskID := uuid.New().String()
+	seedTask(t, sqlxDB, taskID)
+	r := newRouter(t, repo, nil)
+
+	sessBody := mustJSON(t, map[string]interface{}{
+		"task_id": taskID,
+		"state":   "RUNNING",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/task-sessions", bytes.NewReader(sessBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("session seed: expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var sessResp seedTaskSessionResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &sessResp)
+
+	// Seed a message first WITHOUT turn metadata: the harness creates the
+	// active turn, and the later seed must update that same turn.
+	firstBody := mustJSON(t, map[string]interface{}{
+		"session_id": sessResp.SessionID,
+		"type":       "message",
+		"content":    "first message",
+	})
+	wFirst := httptest.NewRecorder()
+	reqFirst := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(firstBody))
+	reqFirst.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(wFirst, reqFirst)
+	if wFirst.Code != http.StatusOK {
+		t.Fatalf("first seed: expected 200, got %d body=%s", wFirst.Code, wFirst.Body.String())
+	}
+
+	turnMeta := map[string]interface{}{
+		"runtime_config_snapshot": map[string]interface{}{
+			"config_baseline": map[string]interface{}{"mode": "default", "model": "anthropic/claude-sonnet-5"},
+			"config_options": []interface{}{
+				map[string]interface{}{"id": "mode", "name": "Mode", "value": "default", "value_name": "Default"},
+			},
+		},
+	}
+	msgBody := mustJSON(t, map[string]interface{}{
+		"session_id":    sessResp.SessionID,
+		"type":          "message",
+		"content":       "hello world",
+		"turn_metadata": turnMeta,
+	})
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(msgBody))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w2.Code, w2.Body.String())
+	}
+
+	// Exactly one active turn exists, both seeded messages share its id, and
+	// the second seed updated the metadata on the pre-existing turn.
+	turns, err := repo.ListTurnsBySession(context.Background(), sessResp.SessionID)
+	if err != nil {
+		t.Fatalf("list turns: %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("expected exactly 1 turn, got %d", len(turns))
+	}
+	turn := turns[0]
+	msgs, err := repo.ListMessages(context.Background(), sessResp.SessionID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+	for _, m := range msgs {
+		if m.TurnID != turn.ID {
+			t.Fatalf("message %q on turn %q, expected shared turn %q", m.ID, m.TurnID, turn.ID)
+		}
+	}
+	if turn.Metadata == nil {
+		t.Fatal("expected turn metadata to be persisted")
+	}
+	snapshot, ok := turn.Metadata["runtime_config_snapshot"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected runtime_config_snapshot object, got %#v", turn.Metadata["runtime_config_snapshot"])
+	}
+	if snapshot["config_baseline"] == nil {
+		t.Fatal("expected config_baseline inside the snapshot")
+	}
+
+	// Seeding another message WITHOUT turn_metadata must leave the existing
+	// metadata untouched (nil must not clear it).
+	thirdBody := mustJSON(t, map[string]interface{}{
+		"session_id": sessResp.SessionID,
+		"type":       "message",
+		"content":    "third message",
+	})
+	w3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/_test/messages", bytes.NewReader(thirdBody))
+	req3.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("third seed: expected 200, got %d body=%s", w3.Code, w3.Body.String())
+	}
+	turnAfter, err := repo.GetTurn(context.Background(), turn.ID)
+	if err != nil {
+		t.Fatalf("get turn after third seed: %v", err)
+	}
+	afterSnapshot, ok := turnAfter.Metadata["runtime_config_snapshot"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected runtime_config_snapshot to survive a nil turn_metadata seed, got %#v", turnAfter.Metadata)
+	}
+	if afterSnapshot["config_baseline"] == nil {
+		t.Fatal("expected config_baseline to survive a nil turn_metadata seed")
+	}
+}
+
 // The depth-1 guard lives in the task SERVICE; the harness writes through the
 // repository so e2e tests can build arbitrary parent_id chains (depth >= 2),
 // which is the only way to exercise the sidebar's multi-level rendering.

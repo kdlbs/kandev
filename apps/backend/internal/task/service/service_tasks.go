@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -1545,7 +1546,14 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	}
 	task.UpdatedAt = time.Now().UTC()
 
-	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+	updateCtx := ctx
+	if req.WorkflowStepID != nil {
+		actorKind, actorID := steptelemetry.HumanOrSystemActor(ctx)
+		updateCtx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+			Trigger: steptelemetry.TriggerTaskUpdate, ActorKind: actorKind, ActorID: actorID,
+		})
+	}
+	if err := s.tasks.UpdateTask(updateCtx, task); err != nil {
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -1810,8 +1818,23 @@ func (s *Service) RestoreTaskMessageRollback(
 	restoredTask := *task
 	restoredTask.State = state
 	restoredTask.WorkflowStepID = workflowStepID
+	// The rollback's trigger is always unarchive_restore, but its actor
+	// prefers an attribution already on ctx over the ActorSystem default —
+	// the MCP message-dispatch rollback path (handlers.go's
+	// handleMessageTask) knows the causal sender session and sets one
+	// before calling here, mirroring the sqlite repository's
+	// hardcodedTriggerAttribution prefer-preset-else-fallback pattern.
+	rollbackAttribution := steptelemetry.Attribution{
+		Trigger: steptelemetry.TriggerUnarchiveRestore, ActorKind: steptelemetry.ActorSystem,
+	}
+	if preset := steptelemetry.FromContext(ctx); preset.ActorKind != steptelemetry.ActorUnknown {
+		rollbackAttribution.ActorKind = preset.ActorKind
+		rollbackAttribution.ActorID = preset.ActorID
+		rollbackAttribution.SessionID = preset.SessionID
+	}
+	rollbackCtx := steptelemetry.WithAttribution(ctx, rollbackAttribution)
 	updated, err := repo.RestoreTaskMessageRollbackIfSessionState(
-		ctx,
+		rollbackCtx,
 		&restoredTask,
 		ownerSessionID,
 		expectedSessionState,

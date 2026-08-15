@@ -198,6 +198,8 @@ function transientRetryReasonKey(failureCode?: string) {
       return "chat:transientRetryReasonProviderUnavailable";
     case "rate_limited":
       return "chat:transientRetryReasonRateLimited";
+    case "agent_transport_lost":
+      return "chat:transientRetryReasonAgentTransportLost";
     default:
       return "chat:transientRetryReasonGeneric";
   }

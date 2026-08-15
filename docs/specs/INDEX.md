@@ -107,6 +107,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [autopilot-mode](tasks/autopilot-mode.md) | draft |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
+| [task-step-transition-ledger](workflow/task-step-transition-ledger/spec.md) | draft |
 | [conditional-session-settings](workflow-session-settings/spec.md) | approved |
 | [prevent-agent-autostart-on-open](prevent-agent-autostart-on-open/spec.md) | draft |
 | [workflow-duplication](workflow-duplication/spec.md) | draft |
@@ -195,6 +196,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [sidebar-queued-prompt-count](ui/sidebar-queued-prompt-count.md) | shipped |
 | [session-tab-delete-feedback](ui/session-tab-delete-feedback.md) | shipped |
 | [message-favorite-star-mobile-size](ui/message-favorite-star-mobile-size.md) | shipped |
+| [message-metadata-overflow](ui/message-metadata-overflow.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [subagent-observability](ui/subagent-observability.md) | building |
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
@@ -260,6 +262,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [agent-resume-runtime-recovery](agent-resume-runtime-recovery/spec.md) | shipped |
 | [agent-stall-recovery](agent-stall-recovery/spec.md) | approved |
 | [mcp-session-observability](mcp-session-observability/spec.md) | approved |
+| [subagent-context-persistence](subagent-context-persistence/spec.md) | draft |
 | [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |

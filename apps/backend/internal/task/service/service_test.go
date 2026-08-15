@@ -3269,8 +3269,8 @@ type failingTurnCreator struct {
 	err error
 }
 
-func (f failingTurnCreator) CreateTurn(context.Context, *models.Turn) error {
-	return f.err
+func (f failingTurnCreator) CreateTurnWithStepStamp(context.Context, *models.Turn) (bool, error) {
+	return false, f.err
 }
 
 func TestService_CreateMessageReturnsTurnStartError(t *testing.T) {

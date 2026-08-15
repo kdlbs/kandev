@@ -355,6 +355,13 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 
+	// The execution-aware task_session_subagents schema is created directly by
+	// initSubagentContextSchema. The predecessor change that introduced the
+	// table is not part of the supported upgrade path, so there is no
+	// intermediate-shape rebuild to run here. Only the historical-message
+	// backfill belongs in the migration phase.
+	r.migrateSubagentContextBackfill()
+
 	return nil
 }
 
@@ -459,6 +466,46 @@ func jsonRemoveKey(postgres bool, column, key string) string {
 		return "(" + base + " - '" + key + "')::text"
 	}
 	return "json_remove(" + base + ", '$." + key + "')"
+}
+
+// jsonKey extracts a text value at a JSON path from a TEXT-typed JSON column.
+// key may itself be dot-separated ("normalized.kind") to reach a field nested
+// several levels deep — jsonInt and jsonBoolToInt build on this by folding
+// their parent/key pair into one such path before extracting.
+func jsonKey(postgres bool, column, key string) string {
+	base := jsonColumn(postgres, column)
+	segments := strings.Join(strings.Split(key, "."), ",")
+	if postgres {
+		return "(" + base + " #>> '{" + segments + "}')"
+	}
+	return "json_extract(" + base + ", '$." + strings.ReplaceAll(segments, ",", ".") + "')"
+}
+
+// jsonInt extracts a nested numeric field and normalizes it the way every
+// unreported-or-invalid metric in this table normalizes: NULL, never a
+// fabricated 0 for "not reported" and never a negative count (AC-7, AC-9,
+// AC-23). Postgres casts to BIGINT, SQLite to INTEGER.
+func jsonInt(postgres bool, column, parent, key string) string {
+	extracted := jsonKey(postgres, column, parent+"."+key)
+	castType := "INTEGER"
+	if postgres {
+		castType = "BIGINT"
+	}
+	cast := "CAST(NULLIF(" + extracted + ", '') AS " + castType + ")"
+	return "(CASE WHEN " + cast + " < 0 THEN NULL ELSE " + cast + " END)"
+}
+
+// jsonBoolToInt normalizes is_async's dialect-inconsistent boolean spelling —
+// Postgres's #>> text extraction yields 'true'/'false', SQLite's json_extract
+// on a JSON boolean yields '1'/'0' — into the single 1/0 the column stores.
+// An absent or false field yields 0, matching the column's own DEFAULT 0.
+func jsonBoolToInt(postgres bool, column, parent, key string) string {
+	extracted := jsonKey(postgres, column, parent+"."+key)
+	// SQLite's json_extract returns a JSON boolean as the storage-class
+	// INTEGER 1/0, not the text '1'/'0' — comparing that INTEGER against a
+	// TEXT literal via IN never matches (SQLite orders INTEGER < TEXT by
+	// storage class), so the extracted value must be cast to TEXT first.
+	return "(CASE WHEN CAST(" + extracted + " AS TEXT) IN ('1', 'true') THEN 1 ELSE 0 END)"
 }
 
 // ensureImproveKandevWorkflowTemplateUniqueness removes the broad index from

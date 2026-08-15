@@ -784,6 +784,16 @@ func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, 
 	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
 }
 
+// subagentContextAdapter adapts the task service to the
+// orchestrator.SubagentContextRecorder interface.
+type subagentContextAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *subagentContextAdapter) RecordSubagentContext(ctx context.Context, req taskservice.RecordSubagentContextRequest) {
+	a.svc.RecordSubagentContext(ctx, req)
+}
+
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
 type messageCreatorAdapter struct {
 	svc    *taskservice.Service

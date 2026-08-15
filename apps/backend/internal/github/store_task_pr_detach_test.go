@@ -17,6 +17,9 @@ func TestTaskPRDetachFiltersActiveRowsAndPersistsTombstone(t *testing.T) {
 	}
 	ctx := context.Background()
 	now := time.Now().UTC()
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-1', 'ws-1')`); err != nil {
+		t.Fatalf("seed task-1: %v", err)
+	}
 	first := &TaskPR{
 		WorkspaceID: "ws-1", TaskID: "task-1", RepositoryID: "repo-1",
 		Owner: "acme", Repo: "demo", PRNumber: 1, PRURL: "https://github.com/acme/demo/pull/1",

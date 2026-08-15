@@ -3,6 +3,7 @@
 import { useState, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@kandev/ui/sheet";
+import { MobileWorkspaceActionsSection } from "@/components/app-sidebar/app-sidebar-workspace-actions";
 import { AppNavSections, useAppNavDialogs } from "./app-nav-sections";
 import { AppNavTrigger } from "./app-nav-trigger";
 
@@ -58,6 +59,7 @@ export function AppNavSheet({ pageNav, omitDestinations }: AppNavSheetProps) {
             <AppNavSections
               onNavigate={close}
               omitDestinations={omitDestinations}
+              workspaceActions={<MobileWorkspaceActionsSection />}
               controls={controls}
             />
           </nav>
