@@ -78,6 +78,21 @@ function bootResumed(id: string): Message {
 }
 
 describe("filterVisibleMessages clarification history", () => {
+  it("uses the newest pending clarification as the active fallback when scope is absent", () => {
+    const old = makeMessage("fallback-old-question", "clarification_request", {
+      status: "pending",
+    });
+    const active = makeMessage("fallback-active-question", "clarification_request", {
+      status: "pending",
+    });
+
+    expect(
+      filterVisibleMessages([old, active], new Set<string>(), new Set<string>()).map(
+        (message) => message.id,
+      ),
+    ).toEqual(["fallback-old-question"]);
+  });
+
   it("keeps a superseded pending clarification as inert transcript history", () => {
     const superseded = {
       ...makeMessage("old-question", "clarification_request", {
@@ -92,12 +107,9 @@ describe("filterVisibleMessages clarification history", () => {
     };
 
     expect(
-      filterVisibleMessages(
-        [superseded, current],
-        new Set<string>(),
-        new Set<string>(),
-        "turn-current",
-      ).map((message) => message.id),
+      filterVisibleMessages([superseded, current], new Set<string>(), new Set<string>(), {
+        currentTurnId: "turn-current",
+      }).map((message) => message.id),
     ).toEqual(["old-question"]);
   });
 
@@ -107,9 +119,9 @@ describe("filterVisibleMessages clarification history", () => {
     });
 
     expect(
-      filterVisibleMessages([pending], new Set<string>(), new Set<string>(), null).map(
-        (message) => message.id,
-      ),
+      filterVisibleMessages([pending], new Set<string>(), new Set<string>(), {
+        currentTurnId: null,
+      }).map((message) => message.id),
     ).toEqual(["legacy-question"]);
     expect(
       findPendingClarificationGroup([pending], { currentTurnId: null }).map(
@@ -127,25 +139,25 @@ describe("filterVisibleMessages clarification history", () => {
       });
 
       expect(
-        filterVisibleMessages(
-          [old],
-          new Set<string>(),
-          new Set<string>(),
-          undefined,
+        filterVisibleMessages([old], new Set<string>(), new Set<string>(), {
+          currentTurnId: undefined,
           pendingAction,
-        ).map((message) => message.id),
+        }).map((message) => message.id),
       ).toEqual(["unhydrated-old-question"]);
     },
   );
 
-  it("hides pending clarification while turn and action authority are unloaded", () => {
+  it("keeps pending clarification as inert history when explicit authority is unavailable", () => {
     const pending = makeMessage("unloaded-question", "clarification_request", {
       status: "pending",
     });
 
     expect(
-      filterVisibleMessages([pending], new Set<string>(), new Set<string>(), undefined, undefined),
-    ).toEqual([]);
+      filterVisibleMessages([pending], new Set<string>(), new Set<string>(), {
+        currentTurnId: undefined,
+        pendingAction: undefined,
+      }).map((message) => message.id),
+    ).toEqual(["unloaded-question"]);
   });
 
   it("hides only the active bundle when clarification authority exists before turn hydration", () => {
@@ -163,13 +175,10 @@ describe("filterVisibleMessages clarification history", () => {
     });
 
     expect(
-      filterVisibleMessages(
-        [old, activeA, activeB],
-        new Set<string>(),
-        new Set<string>(),
-        undefined,
-        "clarification",
-      ).map((message) => message.id),
+      filterVisibleMessages([old, activeA, activeB], new Set<string>(), new Set<string>(), {
+        currentTurnId: undefined,
+        pendingAction: "clarification",
+      }).map((message) => message.id),
     ).toEqual(["unhydrated-superseded"]);
   });
 });

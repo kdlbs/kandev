@@ -362,25 +362,8 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 	// dispatchTakenQueuedMessage) makes the session "busy" under the guard, so
 	// a concurrent interrupt/drain still backs off exactly as an inline retry
 	// would have.
-	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
-	lock.Lock()
-	guardLocked := true
-	unlockGuard := func() {
-		if guardLocked {
-			lock.Unlock()
-			guardLocked = false
-		}
-	}
-	relockGuard := func() {
-		if !guardLocked {
-			lock.Lock()
-			guardLocked = true
-		}
-	}
-	defer func() {
-		unlockGuard()
-		release()
-	}()
+	guard := s.lockCancelInFlightGuard(data.SessionID)
+	defer guard.release()
 
 	// Coordinator stop may have won while this recovery waited for the shared
 	// guard. Re-read inside the critical section and never revive a terminal
@@ -399,7 +382,7 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		return false
 	}
 
-	if err := s.cancelAgentSilentWithGuard(ctx, data.TaskID, data.SessionID, unlockGuard, relockGuard); err != nil {
+	if err := s.cancelAgentSilentWithGuard(ctx, data.TaskID, data.SessionID, guard.unlock, guard.relock); err != nil {
 		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
@@ -519,25 +502,8 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clarificationInputPauseTimeout)
 	defer cancel()
-	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	lock.Lock()
-	guardLocked := true
-	unlockGuard := func() {
-		if guardLocked {
-			lock.Unlock()
-			guardLocked = false
-		}
-	}
-	relockGuard := func() {
-		if !guardLocked {
-			lock.Lock()
-			guardLocked = true
-		}
-	}
-	defer func() {
-		unlockGuard()
-		release()
-	}()
+	guard := s.lockCancelInFlightGuard(sessionID)
+	defer guard.release()
 	session, err := s.repo.GetTaskSession(writeCtx, sessionID)
 	if err != nil {
 		return 0, fmt.Errorf("load session for clarification pause: %w", err)
@@ -575,8 +541,8 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 		session.TaskID,
 		sessionID,
 		expectedTurnID,
-		unlockGuard,
-		relockGuard,
+		guard.unlock,
+		guard.relock,
 	); errors.Is(err, ErrSendNowTurnChanged) {
 		s.logger.Debug("skipping stale clarification pause after successor turn",
 			zap.String("task_id", session.TaskID),
@@ -686,23 +652,8 @@ func (s *Service) runSilentCancellation(requestCtx context.Context, taskID, sess
 }
 
 func (s *Service) runSilentCancellationOwned(ctx context.Context, taskID, sessionID string, operation *cancelOperation) error {
-	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	defer release()
-	lock.Lock()
-	guardLocked := true
-	unlockGuard := func() {
-		if guardLocked {
-			lock.Unlock()
-			guardLocked = false
-		}
-	}
-	relockGuard := func() {
-		if !guardLocked {
-			lock.Lock()
-			guardLocked = true
-		}
-	}
-	defer unlockGuard()
+	guard := s.lockCancelInFlightGuard(sessionID)
+	defer guard.release()
 
 	// Capture only the execution/turn identity before yielding the guard. The
 	// peer-interrupt path can race a ready handler that is blocked in its first
@@ -719,7 +670,7 @@ func (s *Service) runSilentCancellationOwned(ctx context.Context, taskID, sessio
 		return ErrSendNowTurnChanged
 	}
 	s.setCancellationIdentity(sessionID, operation, identity)
-	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, unlockGuard, relockGuard); err != nil {
+	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, guard.unlock, guard.relock); err != nil {
 		return err
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)

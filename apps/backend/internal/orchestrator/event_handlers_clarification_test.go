@@ -259,6 +259,54 @@ func TestResumeDetachedClarificationDispatchFailureLeavesBundleRestorable(t *tes
 	}
 }
 
+func TestResumeDetachedClarificationReportsAcceptedPublicationFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-publish-failure", "session-publish-failure", "step-1")
+	seedExecutorRunning(t, repo, "session-publish-failure", "task-publish-failure", "exec-publish-failure")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session-publish-failure",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	publicationErr := errors.New("publish accepted turn")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.turnService = failingReservedTurnPublisher{
+		TurnService: &repoBackedTurnService{repo: repo},
+		err:         publicationErr,
+	}
+
+	err := svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-publish-failure",
+		SessionID:  "session-publish-failure",
+		PendingID:  "pending-publish-failure",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if err == nil {
+		t.Fatal("resume reported success without durable dispatch publication")
+	}
+	var accepted interface{ DetachedResumeAccepted() bool }
+	if !errors.As(err, &accepted) || !accepted.DetachedResumeAccepted() {
+		t.Fatalf("resume error = %v, want accepted-dispatch marker", err)
+	}
+	if !errors.Is(err, publicationErr) {
+		t.Fatalf("resume error = %v, want publication error %v", err, publicationErr)
+	}
+	if pending := svc.reservedPromptTurnID("session-publish-failure"); pending != "" {
+		t.Fatalf("accepted turn remained rollback-eligible: %q", pending)
+	}
+	active, ok := svc.activeTurns.Load("session-publish-failure")
+	if !ok || active == "" {
+		t.Fatalf("accepted turn active ownership = %v, %v", active, ok)
+	}
+}
+
 func TestResumeDetachedClarificationRejectsBeforeDispatchWhenTurnPersistenceFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -344,6 +392,7 @@ func TestResumeDetachedClarificationUsesBoundedDispatchOnlyPrompt(t *testing.T) 
 	}
 	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
 	resumeCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	done := make(chan error, 1)
 	go func() {
 		done <- svc.ResumeDetachedClarification(resumeCtx, clarification.DetachedClarificationResume{

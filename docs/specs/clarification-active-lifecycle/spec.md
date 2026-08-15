@@ -44,13 +44,17 @@ hiding the action the icon represents.
   orchestrator accepts one resume dispatch within a bounded wait. The response waits for prompt
   acknowledgement, not agent-turn completion. Before dispatch, the successor is durably reserved but
   marked unpublished so provider frames can reference it without making it current. Acknowledgement
-  publishes that reservation. Startup deletes an empty unpublished reservation and restores the exact
-  clarification rows claimed for its dispatch; message evidence instead proves ambiguous acceptance
-  and preserves the successor. A rejection persists terminal status without resuming the agent.
+  publishes that reservation, and HTTP success requires that durable publication. If agentctl accepts
+  the prompt but publication fails, the endpoint returns a server error and keeps the claimed bundle
+  terminal because retrying could dispatch the answer twice. Startup deletes an empty unpublished
+  reservation and restores the exact clarification rows claimed for its dispatch; message evidence
+  instead proves ambiguous acceptance and preserves the successor. A rejection persists terminal
+  status without resuming the agent.
 - Every response atomically claims current-turn ownership before it can reach a live waiter or request
   a detached resume. Terminal message updates are published only after delivery succeeds. If detached
   resume acceptance fails, the endpoint returns an error and restores the still-current bundle to
-  pending so the same answer can be retried.
+  pending so the same answer can be retried. Once agentctl accepts the prompt, later publication or
+  completion errors cannot roll back the successor turn or reopen the answer.
 - A current-turn bundle remains answerable while any sibling question is pending. Recovery claims only
   those pending rows, preserves siblings already made terminal by an earlier partial write, and restores
   only the claimed rows if detached delivery fails.
@@ -103,9 +107,11 @@ No new route or response field.
 - `POST /api/v1/clarification/:pendingId/respond` uses one state-based contract:
   - `active_live`: answer or rejection returns success and is delivered to the same-turn waiter.
   - `active_detached`: an answer returns success only after the orchestrator acknowledges one resume
-    dispatch within a bounded wait; it does not wait for the resumed turn to complete. Rejection returns
-    success and persists without resuming the agent. If resume acceptance fails, an answer returns a
-    server error and the still-current bundle remains answerable for retry.
+    dispatch and durably publishes its successor within a bounded wait; it does not wait for the resumed
+    turn to complete. Rejection returns success and persists without resuming the agent. If resume
+    acceptance fails, an answer returns a server error and the still-current bundle remains answerable
+    for retry. If acceptance succeeds but successor publication fails, the endpoint returns a
+    non-retryable server error and keeps the bundle terminal.
   - `superseded_history` or `terminal`: answer or rejection returns conflict, performs no write, and
     initiates no agent resume.
 - `POST /api/v1/clarification/:pendingId/cancel` remains the low-level cancellation path for a request
@@ -128,7 +134,8 @@ Transitions:
 - Wait timeout, disconnect, or turn teardown moves `active_live -> active_detached` once.
 - Successful answer delivery, Skip, cancel, expiry, or deletion moves either active state to
   `terminal` for that exact `pending_id`. A failed detached resume acceptance returns to
-  `active_detached` while the same turn remains current.
+  `active_detached` while the same turn remains current. A post-acceptance publication failure remains
+  terminal because the prompt may already be running.
 - Acceptance of a newer turn moves any older pending bundle to `superseded_history` operationally;
   no history rewrite is required.
 - Neither `terminal` nor `superseded_history` can become active again. A new request creates a new
@@ -152,6 +159,9 @@ session they can already access. Session selection does not broaden task visibil
 - Detached resume context resolution or orchestrator acceptance fails: use a non-cancelled write context,
   withhold terminal message events, restore the still-current bundle to pending, and return a retryable
   server error instead of reporting false success.
+- Agentctl accepts a detached resume but durable successor publication fails: return a non-retryable
+  server error, keep the claimed bundle terminal, and make later rollback fail closed so the accepted
+  answer cannot be dispatched again in-process.
 - Live waiter delivery fails unexpectedly: restore the durable claim only if its turn remains current,
   report whether retry state was recovered, and never restore it after a successor turn is accepted.
 - Historical partial terminalization leaves pending and terminal siblings in one current-turn bundle:
@@ -215,6 +225,9 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** a detached current-turn answer is not accepted by the orchestrator, **WHEN** the response
   endpoint fails, **THEN** it returns a server error, keeps the question answerable, and a later retry
   delivers exactly one accepted resume request without a failed-dispatch turn superseding the bundle.
+- **GIVEN** agentctl accepts a detached answer but successor publication fails, **WHEN** the response
+  endpoint completes, **THEN** it returns an error, keeps the answer terminal, and does not make that
+  accepted successor eligible for rollback or in-process redispatch.
 - **GIVEN** the backend stops after terminalizing a detached answer and reserving its successor but
   before acknowledgement, **WHEN** it starts again, **THEN** it deletes the empty reservation,
   restores the exact claimed rows to pending, and leaves pre-existing terminal siblings unchanged.

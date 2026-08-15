@@ -205,7 +205,7 @@ func TestReservedTurnCannotBeAdoptedBeforePublication(t *testing.T) {
 		t.Fatalf("open turns before publication = %d, want 1", open)
 	}
 
-	svc.promptDispatchCallback(ctx, "task1", "session1", reserved, nil)()
+	svc.promptDispatchCallback(ctx, "task1", "session1", reserved, nil, &promptDispatchOutcome{})()
 	cached, ok := svc.activeTurns.Load("session1")
 	if !ok || cached != turnID {
 		t.Fatalf("published turn cache = %v, %v; want %q", cached, ok, turnID)
@@ -221,7 +221,9 @@ func TestAcceptedReservationStaysActiveWhenPublicationWriteFails(t *testing.T) {
 	}
 	svc.reservedPromptTurns.Store("session1", reserved.ID)
 
-	svc.promptDispatchCallback(context.Background(), "task1", "session1", reserved, nil)()
+	svc.promptDispatchCallback(
+		context.Background(), "task1", "session1", reserved, nil, &promptDispatchOutcome{},
+	)()
 
 	active, ok := svc.activeTurns.Load("session1")
 	if !ok || active != reserved.ID {
@@ -229,6 +231,26 @@ func TestAcceptedReservationStaysActiveWhenPublicationWriteFails(t *testing.T) {
 	}
 	if pending := svc.reservedPromptTurnID("session1"); pending != "" {
 		t.Fatalf("private reservation cache = %q, want cleared after agentctl acceptance", pending)
+	}
+}
+
+func TestPublishedReservedTurnCannotBeRolledBack(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	turnID, _, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	if err != nil {
+		t.Fatalf("reserve turn: %v", err)
+	}
+
+	svc.promptDispatchCallback(ctx, "task1", "session1", reserved, nil, &promptDispatchOutcome{})()
+	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
+
+	turn, err := repo.GetTurn(ctx, turnID)
+	if err != nil {
+		t.Fatalf("load accepted turn after late rollback: %v", err)
+	}
+	if turn == nil {
+		t.Fatal("late prompt failure deleted an already-published turn")
 	}
 }
 

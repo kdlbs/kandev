@@ -107,6 +107,9 @@ blockers/risks, and update task/plan status.
   restores only their claimed clarification rows. A message-backed reservation is preserved and its
   marker cleared as ambiguous acceptance. SQLite/startup regressions passed; PostgreSQL parity remains
   environment-gated.
+- Review remediation now reports agentctl acceptance followed by successor-publication failure as a
+  non-retryable server error. It keeps the answer terminal, removes rollback eligibility, and preserves
+  active process ownership so the accepted prompt cannot be dispatched twice in-process.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - Final review remediation makes that durable detach an atomic `UPDATE ... RETURNING` claim over the

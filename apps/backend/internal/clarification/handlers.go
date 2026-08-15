@@ -466,6 +466,17 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 	if err := h.resumeDetachedClarification(
 		ctx, pendingID, body.Answers, body.Rejected, body.RejectReason, claim.messages,
 	); err != nil {
+		if detachedResumeWasAccepted(err) {
+			// The prompt reached agentctl. Keep the durable answer terminal so an
+			// HTTP retry cannot dispatch it again, even though turn publication
+			// failed and the caller must receive a server error.
+			h.messageCreator.PublishClarificationBundleUpdates(ctx, claim.messages)
+			h.logger.Error("accepted clarification resume was not durably published",
+				zap.String("pending_id", pendingID),
+				zap.Error(err))
+			return http.StatusInternalServerError,
+				"clarification response was accepted, but dispatch state could not be finalized"
+		}
 		restored := h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
 		h.logger.Error("failed to resume detached clarification",
 			zap.String("pending_id", pendingID),
@@ -477,6 +488,11 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 	}
 	h.messageCreator.PublishClarificationBundleUpdates(ctx, claim.messages)
 	return 0, ""
+}
+
+func detachedResumeWasAccepted(err error) bool {
+	var accepted interface{ DetachedResumeAccepted() bool }
+	return errors.As(err, &accepted) && accepted.DetachedResumeAccepted()
 }
 
 func (h *Handlers) restoreFailedClarificationClaim(

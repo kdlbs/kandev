@@ -2,10 +2,13 @@ import {
   type ClarificationRequestMetadata,
   type Message,
   type MessageType,
-  type TaskPendingAction,
 } from "@/lib/types/http";
 import type { RichMetadata, ToolCallMetadata, TodoSnapshot } from "@/components/task/chat/types";
-import { isPendingClarificationMessage } from "@/lib/utils/pending-clarification";
+import {
+  findPendingClarification,
+  isPendingClarificationMessage,
+  type PendingClarificationScope,
+} from "@/lib/utils/pending-clarification";
 
 const VISIBLE_MESSAGE_TYPES: Set<string> = new Set([
   "message",
@@ -177,27 +180,22 @@ export function collapseTodoSnapshotsPerTurn(messages: Message[]): Message[] {
 
 function findUnhydratedActiveClarification(
   messages: Message[],
-  currentTurnId?: string | null,
-  pendingAction?: TaskPendingAction | null,
+  scope?: PendingClarificationScope,
 ): Message | undefined {
-  if (currentTurnId !== undefined || pendingAction !== "clarification") return undefined;
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const candidate = messages[index];
-    if (isPendingClarificationMessage(candidate)) return candidate;
-  }
-  return undefined;
+  if (scope?.currentTurnId !== undefined) return undefined;
+  if (scope && scope.pendingAction !== "clarification") return undefined;
+  return findPendingClarification(messages, scope) ?? undefined;
 }
 
 function isClarificationVisible(
   message: Message,
-  currentTurnId: string | null | undefined,
-  pendingAction: TaskPendingAction | null | undefined,
+  scope: PendingClarificationScope | undefined,
   unhydratedActive: Message | undefined,
 ): boolean {
   const metadata = message.metadata as ClarificationRequestMetadata | undefined;
   if (!isPendingClarificationMessage(message)) return true;
-  if (currentTurnId !== undefined) {
-    return currentTurnId === null || message.turn_id !== currentTurnId;
+  if (scope?.currentTurnId !== undefined) {
+    return scope.currentTurnId === null || message.turn_id !== scope.currentTurnId;
   }
   if (unhydratedActive) {
     const activeMetadata = unhydratedActive.metadata as ClarificationRequestMetadata | undefined;
@@ -205,25 +203,20 @@ function isClarificationVisible(
       ? metadata?.pending_id !== activeMetadata.pending_id
       : message.id !== unhydratedActive.id;
   }
-  return pendingAction !== undefined && pendingAction !== "clarification";
+  return true;
 }
 
 export function filterVisibleMessages(
   messages: Message[],
   toolCallIds: Set<string>,
   subagentChildIds: Set<string>,
-  currentTurnId?: string | null,
-  pendingAction?: TaskPendingAction | null,
+  scope?: PendingClarificationScope,
 ): Message[] {
-  const unhydratedActive = findUnhydratedActiveClarification(
-    messages,
-    currentTurnId,
-    pendingAction,
-  );
+  const unhydratedActive = findUnhydratedActiveClarification(messages, scope);
   const filtered = messages.filter((message) => {
     if (subagentChildIds.has(message.id) || isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {
-      return isClarificationVisible(message, currentTurnId, pendingAction, unhydratedActive);
+      return isClarificationVisible(message, scope, unhydratedActive);
     }
     if (
       message.type === "status" &&

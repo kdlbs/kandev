@@ -291,11 +291,12 @@ func provideGateway(
 				return byTask[taskID], nil
 			}
 		}
+		activityProvider, countQueuedPrompts := taskStatusRuntimeProviders(orchestratorSvc)
 		projector := statussummary.NewProjector(statussummary.ProjectorConfig{
 			Store:    taskRepo,
 			EventBus: eventBus,
 			LoadSessionObservations: func(ctx context.Context, taskID string) (statussummary.SessionObservationSnapshot, error) {
-				return loadTaskSessionObservations(ctx, taskRepo, orchestratorSvc, taskID)
+				return loadTaskSessionObservations(ctx, taskRepo, activityProvider, taskID)
 			},
 			LoadPendingActions: func(ctx context.Context, taskID string) (map[string]string, error) {
 				return loadTaskPendingActions(ctx, taskRepo, taskID)
@@ -314,10 +315,8 @@ func provideGateway(
 				}
 				return task.WorkspaceID, nil
 			},
-			CountQueuedPrompts: func(ctx context.Context, taskID string) (int, error) {
-				return orchestratorSvc.GetMessageQueue().CountPendingByTask(ctx, taskID)
-			},
-			Logger: log,
+			CountQueuedPrompts: countQueuedPrompts,
+			Logger:             log,
 		})
 		if err := projector.Start(ctx); err != nil {
 			log.Error("failed to start task status summary projector", zap.Error(err))
@@ -423,6 +422,19 @@ func provideGateway(
 type taskStatusActivityProvider interface {
 	ForegroundActivity(sessionID string) v1.ForegroundActivity
 	ActiveSubagentCount(sessionID string) int
+}
+
+func taskStatusRuntimeProviders(
+	orchestratorSvc *orchestrator.Service,
+) (taskStatusActivityProvider, func(context.Context, string) (int, error)) {
+	if orchestratorSvc == nil {
+		return nil, nil
+	}
+	queue := orchestratorSvc.GetMessageQueue()
+	if queue == nil {
+		return orchestratorSvc, nil
+	}
+	return orchestratorSvc, queue.CountPendingByTask
 }
 
 func loadTaskSessionObservations(

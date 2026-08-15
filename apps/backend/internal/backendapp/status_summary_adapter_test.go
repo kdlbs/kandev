@@ -22,6 +22,25 @@ func TestTaskStatusSummaryPRKeyMatchesLiveEventIdentity(t *testing.T) {
 			pr:   &github.TaskPR{ID: "association-2", PRNumber: 42, PRURL: "https://example.test/42"},
 			want: "https://example.test/42",
 		},
+		{
+			name: "repository only",
+			pr:   &github.TaskPR{ID: "association-3", RepositoryID: "repo-a"},
+			want: "repo-a",
+		},
+		{
+			name: "number only",
+			pr:   &github.TaskPR{ID: "association-4", PRNumber: 42},
+			want: "#42",
+		},
+		{
+			name: "association fallback",
+			pr:   &github.TaskPR{ID: "association-5"},
+			want: "association-5",
+		},
+		{
+			name: "nil pull request",
+			want: "",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -29,5 +48,15 @@ func TestTaskStatusSummaryPRKeyMatchesLiveEventIdentity(t *testing.T) {
 				t.Fatalf("taskStatusSummaryPRKey() = %q, want %q", got, test.want)
 			}
 		})
+	}
+}
+
+func TestTaskStatusRuntimeProvidersTreatNilOrchestratorAsAbsent(t *testing.T) {
+	activityProvider, countQueuedPrompts := taskStatusRuntimeProviders(nil)
+	if activityProvider != nil {
+		t.Fatalf("activity provider = %#v, want nil", activityProvider)
+	}
+	if countQueuedPrompts != nil {
+		t.Fatal("queued prompt counter should be nil without an orchestrator")
 	}
 }

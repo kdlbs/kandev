@@ -235,6 +235,9 @@ All task gates passed:
   75 tests; typecheck, zero-warning full lint, and the i18n ratchet passed.
 - Rejected-load review remediation: both primary-session and sessionless pending-selection fallbacks
   revalidate click-time summary ownership; the focused race suite passed 14 tests.
+- Review remediation: agentctl acceptance is not reported as success until the reserved successor is
+  durably published; post-acceptance publication failure remains terminal and rollback-ineligible.
+  Clarification overlay and transcript filtering now share the same optional authority scope.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

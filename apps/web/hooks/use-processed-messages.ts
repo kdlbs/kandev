@@ -10,6 +10,7 @@ import type { ToolCallMetadata } from "@/components/task/chat/types";
 import {
   findPendingClarification,
   findPendingClarificationGroup,
+  type PendingClarificationScope,
 } from "@/lib/utils/pending-clarification";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { LastAgentError } from "@/lib/session-last-agent-error";
@@ -412,6 +413,7 @@ function usePendingClarificationState(messages: Message[], options: ProcessedMes
     [hasScopeKeys, options.currentTurnId, options.pendingAction],
   );
   return {
+    scope,
     pendingClarification: useMemo(
       () => findPendingClarification(messages, scope),
       [messages, scope],
@@ -427,18 +429,11 @@ function useVisibleMessages(
   messages: Message[],
   toolCallIds: Set<string>,
   subagentChildIds: Set<string>,
-  options: ProcessedMessagesOptions,
+  scope: PendingClarificationScope | undefined,
 ) {
   return useMemo(
-    () =>
-      filterVisibleMessages(
-        messages,
-        toolCallIds,
-        subagentChildIds,
-        options.currentTurnId,
-        options.pendingAction,
-      ),
-    [messages, toolCallIds, subagentChildIds, options.currentTurnId, options.pendingAction],
+    () => filterVisibleMessages(messages, toolCallIds, subagentChildIds, scope),
+    [messages, toolCallIds, subagentChildIds, scope],
   );
 }
 
@@ -462,12 +457,12 @@ export function useProcessedMessages(
     () => buildSubagentChildIds(childrenByParentToolCallId),
     [childrenByParentToolCallId],
   );
-  const { pendingClarification, pendingClarificationGroup } = usePendingClarificationState(
+  const { scope, pendingClarification, pendingClarificationGroup } = usePendingClarificationState(
     messages,
     options,
   );
 
-  const visibleMessages = useVisibleMessages(messages, toolCallIds, subagentChildIds, options);
+  const visibleMessages = useVisibleMessages(messages, toolCallIds, subagentChildIds, scope);
 
   const taskDescriptionMessage: Message | null = useMemo(() => {
     return taskDescription && visibleMessages.length === 0

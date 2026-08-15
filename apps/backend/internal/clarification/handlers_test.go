@@ -400,6 +400,56 @@ func TestHttpRespond_DetachedResumeFailureRestoresRetryableBundle(t *testing.T) 
 	}
 }
 
+type acceptedDetachedResumeTestError struct {
+	err error
+}
+
+func (e acceptedDetachedResumeTestError) Error() string { return e.err.Error() }
+func (e acceptedDetachedResumeTestError) Unwrap() error { return e.err }
+func (acceptedDetachedResumeTestError) DetachedResumeAccepted() bool {
+	return true
+}
+
+func TestHttpRespond_AcceptedResumePublicationFailureIsNotRestored(t *testing.T) {
+	msg := &taskmodels.Message{
+		ID: "message-accepted", TaskID: "task-accepted", TaskSessionID: "session-accepted",
+		Metadata: map[string]any{
+			"status": "pending", "pending_id": "pending-accepted", "question_id": "q1",
+			"question": map[string]any{"id": "q1", "prompt": "Continue?"},
+		},
+	}
+	h, _, eventBus, messageCreator := setupTestHandler(t, map[string][]*taskmodels.Message{
+		"pending-accepted": {msg},
+	})
+	eventBus.resumeErr = acceptedDetachedResumeTestError{err: errors.New("publish accepted turn")}
+
+	first := runRespond(t, h, "pending-accepted", RespondBody{
+		Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}},
+	})
+	if first.Code != http.StatusInternalServerError {
+		t.Fatalf("response status = %d, want 500; body=%s", first.Code, first.Body.String())
+	}
+	if strings.Contains(first.Body.String(), "can be retried") {
+		t.Fatalf("accepted response advertised an unsafe retry: %s", first.Body.String())
+	}
+	if got := msg.Metadata["status"]; got != "answered" {
+		t.Fatalf("accepted response status = %v, want terminal answered", got)
+	}
+	if messageCreator.publishedBundles != 1 {
+		t.Fatalf("published terminal bundles = %d, want 1", messageCreator.publishedBundles)
+	}
+
+	second := runRespond(t, h, "pending-accepted", RespondBody{
+		Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}},
+	})
+	if second.Code != http.StatusConflict {
+		t.Fatalf("duplicate response status = %d, want 409; body=%s", second.Code, second.Body.String())
+	}
+	if len(eventBus.resumeRequests) != 1 {
+		t.Fatalf("resume requests = %d, want one accepted dispatch", len(eventBus.resumeRequests))
+	}
+}
+
 func TestHttpRespond_DetachedResumeFailureDoesNotPromiseRetryWhenRestoreFails(t *testing.T) {
 	for _, tt := range []struct {
 		name          string

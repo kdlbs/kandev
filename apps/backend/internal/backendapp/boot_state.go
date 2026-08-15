@@ -654,11 +654,13 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
 	}
 	if summaryErr == nil && pendingErr == nil {
-		statusSummaries, err = b.p.taskSvc.ReconcileTaskStatusSummaries(
+		reconciledSummaries, reconcileErr := b.p.taskSvc.ReconcileTaskStatusSummaries(
 			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
 		)
-		if err != nil {
-			b.logBootError("reconcile task status summaries", err)
+		if reconcileErr != nil {
+			b.logBootError("reconcile task status summaries", reconcileErr)
+		} else {
+			statusSummaries = reconciledSummaries
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary so
