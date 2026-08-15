@@ -56,8 +56,12 @@ Completed 2026-08-15.
 
 - RED: the new rerender regression failed before the implementation (`17 passed, 1 failed`).
 - GREEN: the focused ReviewFileTree suite passed (`18 passed`).
-- Desktop nested-submodule E2E passed once with retries disabled; the no-build pressure run passed 4/4 repetitions.
-- Mobile nested-submodule smoke passed (`1 passed`).
-- Web typecheck reported no errors.
-- Web lint passed with zero warnings.
+- `cd apps/web && pnpm e2e:run tests/review/submodule-review.spec.ts -- --grep "shows nested scopes and commits child gitlinks through the UI" --workers=1 --retries=0` passed (`1 passed`).
+- `cd apps/web && pnpm e2e:run --no-build tests/review/submodule-review.spec.ts -- --grep "shows nested scopes and commits child gitlinks through the UI" --workers=1 --retries=0 --repeat-each=4` passed (`4 passed`).
+- `cd apps/web && pnpm e2e:run --project mobile-chrome tests/review/mobile-submodule-review.spec.ts` passed (`1 passed`).
+- `cd apps && pnpm --filter @kandev/web typecheck` reported no errors.
+- `cd apps && pnpm --filter @kandev/web lint` passed with zero warnings.
+- Changed files: `apps/web/components/review/review-file-tree.tsx`, `apps/web/components/review/review-file-tree.test.tsx`, `docs/specs/ui/submodule-review.md`, `docs/plans/review-tree-late-expansion/plan.md`, and this task file.
+- Residual risk: the Review tree still rebuilds and walks its small directory model when `files` changes; no shared `useTree` behavior or mobile tree surface changed.
 - The disposable screenshot capture spec was removed after capture. The synthetic desktop screenshot manifest was non-empty, every manifest entry mapped to an existing file, and the PNG was compressed for PR publication.
+- Synchronization: this task is `done`, the parent plan is `implemented` with Task 01 checked, and the linked submodule Review spec records the late-source expansion contract.
