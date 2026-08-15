@@ -140,6 +140,53 @@ func TestPostgresDetachActiveClarificationMessagesClaimsCurrentRows(t *testing.T
 	}
 }
 
+func TestPostgresExpireActiveClarificationMessagesPreservesTerminalRows(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 16, 10, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-expire-pg", "session-expire-pg")
+	createPendingActionTurn(
+		t, repo, "task-expire-pg", "session-expire-pg", "turn-expire-pg", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-expire-pg", "task-expire-pg", "session-expire-pg",
+		"turn-expire-pg", "pending-expire-pg", "q-pending", base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-answered-pg", "task-expire-pg", "session-expire-pg",
+		"turn-expire-pg", "pending-answered-pg", "q-answered", base.Add(time.Second),
+	)
+	setClarificationMessageMetadata(t, repo, "message-answered-pg", func(metadata map[string]interface{}) {
+		metadata["status"] = "answered"
+	})
+
+	updated, err := repo.ExpireActiveClarificationBundle(ctx, "session-expire-pg", "pending-expire-pg")
+	if err != nil {
+		t.Fatalf("ExpireActiveClarificationBundle: %v", err)
+	}
+	if ids := messageIDs(updated); len(ids) != 1 || ids[0] != "message-expire-pg" {
+		t.Fatalf("postgres expired message IDs = %v", ids)
+	}
+	expired, err := repo.GetMessage(ctx, "message-expire-pg")
+	if err != nil {
+		t.Fatalf("GetMessage(expired): %v", err)
+	}
+	if expired.Metadata["status"] != "expired" || expired.Metadata["agent_disconnected"] != true {
+		t.Fatalf("postgres expired metadata = %#v", expired.Metadata)
+	}
+	answered, err := repo.GetMessage(ctx, "message-answered-pg")
+	if err != nil {
+		t.Fatalf("GetMessage(answered): %v", err)
+	}
+	if answered.Metadata["status"] != "answered" {
+		t.Fatalf("postgres answered status = %v", answered.Metadata["status"])
+	}
+}
+
 func TestPostgresTurnCreationSerializesWithClarificationDetach(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

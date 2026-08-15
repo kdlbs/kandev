@@ -78,6 +78,27 @@ func (s *stubMessageStore) DetachActiveClarificationMessagesBySessionID(
 	return changed, nil
 }
 
+func (s *stubMessageStore) ExpireActiveClarificationBundle(
+	_ context.Context,
+	sessionID, pendingID string,
+) ([]*taskmodels.Message, error) {
+	active, err := s.FindActiveClarificationMessagesBySessionID(context.Background(), sessionID)
+	if err != nil {
+		return nil, err
+	}
+	changed := make([]*taskmodels.Message, 0, len(active))
+	for _, message := range active {
+		if stringFromMetadata(message.Metadata, "pending_id") != pendingID {
+			continue
+		}
+		message.Metadata["agent_disconnected"] = true
+		message.Metadata["status"] = "expired"
+		s.updated = append(s.updated, message)
+		changed = append(changed, message)
+	}
+	return changed, nil
+}
+
 func (s *stubMessageStore) UpdateMessage(_ context.Context, m *taskmodels.Message) error {
 	s.updated = append(s.updated, m)
 	return nil

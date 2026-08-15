@@ -1,9 +1,38 @@
 package statussummary
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
+
+func applyPullRequestInputs(state *projectionState, inputs []PullRequestInput) {
+	for index, input := range inputs {
+		key := strings.TrimSpace(input.Key)
+		if key == "" {
+			key = strings.TrimSpace(input.URL)
+		}
+		if key == "" && input.Number > 0 {
+			key = fmt.Sprintf("#%d", input.Number)
+		}
+		if key == "" {
+			key = fmt.Sprintf("index:%d", index)
+		}
+		state.prs[key] = pullRequestObservation{
+			state:                 input.State,
+			number:                maxInt(input.Number, 0),
+			url:                   input.URL,
+			reviewState:           input.ReviewState,
+			checksState:           input.ChecksState,
+			mergeableState:        input.MergeableState,
+			unresolvedReviewCount: maxInt(input.UnresolvedReviewCount, 0),
+			pendingReviewCount:    maxInt(input.PendingReviewCount, 0),
+			requiredReviews:       maxInt(input.RequiredReviews, 0),
+			checksTotal:           maxInt(input.ChecksTotal, 0),
+			checksPassing:         maxInt(input.ChecksPassing, 0),
+		}
+	}
+}
 
 func derivePullRequestSummary(state *projectionState) *PullRequestSummary {
 	if !state.prObserved && state.prBaseline != nil {

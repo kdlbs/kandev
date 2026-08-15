@@ -279,6 +279,17 @@ func provideGateway(
 	go gateway.Hub.Run(ctx)
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 	if taskRepo != nil && eventBus != nil {
+		var loadPullRequests statussummary.PullRequestLoader
+		if githubSvc != nil {
+			reader := &githubTaskStatusSummaryPRReader{gh: githubSvc}
+			loadPullRequests = func(ctx context.Context, taskID string) ([]statussummary.PullRequestInput, error) {
+				byTask, err := reader.ListTaskStatusSummaryPullRequests(ctx, []string{taskID})
+				if err != nil {
+					return nil, err
+				}
+				return byTask[taskID], nil
+			}
+		}
 		projector := statussummary.NewProjector(statussummary.ProjectorConfig{
 			Store:    taskRepo,
 			EventBus: eventBus,
@@ -288,6 +299,7 @@ func provideGateway(
 			LoadGitObservations: func(ctx context.Context, taskID string) ([]statussummary.GitObservation, error) {
 				return loadTaskGitObservations(ctx, taskRepo, taskID)
 			},
+			LoadPullRequests: loadPullRequests,
 			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
 				task, err := taskRepo.GetTask(ctx, taskID)
 				if err != nil {

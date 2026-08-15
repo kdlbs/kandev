@@ -393,6 +393,28 @@ describe("selectTaskWithLayout sessionless layout cleanup", () => {
     );
     expect(replaceTaskUrl).toHaveBeenCalledWith(TASK_ID);
   });
+
+  it("uses the task-only fallback when sessionless loading fails", async () => {
+    const store = makeKanbanStore({ activeSessionId: OTHER_SESSION_ID, envIds: {} });
+    const setActiveTask = vi.fn();
+
+    selectTaskWithLayout({
+      taskId: TASK_ID,
+      task: undefined,
+      store,
+      switchToSession: vi.fn(),
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+
+    await flushTaskSelection();
+    expect(launchSession).not.toHaveBeenCalled();
+    expect(setActiveTask).toHaveBeenCalledWith(TASK_ID);
+    expect(replaceTaskUrl).toHaveBeenCalledWith(TASK_ID);
+  });
 });
 
 describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {

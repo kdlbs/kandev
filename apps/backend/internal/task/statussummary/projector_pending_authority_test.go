@@ -217,6 +217,7 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 			UpdatedAt:     storedAt,
 			PendingAction: pendingClarification,
 			Git:           &GitSummary{ChangedFiles: 1},
+			PullRequest:   &PullRequestSummary{Count: 2, OpenCount: 2, State: prStateOpen},
 		},
 	}
 	store := &rejectingPendingProjectorStore{
@@ -230,11 +231,13 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 				PendingAction:     pendingClarification,
 				QueuedPromptCount: 7,
 				Git:               &GitSummary{ChangedFiles: 2},
+				PullRequest:       &PullRequestSummary{Count: 2, OpenCount: 2, State: prStateOpen},
 			},
 		},
 	}
 	loaderCalls := 0
 	gitLoaderCalls := 0
+	prLoaderCalls := 0
 	projector := NewProjector(ProjectorConfig{
 		Store: store,
 		LoadPendingActions: func(context.Context, string) (map[string]string, error) {
@@ -246,6 +249,13 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 			return []GitObservation{
 				{Repository: "repo-a", Summary: GitSummary{ChangedFiles: 1}},
 				{Repository: "repo-b", Summary: GitSummary{ChangedFiles: 1}},
+			}, nil
+		},
+		LoadPullRequests: func(context.Context, string) ([]PullRequestInput, error) {
+			prLoaderCalls++
+			return []PullRequestInput{
+				{Key: "repo-a#41", State: prStateOpen, Number: 41, URL: "https://example.test/41"},
+				{Key: "repo-b#42", State: prStateOpen, Number: 42, URL: "https://example.test/42"},
 			}, nil
 		},
 		Now: func() time.Time { return storedAt.Add(2 * time.Second) },
@@ -263,7 +273,7 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 	got := base.summary("task-cas")
 	if got == nil || got.Revision != 7 || got.PendingAction != "" || got.QueuedPromptCount != 7 ||
 		got.Git == nil || got.Git.ChangedFiles != 2 || got.PrimarySession == nil ||
-		got.PrimarySession.ID != "session-current" {
+		got.PrimarySession.ID != "session-current" || got.PullRequest == nil || got.PullRequest.Count != 2 {
 		t.Fatalf("summary after CAS retry = %+v", got)
 	}
 	if loaderCalls != 2 {
@@ -271,6 +281,9 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 	}
 	if gitLoaderCalls != 2 {
 		t.Fatalf("Git loader calls = %d, want reload after rejection", gitLoaderCalls)
+	}
+	if prLoaderCalls != 2 {
+		t.Fatalf("PR loader calls = %d, want reload after rejection", prLoaderCalls)
 	}
 
 	err = projector.HandleEvent(context.Background(), bus.NewEvent(events.GitEvent, "test", map[string]interface{}{
@@ -289,5 +302,22 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 	got = base.summary("task-cas")
 	if got == nil || got.Git == nil || got.Git.ChangedFiles != 4 {
 		t.Fatalf("Git summary after CAS replay = %+v, want both repositories (4 changed files)", got)
+	}
+
+	err = projector.HandleEvent(context.Background(), bus.NewEvent(events.GitHubTaskPRUpdated, "test", map[string]interface{}{
+		"task_id":       "task-cas",
+		"workspace_id":  "workspace-1",
+		"repository_id": "repo-a",
+		"state":         prStateOpen,
+		"pr_number":     41,
+		"pr_url":        "https://example.test/41",
+		"checks_state":  prStateFailure,
+	}))
+	if err != nil {
+		t.Fatalf("PR replay after CAS rejection: %v", err)
+	}
+	got = base.summary("task-cas")
+	if got == nil || got.PullRequest == nil || got.PullRequest.Count != 2 {
+		t.Fatalf("PR summary after CAS replay = %+v, want both pull requests", got)
 	}
 }

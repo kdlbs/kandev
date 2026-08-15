@@ -225,6 +225,11 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 			return err
 		}
 	}
+	if summary.PullRequest != nil {
+		if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -279,7 +284,14 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	state.prObserved = false
 	applySummaryBaseline(state, current)
 	if current.Git != nil {
-		return p.restoreGitObservations(ctx, taskID, state)
+		if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
+			return err
+		}
+	}
+	if current.PullRequest != nil {
+		if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -299,6 +311,25 @@ func (p *Projector) restoreGitObservations(ctx context.Context, taskID string, s
 		state.git[observation.Repository] = observation.Summary
 	}
 	state.gitObserved = true
+	return nil
+}
+
+func (p *Projector) restorePullRequestObservations(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) error {
+	if p.loadPullRequests == nil {
+		return nil
+	}
+	pullRequests, err := p.loadPullRequests(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load PR observations for task status summary %q: %w", taskID, err)
+	}
+	state.prs = make(map[string]pullRequestObservation, len(pullRequests))
+	state.prBaseline = nil
+	state.prObserved = true
+	applyPullRequestInputs(state, pullRequests)
 	return nil
 }
 

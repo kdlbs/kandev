@@ -39,6 +39,8 @@ export function newestDurableTurnId(turns?: readonly Turn[]): string | null | un
     const candidateKey = [
       durableTurnTimestampKey(candidate.started_at),
       durableTurnTimestampKey(candidate.created_at),
+      // Mirrors the backend's final deterministic tie-break. Turn IDs do not
+      // encode creation time; exact timestamp ties have no finer ordering.
       candidate.id,
     ];
     for (let part = 0; part < candidateKey.length; part++) {

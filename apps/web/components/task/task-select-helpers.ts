@@ -72,7 +72,15 @@ function taskPendingSelectionIsCurrent(
     return initial.revision === null;
   }
   const current = taskPendingSelectionSnapshot(currentTask);
-  return current.revision === initial.revision && current.pendingAction === initial.pendingAction;
+  return current.pendingAction === initial.pendingAction;
+}
+
+function pendingSelectionOwnerChanged(
+  store: StoreApi<AppState>,
+  taskId: string,
+  initial: TaskPendingSelectionSnapshot,
+): boolean {
+  return !!initial.pendingAction && !taskPendingSelectionIsCurrent(store, taskId, initial);
 }
 
 function loadTaskSessionsForSelection(
@@ -199,11 +207,9 @@ function createTaskSelectionGuard(
   store: StoreApi<AppState>,
   taskId: string,
   selectionToken: number,
-  task: PendingTask | undefined,
   selectionSignal?: AbortSignal,
 ) {
   const startActiveTaskId = store.getState().tasks.activeTaskId ?? null;
-  const pendingSnapshot = taskPendingSelectionSnapshot(task);
   let activeTaskChangedExternally = false;
   const unsubscribe = store.subscribe((current, previous) => {
     const currentTaskId = current.tasks.activeTaskId ?? null;
@@ -221,12 +227,6 @@ function createTaskSelectionGuard(
         selectionSignal?.aborted ||
         taskSelectionWasSuperseded(selectionToken) ||
         activeTaskChangedExternally
-      ) {
-        return true;
-      }
-      if (
-        pendingSnapshot.pendingAction &&
-        !taskPendingSelectionIsCurrent(store, taskId, pendingSnapshot)
       ) {
         return true;
       }
@@ -334,11 +334,11 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
   const oldSessionId = state.tasks.activeSessionId;
   const navigateToTask = params.navigateToTask ?? replaceTaskUrl;
   const taskPendingAction = effectiveTaskPendingAction(task);
+  const pendingSnapshot = taskPendingSelectionSnapshot(task);
   const selectionGuard = createTaskSelectionGuard(
     store,
     taskId,
     selectionToken,
-    task,
     params.selectionSignal,
   );
   logTaskSelection(taskId, task?.primarySessionId, oldSessionId, state.tasks.activeTaskId);
@@ -356,8 +356,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
       environmentIdBySessionId: state.environmentIdBySessionId,
       taskSessionsById: state.taskSessions.items,
     });
-    const hasEnvId = !!state.environmentIdBySessionId[targetSessionId];
-    if (hasEnvId && !taskPendingAction) {
+    if (state.environmentIdBySessionId[targetSessionId] && !taskPendingAction) {
       selectionGuard.dispose();
       switchToSession(taskId, targetSessionId, oldSessionId);
       void loadTaskSessionsForTask(taskId).catch(() => undefined);
@@ -367,6 +366,9 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
     void loadTaskSessionsForSelection(loadTaskSessionsForTask, taskId, !!taskPendingAction)
       .then((sessions) => {
         if (selectionGuard.wasSuperseded()) return;
+        if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) {
+          return openTaskWithoutSession(params, navigateToTask);
+        }
         const currentOldSessionId = store.getState().tasks.activeSessionId;
         const resolvedSessionId = resolveTaskSessionId({
           sessions,
@@ -389,6 +391,9 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
   void loadTaskSessionsForSelection(loadTaskSessionsForTask, taskId, !!taskPendingAction)
     .then(async (sessions) => {
       if (selectionGuard.wasSuperseded()) return;
+      if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) {
+        return openTaskWithoutSession(params, navigateToTask);
+      }
       const currentOldSessionId = store.getState().tasks.activeSessionId;
       const sessionId = resolveTaskSessionId({
         sessions,
@@ -422,7 +427,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
     })
     .catch(() => {
       if (selectionGuard.wasSuperseded()) return;
-      if (taskPendingAction) openTaskWithoutSession(params, navigateToTask);
+      openTaskWithoutSession(params, navigateToTask);
     })
     .finally(selectionGuard.dispose);
 }

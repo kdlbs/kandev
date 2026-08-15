@@ -179,7 +179,7 @@ describe("selectTaskWithLayout pending selection races", () => {
 });
 
 describe("selectTaskWithLayout pending summary races", () => {
-  it("ignores an owner response captured before a newer summary revision", async () => {
+  it("falls back to task navigation when the pending action changes", async () => {
     const initialTask = {
       id: PENDING_TASK_ID,
       primarySessionId: PENDING_SESSION_ID,
@@ -226,8 +226,60 @@ describe("selectTaskWithLayout pending summary races", () => {
 
     expect(loadTaskSessionsForTask).toHaveBeenCalledWith(PENDING_TASK_ID, { force: true });
     expect(switchToSession).not.toHaveBeenCalled();
-    expect(setActiveTask).not.toHaveBeenCalledWith(PENDING_TASK_ID);
-    expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
+  });
+
+  it("keeps owner routing when an unrelated summary field changes", async () => {
+    const initialTask = {
+      id: PENDING_TASK_ID,
+      primarySessionId: PENDING_SESSION_ID,
+      statusSummary: {
+        revision: 1,
+        updated_at: "2026-08-15T15:00:00Z",
+        pending_action: "clarification" as const,
+      },
+    };
+    const { state, store, setActiveTask } = makeSelectionHarness({
+      activeTaskId: ORIGINAL_TASK_ID,
+      activeSessionId: ORIGINAL_SESSION_ID,
+      taskRows: [initialTask],
+    });
+    const switchToSession = vi.fn();
+    const { loadTaskSessionsForTask, resolveLoad } = makeDeferredSessionLoader();
+
+    selectTaskWithLayout({
+      taskId: PENDING_TASK_ID,
+      task: initialTask,
+      store,
+      switchToSession,
+      loadTaskSessionsForTask,
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+    state.kanban.tasks[0] = {
+      ...initialTask,
+      statusSummary: {
+        revision: 2,
+        updated_at: "2026-08-15T15:00:01Z",
+        pending_action: "clarification",
+      },
+    };
+    resolveLoad([
+      {
+        id: PENDING_SESSION_ID,
+        task_id: PENDING_TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+      } as TaskSession,
+    ]);
+    await flushTaskSelection();
+
+    expect(switchToSession).toHaveBeenCalledWith(
+      PENDING_TASK_ID,
+      PENDING_SESSION_ID,
+      ORIGINAL_SESSION_ID,
+    );
   });
 });
 

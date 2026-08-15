@@ -56,15 +56,14 @@ function selectionIsCurrent(actions: SelectionActions): boolean {
   return actions.isSelectionCurrent?.() ?? true;
 }
 
-function pendingSelectionIsCurrent(
+function pendingActionIsCurrent(
   actions: SelectionActions,
   taskId: string,
   initial: TaskPendingSelectionSnapshot,
 ): boolean {
-  if (!selectionIsCurrent(actions)) return false;
   const current = actions.getTaskPendingSnapshot?.(taskId);
   if (!current) return true;
-  return current.revision === initial.revision && current.pendingAction === initial.pendingAction;
+  return current.pendingAction === initial.pendingAction;
 }
 
 export async function selectPendingTaskFromSheet(
@@ -90,8 +89,8 @@ export async function selectPendingTaskFromSheet(
     revision: null,
     pendingAction: params.taskPendingAction,
   };
-  if (!pendingSelectionIsCurrent(params, params.taskId, initialSnapshot)) return;
-  if (targetSessionId) {
+  if (!selectionIsCurrent(params)) return;
+  if (targetSessionId && pendingActionIsCurrent(params, params.taskId, initialSnapshot)) {
     params.setActiveSession(params.taskId, targetSessionId);
   } else {
     params.setActiveTask(params.taskId);

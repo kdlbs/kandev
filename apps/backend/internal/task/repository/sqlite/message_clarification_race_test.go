@@ -69,6 +69,80 @@ func TestDetachActiveClarificationMessagesClaimsOnlyCurrentPendingRows(t *testin
 	}
 }
 
+func TestExpireActiveClarificationMessagesClaimsOnlyCurrentPendingRows(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 15, 45, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-expire", "session-expire")
+	createPendingActionTurn(t, repo, "task-expire", "session-expire", "turn-old", base, base)
+	createClarificationBundleMessage(
+		t, repo, "message-old", "task-expire", "session-expire", "turn-old",
+		"pending-old", "q-old", base,
+	)
+	createPendingActionTurn(
+		t, repo, "task-expire", "session-expire", "turn-current",
+		base.Add(time.Minute), base.Add(time.Minute),
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-current", "task-expire", "session-expire", "turn-current",
+		"pending-current", "q-current", base.Add(time.Minute),
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-other-pending", "task-expire", "session-expire", "turn-current",
+		"pending-other", "q-other", base.Add(time.Minute+500*time.Millisecond),
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-answered", "task-expire", "session-expire", "turn-current",
+		"pending-answered", "q-answered", base.Add(time.Minute+time.Second),
+	)
+	setClarificationMessageMetadata(t, repo, "message-answered", func(metadata map[string]interface{}) {
+		metadata["status"] = "answered"
+	})
+
+	updated, err := repo.ExpireActiveClarificationBundle(ctx, "session-expire", "pending-current")
+	if err != nil {
+		t.Fatalf("ExpireActiveClarificationBundle: %v", err)
+	}
+	if ids := messageIDs(updated); len(ids) != 1 || ids[0] != "message-current" {
+		t.Fatalf("expired message IDs = %v, want only current pending row", ids)
+	}
+	current, err := repo.GetMessage(ctx, "message-current")
+	if err != nil {
+		t.Fatalf("GetMessage(current): %v", err)
+	}
+	if current.Metadata["status"] != "expired" || current.Metadata["agent_disconnected"] != true {
+		t.Fatalf("current message metadata = %#v, want expired and disconnected", current.Metadata)
+	}
+	answered, err := repo.GetMessage(ctx, "message-answered")
+	if err != nil {
+		t.Fatalf("GetMessage(answered): %v", err)
+	}
+	if answered.Metadata["status"] != "answered" {
+		t.Fatalf("answered message status = %v, want answered", answered.Metadata["status"])
+	}
+	other, err := repo.GetMessage(ctx, "message-other-pending")
+	if err != nil {
+		t.Fatalf("GetMessage(other pending): %v", err)
+	}
+	if other.Metadata["status"] != "pending" {
+		t.Fatalf("other bundle status = %v, want pending", other.Metadata["status"])
+	}
+	old, err := repo.GetMessage(ctx, "message-old")
+	if err != nil {
+		t.Fatalf("GetMessage(old): %v", err)
+	}
+	if old.Metadata["status"] != "pending" {
+		t.Fatalf("superseded message status = %v, want pending", old.Metadata["status"])
+	}
+	repeated, err := repo.ExpireActiveClarificationBundle(ctx, "session-expire", "pending-current")
+	if err != nil {
+		t.Fatalf("repeated expiry: %v", err)
+	}
+	if len(repeated) != 0 {
+		t.Fatalf("repeated expiry changed rows: %v", messageIDs(repeated))
+	}
+}
+
 func TestRestoreClarificationMessagesRechecksCurrentTurnAtUpdate(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

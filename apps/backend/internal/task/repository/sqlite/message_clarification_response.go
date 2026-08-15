@@ -74,11 +74,73 @@ func (r *Repository) DetachActiveClarificationMessagesBySessionID(
 	return messages, nil
 }
 
+// ExpireActiveClarificationBundle atomically expires one exact pending bundle
+// only while it belongs to the session's current durable turn. The status and
+// pending-ID predicates are evaluated by the UPDATE, so a stale expiry can
+// never overwrite a concurrent answer or a newer bundle.
+func (r *Repository) ExpireActiveClarificationBundle(
+	ctx context.Context,
+	sessionID, pendingID string,
+) ([]*models.Message, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin clarification expiry: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	drv := r.db.DriverName()
+	if err := lockSessionTurnWrites(ctx, tx, drv, sessionID); err != nil {
+		return nil, err
+	}
+	query := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
+		WHERE task_session_id = ?
+		  AND type = 'clarification_request'
+		  AND COALESCE(%s, '') IN ('', 'pending')
+		  AND %s = ?
+		  AND turn_id = (
+			SELECT id
+			FROM task_session_turns
+			WHERE task_session_id = task_session_messages.task_session_id
+			ORDER BY started_at DESC, created_at DESC, id DESC
+			LIMIT 1
+		  )
+		RETURNING id, task_session_id, task_id, turn_id, author_type, author_id,
+		          content, requests_input, type, metadata, created_at, updated_at
+	`, clarificationExpiredMetadataExpr(drv),
+		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
+		dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id"))
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), sessionID, pendingID)
+	if err != nil {
+		return nil, fmt.Errorf("expire active clarification messages: %w", err)
+	}
+	messages, _, err := scanMessageRows(rows, 0)
+	closeErr := rows.Close()
+	if err != nil {
+		return nil, fmt.Errorf("scan expired clarification messages: %w", err)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close expired clarification rows: %w", closeErr)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit clarification expiry: %w", err)
+	}
+	return messages, nil
+}
+
 func clarificationDetachedMetadataExpr(driverName string) string {
 	if dialect.IsPostgres(driverName) {
 		return "jsonb_set(metadata::jsonb, '{agent_disconnected}', 'true'::jsonb)::text"
 	}
 	return "json_set(metadata, '$.agent_disconnected', json('true'))"
+}
+
+func clarificationExpiredMetadataExpr(driverName string) string {
+	if dialect.IsPostgres(driverName) {
+		return "jsonb_set(jsonb_set(metadata::jsonb, '{agent_disconnected}', 'true'::jsonb), " +
+			"'{status}', '\"expired\"'::jsonb)::text"
+	}
+	return "json_set(metadata, '$.agent_disconnected', json('true'), '$.status', 'expired')"
 }
 
 func clarificationNotDetachedPredicate(driverName string) string {

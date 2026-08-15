@@ -41,6 +41,10 @@ type GitObservationLoader func(context.Context, string) ([]GitObservation, error
 // input-capable session belonging to one task.
 type PendingActionLoader func(context.Context, string) (map[string]string, error)
 
+// PullRequestLoader rehydrates the keyed PR observations needed to preserve
+// sibling pull requests across projector restarts and CAS rebases.
+type PullRequestLoader func(context.Context, string) ([]PullRequestInput, error)
+
 // SummaryUpdated is the complete replacement payload sent to workspace
 // subscribers. It intentionally contains no transcript, file list, or source
 // event payload.
@@ -60,6 +64,7 @@ type ProjectorConfig struct {
 	ResolveWorkspace    WorkspaceResolver
 	LoadGitObservations GitObservationLoader
 	LoadPendingActions  PendingActionLoader
+	LoadPullRequests    PullRequestLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
 	// message.queue.get). Wired from the messagequeue service at the
@@ -79,6 +84,7 @@ type Projector struct {
 	resolveWorkspace    WorkspaceResolver
 	loadGitObservations GitObservationLoader
 	loadPendingActions  PendingActionLoader
+	loadPullRequests    PullRequestLoader
 	countQueuedPrompts  func(context.Context, string) (int, error)
 	logger              *logger.Logger
 	now                 func() time.Time
@@ -162,6 +168,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		resolveWorkspace:    cfg.ResolveWorkspace,
 		loadGitObservations: cfg.LoadGitObservations,
 		loadPendingActions:  cfg.LoadPendingActions,
+		loadPullRequests:    cfg.LoadPullRequests,
 		countQueuedPrompts:  cfg.CountQueuedPrompts,
 		logger:              log.WithFields(zap.String("component", "task-status-summary-projector")),
 		now:                 now,

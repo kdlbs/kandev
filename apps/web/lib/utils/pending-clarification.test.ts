@@ -380,6 +380,29 @@ describe("newestDurableTurnId ordering", () => {
       ]),
     ).toBe("turn-a");
   });
+
+  it("orders an exact-second timestamp before a one-nanosecond-later timestamp", () => {
+    expect(
+      newestDurableTurnId([
+        {
+          id: "turn-z",
+          session_id: toSessionId("session-1"),
+          task_id: toTaskId("task-1"),
+          started_at: TURN_TIMESTAMP,
+          created_at: TURN_TIMESTAMP,
+          updated_at: TURN_TIMESTAMP,
+        },
+        {
+          id: "turn-a",
+          session_id: toSessionId("session-1"),
+          task_id: toTaskId("task-1"),
+          started_at: "2026-08-14T12:00:00.000000001Z",
+          created_at: TURN_TIMESTAMP,
+          updated_at: TURN_TIMESTAMP,
+        },
+      ]),
+    ).toBe("turn-a");
+  });
 });
 
 describe("hasPendingPermissionRequest", () => {

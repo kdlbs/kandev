@@ -19,7 +19,10 @@ import (
 )
 
 const (
-	clarificationInputPauseTimeout       = 30 * time.Second
+	clarificationInputPauseTimeout = 30 * time.Second
+	// Detached answers may first cold-resume the runtime. Keep that startup
+	// bounded while preserving the synchronous accept-or-restore contract; a
+	// 202 response could falsely acknowledge a dispatch that never reached it.
 	detachedClarificationDispatchTimeout = 30 * time.Second
 )
 

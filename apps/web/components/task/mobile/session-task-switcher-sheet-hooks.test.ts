@@ -233,6 +233,31 @@ describe("selectPendingTaskFromSheet", () => {
     });
     expect(order).toEqual(["task", "navigate", "close"]);
   });
+
+  it("keeps owner routing when only the summary revision changes", async () => {
+    const setActiveSession = vi.fn();
+    await selectPendingTaskFromSheet({
+      taskId: "task-revision",
+      preferredSessionId: "primary",
+      taskPendingAction: "clarification",
+      pendingSnapshot: { revision: 1, pendingAction: "clarification" },
+      getTaskPendingSnapshot: () => ({ revision: 2, pendingAction: "clarification" }),
+      loadTaskSessionsForTask: vi.fn(async () => [
+        {
+          id: "owner",
+          task_id: "task-revision",
+          state: "WAITING_FOR_INPUT",
+          pending_action: "clarification",
+        } as TaskSession,
+      ]),
+      setActiveSession,
+      setActiveTask: vi.fn(),
+      navigate: vi.fn(),
+      onOpenChange: vi.fn(),
+    });
+
+    expect(setActiveSession).toHaveBeenCalledWith("task-revision", "owner");
+  });
 });
 
 describe("selectTaskFromSheet races", () => {
@@ -306,7 +331,8 @@ describe("selectTaskFromSheet races", () => {
 });
 
 describe("selectTaskFromSheet summary races", () => {
-  it("ignores a delayed owner response after the task summary changes", async () => {
+  it("falls back to task navigation when the pending action changes", async () => {
+    const taskId = "task-summary-race";
     let resolveLoad: (sessions: TaskSession[]) => void = () => undefined;
     const loadTaskSessionsForTask = vi.fn(
       () =>
@@ -324,7 +350,7 @@ describe("selectTaskFromSheet summary races", () => {
     const onOpenChange = vi.fn();
 
     selectTaskFromSheet({
-      taskId: "task-summary-race",
+      taskId,
       task: {
         primarySessionId: "primary",
         statusSummary: {
@@ -349,18 +375,18 @@ describe("selectTaskFromSheet summary races", () => {
     resolveLoad([
       {
         id: "old-owner",
-        task_id: "task-summary-race",
+        task_id: taskId,
         state: "WAITING_FOR_INPUT",
         pending_action: "clarification",
       } as TaskSession,
     ]);
     await Promise.resolve();
 
-    expect(loadTaskSessionsForTask).toHaveBeenCalledWith("task-summary-race", { force: true });
+    expect(loadTaskSessionsForTask).toHaveBeenCalledWith(taskId, { force: true });
     expect(setActiveSession).not.toHaveBeenCalled();
-    expect(setActiveTask).not.toHaveBeenCalled();
-    expect(navigate).not.toHaveBeenCalled();
-    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(setActiveTask).toHaveBeenCalledWith(taskId);
+    expect(navigate).toHaveBeenCalledWith(taskId);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
 
