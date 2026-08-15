@@ -94,7 +94,7 @@ func (r *Repository) reconcileUnpublishedPromptTurn(
 	updatedAt := time.Now().UTC()
 	attempted, _ := metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool)
 	if attempted || referenced {
-		deletePromptDispatchMetadata(metadata)
+		models.ClearPromptDispatchMetadata(metadata)
 		err = updateTurnMetadata(ctx, tx, r.db, turn.id, metadata, updatedAt)
 	} else {
 		err = r.restoreReservedClarificationClaim(ctx, tx, metadata, updatedAt)
@@ -163,14 +163,6 @@ func updateTurnMetadata(
 		return fmt.Errorf("publish message-backed prompt turn %s: %w", turnID, err)
 	}
 	return nil
-}
-
-func deletePromptDispatchMetadata(metadata map[string]interface{}) {
-	delete(metadata, models.TurnMetaKeyPromptDispatchPending)
-	delete(metadata, models.TurnMetaKeyPromptDispatchAttempted)
-	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationPendingID)
-	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationTurnID)
-	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationMessageIDs)
 }
 
 func (r *Repository) restoreReservedClarificationClaim(

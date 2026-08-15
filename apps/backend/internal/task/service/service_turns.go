@@ -138,21 +138,13 @@ func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) er
 	}
 	published := *turn
 	published.Metadata = maps.Clone(turn.Metadata)
-	deletePromptDispatchMetadata(published.Metadata)
+	models.ClearPromptDispatchMetadata(published.Metadata)
 	if err := s.turns.UpdateTurn(ctx, &published); err != nil {
 		return fmt.Errorf("publish reserved turn %s: %w", turn.ID, err)
 	}
 	turn.Metadata = published.Metadata
 	s.publishTurnEvent(events.TurnStarted, turn, nil)
 	return nil
-}
-
-func deletePromptDispatchMetadata(metadata map[string]interface{}) {
-	delete(metadata, models.TurnMetaKeyPromptDispatchPending)
-	delete(metadata, models.TurnMetaKeyPromptDispatchAttempted)
-	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationPendingID)
-	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationTurnID)
-	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationMessageIDs)
 }
 
 // ReconcileUnpublishedPromptTurns restores clarification claims whose empty

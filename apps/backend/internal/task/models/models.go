@@ -275,6 +275,16 @@ const (
 	TurnMetaKeyPromptDispatchClarificationMessageIDs = "prompt_dispatch_clarification_message_ids"
 )
 
+// ClearPromptDispatchMetadata removes every reservation-only field after
+// publication or conservative startup recovery.
+func ClearPromptDispatchMetadata(metadata map[string]interface{}) {
+	delete(metadata, TurnMetaKeyPromptDispatchPending)
+	delete(metadata, TurnMetaKeyPromptDispatchAttempted)
+	delete(metadata, TurnMetaKeyPromptDispatchClarificationPendingID)
+	delete(metadata, TurnMetaKeyPromptDispatchClarificationTurnID)
+	delete(metadata, TurnMetaKeyPromptDispatchClarificationMessageIDs)
+}
+
 // PromptDispatchRecovery identifies the exact clarification claim that an
 // unpublished successor reservation must restore after a backend restart.
 type PromptDispatchRecovery struct {

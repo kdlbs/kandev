@@ -353,13 +353,11 @@ func (h *Handlers) claimClarificationResponse(
 		}
 	}
 	terminalStatus := string(StatusAnswered)
-	responses := make(map[string]interface{}, len(body.Answers))
+	var responses map[string]interface{}
 	if body.Rejected {
 		terminalStatus = string(StatusRejected)
-		for _, questionID := range h.expectedQuestionIDs(ctx, pendingID) {
-			responses[questionID] = nil
-		}
 	} else {
+		responses = make(map[string]interface{}, len(body.Answers))
 		for i := range body.Answers {
 			answer := body.Answers[i]
 			responses[answer.QuestionID] = answer
