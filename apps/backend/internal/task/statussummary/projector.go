@@ -41,6 +41,19 @@ type GitObservationLoader func(context.Context, string) ([]GitObservation, error
 // input-capable session belonging to one task.
 type PendingActionLoader func(context.Context, string) (map[string]string, error)
 
+// SessionObservationSnapshot is the authoritative keyed session state needed
+// to rebuild aggregates that cannot be recovered from their single summary
+// representative after a restart or compare-and-set loss.
+type SessionObservationSnapshot struct {
+	Sessions         []RebuildSession
+	ActivityObserved bool
+	ErrorsObserved   bool
+}
+
+// SessionObservationLoader rehydrates session, activity, and error source
+// observations for one task.
+type SessionObservationLoader func(context.Context, string) (SessionObservationSnapshot, error)
+
 // PullRequestLoader rehydrates the keyed PR observations needed to preserve
 // sibling pull requests across projector restarts and CAS rebases.
 type PullRequestLoader func(context.Context, string) ([]PullRequestInput, error)
@@ -59,12 +72,13 @@ type SummaryUpdated struct {
 func (e SummaryUpdated) GetWorkspaceID() string { return e.WorkspaceID }
 
 type ProjectorConfig struct {
-	Store               SummaryStore
-	EventBus            bus.EventBus
-	ResolveWorkspace    WorkspaceResolver
-	LoadGitObservations GitObservationLoader
-	LoadPendingActions  PendingActionLoader
-	LoadPullRequests    PullRequestLoader
+	Store                   SummaryStore
+	EventBus                bus.EventBus
+	ResolveWorkspace        WorkspaceResolver
+	LoadGitObservations     GitObservationLoader
+	LoadPendingActions      PendingActionLoader
+	LoadSessionObservations SessionObservationLoader
+	LoadPullRequests        PullRequestLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
 	// message.queue.get). Wired from the messagequeue service at the
@@ -79,15 +93,16 @@ type ProjectorConfig struct {
 // independent tasks do not block one another during a burst. Raw stream events
 // are never subscribed to here.
 type Projector struct {
-	store               SummaryStore
-	eventBus            bus.EventBus
-	resolveWorkspace    WorkspaceResolver
-	loadGitObservations GitObservationLoader
-	loadPendingActions  PendingActionLoader
-	loadPullRequests    PullRequestLoader
-	countQueuedPrompts  func(context.Context, string) (int, error)
-	logger              *logger.Logger
-	now                 func() time.Time
+	store                   SummaryStore
+	eventBus                bus.EventBus
+	resolveWorkspace        WorkspaceResolver
+	loadGitObservations     GitObservationLoader
+	loadPendingActions      PendingActionLoader
+	loadSessionObservations SessionObservationLoader
+	loadPullRequests        PullRequestLoader
+	countQueuedPrompts      func(context.Context, string) (int, error)
+	logger                  *logger.Logger
+	now                     func() time.Time
 
 	mu         sync.Mutex
 	state      map[string]*projectionState
@@ -163,17 +178,18 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Projector{
-		store:               cfg.Store,
-		eventBus:            cfg.EventBus,
-		resolveWorkspace:    cfg.ResolveWorkspace,
-		loadGitObservations: cfg.LoadGitObservations,
-		loadPendingActions:  cfg.LoadPendingActions,
-		loadPullRequests:    cfg.LoadPullRequests,
-		countQueuedPrompts:  cfg.CountQueuedPrompts,
-		logger:              log.WithFields(zap.String("component", "task-status-summary-projector")),
-		now:                 now,
-		state:               make(map[string]*projectionState),
-		taskLocks:           make(map[string]*taskProjectionLock),
+		store:                   cfg.Store,
+		eventBus:                cfg.EventBus,
+		resolveWorkspace:        cfg.ResolveWorkspace,
+		loadGitObservations:     cfg.LoadGitObservations,
+		loadPendingActions:      cfg.LoadPendingActions,
+		loadSessionObservations: cfg.LoadSessionObservations,
+		loadPullRequests:        cfg.LoadPullRequests,
+		countQueuedPrompts:      cfg.CountQueuedPrompts,
+		logger:                  log.WithFields(zap.String("component", "task-status-summary-projector")),
+		now:                     now,
+		state:                   make(map[string]*projectionState),
+		taskLocks:               make(map[string]*taskProjectionLock),
 	}
 }
 

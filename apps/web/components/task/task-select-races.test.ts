@@ -230,7 +230,7 @@ describe("selectTaskWithLayout pending summary races", () => {
     expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
   });
 
-  it("keeps owner routing when an unrelated summary field changes", async () => {
+  it("falls back when a same-action summary revision can have a new owner", async () => {
     const initialTask = {
       id: PENDING_TASK_ID,
       primarySessionId: PENDING_SESSION_ID,
@@ -275,11 +275,9 @@ describe("selectTaskWithLayout pending summary races", () => {
     ]);
     await flushTaskSelection();
 
-    expect(switchToSession).toHaveBeenCalledWith(
-      PENDING_TASK_ID,
-      PENDING_SESSION_ID,
-      ORIGINAL_SESSION_ID,
-    );
+    expect(switchToSession).not.toHaveBeenCalled();
+    expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
   });
 });
 

@@ -234,10 +234,14 @@ describe("selectPendingTaskFromSheet", () => {
     expect(order).toEqual(["task", "navigate", "close"]);
   });
 
-  it("keeps owner routing when only the summary revision changes", async () => {
+  it("falls back when the same action has a newer summary revision", async () => {
+    const taskId = "task-revision";
     const setActiveSession = vi.fn();
+    const setActiveTask = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
     await selectPendingTaskFromSheet({
-      taskId: "task-revision",
+      taskId,
       preferredSessionId: "primary",
       taskPendingAction: "clarification",
       pendingSnapshot: { revision: 1, pendingAction: "clarification" },
@@ -245,18 +249,21 @@ describe("selectPendingTaskFromSheet", () => {
       loadTaskSessionsForTask: vi.fn(async () => [
         {
           id: "owner",
-          task_id: "task-revision",
+          task_id: taskId,
           state: "WAITING_FOR_INPUT",
           pending_action: "clarification",
         } as TaskSession,
       ]),
       setActiveSession,
-      setActiveTask: vi.fn(),
-      navigate: vi.fn(),
-      onOpenChange: vi.fn(),
+      setActiveTask,
+      navigate,
+      onOpenChange,
     });
 
-    expect(setActiveSession).toHaveBeenCalledWith("task-revision", "owner");
+    expect(setActiveSession).not.toHaveBeenCalled();
+    expect(setActiveTask).toHaveBeenCalledWith(taskId);
+    expect(navigate).toHaveBeenCalledWith(taskId);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
 

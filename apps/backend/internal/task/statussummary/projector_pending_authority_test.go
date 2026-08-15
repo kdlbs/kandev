@@ -236,10 +236,41 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 		},
 	}
 	loaderCalls := 0
+	sessionLoaderCalls := 0
 	gitLoaderCalls := 0
 	prLoaderCalls := 0
 	projector := NewProjector(ProjectorConfig{
 		Store: store,
+		LoadSessionObservations: func(context.Context, string) (SessionObservationSnapshot, error) {
+			sessionLoaderCalls++
+			return SessionObservationSnapshot{
+				ActivityObserved: true,
+				ErrorsObserved:   true,
+				Sessions: []RebuildSession{
+					{
+						ID:                  "session-current",
+						State:               sessionStateRunning,
+						IsPrimary:           true,
+						ForegroundActivity:  activityGenerating,
+						ActiveSubagentCount: 1,
+						ActiveError: &ActiveErrorSummary{
+							SessionID: "session-current", Stamp: "error-current",
+							OccurredAt: storedAt.Add(2 * time.Minute), Preview: "current failed",
+						},
+					},
+					{
+						ID:                  "session-sibling",
+						State:               sessionStateRunning,
+						ForegroundActivity:  activityBackground,
+						ActiveSubagentCount: 2,
+						ActiveError: &ActiveErrorSummary{
+							SessionID: "session-sibling", Stamp: "error-sibling",
+							OccurredAt: storedAt.Add(time.Minute), Preview: "sibling failed",
+						},
+					},
+				},
+			}, nil
+		},
 		LoadPendingActions: func(context.Context, string) (map[string]string, error) {
 			loaderCalls++
 			return map[string]string{}, nil
@@ -278,6 +309,9 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 	}
 	if loaderCalls != 2 {
 		t.Fatalf("pending loader calls = %d, want reload after rejection", loaderCalls)
+	}
+	if sessionLoaderCalls != 2 {
+		t.Fatalf("session loader calls = %d, want reload after rejection", sessionLoaderCalls)
 	}
 	if gitLoaderCalls != 2 {
 		t.Fatalf("Git loader calls = %d, want reload after rejection", gitLoaderCalls)
@@ -319,5 +353,34 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 	got = base.summary("task-cas")
 	if got == nil || got.PullRequest == nil || got.PullRequest.Count != 2 {
 		t.Fatalf("PR summary after CAS replay = %+v, want both pull requests", got)
+	}
+
+	err = projector.HandleEvent(context.Background(), bus.NewEvent(events.TaskSessionActivityChanged, "test", map[string]interface{}{
+		"task_id":               "task-cas",
+		"workspace_id":          "workspace-1",
+		"session_id":            "session-current",
+		"foreground_activity":   activityBackground,
+		"active_subagent_count": 0,
+	}))
+	if err != nil {
+		t.Fatalf("activity replay after CAS rejection: %v", err)
+	}
+	got = base.summary("task-cas")
+	if got == nil || got.ForegroundActivity != activityBackground || got.ActiveSubagentCount != 2 {
+		t.Fatalf("activity after CAS replay = %+v, want sibling activity/count preserved", got)
+	}
+
+	err = projector.HandleEvent(context.Background(), bus.NewEvent(events.TaskSessionErrorChanged, "test", map[string]interface{}{
+		"task_id":      "task-cas",
+		"workspace_id": "workspace-1",
+		"session_id":   "session-current",
+		"active":       false,
+	}))
+	if err != nil {
+		t.Fatalf("error recovery after CAS rejection: %v", err)
+	}
+	got = base.summary("task-cas")
+	if got == nil || got.ActiveError == nil || got.ActiveError.SessionID != "session-sibling" {
+		t.Fatalf("error after representative recovery = %+v, want sibling error preserved", got)
 	}
 }

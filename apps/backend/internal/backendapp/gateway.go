@@ -32,6 +32,7 @@ import (
 	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
 	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -293,6 +294,9 @@ func provideGateway(
 		projector := statussummary.NewProjector(statussummary.ProjectorConfig{
 			Store:    taskRepo,
 			EventBus: eventBus,
+			LoadSessionObservations: func(ctx context.Context, taskID string) (statussummary.SessionObservationSnapshot, error) {
+				return loadTaskSessionObservations(ctx, taskRepo, orchestratorSvc, taskID)
+			},
 			LoadPendingActions: func(ctx context.Context, taskID string) (map[string]string, error) {
 				return loadTaskPendingActions(ctx, taskRepo, taskID)
 			},
@@ -414,6 +418,55 @@ func provideGateway(
 	}
 
 	return gateway, notificationSvc, notificationCtrl, terminalSvc, nil
+}
+
+type taskStatusActivityProvider interface {
+	ForegroundActivity(sessionID string) v1.ForegroundActivity
+	ActiveSubagentCount(sessionID string) int
+}
+
+func loadTaskSessionObservations(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	activityProvider taskStatusActivityProvider,
+	taskID string,
+) (statussummary.SessionObservationSnapshot, error) {
+	sessions, err := taskRepo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return statussummary.SessionObservationSnapshot{}, err
+	}
+	snapshot := statussummary.SessionObservationSnapshot{
+		Sessions:         make([]statussummary.RebuildSession, 0, len(sessions)),
+		ActivityObserved: activityProvider != nil,
+		ErrorsObserved:   true,
+	}
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		input := statussummary.RebuildSession{
+			ID:        session.ID,
+			State:     string(session.State),
+			IsPrimary: session.IsPrimary,
+		}
+		if activityProvider != nil {
+			activity := activityProvider.ForegroundActivity(session.ID)
+			if session.State == models.TaskSessionStateRunning || activity == v1.ForegroundActivityBackground {
+				input.ForegroundActivity = string(activity)
+			}
+			input.ActiveSubagentCount = maxNonNegative(activityProvider.ActiveSubagentCount(session.ID))
+		}
+		if lastError, ok := models.LoadLastAgentError(session.Metadata); ok && !lastError.IsDismissed() {
+			input.ActiveError = &statussummary.ActiveErrorSummary{
+				SessionID:  session.ID,
+				Stamp:      lastError.Stamp(),
+				OccurredAt: lastError.OccurredAt,
+				Preview:    lastError.Message,
+			}
+		}
+		snapshot.Sessions = append(snapshot.Sessions, input)
+	}
+	return snapshot, nil
 }
 
 func loadTaskPendingActions(

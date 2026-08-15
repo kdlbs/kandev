@@ -40,6 +40,13 @@ export type TaskPendingSelectionSnapshot = {
   pendingAction: TaskPendingAction | null | undefined;
 };
 
+export function taskPendingSelectionMatches(
+  initial: TaskPendingSelectionSnapshot,
+  current: TaskPendingSelectionSnapshot,
+): boolean {
+  return current.revision === initial.revision && current.pendingAction === initial.pendingAction;
+}
+
 export function effectiveTaskPendingAction(
   task: PendingTask | undefined,
 ): TaskPendingAction | null | undefined {
@@ -72,7 +79,7 @@ function taskPendingSelectionIsCurrent(
     return initial.revision === null;
   }
   const current = taskPendingSelectionSnapshot(currentTask);
-  return current.pendingAction === initial.pendingAction;
+  return taskPendingSelectionMatches(initial, current);
 }
 
 function pendingSelectionOwnerChanged(

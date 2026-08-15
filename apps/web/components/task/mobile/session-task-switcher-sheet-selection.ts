@@ -6,6 +6,7 @@ import {
   effectiveTaskPendingAction,
   resolvePreferredSessionId,
   resolveTaskSessionId,
+  taskPendingSelectionMatches,
   taskPendingSelectionSnapshot,
   type TaskPendingSelectionSnapshot,
 } from "../task-select-helpers";
@@ -63,7 +64,7 @@ function pendingActionIsCurrent(
 ): boolean {
   const current = actions.getTaskPendingSnapshot?.(taskId);
   if (!current) return true;
-  return current.pendingAction === initial.pendingAction;
+  return taskPendingSelectionMatches(initial, current);
 }
 
 export async function selectPendingTaskFromSheet(

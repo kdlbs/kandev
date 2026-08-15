@@ -220,6 +220,9 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	state.current = cloneSummary(summary)
 	state.revision = summary.Revision
 	applySummaryBaseline(state, summary)
+	if err := p.restoreSessionObservations(ctx, taskID, state); err != nil {
+		return err
+	}
 	if summary.Git != nil {
 		if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
 			return err
@@ -283,6 +286,9 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	state.prBaseline = nil
 	state.prObserved = false
 	applySummaryBaseline(state, current)
+	if err := p.restoreSessionObservations(ctx, taskID, state); err != nil {
+		return err
+	}
 	if current.Git != nil {
 		if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
 			return err
@@ -292,6 +298,48 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 		if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (p *Projector) restoreSessionObservations(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) error {
+	if p.loadSessionObservations == nil {
+		return nil
+	}
+	snapshot, err := p.loadSessionObservations(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load session observations for task status summary %q: %w", taskID, err)
+	}
+	sessions := make(map[string]sessionObservation, len(snapshot.Sessions))
+	errorsBySession := make(map[string]*ActiveErrorSummary, len(snapshot.Sessions))
+	for _, input := range snapshot.Sessions {
+		sessionID := strings.TrimSpace(input.ID)
+		if sessionID == "" {
+			continue
+		}
+		sessions[sessionID] = sessionObservation{
+			id:                  sessionID,
+			state:               input.State,
+			isPrimary:           input.IsPrimary,
+			foregroundActivity:  input.ForegroundActivity,
+			activeSubagentCount: maxInt(input.ActiveSubagentCount, 0),
+		}
+		activeError := normalizeRebuildError(input.ActiveError, p.now().UTC())
+		if activeError == nil || state.clearedErrorStamps[sessionID] == activeError.Stamp {
+			continue
+		}
+		activeError.SessionID = sessionID
+		errorsBySession[sessionID] = activeError
+	}
+	state.sessions = sessions
+	state.activityObserved = snapshot.ActivityObserved
+	if snapshot.ErrorsObserved {
+		state.errors = errorsBySession
+		state.errorsObserved = true
 	}
 	return nil
 }
