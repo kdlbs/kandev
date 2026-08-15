@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import { usePathname, useRouter } from "@/lib/routing/client-router";
 import { linkToTask, replaceTaskUrl } from "@/lib/links";
@@ -318,6 +318,15 @@ function useSidebarTaskSelection(params: {
     () => buildSwitchToSession(store, setActiveSession),
     [store, setActiveSession],
   );
+  const selectionControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    selectionControllerRef.current = controller;
+    return () => {
+      controller.abort();
+      if (selectionControllerRef.current === controller) selectionControllerRef.current = null;
+    };
+  }, [pathname]);
   return useCallback(
     (taskId: string) => {
       const state = store.getState();
@@ -347,6 +356,7 @@ function useSidebarTaskSelection(params: {
         navigateToTask: onTaskRoute
           ? replaceTaskUrl
           : (selectedTaskId) => router.push(linkToTask(selectedTaskId)),
+        selectionSignal: selectionControllerRef.current?.signal,
       });
     },
     [

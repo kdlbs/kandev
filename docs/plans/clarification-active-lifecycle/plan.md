@@ -116,12 +116,14 @@ bundle detached, a newer bundle rejected, and a later completion republishing th
 
 - Add a pure resolver in `apps/web/components/task/task-select-helpers.ts` that selects the first
   (newest, because the API order is newest-first) input-capable session whose `pending_action`
-  matches the task summary action. It falls back to remembered session, primary session, then first
-  session when no owner matches.
+  matches the task summary action. When a task advertises pending input but no matching input-capable
+  owner exists, fail closed and navigate only to the task; never guess the remembered, primary, or
+  first session. Clean tasks retain those normal session fallbacks.
 - When a desktop task advertises pending input, always finish the existing session-list load before
   switching, even if the preferred session already has an environment mapping. Apply the same rule
   when the global sidebar starts from a non-task route. Keep the existing selection-token and
-  external-navigation race guards.
+  external-navigation race guards, and invalidate deferred off-route selection when the pathname
+  changes or its initiating sidebar callback unmounts.
 - Reuse the resolver in
   `apps/web/components/task/mobile/session-task-switcher-sheet-hooks.ts`; remove the synchronous
   primary fast path for a pending task, close the drawer only after the selected session/URL is set,

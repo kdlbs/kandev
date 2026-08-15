@@ -230,6 +230,43 @@ describe("selectTaskWithLayout external active-task changes", () => {
     expect(switchToSession).not.toHaveBeenCalled();
     expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
   });
+
+  it("ignores an off-route pending selection after unrelated navigation", async () => {
+    const switchToSession = vi.fn();
+    const navigateToTask = vi.fn();
+    const selectionController = new AbortController();
+    const { store, setActiveTask } = pendingHarness();
+    const { loadTaskSessionsForTask, resolveLoad } = makeDeferredSessionLoader();
+    selectTaskWithLayout({
+      taskId: PENDING_TASK_ID,
+      task: {
+        primarySessionId: PENDING_SESSION_ID,
+        taskPendingAction: "clarification",
+      },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask,
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+      navigateToTask,
+      selectionSignal: selectionController.signal,
+    });
+
+    selectionController.abort();
+    resolveLoad([
+      {
+        id: PENDING_SESSION_ID,
+        task_id: PENDING_TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        pending_action: "clarification",
+      } as TaskSession,
+    ]);
+    await flushTaskSelection();
+
+    expect(switchToSession).not.toHaveBeenCalled();
+    expect(setActiveTask).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(navigateToTask).not.toHaveBeenCalled();
+  });
 });
 
 describe("selectTaskWithLayout selection guard cleanup", () => {

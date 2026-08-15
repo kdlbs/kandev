@@ -150,6 +150,7 @@ function createTaskSelectionGuard(
   store: StoreApi<AppState>,
   taskId: string,
   selectionToken: number,
+  selectionSignal?: AbortSignal,
 ) {
   const startActiveTaskId = store.getState().tasks.activeTaskId ?? null;
   let activeTaskChangedExternally = false;
@@ -165,7 +166,13 @@ function createTaskSelectionGuard(
       if (typeof unsubscribe === "function") unsubscribe();
     },
     wasSuperseded: () => {
-      if (taskSelectionWasSuperseded(selectionToken) || activeTaskChangedExternally) return true;
+      if (
+        selectionSignal?.aborted ||
+        taskSelectionWasSuperseded(selectionToken) ||
+        activeTaskChangedExternally
+      ) {
+        return true;
+      }
       const activeTaskId = store.getState().tasks.activeTaskId ?? null;
       return activeTaskId !== startActiveTaskId && activeTaskId !== taskId;
     },
@@ -229,6 +236,7 @@ type SelectTaskWithLayoutParams = {
   setActiveTask: (taskId: string) => void;
   setPreparingTaskId: (id: string | null) => void;
   navigateToTask?: (taskId: string) => void;
+  selectionSignal?: AbortSignal;
 };
 
 function openTaskWithoutSession(
@@ -246,7 +254,12 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
   const oldSessionId = state.tasks.activeSessionId;
   const navigateToTask = params.navigateToTask ?? replaceTaskUrl;
   const taskPendingAction = effectiveTaskPendingAction(task);
-  const selectionGuard = createTaskSelectionGuard(store, taskId, selectionToken);
+  const selectionGuard = createTaskSelectionGuard(
+    store,
+    taskId,
+    selectionToken,
+    params.selectionSignal,
+  );
   if (isDebug()) {
     debug("selectTaskWithLayout: entry", {
       taskId,
