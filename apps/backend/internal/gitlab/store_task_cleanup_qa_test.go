@@ -5,11 +5,44 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 )
+
+var testGitLabTaskOwnedTables = []string{
+	"gitlab_mr_watches",
+	"gitlab_task_mrs",
+	"gitlab_task_mr_options",
+	"gitlab_task_mr_state",
+}
+
+func seedGitLabTaskOwnedAutomationState(t *testing.T, store *Store, taskID string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := store.db.Exec(`
+		INSERT INTO gitlab_task_mr_options (task_id, created_at, updated_at)
+		VALUES (?, ?, ?)`, taskID, now, now); err != nil {
+		t.Fatalf("seed task MR options for %s: %v", taskID, err)
+	}
+	if _, err := store.db.Exec(`
+		INSERT INTO gitlab_task_mr_state
+			(task_id, repository_id, project_path, mr_iid, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)`, taskID, "repo-1", "group/project", 1, now, now); err != nil {
+		t.Fatalf("seed MR automation state for %s: %v", taskID, err)
+	}
+}
+
+func countGitLabTaskOwnedRows(t *testing.T, store *Store, table, taskID string) int {
+	t.Helper()
+	var count int
+	if err := store.db.Get(&count, `SELECT COUNT(*) FROM `+table+` WHERE task_id = ?`, taskID); err != nil {
+		t.Fatalf("count %s for %s: %v", table, taskID, err)
+	}
+	return count
+}
 
 // countTaskMRRows counts gitlab_task_mrs rows directly, bypassing
 // ListTaskMRsByTask so a test can observe rows for task IDs the normal read
@@ -142,11 +175,47 @@ func TestHandleTaskDeletedConcurrentDeliveryIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestHealTaskContributionOrphansHandlesUnusualTaskIDs pins how the startup
+func TestHandleTaskDeletedRemovesAllTaskOwnedState(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, store, "ws")
+
+	for _, taskID := range []string{"doomed", "bystander"} {
+		seedTask(t, store, taskID, "ws")
+		if err := store.UpsertTaskMR(ctx, newTestMR(taskID, "", "group/project", 1)); err != nil {
+			t.Fatalf("create task MR for %s: %v", taskID, err)
+		}
+		if err := store.CreateMRWatch(ctx, &MRWatch{
+			SessionID: "session-" + taskID, TaskID: taskID, ProjectPath: "group/project", Branch: "main",
+		}); err != nil {
+			t.Fatalf("create MR watch for %s: %v", taskID, err)
+		}
+		seedGitLabTaskOwnedAutomationState(t, store, taskID)
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	svc := NewService(DefaultHost, NewMockClient(DefaultHost), "", nil, log)
+	svc.SetStore(store)
+	event := bus.NewEvent(events.TaskDeleted, "task-service", map[string]interface{}{"task_id": "doomed"})
+	if err := svc.handleTaskDeleted(ctx, event); err != nil {
+		t.Fatalf("handle task deleted: %v", err)
+	}
+
+	for _, table := range testGitLabTaskOwnedTables {
+		if got := countGitLabTaskOwnedRows(t, store, table, "doomed"); got != 0 {
+			t.Fatalf("%s rows for doomed task = %d, want 0", table, got)
+		}
+		if got := countGitLabTaskOwnedRows(t, store, table, "bystander"); got != 1 {
+			t.Fatalf("%s rows for bystander task = %d, want 1", table, got)
+		}
+	}
+}
+
+// TestHealTaskOwnedOrphansHandlesUnusualTaskIDs pins how the startup
 // sweep treats rows whose task_id can never match a tasks row: the empty
 // string, and a very long unicode identifier. Both are ownerless by
 // definition, so both must be swept, while a real task's rows survive.
-func TestHealTaskContributionOrphansHandlesUnusualTaskIDs(t *testing.T) {
+func TestHealTaskOwnedOrphansHandlesUnusualTaskIDs(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	seedWorkspace(t, store, "ws")

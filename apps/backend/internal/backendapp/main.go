@@ -365,6 +365,9 @@ func startServices( //nolint:cyclop
 	if services.Workflow != nil {
 		addCleanup(services.Workflow.Close)
 	}
+	if services.GitLabCleanup != nil {
+		addCleanup(services.GitLabCleanup)
+	}
 	services.RuntimeFlags = runtimeflags.NewService(
 		repos.RuntimeFlags,
 		runtimeflags.RuntimeOptionsFromAppliedConfig(runtimeFlagDefaults, cfg),

@@ -5,10 +5,50 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 )
+
+var testGitHubTaskOwnedTables = []string{
+	"github_pr_watches",
+	"github_task_prs",
+	"github_task_ci_options",
+	"github_task_pr_automation_options",
+	"github_task_ci_pr_state",
+}
+
+func seedGitHubTaskOwnedAutomationState(t *testing.T, store *Store, taskID string) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := store.db.Exec(`
+		INSERT INTO github_task_ci_options (task_id, created_at, updated_at)
+		VALUES (?, ?, ?)`, taskID, now, now); err != nil {
+		t.Fatalf("seed task CI options for %s: %v", taskID, err)
+	}
+	if _, err := store.db.Exec(`
+		INSERT INTO github_task_pr_automation_options
+			(task_id, repository_id, pr_number, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)`, taskID, "", 1, now, now); err != nil {
+		t.Fatalf("seed PR automation options for %s: %v", taskID, err)
+	}
+	if _, err := store.db.Exec(`
+		INSERT INTO github_task_ci_pr_state
+			(task_id, repository_id, pr_number, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)`, taskID, "", 1, now, now); err != nil {
+		t.Fatalf("seed PR automation state for %s: %v", taskID, err)
+	}
+}
+
+func countGitHubTaskOwnedRows(t *testing.T, store *Store, table, taskID string) int {
+	t.Helper()
+	var count int
+	if err := store.db.Get(&count, `SELECT COUNT(*) FROM `+table+` WHERE task_id = ?`, taskID); err != nil {
+		t.Fatalf("count %s for %s: %v", table, taskID, err)
+	}
+	return count
+}
 
 // countTaskPRRows counts github_task_prs rows directly, bypassing the
 // task-scoped read paths so a test can observe rows for task IDs those paths
@@ -105,11 +145,52 @@ func TestHandleTaskDeletedConcurrentDeliveryIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestHealTaskContributionOrphansHandlesUnusualTaskIDs pins how the startup
+func TestHandleTaskDeletedRemovesAllTaskOwnedState(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+
+	for _, taskID := range []string{"doomed", "bystander"} {
+		seedTask(t, store, taskID, false)
+		if err := store.CreateTaskPR(ctx, &TaskPR{
+			TaskID: taskID, WorkspaceID: testWorkspaceID, Owner: "owner", Repo: "repo", PRNumber: 1,
+		}); err != nil {
+			t.Fatalf("create task PR for %s: %v", taskID, err)
+		}
+		mustCreateWatch(t, store, "session-"+taskID, taskID)
+		seedGitHubTaskOwnedAutomationState(t, store, taskID)
+	}
+
+	event := bus.NewEvent(events.TaskDeleted, "task-service", map[string]interface{}{"task_id": "doomed"})
+	if err := svc.handleTaskDeleted(ctx, event); err != nil {
+		t.Fatalf("handle task deleted: %v", err)
+	}
+
+	for _, table := range testGitHubTaskOwnedTables {
+		if got := countGitHubTaskOwnedRows(t, store, table, "doomed"); got != 0 {
+			t.Fatalf("%s rows for doomed task = %d, want 0", table, got)
+		}
+		if got := countGitHubTaskOwnedRows(t, store, table, "bystander"); got != 1 {
+			t.Fatalf("%s rows for bystander task = %d, want 1", table, got)
+		}
+	}
+}
+
+func TestHealTaskOwnedOrphansSurfacesDatabaseFailure(t *testing.T) {
+	_, _, _, store := setupPollerTest(t)
+	if err := store.db.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+
+	if err := store.healTaskOwnedOrphans(); err == nil {
+		t.Fatal("orphan sweep returned nil for a closed database")
+	}
+}
+
+// TestHealTaskOwnedOrphansHandlesUnusualTaskIDs pins how the startup
 // sweep treats rows whose task_id can never match a tasks row: the empty
 // string, and a very long unicode identifier. Both are ownerless by
 // definition, so both must be swept, while a real task's rows survive.
-func TestHealTaskContributionOrphansHandlesUnusualTaskIDs(t *testing.T) {
+func TestHealTaskOwnedOrphansHandlesUnusualTaskIDs(t *testing.T) {
 	_, _, _, store := setupPollerTest(t)
 	ctx := context.Background()
 	seedTask(t, store, "real-task", false)

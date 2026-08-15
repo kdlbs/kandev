@@ -37,11 +37,11 @@ func TestDeleteTaskMRsByTaskIDRemovesOnlyTargetRows(t *testing.T) {
 	}
 }
 
-// TestHealTaskContributionOrphansOnStoreInit covers AC5/AC6: store
+// TestHealTaskOwnedOrphansOnStoreInit covers AC5/AC6: store
 // initialization deletes gitlab_task_mrs/gitlab_mr_watches rows whose task_id
 // has no matching tasks.id, preserves rows for active and archived tasks, and
 // a repeat initialization is a no-op.
-func TestHealTaskContributionOrphansOnStoreInit(t *testing.T) {
+func TestHealTaskOwnedOrphansOnStoreInit(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	seedWorkspace(t, store, "ws")
@@ -60,6 +60,9 @@ func TestHealTaskContributionOrphansOnStoreInit(t *testing.T) {
 		if err := store.CreateMRWatch(ctx, &MRWatch{SessionID: "session-" + taskID, TaskID: taskID, ProjectPath: "group/project", Branch: "main"}); err != nil {
 			t.Fatalf("create MR watch for %s: %v", taskID, err)
 		}
+		if taskID != "orphan-task" {
+			seedGitLabTaskOwnedAutomationState(t, store, taskID)
+		}
 	}
 
 	reopened, err := NewStore(store.db, store.ro)
@@ -73,12 +76,22 @@ func TestHealTaskContributionOrphansOnStoreInit(t *testing.T) {
 		if got, _ := reopened.GetMRWatchBySession(ctx, "session-"+taskID); got == nil {
 			t.Fatalf("watch for %s was removed, want preserved", taskID)
 		}
+		for _, table := range testGitLabTaskOwnedTables {
+			if got := countGitLabTaskOwnedRows(t, reopened, table, taskID); got != 1 {
+				t.Fatalf("%s rows for %s = %d, want 1", table, taskID, got)
+			}
+		}
 	}
 	if got, err := reopened.ListTaskMRsByTask(ctx, "orphan-task"); err != nil || len(got) != 0 {
 		t.Fatalf("orphan MRs = %d, %v; want 0", len(got), err)
 	}
 	if got, _ := reopened.GetMRWatchBySession(ctx, "session-orphan-task"); got != nil {
 		t.Fatal("orphan watch was not removed")
+	}
+	for _, table := range testGitLabTaskOwnedTables {
+		if got := countGitLabTaskOwnedRows(t, reopened, table, "orphan-task"); got != 0 {
+			t.Fatalf("orphan %s rows = %d, want 0", table, got)
+		}
 	}
 
 	if _, err := NewStore(reopened.db, reopened.ro); err != nil {

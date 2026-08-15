@@ -34,11 +34,11 @@ func TestDeleteTaskPRsByTaskIDRemovesOnlyTargetRows(t *testing.T) {
 	}
 }
 
-// TestHealTaskContributionOrphansOnStoreInit covers AC5/AC6: store
+// TestHealTaskOwnedOrphansOnStoreInit covers AC5/AC6: store
 // initialization deletes github_task_prs/github_pr_watches rows whose task_id
 // has no matching tasks.id, preserves rows for active and archived tasks, and
 // a repeat initialization is a no-op.
-func TestHealTaskContributionOrphansOnStoreInit(t *testing.T) {
+func TestHealTaskOwnedOrphansOnStoreInit(t *testing.T) {
 	_, _, _, store := setupPollerTest(t)
 	ctx := context.Background()
 
@@ -51,6 +51,7 @@ func TestHealTaskContributionOrphansOnStoreInit(t *testing.T) {
 			t.Fatalf("create task PR for %s: %v", taskID, err)
 		}
 		mustCreateWatch(t, store, "session-"+taskID, taskID)
+		seedGitHubTaskOwnedAutomationState(t, store, taskID)
 	}
 
 	reopened, err := NewStore(store.db, store.ro)
@@ -64,12 +65,22 @@ func TestHealTaskContributionOrphansOnStoreInit(t *testing.T) {
 		if got, _ := reopened.GetPRWatchBySession(ctx, "session-"+taskID); got == nil {
 			t.Fatalf("watch for %s was removed, want preserved", taskID)
 		}
+		for _, table := range testGitHubTaskOwnedTables {
+			if got := countGitHubTaskOwnedRows(t, reopened, table, taskID); got != 1 {
+				t.Fatalf("%s rows for %s = %d, want 1", table, taskID, got)
+			}
+		}
 	}
 	if got, err := reopened.ListTaskPRsByTaskIncludingDetached(ctx, "orphan-task"); err != nil || len(got) != 0 {
 		t.Fatalf("orphan PRs = %d, %v; want 0", len(got), err)
 	}
 	if got, _ := reopened.GetPRWatchBySession(ctx, "session-orphan-task"); got != nil {
 		t.Fatal("orphan watch was not removed")
+	}
+	for _, table := range testGitHubTaskOwnedTables {
+		if got := countGitHubTaskOwnedRows(t, reopened, table, "orphan-task"); got != 0 {
+			t.Fatalf("orphan %s rows = %d, want 0", table, got)
+		}
 	}
 
 	if _, err := NewStore(reopened.db, reopened.ro); err != nil {

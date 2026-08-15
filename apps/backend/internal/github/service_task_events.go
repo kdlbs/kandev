@@ -73,8 +73,7 @@ func (s *Service) handleTaskDeleted(ctx context.Context, event *bus.Event) error
 		return nil
 	}
 	s.revokeCredentialTask(taskID)
-	s.pruneWatchesForTask(ctx, taskID, "deleted")
-	s.pruneTaskPRsForTask(ctx, taskID, "deleted")
+	s.pruneTaskOwnedStateForTask(ctx, taskID, "deleted")
 	return nil
 }
 
@@ -155,14 +154,14 @@ func (s *Service) revokeCredentialTask(taskID string) {
 	}
 }
 
-func (s *Service) pruneTaskPRsForTask(ctx context.Context, taskID, reason string) {
-	n, err := s.store.DeleteTaskPRsByTaskID(ctx, taskID)
+func (s *Service) pruneTaskOwnedStateForTask(ctx context.Context, taskID, reason string) {
+	n, err := s.store.DeleteTaskOwnedStateByTaskID(ctx, taskID)
 	if err != nil {
-		s.logger.Error("failed to delete task PR associations", zap.String("task_id", taskID), zap.String("reason", reason), zap.Error(err))
+		s.logger.Error("failed to delete task-owned GitHub state", zap.String("task_id", taskID), zap.String("reason", reason), zap.Error(err))
 		return
 	}
 	if n > 0 {
-		s.logger.Info("pruned task PR associations after task change", zap.String("task_id", taskID), zap.String("reason", reason), zap.Int64("deleted", n))
+		s.logger.Info("pruned task-owned GitHub state after task change", zap.String("task_id", taskID), zap.String("reason", reason), zap.Int64("deleted", n))
 	}
 }
 

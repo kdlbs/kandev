@@ -24,15 +24,11 @@ func (s *Service) handleTaskDeleted(ctx context.Context, event *bus.Event) error
 	if store == nil {
 		return nil
 	}
-	if n, err := store.DeleteMRWatchesByTaskID(ctx, taskID); err != nil {
-		s.logger.Error("failed to delete MR watches for task", zap.String("task_id", taskID), zap.Error(err))
+	n, err := store.DeleteTaskOwnedStateByTaskID(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to delete task-owned GitLab state", zap.String("task_id", taskID), zap.Error(err))
 	} else if n > 0 {
-		s.logger.Info("pruned MR watches after task deletion", zap.String("task_id", taskID), zap.Int64("deleted", n))
-	}
-	if n, err := store.DeleteTaskMRsByTaskID(ctx, taskID); err != nil {
-		s.logger.Error("failed to delete task MR associations", zap.String("task_id", taskID), zap.Error(err))
-	} else if n > 0 {
-		s.logger.Info("pruned task MR associations after task deletion", zap.String("task_id", taskID), zap.Int64("deleted", n))
+		s.logger.Info("pruned task-owned GitLab state after task deletion", zap.String("task_id", taskID), zap.Int64("deleted", n))
 	}
 	return nil
 }

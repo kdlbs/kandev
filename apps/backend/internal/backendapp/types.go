@@ -65,19 +65,20 @@ type Repositories struct {
 }
 
 type Services struct {
-	Task         *taskservice.Service
-	User         *userservice.Service
-	Editor       *editorservice.Service
-	Notification *notificationservice.Service
-	Prompts      *promptservice.Service
-	Utility      *utilityservice.Service
-	Workflow     *workflowservice.Service
-	GitHub       *github.Service
-	GitLab       *gitlab.Service
-	AzureDevOps  *azuredevops.Service
-	Jira         *jira.Service
-	Linear       *linear.Service
-	Sentry       *sentry.Service
+	Task          *taskservice.Service
+	User          *userservice.Service
+	Editor        *editorservice.Service
+	Notification  *notificationservice.Service
+	Prompts       *promptservice.Service
+	Utility       *utilityservice.Service
+	Workflow      *workflowservice.Service
+	GitHub        *github.Service
+	GitLab        *gitlab.Service
+	GitLabCleanup func() error
+	AzureDevOps   *azuredevops.Service
+	Jira          *jira.Service
+	Linear        *linear.Service
+	Sentry        *sentry.Service
 	// WorkflowSync keeps workspace workflows in sync with definition files
 	// in a configured GitHub repository. Nil when GitHub is unavailable.
 	WorkflowSync *workflowsync.Service
