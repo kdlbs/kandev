@@ -30,6 +30,8 @@ type SelectionState = {
   taskSessionsById: Record<string, TaskSession>;
 };
 
+// Module-level because the mobile task sheet is a singleton; this counter gates
+// async selections across its shared instance.
 let taskSelectionSequence = 0;
 
 export function handleTaskSheetOpenChange(

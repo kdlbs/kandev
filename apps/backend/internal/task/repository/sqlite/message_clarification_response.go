@@ -139,6 +139,8 @@ func (r *Repository) loadRestorableClarificationBundle(
 ) ([]*models.Message, error) {
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
 	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
+	// A pending ID spanning message types, sessions, or turns is malformed. The
+	// NOT EXISTS guard intentionally makes the whole bundle ineligible to restore.
 	query := fmt.Sprintf(`
 		SELECT m.id, m.task_session_id, m.task_id, m.turn_id, m.author_type, m.author_id,
 		       m.content, m.requests_input, m.type, m.metadata, m.created_at, m.updated_at
@@ -232,6 +234,8 @@ func (r *Repository) claimActiveClarificationBundle(
 	pendingIDExpr := dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id")
 	statusExpr := dialect.JSONExtract(drv, "task_session_messages.metadata", "status")
 	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
+	// A pending ID spanning message types, sessions, or turns is malformed. The
+	// NOT EXISTS guard intentionally makes the whole bundle ineligible to claim.
 	claimQuery := fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
