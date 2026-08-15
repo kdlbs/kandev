@@ -598,6 +598,10 @@ type Service struct {
 
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
+	// reservedPromptTurns keeps durably created turns private until agentctl
+	// accepts their prompt. Message persistence may use the ID, but another
+	// prompt must not adopt it before turn.started is published.
+	reservedPromptTurns sync.Map
 
 	// dispatchingQueued tracks the pre-acceptance reservation for the exact
 	// queued message handed to an async worker. acceptedQueuedDispatch keeps
@@ -1429,6 +1433,14 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 	if s.turnService == nil {
 		return "", false, nil, nil
 	}
+	if reservedID := s.reservedPromptTurnID(sessionID); reservedID != "" {
+		return "", false, nil, fmt.Errorf(
+			"%w: session %s has unpublished reserved turn %s",
+			ErrAgentPromptInProgress,
+			sessionID,
+			reservedID,
+		)
+	}
 
 	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
 		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
@@ -1458,12 +1470,19 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 		return "", false, nil, fmt.Errorf("persist turn: %w", err)
 	}
 
-	s.activeTurns.Store(sessionID, turn.ID)
 	if reserve {
+		s.reservedPromptTurns.Store(sessionID, turn.ID)
 		return turn.ID, true, turn, nil
 	}
+	s.activeTurns.Store(sessionID, turn.ID)
 	s.bindAcceptedDispatchTurn(sessionID, turn.ID)
 	return turn.ID, true, nil, nil
+}
+
+func (s *Service) reservedPromptTurnID(sessionID string) string {
+	turnID, _ := s.reservedPromptTurns.Load(sessionID)
+	id, _ := turnID.(string)
+	return id
 }
 
 // completeTurnForSession closes any open turn for the session.
@@ -1719,6 +1738,9 @@ func (s *Service) getActiveTurnID(sessionID string) string {
 		if turnID != "" {
 			return turnID
 		}
+	}
+	if turnID := s.reservedPromptTurnID(sessionID); turnID != "" {
+		return turnID
 	}
 	// No active turn exists - start one lazily
 	// This handles edge cases like resumed sessions or race conditions

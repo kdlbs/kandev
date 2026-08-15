@@ -3599,6 +3599,12 @@ func (s *Service) promptDispatchCallback(
 	return func() {
 		if reservedTurn != nil && s.turnService != nil {
 			s.turnService.PublishReservedTurn(reservedTurn)
+			s.reservedPromptTurns.CompareAndDelete(sessionID, reservedTurn.ID)
+			active, err := s.turnService.GetActiveTurn(ctx, sessionID)
+			if err == nil && active != nil && active.ID == reservedTurn.ID {
+				s.activeTurns.Store(sessionID, reservedTurn.ID)
+				s.bindAcceptedDispatchTurn(sessionID, reservedTurn.ID)
+			}
 		}
 		if s.acceptForegroundDispatch(dispatch) {
 			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
@@ -3735,14 +3741,21 @@ func (s *Service) rollbackReservedPromptTurn(ctx context.Context, sessionID, tur
 	}
 	rolledBack, err := s.turnService.RollbackReservedTurn(ctx, sessionID, turnID)
 	if err != nil {
+		s.reservedPromptTurns.CompareAndDelete(sessionID, turnID)
 		s.logger.Warn("failed to roll back reserved prompt turn",
 			zap.String("session_id", sessionID),
 			zap.String("turn_id", turnID),
 			zap.Error(err))
 		return
 	}
+	s.reservedPromptTurns.CompareAndDelete(sessionID, turnID)
 	if rolledBack {
 		s.activeTurns.CompareAndDelete(sessionID, turnID)
+		return
+	}
+	active, lookupErr := s.turnService.GetActiveTurn(ctx, sessionID)
+	if lookupErr == nil && active != nil && active.ID == turnID {
+		s.activeTurns.Store(sessionID, turnID)
 	}
 }
 

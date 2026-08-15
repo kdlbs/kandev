@@ -445,14 +445,21 @@ func (r *Repository) loadClaimedClarificationBundle(
 	tx *sqlx.Tx,
 	drv, pendingID string,
 ) ([]*models.Message, error) {
-	claimedStatusExpr := dialect.JSONExtract(drv, "metadata", "status")
+	claimedStatusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id,
-		       content, requests_input, type, metadata, created_at, updated_at
-		FROM task_session_messages
+		SELECT m.id, m.task_session_id, m.task_id, m.turn_id, m.author_type, m.author_id,
+		       m.content, m.requests_input, m.type, m.metadata, m.created_at, m.updated_at
+		FROM task_session_messages m
 		WHERE %s = ? AND %s = ?
-		ORDER BY created_at ASC, id ASC
-	`, dialect.JSONExtract(drv, "metadata", "pending_id"), claimedStatusExpr)), pendingID, clarificationStatusResponding)
+		  AND m.turn_id = (
+			SELECT id
+			FROM task_session_turns
+			WHERE task_session_id = m.task_session_id
+			ORDER BY started_at DESC, created_at DESC, id DESC
+			LIMIT 1
+		  )
+		ORDER BY m.created_at ASC, m.id ASC
+	`, dialect.JSONExtract(drv, "m.metadata", "pending_id"), claimedStatusExpr)), pendingID, clarificationStatusResponding)
 	if err != nil {
 		return nil, fmt.Errorf("load claimed clarification bundle: %w", err)
 	}

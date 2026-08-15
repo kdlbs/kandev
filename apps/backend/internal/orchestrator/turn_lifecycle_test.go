@@ -161,6 +161,61 @@ func TestStartTurnIsIdempotentInMemory(t *testing.T) {
 	}
 }
 
+func TestReservedTurnCannotBeAdoptedBeforePublication(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+
+	turnID, created, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	if err != nil || !created || reserved == nil || turnID == "" {
+		t.Fatalf("reserve turn: id=%q created=%v reserved=%v err=%v", turnID, created, reserved, err)
+	}
+	if cached, ok := svc.activeTurns.Load("session1"); ok {
+		t.Fatalf("unpublished reserved turn entered active cache: %v", cached)
+	}
+
+	adoptedID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false)
+	if !errors.Is(err, ErrAgentPromptInProgress) || adoptedID != "" {
+		t.Fatalf("second prompt adopted unpublished turn: id=%q err=%v", adoptedID, err)
+	}
+	if got := svc.getActiveTurnID("session1"); got != turnID {
+		t.Fatalf("message turn ID = %q, want reserved turn %q", got, turnID)
+	}
+	if open := openTurnCount(t, repo, "session1"); open != 1 {
+		t.Fatalf("open turns before publication = %d, want 1", open)
+	}
+
+	svc.promptDispatchCallback(ctx, "task1", "session1", reserved, nil)()
+	cached, ok := svc.activeTurns.Load("session1")
+	if !ok || cached != turnID {
+		t.Fatalf("published turn cache = %v, %v; want %q", cached, ok, turnID)
+	}
+}
+
+func TestRejectedReservedTurnClearsPrivateCache(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	if err != nil {
+		t.Fatalf("reserve turn: %v", err)
+	}
+	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
+	if reserved := svc.reservedPromptTurnID("session1"); reserved != "" {
+		t.Fatalf("reserved cache after rollback = %q, want empty", reserved)
+	}
+	if _, ok := svc.activeTurns.Load("session1"); ok {
+		t.Fatal("rolled-back reservation entered active cache")
+	}
+	if open := openTurnCount(t, repo, "session1"); open != 0 {
+		t.Fatalf("open turns after rollback = %d, want 0", open)
+	}
+
+	successorID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false)
+	if err != nil || successorID == "" || successorID == turnID {
+		t.Fatalf("successor after rollback: id=%q rejected=%q err=%v", successorID, turnID, err)
+	}
+}
+
 // TestCompleteTurnClosesUntrackedDBTurn covers the user-cancel zombie path:
 // completeTurnForSession previously bailed when activeTurns was empty, leaving
 // the DB row open (e.g. after a backend restart wiped activeTurns, or after

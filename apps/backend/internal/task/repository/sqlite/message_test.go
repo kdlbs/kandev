@@ -219,12 +219,25 @@ func TestGetPendingActionsBySessionIDs(t *testing.T) {
 	seedForMsgTest(t, repo, "task-stale", "sess-stale", "turn-current")
 	createPendingActionMessage(t, repo, "message-current", "task-stale", "sess-stale", "turn-current", models.MessageTypeMessage, "<missing>", now.Add(time.Second))
 
+	seedForMsgTest(t, repo, "task-reserved", "sess-reserved", "turn-reserved-old")
+	createPendingActionMessage(t, repo, "clar-reserved", "task-reserved", "sess-reserved", "turn-reserved-old", models.MessageTypeClarificationRequest, "pending", now)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-reserved-empty",
+		TaskSessionID: "sess-reserved",
+		TaskID:        "task-reserved",
+		StartedAt:     now.Add(time.Second),
+		CreatedAt:     now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("CreateTurn(reserved empty): %v", err)
+	}
+
 	got, err := repo.GetPendingActionsBySessionIDs(ctx, []string{
 		"sess-clar",
 		"sess-resolved",
 		"sess-perm",
 		"sess-perm-tie",
 		"sess-stale",
+		"sess-reserved",
 		"sess-missing",
 	})
 	if err != nil {
@@ -244,6 +257,9 @@ func TestGetPendingActionsBySessionIDs(t *testing.T) {
 	}
 	if _, ok := got["sess-stale"]; ok {
 		t.Fatalf("sess-stale should not inherit previous turn actions: %#v", got["sess-stale"])
+	}
+	if _, ok := got["sess-reserved"]; ok {
+		t.Fatalf("sess-reserved should not inherit actions while its newest turn is empty: %#v", got["sess-reserved"])
 	}
 	if _, ok := got["sess-missing"]; ok {
 		t.Fatalf("sess-missing should not have a pending action: %#v", got["sess-missing"])

@@ -259,6 +259,50 @@ func TestCompleteActiveClarificationBundleRejectsSupersededTurn(t *testing.T) {
 	}
 }
 
+func TestLoadClaimedClarificationBundleUsesCurrentTurn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 14, 30, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-load-claim", "session-load-claim")
+	createPendingActionTurn(t, repo, "task-load-claim", "session-load-claim", "turn-load-old", base, base)
+	createClarificationBundleMessage(
+		t, repo, "message-load-old", "task-load-claim", "session-load-claim", "turn-load-old",
+		"pending-load", "q-old", base,
+	)
+	setClarificationMessageMetadata(t, repo, "message-load-old", func(metadata map[string]interface{}) {
+		metadata["status"] = clarificationStatusResponding
+	})
+	createPendingActionTurn(
+		t, repo, "task-load-claim", "session-load-claim", "turn-load-current",
+		base.Add(time.Second), base.Add(time.Second),
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-load-current", "task-load-claim", "session-load-claim", "turn-load-current",
+		"pending-load", "q-current", base.Add(time.Second),
+	)
+	setClarificationMessageMetadata(t, repo, "message-load-current", func(metadata map[string]interface{}) {
+		metadata["status"] = clarificationStatusResponding
+	})
+
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTxx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	loaded, err := repo.loadClaimedClarificationBundle(
+		ctx,
+		tx,
+		repo.db.DriverName(),
+		"pending-load",
+	)
+	if err != nil {
+		t.Fatalf("loadClaimedClarificationBundle: %v", err)
+	}
+	if ids := messageIDs(loaded); len(ids) != 1 || ids[0] != "message-load-current" {
+		t.Fatalf("claimed messages = %v, want only current-turn row", ids)
+	}
+}
+
 func TestCompleteActiveClarificationBundleRecoversMixedStatusBundle(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
