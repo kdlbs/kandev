@@ -406,6 +406,14 @@ func TestSendQueuedNowCancelsLiveReplacementTurn(t *testing.T) {
 	secondPromptEntered := make(chan struct{})
 	allowSecondPrompt := make(chan struct{})
 	var releaseFirstPrompt, releaseSecondPrompt, markSecondPrompt sync.Once
+	var stopSendNowWorkers func()
+	t.Cleanup(func() {
+		releaseFirstPrompt.Do(func() { close(allowFirstPrompt) })
+		releaseSecondPrompt.Do(func() { close(allowSecondPrompt) })
+		if stopSendNowWorkers != nil {
+			stopSendNowWorkers()
+		}
+	})
 	var promptCount atomic.Int32
 	agentMgr := &mockAgentManager{
 		isAgentRunning:         true,
@@ -426,11 +434,7 @@ func TestSendQueuedNowCancelsLiveReplacementTurn(t *testing.T) {
 	svc.messageQueue.SetAutoMergeEnabled(false)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 	svc.messageCreator = &mockMessageCreator{}
-	t.Cleanup(func() {
-		releaseFirstPrompt.Do(func() { close(allowFirstPrompt) })
-		releaseSecondPrompt.Do(func() { close(allowSecondPrompt) })
-		svc.stopSendNowWorkers()
-	})
+	stopSendNowWorkers = svc.stopSendNowWorkers
 
 	if _, err := svc.messageQueue.QueueMessageWithMetadata(
 		ctx, "session-1", "task-1", "first send now", "", messagequeue.QueuedByUser, false, nil, nil,
