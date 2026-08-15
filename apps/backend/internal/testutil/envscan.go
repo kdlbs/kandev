@@ -60,21 +60,33 @@ type envScan struct {
 	extraReaders map[string]bool
 }
 
-// packageConstants holds every package-level string constant, plus the names
-// that more than one file declares with different values. Build-tagged platform
-// variants (foo_unix.go and foo_windows.go) may legally declare one name twice,
-// and every file is parsed regardless of its tags, so a plain name-to-value map
-// would silently keep whichever file was parsed last and classify the other
-// file's read against the wrong variable.
+// packageConstants holds every package-level string constant, plus the names no
+// single value can be attributed to. Build-tagged platform variants (foo_unix.go
+// and foo_windows.go) may legally declare one name twice, and every file is
+// parsed regardless of its tags, so a plain name-to-value map would silently
+// keep whichever file was parsed last and classify the other file's read against
+// the wrong variable.
+//
+// Two spellings of that hazard are tracked separately because they need
+// different advice. conflicts holds names declared with two different string
+// literals. unresolved holds names declared somewhere this scanner cannot read a
+// literal from at all — a reference to another constant, a concatenation, an
+// untyped iota, or an implicit repetition of the previous expression list. The
+// second kind matters for the same reason as the first: without it a literal
+// declaration in one build-tagged file lends its value to a same-named
+// declaration in another that this scanner cannot read, and the read resolves to
+// the wrong platform's variable just as silently.
 type packageConstants struct {
-	values    map[string]string
-	conflicts map[string]bool
+	values     map[string]string
+	conflicts  map[string]bool
+	unresolved map[string]bool
 }
 
 func newPackageConstants() packageConstants {
 	return packageConstants{
-		values:    make(map[string]string),
-		conflicts: make(map[string]bool),
+		values:     make(map[string]string),
+		conflicts:  make(map[string]bool),
+		unresolved: make(map[string]bool),
 	}
 }
 
@@ -89,10 +101,17 @@ func (c packageConstants) record(name, value string) {
 	c.values[name] = value
 }
 
-// resolve refuses to guess for a conflicting name, so the read is reported as
-// unclassifiable rather than silently resolved to one platform's value.
+// recordUnresolvable marks a name this scanner cannot read a string literal
+// from, so no other file's declaration of the same name can stand in for it.
+func (c packageConstants) recordUnresolvable(name string) {
+	c.unresolved[name] = true
+}
+
+// resolve refuses to guess for a name that is conflicting or unreadable, so the
+// read is reported as unclassifiable rather than silently resolved to whichever
+// declaration this scanner happened to understand.
 func (c packageConstants) resolve(name string) (string, bool) {
-	if c.conflicts[name] {
+	if c.conflicts[name] || c.unresolved[name] {
 		return "", false
 	}
 	value, ok := c.values[name]
@@ -232,7 +251,9 @@ func unresolvedMessage(pos token.Position, arg ast.Expr, constants packageConsta
 
 // stringConstants maps package-level string constant names to their values so
 // env reads written as os.Getenv(someConst) resolve to the variable name, and
-// records the names whose value depends on which file you believe.
+// records the names whose value would otherwise depend on which file you
+// believe: those declared twice with different literals, and those declared
+// anywhere in a form this scanner cannot read a literal from.
 func stringConstants(files []*ast.File) packageConstants {
 	constants := newPackageConstants()
 	for _, file := range files {
@@ -247,7 +268,9 @@ func stringConstants(files []*ast.File) packageConstants {
 	return constants
 }
 
-// recordConstSpecs records every string-literal constant in one const block.
+// recordConstSpecs records every string-literal constant in one const block, and
+// marks every other name it declares unresolvable. Skipping those instead would
+// let a same-named literal in a build-tagged sibling file resolve this read.
 func recordConstSpecs(constants packageConstants, specs []ast.Spec) {
 	for _, spec := range specs {
 		valueSpec, ok := spec.(*ast.ValueSpec)
@@ -255,12 +278,13 @@ func recordConstSpecs(constants packageConstants, specs []ast.Spec) {
 			continue
 		}
 		for i, name := range valueSpec.Names {
-			if i >= len(valueSpec.Values) {
-				continue
+			if i < len(valueSpec.Values) {
+				if value, ok := literalString(valueSpec.Values[i]); ok {
+					constants.record(name.Name, value)
+					continue
+				}
 			}
-			if value, ok := literalString(valueSpec.Values[i]); ok {
-				constants.record(name.Name, value)
-			}
+			constants.recordUnresolvable(name.Name)
 		}
 	}
 }

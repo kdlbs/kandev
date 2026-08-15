@@ -398,6 +398,82 @@ const fooEnv = "FOO"
 	}
 }
 
+// TestUncoveredEnvReadsUnreadableConstantDoesNotBorrowSiblingValue pins the
+// other half of the build-tag collision, which the conflicting-literal check
+// alone does not catch. A platform pair may declare one constant name twice with
+// only ONE side written as a string literal — the other referring to a second
+// constant, concatenating, or repeating the previous expression list. Two
+// differing literals conflict, but a literal paired with an unreadable
+// declaration did not, so the literal file's value was lent to the read in the
+// file this scanner cannot read, exactly as silently. Proven against the real
+// package: a //go:build !windows file declaring qaEnv = qaOtherEnv (where
+// qaOtherEnv is the uncovered "KANDEV_QA_UNCOVERED") and reading os.Getenv(qaEnv),
+// paired with a //go:build windows file declaring qaEnv = "SHELL", left the
+// process guard reporting ok even though the uncovered read is the one that
+// compiles on Linux. The same probe now fails.
+func TestUncoveredEnvReadsUnreadableConstantDoesNotBorrowSiblingValue(t *testing.T) {
+	fileSet, files := parseSnippets(t, `//go:build !windows
+
+package example
+
+import "os"
+
+const otherEnv = "UNCOVERED_ON_UNIX"
+
+const shellEnv = otherEnv
+
+func read() string { return os.Getenv(shellEnv) }
+`, `//go:build windows
+
+package example
+
+const shellEnv = "SHELL"
+`)
+
+	messages := uncoveredEnvReads(fileSet, files, nil, []string{"SHELL"})
+	if len(messages) != 1 {
+		t.Fatalf("expected exactly one unresolvable-identifier message, got %v", messages)
+	}
+	// The generic message, not the conflicting-literals one: nothing here was
+	// declared with two different values, so pointing at that cause would send
+	// the author looking for a second literal that does not exist.
+	if !strings.Contains(messages[0], "not a string literal") {
+		t.Fatalf("message %q does not explain the resolution failure", messages[0])
+	}
+}
+
+// TestUncoveredEnvReadsImplicitRepetitionDoesNotBorrowSiblingValue covers the
+// valueless spelling of the same hazard: in a const block, a name with no
+// expression repeats the previous one, which this scanner does not evaluate.
+func TestUncoveredEnvReadsImplicitRepetitionDoesNotBorrowSiblingValue(t *testing.T) {
+	fileSet, files := parseSnippets(t, `//go:build !windows
+
+package example
+
+import "os"
+
+const (
+	firstEnv = "UNCOVERED_ON_UNIX"
+	shellEnv
+)
+
+func read() string { return os.Getenv(shellEnv) }
+`, `//go:build windows
+
+package example
+
+const shellEnv = "SHELL"
+`)
+
+	messages := uncoveredEnvReads(fileSet, files, nil, []string{"SHELL"})
+	if len(messages) != 1 {
+		t.Fatalf("expected exactly one unresolvable-identifier message, got %v", messages)
+	}
+	if !strings.Contains(messages[0], "not a string literal") {
+		t.Fatalf("message %q does not explain the resolution failure", messages[0])
+	}
+}
+
 func TestUncoveredEnvReadsExemptName(t *testing.T) {
 	fileSet, file := parseSnippet(t, `package example
 
