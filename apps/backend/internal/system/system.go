@@ -89,6 +89,10 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	tracker := jobs.NewTracker(eventBus, log)
 	dataDir := cfg.ResolvedDataDir()
 	homeDir := cfg.ResolvedHomeDir()
+	databasePath := cfg.Database.Path
+	if databasePath == "" {
+		databasePath = filepath.Join(dataDir, "kandev.db")
+	}
 
 	resetDirs := database.ResetDirs{
 		Worktrees: filepath.Join(homeDir, "worktrees"),
@@ -97,10 +101,10 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		Tasks:     filepath.Join(homeDir, "tasks"),
 		QuickChat: filepath.Join(homeDir, "quick-chat"),
 	}
-	dbSvc := database.NewService(pool, dataDir, resetDirs, tracker, log)
+	dbSvc := database.NewService(pool, databasePath, resetDirs, tracker, log)
 	dbSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
 
-	backupsSvc := backups.NewService(dataDir, pool, tracker, log)
+	backupsSvc := backups.NewService(databasePath, pool, tracker, log)
 
 	settingsStore, err := systemsettings.NewStore(pool)
 	if err != nil {

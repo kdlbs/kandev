@@ -39,8 +39,8 @@ var errRestoreConfirm = errors.New("restore requires confirm=RESTORE")
 // "..", or absolute prefixes.
 var ErrInvalidName = errors.New("invalid backup name")
 
-// Service owns access to the <data-dir>/backups directory and exposes the
-// list/create/restore/delete/download API.
+// Service owns access to the backups directory beside the configured database
+// file and exposes the list/create/restore/delete/download API.
 //
 // Restore intentionally does not attempt to re-exec the backend: the staged
 // DB file is written in place and the user is told (via the frontend dialog)
@@ -48,35 +48,30 @@ var ErrInvalidName = errors.New("invalid backup name")
 // syscall.Exec approach was brittle under desktop launchers and `make dev`
 // watchers, and left the web UI disconnected from a fresh backend.
 type Service struct {
-	dataDir string
-	pool    *db.Pool
-	jobs    *jobs.Tracker
-	log     *logger.Logger
+	databasePath string
+	pool         *db.Pool
+	jobs         *jobs.Tracker
+	log          *logger.Logger
 
 	// failWritesForTest, when true, causes Restore's staged-write step to
-	// fail before kandev.db is touched. Only set by tests.
+	// fail before the configured database file is touched. Only set by tests.
 	failWritesForTest bool
 }
 
-// NewService constructs a Service. The backups directory under dataDir is
-// created lazily by methods that need it.
-func NewService(dataDir string, pool *db.Pool, tracker *jobs.Tracker, log *logger.Logger) *Service {
+// NewService constructs a Service. The backups directory beside databasePath
+// is created lazily by methods that need it.
+func NewService(databasePath string, pool *db.Pool, tracker *jobs.Tracker, log *logger.Logger) *Service {
 	return &Service{
-		dataDir: dataDir,
-		pool:    pool,
-		jobs:    tracker,
-		log:     log,
+		databasePath: databasePath,
+		pool:         pool,
+		jobs:         tracker,
+		log:          log,
 	}
 }
 
-// backupsDir returns the absolute path to the snapshots directory.
+// backupsDir returns the snapshots directory beside the configured database.
 func (s *Service) backupsDir() string {
-	return filepath.Join(s.dataDir, "backups")
-}
-
-// dbPath returns the absolute path to the live SQLite database file.
-func (s *Service) dbPath() string {
-	return filepath.Join(s.dataDir, "kandev.db")
+	return filepath.Join(filepath.Dir(s.databasePath), "backups")
 }
 
 // ensureBackupsDir mkdirs the backups directory.
@@ -84,7 +79,7 @@ func (s *Service) ensureBackupsDir() error {
 	return os.MkdirAll(s.backupsDir(), 0o755)
 }
 
-// List enumerates the snapshots in <data-dir>/backups, classifying each
+// List enumerates the snapshots in the sibling backups directory, classifying each
 // .db file as auto or manual. Non-.db files and unrecognised prefixes are
 // skipped silently. Always returns a non-nil slice.
 func (s *Service) List() ([]Snapshot, error) {
@@ -220,12 +215,12 @@ func (s *Service) runRestore(_ context.Context, snapshotPath string) (map[string
 	if _, err := os.Stat(snapshotPath); err != nil {
 		return nil, fmt.Errorf("snapshot not found: %w", err)
 	}
-	stagedPath := s.dbPath() + ".new"
+	stagedPath := s.databasePath + ".new"
 	if err := s.writeStagedRestore(snapshotPath, stagedPath); err != nil {
 		_ = os.Remove(stagedPath)
 		return nil, err
 	}
-	if err := os.Rename(stagedPath, s.dbPath()); err != nil {
+	if err := os.Rename(stagedPath, s.databasePath); err != nil {
 		_ = os.Remove(stagedPath)
 		return nil, fmt.Errorf("atomic rename failed: %w", err)
 	}
@@ -304,7 +299,7 @@ func (s *Service) OpenForDownload(name string) (*os.File, int64, error) {
 // separators, no "..", no absolute prefix), confirms it matches a
 // recognised snapshot prefix (so unrelated files dropped into the backups
 // directory cannot be restored/downloaded/deleted), and that it resolves
-// inside the backups directory. Returns the absolute path.
+// inside the backups directory. Returns the joined path.
 func (s *Service) resolveSnapshotPath(name string) (string, error) {
 	if name == "" || name == "." || name == ".." {
 		return "", ErrInvalidName

@@ -250,7 +250,7 @@ Every long-running goroutine must have a single owner with explicit start and st
 
 ## Backups
 
-- On every SQLite boot, `persistence.Provide` reads `kandev_meta.kandev_version`. If the stored version differs from the binary version (or any user tables exist but no version is recorded), it takes a `VACUUM INTO` snapshot into `<data-dir>/backups/` before running migrations.
+- On every SQLite boot, `persistence.Provide` reads `kandev_meta.kandev_version`. If the stored version differs from the binary version (or any user tables exist but no version is recorded), it takes a `VACUUM INTO` snapshot into `backups/` beside the configured SQLite database file before running migrations. The default path is `<home>/data/kandev.db`, with backups in `<home>/data/backups/`.
 - Retention: 2 backups kept (newest two by mtime); older ones are pruned after the snapshot succeeds.
 - Postgres: backup is skipped with a log line. Use `pg_dump` for Postgres backups.
 - Boot aborts if the backup fails — the pool is closed and `Provide` returns an error.
