@@ -181,7 +181,7 @@ describe("selectTaskWithLayout pending selection races", () => {
 describe("selectTaskWithLayout pending summary races", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("discards selection when the pending action changes", async () => {
+  it("falls back to the task route when the pending action changes", async () => {
     const initialTask = {
       id: PENDING_TASK_ID,
       primarySessionId: PENDING_SESSION_ID,
@@ -228,11 +228,11 @@ describe("selectTaskWithLayout pending summary races", () => {
 
     expect(loadTaskSessionsForTask).toHaveBeenCalledWith(PENDING_TASK_ID, { force: true });
     expect(switchToSession).not.toHaveBeenCalled();
-    expect(setActiveTask).not.toHaveBeenCalled();
-    expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
   });
 
-  it("discards selection when a same-action summary revision can have a new owner", async () => {
+  it("falls back to the task route when a same-action revision can have a new owner", async () => {
     const initialTask = {
       id: PENDING_TASK_ID,
       primarySessionId: PENDING_SESSION_ID,
@@ -278,8 +278,8 @@ describe("selectTaskWithLayout pending summary races", () => {
     await flushTaskSelection();
 
     expect(switchToSession).not.toHaveBeenCalled();
-    expect(setActiveTask).not.toHaveBeenCalled();
-    expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
   });
 });
 
@@ -287,7 +287,7 @@ describe("selectTaskWithLayout rejected pending-load races", () => {
   beforeEach(() => vi.clearAllMocks());
 
   for (const primarySessionId of [PENDING_SESSION_ID, null]) {
-    it(`discards a rejected ${primarySessionId ? "primary" : "sessionless"} load after the summary changes`, async () => {
+    it(`falls back after a rejected ${primarySessionId ? "primary" : "sessionless"} load when the summary changes`, async () => {
       const initialTask = {
         id: PENDING_TASK_ID,
         primarySessionId,
@@ -326,8 +326,8 @@ describe("selectTaskWithLayout rejected pending-load races", () => {
       await flushTaskSelection();
 
       expect(switchToSession).not.toHaveBeenCalled();
-      expect(setActiveTask).not.toHaveBeenCalled();
-      expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+      expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID);
+      expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
     });
   }
 });

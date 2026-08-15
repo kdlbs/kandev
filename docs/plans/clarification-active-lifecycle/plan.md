@@ -244,6 +244,12 @@ All task gates passed:
 - Ready-race remediation: live reservations broadcast acceptance or rollback. An overlapping ready
   event waits for that result and revalidates prompt generation, preventing a delayed predecessor from
   completing the successor or running workflow completion against it.
+- Final bot-review remediation: clarification persistence operations use fresh bounded contexts;
+  post-acceptance transport failures run cleanup without reopening the answer; reservation rollback
+  lets the still-authoritative predecessor ready event complete; startup recovery errors fail before
+  prompt admission; and stale pending-owner loads still open the requested task on desktop and mobile.
+  Full clarification/orchestrator tests, ten race-enabled focused repetitions, changed-code backend
+  lint, 55 focused web tests, zero-warning focused web lint, typecheck, and i18n ratchet passed.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

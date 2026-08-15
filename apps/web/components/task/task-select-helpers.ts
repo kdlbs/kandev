@@ -337,15 +337,15 @@ function logTaskSelection(
 export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
   const state = store.getState();
-  const selectionToken = nextTaskSelectionToken();
   const oldSessionId = state.tasks.activeSessionId;
   const navigateToTask = params.navigateToTask ?? replaceTaskUrl;
+  const openWithoutSession = () => openTaskWithoutSession(params, navigateToTask);
   const taskPendingAction = effectiveTaskPendingAction(task);
   const pendingSnapshot = taskPendingSelectionSnapshot(task);
   const selectionGuard = createTaskSelectionGuard(
     store,
     taskId,
-    selectionToken,
+    nextTaskSelectionToken(),
     params.selectionSignal,
   );
   logTaskSelection(taskId, task?.primarySessionId, oldSessionId, state.tasks.activeTaskId);
@@ -373,21 +373,23 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
     void loadTaskSessionsForSelection(loadTaskSessionsForTask, taskId, !!taskPendingAction)
       .then((sessions) => {
         if (selectionGuard.wasSuperseded()) return;
-        if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) return;
+        if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot))
+          return openWithoutSession();
         const currentOldSessionId = store.getState().tasks.activeSessionId;
         const resolvedSessionId = resolveTaskSessionId({
           sessions,
           preferredSessionId: targetSessionId,
           taskPendingAction,
         });
-        if (!resolvedSessionId) return openTaskWithoutSession(params, navigateToTask);
+        if (!resolvedSessionId) return openWithoutSession();
         switchToSession(taskId, resolvedSessionId, currentOldSessionId);
         navigateToTask(taskId);
       })
       .catch(() => {
         if (selectionGuard.wasSuperseded()) return;
-        if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) return;
-        if (taskPendingAction) return openTaskWithoutSession(params, navigateToTask);
+        if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot))
+          return openWithoutSession();
+        if (taskPendingAction) return openWithoutSession();
         switchToSession(taskId, targetSessionId, store.getState().tasks.activeSessionId);
         navigateToTask(taskId);
       })
@@ -397,7 +399,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
   void loadTaskSessionsForSelection(loadTaskSessionsForTask, taskId, !!taskPendingAction)
     .then(async (sessions) => {
       if (selectionGuard.wasSuperseded()) return;
-      if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) return;
+      if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) return openWithoutSession();
       const currentOldSessionId = store.getState().tasks.activeSessionId;
       const sessionId = resolveTaskSessionId({
         sessions,
@@ -409,7 +411,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
         navigateToTask(taskId);
         return;
       }
-      if (taskPendingAction) return openTaskWithoutSession(params, navigateToTask);
+      if (taskPendingAction) return openWithoutSession();
 
       const switched = await prepareAndSwitchTask(
         taskId,
@@ -431,8 +433,8 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
     })
     .catch(() => {
       if (selectionGuard.wasSuperseded()) return;
-      if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) return;
-      openTaskWithoutSession(params, navigateToTask);
+      if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) return openWithoutSession();
+      openWithoutSession();
     })
     .finally(selectionGuard.dispose);
 }

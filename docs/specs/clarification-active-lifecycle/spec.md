@@ -50,14 +50,19 @@ hiding the action the icon represents.
   metadata and publishes the reservation, and HTTP success requires that durable publication. If the
   predecessor's delayed ready event overlaps this private reservation, ready handling waits for the
   reservation to resolve and then revalidates prompt generation before touching turn or workflow state.
-  It cannot complete the reserved successor or run predecessor completion actions against it. If the
-  attempt marker cannot be persisted, dispatch does not occur and the answer remains retryable. If
-  agentctl synchronously rejects the prompt, the reservation is rolled back and the answer can be
-  restored. If agentctl accepts the prompt but publication fails, the endpoint returns a server error
-  and keeps the claimed bundle terminal because retrying could dispatch the answer twice. Startup
+  It cannot complete the reserved successor or run predecessor completion actions against it. When the
+  reservation rolls back, a ready event whose predecessor generation still owns the session continues
+  through normal completion so the predecessor and its queue are not stranded. If the attempt marker
+  cannot be persisted, dispatch does not occur and the answer remains retryable. If agentctl
+  synchronously rejects the prompt, the reservation is rolled back and the answer can be restored. If
+  agentctl accepts the prompt but publication or later transport handling fails, the endpoint returns a
+  server error, performs normal prompt-failure cleanup, and keeps the claimed bundle terminal because
+  retrying could dispatch the answer twice. Startup
   deletes only an empty, unattempted unpublished reservation and restores the exact clarification rows
   claimed for its dispatch; an attempt marker or message evidence instead proves dispatch ambiguity and
-  preserves the successor. A rejection persists terminal status without resuming the agent.
+  preserves the successor. If reservation reconciliation fails, orchestrator startup fails before
+  watcher, scheduler, or prompt admission starts; the next start retries recovery. A rejection persists
+  terminal status without resuming the agent.
 - Every response atomically claims current-turn ownership before it can reach a live waiter or request
   a detached resume. Terminal message updates are published only after delivery succeeds. If detached
   resume acceptance fails, the endpoint returns an error and restores the still-current bundle to
@@ -187,7 +192,8 @@ session they can already access. Session selection does not broaden task visibil
 - Session loading fails during task activation: retain existing navigation fallback instead of
   stranding the user in the task drawer or on an unchanged URL.
 - A newer task-summary revision arrives while pending-owner loading is in flight: discard the delayed
-  owner result and let the newer projection drive the next activation.
+  owner-session result, open the requested task through the task-only fallback, and let the current
+  projection render the authoritative pending owner.
 - Backend stops after reserving a detached-answer successor but before the attempt marker: startup
   restores only the clarification rows claimed for that dispatch and removes the empty reservation.
 - Backend stops after the attempt marker but before dispatch acknowledgement: startup fails closed,
@@ -195,7 +201,11 @@ session they can already access. Session selection does not broaden task visibil
   referencing the reservation provides the same conservative authority even without the marker.
 - A delayed predecessor ready event arrives between the attempt marker and agentctl acknowledgement:
   wait for the live reservation outcome, then reject the event if its prompt generation was superseded;
-  never complete the reserved successor or evaluate predecessor workflow completion against it.
+  never complete the reserved successor or evaluate predecessor workflow completion against it. If the
+  reservation rolls back and the predecessor generation still owns the session, process the ready event
+  normally instead of stranding the predecessor turn.
+- Unpublished-reservation reconciliation fails during startup: fail startup before event processing or
+  prompt admission begins so no new turn can supersede an unrecovered clarification claim.
 
 ## Persistence guarantees
 
@@ -249,6 +259,9 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** agentctl accepts a detached answer but successor publication fails, **WHEN** the response
   endpoint completes, **THEN** it returns an error, keeps the answer terminal, and does not make that
   accepted successor eligible for rollback or in-process redispatch.
+- **GIVEN** agentctl accepts a detached answer and later transport handling also fails, **WHEN** prompt
+  handling returns, **THEN** normal failure cleanup runs and the accepted-answer marker still prevents
+  the terminal clarification from being reopened.
 - **GIVEN** the backend stops after terminalizing a detached answer and reserving its successor but
   before marking dispatch attempted, **WHEN** it starts again, **THEN** it deletes the empty
   reservation, restores the exact claimed rows to pending, and leaves pre-existing terminal siblings
@@ -258,7 +271,13 @@ session they can already access. Session selection does not broaden task visibil
   the exact claimed rows terminal rather than risking duplicate answer dispatch.
 - **GIVEN** a predecessor ready event arrives while a detached-answer successor is reserved, **WHEN**
   the successor dispatch resolves, **THEN** the handler revalidates prompt generation and the stale
-  predecessor cannot complete the successor or run `on_turn_complete` against it.
+  predecessor cannot complete the successor or run `on_turn_complete` against it; if reservation
+  rollback leaves that predecessor generation authoritative, its ready event completes normally.
+- **GIVEN** startup cannot reconcile an unpublished prompt reservation, **WHEN** the orchestrator starts,
+  **THEN** startup returns an error before watcher, scheduler, or prompt admission begins.
+- **GIVEN** pending ownership changes while desktop or mobile task selection loads sessions, **WHEN** the
+  delayed load settles, **THEN** Kandev ignores its stale owner choice but still opens the selected task
+  through the task-only fallback, and the mobile sheet closes.
 - **GIVEN** two request identities produce terminal and pending events close together, **WHEN** the
   projector refreshes, **THEN** its result matches current repository state rather than event order.
 

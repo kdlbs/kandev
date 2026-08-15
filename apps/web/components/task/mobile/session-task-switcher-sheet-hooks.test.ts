@@ -234,7 +234,7 @@ describe("selectPendingTaskFromSheet", () => {
     expect(order).toEqual(["task", "navigate", "close"]);
   });
 
-  it("leaves the sheet unchanged when the same action has a newer summary revision", async () => {
+  it("opens the task when the same action has a newer summary revision", async () => {
     const taskId = "task-revision";
     const setActiveSession = vi.fn();
     const setActiveTask = vi.fn();
@@ -261,9 +261,9 @@ describe("selectPendingTaskFromSheet", () => {
     });
 
     expect(setActiveSession).not.toHaveBeenCalled();
-    expect(setActiveTask).not.toHaveBeenCalled();
-    expect(navigate).not.toHaveBeenCalled();
-    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(setActiveTask).toHaveBeenCalledWith(taskId);
+    expect(navigate).toHaveBeenCalledWith(taskId);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
 
@@ -338,7 +338,7 @@ describe("selectTaskFromSheet races", () => {
 });
 
 describe("selectTaskFromSheet summary races", () => {
-  it("leaves the sheet unchanged when the pending action changes", async () => {
+  it("opens the task and closes the sheet when the pending action changes", async () => {
     const taskId = "task-summary-race";
     let resolveLoad: (sessions: TaskSession[]) => void = () => undefined;
     const loadTaskSessionsForTask = vi.fn(
@@ -391,9 +391,9 @@ describe("selectTaskFromSheet summary races", () => {
 
     expect(loadTaskSessionsForTask).toHaveBeenCalledWith(taskId, { force: true });
     expect(setActiveSession).not.toHaveBeenCalled();
-    expect(setActiveTask).not.toHaveBeenCalled();
-    expect(navigate).not.toHaveBeenCalled();
-    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(setActiveTask).toHaveBeenCalledWith(taskId);
+    expect(navigate).toHaveBeenCalledWith(taskId);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
 

@@ -264,6 +264,7 @@ type mockAgentManager struct {
 	restartProcessErr      error
 	promptErr              error
 	promptResult           *executor.PromptResult
+	promptAcceptedOnError  bool
 	promptAgentFunc        func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
 	launchAgentFunc        func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
 	startAgentProcessCalls []string
@@ -452,7 +453,7 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, 
 
 func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
 	result, err := m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
-	if err == nil && onDispatched != nil {
+	if (err == nil || m.promptAcceptedOnError) && onDispatched != nil {
 		onDispatched()
 	}
 	return result, err

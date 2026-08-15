@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // repoTurnService is a minimal TurnService used by lifecycle tests. It mirrors
@@ -27,8 +28,17 @@ type failingReservedTurnPublisher struct {
 	err error
 }
 
+type failingPromptTurnReconciler struct {
+	TurnService
+	err error
+}
+
 func (s failingReservedTurnPublisher) PublishReservedTurn(context.Context, *models.Turn) error {
 	return s.err
+}
+
+func (s failingPromptTurnReconciler) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
+	return 0, s.err
 }
 
 func (failingReservedTurnPublisher) GetActiveTurn(context.Context, string) (*models.Turn, error) {
@@ -285,6 +295,62 @@ func TestAgentReadyWaitsForReservedPromptGeneration(t *testing.T) {
 	}
 	if turn.CompletedAt != nil {
 		t.Fatalf("predecessor ready completed reserved successor at %v", turn.CompletedAt)
+	}
+}
+
+func TestAgentReadyRevalidatesAfterReservedPromptRollback(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	stepGetter := svc.workflowStepGetter.(*mockStepGetter)
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1"}
+	agentMgr := svc.agentManager.(*mockAgentManager)
+	agentMgr.currentPromptExecutionID = "exec1"
+	agentMgr.currentPromptGeneration.Store(1)
+
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	if err != nil {
+		t.Fatalf("reserve successor turn: %v", err)
+	}
+	readyDone := make(chan struct{})
+	go func() {
+		svc.handleAgentReady(ctx, watcher.AgentEventData{
+			TaskID: "task1", SessionID: "session1",
+			AgentExecutionID: "exec1", PromptGeneration: 1,
+		})
+		close(readyDone)
+	}()
+	select {
+	case <-readyDone:
+		t.Fatal("predecessor ready returned before reservation resolution")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
+	select {
+	case <-readyDone:
+	case <-time.After(time.Second):
+		t.Fatal("predecessor ready did not resume after reservation rollback")
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("load session after ready: %v", err)
+	}
+	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+		t.Fatalf("rolled-back reservation stranded predecessor in %q", session.State)
+	}
+}
+
+func TestStartFailsClosedWhenPromptTurnRecoveryFails(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	recoveryErr := errors.New("recover unpublished prompt turn")
+	svc.turnService = failingPromptTurnReconciler{TurnService: svc.turnService, err: recoveryErr}
+
+	err := svc.Start(context.Background())
+	if !errors.Is(err, recoveryErr) {
+		t.Fatalf("Start error = %v, want %v", err, recoveryErr)
+	}
+	if svc.running {
+		t.Fatal("service remained running after prompt-turn recovery failure")
 	}
 }
 

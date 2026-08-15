@@ -100,6 +100,10 @@ update task/plan status.
   and phone; shared session-loader tests cover cached success and failed forced refresh.
 - Rejected forced loads now perform the same click-time summary revision/action revalidation as
   successful loads. Primary-session and sessionless race regressions passed in the 14-test focused suite.
+- Bot-review remediation keeps the stale owner-session result discarded but opens the requested task
+  through the task-only fallback. Desktop releases the outgoing layout; mobile activates the task,
+  navigates, and closes the existing inset drawer. Three focused suites passed 55 tests with zero lint
+  warnings, typecheck, and the i18n ratchet.
 - Six shared desktop/mobile selection and removal suites passed 75 tests; web typecheck, zero-warning
   full lint, and the i18n ratchet passed.
 - `cd apps && pnpm install --frozen-lockfile` passed.

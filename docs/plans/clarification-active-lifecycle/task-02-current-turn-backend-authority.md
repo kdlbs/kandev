@@ -117,6 +117,12 @@ blockers/risks, and update task/plan status.
 - Ready-race remediation gives each live reservation an accepted-or-rolled-back completion signal.
   `agent.ready` waits on that signal outside the cancellation guard, reacquires the guard, and
   revalidates prompt generation before it can settle turns or run workflow completion.
+- Bot-review remediation bounds each clarification claim and restore database operation with a fresh
+  detached 30-second context. Post-acceptance transport errors now run normal failure cleanup while
+  retaining the non-retryable accepted marker, including when durable publication also fails.
+- A ready event resumes normal predecessor completion after a reservation rolls back and its prompt
+  generation remains authoritative. Startup now fails before watcher, scheduler, or prompt admission
+  when any unpublished reservation cannot be reconciled.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - Final review remediation makes that durable detach an atomic `UPDATE ... RETURNING` claim over the
@@ -132,3 +138,6 @@ blockers/risks, and update task/plan status.
   reported zero issues against merge base `8c9456074a2f61abec48ddd8742ec81635faa16e`.
 - After dispatch-acknowledgement remediation, the repository, clarification, and orchestrator package
   command passed again; focused detached-resume tests and changed-code `golangci-lint` also passed.
+- Bot-review remediation passed the full clarification and orchestrator suites, changed-code
+  `golangci-lint` with zero issues, and ten race-enabled repetitions of the reservation-ready and
+  post-acceptance failure regressions.

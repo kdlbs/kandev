@@ -307,6 +307,57 @@ func TestResumeDetachedClarificationReportsAcceptedPublicationFailure(t *testing
 	}
 }
 
+func TestResumeDetachedClarificationCleansUpAcceptedDispatchFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-accepted-failure", "session-accepted-failure", "step-1")
+	seedExecutorRunning(t, repo, "session-accepted-failure", "task-accepted-failure", "exec-accepted-failure")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session-accepted-failure",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	dispatchErr := errors.New("stream failed after prompt acceptance")
+	publicationErr := errors.New("publish accepted turn")
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptErr:              dispatchErr,
+		promptAcceptedOnError:  true,
+	}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.turnService = failingReservedTurnPublisher{
+		TurnService: &repoBackedTurnService{repo: repo},
+		err:         publicationErr,
+	}
+
+	err := svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-accepted-failure",
+		SessionID:  "session-accepted-failure",
+		PendingID:  "pending-accepted-failure",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if !errors.Is(err, dispatchErr) || !errors.Is(err, publicationErr) {
+		t.Fatalf("resume error = %v, want dispatch %v and publication %v", err, dispatchErr, publicationErr)
+	}
+	var accepted interface{ DetachedResumeAccepted() bool }
+	if !errors.As(err, &accepted) || !accepted.DetachedResumeAccepted() {
+		t.Fatalf("resume error = %v, want accepted-dispatch marker", err)
+	}
+	session, getErr := repo.GetTaskSession(ctx, "session-accepted-failure")
+	if getErr != nil {
+		t.Fatalf("load session after failure: %v", getErr)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after accepted failure = %q, want %q", session.State, models.TaskSessionStateWaitingForInput)
+	}
+}
+
 func TestResumeDetachedClarificationRejectsBeforeDispatchWhenTurnPersistenceFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

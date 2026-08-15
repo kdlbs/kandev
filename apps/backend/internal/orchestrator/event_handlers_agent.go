@@ -501,11 +501,10 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			return
 		}
 		if !accepted {
-			s.logger.Debug("ignoring agent.ready that overlapped a rolled-back prompt reservation",
+			s.logger.Debug("revalidating agent.ready after overlapping prompt reservation rolled back",
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", data.SessionID),
 				zap.String("turn_id", reservation.id))
-			return
 		}
 	}
 	if waitedForReservation {

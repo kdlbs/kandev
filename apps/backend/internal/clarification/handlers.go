@@ -418,6 +418,8 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 		return 0, ""
 	}
 	if errors.Is(deliveryErr, ErrAlreadyResponded) {
+		// Defensive only: the durable claim above is exclusive. Retain this as a
+		// safety net if the in-memory waiter ever diverges from durable state.
 		h.messageCreator.PublishClarificationBundleUpdates(ctx, claim.messages)
 		h.logger.Warn("duplicate response attempt", zap.String("pending_id", pendingID))
 		return http.StatusConflict, "response already submitted"

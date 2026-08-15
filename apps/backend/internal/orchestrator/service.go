@@ -1912,7 +1912,14 @@ func (s *Service) Start(ctx context.Context) error {
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
 	// when the user opens them (via task.session.status → task.session.resume).
-	s.reconcileSessionsOnStartup(ctx)
+	if err := s.reconcileUnpublishedPromptTurnsOnStartup(ctx); err != nil {
+		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		return err
+	}
+	s.reconcileExecutorSessionsOnStartup(ctx)
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
@@ -2030,16 +2037,29 @@ func (s *Service) Stop() error {
 //     clear stale execution IDs, fix task state, preserve ExecutorRunning record
 //  4. Pre-poll remote executor status for remote runtimes (sprites, remote_docker)
 //
-// Called by: Start() method during orchestrator initialization.
+// Tests and explicit reconciliation callers use this combined entrypoint;
+// Start calls both phases directly so prompt-turn recovery errors are fatal.
 func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
+	if err := s.reconcileUnpublishedPromptTurnsOnStartup(ctx); err != nil {
+		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
+		return
+	}
+	s.reconcileExecutorSessionsOnStartup(ctx)
+}
+
+func (s *Service) reconcileUnpublishedPromptTurnsOnStartup(ctx context.Context) error {
 	if s.turnService != nil {
 		reconciled, reconcileErr := s.turnService.ReconcileUnpublishedPromptTurns(ctx)
 		if reconcileErr != nil {
-			s.logger.Warn("failed to reconcile unpublished prompt turns on startup", zap.Error(reconcileErr))
+			return fmt.Errorf("reconcile unpublished prompt turns on startup: %w", reconcileErr)
 		} else if reconciled > 0 {
 			s.logger.Info("reconciled unpublished prompt turns on startup", zap.Int("count", reconciled))
 		}
 	}
+	return nil
+}
+
+func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 	runningExecutors, err := s.repo.ListExecutorsRunning(ctx)
 	if err != nil {
 		s.logger.Warn("failed to list executors running on startup", zap.Error(err))

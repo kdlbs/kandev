@@ -3508,20 +3508,34 @@ func (o *promptDispatchOutcome) snapshot() (bool, error) {
 	return o.accepted, o.publicationErr
 }
 
-// acceptedPromptPublicationError means agentctl accepted the prompt, but the
-// durable reservation could not be published. Detached clarification callers
-// must not reopen the already-delivered answer on this error.
-type acceptedPromptPublicationError struct {
+// acceptedPromptDispatchError means agentctl accepted the prompt, but durable
+// publication or later transport handling failed. Detached clarification
+// callers must not reopen the already-delivered answer on this error.
+type acceptedPromptDispatchError struct {
 	err error
 }
 
-func (e *acceptedPromptPublicationError) Error() string {
-	return fmt.Sprintf("prompt accepted but durable turn publication failed: %v", e.err)
+func (e *acceptedPromptDispatchError) Error() string {
+	return fmt.Sprintf("prompt accepted but post-dispatch handling failed: %v", e.err)
 }
 
-func (e *acceptedPromptPublicationError) Unwrap() error { return e.err }
+func (e *acceptedPromptDispatchError) Unwrap() error { return e.err }
 
-func (*acceptedPromptPublicationError) DetachedResumeAccepted() bool { return true }
+func (*acceptedPromptDispatchError) DetachedResumeAccepted() bool { return true }
+
+func wrapAcceptedPromptDispatchFailure(
+	dispatchAccepted bool,
+	failureErr, publicationErr error,
+) error {
+	if !dispatchAccepted {
+		return failureErr
+	}
+	combined := errors.Join(failureErr, publicationErr)
+	if combined == nil {
+		return nil
+	}
+	return &acceptedPromptDispatchError{err: combined}
+}
 
 func (options promptTaskOptions) executorContext(ctx context.Context) context.Context {
 	if options.preservePromptContext {
@@ -3649,24 +3663,47 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		onDispatched, session,
 	)
 	dispatchAccepted, publicationErr := dispatchOutcome.snapshot()
-	if publicationErr != nil {
-		return nil, &acceptedPromptPublicationError{err: publicationErr}
-	}
 	if err != nil {
-		failureCtx, cancel := options.failureContext(ctx)
-		defer cancel()
-		s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
-		if dispatchAccepted && rollback.reservedTurn != nil {
-			// Agentctl acceptance made the turn authoritative. A later completion
-			// error may reconcile session state, but must not delete this turn.
-			rollback.reservedTurn = nil
-		}
-		return s.handlePromptDispatchFailure(
-			failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt,
-			attachments, rollback, options.lifecyclePrompt, err,
+		return s.finishPromptDispatchFailure(
+			ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
+			rollback, options, err, foregroundDispatch, dispatchAccepted, publicationErr,
 		)
 	}
+	if publicationErr != nil {
+		return nil, &acceptedPromptDispatchError{err: publicationErr}
+	}
 	return &PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage}, nil
+}
+
+func (s *Service) finishPromptDispatchFailure(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode, resumedForPrompt bool,
+	attachments []v1.MessageAttachment,
+	rollback promptClaimRollback,
+	options promptTaskOptions,
+	promptErr error,
+	foregroundDispatch *foregroundDispatch,
+	dispatchAccepted bool,
+	publicationErr error,
+) (*PromptResult, error) {
+	failureCtx, cancel := options.failureContext(ctx)
+	defer cancel()
+	s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
+	if dispatchAccepted && rollback.reservedTurn != nil {
+		// Agentctl acceptance made the turn authoritative. A later completion
+		// error may reconcile session state, but must not delete this turn.
+		rollback.reservedTurn = nil
+	}
+	failureResult, failureErr := s.handlePromptDispatchFailure(
+		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt,
+		attachments, rollback, options.lifecyclePrompt, promptErr,
+	)
+	return failureResult, wrapAcceptedPromptDispatchFailure(
+		dispatchAccepted,
+		failureErr,
+		publicationErr,
+	)
 }
 
 func (s *Service) reloadPromptSession(

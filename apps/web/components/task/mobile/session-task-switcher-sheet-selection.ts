@@ -75,6 +75,7 @@ export async function selectPendingTaskFromSheet(
     pendingSnapshot?: TaskPendingSelectionSnapshot;
   } & SelectionActions,
 ): Promise<void> {
+  const navigate = params.navigate ?? replaceTaskUrl;
   let targetSessionId = "";
   try {
     const sessions = await params.loadTaskSessionsForTask(params.taskId, { force: true });
@@ -91,13 +92,18 @@ export async function selectPendingTaskFromSheet(
     pendingAction: params.taskPendingAction,
   };
   if (!selectionIsCurrent(params)) return;
-  if (!pendingActionIsCurrent(params, params.taskId, initialSnapshot)) return;
+  if (!pendingActionIsCurrent(params, params.taskId, initialSnapshot)) {
+    params.setActiveTask(params.taskId);
+    navigate(params.taskId);
+    params.onOpenChange(false);
+    return;
+  }
   if (targetSessionId) {
     params.setActiveSession(params.taskId, targetSessionId);
   } else {
     params.setActiveTask(params.taskId);
   }
-  (params.navigate ?? replaceTaskUrl)(params.taskId);
+  navigate(params.taskId);
   params.onOpenChange(false);
 }
 
