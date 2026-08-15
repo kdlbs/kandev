@@ -229,7 +229,7 @@ describe("selectPendingTaskFromSheet", () => {
       navigate: () => order.push("navigate"),
       onOpenChange: () => order.push("close"),
     });
-    expect(order).toEqual(["session:primary", "navigate", "close"]);
+    expect(order).toEqual(["task", "navigate", "close"]);
   });
 });
 

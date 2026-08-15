@@ -53,7 +53,7 @@ export async function selectPendingTaskFromSheet(
     taskPendingAction: TaskPendingAction;
   } & SelectionActions,
 ): Promise<void> {
-  let targetSessionId = params.preferredSessionId;
+  let targetSessionId = "";
   try {
     const sessions = await params.loadTaskSessionsForTask(params.taskId);
     targetSessionId = resolveTaskSessionId({

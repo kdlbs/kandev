@@ -202,21 +202,29 @@ func TestTaskToAPI_DerivesInterruptedFromMetadata(t *testing.T) {
 }
 
 func TestFromTurnPreservesSubsecondOrderingPrecision(t *testing.T) {
-	base := time.Date(2026, time.August, 15, 12, 0, 0, 123456789, time.UTC)
+	base := time.Date(2026, time.August, 15, 12, 0, 0, 100000000, time.UTC)
+	completedAt := base.Add(3 * time.Nanosecond)
 	got := FromTurn(&models.Turn{
-		ID:        "turn-nano",
-		StartedAt: base,
-		CreatedAt: base.Add(time.Nanosecond),
-		UpdatedAt: base.Add(2 * time.Nanosecond),
+		ID:          "turn-nano",
+		StartedAt:   base,
+		CompletedAt: &completedAt,
+		CreatedAt:   base.Add(time.Nanosecond),
+		UpdatedAt:   base.Add(2 * time.Nanosecond),
 	})
 
-	if got.StartedAt != "2026-08-15T12:00:00.123456789Z" {
+	if got.StartedAt != "2026-08-15T12:00:00.100000000Z" {
 		t.Fatalf("StartedAt = %q, want nanosecond precision", got.StartedAt)
 	}
-	if got.CreatedAt != "2026-08-15T12:00:00.12345679Z" {
+	if got.CreatedAt != "2026-08-15T12:00:00.100000001Z" {
 		t.Fatalf("CreatedAt = %q, want nanosecond precision", got.CreatedAt)
 	}
-	if got.UpdatedAt != "2026-08-15T12:00:00.123456791Z" {
+	if got.UpdatedAt != "2026-08-15T12:00:00.100000002Z" {
 		t.Fatalf("UpdatedAt = %q, want nanosecond precision", got.UpdatedAt)
+	}
+	if got.CompletedAt == nil || *got.CompletedAt != "2026-08-15T12:00:00.100000003Z" {
+		t.Fatalf("CompletedAt = %v, want nanosecond precision", got.CompletedAt)
+	}
+	if got.StartedAt >= got.CreatedAt || got.CreatedAt >= got.UpdatedAt || got.UpdatedAt >= *got.CompletedAt {
+		t.Fatalf("turn timestamps are not lexically chronological: %+v", got)
 	}
 }
