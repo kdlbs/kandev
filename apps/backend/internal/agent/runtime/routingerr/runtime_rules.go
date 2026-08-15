@@ -68,7 +68,15 @@ var runtimeEnvironmentRules = []runtimeRule{
 		// 529-overloaded rules above still win when signatures co-occur.
 		id:      transportLostRuleID,
 		pattern: transportLostRe,
-		build: func(string) *Error {
+		build: func(text string) *Error {
+			// A context cancellation or deadline can be reported alongside the
+			// same "connection closed" wording the transport-lost signature
+			// matches on (e.g. "context canceled: connection closed"). Those
+			// envelopes must keep falling through to manual recovery, so
+			// reject them here rather than trust the substring match alone.
+			if cancellationOrDeadlineRe.MatchString(text) {
+				return nil
+			}
 			return &Error{
 				Code:       CodeAgentTransportLost,
 				Confidence: ConfHigh,
@@ -76,6 +84,13 @@ var runtimeEnvironmentRules = []runtimeRule{
 		},
 	},
 }
+
+// cancellationOrDeadlineRe matches context-cancellation and deadline
+// signatures that can co-occur with the transport-lost wording in the same
+// error string. Kept separate from transportLostRe so the two can be
+// combined without the transport-lost pattern itself growing lookahead
+// complexity.
+var cancellationOrDeadlineRe = regexp.MustCompile(`(?i)\bcontext (?:canceled|deadline exceeded)\b|\bcancel escalated\b`)
 
 const resumeCorruptedRuleID = "anthropic.thinking_blocks.immutable.v1"
 

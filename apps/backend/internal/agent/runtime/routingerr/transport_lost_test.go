@@ -88,6 +88,14 @@ func TestClassify_TransportLost_ExcludesCancellationSignatures(t *testing.T) {
 		"context canceled",
 		"context deadline exceeded",
 		"cancel escalated: prompt abandoned after cancel",
+		// Composite envelopes: a cancellation/deadline signature co-occurring
+		// with the transport-lost wording in the same message. Without the
+		// cancellationOrDeadlineRe guard these would match transportLostRe on
+		// "connection closed"/"peer disconnected" alone and wrongly become
+		// auto-retryable, turning a user cancel or timeout into a relaunch loop.
+		"context canceled: connection closed",
+		"context deadline exceeded: connection closed",
+		"context canceled: peer disconnected before response",
 	}
 	for _, msg := range cases {
 		t.Run(msg, func(t *testing.T) {

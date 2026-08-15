@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -95,8 +96,18 @@ func TestHandleTransportLost_FailsExactlyNTimes(t *testing.T) {
 	// The third attempt would recover (emits text via the live conn) — not
 	// exercised here to avoid needing a real ACP connection; the recovery path
 	// is covered end-to-end by the Playwright spec. Assert the persisted count
-	// reached the fail budget so recovery is next.
-	if got := nextTransportLostAttempt(sid) - 1; got != 2 {
+	// reached the fail budget so recovery is next. Read the counter file
+	// directly rather than calling nextTransportLostAttempt, which would
+	// increment it as a side effect of the assertion itself.
+	raw, err := os.ReadFile(transportLostCounterPath(sid))
+	if err != nil {
+		t.Fatalf("failed to read persisted attempt count: %v", err)
+	}
+	got, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("failed to parse persisted attempt count %q: %v", raw, err)
+	}
+	if got != 2 {
 		t.Errorf("persisted attempt count = %d, want 2", got)
 	}
 }
