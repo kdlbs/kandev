@@ -15,14 +15,21 @@ func TestCanonicalCredentialPath(t *testing.T) {
 		"nested namespace":   {raw: "/scm/ENG/widgets.git", want: "/scm/ENG/widgets"},
 		"case preserved":     {raw: "/Acme/Widgets.git", want: "/Acme/Widgets"},
 		"root":               {raw: "/", want: "/"},
-		"bare suffix":        {raw: "/.git", want: "/"},
+		"bare suffix":        {raw: "/.git", want: "/.git"},
 		"empty":              {raw: "", want: ""},
+		// GitHub forbids a repository named ".git"; reducing it keeps the
+		// function idempotent instead of leaving a trailing slash behind.
+		"repository named .git": {raw: "/acme/.git", want: "/acme"},
 		// ".github" is a real repository name and must survive intact.
 		"dot-prefixed repository": {raw: "/acme/.github", want: "/acme/.github"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := CanonicalCredentialPath(testCase.raw); got != testCase.want {
+			got := CanonicalCredentialPath(testCase.raw)
+			if got != testCase.want {
 				t.Fatalf("CanonicalCredentialPath(%q) = %q, want %q", testCase.raw, got, testCase.want)
+			}
+			if again := CanonicalCredentialPath(got); again != got {
+				t.Fatalf("CanonicalCredentialPath(%q) is not idempotent: %q then %q", testCase.raw, got, again)
 			}
 		})
 	}

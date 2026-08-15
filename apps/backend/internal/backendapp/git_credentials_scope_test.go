@@ -9,21 +9,40 @@ import (
 )
 
 func gitCredentialScopeTestRepository(remoteURL string) *fakeGitHubBrokerTaskRepository {
+	repository := gitCredentialScopeRepository(remoteURL)
+	repository.ProviderOwner = "acme"
+	repository.ProviderName = "widgets"
 	return &fakeGitHubBrokerTaskRepository{
-		task:    &taskmodels.Task{ID: "task-1", WorkspaceID: "workspace-1"},
-		session: &taskmodels.TaskSession{ID: "session-1", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning},
-		repository: &taskmodels.Repository{
-			ID: "repository-1", WorkspaceID: "workspace-1", Provider: "github",
-			ProviderOwner: "acme", ProviderName: "widgets", RemoteURL: remoteURL,
-		},
-		links: []*taskmodels.TaskRepository{{TaskID: "task-1", RepositoryID: "repository-1"}},
+		task:       &taskmodels.Task{ID: "task-1", WorkspaceID: "workspace-1"},
+		session:    &taskmodels.TaskSession{ID: "session-1", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning},
+		repository: repository,
+		links:      []*taskmodels.TaskRepository{{TaskID: "task-1", RepositoryID: "repository-1"}},
+	}
+}
+
+func gitCredentialScopeRepository(remoteURL string) *taskmodels.Repository {
+	return &taskmodels.Repository{
+		ID: "repository-1", WorkspaceID: "workspace-1", Provider: "github", RemoteURL: remoteURL,
+	}
+}
+
+func gitCredentialScopeTaskRepository(repository *taskmodels.Repository) *fakeGitHubBrokerTaskRepository {
+	return &fakeGitHubBrokerTaskRepository{
+		task:       &taskmodels.Task{ID: "task-1", WorkspaceID: "workspace-1"},
+		session:    &taskmodels.TaskSession{ID: "session-1", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning},
+		repository: repository,
+		links:      []*taskmodels.TaskRepository{{TaskID: "task-1", RepositoryID: "repository-1"}},
 	}
 }
 
 func gitCredentialScopeForPath(path string) gitcredentials.Scope {
+	return gitCredentialScopeForHostPath("github.com", path)
+}
+
+func gitCredentialScopeForHostPath(host, path string) gitcredentials.Scope {
 	return gitcredentials.Scope{
 		ProviderID: "github", WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1",
-		RepositoryID: "repository-1", Host: "github.com", Path: path,
+		RepositoryID: "repository-1", Host: host, Path: path,
 	}
 }
 
@@ -56,15 +75,28 @@ func TestGitHubBrokerScopeAuthorizerAcceptsEquivalentRepositorySpellings(t *test
 
 func TestGitHubBrokerScopeAuthorizerRejectsForeignRepositoryScope(t *testing.T) {
 	for name, testCase := range map[string]struct {
-		remoteURL string
-		scopePath string
+		repository *taskmodels.Repository
+		scopePath  string
 	}{
-		"different repository": {remoteURL: "git@github.com:acme/widgets.git", scopePath: "/acme/widgets-staging"},
-		"different host":       {remoteURL: "git@github.example:acme/widgets.git", scopePath: "/acme/widgets"},
-		"unsupported remote":   {remoteURL: "file:///tmp/widgets.git", scopePath: "/acme/widgets"},
+		"different repository": {
+			repository: gitCredentialScopeTestRepository("git@github.com:acme/widgets.git").repository,
+			scopePath:  "/acme/widgets-staging",
+		},
+		"ssh remote on another host, no provider identity": {
+			repository: gitCredentialScopeRepository("git@github.example:acme/widgets.git"),
+			scopePath:  "/acme/widgets",
+		},
+		"unsupported remote, no provider identity": {
+			repository: gitCredentialScopeRepository("file:///tmp/widgets.git"),
+			scopePath:  "/acme/widgets",
+		},
+		"https remote on another host wins over provider identity": {
+			repository: gitCredentialScopeTestRepository("https://github.example/acme/widgets.git").repository,
+			scopePath:  "/acme/widgets",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			authorizer := &githubBrokerScopeAuthorizer{repo: gitCredentialScopeTestRepository(testCase.remoteURL)}
+			authorizer := &githubBrokerScopeAuthorizer{repo: gitCredentialScopeTaskRepository(testCase.repository)}
 
 			if err := authorizer.AuthorizeGitCredential(
 				context.Background(), gitCredentialScopeForPath(testCase.scopePath),
@@ -72,5 +104,26 @@ func TestGitHubBrokerScopeAuthorizerRejectsForeignRepositoryScope(t *testing.T) 
 				t.Fatal("AuthorizeGitCredential() error = nil, want scope denial")
 			}
 		})
+	}
+}
+
+// An SSH URL cannot express the provider's HTTPS port, so the persisted
+// provider identity, not a rewrite of the remote, decides the origin.
+func TestGitHubBrokerScopeAuthorizerUsesProviderHostPortForSSHRemote(t *testing.T) {
+	repository := gitCredentialScopeRepository("ssh://git@ghe.example:2222/acme/widgets.git")
+	repository.ProviderHost = "https://ghe.example:8443"
+	repository.ProviderOwner = "acme"
+	repository.ProviderName = "widgets"
+	authorizer := &githubBrokerScopeAuthorizer{repo: gitCredentialScopeTaskRepository(repository)}
+
+	if err := authorizer.AuthorizeGitCredential(
+		context.Background(), gitCredentialScopeForHostPath("ghe.example:8443", "/acme/widgets"),
+	); err != nil {
+		t.Fatalf("AuthorizeGitCredential() error = %v", err)
+	}
+	if err := authorizer.AuthorizeGitCredential(
+		context.Background(), gitCredentialScopeForHostPath("ghe.example", "/acme/widgets"),
+	); err == nil {
+		t.Fatal("AuthorizeGitCredential() error = nil, want portless origin denial")
 	}
 }

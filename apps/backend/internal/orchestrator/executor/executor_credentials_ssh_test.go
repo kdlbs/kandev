@@ -59,6 +59,28 @@ func TestGitCredentialCloneIdentityAcceptsSSHRemoteURL(t *testing.T) {
 	}
 }
 
+// An SSH URL cannot express the provider's HTTPS port, so a repository whose
+// provider runs HTTPS on a non-default port must take its credential identity
+// from the persisted provider host rather than from a rewrite of the remote.
+func TestGitCredentialCloneIdentityPrefersProviderHostOverSSHRemote(t *testing.T) {
+	repository := &models.Repository{
+		Provider: "github", ProviderHost: "https://ghe.example:8443",
+		ProviderOwner: "acme", ProviderName: "widgets",
+		RemoteURL: "ssh://git@ghe.example:2222/acme/widgets.git",
+	}
+
+	host, path, owner, repo, err := gitCredentialCloneIdentity(repository, "repo-1")
+	if err != nil {
+		t.Fatalf("gitCredentialCloneIdentity() error = %v", err)
+	}
+	if host != "ghe.example:8443" || path != "/acme/widgets.git" {
+		t.Fatalf("clone identity = %q %q, want ghe.example:8443 /acme/widgets.git", host, path)
+	}
+	if owner != "acme" || repo != "widgets" {
+		t.Fatalf("clone identity owner/repo = %q/%q, want acme/widgets", owner, repo)
+	}
+}
+
 func TestGitCredentialCloneIdentityRejectsUnsupportedRemoteURL(t *testing.T) {
 	for name, remoteURL := range map[string]string{
 		"local file":     "file:///tmp/repository.git",
