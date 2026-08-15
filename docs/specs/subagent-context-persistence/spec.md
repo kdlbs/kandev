@@ -7,6 +7,16 @@ owner: nova28
 
 # Subagent context persistence
 
+> **Current implementation boundary (2026-08-15).** The execution-aware
+> `task_session_subagents` shape is created directly by schema initialization.
+> The predecessor two-column shape and the `subagent_context_execution_since`
+> activation key were not shipped on the supported base branch, so the current
+> implementation does not include a compatibility rebuild or shape-probing
+> migration for them. Historical amendment text below records the earlier
+> design discussion; the supported migration work is the historical-message
+> backfill and its two activation keys. See
+> [ADR-2026-08-15-subagent-context-schema-boundary](../../decisions/2026-08-15-subagent-context-schema-boundary.md).
+
 ## Amendment log
 
 **Amendment 1 (2026-08-14) — row identity gains an execution dimension.**

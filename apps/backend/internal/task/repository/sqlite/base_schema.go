@@ -628,10 +628,8 @@ func (r *Repository) initSessionSchema() error {
 // "no execution identity available") so every row has one, and is part of the
 // UNIQUE key (task_session_id, agent_execution_id, tool_call_id) — a late
 // frame from an earlier, already-completed execution creates/updates its own
-// row instead of clobbering a later execution's (AC-32). A DB that predates
-// this column reaches the same shape via
-// migrateSubagentContextExecutionIdentity (subagent_context_execution_migration.go),
-// per AC-33.
+// row instead of clobbering a later execution's (AC-32). Historical message
+// rows are handled separately by the one-time backfill migration.
 func (r *Repository) initSubagentContextSchema() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_session_subagents (

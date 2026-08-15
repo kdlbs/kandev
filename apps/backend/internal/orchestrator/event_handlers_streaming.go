@@ -75,6 +75,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			terminalCompleteStream = true
 		}
 	} else if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		// Keep the message side suppressed for completed executions, but do not
+		// discard a late subagent frame before its durable context is recorded.
+		// This guard runs before the event-type switch below, so handler-level
+		// recording alone would not cover the production dispatch path.
+		if eventType == agentEventToolCall || eventType == agentEventToolUpdate {
+			s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
+		}
 		return
 	}
 
@@ -102,7 +109,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
 
-	case "tool_update":
+	case agentEventToolUpdate:
 		s.handleToolUpdateEvent(ctx, payload)
 
 	case agentEventComplete:

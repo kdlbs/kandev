@@ -169,6 +169,48 @@ func TestHandleToolUpdateEventCarriesTerminalToolStatus(t *testing.T) {
 	require.Equal(t, agentEventComplete, requests[1].ToolStatus)
 }
 
+// TestHandleAgentStreamEventFromCompletedExecutionStillRecordsSubagentContext
+// covers the public stream dispatcher. The completed-execution guard runs
+// before the event-type switch, so handler-level tests alone would not catch
+// a regression that drops the frame before the recorder can see it.
+func TestHandleAgentStreamEventFromCompletedExecutionStillRecordsSubagentContext(t *testing.T) {
+	for _, eventType := range []string{"tool_call", "tool_update"} {
+		t.Run(eventType, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "task1", "session1", "step1")
+
+			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+			svc.turnService = &repoTurnService{repo: repo}
+			messages := &mockMessageCreator{}
+			svc.messageCreator = messages
+			recorder := &fakeSubagentContextRecorder{}
+			svc.subagentContexts = recorder
+			svc.markExecutionCompleted("session1", "exec-1")
+
+			payload := streams.NewSubagentTask("d", "p", "reviewer")
+			payload.SubagentTask().Status = "completed"
+			event := &lifecycle.AgentStreamEventPayload{
+				TaskID: "task1", SessionID: "session1", ExecutionID: "exec-1",
+				Data: &lifecycle.AgentStreamEventData{
+					Type: eventType, ToolCallID: "tc-late", ToolStatus: agentEventComplete,
+					Normalized: payload,
+				},
+			}
+
+			svc.handleAgentStreamEvent(ctx, event)
+
+			require.Zero(t, messages.toolCallWrites+messages.toolUpdateWrites,
+				"the completed-execution guard must still drop the message side")
+			requests := recorder.all()
+			require.Len(t, requests, 1,
+				"the dispatcher must record a late subagent frame before dropping it")
+			require.Equal(t, "tc-late", requests[0].ToolCallID)
+			require.Equal(t, agentEventComplete, requests[0].ToolStatus)
+		})
+	}
+}
+
 // TestHandleToolCallEventIgnoresNonSubagentKind covers "a non-subagent_task
 // normalized kind records nothing".
 func TestHandleToolCallEventIgnoresNonSubagentKind(t *testing.T) {

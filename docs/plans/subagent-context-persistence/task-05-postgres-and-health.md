@@ -8,10 +8,10 @@ plan: "plan.md"
 spec: "../../specs/subagent-context-persistence/spec.md"
 ---
 
-> **Amendment 1 update:** Postgres parity now also covers the dedicated
-> execution-identity migration's atomicity (failpoint-and-rollback matrix) —
-> see the "Amendment 1 update" note near the top of `plan.md` for the current
-> migration and backfill shape this task must validate.
+> **Current implementation boundary:** Postgres parity covers the final
+> execution-aware schema and the historical-message backfill. The feature does
+> not ship a compatibility rebuild for an earlier table shape; see
+> `docs/decisions/2026-08-15-subagent-context-schema-boundary.md`.
 
 # Task 05: Postgres parity and health-query coverage
 

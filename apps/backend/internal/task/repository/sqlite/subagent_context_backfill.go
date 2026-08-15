@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -16,6 +18,16 @@ const (
 	subagentContextBackfillThroughKey    = "subagent_context_backfill_through"
 	subagentContextBackfillMigrationName = "task_session_subagents.backfill"
 )
+
+// warnSubagentContextMigration logs a failure in the exact migration warning
+// shape used by the repository's MigrateLogger. The backfill is telemetry-only:
+// failures are visible at WARN and never abort backend startup.
+func (r *Repository) warnSubagentContextMigration(name string, err error) {
+	if r.log == nil {
+		return
+	}
+	r.log.Warn("migration failed", zap.String("name", name), zap.Error(err))
+}
 
 // migrateSubagentContextBackfill recovers task_session_subagents history from
 // existing task_session_messages rows whose metadata.normalized.kind is

@@ -342,17 +342,12 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 
-	// AC-33c: the shape migration (add agent_execution_id, widen the UNIQUE
-	// key) and its execution_since key write must be attempted BEFORE the
-	// backfill in the same pass — the backfill's INSERT references the new
-	// column and conflict target. Both live in
-	// subagent_context_execution_migration.go / subagent_context_backfill.go.
-	// The backfill runs only when the AC-33 end state is schema-observed to
-	// hold; otherwise it is skipped entirely (not just its key writes) and
-	// retried, along with the shape migration, on the next boot.
-	if r.migrateSubagentContextExecutionIdentity() {
-		r.migrateSubagentContextBackfill()
-	}
+	// The execution-aware task_session_subagents schema is created directly by
+	// initSubagentContextSchema. The predecessor change that introduced the
+	// table is not part of the supported upgrade path, so there is no
+	// intermediate-shape rebuild to run here. Only the historical-message
+	// backfill belongs in the migration phase.
+	r.migrateSubagentContextBackfill()
 
 	return nil
 }
