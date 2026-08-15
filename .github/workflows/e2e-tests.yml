@@ -312,10 +312,19 @@ jobs:
       # executor and the SSH executor's sshd target). Without --project the
       # container-bound specs would run here too, fail seeding (Docker not
       # enabled for these shards), and spam every shard.
+      # global-setup.ts refuses to run a backend binary older than any
+      # apps/backend source. That guard exists for local runs, where nothing
+      # else notices `pnpm run build:e2e` rebuilding only the frontend. Here
+      # the binary is staged out of band: the `build` job compiled it from
+      # this same commit, and the shard's own checkout stamps every source
+      # file with a *later* mtime than the artifact it downloads. Freshness is
+      # already guaranteed by `needs: build`; the mtime comparison is not
+      # meaningful across jobs.
       - name: Run planned E2E tests (shard ${{ matrix.shard }}/14)
         working-directory: apps/web
         env:
           E2E_SHARD: ${{ matrix.shard }}
+          KANDEV_E2E_SKIP_FRESHNESS: "1"
         run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${{ matrix.shard }}.json"
 
       - name: Upload blob report
@@ -488,11 +497,14 @@ jobs:
           name: e2e-shard-manifests
           path: e2e-manifests
 
+      # Same out-of-band staging as the chromium shards above — see the comment
+      # on that step for why the backend-binary freshness guard is skipped.
       - name: Run planned container-backed E2E tests shard ${{ matrix.shard }}/6 (Docker executor + SSH executor)
         working-directory: apps/web
         env:
           KANDEV_E2E_CONTAINERS: "1"
           E2E_SHARD: ${{ matrix.shard }}
+          KANDEV_E2E_SKIP_FRESHNESS: "1"
         run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/containers/${{ matrix.shard }}.json"
 
       # Named with the same `blob-report-*` prefix the merge job globs for
