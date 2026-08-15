@@ -247,6 +247,52 @@ describe("useTaskMRAutomationOptions races", () => {
     });
     expect(result.current.options?.prompt_on_merged).toBe(true);
   });
+
+  // A task with N linked MRs mounts N MRAutomationControls, each with its own
+  // useTaskMRAutomationOptions("task-1") instance. All instances read/write
+  // the same store slot, so their save-ordering guards must also be shared —
+  // otherwise an older instance's private counter never learns about a
+  // newer instance's save and treats its own stale response as current.
+  it("shares update ordering across multiple mounted instances for the same task, so an older instance's stale response cannot clobber a newer one's committed result", async () => {
+    api.getTaskMRAutomation.mockResolvedValue(baseOptions());
+    const { result } = renderHook(
+      () => ({
+        a: useTaskMRAutomationOptions("task-1"),
+        b: useTaskMRAutomationOptions("task-1"),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.a.options).not.toBeNull());
+
+    const updateA = deferred<TaskMRAutomationOptions>();
+    const updateB = deferred<TaskMRAutomationOptions>();
+    api.updateTaskMRAutomation
+      .mockImplementationOnce(() => updateA.promise)
+      .mockImplementationOnce(() => updateB.promise);
+
+    // Instance A (e.g. !1's block) starts a save...
+    act(() => {
+      void result.current.a.update({ auto_fix_prompt_override: "from A" });
+    });
+    // ...then instance B (e.g. !2's block) starts a later save for the same
+    // task before A's resolves.
+    act(() => {
+      void result.current.b.update({ auto_fix_prompt_override: "from B" });
+    });
+
+    // B's later, authoritative response lands first...
+    await act(async () => {
+      updateB.resolve(baseOptions({ auto_fix_prompt_override: "from B" }));
+    });
+    expect(result.current.a.options?.auto_fix_prompt_override).toBe("from B");
+
+    // ...then A's now-stale response resolves after. It must not win.
+    await act(async () => {
+      updateA.resolve(baseOptions({ auto_fix_prompt_override: "from A" }));
+    });
+    expect(result.current.a.options?.auto_fix_prompt_override).toBe("from B");
+    expect(result.current.b.options?.auto_fix_prompt_override).toBe("from B");
+  });
 });
 
 describe("useTaskMRAutomationOptions task switching", () => {

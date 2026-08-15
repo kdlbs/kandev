@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { useCallback, useEffect, type RefObject } from "react";
 import { getTaskMRAutomation, updateTaskMRAutomation } from "@/lib/api/domains/gitlab-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
@@ -12,6 +12,28 @@ import type {
 import { t } from "@/lib/i18n";
 
 type AppStoreApi = ReturnType<typeof useAppStoreApi>;
+
+type MRAutomationRequestRefs = Pick<
+  MRAutomationRequestContext,
+  "refreshRequestRef" | "updateRequestRef" | "updateSettleCounterRef"
+>;
+
+// One task can mount a control for every linked MR. Those controls share a
+// store, so they must also share request ordering: an older control's full
+// response must not overwrite a newer control's response for another MR.
+const requestRefsByStore = new WeakMap<AppStoreApi, MRAutomationRequestRefs>();
+
+function requestRefsForStore(storeApi: AppStoreApi): MRAutomationRequestRefs {
+  const existing = requestRefsByStore.get(storeApi);
+  if (existing) return existing;
+  const refs: MRAutomationRequestRefs = {
+    refreshRequestRef: { current: {} },
+    updateRequestRef: { current: {} },
+    updateSettleCounterRef: { current: {} },
+  };
+  requestRefsByStore.set(storeApi, refs);
+  return refs;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : t("gitlab:failedToLoadMrAutomationOptions");
@@ -252,11 +274,10 @@ async function performUpdate(
  *    corrects it again.
  */
 export function useTaskMRAutomationOptions(taskId: string | null) {
-  const refreshRequestRef = useRef<Record<string, number>>({});
-  const updateRequestRef = useRef<Record<string, number>>({});
-  const updateSettleCounterRef = useRef<Record<string, number>>({});
   const storeApi = useAppStoreApi();
 
+  const { refreshRequestRef, updateRequestRef, updateSettleCounterRef } =
+    requestRefsForStore(storeApi);
   const options = useAppStore((state) =>
     taskId ? (state.taskMRAutomation.byTaskId[taskId] ?? null) : null,
   );
