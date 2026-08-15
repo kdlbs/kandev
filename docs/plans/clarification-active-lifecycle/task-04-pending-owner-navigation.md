@@ -79,6 +79,8 @@ update task/plan status.
 - PR review follow-up keeps superseded pending-metadata rows as inert transcript history when turns
   are unhydrated and the server reports no active clarification, while hiding only the authoritative
   latest bundle when clarification remains active. The explicit no-turn legacy overlay path is pinned.
+- Mixed-status recovery counts terminal siblings for arrival completeness but renders only pending
+  questions, so already-answered cards never request replacement answers.
 - Desktop navigation re-reads the active source session after asynchronous loading, and mobile item
   projection reuses the shared task pending-action authority helper.
 - Closing the mobile task sheet invalidates any asynchronous selection before a later reopen, preventing

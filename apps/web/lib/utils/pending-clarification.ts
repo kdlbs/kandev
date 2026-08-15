@@ -73,10 +73,10 @@ export function findPendingClarification(
   return null;
 }
 
-// findPendingClarificationGroup returns every clarification_request message
-// that shares the latest pending message's pending_id, ordered by chat position.
-// Multi-question bundles emit one message per question; the chat panel uses this
-// list to render every pending question card together.
+// findPendingClarificationGroup returns pending clarification_request messages
+// that share the latest pending message's pending_id, ordered by chat position.
+// Multi-question bundles emit one message per question; terminal siblings count
+// toward arrival completeness but are not rendered for a replacement answer.
 //
 // Gates on `question_total` from metadata: returns an empty array until the
 // number of messages received equals the expected bundle size. This prevents
@@ -94,16 +94,16 @@ export function findPendingClarificationGroup(
   const meta = last.metadata as ClarificationRequestMetadata | undefined;
   const pendingID = meta?.pending_id;
   if (!pendingID) return [last];
-  const group = scoped.filter((m) => {
+  const bundle = scoped.filter((m) => {
     if (m.type !== "clarification_request") return false;
     const mMeta = m.metadata as ClarificationRequestMetadata | undefined;
     return mMeta?.pending_id === pendingID;
   });
   const expectedTotal = meta?.question_total;
-  if (typeof expectedTotal === "number" && expectedTotal > 0 && group.length < expectedTotal) {
+  if (typeof expectedTotal === "number" && expectedTotal > 0 && bundle.length < expectedTotal) {
     return [];
   }
-  return group;
+  return bundle.filter(isPendingClarificationMessage);
 }
 
 export function hasPendingClarification(

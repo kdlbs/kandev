@@ -156,6 +156,23 @@ describe("findPendingClarificationGroup", () => {
     });
     expect(findPendingClarificationGroup([old, a]).map((m) => m.id)).toEqual(["a"]);
   });
+
+  it("counts terminal siblings for completeness but returns only pending questions", () => {
+    const answered = message({
+      id: "answered",
+      type: "clarification_request",
+      metadata: { pending_id: "p1", question_total: 2, status: "answered" },
+    });
+    const pending = message({
+      id: "pending",
+      type: "clarification_request",
+      metadata: { pending_id: "p1", question_total: 2, status: "pending" },
+    });
+
+    expect(findPendingClarificationGroup([answered, pending]).map((item) => item.id)).toEqual([
+      "pending",
+    ]);
+  });
 });
 
 describe("current-turn clarification ownership", () => {

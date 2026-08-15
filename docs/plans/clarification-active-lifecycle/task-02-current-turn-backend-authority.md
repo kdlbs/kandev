@@ -93,7 +93,8 @@ blockers/risks, and update task/plan status.
 - Detach and expiry counts now include only bundles whose messages changed. Malformed messages without
   their schema-required durable turn remain inert instead of becoming pending authority.
 - Final review remediation lets atomic response claims recover pending rows from a mixed-status bundle,
-  while targeted rollback restores only rows owned by the failed delivery attempt.
+  validates answers only for those pending rows, and preserves terminal siblings; targeted rollback
+  restores only rows owned by the failed delivery attempt.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - `cd apps/backend && go test ./internal/task/repository/sqlite ./internal/clarification ./internal/orchestrator`

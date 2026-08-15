@@ -24,6 +24,7 @@ import (
 const (
 	metaQuestionKey   = "question"
 	metaQuestionIDKey = "question_id"
+	metaStatusKey     = "status"
 )
 
 // messageStore is the minimal task repository interface required by clarification handlers.
@@ -526,8 +527,8 @@ func (h *Handlers) validateRespondAnswers(ctx context.Context, pendingID string,
 }
 
 // expectedQuestionIDs returns the ordered question ids the user is expected to
-// answer for the given pending bundle. Falls back to the persisted messages if
-// the in-store request has been cleaned up.
+// answer for the given pending bundle. Persisted recovery includes only pending
+// siblings because an earlier partial write may have made other rows terminal.
 func (h *Handlers) expectedQuestionIDs(ctx context.Context, pendingID string) []string {
 	if req, ok := h.store.GetRequest(pendingID); ok && req != nil {
 		ids := make([]string, 0, len(req.Questions))
@@ -545,6 +546,10 @@ func (h *Handlers) expectedQuestionIDs(ctx context.Context, pendingID string) []
 	}
 	ids := make([]string, 0, len(msgs))
 	for _, m := range msgs {
+		status := stringFromMetadata(m.Metadata, metaStatusKey)
+		if status != "" && status != string(StatusPending) {
+			continue
+		}
 		if id := stringFromMetadata(m.Metadata, metaQuestionIDKey); id != "" {
 			ids = append(ids, id)
 		}

@@ -266,6 +266,41 @@ func TestHttpRespond_AnsweredAfterTimeoutAwaitsResume(t *testing.T) {
 	}
 }
 
+func TestHttpRespond_DetachedMixedBundleAcceptsOnlyPendingAnswers(t *testing.T) {
+	terminal := &taskmodels.Message{
+		ID: "message-terminal", TaskID: "task-mixed", TaskSessionID: "session-mixed",
+		Metadata: map[string]any{
+			"status": "answered", "pending_id": "pending-mixed", "question_id": "q1",
+		},
+	}
+	pending := &taskmodels.Message{
+		ID: "message-pending", TaskID: "task-mixed", TaskSessionID: "session-mixed",
+		Metadata: map[string]any{
+			"status": "pending", "pending_id": "pending-mixed", "question_id": "q2",
+		},
+	}
+	h, _, eventBus, messageCreator := setupTestHandler(t, map[string][]*taskmodels.Message{
+		"pending-mixed": {terminal, pending},
+	})
+
+	rec := runRespond(t, h, "pending-mixed", RespondBody{
+		Answers: []Answer{{QuestionID: "q2", SelectedOptions: []string{"continue"}}},
+	})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("response status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(messageCreator.updates) != 1 || messageCreator.updates[0].questionID != "q2" {
+		t.Fatalf("updated messages = %+v, want only pending q2", messageCreator.updates)
+	}
+	if terminal.Metadata["status"] != "answered" {
+		t.Fatalf("terminal sibling status = %v, want answered", terminal.Metadata["status"])
+	}
+	if len(eventBus.resumeRequests) != 1 {
+		t.Fatalf("resume requests = %d, want 1", len(eventBus.resumeRequests))
+	}
+}
+
 func TestHttpRespond_DetachedAnswerPublishesOnlyForWinningClaim(t *testing.T) {
 	msgs := map[string][]*taskmodels.Message{
 		"pending-race": {{
