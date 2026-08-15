@@ -615,6 +615,12 @@ type Service struct {
 	// clobber the task back to REVIEW while work is active.
 	taskRuntimeStateMu sync.Mutex
 
+	// taskSessionErrorLocks serialize session deletion with retained-error
+	// selection and publication for each task. Entries are reference-counted
+	// and reclaimed after the last concurrent operation releases them.
+	taskSessionErrorLocksMu sync.Mutex
+	taskSessionErrorLocks   map[string]*taskSessionErrorGuard
+
 	// completedExecutions records execution IDs that have reached a terminal
 	// agent lifecycle event. Buffered stream/tool events for these executions
 	// must not wake their session back to RUNNING after the terminal path makes

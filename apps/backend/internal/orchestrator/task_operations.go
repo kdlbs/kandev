@@ -2793,10 +2793,9 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		zap.String("state", string(session.State)),
 		zap.Bool("was_primary", wasPrimary))
 
-	if err := s.repo.DeleteTaskSession(ctx, sessionID); err != nil {
+	if err := s.deleteSessionAndPublishError(ctx, taskID, sessionID); err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
-	s.publishDeletedSessionError(ctx, taskID, sessionID)
 
 	// Drop the in-memory git snapshot throttle entry — the session will
 	// never receive another git event, so its cache slot is dead weight.
@@ -2823,6 +2822,19 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		s.promoteNextPrimaryAfterRemoval(ctx, taskID, sessionID)
 	}
 
+	return nil
+}
+
+func (s *Service) deleteSessionAndPublishError(ctx context.Context, taskID, sessionID string) error {
+	lock, release := s.acquireTaskSessionErrorGuard(taskID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := s.repo.DeleteTaskSession(ctx, sessionID); err != nil {
+		return err
+	}
+	s.publishDeletedSessionError(ctx, taskID, sessionID)
 	return nil
 }
 
@@ -4330,6 +4342,40 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 type cancelInFlightGuard struct {
 	mu   sync.Mutex
 	refs int
+}
+
+type taskSessionErrorGuard struct {
+	mu   sync.Mutex
+	refs int
+}
+
+func (s *Service) acquireTaskSessionErrorGuard(taskID string) (*sync.Mutex, func()) {
+	s.taskSessionErrorLocksMu.Lock()
+	if s.taskSessionErrorLocks == nil {
+		s.taskSessionErrorLocks = make(map[string]*taskSessionErrorGuard)
+	}
+	guard, ok := s.taskSessionErrorLocks[taskID]
+	if !ok {
+		guard = &taskSessionErrorGuard{}
+		s.taskSessionErrorLocks[taskID] = guard
+	}
+	guard.refs++
+	s.taskSessionErrorLocksMu.Unlock()
+
+	var released bool
+	release := func() {
+		if released {
+			return
+		}
+		released = true
+		s.taskSessionErrorLocksMu.Lock()
+		guard.refs--
+		if guard.refs == 0 {
+			delete(s.taskSessionErrorLocks, taskID)
+		}
+		s.taskSessionErrorLocksMu.Unlock()
+	}
+	return &guard.mu, release
 }
 
 type cancellationKind string

@@ -1491,11 +1491,16 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 	defer lock.Unlock()
 
 	if _, err := s.repo.GetTaskSession(ctx, data.SessionID); err != nil {
-		s.logger.Warn("skipping recoverable failure for unavailable session",
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			s.logger.Debug("skipping recoverable failure for deleted session",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID))
+			return
+		}
+		s.logger.Warn("failed to reload session before recoverable failure; continuing",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
-		return
 	}
 	s.handleRecoverableFailureLocked(ctx, data)
 }

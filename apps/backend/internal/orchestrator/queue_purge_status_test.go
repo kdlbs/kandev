@@ -250,7 +250,7 @@ func TestDeleteSessionRetainsOtherProjectedAgentErrorAfterRestart(t *testing.T) 
 	t.Cleanup(func() { eventBus.Close() })
 	svc.eventBus = eventBus
 
-	newProjector := func(parent context.Context) context.CancelFunc {
+	newProjector := func(parent context.Context) func() {
 		ctx, cancel := context.WithCancel(parent)
 		projector := statussummary.NewProjector(statussummary.ProjectorConfig{
 			Store:              repo,
@@ -258,14 +258,15 @@ func TestDeleteSessionRetainsOtherProjectedAgentErrorAfterRestart(t *testing.T) 
 			ResolveWorkspace:   func(context.Context, string) (string, error) { return "ws1", nil },
 			CountQueuedPrompts: svc.messageQueue.CountPendingByTask,
 		})
-		t.Cleanup(func() {
+		stop := func() {
 			cancel()
 			projector.Close()
-		})
+		}
+		t.Cleanup(stop)
 		if err := projector.Start(ctx); err != nil {
 			t.Fatalf("start status summary projector: %v", err)
 		}
-		return cancel
+		return stop
 	}
 
 	publishActiveError := func(sessionID, stamp, occurredAt string) {
@@ -286,7 +287,7 @@ func TestDeleteSessionRetainsOtherProjectedAgentErrorAfterRestart(t *testing.T) 
 		}
 	}
 
-	cancelFirst := newProjector(ctx)
+	stopFirst := newProjector(ctx)
 	publishActiveError(retainedSessionID, "error-older", "2026-08-15T10:00:00Z")
 	publishActiveError(deletedSessionID, "error-newer", "2026-08-15T11:00:00Z")
 	beforeRestart, err := repo.LoadTaskStatusSummaries(ctx, []string{taskID})
@@ -296,7 +297,7 @@ func TestDeleteSessionRetainsOtherProjectedAgentErrorAfterRestart(t *testing.T) 
 	if summary := beforeRestart[taskID]; summary == nil || summary.ActiveError == nil || summary.ActiveError.SessionID != deletedSessionID {
 		t.Fatalf("summary before restart = %+v, want newer deleted-session error", summary)
 	}
-	cancelFirst()
+	stopFirst()
 
 	newProjector(ctx)
 	if err := svc.DeleteSession(ctx, deletedSessionID); err != nil {

@@ -135,6 +135,9 @@ remain during migration, but switchers use the summary when present.
   batch summary reads and may batch repairs; they do not perform an N+1 query.
 - Existing rows are repaired after startup recovery changes authoritative session state. Missing-row
   hydration is not the only recovery path for a stale summary.
+- Session deletion repair serializes the authoritative row removal, retained-error
+  selection, and inactive/active error publication by task. Concurrent deletions
+  therefore cannot restore an error for a session that has already been removed.
 - Live Git observations remain coalesced before persistence/publication.
   Running executions maintain the slow monitoring baseline independently of
   browser subscribers; active focus may request fast monitoring. Settled tasks
@@ -217,6 +220,10 @@ intermediate replacement.
 - If `status_summary` is temporarily absent during rollout, task rows use the
   existing coarse task fields and omit unavailable decorations; they do not
   subscribe to inactive sessions.
+- If recoverable-error handling cannot read a session because of a transient
+  database or metadata error, it logs the read failure and keeps the existing
+  recovery, state-reconciliation, and cleanup behavior. Only an authoritative
+  missing-session result suppresses those side effects.
 
 ## Scenarios
 
@@ -240,6 +247,9 @@ intermediate replacement.
   to the newer error, **WHEN** the projector restarts and the newer session is
   deleted, **THEN** the retained session's error becomes the task's
   `active_error` instead of leaving the summary empty.
+- **GIVEN** two sessions in one task have recoverable errors, **WHEN** both
+  sessions are deleted concurrently while retained-error repair is in flight,
+  **THEN** the final task summary contains no error for either deleted session.
 - **GIVEN** a session's agent requests permission and, before that request is
   answered, the same session emits an unrelated tool call/execute/read message
   that reaches its own terminal status, **WHEN** the projector processes that
