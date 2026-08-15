@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/gitcredentials"
 	githubpkg "github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -245,7 +246,8 @@ func (a *githubBrokerScopeAuthorizer) authorizeRepositoryIdentity(ctx context.Co
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
 	host, path, err := repositoryHTTPSIdentity(repository)
-	if err != nil || !strings.EqualFold(host, scope.Host) || path != scope.Path {
+	if err != nil || !strings.EqualFold(host, scope.Host) ||
+		githubauth.CanonicalCredentialPath(path) != githubauth.CanonicalCredentialPath(scope.Path) {
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
 	return nil
@@ -269,6 +271,11 @@ func repositoryHTTPSIdentity(repository *taskmodels.Repository) (string, string,
 
 func repositoryHTTPSCloneURL(repository *taskmodels.Repository) string {
 	remoteURL := strings.TrimSpace(repository.RemoteURL)
+	// An SSH origin names the same repository as its HTTPS form; the executor
+	// derives the lease scope from the rewritten URL, so this must match.
+	if converted := repoclone.CanonicalHTTPSCloneURL(remoteURL); converted != "" {
+		remoteURL = converted
+	}
 	if remoteURL != "" || !strings.EqualFold(repository.Provider, gitCredentialGitHubProviderID) ||
 		repository.ProviderOwner == "" || repository.ProviderName == "" {
 		return remoteURL

@@ -572,8 +572,20 @@ func managedGitCredentialProvider(repository *models.Repository, githubManaged b
 	return providerID
 }
 
-func gitCredentialCloneIdentity(repository *models.Repository, repositoryID string) (string, string, string, string, error) {
+// credentialIdentityCloneURL returns the HTTPS clone URL a managed credential
+// scope is derived from. A repository cloned over SSH stores an SSH remote URL;
+// that is a transport choice, not a different repository, so it is rewritten to
+// its HTTPS form instead of failing the launch.
+func credentialIdentityCloneURL(repository *models.Repository) string {
 	cloneURL := repositoryCloneURL(repository)
+	if converted := repoclone.CanonicalHTTPSCloneURL(cloneURL); converted != "" {
+		return converted
+	}
+	return cloneURL
+}
+
+func gitCredentialCloneIdentity(repository *models.Repository, repositoryID string) (string, string, string, string, error) {
+	cloneURL := credentialIdentityCloneURL(repository)
 	if cloneURL == "" {
 		return "", "", "", "", fmt.Errorf("repository %q has no HTTPS clone URL for managed credentials", repositoryID)
 	}

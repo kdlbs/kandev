@@ -86,6 +86,49 @@ func TestSanitize_RedactionsGolden(t *testing.T) {
 	}
 }
 
+// Kandev resource IDs are UUIDs, and the catch-all high-entropy rule masked
+// them — turning "repository <id> is misconfigured" into an error that could
+// only be diagnosed by querying the database.
+func TestSanitize_PreservesResourceIDsButNotSecrets(t *testing.T) {
+	cases := []struct {
+		name        string
+		in          string
+		mustHave    []string
+		mustNotHave []string
+	}{
+		{
+			name:     "repository id survives",
+			in:       `repository "16026b06-bd79-47c0-aed1-dc7ca95f63d9" must use an HTTPS clone URL`,
+			mustHave: []string{"16026b06-bd79-47c0-aed1-dc7ca95f63d9"},
+		},
+		{
+			name:        "opaque lease token is still masked",
+			in:          "lease Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG0 was revoked",
+			mustNotHave: []string{"Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG0"},
+		},
+		{
+			name:        "uuid-length non-uuid is still masked",
+			in:          "value 16026b06bd7947c0aed1dc7ca95f63d9aaaa tail",
+			mustNotHave: []string{"16026b06bd7947c0aed1dc7ca95f63d9aaaa"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := Sanitize(c.in)
+			for _, good := range c.mustHave {
+				if !strings.Contains(got, good) {
+					t.Fatalf("expected %q in output, got %q", good, got)
+				}
+			}
+			for _, bad := range c.mustNotHave {
+				if strings.Contains(got, bad) {
+					t.Fatalf("expected %q to be redacted, got %q", bad, got)
+				}
+			}
+		})
+	}
+}
+
 func TestSanitize_Idempotent(t *testing.T) {
 	inputs := []string{
 		"plain text",

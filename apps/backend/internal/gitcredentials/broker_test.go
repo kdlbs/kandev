@@ -155,7 +155,38 @@ func TestBrokerRejectsRepositoryPathCaseMismatch(t *testing.T) {
 	}
 }
 
-func TestBrokerRejectsRepositoryGitSuffixMismatch(t *testing.T) {
+// A scope path comes from a clone URL and keeps its ".git" suffix; the gh CLI
+// shim asks for the bare "/<owner>/<repo>". Both name the same repository, so
+// the suffix must not decide whether a lease redeems.
+func TestBrokerAcceptsRepositoryPathWithoutGitSuffix(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		scopePath  string
+		redeemPath string
+	}{
+		{name: "scope keeps suffix", scopePath: "/scm/ENG/widgets.git", redeemPath: "/scm/ENG/widgets"},
+		{name: "redemption keeps suffix", scopePath: "/scm/ENG/widgets", redeemPath: "/scm/ENG/widgets.git"},
+		{name: "trailing slash", scopePath: "/scm/ENG/widgets.git", redeemPath: "/scm/ENG/widgets/"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			provider := &rotatingProvider{binding: "generation-1", username: "user", secret: "secret"}
+			broker := NewBroker(provider, &recordingAuthorizer{})
+			scope := testScope()
+			scope.Path = testCase.scopePath
+			lease, err := broker.Issue(t.Context(), scope)
+			if err != nil {
+				t.Fatalf("Issue() error = %v", err)
+			}
+			request := testRedemption(lease.Token)
+			request.Path = testCase.redeemPath
+			if _, err := broker.Redeem(t.Context(), request); err != nil {
+				t.Fatalf("Redeem() error = %v, want success", err)
+			}
+		})
+	}
+}
+
+func TestBrokerRejectsRepositoryPathMismatch(t *testing.T) {
 	provider := &rotatingProvider{binding: "generation-1", username: "user", secret: "secret"}
 	broker := NewBroker(provider, &recordingAuthorizer{})
 	lease, err := broker.Issue(t.Context(), testScope())
@@ -163,7 +194,7 @@ func TestBrokerRejectsRepositoryGitSuffixMismatch(t *testing.T) {
 		t.Fatalf("Issue() error = %v", err)
 	}
 	request := testRedemption(lease.Token)
-	request.Path = "/scm/ENG/widgets"
+	request.Path = "/scm/ENG/widgets-staging"
 	if _, err := broker.Redeem(t.Context(), request); !errors.Is(err, ErrScopeDenied) {
 		t.Fatalf("Redeem() error = %v, want ErrScopeDenied", err)
 	}
