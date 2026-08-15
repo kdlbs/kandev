@@ -10,7 +10,10 @@ import { dwell } from "../../helpers/causal-waits";
 
 const SEARCH_TERM = "TaskWorkspaceNeedle";
 const EXTRA_REPOSITORY_NAME = "content-search-extra";
-const TARGET_LINE = 9;
+const TARGET_LINE = 180;
+const CACHED_PREVIEW_TARGET_LINE = 180;
+const CACHED_PREVIEW_MARKER = "CACHED_PREVIEW_CONTENT_MATCH";
+const PREVIEW_REPLACEMENT_MARKER = "PREVIEW_REPLACEMENT_FILE";
 
 function fileContent(marker: string, targetLine: number): string {
   const lines = Array.from(
@@ -221,20 +224,159 @@ test("@search searches all task repositories and opens the selected match", asyn
     .poll(
       () =>
         testPage.evaluate((marker) => {
+          type Model = {
+            getAllDecorations: () => Array<{ options: { className?: string } }>;
+            getValue: () => string;
+          };
           type Editor = {
-            getModel: () => { getValue: () => string } | null;
+            getModel: () => Model | null;
             getPosition: () => { lineNumber: number } | null;
+            getVisibleRanges: () => Array<{ startLineNumber: number; endLineNumber: number }>;
           };
           type MonacoWindow = Window & {
             monaco?: { editor: { getEditors: () => Editor[] } };
           };
-          const editors = (window as MonacoWindow).monaco?.editor.getEditors() ?? [];
-          return (
-            editors.find((editor) => editor.getModel()?.getValue().includes(marker))?.getPosition()
-              ?.lineNumber ?? null
+          const editor = ((window as MonacoWindow).monaco?.editor.getEditors() ?? []).find(
+            (candidate) => candidate.getModel()?.getValue().includes(marker),
           );
+          const line = editor?.getPosition()?.lineNumber ?? null;
+          return {
+            line,
+            visible:
+              line !== null &&
+              (editor?.getVisibleRanges() ?? []).some(
+                (range) => line >= range.startLineNumber && line <= range.endLineNumber,
+              ),
+            flash:
+              editor
+                ?.getModel()
+                ?.getAllDecorations()
+                .some(
+                  (decoration) => decoration.options.className === "editor-content-search-flash",
+                ) ?? false,
+          };
         }, "EXTRA_REPOSITORY_MATCH"),
       { timeout: 10_000 },
     )
-    .toBe(TARGET_LINE);
+    .toEqual({ line: TARGET_LINE, visible: true, flash: true });
+});
+
+test("@search reveals and flashes a cached preview content match selected with Enter", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const targetPath = `src/cached-content-target-${suffix}.ts`;
+  const replacementPath = `src/cached-content-replacement-${suffix}.ts`;
+  const gitEnv = makeGitEnv(backend.tmpDir);
+  const primaryGit = new GitHelper(path.join(backend.tmpDir, "repos", "e2e-repo"), gitEnv);
+  primaryGit.createFile(targetPath, fileContent(CACHED_PREVIEW_MARKER, CACHED_PREVIEW_TARGET_LINE));
+  primaryGit.createFile(replacementPath, `export const ${PREVIEW_REPLACEMENT_MARKER} = true;\n`);
+  primaryGit.stageAll();
+  primaryGit.commit("seed cached preview content search");
+
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    "Cached preview workspace content search",
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+    },
+  );
+
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  await session.waitForChatIdle({ timeout: 30_000 });
+
+  const openFileFromPalette = async (filePath: string, marker: string) => {
+    await testPage.keyboard.press(`${MODIFIER}+Shift+k`);
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    const input = dialog.getByRole("combobox");
+    const fileName = path.basename(filePath);
+    await input.fill(fileName);
+    await expect(dialog.locator("[cmdk-item]").filter({ hasText: fileName })).toHaveCount(1);
+    await testPage.keyboard.press("Enter");
+    await expect(dialog).not.toBeVisible();
+    await expect
+      .poll(() =>
+        testPage.evaluate((expectedMarker) => {
+          type Editor = { getModel: () => { getValue: () => string } | null };
+          type MonacoWindow = Window & {
+            monaco?: { editor: { getEditors: () => Editor[] } };
+          };
+          return ((window as MonacoWindow).monaco?.editor.getEditors() ?? []).some((editor) =>
+            editor.getModel()?.getValue().includes(expectedMarker),
+          );
+        }, marker),
+      )
+      .toBe(true);
+  };
+
+  // Warm the target model, then reuse the shared preview for another cached file.
+  await openFileFromPalette(targetPath, CACHED_PREVIEW_MARKER);
+  await openFileFromPalette(replacementPath, PREVIEW_REPLACEMENT_MARKER);
+
+  await testPage.keyboard.press(`${MODIFIER}+Shift+f`);
+  const dialog = testPage.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("combobox").fill(CACHED_PREVIEW_MARKER);
+  const targetResult = dialog.getByTestId("content-search-result").filter({ hasText: targetPath });
+  await expect(targetResult).toHaveCount(1);
+  await testPage.keyboard.press("Enter");
+  await expect(dialog).not.toBeVisible();
+
+  const revealState = () =>
+    testPage.evaluate((expectedMarker) => {
+      type Model = {
+        getAllDecorations: () => Array<{ options: { className?: string } }>;
+        getValue: () => string;
+      };
+      type Editor = {
+        getModel: () => Model | null;
+        getPosition: () => { lineNumber: number } | null;
+        getVisibleRanges: () => Array<{ startLineNumber: number; endLineNumber: number }>;
+      };
+      type MonacoWindow = Window & {
+        monaco?: { editor: { getEditors: () => Editor[] } };
+      };
+      const editor = ((window as MonacoWindow).monaco?.editor.getEditors() ?? []).find(
+        (candidate) => candidate.getModel()?.getValue().includes(expectedMarker),
+      );
+      const line = editor?.getPosition()?.lineNumber ?? null;
+      return {
+        line,
+        visible:
+          line !== null &&
+          (editor?.getVisibleRanges() ?? []).some(
+            (range) => line >= range.startLineNumber && line <= range.endLineNumber,
+          ),
+        flash:
+          editor
+            ?.getModel()
+            ?.getAllDecorations()
+            .some((decoration) => decoration.options.className === "editor-content-search-flash") ??
+          false,
+      };
+    }, CACHED_PREVIEW_MARKER);
+
+  await expect.poll(revealState).toEqual({
+    line: CACHED_PREVIEW_TARGET_LINE,
+    visible: true,
+    flash: true,
+  });
+  await expect.poll(revealState).toEqual({
+    line: CACHED_PREVIEW_TARGET_LINE,
+    visible: true,
+    flash: false,
+  });
 });
