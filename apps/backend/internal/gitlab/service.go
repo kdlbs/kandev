@@ -268,13 +268,22 @@ func (s *Service) SetStore(store *Store) {
 
 func (s *Service) subscribeTaskEvents() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.eventBus == nil || s.store == nil || len(s.taskEventSubs) > 0 {
+	busReady := s.eventBus != nil && s.store != nil && len(s.taskEventSubs) == 0
+	eventBus := s.eventBus
+	s.mu.Unlock()
+	if !busReady {
 		return
 	}
-	sub, err := s.eventBus.Subscribe(events.TaskDeleted, s.handleTaskDeleted)
+	sub, err := eventBus.Subscribe(events.TaskDeleted, s.handleTaskDeleted)
 	if err != nil {
 		s.logger.Error("failed to subscribe to task.deleted events", zap.Error(err))
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.taskEventSubs) > 0 {
+		// A concurrent call already subscribed while we were outside the lock.
+		_ = sub.Unsubscribe()
 		return
 	}
 	s.taskEventSubs = append(s.taskEventSubs, sub)
