@@ -1363,6 +1363,54 @@ func TestPublishPromptUsage_NonTerminalCompletionUsesReadyTurnSnapshot(t *testin
 		"non-terminal completion must carry the turn id the ready event just closed, not NULL")
 }
 
+// TestPublishPromptUsage_CompletionPayloadTurnIDOwnsTurn verifies that a
+// completion's durable turn identity wins over the currently active turn.
+// This is the ordering that occurs when a queued successor starts before the
+// completion frame crosses a NATS subject or instance boundary.
+func TestPublishPromptUsage_CompletionPayloadTurnIDOwnsTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+	svc := createTestService(repo, stepGetter, taskRepo)
+	svc.turnService = &repoTurnService{repo: repo}
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	completedTurn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+	svc.completeTurnForSession(ctx, "s1")
+	successorTurn, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:   agentEventComplete,
+			TurnID: completedTurn.ID,
+			Usage:  &streams.PromptUsage{InputTokens: 10, OutputTokens: 5},
+		},
+	})
+
+	usageEvent := findPromptUsageEvent(t, eb)
+	require.NotNil(t, usageEvent, "expected a session_prompt_usage.updated event to be published")
+	require.Equal(t, completedTurn.ID, usageEvent.TurnID,
+		"completion payload must retain its captured turn id")
+
+	active, err := svc.turnService.GetActiveTurn(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, successorTurn.ID, active.ID,
+		"a late completion must not close a successor turn")
+}
+
 // TestMarkReadyTurn_ZeroGenerationQueuesFIFO is the unit-level regression
 // test for R2-F3: markReadyTurn's old promptGeneration==0 early return
 // rested on the false premise that generation-less completions never

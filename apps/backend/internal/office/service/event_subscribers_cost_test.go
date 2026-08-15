@@ -159,6 +159,47 @@ func TestPromptUsage_CostSourceProviderReported(t *testing.T) {
 	}
 }
 
+func TestPromptUsage_ExplicitZeroProviderCostSkipsPricing(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	svc.SetPricingLookup(&fakePricingLookup{
+		hit:     true,
+		pricing: shared.ModelPricing{InputPerMillion: 999999, OutputPerMillion: 999999},
+	})
+
+	createTestAgent(t, svc, "ws-1", "worker-zero-provider")
+	insertTestTask(t, svc, "task-zero-provider", "ws-1")
+	setTestTaskAssignee(t, svc, "task-zero-provider", "worker-zero-provider")
+
+	event := bus.NewEvent(events.SessionPromptUsageUpdated, "test", map[string]interface{}{
+		"task_id":    "task-zero-provider",
+		"session_id": "session-zero-provider",
+		"agent_id":   "claude-acp",
+		"model":      "sonnet",
+		"usage": map[string]interface{}{
+			"input_tokens":                    100,
+			"output_tokens":                   200,
+			"provider_reported_cost_subcents": 0,
+			"provider_reported_cost_present":  true,
+		},
+	})
+	if err := eb.Publish(ctx, events.BuildSessionPromptUsageSubject("session-zero-provider"), event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	costs, err := svc.ListCostEvents(ctx, "ws-1")
+	if err != nil || len(costs) != 1 {
+		t.Fatalf("list costs: %v (len=%d)", err, len(costs))
+	}
+	row := costs[0]
+	if row.CostSubcents != 0 {
+		t.Fatalf("cost_subcents = %d, want 0", row.CostSubcents)
+	}
+	if row.CostSource == nil || *row.CostSource != models.CostSourceProviderReported {
+		t.Fatalf("CostSource = %v, want %q", row.CostSource, models.CostSourceProviderReported)
+	}
+}
+
 // TestPromptUsage_CostSourceModelsDevList confirms Layer B rows are tagged
 // models_dev_list with the four applied rates and the catalogue version
 // recorded — the whole point of the provenance field: today `estimated`

@@ -547,10 +547,14 @@ func (s *Service) StartCreatedSession(
 	if isOfficeTask {
 		mcpMode = executor.McpModeOffice
 	}
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments})
+	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
+	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
 	if err != nil {
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
+		if initialTurnCreated {
+			s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
+		}
 		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
 
@@ -1014,6 +1018,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if isOfficeTask {
 		mcpMode = executor.McpModeOffice
 	}
+	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
 
 	// Cache the raw prompt so a transient-provider-error (529) retry can
 	// re-drive this first turn — initial launches bypass PromptTask.
@@ -1023,6 +1028,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		AgentProfileID:       agentProfileID,
 		OfficeAgentProfileID: officeAgentProfileID,
 		ExecutorID:           executorID,
+		TurnID:               initialTurnID,
 		Prompt:               effectivePrompt,
 		WorkflowStepID:       workflowStepID,
 		StartAgent:           true,
@@ -1032,6 +1038,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		RouteOverride:        route,
 	})
 	if err != nil {
+		if initialTurnCreated {
+			s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
+		}
 		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
 
@@ -3358,6 +3367,16 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
 	// We still want to log and respond, but the prompt should continue regardless.
 	promptCtx := context.WithoutCancel(ctx)
+	if rollback.turnID != "" {
+		if setter, ok := s.agentManager.(executor.PromptTurnIDSetter); ok {
+			if err := setter.SetPromptTurnID(promptCtx, session.AgentExecutionID, rollback.turnID); err != nil {
+				s.logger.Warn("failed to bind prompt turn before dispatch",
+					zap.String("session_id", sessionID),
+					zap.String("turn_id", rollback.turnID),
+					zap.Error(err))
+			}
+		}
+	}
 	result, err := s.executor.PromptWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
 		func() {

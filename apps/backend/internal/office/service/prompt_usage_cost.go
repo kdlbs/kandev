@@ -41,7 +41,8 @@ type costResolution struct {
 // resolveCostForUsage applies the Layer A / Layer B lookup and records
 // which layer produced the dollar amount — CostSource, distinct from
 // Estimated (a token-synthesis flag, not cost provenance). Layer A wins
-// when the adapter forwarded a non-zero provider-reported cost
+// when the adapter forwarded a provider-reported cost sample, including an
+// explicit zero
 // (claude-acp's usage_update.cost.amount). Layer B (models.dev) is queried
 // when a PricingLookup is wired; on miss or when no PricingLookup is
 // configured the row is unpriced. Estimated is data.Usage.Estimated
@@ -50,7 +51,7 @@ type costResolution struct {
 // and cost_source=unpriced already carries the second one — see
 // costContractVersion's v1→v2 doc comment.
 func (s *Service) resolveCostForUsage(ctx context.Context, data PromptUsageData) costResolution {
-	if data.Usage.ProviderReportedCostSubcents > 0 {
+	if data.Usage.ProviderReportedCostPresent || data.Usage.ProviderReportedCostSubcents > 0 {
 		return costResolution{
 			costSubcents: data.Usage.ProviderReportedCostSubcents,
 			estimated:    data.Usage.Estimated,

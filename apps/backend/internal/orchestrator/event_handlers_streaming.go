@@ -1369,19 +1369,12 @@ func readyTurnZeroGenKey(sessionID, executionID string) string {
 //
 // This ordering is airtight on the default in-memory event bus, where
 // Publish delivers to a subject's subscriber synchronously before returning
-// (see internal/events/bus/memory.go), so markReadyTurn has always run by
-// the time the complete-stream frame is dispatched. It is best-effort, not
-// guaranteed, on a NATS-backed bus (opt-in via cfg.NATS.URL): AgentReady and
-// the agent.stream.* wildcard are different subjects — the former
-// queue-subscribed (one of possibly several orchestrator instances), the
-// latter broadcast to all — so core NATS pub/sub gives no cross-subject or
-// cross-instance ordering guarantee, and this in-memory map is itself
-// per-process. A miss under NATS is not a regression: it falls back to
-// exactly the live-lookup/terminal-marker resolution this mechanism
-// supplements, i.e. the same turn_id quality this PR would have without the
-// fast path. Closing that gap for real (persisted marks, or session-affine
-// routing so one instance owns both subjects for a session) is tracked
-// separately — see the PR #2606 review thread for the follow-up.
+// (see internal/events/bus/memory.go). It is best-effort, not guaranteed, on
+// a NATS-backed bus (opt-in via cfg.NATS.URL): AgentReady and the
+// agent.stream.* wildcard are different subjects, and this in-memory map is
+// per-process. The durable TurnID on the completion payload closes that
+// cross-subject/cross-instance gap; this mark remains a compatibility fallback
+// for older producers and completion paths without a captured ID.
 func (s *Service) markReadyTurn(sessionID, executionID string, promptGeneration uint64, turnID string) {
 	if sessionID == "" || executionID == "" || turnID == "" {
 		return
@@ -2039,57 +2032,72 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID)
 	}
 
-	// The generation-keyed (or generation-less FIFO) mark handleAgentReady
-	// recorded for THIS exact completion is always the first choice, on both
-	// the terminal and non-terminal paths: agent.ready is published before
-	// the complete-stream frame for the same completion, and on the default
-	// in-memory event bus that ordering is airtight — see markReadyTurn's
-	// doc comment for the NATS-deployment caveat, where a miss degrades to
-	// exactly the fallback below rather than to something worse. A miss also
-	// means this completion never went through handleAgentReady's ready path
-	// (e.g. an error/interrupt that completed the execution directly) — fall
-	// back to whichever snapshot the branch has: terminalMarker.turnID
-	// (captured by markTerminalExecution at agent.completed, valid here only
-	// because terminalCompleteStream is true — see markTerminalExecution)
-	// for terminal completions, or a live active-turn lookup for
-	// non-terminal ones.
-	promptUsageTurnID, ok := s.takeReadyTurnMark(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration)
-	if !ok {
-		if terminalCompleteStream {
-			promptUsageTurnID = terminalMarker.turnID
-		} else {
-			promptUsageTurnID = s.currentTurnIDForSession(ctx, payload.SessionID)
+	// The lifecycle completion payload carries the durable turn captured before
+	// AgentReady can admit a successor prompt. Older producers do not include
+	// it, so retain the generation-keyed (or generation-less FIFO) ready mark as
+	// a compatibility fallback. A miss also means this completion never went
+	// through handleAgentReady's ready path (e.g. an error/interrupt that
+	// completed the execution directly), so fall back to whichever snapshot the
+	// branch has: terminalMarker.turnID (captured by markTerminalExecution at
+	// agent.completed) for terminal completions, or a live active-turn lookup
+	// for non-terminal ones.
+	completionTurnID := payload.Data.TurnID
+	if completionTurnID == "" {
+		var ok bool
+		completionTurnID, ok = s.takeReadyTurnMark(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration)
+		if !ok {
+			if terminalCompleteStream {
+				completionTurnID = terminalMarker.turnID
+			} else {
+				completionTurnID = s.currentTurnIDForSession(ctx, payload.SessionID)
+			}
 		}
 	}
-	s.publishPromptUsage(ctx, payload, session, promptUsageTurnID)
+	s.publishPromptUsage(ctx, payload, session, completionTurnID)
 
 	if terminalCompleteStream {
-		s.saveAgentTextForTurn(ctx, payload, terminalMarker.turnID)
-		s.publishAgentPlanForTurn(ctx, payload, terminalMarker.turnID, false)
-		s.persistTurnPromptMetadataForTurn(ctx, payload, session, terminalMarker.turnID)
-		if terminalMarker.turnID != "" {
-			s.publishAgentTurnCompleteForTurn(ctx, payload, terminalMarker.turnID)
+		terminalTurnID := terminalMarker.turnID
+		if payload.Data.TurnID != "" {
+			terminalTurnID = payload.Data.TurnID
+		}
+		s.saveAgentTextForTurn(ctx, payload, terminalTurnID)
+		s.publishAgentPlanForTurn(ctx, payload, terminalTurnID, false)
+		s.persistTurnPromptMetadataForTurn(ctx, payload, session, terminalTurnID)
+		if terminalTurnID != "" {
+			s.publishAgentTurnCompleteForTurn(ctx, payload, terminalTurnID)
 		}
 		s.detachClarificationWaiters(ctx, payload.SessionID)
 		s.logger.Debug("complete stream from terminal execution flushed final data; skipping active turn and runtime reconciliation",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
 			zap.String("agent_execution_id", payload.ExecutionID),
-			zap.String("turn_id", terminalMarker.turnID))
+			zap.String("turn_id", terminalTurnID))
 		return
 	}
 
-	s.saveAgentTextIfPresent(ctx, payload)
-	s.publishAgentPlanIfPresent(ctx, payload)
-	s.persistTurnPromptMetadata(ctx, payload, session)
-	s.completeTurnForTaskSession(ctx, payload.TaskID, payload.SessionID)
+	if completionTurnID != "" {
+		s.saveAgentTextForTurn(ctx, payload, completionTurnID)
+		s.publishAgentPlanForTurn(ctx, payload, completionTurnID, false)
+		s.persistTurnPromptMetadataForTurn(ctx, payload, session, completionTurnID)
+		if err := s.completeTurnForTaskSessionCheckedOwned(ctx, payload.TaskID, payload.SessionID, completionTurnID); err != nil {
+			s.logger.Warn("failed to complete stream event's captured turn",
+				zap.String("session_id", payload.SessionID),
+				zap.String("turn_id", completionTurnID),
+				zap.Error(err))
+		}
+	} else {
+		s.saveAgentTextIfPresent(ctx, payload)
+		s.publishAgentPlanIfPresent(ctx, payload)
+		s.persistTurnPromptMetadata(ctx, payload, session)
+		s.completeTurnForTaskSession(ctx, payload.TaskID, payload.SessionID)
+	}
 
 	// Publish agent turn message event so the office comment bridge can
 	// auto-post the agent's response as a task comment. Published here
 	// (not in saveAgentTextIfPresent) because for streaming agents the
 	// text is drained by message_chunk events and Data.Text is empty at
 	// complete time.
-	s.publishAgentTurnComplete(ctx, payload)
+	s.publishAgentTurnCompleteForTurn(ctx, payload, completionTurnID)
 
 	// Detach any pending clarifications so WaitForResponse unblocks while the
 	// overlay stays interactive for a deferred answer via the event fallback path.
@@ -2503,6 +2511,7 @@ func promptUsageMetadata(usage *streams.PromptUsage) map[string]interface{} {
 		"thought_tokens":                  usage.ThoughtTokens,
 		"total_tokens":                    usage.TotalTokens,
 		"provider_reported_cost_subcents": usage.ProviderReportedCostSubcents,
+		"provider_reported_cost_present":  usage.ProviderReportedCostPresent,
 		"estimated":                       usage.Estimated,
 	}
 }

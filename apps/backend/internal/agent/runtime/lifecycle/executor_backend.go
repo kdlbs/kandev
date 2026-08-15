@@ -344,6 +344,7 @@ type ExecutorCreateRequest struct {
 	TaskEnvironmentID    string // Env this execution belongs to (shared across sessions in same task)
 	AgentProfileID       string
 	OfficeAgentProfileID string
+	PromptTurnID         string
 	WorkspacePath        string
 	WorkspaceSourceRoots []string
 	Protocol             string
@@ -446,6 +447,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		TaskEnvironmentID:    req.TaskEnvironmentID,
 		AgentProfileID:       req.AgentProfileID,
 		OfficeAgentProfileID: req.OfficeAgentProfileID,
+		promptTurnID:         req.PromptTurnID,
 		AgentID:              agentID,
 		ContainerID:          ri.ContainerID,
 		ContainerIP:          ri.ContainerIP,

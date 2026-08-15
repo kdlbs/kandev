@@ -129,6 +129,7 @@ type AgentStreamEventData struct {
 	ProviderError    *streams.ProviderError `json:"provider_error,omitempty"`
 	SessionStatus    string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
 	PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
+	TurnID           string                 `json:"turn_id,omitempty"`
 	Data             interface{}            `json:"data,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
@@ -663,13 +664,12 @@ func (p SessionTodosEventPayload) GetSessionID() string {
 // slug (claude-acp, codex-acp, ...). The office cost subscriber derives the
 // provider name from AgentType — AgentID is kept for legacy consumers.
 //
-// TurnID and UsageEventID are resolved/minted at the publish site
-// (orchestrator's publishPromptUsage), not by a downstream consumer:
-// TurnID because the turn is only reliably known there (active-turn state
-// plus the terminal-execution marker), and UsageEventID because minting it
-// once at the point of publish — rather than per-consumer — is what makes
-// it a stable idempotency key across event redelivery. Both are empty when
-// unavailable (e.g. no active turn), never a synthesized placeholder.
+// TurnID is captured on the lifecycle completion frame before AgentReady can
+// admit a successor prompt and is forwarded by the orchestrator. The
+// orchestrator mints UsageEventID once at publish time — rather than per
+// consumer — so it remains a stable idempotency key across event redelivery.
+// Both are empty when unavailable (e.g. no active turn), never a synthesized
+// placeholder.
 type SessionPromptUsageEventPayload struct {
 	TaskID       string               `json:"task_id"`
 	SessionID    string               `json:"session_id"`

@@ -130,9 +130,12 @@ type PromptUsageData struct {
 // UsageTokens mirrors streams.PromptUsage on the wire. All counts are int64
 // to match the stream type and to handle workspaces that accumulate over a
 // million tokens. ProviderReportedCostSubcents is forwarded from claude-acp's
-// usage_update.cost.amount (USD float * 10000); when > 0 the subscriber uses
-// it directly and skips the models.dev lookup. Estimated is true when the
-// adapter synthesised tokens (codex-acp cumulative-delta inference).
+// usage_update.cost.amount (USD float * 10000); when
+// ProviderReportedCostPresent is true (including an explicit zero), the
+// subscriber uses it directly and skips the models.dev lookup. The legacy
+// positive-value check remains in the resolver for older events. Estimated is
+// true when the adapter synthesised tokens (codex-acp cumulative-delta
+// inference).
 type UsageTokens struct {
 	InputTokens                  int64 `json:"input_tokens"`
 	OutputTokens                 int64 `json:"output_tokens"`
@@ -141,6 +144,7 @@ type UsageTokens struct {
 	ThoughtTokens                int64 `json:"thought_tokens,omitempty"`
 	TotalTokens                  int64 `json:"total_tokens,omitempty"`
 	ProviderReportedCostSubcents int64 `json:"provider_reported_cost_subcents,omitempty"`
+	ProviderReportedCostPresent  bool  `json:"provider_reported_cost_present,omitempty"`
 	Estimated                    bool  `json:"estimated,omitempty"`
 }
 
@@ -529,8 +533,9 @@ func (s *Service) tryPostStartFallback(
 //
 //  1. Provider-reported cost (Layer A) — claude-acp emits exact USD per
 //     turn on usage_update.cost.amount; the adapter forwards this as
-//     ProviderReportedCostSubcents. When > 0 the row is recorded
-//     verbatim and pricing lookup is skipped. This is the only accurate
+//     ProviderReportedCostSubcents plus a presence bit. When present (even
+//     when zero), the row is recorded verbatim and pricing lookup is skipped.
+//     This is the only accurate
 //     path for claude-acp, whose model identifiers are logical aliases
 //     (default / sonnet / haiku) with no real-name mapping.
 //  2. models.dev (Layer B) — when tokens are reported but no cost,
