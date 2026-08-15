@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ApiClient } from "./helpers/api-client";
 import { seedGitLabMRData, GITLAB_HOST, GITLAB_PROJECT } from "./helpers/gitlab";
+import { dwell } from "./helpers/causal-waits";
 
 const BASE_URL = process.env.KANDEV_BASE_URL || "http://localhost:18500";
 // Resolved from this file's own location so the script works in any checkout;
@@ -49,7 +50,11 @@ async function main() {
     const { agents } = await apiClient.listAgents();
     agentProfileId = agents[0]?.profiles[0]?.id;
     if (agentProfileId) break;
-    await new Promise((r) => setTimeout(r, 250));
+    await dwell(
+      250,
+      "poll-interval",
+      "polling listAgents() until the backend's initial agent setup completes",
+    );
   }
   if (!agentProfileId) throw new Error("no agent profile available after 30s");
 
