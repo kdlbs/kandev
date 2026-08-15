@@ -18,8 +18,13 @@
   aborted global setup demanding a rebuild over a coverage profile that changes nothing
   the binary contains. Now skips the three patterns the repo `.gitignore` already lists as
   Go output; none is `//go:embed`-ed and no tracked file under `apps/backend` matches one,
-  so the guard cannot miss a genuinely stale binary. Covered by a new unit case (8/8) and
-  confirmed on the real tree. (commit `f21a1a631`)
+  so the guard cannot miss a genuinely stale binary. Covered by three unit cases (10/10) and
+  confirmed on the real tree. Beyond showing the three patterns are ignored, two cases pin the
+  properties that keep the exclusion safe: a coverage run alongside a genuinely newer `.go`
+  still aborts and names the `.go` (the skip removes files from consideration rather than
+  short-circuiting the check), and the `$` anchors hold, so `notes.output` is still counted.
+  Both were confirmed to fail against a deliberately loosened pattern list. (commits
+  `f21a1a631`, `5bb4d38d7`)
 
 - `apps/web/e2e/global-setup.ts:41`, `apps/web/e2e/global-setup.test.ts:95` — both comments
   justified excluding `internal/webapp/embedded/generated/` with "it is written *after* the
