@@ -107,8 +107,12 @@ type AgentExecution struct {
 	IsPassthrough bool
 
 	// Passthrough mode info (CLI passthrough without ACP)
-	PassthroughProcessID string    // Process ID in the interactive runner (empty if not in passthrough mode)
-	PassthroughStartedAt time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
+	// passthroughLifecycleMu serializes process replacement paths. A workflow
+	// context reset and a delayed exit auto-restart must not both replace the
+	// same PTY, or the execution can point at the wrong process.
+	passthroughLifecycleMu sync.Mutex
+	PassthroughProcessID   string    // Process ID in the interactive runner (empty if not in passthrough mode)
+	PassthroughStartedAt   time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
 	// passthroughLaunchUsedResume is true if the current passthrough process was
 	// launched via ResumePassthroughSession with the resume flag attached. The
 	// fast-fail handler reads this to decide whether to retry once with a fresh
