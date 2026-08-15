@@ -700,6 +700,7 @@ func TestStoreMigrateTaskCIOptionsToPRScope_DoesNotReenableUserDisabled(t *testi
 	ctx := context.Background()
 	now := time.Now().UTC()
 
+	insertTestTask(t, store, "task-1")
 	seedLegacyTaskCIOptions(t, store, "task-1", true, false)
 	if err := store.CreateTaskPR(ctx, &TaskPR{
 		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,
@@ -737,6 +738,7 @@ func TestStoreMigrateTaskCIOptionsToPRScope_NewlyLinkedPRStartsAllOff(t *testing
 	ctx := context.Background()
 	now := time.Now().UTC()
 
+	insertTestTask(t, store, "task-1")
 	seedLegacyTaskCIOptions(t, store, "task-1", true, true)
 	if err := store.CreateTaskPR(ctx, &TaskPR{
 		TaskID: "task-1", RepositoryID: "repo-1", Owner: "o", Repo: "r", PRNumber: 1, CreatedAt: now,

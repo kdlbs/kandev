@@ -37,6 +37,9 @@ func TestTaskDeletedEventRemovesTaskMRsAndWatches(t *testing.T) {
 	if got, _ := store.ListTaskMRsByTask(ctx, "retained"); len(got) != 1 {
 		t.Fatalf("retained task MRs = %d, want 1", len(got))
 	}
+	if got, _ := store.GetMRWatchBySession(ctx, "session-deleted"); got != nil {
+		t.Fatal("deleted task watch survived")
+	}
 	if got, _ := store.GetMRWatchBySession(ctx, "session-retained"); got == nil {
 		t.Fatal("unrelated watch was removed")
 	}
@@ -100,6 +103,16 @@ func TestHandleTaskUpdated_ArchiveRetainsTaskMRs(t *testing.T) {
 	svc.SetStore(store)
 	t.Cleanup(svc.unsubscribeTaskEvents)
 
+	// GitLab only ever subscribes to events.TaskDeleted (see
+	// subscribeTaskEvents), so this assertion pins that set: the retention
+	// below is a no-op because nothing handles task.updated, not because a
+	// handler inspects the event and chooses to retain. If GitLab ever grows
+	// a task.updated subscriber, this count changes and the assumption below
+	// must be revisited alongside it.
+	if got := len(svc.taskEventSubs); got != 1 {
+		t.Fatalf("task event subscriptions = %d, want 1 (task.deleted only)", got)
+	}
+
 	archiveEvent := bus.NewEvent(events.TaskUpdated, "task-service", map[string]interface{}{
 		"task_id":     "t1",
 		"archived_at": "2026-04-19T12:00:00Z",
@@ -137,5 +150,20 @@ func TestSubscribeTaskEventsIsIdempotentRegardlessOfSetOrder(t *testing.T) {
 	svc.SetEventBus(eventBus)
 	if got := len(svc.taskEventSubs); got != 1 {
 		t.Fatalf("subscriptions after repeat Set calls = %d, want 1", got)
+	}
+
+	// Repeat with the opposite setter order: SetEventBus before SetStore.
+	svc2 := NewService(DefaultHost, NewMockClient(DefaultHost), "", nil, log)
+	svc2.SetEventBus(eventBus)
+	svc2.SetStore(store)
+	t.Cleanup(svc2.unsubscribeTaskEvents)
+	if got := len(svc2.taskEventSubs); got != 1 {
+		t.Fatalf("subscriptions after bus-then-store = %d, want 1", got)
+	}
+
+	svc2.SetEventBus(eventBus)
+	svc2.SetStore(store)
+	if got := len(svc2.taskEventSubs); got != 1 {
+		t.Fatalf("subscriptions after repeat Set calls (bus-then-store) = %d, want 1", got)
 	}
 }
