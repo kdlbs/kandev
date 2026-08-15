@@ -228,17 +228,20 @@ func (c *PATClient) FindPRByBranch(ctx context.Context, owner, repo, branch stri
 	return status.PR, nil
 }
 
-func (c *PATClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, branch string) (*PR, error) {
+func (c *PATClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, headRepo, branch string) (*PR, error) {
 	var raw []patPR
 	head := url.QueryEscape(headOwner + ":" + branch)
-	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&head=%s&per_page=1", owner, repo, head)
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&head=%s&per_page=100", owner, repo, head)
 	if err := c.get(ctx, endpoint, &raw); err != nil {
 		return nil, fmt.Errorf("find PR by head %q:%q: %w", headOwner, branch, err)
 	}
-	if len(raw) == 0 {
-		return nil, nil
+	for i := range raw {
+		pr := convertPatPR(&raw[i], owner, repo)
+		if sameRepositoryIdentity(pr.HeadRepoOwner, pr.HeadRepoName, headOwner, headRepo) {
+			return pr, nil
+		}
 	}
-	return convertPatPR(&raw[0], owner, repo), nil
+	return nil, nil
 }
 
 func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error) {

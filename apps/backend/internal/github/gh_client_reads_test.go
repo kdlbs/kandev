@@ -204,18 +204,48 @@ func TestGHClient_FindPRByHead_UsesExactSourceRepository(t *testing.T) {
 		}]`,
 	})
 
-	pr, err := NewGHClient().FindPRByHead(context.Background(), "kdlbs", "kandev", "alice", "feature")
+	pr, err := NewGHClient().FindPRByHead(context.Background(), "kdlbs", "kandev", "alice", "kandev", "feature")
 	if err != nil {
 		t.Fatalf("FindPRByHead: %v", err)
 	}
 	assertGHArgv(t, calls(t), 0, []string{
-		"pr", "list", "--repo", "kdlbs/kandev", "--head", "alice:feature", "--state", "open",
+		"pr", "list", "--repo", "kdlbs/kandev", "--head", "feature", "--state", "open",
 		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft," +
 			"mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,headRepository,headRepositoryOwner",
-		"--limit", "1",
+		"--limit", "100",
 	})
 	if pr == nil || pr.HeadRepoOwner != "alice" || pr.HeadRepoName != "kandev" {
 		t.Fatalf("PR = %#v, want source alice/kandev", pr)
+	}
+}
+
+func TestGHClient_FindPRByHead_ScansAllMatchingBranches(t *testing.T) {
+	calls := newFakeGH(t, ghResponse{
+		Prefix: "pr list",
+		Stdout: `[
+			{"number":11,"title":"other fork","url":"https://github.com/kdlbs/kandev/pull/11",
+			"state":"OPEN","headRefName":"feature","headRefOid":"other","baseRefName":"main",
+			"headRepository":{"name":"other-kandev","nameWithOwner":"alice/other-kandev"},
+			"headRepositoryOwner":{"login":"alice"}},
+			{"number":12,"title":"requested fork","url":"https://github.com/kdlbs/kandev/pull/12",
+			"state":"OPEN","headRefName":"feature","headRefOid":"requested","baseRefName":"main",
+			"headRepository":{"name":"kandev","nameWithOwner":"alice/kandev"},
+			"headRepositoryOwner":{"login":"alice"}}
+		]`,
+	})
+
+	pr, err := NewGHClient().FindPRByHead(context.Background(), "kdlbs", "kandev", "alice", "kandev", "feature")
+	if err != nil {
+		t.Fatalf("FindPRByHead: %v", err)
+	}
+	assertGHArgv(t, calls(t), 0, []string{
+		"pr", "list", "--repo", "kdlbs/kandev", "--head", "feature", "--state", "open",
+		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft," +
+			"mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,headRepository,headRepositoryOwner",
+		"--limit", "100",
+	})
+	if pr == nil || pr.Number != 12 || pr.HeadRepoOwner != "alice" {
+		t.Fatalf("PR = %#v, want the requested fork PR", pr)
 	}
 }
 

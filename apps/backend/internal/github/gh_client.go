@@ -287,20 +287,26 @@ func (c *GHClient) GetIssue(ctx context.Context, owner, repo string, number int)
 }
 
 func (c *GHClient) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
-	return c.findPRByHead(ctx, owner, repo, branch, branch)
+	return c.findPRByHead(ctx, owner, repo, branch, branch, "", "")
 }
 
-func (c *GHClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, branch string) (*PR, error) {
-	return c.findPRByHead(ctx, owner, repo, headOwner+":"+branch, branch)
+func (c *GHClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, headRepo, branch string) (*PR, error) {
+	return c.findPRByHead(ctx, owner, repo, branch, branch, headOwner, headRepo)
 }
 
-func (c *GHClient) findPRByHead(ctx context.Context, owner, repo, head, branchForError string) (*PR, error) {
+func (c *GHClient) findPRByHead(ctx context.Context, owner, repo, head, branchForError, headOwner, headRepo string) (*PR, error) {
+	limit := "1"
+	if headOwner != "" {
+		// --head accepts only a branch name. Fetch enough matches to select the
+		// requested fork after gh returns PRs from the whole fork network.
+		limit = "100"
+	}
 	out, err := c.run(ctx, "pr", "list",
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
 		"--head", head,
 		"--state", "open",
 		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,headRepository,headRepositoryOwner",
-		"--limit", "1")
+		"--limit", limit)
 	if err != nil {
 		return nil, fmt.Errorf("find PR by branch %q: %w", branchForError, err)
 	}
@@ -308,10 +314,14 @@ func (c *GHClient) findPRByHead(ctx context.Context, owner, repo, head, branchFo
 	if err := json.Unmarshal([]byte(out), &prs); err != nil {
 		return nil, fmt.Errorf("parse PR list: %w", err)
 	}
-	if len(prs) == 0 {
-		return nil, nil
+	for i := range prs {
+		pr := convertGHPR(&prs[i], owner, repo)
+		if (headOwner == "" && headRepo == "") ||
+			sameRepositoryIdentity(pr.HeadRepoOwner, pr.HeadRepoName, headOwner, headRepo) {
+			return pr, nil
+		}
 	}
-	return convertGHPR(&prs[0], owner, repo), nil
+	return nil, nil
 }
 
 func (c *GHClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error) {

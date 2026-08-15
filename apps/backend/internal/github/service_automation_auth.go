@@ -12,7 +12,7 @@ import (
 // is not unique across a fork network, so a parent-repository fallback must
 // preserve the source repository identity.
 type exactHeadPRFinder interface {
-	FindPRByHead(ctx context.Context, owner, repo, headOwner, branch string) (*PR, error)
+	FindPRByHead(ctx context.Context, owner, repo, headOwner, headRepo, branch string) (*PR, error)
 }
 
 type repositoryDetailsReader interface {
@@ -68,7 +68,7 @@ func findPRByBranchInForkNetwork(
 	if !ok {
 		return nil, nil
 	}
-	pr, err = finder.FindPRByHead(ctx, parentOwner, parentRepo, owner, branch)
+	pr, err = finder.FindPRByHead(ctx, parentOwner, parentRepo, owner, repo, branch)
 	if err != nil || pr == nil {
 		return pr, err
 	}

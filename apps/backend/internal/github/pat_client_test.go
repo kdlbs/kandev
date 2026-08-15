@@ -387,6 +387,9 @@ func TestPATClient_FindPRByHead_UsesExactSourceRepository(t *testing.T) {
 		if got := r.URL.Query().Get("head"); got != "alice:feature" {
 			t.Errorf("head = %q, want alice:feature", got)
 		}
+		if got := r.URL.Query().Get("per_page"); got != "100" {
+			t.Errorf("per_page = %q, want 100", got)
+		}
 		_, _ = w.Write([]byte(`[{"number":12,"title":"fork PR","html_url":"https://x/12","state":"open",
 			"head":{"ref":"feature","sha":"abc123","repo":{"id":200,"name":"kandev","full_name":"alice/kandev","owner":{"login":"alice"}}},
 			"base":{"ref":"main","repo":{"id":100,"name":"kandev","full_name":"kdlbs/kandev","owner":{"login":"kdlbs"}}},
@@ -395,7 +398,7 @@ func TestPATClient_FindPRByHead_UsesExactSourceRepository(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	pr, err := newPATClientPointingAt(t, srv.URL).FindPRByHead(
-		context.Background(), "kdlbs", "kandev", "alice", "feature",
+		context.Background(), "kdlbs", "kandev", "alice", "kandev", "feature",
 	)
 	if err != nil {
 		t.Fatalf("FindPRByHead: %v", err)
