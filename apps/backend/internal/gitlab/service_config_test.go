@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -623,5 +624,62 @@ func assertWorkingWorkspaceConfig(t *testing.T, store *Store, secrets *configTes
 	}
 	if gotToken := secrets.values[SecretKeyForWorkspace(workspaceID)]; gotToken != wantToken {
 		t.Fatalf("preserved secret = %q, want %q", gotToken, wantToken)
+	}
+}
+
+func TestTrustedEnvironmentTokenHostPrecedence(t *testing.T) {
+	tests := []struct {
+		name        string
+		kandevHost  string
+		gitlabHost  string
+		startupHost string
+		want        string
+	}{
+		{name: "kandev host wins over gitlab host and startup host", kandevHost: "https://gitlab.kandev.example", gitlabHost: "https://gitlab.legacy.example", startupHost: "https://gitlab.startup.example", want: "https://gitlab.kandev.example"},
+		{name: "gitlab host wins over startup host when kandev host unset", gitlabHost: "https://gitlab.legacy.example", startupHost: "https://gitlab.startup.example", want: "https://gitlab.legacy.example"},
+		{name: "startup host used when neither env var is set", startupHost: "https://gitlab.startup.example", want: "https://gitlab.startup.example"},
+		{name: "unparseable kandev host yields empty trusted host", kandevHost: "ftp://gitlab.kandev.example", startupHost: "https://gitlab.startup.example", want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(envKandevGitLabHost, test.kandevHost)
+			t.Setenv(envGitLabHost, test.gitlabHost)
+			if got := trustedEnvironmentTokenHost(test.startupHost); got != test.want {
+				t.Fatalf("trustedEnvironmentTokenHost(%q) = %q, want %q", test.startupHost, got, test.want)
+			}
+		})
+	}
+}
+
+// TestEnvironmentTokenTrustsSelfHostedOriginOverStartupHost covers the
+// self-hosted deployment path: KANDEV_GITLAB_HOST names the trusted origin,
+// which may differ from the startup host NewService was constructed with.
+// This is the behaviour the ambient ci-machine env was accidentally
+// exercising, and the mirror image of
+// TestEnvironmentTokenRejectsUntrustedWorkspaceHostBeforeClientConstruction.
+func TestEnvironmentTokenTrustsSelfHostedOriginOverStartupHost(t *testing.T) {
+	t.Setenv(envKandevGitLabHost, "https://gitlab.selfhosted.example")
+	t.Setenv(secretNameToken, "glpat-selfhosted-secret")
+	store := newTestStore(t)
+	seedWorkspace(t, store, "workspace-a")
+	service := NewService("https://gitlab.startup.example", NewNoopClient(DefaultHost), AuthMethodNone, nil, newTestLogger(t))
+	service.SetStore(store)
+	service.SetWorkspaceSecretStore(&configTestSecrets{values: make(map[string]string)})
+	service.workspaceClientFn = func(_ context.Context, cfg *GitLabConfig, token string) (Client, error) {
+		return NewMockClient(cfg.Host), nil
+	}
+
+	accepted := service.TestConfigForWorkspace(t.Context(), "workspace-a", &SetConfigRequest{
+		Host: "https://gitlab.selfhosted.example", AuthMethod: AuthMethodEnvironment,
+	})
+	if !accepted.OK {
+		t.Fatalf("self-hosted origin rejected: %#v", accepted)
+	}
+
+	rejected := service.TestConfigForWorkspace(t.Context(), "workspace-a", &SetConfigRequest{
+		Host: "https://gitlab.startup.example", AuthMethod: AuthMethodEnvironment,
+	})
+	if rejected.OK || !strings.Contains(rejected.Error, "environment credential host") {
+		t.Fatalf("startup host unexpectedly accepted: %#v", rejected)
 	}
 }

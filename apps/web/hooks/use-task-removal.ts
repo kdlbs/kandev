@@ -69,25 +69,25 @@ async function loadTaskSessionsForTaskFromStore(
   }
 }
 
-function removeTaskFromSnapshots(store: StoreApi<AppState>, taskId: string): void {
+function removeTasksFromSnapshots(store: StoreApi<AppState>, taskIds: ReadonlySet<string>): void {
   const currentSnapshots = store.getState().kanbanMulti.snapshots;
   for (const [wfId, snapshot] of Object.entries(currentSnapshots)) {
-    const hadTask = snapshot.tasks.some((t: KanbanState["tasks"][number]) => t.id === taskId);
+    const hadTask = snapshot.tasks.some((t: KanbanState["tasks"][number]) => taskIds.has(t.id));
     if (hadTask) {
       store.getState().setWorkflowSnapshot(wfId, {
         ...snapshot,
-        tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
+        tasks: snapshot.tasks.filter((t: KanbanState["tasks"][number]) => !taskIds.has(t.id)),
       });
     }
   }
 
   const currentKanbanTasks = store.getState().kanban.tasks;
-  if (currentKanbanTasks.some((t: KanbanState["tasks"][number]) => t.id === taskId)) {
+  if (currentKanbanTasks.some((t: KanbanState["tasks"][number]) => taskIds.has(t.id))) {
     store.setState((state) => ({
       ...state,
       kanban: {
         ...state.kanban,
-        tasks: state.kanban.tasks.filter((t: KanbanState["tasks"][number]) => t.id !== taskId),
+        tasks: state.kanban.tasks.filter((t: KanbanState["tasks"][number]) => !taskIds.has(t.id)),
       },
     }));
   }
@@ -310,10 +310,16 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
    */
   const removeTaskFromBoard = useCallback(
     async (taskId: string, opts?: RemoveFromBoardOptions): Promise<RemoveFromBoardResult> => {
-      if (!opts?.switchOnly) removeTaskFromSnapshots(store, taskId);
       const excludedTaskIds = opts?.excludeTaskTree
         ? (opts.excludedTaskIds ?? collectTaskTreeIdsFromStore(store, taskId))
         : undefined;
+      if (!opts?.switchOnly) {
+        // A cascade archive publishes one task.updated event per descendant,
+        // but those events can arrive after the archive request resolves. The
+        // cached tree is already known to be removed at this point, so prune
+        // it optimistically and let WS updates reconcile any other clients.
+        removeTasksFromSnapshots(store, excludedTaskIds ?? new Set([taskId]));
+      }
       const allRemainingTasks = collectRemainingTasks(store);
 
       if (!shouldSwitchAfterRemoval(store, taskId, opts)) {

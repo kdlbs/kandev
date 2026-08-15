@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -39,6 +40,26 @@ type fakeRuntimeUpdater struct {
 	invalidatePkg   string
 	refreshCalls    int
 	resolvedPackage string
+}
+
+type sequencedVersionUpdater struct {
+	fakeRuntimeUpdater
+	metadata     RuntimeVersionMetadata
+	metadataErr  error
+	metadataCall int
+}
+
+func (u *sequencedVersionUpdater) ResolveVersions(
+	_ context.Context,
+	_ string,
+) (RuntimeVersionMetadata, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.metadataCall++
+	if u.metadataCall > 1 && u.metadataErr != nil {
+		return RuntimeVersionMetadata{}, u.metadataErr
+	}
+	return u.metadata, nil
 }
 
 type recordingCommandExecutor struct {
@@ -74,6 +95,25 @@ func TestHostRuntimeUpdaterResolvesTargetWithDirectNPMArgv(t *testing.T) {
 		t.Fatalf("target = %q, want 1.2.3", target)
 	}
 	want := []string{"npm", "view", "@example/managed-acp", "dist-tags.latest", "--json"}
+	if got := strings.Join(executor.outputCommand, "\x00"); got != strings.Join(want, "\x00") {
+		t.Fatalf("command = %v, want %v", executor.outputCommand, want)
+	}
+}
+
+func TestHostRuntimeUpdaterResolvesStableVersionCatalogue(t *testing.T) {
+	executor := &recordingCommandExecutor{
+		output: `{"versions":["1.0.1","1.0.2-beta.1","1.0.2"],"dist-tags":{"latest":"1.0.2"}}`,
+	}
+	updater := &hostRuntimeUpdater{executor: executor}
+
+	metadata, err := updater.ResolveVersions(context.Background(), "@example/managed-acp")
+	if err != nil {
+		t.Fatalf("ResolveVersions: %v", err)
+	}
+	if metadata.Latest != "1.0.2" || len(metadata.Versions) != 3 {
+		t.Fatalf("metadata = %#v", metadata)
+	}
+	want := []string{"npm", "view", "@example/managed-acp", "versions", "dist-tags", "--json"}
 	if got := strings.Join(executor.outputCommand, "\x00"); got != strings.Join(want, "\x00") {
 		t.Fatalf("command = %v, want %v", executor.outputCommand, want)
 	}
@@ -225,7 +265,7 @@ func waitForUpdateStatus(
 			return &snapshot
 		}
 	}
-	t.Fatalf("job %s finished with status %s, want %v", jobID, snapshot.Status, statuses)
+	t.Fatalf("job %s finished with status %s, error %q, operation %q, want %v", jobID, snapshot.Status, snapshot.Error, snapshot.Operation, statuses)
 	return nil
 }
 
@@ -313,6 +353,124 @@ func TestAgentUpdatePreviewRejectsUnsupportedAndResolutionFailure(t *testing.T) 
 				t.Fatalf("failed preview mutated runtime: update=%d refresh=%d", test.updater.runCalls, test.updater.refreshCalls)
 			}
 		})
+	}
+}
+
+func TestAgentUpdatePreviewSurfacesSelectionStoreFailure(t *testing.T) {
+	updater := &fakeRuntimeUpdater{target: "1.1.0"}
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.err = errors.New("selection store locked")
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      managedRuntimeSpec(),
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetRuntimeUpdater(updater)
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+
+	_, err := ctrl.PreviewAgentUpdate(context.Background(), ag.ID())
+	if !errors.Is(err, ErrRuntimeUpdatePreviewFailed) {
+		t.Fatalf("PreviewAgentUpdate error = %v, want %v", err, ErrRuntimeUpdatePreviewFailed)
+	}
+	if !strings.Contains(err.Error(), "selection store locked") {
+		t.Fatalf("PreviewAgentUpdate error = %v, want selection error", err)
+	}
+}
+
+func TestEnqueueAgentUpdateReusesActiveJobBeforeMetadataResolution(t *testing.T) {
+	metadataErr := errors.New("registry unavailable")
+	updater := &sequencedVersionUpdater{
+		fakeRuntimeUpdater: fakeRuntimeUpdater{
+			current:      hostutility.AgentCapabilities{AgentVersion: "1.0.0"},
+			currentFound: true,
+			refreshCaps:  hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.1.0"},
+			runStarted:   make(chan struct{}),
+			releaseRun:   make(chan struct{}),
+		},
+		metadata:    RuntimeVersionMetadata{Versions: []string{"1.0.0", "1.1.0"}, Latest: "1.1.0"},
+		metadataErr: metadataErr,
+	}
+	hub := newUpdateTerminalBroadcaster()
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      managedRuntimeSpec(),
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetRuntimeUpdater(updater)
+	ctrl.updateJobStore = NewAgentUpdateJobStore(
+		hub,
+		zap.NewNop(),
+		updater,
+		newMaintenanceCoordinator(),
+		nil,
+	)
+
+	first, err := ctrl.EnqueueAgentUpdate(context.Background(), ag.ID(), "1.1.0")
+	if err != nil {
+		t.Fatalf("first EnqueueAgentUpdate: %v", err)
+	}
+	select {
+	case <-updater.runStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first update did not reach the running phase")
+	}
+
+	second, err := ctrl.EnqueueAgentUpdate(context.Background(), ag.ID(), "1.1.0")
+	if err != nil {
+		t.Fatalf("second EnqueueAgentUpdate: %v", err)
+	}
+	if second.JobID != first.JobID {
+		t.Fatalf("job IDs differ: %s != %s", second.JobID, first.JobID)
+	}
+	updater.mu.Lock()
+	metadataCalls := updater.metadataCall
+	updater.mu.Unlock()
+	if metadataCalls != 1 {
+		t.Fatalf("metadata calls = %d, want one initial validation", metadataCalls)
+	}
+
+	close(updater.releaseRun)
+	waitForUpdateStatus(t, hub.completed, first.JobID, dto.AgentUpdateJobStatusSucceeded)
+}
+
+func TestEnqueueAgentUpdateDoesNotCreateJobForAlreadyActiveHealthyTarget(t *testing.T) {
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values["managed-acp\x00@example/managed-acp"] = managedruntime.Selection{
+		Package: "@example/managed-acp",
+		Version: "1.1.0",
+	}
+	updater := &recoveryRuntimeUpdater{
+		metadata: RuntimeVersionMetadata{Versions: []string{"1.1.0"}, Latest: "1.1.0"},
+		current: hostutility.AgentCapabilities{
+			Status:       hostutility.StatusOK,
+			AgentVersion: "1.1.0",
+		},
+		currentFound: true,
+	}
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      managedRuntimeSpec(),
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+	ctrl.SetJobBroadcaster(newUpdateTerminalBroadcaster())
+	ctrl.SetRuntimeUpdater(updater)
+
+	result, err := ctrl.EnqueueAgentUpdate(context.Background(), ag.ID(), "1.1.0")
+	if err != nil {
+		t.Fatalf("EnqueueAgentUpdate: %v", err)
+	}
+	if result.JobID != "" {
+		t.Fatalf("no-op response job ID = %q, want no persisted job", result.JobID)
+	}
+	if result.Operation != string(managedruntime.OperationUpToDate) {
+		t.Fatalf("no-op operation = %q, want up_to_date", result.Operation)
+	}
+	if jobs := ctrl.ListAgentUpdateJobs(); len(jobs) != 0 {
+		t.Fatalf("retained jobs = %d, want none", len(jobs))
+	}
+	if updater.runCalls != 0 || len(updater.probe) != 0 {
+		t.Fatalf("no-op mutated updater: runs=%d probes=%d", updater.runCalls, len(updater.probe))
 	}
 }
 

@@ -13,6 +13,8 @@ export interface OpenPluginModal {
   instanceId: string;
   pluginId: string;
   options: PluginModalOptions;
+  /** Host-only geometry. Plugins cannot select native workflow layouts through openModal. */
+  layout?: "task-link";
 }
 
 let nextInstanceId = 0;
@@ -33,8 +35,21 @@ class PluginModalManager {
 
   /** Opens a modal owned by `pluginId`; returns a handle to close it. */
   openModal(pluginId: string, options: PluginModalOptions): PluginModalHandle {
+    return this.open(pluginId, options);
+  }
+
+  /** Opens the fixed-width native task-link surface used by host workflow APIs. */
+  openTaskLinkDialog(pluginId: string, options: PluginModalOptions): PluginModalHandle {
+    return this.open(pluginId, options, "task-link");
+  }
+
+  private open(
+    pluginId: string,
+    options: PluginModalOptions,
+    layout?: OpenPluginModal["layout"],
+  ): PluginModalHandle {
     const instanceId = `plugin-modal-${(nextInstanceId += 1)}`;
-    this.modals = [...this.modals, { instanceId, pluginId, options }];
+    this.modals = [...this.modals, { instanceId, pluginId, options, layout }];
     this.notify();
     return { close: () => this.close(instanceId) };
   }

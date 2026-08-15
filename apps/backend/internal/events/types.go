@@ -10,6 +10,13 @@ const (
 	TaskMoved                      = "task.moved" // Manual step change via MoveTask
 	TaskQueuePromoted              = "task.queue_promoted"
 	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
+	// TaskDependenciesResolved fires when a task's last unresolved dependency
+	// completes successfully. Payload: {task_id, resolved_by_task_id}.
+	TaskDependenciesResolved = "task.dependencies_resolved"
+	// TaskDependencyFailed fires when a blocked task's chain halts because a
+	// predecessor failed or was cancelled. Payload:
+	// {task_id, failed_task_id, failed_state}.
+	TaskDependencyFailed = "task.dependency_failed"
 )
 
 // Event types for office task tree controls.

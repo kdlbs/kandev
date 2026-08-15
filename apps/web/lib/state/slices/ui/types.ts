@@ -64,7 +64,7 @@ export type MobileSessionPanel = MobileSessionCorePanel | MobileSessionPluginPan
 
 export type MobileSessionState = {
   activePanelBySessionId: Record<string, MobileSessionPanel>;
-  reviewMRKeyBySessionId: Record<string, string>;
+  reviewItemIdBySessionId: Record<string, string>;
   isTaskSwitcherOpen: boolean;
 };
 
@@ -293,7 +293,7 @@ export type UISliceActions = {
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileKanbanFocusedWorkflow: (workflowId: string | null) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
-  setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
+  setMobileSessionReview: (sessionId: string, reviewItemId: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setCancelTurnPending: (sessionId: string, pending: boolean) => void;

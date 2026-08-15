@@ -954,8 +954,8 @@ func (m *mockRepository) GetGitSnapshotsBySession(ctx context.Context, sessionID
 }
 
 // Session Commit operations
-func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error {
-	return nil
+func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error) {
+	return true, nil
 }
 func (m *mockRepository) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
 	return nil, nil
@@ -994,7 +994,7 @@ func (m *mockRepository) ListRepositoryScripts(ctx context.Context, repositoryID
 func (m *mockRepository) ListScriptsByRepositoryIDs(_ context.Context, _ []string) (map[string][]*models.RepositoryScript, error) {
 	return make(map[string][]*models.RepositoryScript), nil
 }
-func (m *mockRepository) GetRepositoryByProviderInfo(_ context.Context, _, _, _, _, _ string) (*models.Repository, error) {
+func (m *mockRepository) GetRepositoryByProviderIdentity(_ context.Context, _ models.ProviderRepositoryIdentity) (*models.Repository, error) {
 	return nil, nil
 }
 func (m *mockRepository) GetRepositoryByLocalPath(_ context.Context, _, _ string) (*models.Repository, error) {

@@ -8,91 +8,174 @@ owner: kandev
 
 ## Why
 
-Agents can create tasks and subtasks through `create_task_kandev`. When the tool call omits `agent_profile_id`, inheriting the calling task's profile can unintentionally select an expensive model instead of the workspace's configured default. Users need a durable choice between preserving that inheritance behavior and using the target workspace's default profile.
+Agents create tasks and subtasks through `create_task_kandev`. Most coding
+harnesses start delegated work with the configuration of the agent session that
+created it. Kandev instead uses the profile that originally started the source
+task, which is opaque when a task has multiple sessions or a session changes its
+model.
+
+Users need a predictable default that follows the creating session. They also
+need an explicit workspace-default policy for cost control.
 
 ## What
 
-- Task Actions settings exposes a per-user **MCP-created task agent profile** choice with two values:
-  - **Current task profile** (`current_task`): preserve the existing profile-resolution behavior.
-  - **Workspace default profile** (`workspace_default`): skip the current task profile, honor any workflow profile, then use the default agent profile of the workspace that owns the new task.
-- `current_task` is the default for new users and for existing settings that do not contain the preference. Selecting `workspace_default` is opt-in.
-- The preference applies only to tasks and subtasks created by `create_task_kandev` when `agent_profile_id` is omitted.
-- An explicit `agent_profile_id` wins over the preference and does not require the preference to be read. The one exception is a task that sits on a workflow step at launch: the orchestrator applies that step's launch profile (the step's pinned profile, or the workflow default when the step has none) over any caller-provided profile, so `create_task_kandev` reports and stores that workflow-derived profile to match what actually runs. A `create_task_kandev` task lands on a step whenever its workflow has steps — the explicit `workflow_step_id`, or the start step assigned when the step is omitted. Off a workflow step (no workflow, or a workflow with no steps), an explicit `agent_profile_id` always wins.
-- The setting explains in visible, plain language that Kandev makes this decision when an agent calls a task-creating Kandev MCP tool without `agent_profile_id`. It identifies `create_task_kandev` as the only affected tool, covers both new tasks and subtasks, names `spawn_session_kandev` as unaffected, and states that an explicitly chosen profile wins. A secondary help tooltip explains why adding a session does not create a new profile-resolution decision. Each option describes both its resolution behavior and when to choose it, including the risk that current-task inheritance can reuse a more expensive profile.
-- In `current_task` mode, the existing fallback order remains unchanged: parent task or calling source task, workflow step or workflow default, then target workspace default.
-- In `workspace_default` mode, parent/source task inheritance is skipped. The profile resolves from the workflow step or workflow default first, then from the target workspace default. This preserves workflow policy while avoiding inheritance from the calling task.
-- Executor and executor-profile inheritance are unchanged in both modes.
-- The selected profile is persisted in the created task's launch metadata even when `start_agent=false`, matching the existing deferred-start contract.
-- The setting is portable per-user state. It applies across workspaces, while `workspace_default` dynamically resolves against each new task's target workspace.
-- The setting is usable at narrow mobile widths without horizontal page scrolling, clipped labels, or hover-only interaction.
+- Task Actions settings exposes a per-user **MCP-created task agent profile**
+  choice with two stored values:
+  - **Creating session profile** (`current_task`) uses the verified session that
+    called `create_task_kandev`. It copies that session's agent profile and its
+    effective model, mode, and dynamic options.
+  - **Workspace default profile** (`workspace_default`) skips the creating
+    session and task profiles. It uses the workflow profile, then the target
+    workspace default.
+- `current_task` remains the stored default for new users and existing settings.
+  The label changes because the creating session, not the task's original
+  profile, owns the default.
+- The preference applies to top-level tasks and subtasks created by
+  `create_task_kandev` when `agent_profile_id` is omitted.
+- The session-bound MCP server supplies `source_task_id` and `source_session_id`.
+  These fields are server-owned context and are not tool arguments.
+- The backend uses `source_session_id` only when the session exists and belongs
+  to `source_task_id`. A live agent cannot select another session as the source.
+- The creating session's effective configuration is its profile snapshot plus
+  the latest provider runtime state and explicit runtime overrides. Later values
+  override earlier values.
+- Kandev stores the copied effective configuration as the initial session's
+  runtime overrides. The copied values therefore beat later edits to the shared
+  agent profile.
+- The copied runtime configuration applies only when the creating session's
+  profile wins profile resolution. Kandev does not mix the values into an
+  explicit profile, a workflow-selected profile, or the workspace-default
+  profile.
+- An explicit `agent_profile_id` wins when the task does not land on a workflow
+  step. It also prevents a user-settings read and prevents creator runtime
+  inheritance.
+- A task that lands on a workflow step uses that step's launch profile. This is
+  the step's pinned profile, or the workflow default when the step has no pinned
+  profile. This workflow profile wins over an explicit or inherited profile.
+- In `current_task` mode, a call without verified session context keeps the
+  compatibility fallback: parent or source task, workflow default, then target
+  workspace default. This supports external MCP calls and deferred tasks that
+  have no session.
+- In `workspace_default` mode, parent and source task profiles remain skipped.
+  The workflow profile wins before the target workspace default.
+- Executor and executor-profile inheritance do not change. Subtasks continue to
+  inherit executor configuration from the parent. Top-level tasks continue to
+  inherit it from the source task.
+- The resolved profile and initial runtime configuration persist when
+  `start_agent=false`. The first session uses both values when a user starts the
+  task later.
+- The setting explains that `create_task_kandev` is the only affected tool. It
+  states that `spawn_session_kandev` and UI-created tasks are not affected.
+- The setting remains usable at narrow mobile widths without clipped text,
+  hover-only information, or horizontal page scrolling.
 
 ## Data model
 
-The existing JSON settings object in `users.settings` gains:
+The existing JSON settings object in `users.settings` retains:
 
 ```text
 mcp_task_agent_profile_default  string  enum: current_task | workspace_default
 ```
 
-The value is non-null in the normalized user-settings model. Missing or unrecognized stored values normalize to `current_task` for backward and forward compatibility. PATCH requests accept only the two documented values.
+No user-settings migration is required. The `current_task` value now means the
+verified creating session when one exists.
 
-No relational schema migration is required because user settings are stored as JSON.
+Task launch metadata gains a typed initial-session runtime configuration. It
+contains the effective `model`, `mode`, and `config_options`. It contains no
+credentials, prompts, or provider capability catalog.
+
+The task session copies this launch configuration into its existing
+`runtime_config_overrides` metadata when Kandev creates the initial session.
+Later sessions do not copy the initial-session value.
 
 ## API surface
 
-The existing user-settings contracts gain `mcp_task_agent_profile_default`:
-
-- `GET /api/v1/user/settings` returns `settings.mcp_task_agent_profile_default` as `current_task` or `workspace_default`.
-- `PATCH /api/v1/user/settings` accepts an optional `mcp_task_agent_profile_default`. Omission leaves the value unchanged; an unsupported value returns the existing validation response and does not update settings.
-- `user.settings.updated` includes `mcp_task_agent_profile_default` so open clients converge on the saved value.
-- The Go-served SPA boot settings include `userSettings.mcpTaskAgentProfileDefault` with the same normalized enum value.
-
-The `create_task_kandev` input and response schemas do not change. The preference changes server-side resolution only when its existing optional `agent_profile_id` input is empty. Its MCP tool description explains the two server-side default modes and states that workflow step/default profiles retain precedence over the workspace default.
+- The `create_task_kandev` public input and output schemas do not change.
+- The session-bound MCP transport adds internal `source_session_id` context to
+  the backend request. External MCP mode sends no session ID.
+- `GET /api/v1/user/settings`, `PATCH /api/v1/user/settings`, the
+  `user.settings.updated` event, and the SPA boot payload retain the existing
+  `current_task | workspace_default` values.
+- The MCP tool description explains creating-session inheritance, effective
+  runtime configuration, override precedence, and the external fallback.
 
 ## Permissions
 
-- A user who can read or update their existing user settings can read or update this preference.
-- The preference does not grant task-creation or agent-profile permissions. Existing `create_task_kandev`, workspace, workflow, and profile authorization rules remain in force.
+- Existing user-settings and task-creation permissions remain in force.
+- The backend derives creator identity from the MCP server bound to the live
+  session. The tool caller cannot supply or override that identity.
+- Session lookup uses the existing task-session access rules.
 
 ## Failure modes
 
-- If `workspace_default` is selected and neither the task's workflow nor the target workspace supplies an agent profile, `create_task_kandev` returns a validation error and creates no task, regardless of `start_agent`.
-- If a workspace lookup required by the selected resolution chain fails, task creation fails and creates no partial task.
-- If user settings cannot be read for an omitted-profile request, task creation fails and creates no partial task; the server does not silently choose another policy.
-- An explicit `agent_profile_id` continues through existing validation and resolution even if reading the preference would fail.
-- Changing the choice creates a local settings draft. The preference is persisted only when the user chooses **Save changes**; a failed save keeps the draft selected and leaves the stored preference unchanged.
+- If a request contains server-supplied creator context that does not resolve to
+  the declared source task, task creation fails and creates no partial task.
+- If Kandev cannot read the verified creator session, task creation fails and
+  creates no partial task.
+- If `workspace_default` is selected and no workflow or target-workspace profile
+  exists, task creation returns a validation error and creates no task.
+- If user settings cannot be read for an omitted-profile request, task creation
+  fails. An explicit profile does not read this setting.
+- If a provider no longer supports a copied model or option, the existing
+  session-start error and model-fallback policy apply. Kandev does not silently
+  substitute the source task's original profile configuration.
 
 ## Persistence guarantees
 
-- The preference survives backend restarts and frontend reloads as part of backend-owned portable user settings.
-- Existing installations with no stored field behave exactly as `current_task`.
-- Saving the preference publishes the existing user-settings update event; no browser storage is a durable fallback.
-- Created tasks retain the resolved agent profile in task metadata, so later session creation does not re-evaluate a changed preference.
+- The user preference survives restart as portable user settings.
+- The resolved profile and initial runtime configuration survive restart in task
+  metadata, including for `start_agent=false`.
+- The initial task session receives an immutable copy of the launch seed in its
+  own runtime overrides. Later changes to the source session do not change it.
+- Existing installations with no stored preference continue to normalize to
+  `current_task`.
 
 ## Scenarios
 
-- **GIVEN** an existing user with no stored preference, **WHEN** Task Actions settings loads, **THEN** **Current task profile** is selected.
-- **GIVEN** a user opens the setting without knowing MCP terminology, **WHEN** they read the control, **THEN** they can tell when it applies, what each option does, which option controls accidental model cost, and that an explicit profile selection overrides it.
-- **GIVEN** a user needs to know which Kandev MCP calls use the setting, **WHEN** they read the control, **THEN** they can see that `create_task_kandev` is affected for new tasks and subtasks while `spawn_session_kandev` and UI-created tasks are not, without relying on the help tooltip.
-- **GIVEN** `current_task` is selected and the calling task uses profile A while its workspace default is profile B, **WHEN** the agent creates a task without `agent_profile_id`, **THEN** the created task records profile A under the existing resolution rules.
-- **GIVEN** `workspace_default` is selected, the calling task uses profile A, no workflow profile applies, and the target workspace default is profile B, **WHEN** the agent creates a top-level task without `agent_profile_id`, **THEN** the created task records profile B.
-- **GIVEN** `workspace_default` is selected, a parent task uses profile A, no workflow profile applies, and its workspace default is profile B, **WHEN** the agent creates a subtask without `agent_profile_id`, **THEN** the subtask records profile B and retains the existing executor inheritance.
-- **GIVEN** `workspace_default` is selected and the target workflow step or workflow default supplies profile W, **WHEN** the agent creates a task without `agent_profile_id`, **THEN** the created task records profile W instead of the caller or workspace-default profile.
-- **GIVEN** `workspace_default` is selected and no workflow profile applies, **WHEN** the agent creates a task in a different workspace without `agent_profile_id`, **THEN** the new task uses that target workspace's default rather than the caller's workspace default.
-- **GIVEN** either preference is selected and the task is not on a workflow step at launch (no workflow, or a workflow with no steps), **WHEN** `create_task_kandev` includes profile C explicitly, **THEN** the created task records profile C.
-- **GIVEN** the target workflow has a start step whose launch profile resolves to profile W (the step's pinned profile, or the workflow default when the step is unpinned), **WHEN** `create_task_kandev` includes profile C explicitly but omits `workflow_step_id`, **THEN** the created task lands on that start step and records profile W, matching the profile the orchestrator launches.
-- **GIVEN** `workspace_default` is selected and neither the workflow nor the target workspace has a default agent profile, **WHEN** an agent creates a task without `agent_profile_id`, **THEN** the tool returns a validation error and no task exists.
-- **GIVEN** `workspace_default` is selected, no workflow profile applies, and a workspace default exists, **WHEN** an agent creates a task with `start_agent=false` and no `agent_profile_id`, **THEN** the task is created without a session and records the target workspace default for later launch.
-- **GIVEN** the setting is open on a mobile viewport, **WHEN** the user selects **Workspace default profile** and chooses **Save changes**, **THEN** the choice saves and remains selected after reload without horizontal overflow.
-- **GIVEN** a settings update fails, **WHEN** the user chooses **Save changes**, **THEN** the draft remains selected, the page shows the save failure, and the stored preference is unchanged.
+- **GIVEN** a task started with profile A and a second live session that uses
+  profile B, **WHEN** session B creates a task without `agent_profile_id`,
+  **THEN** the created task records profile B.
+- **GIVEN** a live session changed from its profile model to another model and
+  selected a new reasoning value, **WHEN** it creates a task without
+  `agent_profile_id`, **THEN** the initial child session starts with the changed
+  model and reasoning value.
+- **GIVEN** a live session creates a top-level task in the same workspace,
+  **WHEN** it omits `agent_profile_id`, **THEN** the new task inherits that
+  session's profile and effective runtime configuration.
+- **GIVEN** a live session creates a subtask under another task, **WHEN** it
+  omits `agent_profile_id`, **THEN** the subtask inherits the creating session's
+  agent configuration and the parent task's executor configuration.
+- **GIVEN** `current_task` is selected and an external MCP caller has no session,
+  **WHEN** it creates a subtask without `agent_profile_id`, **THEN** profile
+  resolution uses the parent task compatibility fallback.
+- **GIVEN** `workspace_default` is selected, **WHEN** a live session creates a
+  task without `agent_profile_id`, **THEN** Kandev does not copy the source
+  session profile or runtime configuration.
+- **GIVEN** a call supplies `agent_profile_id`, **WHEN** the target task does not
+  land on a workflow step, **THEN** Kandev uses that profile and does not copy
+  the creating session runtime configuration.
+- **GIVEN** a workflow step selects profile W, **WHEN** a live session creates a
+  task on that step, **THEN** the created task uses profile W and does not copy
+  the creating session runtime configuration.
+- **GIVEN** a live session creates a task with `start_agent=false`, **WHEN** the
+  user later starts its first session, **THEN** that session uses the persisted
+  creator profile and runtime configuration.
+- **GIVEN** creator context names a session from another task, **WHEN** Kandev
+  handles the request, **THEN** creation fails before any task persists.
+- **GIVEN** the Task Actions setting is open on a phone, **WHEN** the user reads
+  and changes the choice, **THEN** all precedence information is touch-visible
+  and the page has no horizontal overflow.
 
 ## Out of scope
 
-- Changing profile resolution for UI-created tasks, API-created tasks, automations, Office routing, or `spawn_session_kandev`.
-- Changing workspace default profile configuration or agent-profile lifecycle rules.
+- Changing profile resolution for UI-created tasks, API-created tasks,
+  automations, Office routing, utility agents, or `spawn_session_kandev`.
 - Changing executor or executor-profile inheritance.
-- Selecting a specific profile directly from Task Actions settings; the tool's explicit `agent_profile_id` remains the per-call override.
+- Adding a third preference value or changing the stored enum names.
+- Copying credentials, environment variables, CLI flags, or MCP configuration
+  from the creating session.
+- Changing provider model fallback policy.
 
 ## Implementation plan
 
-See [`../../../plans/mcp-task-agent-profile-default/plan.md`](../../../plans/mcp-task-agent-profile-default/plan.md).
+See [`../../../plans/creator-session-task-inheritance/plan.md`](../../../plans/creator-session-task-inheritance/plan.md).

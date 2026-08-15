@@ -244,6 +244,10 @@ func (m *mockTaskRepo) UpdateTaskStateIfSessionState(
 type mockAgentManager struct {
 	isPassthrough  bool
 	isAgentRunning bool
+	// getGitLogFunc, when non-nil, overrides GetGitLog. Lets tests model a
+	// commit reconcile sweep (or archive capture) observing new commits, or
+	// simulate the agent process being gone (nil, nil).
+	getGitLogFunc func(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error)
 	// isAgentRunningFn, when non-nil, overrides isAgentRunning for
 	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
 	// (e.g. stream disconnect between PromptAgent call and queue write).
@@ -653,7 +657,10 @@ func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, session
 	}
 	return "", fmt.Errorf("no execution found")
 }
-func (m *mockAgentManager) GetGitLog(_ context.Context, _, _ string, _ int, _ string) (*client.GitLogResult, error) {
+func (m *mockAgentManager) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error) {
+	if m.getGitLogFunc != nil {
+		return m.getGitLogFunc(ctx, sessionID, baseCommit, limit, targetBranch)
+	}
 	return nil, nil
 }
 func (m *mockAgentManager) GetCumulativeDiff(_ context.Context, _, _ string) (*client.CumulativeDiffResult, error) {
@@ -813,6 +820,11 @@ func createTestServiceWithAgent(repo *sqliterepo.Repository, stepGetter *mockSte
 	}
 	repo.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
 		_, _ = svc.messageQueue.PurgeTask(ctx, taskID)
+	})
+	// Mirror production: after task-scoped queue purge, publish queue-status
+	// so the status-summary projector can zero queued_prompt_count.
+	repo.SetTaskQueuePurgeNotifier(func(ctx context.Context, taskID string) {
+		svc.publishTaskQueueStatusEvent(ctx, taskID, "")
 	})
 	return svc
 }
@@ -1624,6 +1636,11 @@ func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *moc
 	}
 	repo.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
 		_, _ = svc.messageQueue.PurgeTask(ctx, taskID)
+	})
+	// Mirror production: after task-scoped queue purge, publish queue-status
+	// so the status-summary projector can zero queued_prompt_count.
+	repo.SetTaskQueuePurgeNotifier(func(ctx context.Context, taskID string) {
+		svc.publishTaskQueueStatusEvent(ctx, taskID, "")
 	})
 	return svc
 }

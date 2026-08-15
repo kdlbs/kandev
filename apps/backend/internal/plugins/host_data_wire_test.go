@@ -105,9 +105,12 @@ func seedSessionsWireFixture(d *testDataHost, n int) {
 		if i == 0 {
 			sessions[i].Metadata = map[string]any{"acp": map[string]any{"session_id": "acp-session-0"}}
 		}
+		linesAdded := int64(10 * (i + 1))
+		linesDeleted := int64(i + 1)
 		stats[i] = &analyticsmodels.SessionCodeStats{
-			SessionID:           id,
-			LinesAddedCommitted: int64(10 * (i + 1)),
+			SessionID:             id,
+			LinesAddedCommitted:   &linesAdded,
+			LinesDeletedCommitted: &linesDeleted,
 		}
 	}
 	d.tasks.sessionsByTask = map[string][]*taskmodels.TaskSession{"task-1": sessions}
@@ -156,6 +159,7 @@ func TestPluginHostData_Wire_SessionsRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stats, 1)
 	require.Equal(t, "session-0", stats[0].SessionID)
+	require.True(t, stats[0].CommittedLinesAvailable)
 	require.Equal(t, int64(10), stats[0].LinesAddedCommitted)
 }
 
@@ -213,6 +217,39 @@ func TestPluginHostData_Wire_PermissionDeniedPerResource(t *testing.T) {
 		require.True(t, ok, "expected a gRPC status error, got %v", err)
 		require.Equal(t, codes.PermissionDenied, st.Code())
 		require.Equal(t, "capability 'api_read:sessions' not declared", st.Message())
+	})
+}
+
+func TestPluginHostData_Wire_ExecutorProfiles(t *testing.T) {
+	t.Run("DeniedWithoutCapability", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{})
+		host := dialPluginHostOverWire(t, d.host)
+		reader, ok := pluginsdk.ExecutorProfiles(host)
+		require.True(t, ok)
+
+		_, _, err := reader.List(context.Background(), pluginsdk.Page{})
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		require.Equal(t, codes.PermissionDenied, st.Code())
+		require.Equal(t, "capability 'api_read:executor_profiles' not declared", st.Message())
+	})
+
+	t.Run("MapsProfilesAndExecutorType", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{APIRead: []string{"executor_profiles"}})
+		d.tasks.executorProfiles = []*taskmodels.ExecutorProfile{{ID: "profile-1", ExecutorID: "executor-1", Name: "Docker"}}
+		d.tasks.executors = map[string]*taskmodels.Executor{"executor-1": {ID: "executor-1", Type: taskmodels.ExecutorTypeLocalDocker}}
+		host := dialPluginHostOverWire(t, d.host)
+		reader, ok := pluginsdk.ExecutorProfiles(host)
+		require.True(t, ok)
+
+		profiles, pageInfo, err := reader.List(context.Background(), pluginsdk.Page{})
+		require.NoError(t, err)
+		require.Len(t, profiles, 1)
+		require.Equal(t, "profile-1", profiles[0].ID)
+		require.Equal(t, "Docker", profiles[0].DisplayName)
+		require.Equal(t, "local_docker", profiles[0].ExecutorType)
+		require.NotNil(t, pageInfo)
 	})
 }
 

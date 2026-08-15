@@ -22,12 +22,13 @@ import (
 
 // Service manages queued messages for sessions, backed by Repository.
 type Service struct {
-	repo          Repository
-	maxPerSession atomic.Int64
-	mergeEnabled  atomic.Bool
-	logger        *logger.Logger
-	admissionMu   sync.Mutex
-	admissions    map[string]*sessionAdmission
+	repo             Repository
+	maxPerSession    atomic.Int64
+	mergeEnabled     atomic.Bool
+	autoMergeEnabled atomic.Bool
+	logger           *logger.Logger
+	admissionMu      sync.Mutex
+	admissions       map[string]*sessionAdmission
 }
 
 type sessionAdmission struct {
@@ -53,6 +54,7 @@ func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service
 	}
 	service.SetMaxPerSession(maxPerSession)
 	service.mergeEnabled.Store(true)
+	service.autoMergeEnabled.Store(true)
 	return service
 }
 
@@ -91,9 +93,20 @@ func (s *Service) SetMergeEnabled(enabled bool) {
 	s.mergeEnabled.Store(enabled)
 }
 
+// AutoMergeEnabled reports whether ordinary newly admitted messages may be
+// folded into a compatible queue tail. It is independent from manual merge.
+func (s *Service) AutoMergeEnabled() bool { return s.autoMergeEnabled.Load() }
+
+// SetAutoMergeEnabled toggles admission-time automatic merging. Existing rows
+// are never compacted retroactively.
+func (s *Service) SetAutoMergeEnabled(enabled bool) {
+	s.autoMergeEnabled.Store(enabled)
+}
+
 // WithSessionAdmission runs fn under the per-session queue admission lock.
-// All queue insertion paths use the same lock. The callback must complete
-// synchronously; queue methods called with its context reuse the held lock.
+// All queue insertion and mutation paths use the same lock. The callback must
+// complete synchronously; queue methods called with its context reuse the held
+// lock.
 func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn func(context.Context) error) error {
 	if fn == nil {
 		return errors.New("session admission callback is nil")
@@ -140,14 +153,103 @@ func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, 
 // is propagated to the resulting Message row when the queued message is
 // drained (e.g. sender_task_id for messages sent via message_task_kandev).
 func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}) (*QueuedMessage, error) {
-	return s.queueMessageWithMetadata(
-		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata,
-		s.MaxPerSession(),
+	return s.queueMessageWithMetadataAdmission(
+		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, nil,
 	)
 }
 
-// queueMessageWithMetadata is the admission-checked core of QueueMessageWithMetadata.
-func (s *Service) queueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, error) {
+// QueueMessageWithMetadataAfterInsert admits an exact source row, runs
+// afterInsert while the per-session admission lock remains held, then attempts
+// the snapshotted automatic fold. Callers use the hook to claim staged
+// attachments before folding; if it returns an error, no fold is attempted.
+func (s *Service) QueueMessageWithMetadataAfterInsert(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, afterInsert func(context.Context, *QueuedMessage) error) (*QueuedMessage, error) {
+	return s.queueMessageWithMetadataAdmission(
+		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, afterInsert,
+	)
+}
+
+// queueMessageWithMetadataAdmission snapshots policy and completes admission
+// under one per-session lock.
+func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, afterInsert func(context.Context, *QueuedMessage) error) (*QueuedMessage, error) {
+	var queued *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		maxPerSession := s.MaxPerSession()
+		autoMergeEnabled := s.AutoMergeEnabled()
+		source, err := s.insertQueueMessageWithMetadata(
+			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession,
+		)
+		if err != nil {
+			if errors.Is(err, ErrQueueFull) && autoMergeEnabled && afterInsert == nil {
+				// A full queue must still accept a message that would fold into
+				// the tail: admission-time auto-merge runs after a successful
+				// insert, so at capacity it could never fire. Fold the
+				// candidate directly — the fold is the admission. The
+				// afterInsert hook is excluded because it claims staged
+				// attachments against a persisted source row, which this path
+				// never creates.
+				candidate := &QueuedMessage{
+					SessionID:   sessionID,
+					TaskID:      taskID,
+					Content:     content,
+					Model:       model,
+					PlanMode:    planMode,
+					Attachments: attachments,
+					Metadata:    copyMessageMetadata(metadata, 0),
+					QueuedBy:    userID,
+				}
+				merged, didMerge, mergeErr := s.repo.AutoMergeCandidateIntoAbove(admittedCtx, candidate)
+				switch {
+				case mergeErr != nil:
+					if errors.Is(mergeErr, ErrTaskInactive) {
+						// The task was archived or deleted while the admission
+						// was in flight; surface the inactive-task contract
+						// instead of a misleading queue-full rejection.
+						return mergeErr
+					}
+					s.logger.Error("automatic merge into full queue failed; preserving queue full rejection",
+						zap.String("session_id", sessionID),
+						zap.Error(mergeErr))
+					return err
+				case didMerge && merged != nil:
+					s.logger.Info("automatically merged queued entry into full tail",
+						zap.String("session_id", sessionID),
+						zap.String("surviving_entry_id", merged.ID))
+					queued = merged
+					return nil
+				default:
+					// The fold skipped because the tail is absent or changed —
+					// a concurrent drain freed capacity (or a concurrent fold or
+					// drain moved the tail) between the failed insert and the
+					// fold scan. Retry the ordinary insert once under the held
+					// admission lock: it succeeds now that capacity is free, and
+					// still returns ErrQueueFull when another writer keeps the
+					// cap occupied. Without this retry a stale ErrQueueFull
+					// would drop a message that is admissible at fold time.
+					source, err = s.insertQueueMessageWithMetadata(
+						admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession,
+					)
+					if err != nil {
+						return err
+					}
+				}
+			} else {
+				return err
+			}
+		}
+		if afterInsert != nil {
+			if err := afterInsert(admittedCtx, source); err != nil {
+				return err
+			}
+		}
+		queued = s.finalizeAutoMerge(admittedCtx, source, autoMergeEnabled)
+		return nil
+	})
+	return queued, err
+}
+
+// queueMessageWithMetadataSeparate is used by retry paths whose existing
+// contract must not gain admission-time automatic behavior.
+func (s *Service) queueMessageWithMetadataSeparate(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, error) {
 	var queued *QueuedMessage
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		var err error
@@ -157,6 +259,28 @@ func (s *Service) queueMessageWithMetadata(ctx context.Context, sessionID, taskI
 		return err
 	})
 	return queued, err
+}
+
+func (s *Service) finalizeAutoMerge(ctx context.Context, source *QueuedMessage, enabled bool) *QueuedMessage {
+	if !enabled {
+		return source
+	}
+	merged, didMerge, err := s.repo.AutoMergeIntoAbove(ctx, source.SessionID, source.ID)
+	if err != nil {
+		s.logger.Error("automatic queue merge failed; preserving separate admission",
+			zap.String("session_id", source.SessionID),
+			zap.String("source_entry_id", source.ID),
+			zap.Error(err))
+		return source
+	}
+	if !didMerge || merged == nil {
+		return source
+	}
+	s.logger.Info("automatically merged queued entry into tail",
+		zap.String("session_id", source.SessionID),
+		zap.String("source_entry_id", source.ID),
+		zap.String("surviving_entry_id", merged.ID))
+	return merged
 }
 
 // insertQueueMessageWithMetadata inserts a message with metadata under the per-session admission lock.
@@ -293,7 +417,7 @@ func (s *Service) RequeueMessage(ctx context.Context, msg *QueuedMessage, queued
 			msg.Attachments, msg.Metadata, coalesceKey, true, 0,
 		)
 	}
-	queued, err := s.queueMessageWithMetadata(
+	queued, err := s.queueMessageWithMetadataSeparate(
 		ctx, msg.SessionID, msg.TaskID, msg.Content, msg.Model, queuedBy, msg.PlanMode,
 		msg.Attachments, msg.Metadata, 0,
 	)
@@ -389,9 +513,16 @@ func lifecycleGenerationFromMetadata(metadata map[string]interface{}) (int64, bo
 }
 
 // ReserveQueued atomically takes an ordinary head entry or reserves a durable
-// lifecycle head entry. A reserved lifecycle row survives until acknowledged.
+// lifecycle head entry. The admission lock keeps drains from observing an
+// insert before its automatic-merge finalization completes. A reserved
+// lifecycle row survives until acknowledged.
 func (s *Service) ReserveQueued(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
-	msg, err := s.repo.ReserveHead(ctx, sessionID)
+	var msg *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		msg, err = s.repo.ReserveHead(admittedCtx, sessionID)
+		return err
+	})
 	if err != nil {
 		s.logger.Error("reserve head failed",
 			zap.String("session_id", sessionID),
@@ -403,7 +534,9 @@ func (s *Service) ReserveQueued(ctx context.Context, sessionID string) (*QueuedM
 
 // AcknowledgeQueued removes a server-reserved entry after prompt acceptance.
 func (s *Service) AcknowledgeQueued(ctx context.Context, sessionID, entryID string) error {
-	err := s.repo.AcknowledgeByID(ctx, sessionID, entryID)
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.AcknowledgeByID(admittedCtx, sessionID, entryID)
+	})
 	if errors.Is(err, ErrEntryNotFound) {
 		return nil
 	}
@@ -475,7 +608,12 @@ func (s *Service) AppendContent(ctx context.Context, sessionID, taskID, content,
 // TakeQueued atomically removes and returns the head entry. Returns nil, false
 // when the queue is empty.
 func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
-	msg, err := s.repo.TakeHead(ctx, sessionID)
+	var msg *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		msg, err = s.repo.TakeHead(admittedCtx, sessionID)
+		return err
+	})
 	if err != nil {
 		s.logger.Error("take head failed",
 			zap.String("session_id", sessionID),
@@ -504,7 +642,12 @@ func (s *Service) TakeQueued(ctx context.Context, sessionID string) (*QueuedMess
 // InterruptForPeerMessage to dispatch the specific message that triggered
 // the interrupt instead of whatever happens to be at the FIFO head.
 func (s *Service) TakeQueuedEntry(ctx context.Context, sessionID, entryID string) (*QueuedMessage, bool, error) {
-	msg, err := s.repo.TakeByID(ctx, sessionID, entryID)
+	var msg *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		msg, err = s.repo.TakeByID(admittedCtx, sessionID, entryID)
+		return err
+	})
 	if err != nil {
 		s.logger.Error("take by id failed",
 			zap.String("session_id", sessionID),
@@ -553,7 +696,12 @@ func (s *Service) GetEntry(ctx context.Context, sessionID, entryID string) (*Que
 // mutating any row, so aggregate validation failures or click-time edits leave
 // the queue untouched.
 func (s *Service) ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
-	claim, err := s.repo.ClaimSendNow(ctx, sessionID, expected)
+	var claim *SendNowClaim
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		claim, err = s.repo.ClaimSendNow(admittedCtx, sessionID, expected)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -596,7 +744,9 @@ func (s *Service) AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowCla
 // UpdateMessageWithMetadata atomically edits queue content and applies
 // metadata replacements while retaining unrelated metadata keys.
 func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
-	if err := s.repo.UpdateContentAndMetadata(ctx, sessionID, entryID, content, attachments, metadataUpdates, queuedBy); err != nil {
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.UpdateContentAndMetadata(admittedCtx, sessionID, entryID, content, attachments, metadataUpdates, queuedBy)
+	}); err != nil {
 		return err
 	}
 	s.logger.Info("queued entry updated",
@@ -609,7 +759,9 @@ func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entr
 // the rationale on the Repository.DeleteByID contract for why. Returns
 // ErrEntryNotFound when no entry matches.
 func (s *Service) RemoveEntry(ctx context.Context, sessionID, entryID string) error {
-	if err := s.repo.DeleteByID(ctx, sessionID, entryID); err != nil {
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.DeleteByID(admittedCtx, sessionID, entryID)
+	}); err != nil {
 		return err
 	}
 	s.logger.Info("queued entry removed",
@@ -625,7 +777,12 @@ func (s *Service) MergeIntoAbove(ctx context.Context, sessionID, entryID, queued
 	if !s.MergeEnabled() {
 		return nil, ErrMergeDisabled
 	}
-	merged, err := s.repo.MergeIntoAbove(ctx, sessionID, entryID, queuedBy)
+	var merged *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		merged, err = s.repo.MergeIntoAbove(admittedCtx, sessionID, entryID, queuedBy)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +801,9 @@ func (s *Service) ReorderEntries(ctx context.Context, sessionID string, orderedI
 	if err := validateReorderInput(orderedIDs); err != nil {
 		return err
 	}
-	if err := s.repo.ReorderEntries(ctx, sessionID, orderedIDs); err != nil {
+	if err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return s.repo.ReorderEntries(admittedCtx, sessionID, orderedIDs)
+	}); err != nil {
 		return err
 	}
 	s.logger.Info("queued entries reordered",
@@ -656,7 +815,12 @@ func (s *Service) ReorderEntries(ctx context.Context, sessionID string, orderedI
 // CancelAll clears every queued entry for a session. Returns the number of
 // rows removed.
 func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) {
-	n, err := s.repo.DeleteAllBySession(ctx, sessionID)
+	var n int
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		n, err = s.repo.DeleteAllBySession(admittedCtx, sessionID)
+		return err
+	})
 	if err != nil {
 		return 0, err
 	}

@@ -142,7 +142,8 @@ type SessionLauncher interface {
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) (*executor.TaskExecution, error)
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
-	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
+	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
+	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
 	GetMessageQueue() *messagequeue.Service
 	// QueueAndInterruptForPeerMessage atomically queues prompt for sessionID
 	// then interrupts the session's in-flight turn to dispatch it right
@@ -357,6 +358,8 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPAddTaskDependency, h.handleAddTaskDependency)
+	d.RegisterFunc(ws.ActionMCPRemoveTaskDependency, h.handleRemoveTaskDependency)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
 	d.RegisterFunc(ws.ActionMCPAddWorkspaceSources, h.handleAddWorkspaceSources)
 	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
@@ -576,6 +579,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	var req struct {
 		ParentID               string               `json:"parent_id"`
 		SourceTaskID           string               `json:"source_task_id"`
+		SourceSessionID        string               `json:"source_session_id"`
 		WorkspaceID            string               `json:"workspace_id"`
 		WorkflowID             string               `json:"workflow_id"`
 		WorkflowStepID         string               `json:"workflow_step_id"`
@@ -589,6 +593,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories           []mcpRepositoryInput `json:"repositories"`              // explicit repositories for top-level tasks
 		BaseBranch             string               `json:"base_branch"`               // top-level fallback applied to every resolved repo only when no per-repo entries are supplied; explicit per-repo BaseBranch is authoritative when Repositories is set
 		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
+		StartWhenUnblocked     *bool                `json:"start_when_unblocked"`      // nil = derive from start_agent when BlockedBy is set
 		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
 		ExternalID             string               `json:"external_id"`               // caller-supplied create-idempotency key
 	}
@@ -688,7 +693,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
 	}
-	launchConfig, metadata, err := h.resolveMCPLaunchMetadata(ctx, pendingTask, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID)
+	launchConfig, metadata, err := h.resolveMCPLaunchMetadataWithSource(
+		ctx, pendingTask, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID, req.SourceSessionID,
+	)
 	if err != nil {
 		code := ws.ErrorCodeInternalError
 		if errors.Is(err, errMCPAgentProfileRequired) {
@@ -716,6 +723,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Autopilot:              req.Autopilot,
 		Repositories:           repos,
 		BlockedBy:              req.BlockedBy,
+		StartWhenUnblocked:     req.StartWhenUnblocked,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Metadata:               metadata,
 		DeferredLaunch:         deferredLaunch,
@@ -806,12 +814,28 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	// Auto-start agent session asynchronously only if requested and admitted.
-	if startAgent && task.QueuedForStepID == "" && h.sessionLauncher != nil {
+	//
+	// A create that declared dependencies does NOT launch now: the start intent
+	// was recorded as a start-when-unblocked deferred launch and dependency
+	// resolution consumes it. Agents pass start_agent=true by habit, so without
+	// this every step of an agent-built chain would launch at once.
+	startWhenUnblocked := service.ResolveStartWhenUnblocked(&service.CreateTaskRequest{
+		BlockedBy:          req.BlockedBy,
+		StartWhenUnblocked: req.StartWhenUnblocked,
+	})
+	// Blockers suppress the immediate launch on their own. start_when_unblocked
+	// only decides whether a DEFERRED launch is recorded, so `false` means "no
+	// automatic start at all" — launching now would start a task that is blocked.
+	if startAgent && len(req.BlockedBy) == 0 && task.QueuedForStepID == "" && h.sessionLauncher != nil {
 		h.launchAutoStartTask(ctx, task, launchConfig)
 	}
 
+	response := dto.FromTask(task)
+	// Report the deferred start so the caller does not have to infer whether the
+	// task launched or is waiting on its dependencies.
+	response.StartWhenUnblocked = startWhenUnblocked
 	return ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
-		TaskDTO:          dto.FromTask(task),
+		TaskDTO:          response,
 		Deduplicated:     false,
 		CreationComplete: true,
 	})
@@ -1115,9 +1139,10 @@ func inheritedRepoInputs(src []*models.TaskRepository) []service.TaskRepositoryI
 }
 
 type mcpAutoStartConfig struct {
-	AgentProfileID    string
-	ExecutorID        string
-	ExecutorProfileID string
+	AgentProfileID       string
+	ExecutorID           string
+	ExecutorProfileID    string
+	InitialRuntimeConfig *models.SessionRuntimeConfig
 }
 
 var errMCPAgentProfileRequired = errors.New("agent_profile_id is required because the selected task profile policy, workflow, and workspace defaults did not resolve a profile")
@@ -1143,7 +1168,17 @@ func (h *Handlers) resolveMCPAutoStartConfig(ctx context.Context, task *models.T
 }
 
 func (h *Handlers) resolveMCPLaunchMetadata(ctx context.Context, task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) (mcpAutoStartConfig, map[string]interface{}, error) {
-	launchConfig, err := h.resolveMCPAutoStartConfigWithError(ctx, task, agentProfileID, executorProfileID, sourceTaskID)
+	return h.resolveMCPLaunchMetadataWithSource(ctx, task, agentProfileID, executorProfileID, sourceTaskID, "")
+}
+
+func (h *Handlers) resolveMCPLaunchMetadataWithSource(
+	ctx context.Context,
+	task *models.Task,
+	agentProfileID, executorProfileID, sourceTaskID, sourceSessionID string,
+) (mcpAutoStartConfig, map[string]interface{}, error) {
+	launchConfig, err := h.resolveMCPAutoStartConfigWithSource(
+		ctx, task, agentProfileID, executorProfileID, sourceTaskID, sourceSessionID,
+	)
 	if err != nil {
 		return mcpAutoStartConfig{}, nil, fmt.Errorf("failed to resolve launch profile: %w", err)
 	}
@@ -1159,13 +1194,35 @@ func (h *Handlers) resolveMCPLaunchMetadata(ctx context.Context, task *models.Ta
 	if launchConfig.ExecutorProfileID != "" {
 		metadata[models.MetaKeyExecutorProfileID] = launchConfig.ExecutorProfileID
 	}
+	if launchConfig.InitialRuntimeConfig != nil {
+		metadata[models.MetaKeyInitialSessionRuntimeConfig] = *launchConfig.InitialRuntimeConfig
+		metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID] = launchConfig.AgentProfileID
+	}
 	return launchConfig, metadata, nil
 }
 
 func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) (mcpAutoStartConfig, error) {
+	return h.resolveMCPAutoStartConfigWithSource(ctx, task, agentProfileID, executorProfileID, sourceTaskID, "")
+}
+
+func (h *Handlers) resolveMCPAutoStartConfigWithSource(
+	ctx context.Context,
+	task *models.Task,
+	agentProfileID, executorProfileID, sourceTaskID, sourceSessionID string,
+) (mcpAutoStartConfig, error) {
+	creatorSession, err := h.resolveMCPCreatorSession(ctx, sourceTaskID, sourceSessionID)
+	if err != nil {
+		return mcpAutoStartConfig{}, err
+	}
 	profileDefault, err := h.mcpTaskAgentProfileDefault(ctx, agentProfileID)
 	if err != nil {
 		return mcpAutoStartConfig{}, fmt.Errorf("read MCP task agent profile default: %w", err)
+	}
+	useCreatorRuntime := creatorSession != nil &&
+		profileDefault == usermodels.MCPTaskAgentProfileDefaultCurrentTask &&
+		agentProfileID == "" && creatorSession.AgentProfileID != ""
+	if useCreatorRuntime {
+		agentProfileID = creatorSession.AgentProfileID
 	}
 	profileForInheritance := &agentProfileID
 	// Workspace-default mode keeps executor inheritance but discards inherited agent profiles.
@@ -1174,20 +1231,14 @@ func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task 
 		profileForInheritance = &ignoredInheritedProfile
 	}
 
-	executorID, err := h.inheritFromTask(ctx, task.ParentID, profileForInheritance, &executorProfileID)
+	executorID, executorProfileID, err := h.resolveMCPInheritedExecutors(
+		ctx, task, profileForInheritance, executorProfileID, sourceTaskID,
+	)
 	if err != nil {
-		return mcpAutoStartConfig{}, fmt.Errorf("inherit from parent task %s: %w", task.ParentID, err)
+		return mcpAutoStartConfig{}, err
 	}
-
-	// For top-level tasks, inherit from the source task (the calling agent's task).
-	if task.ParentID == "" && sourceTaskID != "" {
-		sourceExecutorID, err := h.inheritFromTask(ctx, sourceTaskID, profileForInheritance, &executorProfileID)
-		if err != nil {
-			return mcpAutoStartConfig{}, fmt.Errorf("inherit from source task %s: %w", sourceTaskID, err)
-		}
-		if executorID == "" {
-			executorID = sourceExecutorID
-		}
+	if profileDefault != usermodels.MCPTaskAgentProfileDefaultWorkspaceDefault {
+		agentProfileID = *profileForInheritance
 	}
 
 	// Mirror the orchestrator's launch-time precedence so the profile reported
@@ -1200,31 +1251,97 @@ func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task 
 	// CreateTask assigns when the step is omitted. When the task will be on a
 	// step, the workflow-derived profile overrides the caller; otherwise it only
 	// fills an omitted profile.
-	workflowProfileID, onStepAtLaunch, err := h.resolveWorkflowLaunchProfile(ctx, task.WorkflowStepID, task.WorkflowID)
+	agentProfileID, useCreatorRuntime, err = h.resolveMCPFinalAgentProfile(
+		ctx, task, agentProfileID, useCreatorRuntime,
+	)
 	if err != nil {
-		return mcpAutoStartConfig{}, fmt.Errorf("resolve workflow agent profile: %w", err)
-	}
-	if workflowProfileID != "" && (onStepAtLaunch || agentProfileID == "") {
-		agentProfileID = workflowProfileID
-	}
-	if agentProfileID == "" && h.taskSvc != nil {
-		workspace, err := h.taskSvc.GetWorkspace(ctx, task.WorkspaceID)
-		if err != nil {
-			return mcpAutoStartConfig{}, fmt.Errorf("get workspace %s: %w", task.WorkspaceID, err)
-		}
-		if workspace != nil && workspace.DefaultAgentProfileID != nil {
-			agentProfileID = *workspace.DefaultAgentProfileID
-		}
+		return mcpAutoStartConfig{}, err
 	}
 	if executorID == "" && executorProfileID == "" {
 		executorID = models.ExecutorIDWorktree
 	}
 
-	return mcpAutoStartConfig{
+	config := mcpAutoStartConfig{
 		AgentProfileID:    agentProfileID,
 		ExecutorID:        executorID,
 		ExecutorProfileID: executorProfileID,
-	}, nil
+	}
+	if useCreatorRuntime {
+		if runtimeConfig, ok := models.LoadEffectiveSessionRuntimeConfig(creatorSession); ok {
+			config.InitialRuntimeConfig = &runtimeConfig
+		}
+	}
+	return config, nil
+}
+
+func (h *Handlers) resolveMCPInheritedExecutors(
+	ctx context.Context,
+	task *models.Task,
+	agentProfileID *string,
+	executorProfileID, sourceTaskID string,
+) (string, string, error) {
+	executorID, err := h.inheritFromTask(ctx, task.ParentID, agentProfileID, &executorProfileID)
+	if err != nil {
+		return "", "", fmt.Errorf("inherit from parent task %s: %w", task.ParentID, err)
+	}
+	if task.ParentID == "" && sourceTaskID != "" {
+		sourceExecutorID, sourceErr := h.inheritFromTask(ctx, sourceTaskID, agentProfileID, &executorProfileID)
+		if sourceErr != nil {
+			return "", "", fmt.Errorf("inherit from source task %s: %w", sourceTaskID, sourceErr)
+		}
+		if executorID == "" {
+			executorID = sourceExecutorID
+		}
+	}
+	return executorID, executorProfileID, nil
+}
+
+func (h *Handlers) resolveMCPFinalAgentProfile(
+	ctx context.Context,
+	task *models.Task,
+	agentProfileID string,
+	useCreatorRuntime bool,
+) (string, bool, error) {
+	workflowProfileID, onStepAtLaunch, err := h.resolveWorkflowLaunchProfile(ctx, task.WorkflowStepID, task.WorkflowID)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve workflow agent profile: %w", err)
+	}
+	if workflowProfileID != "" && (onStepAtLaunch || agentProfileID == "") {
+		// The workflow-selected profile owns this launch, so creator runtime
+		// values must not be copied into it.
+		return workflowProfileID, false, nil
+	}
+	if agentProfileID != "" || h.taskSvc == nil {
+		return agentProfileID, useCreatorRuntime, nil
+	}
+	workspace, err := h.taskSvc.GetWorkspace(ctx, task.WorkspaceID)
+	if err != nil {
+		return "", false, fmt.Errorf("get workspace %s: %w", task.WorkspaceID, err)
+	}
+	if workspace != nil && workspace.DefaultAgentProfileID != nil {
+		return *workspace.DefaultAgentProfileID, false, nil
+	}
+	return agentProfileID, false, nil
+}
+
+func (h *Handlers) resolveMCPCreatorSession(ctx context.Context, sourceTaskID, sourceSessionID string) (*models.TaskSession, error) {
+	if sourceSessionID == "" {
+		return nil, nil
+	}
+	if sourceTaskID == "" {
+		return nil, errors.New("source_session_id requires source_task_id")
+	}
+	if h.taskSvc == nil {
+		return nil, errors.New("cannot verify source_session_id without task service")
+	}
+	session, err := h.taskSvc.GetTaskSession(ctx, sourceSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("verify source session %s: %w", sourceSessionID, err)
+	}
+	if session == nil || session.TaskID != sourceTaskID {
+		return nil, fmt.Errorf("source session %s does not belong to source task %s", sourceSessionID, sourceTaskID)
+	}
+	return session, nil
 }
 
 func (h *Handlers) mcpTaskAgentProfileDefault(ctx context.Context, explicitAgentProfileID string) (string, error) {
@@ -2148,7 +2265,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"task_id":              req.TaskID,
 			"reply_to_question_id": req.ReplyToQuestionID,
-			"status":               "already_answered",
+			stopTaskStatusKey:      "already_answered",
 		})
 	}
 
@@ -2197,7 +2314,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		if parentReply != nil {
 			if restoreErr := h.restoreParentQuestionPending(ctx, parentReply.message); restoreErr != nil {
 				h.logger.Error("failed to restore parent question after answer dispatch failure",
-					zap.String("question_id", parentReply.message.ID), zap.Error(restoreErr))
+					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
 			}
 		}
 		var qfErr *queueFullDispatchError
@@ -2209,9 +2326,9 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"task_id":    req.TaskID,
-		"session_id": result.sessionID,
-		"status":     result.status,
+		"task_id":         req.TaskID,
+		"session_id":      result.sessionID,
+		stopTaskStatusKey: result.status,
 	})
 }
 
@@ -2744,12 +2861,29 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 			return taskMessageDispatchResult{}, err
 		}
-		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session, pinnedTarget)
+		session, turnStartResult, err := h.prepareSessionForTaskMessage(ctx, taskID, session, pinnedTarget)
 		if err != nil {
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 			return taskMessageDispatchResult{}, err
 		}
 		reviewRollback.captureSelectedSession(session)
+		if turnStartResult.Queued {
+			if err := h.sessionLauncher.QueueUserPrompt(
+				ctx,
+				taskID,
+				session.ID,
+				prompt,
+				"",
+				false,
+				nil,
+				metadata,
+				false,
+			); err != nil {
+				h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
+				return taskMessageDispatchResult{}, fmt.Errorf("failed to queue prompt until workflow promotion: %w", err)
+			}
+			return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID}, nil
+		}
 		result, err := h.dispatchPreparedTaskMessage(ctx, taskID, session, prompt, metadata)
 		if err != nil {
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
@@ -2904,9 +3038,10 @@ func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID str
 	return result, nil
 }
 
-func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, pinnedTarget bool) (*models.TaskSession, error) {
-	if err := h.sessionLauncher.ProcessOnTurnStart(ctx, taskID, session.ID); err != nil {
-		return nil, fmt.Errorf("failed to process on_turn_start for task message: %w", err)
+func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, pinnedTarget bool) (*models.TaskSession, orchestrator.ProcessOnTurnStartResult, error) {
+	turnStartResult, err := h.sessionLauncher.ProcessOnTurnStart(ctx, taskID, session.ID)
+	if err != nil {
+		return nil, orchestrator.ProcessOnTurnStartResult{}, fmt.Errorf("failed to process on_turn_start for task message: %w", err)
 	}
 	if pinnedTarget {
 		// The caller addressed this exact session — never reroute to the
@@ -2914,15 +3049,15 @@ func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID stri
 		// on_turn_start.
 		reloaded, err := h.taskSvc.GetTaskSession(ctx, session.ID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to reload pinned target session after on_turn_start: %w", err)
+			return nil, orchestrator.ProcessOnTurnStartResult{}, fmt.Errorf("failed to reload pinned target session after on_turn_start: %w", err)
 		}
-		return reloaded, nil
+		return reloaded, turnStartResult, nil
 	}
 	resolved, err := h.resolveSessionAfterTaskMessageTurnStart(ctx, taskID, session)
 	if err != nil {
-		return nil, err
+		return nil, orchestrator.ProcessOnTurnStartResult{}, err
 	}
-	return resolved, nil
+	return resolved, turnStartResult, nil
 }
 
 func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskID string) (taskMessageReviewRollback, error) {

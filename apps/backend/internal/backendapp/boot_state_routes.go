@@ -574,6 +574,8 @@ func mapKanbanStepState(step taskdto.WorkflowStepDTO) map[string]any {
 		"show_in_command_panel": step.ShowInCommandPanel,
 		"agent_profile_id":      nullString(step.AgentProfileID),
 		"stage_type":            nullString(step.StageType),
+		"wip_limit":             step.WIPLimit,
+		"pull_from_step_id":     nullString(step.PullFromStepID),
 	}
 }
 
@@ -606,6 +608,9 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"primarySessionState":         task.PrimarySessionState,
 		"primarySessionPendingAction": task.PrimarySessionPendingAction,
 		"taskPendingAction":           task.TaskPendingAction,
+		"wipAdmitted":                 task.WIPAdmitted,
+		"queuedForStepId":             nullString(task.QueuedForStepID),
+		"queuedAt":                    task.QueuedAt,
 		"interrupted":                 task.Interrupted,
 		"statusSummary":               task.StatusSummary,
 		"sessionCount":                task.SessionCount,
@@ -613,7 +618,32 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"parentTaskId":                nullString(task.ParentID),
 		"updatedAt":                   task.UpdatedAt,
 		"createdAt":                   task.CreatedAt,
+		// Dependency projection. This mapper is a camelCase whitelist writing
+		// straight into the frontend store shape, so a new DTO field is invisible
+		// to the boot payload until it is listed here — the board badge and the
+		// dependency chip both read these on first paint.
+		"blocked":            task.Blocked,
+		"blockedReason":      nullString(task.BlockedReason),
+		"dependsOn":          dependencyRefStates(task.DependsOn),
+		"blocks":             dependencyRefStates(task.Blocks),
+		"startWhenUnblocked": task.StartWhenUnblocked,
 	}
+}
+
+// dependencyRefStates maps dependency edge entries into the store shape. Returns
+// an empty slice rather than nil so the client reads "no edges" instead of
+// "unknown" and does not keep a stale badge.
+func dependencyRefStates(refs []taskdto.TaskDependencyRefDTO) []map[string]any {
+	out := make([]map[string]any, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, map[string]any{
+			"id":      ref.ID,
+			"title":   ref.Title,
+			"state":   ref.State,
+			statusKey: ref.Status,
+		})
+	}
+	return out
 }
 
 // mapSidebarViews maps sidebar views to the SPA boot shape.
@@ -673,7 +703,7 @@ func mapTaskCreateLastUsed(value usermodels.TaskCreateLastUsed) map[string]any {
 	}
 	return map[string]any{
 		"repositoryId":           nullString(value.RepositoryID),
-		"branch":                 nullString(value.Branch),
+		branchFieldKey:           nullString(value.Branch),
 		"agentProfileId":         nullString(value.AgentProfileID),
 		"executorProfileId":      nullString(value.ExecutorProfileID),
 		"workflowIdsByWorkspace": workflowIDsByWorkspace,

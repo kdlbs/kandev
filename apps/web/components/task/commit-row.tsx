@@ -21,6 +21,13 @@ import { useTranslation } from "react-i18next";
 
 export type CommitPresentation = "current_pr" | "local_checkout";
 
+const provenanceAccessibleLabelKey = {
+  current_pr: "task:currentPRCommit",
+  local_checkout: "task:localCheckoutCommit",
+  pushed: "task:pushedCommit",
+  unpushed: "task:unpushedCommit",
+} as const;
+
 export type CommitItem = {
   commit_sha: string;
   commit_message: string;
@@ -177,32 +184,35 @@ function CommitRowActions({
 function CommitStatusMarker({ commit }: { commit: CommitItem }) {
   const { t } = useTranslation();
   let label: string;
+  let provenance: "current_pr" | "local_checkout" | "pushed" | "unpushed";
   let marker = <IconGitCommit aria-hidden="true" className="h-3.5 w-3.5 text-muted-foreground" />;
 
   if (commit.presentation === "current_pr") {
     label = t("task:currentPRCommit");
+    provenance = "current_pr";
+    marker = <IconGitCommit aria-hidden="true" className="h-3.5 w-3.5 text-violet-500" />;
   } else if (commit.presentation === "local_checkout") {
     label = t("task:localCheckoutCommit");
+    provenance = "local_checkout";
+    marker = <IconGitCommit aria-hidden="true" className="h-3.5 w-3.5 text-amber-500" />;
   } else if (commit.pushed === true) {
     label = t("task:pushedToRemote");
+    provenance = "pushed";
   } else {
     label = t("task:localCommitNotYetPushed");
+    provenance = "unpushed";
     marker = <IconArrowUp aria-hidden="true" className="h-3.5 w-3.5 text-emerald-500" />;
   }
 
-  let accessibleLabel: string;
-  if (commit.presentation === "current_pr") {
-    accessibleLabel = t("task:currentPRCommit");
-  } else if (commit.presentation === "local_checkout") {
-    accessibleLabel = t("task:localCheckoutCommit");
-  } else if (commit.pushed === true) {
-    accessibleLabel = t("task:pushedCommit");
-  } else {
-    accessibleLabel = t("task:unpushedCommit");
-  }
+  const accessibleLabel = t(provenanceAccessibleLabelKey[provenance]);
 
   return (
-    <span className="shrink-0" title={label}>
+    <span
+      className="shrink-0"
+      title={label}
+      data-testid="commit-provenance"
+      data-commit-provenance={provenance}
+    >
       <span className="sr-only">{accessibleLabel}</span>
       {marker}
     </span>

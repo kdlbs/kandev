@@ -91,6 +91,48 @@ func (m *Manager) checkoutBranchExistsAnywhere(ctx context.Context, repoPath, br
 	return remote
 }
 
+func (m *Manager) preferRefreshedRemoteRef(ctx context.Context, repoPath, branch string) string {
+	localBranch := strings.TrimPrefix(branch, "origin/")
+	if localBranch == "" {
+		return branch
+	}
+	remoteRef := "origin/" + localBranch
+	if exists, err := m.branchExists(ctx, repoPath, remoteRef); err == nil && exists {
+		return remoteRef
+	}
+	return branch
+}
+
+// prepareCheckoutFromRefreshedOrigin makes a refreshed remote branch available
+// as a local branch without contacting origin. It returns false when neither a
+// local nor remote-tracking ref exists, preserving the existing "create a new
+// branch from base" behavior.
+func (m *Manager) prepareCheckoutFromRefreshedOrigin(ctx context.Context, repoPath, branch string) (bool, error) {
+	if exists, err := m.branchExists(ctx, repoPath, branch); err != nil {
+		return false, err
+	} else if exists {
+		return true, nil
+	}
+	remoteRef := "origin/" + branch
+	if exists, err := m.branchExists(ctx, repoPath, remoteRef); err != nil {
+		return false, err
+	} else if !exists {
+		return false, nil
+	}
+
+	release, err := subproc.Git().Acquire(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "branch", "--track", branch, remoteRef)
+	if output, runErr := cmd.CombinedOutput(); runErr != nil {
+		return false, fmt.Errorf("create local branch %q from refreshed origin: %s: %w",
+			branch, strings.TrimSpace(string(output)), runErr)
+	}
+	return true, nil
+}
+
 // Branch recovery statuses reported by BranchRecoveryStatus.
 const (
 	BranchStatusLocal   = "local"

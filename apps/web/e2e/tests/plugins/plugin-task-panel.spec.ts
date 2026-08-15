@@ -16,6 +16,7 @@ import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import type { ApiClient } from "../../helpers/api-client";
+import { dwell } from "../../helpers/causal-waits";
 
 const PANEL_ID = "notes";
 
@@ -311,7 +312,12 @@ test.describe("Plugins — task panel / kanban Edit submenu / card indicator", (
 
     // Now let the stale first read land — it must not revert the panel.
     releaseFirst();
-    await testPage.waitForTimeout(500);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "asserts the stale first read never reverts the panel; a value that must not be written renders nothing, so the check needs time for the late response to land and do damage",
+    );
     await expect(notesEditor).toHaveValue("second note");
   });
 

@@ -47,7 +47,7 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 		Identifier:  "PROJ-42",
 		IsEphemeral: false,
 		Repositories: []TaskRepository{
-			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0},
+			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix"},
 			{ID: "tr-2", RepositoryID: "repo-2", BaseBranch: "develop", Position: 1},
 		},
 		Metadata: map[string]any{"source": "plugin:agent-stats", "count": float64(3)},
@@ -58,6 +58,8 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 	require.Equal(t, "task-1", proto.GetId())
 	require.Equal(t, "2026-07-15T12:01:00Z", proto.GetStartedAt())
 	require.Nil(t, proto.CompletedAt)
+	require.Equal(t, "feature/fix", proto.GetRepositories()[0].GetCheckoutBranch())
+	require.Empty(t, proto.GetRepositories()[1].GetCheckoutBranch(), "empty checkout branches remain wire-compatible")
 
 	back, err := taskFromProto(proto)
 	require.NoError(t, err)
@@ -150,12 +152,54 @@ func TestAgentProfileProtoRoundTrip(t *testing.T) {
 	require.Equal(t, profile, agentProfileFromProto(proto))
 }
 
+func TestExecutorProfileProtoRoundTrip(t *testing.T) {
+	profile := ExecutorProfile{ID: "exec-1", DisplayName: "Local Docker", ExecutorType: "local_docker"}
+	require.Equal(t, profile, executorProfileFromProto(profile.toProto()))
+}
+
+func TestCreateTaskInputRichProtoRoundTrip(t *testing.T) {
+	defaultBranch := "main"
+	baseBranch := "release"
+	headBranch := "feature/plugin"
+	checkoutBranch := "feature/plugin"
+	pullRequestNumber := int64(42)
+	prompt := "Implement the fix"
+	input := CreateTaskInput{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "wf-1",
+		Title:       "Plugin-created task",
+		Repositories: []PluginTaskRepository{{
+			Remote: &RemoteRepositoryDescriptor{
+				ProviderID: "example", ProviderHost: "code.example.test", OwnerOrProject: "team",
+				ProviderRepositoryID: "repo-42", Name: "api", CloneURL: "https://code.example.test/scm/team/api.git",
+				DefaultBranch: &defaultBranch, BaseBranch: &baseBranch, HeadBranch: &headBranch, PullRequestNumber: &pullRequestNumber,
+			},
+			BaseBranch: &baseBranch, CheckoutBranch: &checkoutBranch, PullRequestNumber: &pullRequestNumber,
+		}},
+		Launch:   &PluginTaskLaunchOptions{AgentProfileID: strPtr("agent-1"), ExecutorProfileID: strPtr("exec-1"), Prompt: &prompt, PlanMode: strPtr("replace")},
+		Metadata: map[string]any{"watch_id": "watch-1"},
+	}
+
+	proto, err := input.toProto()
+	require.NoError(t, err)
+	back, err := createTaskInputFromProto(proto)
+	require.NoError(t, err)
+	require.Equal(t, input, back)
+}
+
 func TestRepositoryProtoRoundTrip(t *testing.T) {
 	repo := Repository{
-		ID:            "repo-1",
-		WorkspaceID:   "ws-1",
-		Name:          "kdlbs/kandev",
-		DefaultBranch: strPtr("main"),
+		ID:                   "repo-1",
+		WorkspaceID:          "ws-1",
+		Name:                 "kdlbs/kandev",
+		DefaultBranch:        strPtr("main"),
+		SourceType:           "provider",
+		ProviderID:           "example-vcs",
+		ProviderRepositoryID: "repo-42",
+		ProviderHost:         "code.example.test",
+		OwnerOrProject:       "team",
+		ProviderName:         "kandev",
+		RemoteURL:            "https://code.example.test/scm/team/kandev.git",
 	}
 	proto := repo.toProto()
 	require.Equal(t, repo, repositoryFromProto(proto))
@@ -163,6 +207,8 @@ func TestRepositoryProtoRoundTrip(t *testing.T) {
 	repoNoBranch := Repository{ID: "repo-2", WorkspaceID: "ws-1", Name: "kdlbs/other"}
 	protoNoBranch := repoNoBranch.toProto()
 	require.Nil(t, protoNoBranch.DefaultBranch)
+	require.Empty(t, protoNoBranch.GetProviderId(), "new origin fields preserve empty compatibility")
+	require.Empty(t, protoNoBranch.GetRemoteUrl(), "new origin fields preserve empty compatibility")
 	require.Equal(t, repoNoBranch, repositoryFromProto(protoNoBranch))
 }
 
@@ -206,8 +252,32 @@ func TestSessionCodeStatsProtoRoundTrip(t *testing.T) {
 		LinesDeletedCommitted:   40,
 		LinesAddedPeakPending:   15,
 		LinesDeletedPeakPending: 3,
+		CommittedLinesAvailable: true,
 	}
 	proto := stats.toProto()
+	require.Equal(t, stats, sessionCodeStatsFromProto(proto))
+}
+
+// A session that predates commit-capture activation reports
+// CommittedLinesAvailable == false, not a real measurement, for committed
+// lines — the wire contract must round-trip that unavailability exactly,
+// not silently present it as a real zero-change session. LinesAddedCommitted/
+// LinesDeletedCommitted stay plain int64 (not pointers) because they are
+// already-shipped public SDK fields (ADR 0043's additive-only DTO contract);
+// see SessionCodeStats' doc comment.
+func TestSessionCodeStatsProtoRoundTrip_CommittedLinesUnavailable(t *testing.T) {
+	stats := SessionCodeStats{
+		SessionID:               "session-legacy",
+		LinesAddedCommitted:     0,
+		LinesDeletedCommitted:   0,
+		LinesAddedPeakPending:   7,
+		LinesDeletedPeakPending: 1,
+		CommittedLinesAvailable: false,
+	}
+	proto := stats.toProto()
+	if proto.GetCommittedLinesAvailable() {
+		t.Errorf("proto.CommittedLinesAvailable = true, want false")
+	}
 	require.Equal(t, stats, sessionCodeStatsFromProto(proto))
 }
 

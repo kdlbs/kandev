@@ -16,4 +16,19 @@ export class AppSidebarPage {
       await header.click();
     }
   }
+
+  /** Task row, scoped to this sidebar. `data-task-row-id` lives on the row itself. */
+  row(taskId: string): Locator {
+    return this.root.locator(`[data-task-row-id="${taskId}"]`);
+  }
+
+  /** MR badge for a task row, scoped to `app-sidebar` per the duplicate-mount rule. */
+  mrBadge(taskId: string): Locator {
+    return this.row(taskId).getByTestId(`mr-task-icon-${taskId}`);
+  }
+
+  /** PR badge for a task row, scoped to `app-sidebar` per the duplicate-mount rule. */
+  prBadge(taskId: string): Locator {
+    return this.row(taskId).getByTestId(`pr-task-icon-${taskId}`);
+  }
 }

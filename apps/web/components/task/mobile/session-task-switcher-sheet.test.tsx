@@ -8,7 +8,10 @@ import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 const mocks = vi.hoisted(() => ({
   toggleSidebarGroupCollapsed: vi.fn(),
   appState: {
+    workspaces: { activeId: "workspace-1" },
+    repositories: { itemsByWorkspaceId: {} },
     taskPRs: { byTaskId: {} },
+    taskMRs: { byWorkspaceId: {} },
     comments: { byTaskId: {} },
   },
 }));

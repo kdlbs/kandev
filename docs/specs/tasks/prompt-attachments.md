@@ -37,6 +37,10 @@ move files into a workspace manually or strip useful evidence.
 - Submitted user messages and queue entries retain attachment name, MIME type,
   raw size, kind, and delivery mode for transcript display and later authorized
   download. They do not retain base64 data or expose host filesystem paths.
+- Queued image previews resolve file-backed attachment IDs through the
+  authorized content endpoint and retain the legacy inline-data fallback. The
+  queue UI does not construct an image data URL when an attachment has no
+  inline bytes.
 - Path-delivered files are materialized in the active execution beneath the
   session's `.kandev/attachments/<session-id>/` directory before the agent is
   prompted. Existing native-prompt and path delivery choices remain available.
@@ -167,6 +171,10 @@ request paths never determine ownership.
 - **GIVEN** a message with a ready attachment is queued while an agent is busy,
   **WHEN** the queue entry drains, **THEN** the same file is attached to the
   persisted message and delivered once without re-upload.
+- **GIVEN** a queued image has an `attachment_id` and no inline `data`, **WHEN**
+  the queue panel renders it, **THEN** the thumbnail and full-size preview load
+  from the authorized attachment content endpoint; a legacy inline image still
+  loads from its MIME-qualified data URL.
 - **GIVEN** a phone viewport, **WHEN** an upload fails or exceeds the limit,
   **THEN** the existing composer shows reachable retry/remove actions and a
   contained localized error with the 100 MiB limit.
@@ -178,3 +186,4 @@ request paths never determine ownership.
 - Per-user or per-workspace configurable attachment limits.
 - External object storage or direct browser-to-executor uploads.
 - Changing the separate 10 MiB task-document attachment contract.
+- Changing the queue's existing compact thumbnail dimensions or crop policy.

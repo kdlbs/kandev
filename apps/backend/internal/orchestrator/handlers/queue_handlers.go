@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -54,6 +55,7 @@ const (
 // in messagequeue.Service.
 type QueueService interface {
 	QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error)
+	QueueMessageWithMetadataAfterInsert(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment, metadata map[string]interface{}, afterInsert func(context.Context, *messagequeue.QueuedMessage) error) (*messagequeue.QueuedMessage, error)
 	AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, bool, error)
 	GetEntry(ctx context.Context, sessionID, entryID string) (*messagequeue.QueuedMessage, error)
 	UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []messagequeue.MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error
@@ -225,7 +227,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences).
 		ToMap()
-	queued, err := h.queueService.QueueMessageWithMetadata(ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata)
+	queued, err := h.admitQueuedMessage(ctx, &req, queuedBy, metadata)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
 			status := h.queueService.GetStatus(ctx, req.SessionID)
@@ -235,20 +237,53 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 					fieldMax:       status.Max,
 				})
 		}
-		h.logger.Error("failed to queue message", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
-	}
-	if h.attachmentClaimer != nil && len(req.Attachments) > 0 {
-		if err := h.attachmentClaimer.ClaimMessageAttachments(ctx, req.TaskID, req.SessionID, queueAttachmentsToV1(req.Attachments)); err != nil {
-			if rollbackErr := h.rollbackQueuedAttachmentClaim(ctx, req.SessionID, queued.ID); rollbackErr != nil {
-				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to roll back queued attachment", nil)
-			}
+		if errors.Is(err, messagequeue.ErrTaskInactive) {
+			// The task was archived or deleted between the caller's
+			// authorization and the queue admission; do not queue a message
+			// that would be orphaned behind the task's purge.
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Task is no longer active", nil)
+		}
+		if errors.Is(err, errQueuedAttachmentRollback) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to roll back queued attachment", nil)
+		}
+		if errors.Is(err, errQueuedAttachmentUnavailable) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Attachment is no longer available", nil)
 		}
+		h.logger.Error("failed to queue message", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
 	}
 
 	h.publishStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, queued)
+}
+
+var (
+	errQueuedAttachmentUnavailable = errors.New("queued attachment unavailable")
+	errQueuedAttachmentRollback    = errors.New("queued attachment rollback failed")
+)
+
+func (h *QueueHandlers) admitQueuedMessage(ctx context.Context, req *wsQueueMessageRequest, queuedBy string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error) {
+	if h.attachmentClaimer == nil || len(req.Attachments) == 0 {
+		return h.queueService.QueueMessageWithMetadata(
+			ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata,
+		)
+	}
+	return h.queueService.QueueMessageWithMetadataAfterInsert(
+		ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata,
+		func(admittedCtx context.Context, source *messagequeue.QueuedMessage) error {
+			claimErr := h.attachmentClaimer.ClaimMessageAttachments(
+				admittedCtx, req.TaskID, req.SessionID, queueAttachmentsToV1(req.Attachments),
+			)
+			if claimErr == nil {
+				return nil
+			}
+			if rollbackErr := h.rollbackQueuedAttachmentClaim(admittedCtx, req.SessionID, source.ID); rollbackErr != nil {
+				h.logger.Error("failed to roll back queued attachment", zap.Error(rollbackErr))
+				return fmt.Errorf("%w: %v", errQueuedAttachmentRollback, rollbackErr)
+			}
+			return fmt.Errorf("%w: %v", errQueuedAttachmentUnavailable, claimErr)
+		},
+	)
 }
 
 type wsCancelAllRequest struct {

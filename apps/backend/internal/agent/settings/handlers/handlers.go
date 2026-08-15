@@ -58,6 +58,8 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents", h.httpListAgents)
 	api.POST("/agents", h.interlock, h.httpCreateAgent)
 	api.POST("/agents/tui", h.interlock, h.httpCreateCustomTUIAgent)
+	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
+	api.PATCH("/agents/tui/:id/mcp", h.interlock, h.httpUpdateCustomTUIAgentMCP)
 	api.GET("/agents/:id", h.httpGetAgent)
 	api.PATCH("/agents/:id", h.interlock, h.httpUpdateAgent)
 	api.DELETE("/agents/:id", h.interlock, h.httpDeleteAgent)
@@ -123,8 +125,18 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var request dto.AgentUpdateRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
+		return
+	}
+	request.TargetVersion = strings.TrimSpace(request.TargetVersion)
+	if request.TargetVersion == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
+		return
+	}
 	h.enqueueMaintenance(c, name, "update", func() (any, error) {
-		return h.controller.EnqueueAgentUpdate(name)
+		return h.controller.EnqueueAgentUpdate(c.Request.Context(), name, request.TargetVersion)
 	}, classifyUpdateError)
 }
 
@@ -133,7 +145,11 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	preview, err := h.controller.PreviewAgentUpdate(c.Request.Context(), name)
+	preview, err := h.controller.PreviewAgentUpdate(
+		c.Request.Context(),
+		name,
+		strings.TrimSpace(c.Query("target_version")),
+	)
 	if err == nil {
 		c.JSON(http.StatusOK, preview)
 		return
@@ -211,6 +227,12 @@ func classifyUpdateError(err error) (int, string, bool) {
 		return http.StatusBadRequest, "agent runtime update unsupported", true
 	case errors.Is(err, controller.ErrRuntimeUpdaterUnavailable):
 		return http.StatusServiceUnavailable, "agent update service not ready", true
+	case errors.Is(err, controller.ErrRuntimeUpdateTargetRequired):
+		return http.StatusBadRequest, "target version is required", true
+	case errors.Is(err, controller.ErrRuntimeUpdateTargetInvalid):
+		return http.StatusBadRequest, "target version is invalid", true
+	case errors.Is(err, controller.ErrRuntimeUpdateTargetMissing):
+		return http.StatusBadRequest, "target version is not published", true
 	default:
 		return 0, "", false
 	}
@@ -221,7 +243,13 @@ func classifyUpdatePreviewError(err error) (int, string, bool) {
 		return status, message, true
 	}
 	if errors.Is(err, controller.ErrRuntimeUpdatePreviewFailed) {
-		return http.StatusBadGateway, "unable to resolve latest runtime version", true
+		return http.StatusBadGateway, "unable to resolve runtime versions", true
+	}
+	if errors.Is(err, controller.ErrRuntimeUpdateTargetInvalid) {
+		return http.StatusBadRequest, "target version is invalid", true
+	}
+	if errors.Is(err, controller.ErrRuntimeUpdateTargetMissing) {
+		return http.StatusBadRequest, "target version is not published", true
 	}
 	return 0, "", false
 }

@@ -1,11 +1,10 @@
 /**
  * Curated icon-name → Tabler icon map for plugin registrations.
  *
- * The frozen plugin contract (docs/plans/plugins/PLUGIN-API.md) only carries
- * opaque string icon names (`NavItem.icon`, `PluginPageChrome.icon`) — plugins
- * never hold host component values. The host maps known names onto first-party
- * glyphs here; unknown or missing names fall back per surface (puzzle piece in
- * the sidebar, no icon in the page topbar).
+ * Registrations may use a curated opaque name or a plugin-owned component.
+ * The host maps known names onto first-party glyphs and passes component icons
+ * through; unknown or missing names retain each surface's existing fallback
+ * (puzzle piece in the sidebar, no icon in the page topbar).
  */
 import {
   IconBell,
@@ -28,8 +27,12 @@ import {
   IconUsers,
 } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
+import type { PluginIcon } from "./types";
 
-/** Icon names a plugin may reference from `NavItem.icon` / `PluginPageChrome.icon`. */
+type PluginIconComponent = Exclude<PluginIcon, string>;
+type ResolvedPluginIcon = TablerIcon | PluginIconComponent;
+
+/** Curated icon names a plugin may reference instead of supplying its own component. */
 export const PLUGIN_ICONS: Record<string, TablerIcon> = {
   bell: IconBell,
   bolt: IconBolt,
@@ -52,11 +55,12 @@ export const PLUGIN_ICONS: Record<string, TablerIcon> = {
 };
 
 /** Strict lookup: the named icon, or undefined when the name is unknown/missing. */
-export function lookupPluginIcon(name?: string): TablerIcon | undefined {
-  return name ? PLUGIN_ICONS[name] : undefined;
+export function lookupPluginIcon(icon?: PluginIcon): ResolvedPluginIcon | undefined {
+  if (typeof icon === "function") return icon;
+  return icon ? PLUGIN_ICONS[icon] : undefined;
 }
 
 /** Sidebar lookup: always renders something — unknown/missing names get the puzzle glyph. */
-export function resolvePluginIcon(name?: string): TablerIcon {
-  return lookupPluginIcon(name) ?? IconPuzzle;
+export function resolvePluginIcon(icon?: PluginIcon): ResolvedPluginIcon {
+  return lookupPluginIcon(icon) ?? IconPuzzle;
 }

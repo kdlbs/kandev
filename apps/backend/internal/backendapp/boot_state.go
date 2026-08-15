@@ -669,6 +669,9 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 	if queuedErr != nil {
 		b.logBootError("queued prompt counts", queuedErr)
 	}
+	// Dependency state is derived per read (never stored, so the auto-start gate
+	// can never read a stale value). One batched call for the whole boot payload.
+	dependencyViews := b.p.taskSvc.BuildDependencyViews(ctx, tasks)
 	result := make([]taskdto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		if task == nil {
@@ -710,6 +713,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
 		}
+		taskdto.EnrichTaskDependencies(&dto, bootDependencyProjection(dependencyViews[task.ID]), task)
 		dto.StatusSummary = statusSummaries[task.ID]
 		if dto.StatusSummary != nil {
 			switch {
@@ -1030,7 +1034,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 				"sessionId":    session.ID,
 				"repositoryId": nullString(dto.RepositoryID),
 				"path":         nullString(dto.WorktreePath),
-				"branch":       nullString(dto.WorktreeBranch),
+				branchFieldKey: nullString(dto.WorktreeBranch),
 			}
 			worktreesBySession[session.ID] = []string{dto.WorktreeID}
 		}
@@ -1145,8 +1149,8 @@ func (b bootStateBuilder) addTaskDetailAgentsState(ctx context.Context, state ma
 	state["settingsAgents"] = map[string]any{"items": response.Agents}
 	state["settingsData"] = map[string]any{"agentsLoaded": true, "executorsLoaded": false}
 	state["agentProfiles"] = map[string]any{
-		"items":   agentProfileOptionStates(response.Agents),
-		"version": 0,
+		"items":         agentProfileOptionStates(response.Agents),
+		versionFieldKey: 0,
 	}
 }
 

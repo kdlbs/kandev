@@ -4,6 +4,9 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+
+registerSeparateQueueRows(test);
 
 /**
  * E2E coverage for the cross-task message attribution feature.
@@ -41,21 +44,28 @@ async function waitForCrossTaskMessage(
   sessionId: string,
   timeoutMs = 30_000,
 ): Promise<{ id: string; content: string; metadata?: Record<string, unknown> }> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const { messages } = await apiClient.listSessionMessages(sessionId);
-    const match = messages.find(
-      (m) =>
-        m.author_type === "user" &&
-        m.metadata &&
-        (m.metadata as Record<string, unknown>).sender_task_id,
-    );
-    if (match) return match;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error(
-    `No cross-task user message recorded on session ${sessionId} within ${timeoutMs}ms`,
-  );
+  let match:
+    | Awaited<ReturnType<typeof apiClient.listSessionMessages>>["messages"][number]
+    | undefined;
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        match = messages.find(
+          (m) =>
+            m.author_type === "user" &&
+            m.metadata &&
+            (m.metadata as Record<string, unknown>).sender_task_id,
+        );
+        return Boolean(match);
+      },
+      {
+        timeout: timeoutMs,
+        message: `No cross-task user message recorded on session ${sessionId}`,
+      },
+    )
+    .toBe(true);
+  return match!;
 }
 
 /** Create a target task that immediately enters WAITING_FOR_INPUT — the
@@ -306,12 +316,15 @@ test.describe("Cross-task agent message attribution", () => {
 
     // Wait for the agent's tool call + final message to complete, then assert
     // the receiving session never gained a cross-task user message.
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      const { messages } = await apiClient.listSessionMessages(selfTask.session_id);
-      if (messages.some((m) => m.content.includes("attempted"))) break;
-      await new Promise((r) => setTimeout(r, 250));
-    }
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(selfTask.session_id!);
+          return messages.some((m) => m.content.includes("attempted"));
+        },
+        { timeout: 30_000, message: "agent turn did not record its attempt" },
+      )
+      .toBe(true);
     const { messages } = await apiClient.listSessionMessages(selfTask.session_id);
     const senderRow = messages.find(
       (m) =>
@@ -347,16 +360,19 @@ test.describe("Cross-task agent message attribution", () => {
     // Wait until the agent has run its turn — at least one agent-authored
     // message must appear (text reply, tool call, or both). Then assert the
     // backend rejection text shows up somewhere in the recorded payload.
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      const { messages } = await apiClient.listSessionMessages(sender.session_id);
-      // Wait for the agent's "done" text reply (emitted *after* the failed
-      // tool call), so we know the tool result has been persisted by the time
-      // we look at the metadata. Filtering on author_type avoids matching the
-      // user-authored description that contains the script source.
-      if (messages.some((m) => m.author_type === "agent" && m.content.includes("done"))) break;
-      await new Promise((r) => setTimeout(r, 250));
-    }
+    // Wait for the agent's "done" text reply (emitted *after* the failed tool
+    // call), so we know the tool result has been persisted by the time we look
+    // at the metadata. Filtering on author_type avoids matching the
+    // user-authored description that contains the script source.
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(sender.session_id!);
+          return messages.some((m) => m.author_type === "agent" && m.content.includes("done"));
+        },
+        { timeout: 30_000, message: "agent turn did not emit its done reply" },
+      )
+      .toBe(true);
     const { messages } = await apiClient.listSessionMessages(sender.session_id);
     // Search the entire payload for the rejection text — the mock-agent stuffs
     // it into the tool's output map, but the exact metadata shape varies by

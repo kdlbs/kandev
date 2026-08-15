@@ -23,6 +23,8 @@ export interface PRCreateResult {
   provider?: string;
   output?: string;
   error?: string;
+  linked?: boolean;
+  association_error?: string;
 }
 
 export function getChangeRequestTerminology(provider?: string) {

@@ -521,7 +521,11 @@ func validateCommandPrefix(prefix string) error {
 func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (*dto.AgentProfileDTO, error) {
 	profile, err := c.repo.GetAgentProfile(ctx, id)
 	if err != nil {
-		if strings.Contains(err.Error(), "agent profile not found") {
+		// The read path reports a missing (or already soft-deleted) row as
+		// sql.ErrNoRows, not as the "agent profile not found" message the
+		// update/delete paths use, so this has to go through the helper that
+		// knows both shapes or the sentinel is never returned.
+		if isProfileNotFoundErr(err) {
 			return nil, ErrAgentProfileNotFound
 		}
 		return nil, err
@@ -536,7 +540,7 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 		return nil, err
 	}
 	if err := c.repo.DeleteAgentProfile(ctx, id); err != nil {
-		if strings.Contains(err.Error(), "agent profile not found") {
+		if isProfileNotFoundErr(err) {
 			return nil, ErrAgentProfileNotFound
 		}
 		return nil, err
@@ -783,6 +787,7 @@ func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentD
 			Description:     agent.TUIConfig.Description,
 			CommandArgs:     agent.TUIConfig.CommandArgs,
 			WaitForTerminal: agent.TUIConfig.WaitForTerminal,
+			MCPStrategy:     agent.TUIConfig.MCPStrategy,
 		}
 	}
 	return result

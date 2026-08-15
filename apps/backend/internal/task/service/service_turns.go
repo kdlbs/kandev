@@ -98,13 +98,7 @@ func runtimeConfigSnapshotMetadata(session *models.TaskSession) map[string]inter
 }
 
 func buildTurnRuntimeConfigSnapshot(session *models.TaskSession) models.TurnRuntimeConfigSnapshot {
-	effective := runtimeConfigFromProfileSnapshot(session.AgentProfileSnapshot)
-	if runtime, ok := models.LoadSessionRuntimeConfig(session.Metadata); ok {
-		mergeRuntimeConfig(&effective, runtime)
-	}
-	if overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
-		mergeRuntimeConfig(&effective, overrides)
-	}
+	effective, _ := models.LoadEffectiveSessionRuntimeConfig(session)
 	baseline, _ := models.LoadSessionACPConfigBaseline(session.Metadata)
 	result := models.TurnRuntimeConfigSnapshot{
 		Model:          effective.Model,
@@ -164,20 +158,18 @@ func selectedTurnConfigOption(
 	}, true
 }
 
-func runtimeConfigFromProfileSnapshot(snapshot map[string]interface{}) models.SessionRuntimeConfig {
-	config := models.SessionRuntimeConfig{}
-	if snapshot == nil {
-		return config
+func selectedConfigValueName(options []streams.ConfigOptionValue, value string) string {
+	for _, option := range options {
+		if option.Value == value {
+			return option.Name
+		}
 	}
-	config.Model = models.StringFromAny(snapshot[runtimeModelConfigID])
-	config.Mode = models.StringFromAny(snapshot["mode"])
-	config.ConfigOptions = stringConfigOptions(snapshot["config_options"])
-	if config.ConfigOptions == nil {
-		config.ConfigOptions = stringConfigOptions(snapshot["configOptions"])
-	}
-	return config
+	return value
 }
 
+// stringConfigOptions decodes the profile option shapes used by persisted
+// task-service metadata. Keep this package-local decoder available for the
+// service coverage tests that exercise both in-memory and JSON-like values.
 func stringConfigOptions(raw interface{}) map[string]string {
 	switch values := raw.(type) {
 	case map[string]string:
@@ -193,33 +185,6 @@ func stringConfigOptions(raw interface{}) map[string]string {
 	default:
 		return nil
 	}
-}
-
-func mergeRuntimeConfig(target *models.SessionRuntimeConfig, source models.SessionRuntimeConfig) {
-	if source.Model != "" {
-		target.Model = source.Model
-	}
-	if source.Mode != "" {
-		target.Mode = source.Mode
-	}
-	if source.ConfigOptions == nil {
-		return
-	}
-	if target.ConfigOptions == nil {
-		target.ConfigOptions = make(map[string]string)
-	}
-	for key, value := range source.ConfigOptions {
-		target.ConfigOptions[key] = value
-	}
-}
-
-func selectedConfigValueName(options []streams.ConfigOptionValue, value string) string {
-	for _, option := range options {
-		if option.Value == value {
-			return option.Name
-		}
-	}
-	return value
 }
 
 // GetTurn returns a turn by ID.

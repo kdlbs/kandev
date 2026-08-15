@@ -98,27 +98,28 @@ type MockClient struct {
 	// `github_not_configured`. Used by e2e tests that need to verify the
 	// "Connect GitHub" banner in the Remote-tab chip popover without ripping
 	// the whole mock client out of the wiring.
-	reposUnavailable bool
-	prs              map[prKey]*PR
-	issues           map[issueKey]*Issue
-	prsByBranch      map[branchKey]*PR
-	orgs             []GitHubOrg
-	repos            map[string][]GitHubRepo
-	branches         map[repoKey][]RepoBranch
-	reviews          map[prKey][]PRReview
-	comments         map[prKey][]PRComment
-	checks           map[checkKey][]CheckRun
-	files            map[prKey][]PRFile
-	commits          map[prKey][]PRCommitInfo
-	commitDetails    map[commitDetailKey]PRCommitDetail
-	submittedReviews []submittedReview
-	requestedReviews []requestedReviewers
-	mergedPRs        []mergedPR
-	mergeMethods     map[repoKey]RepoMergeMethods
-	gists            map[string]mockGist
-	deletedGists     []string
-	nextGistID       int
-	repoFiles        map[repoKey][]repoFileEntry
+	reposUnavailable  bool
+	prs               map[prKey]*PR
+	issues            map[issueKey]*Issue
+	prsByBranch       map[branchKey]*PR
+	orgs              []GitHubOrg
+	repos             map[string][]GitHubRepo
+	branches          map[repoKey][]RepoBranch
+	reviews           map[prKey][]PRReview
+	comments          map[prKey][]PRComment
+	checks            map[checkKey][]CheckRun
+	files             map[prKey][]PRFile
+	commits           map[prKey][]PRCommitInfo
+	prCommitsFailures map[prKey]int
+	commitDetails     map[commitDetailKey]PRCommitDetail
+	submittedReviews  []submittedReview
+	requestedReviews  []requestedReviewers
+	mergedPRs         []mergedPR
+	mergeMethods      map[repoKey]RepoMergeMethods
+	gists             map[string]mockGist
+	deletedGists      []string
+	nextGistID        int
+	repoFiles         map[repoKey][]repoFileEntry
 
 	// findPRByBranchCalls counts FindPRByBranch invocations so tests can
 	// assert that branch-detection probes are throttled. Atomic because
@@ -146,22 +147,23 @@ type mockGist struct {
 // NewMockClient creates a new MockClient with default values.
 func NewMockClient() *MockClient {
 	return &MockClient{
-		user:          mockDefaultUser,
-		authenticated: true,
-		prs:           make(map[prKey]*PR),
-		issues:        make(map[issueKey]*Issue),
-		prsByBranch:   make(map[branchKey]*PR),
-		repos:         make(map[string][]GitHubRepo),
-		branches:      make(map[repoKey][]RepoBranch),
-		reviews:       make(map[prKey][]PRReview),
-		comments:      make(map[prKey][]PRComment),
-		checks:        make(map[checkKey][]CheckRun),
-		files:         make(map[prKey][]PRFile),
-		commits:       make(map[prKey][]PRCommitInfo),
-		commitDetails: make(map[commitDetailKey]PRCommitDetail),
-		mergeMethods:  make(map[repoKey]RepoMergeMethods),
-		gists:         make(map[string]mockGist),
-		repoFiles:     make(map[repoKey][]repoFileEntry),
+		user:              mockDefaultUser,
+		authenticated:     true,
+		prs:               make(map[prKey]*PR),
+		issues:            make(map[issueKey]*Issue),
+		prsByBranch:       make(map[branchKey]*PR),
+		repos:             make(map[string][]GitHubRepo),
+		branches:          make(map[repoKey][]RepoBranch),
+		reviews:           make(map[prKey][]PRReview),
+		comments:          make(map[prKey][]PRComment),
+		checks:            make(map[checkKey][]CheckRun),
+		files:             make(map[prKey][]PRFile),
+		commits:           make(map[prKey][]PRCommitInfo),
+		prCommitsFailures: make(map[prKey]int),
+		commitDetails:     make(map[commitDetailKey]PRCommitDetail),
+		mergeMethods:      make(map[repoKey]RepoMergeMethods),
+		gists:             make(map[string]mockGist),
+		repoFiles:         make(map[repoKey][]repoFileEntry),
 	}
 }
 
@@ -452,9 +454,14 @@ func (m *MockClient) ListPRFiles(_ context.Context, owner, repo string, number i
 }
 
 func (m *MockClient) ListPRCommits(_ context.Context, owner, repo string, number int) ([]PRCommitInfo, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.commits[prKey{owner, repo, number}], nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := prKey{owner, repo, number}
+	if remaining := m.prCommitsFailures[k]; remaining > 0 {
+		m.prCommitsFailures[k] = remaining - 1
+		return nil, fmt.Errorf("mock: PR commits unavailable for %s/%s#%d", owner, repo, number)
+	}
+	return m.commits[k], nil
 }
 
 func (m *MockClient) GetPRCommitDetail(_ context.Context, owner, repo, sha string) (PRCommitDetail, error) {
@@ -874,6 +881,18 @@ func (m *MockClient) AddPRCommits(owner, repo string, number int, commits []PRCo
 	m.commits[k] = append(m.commits[k], commits...)
 }
 
+// SetPRCommitsFailures queues a number of failed ListPRCommits responses for a PR.
+func (m *MockClient) SetPRCommitsFailures(owner, repo string, number, failures int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := prKey{owner, repo, number}
+	if failures <= 0 {
+		delete(m.prCommitsFailures, k)
+		return
+	}
+	m.prCommitsFailures[k] = failures
+}
+
 // AddPRCommitDetail seeds an individual GitHub commit response.
 func (m *MockClient) AddPRCommitDetail(owner, repo, sha string, detail PRCommitDetail) {
 	m.mu.Lock()
@@ -904,6 +923,7 @@ func (m *MockClient) Reset() {
 	m.checks = make(map[checkKey][]CheckRun)
 	m.files = make(map[prKey][]PRFile)
 	m.commits = make(map[prKey][]PRCommitInfo)
+	m.prCommitsFailures = make(map[prKey]int)
 	m.commitDetails = make(map[commitDetailKey]PRCommitDetail)
 	m.submittedReviews = nil
 	m.requestedReviews = nil

@@ -25,9 +25,9 @@ const (
 // pipeline-status rollup (an allowed-to-fail job doesn't fail the pipeline).
 func pipelineJobBucket(job PipelineJob) string {
 	switch job.Status {
-	case "success", "skipped":
+	case pipelineStatusSuccess, pipelineStatusSkipped:
 		return pipelineJobBucketPassed
-	case "failed", "canceled":
+	case pipelineStatusFailed, pipelineStatusCanceled:
 		if job.AllowFailure {
 			return pipelineJobBucketPassed
 		}

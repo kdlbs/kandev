@@ -665,7 +665,7 @@ func TestGitSnapshotsAndCommitsCascadeOnSessionDelete(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateGitSnapshot: %v", err)
 	}
-	if err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
+	if _, err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
 		ID: "cascade-commit", SessionID: "session-cascade", CommitSHA: "abc123",
 		CommittedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
@@ -707,7 +707,7 @@ func TestCreateSessionCommitRoundTripsEveryField(t *testing.T) {
 		Deletions:            45,
 		CreatedAt:            time.Date(2026, 4, 2, 3, 4, 6, 0, time.UTC),
 	}
-	if err := repo.CreateSessionCommit(ctx, want); err != nil {
+	if _, err := repo.CreateSessionCommit(ctx, want); err != nil {
 		t.Fatalf("CreateSessionCommit: %v", err)
 	}
 
@@ -779,7 +779,7 @@ func TestCreateSessionCommitDefaultsIDAndCreatedAt(t *testing.T) {
 		SessionID: "session-commit-defaults", CommitSHA: "deadbeef",
 		CommittedAt: time.Date(2026, 4, 2, 3, 4, 5, 0, time.UTC),
 	}
-	if err := repo.CreateSessionCommit(ctx, commit); err != nil {
+	if _, err := repo.CreateSessionCommit(ctx, commit); err != nil {
 		t.Fatalf("CreateSessionCommit: %v", err)
 	}
 	if commit.ID == "" {
@@ -797,6 +797,57 @@ func TestCreateSessionCommitDefaultsIDAndCreatedAt(t *testing.T) {
 	}
 }
 
+// Regression: the same underlying git commit can now be observed by more
+// than one trigger (live event, per-turn sweep, archive capture). A second
+// CreateSessionCommit for the same (session_id, commit_sha) must be a no-op
+// - not a duplicate row, and not an error - and must preserve the original
+// observation's created_at rather than overwriting it with the replay time.
+func TestCreateSessionCommitIsIdempotentOnSessionAndSHA(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForGit(t, repo, "task-commit-idempotent", "session-commit-idempotent")
+
+	first := &models.SessionCommit{
+		ID: "commit-first", SessionID: "session-commit-idempotent", CommitSHA: "shared-sha",
+		CommitMessage: "feat: first observation",
+		CommittedAt:   time.Date(2026, 4, 2, 3, 4, 5, 0, time.UTC),
+	}
+	inserted, err := repo.CreateSessionCommit(ctx, first)
+	if err != nil {
+		t.Fatalf("CreateSessionCommit(first): %v", err)
+	}
+	if !inserted {
+		t.Error("CreateSessionCommit(first) inserted = false, want true")
+	}
+
+	second := &models.SessionCommit{
+		ID: "commit-second", SessionID: "session-commit-idempotent", CommitSHA: "shared-sha",
+		CommitMessage: "feat: re-observed by a different trigger",
+		CommittedAt:   time.Date(2026, 4, 2, 4, 0, 0, 0, time.UTC),
+	}
+	inserted, err = repo.CreateSessionCommit(ctx, second)
+	if err != nil {
+		t.Fatalf("CreateSessionCommit(second): %v", err)
+	}
+	if inserted {
+		t.Error("CreateSessionCommit(second) inserted = true, want false (ON CONFLICT DO NOTHING)")
+	}
+
+	listed, err := repo.GetSessionCommits(ctx, "session-commit-idempotent")
+	if err != nil {
+		t.Fatalf("GetSessionCommits: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("commit rows = %d, want 1", len(listed))
+	}
+	if listed[0].ID != "commit-first" {
+		t.Errorf("surviving row = %q, want commit-first (the original observation)", listed[0].ID)
+	}
+	if listed[0].CommitMessage != first.CommitMessage {
+		t.Errorf("CommitMessage = %q, want the first observation's message unchanged", listed[0].CommitMessage)
+	}
+}
+
 func TestGetSessionCommitsOrdersByCommittedAtDescending(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -805,14 +856,14 @@ func TestGetSessionCommitsOrdersByCommittedAtDescending(t *testing.T) {
 
 	base := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
 	for i, id := range []string{"c1", "c2", "c3"} {
-		if err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
+		if _, err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
 			ID: id, SessionID: "session-commit-order", CommitSHA: id,
 			CommittedAt: base.Add(time.Duration(i) * time.Hour),
 		}); err != nil {
 			t.Fatalf("CreateSessionCommit(%s): %v", id, err)
 		}
 	}
-	if err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
+	if _, err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
 		ID: "noise", SessionID: "session-commit-noise", CommitSHA: "noise",
 		CommittedAt: base.Add(10 * time.Hour),
 	}); err != nil {
@@ -849,7 +900,7 @@ func TestDeleteSessionCommitRemovesOnlyTheTargetRow(t *testing.T) {
 
 	base := time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)
 	for i, id := range []string{"keep-1", "drop-me", "keep-2"} {
-		if err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
+		if _, err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
 			ID: id, SessionID: "session-commit-del", CommitSHA: id,
 			CommittedAt: base.Add(time.Duration(i) * time.Hour),
 		}); err != nil {
@@ -916,7 +967,7 @@ func TestGitSnapshotMethodsPropagateBackendErrors(t *testing.T) {
 	if _, err := repo.GetLatestGitSnapshotsBySessionIDs(ctx, []string{"session-git-broken"}); err == nil {
 		t.Error("GetLatestGitSnapshotsBySessionIDs on a closed database returned nil")
 	}
-	if err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
+	if _, err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
 		ID: "commit-broken", SessionID: "session-git-broken", CommitSHA: "x",
 		CommittedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}); err == nil {

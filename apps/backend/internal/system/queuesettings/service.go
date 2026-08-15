@@ -15,6 +15,8 @@ type Target interface {
 	SetMaxPerSession(int)
 	MergeEnabled() bool
 	SetMergeEnabled(bool)
+	AutoMergeEnabled() bool
+	SetAutoMergeEnabled(bool)
 }
 
 type EnvironmentReader func() Environment
@@ -59,7 +61,7 @@ func (s *Service) Get(ctx context.Context) (Response, error) {
 // omits keep their current effective value rather than resetting to zero, so
 // a client that edits only one field can never silently clobber another (see
 // SettingsPatch). The environment lock only blocks a patch that actually
-// attempts to change max_per_session — it does not control merge_enabled.
+// attempts to change max_per_session. It controls neither merge setting.
 func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -87,12 +89,13 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 	if err := s.store.Save(ctx, settings); err != nil {
 		return Response{}, err
 	}
-	s.target.SetMaxPerSession(settings.MaxPerSession)
-	s.target.SetMergeEnabled(settings.MergeEnabled)
 	updated, err := Resolve(&settings, environment)
 	if err != nil {
 		return Response{}, err
 	}
+	s.target.SetMaxPerSession(updated.Effective.MaxPerSession)
+	s.target.SetMergeEnabled(updated.Effective.MergeEnabled)
+	s.target.SetAutoMergeEnabled(updated.Effective.AutoMergeEnabled)
 	return updated.Response, nil
 }
 

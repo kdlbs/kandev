@@ -90,8 +90,8 @@ func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) 
 // execution environment. See NativeBinaryAgent.
 func (a *CopilotACP) NativeBinaryName() string { return copilotNativeBinary }
 
-func (a *CopilotACP) BuildCommand(CommandOptions) Command {
-	return a.ManagedNPMRuntime().CachedACPCommand()
+func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
+	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
 }
 
 func (a *CopilotACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {

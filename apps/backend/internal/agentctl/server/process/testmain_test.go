@@ -26,6 +26,7 @@ import (
 const kandevTestFixtureEnv = "KANDEV_TEST_FIXTURE"
 const gitFetchRaceRealGitEnv = "KANDEV_GIT_FETCH_RACE_REAL_GIT"
 const gitFetchRaceWorktreeEnv = "KANDEV_GIT_FETCH_RACE_WORKTREE"
+const legacyGitLabHostEnv = "GITLAB_HOST"
 
 // TestMain branches into fixture-binary mode when the activation env var
 // is set; otherwise it runs the test suite normally — wrapped in goleak so
@@ -36,6 +37,16 @@ func TestMain(m *testing.M) {
 		runFixture(spec)
 		return
 	}
+	// Tests build GitOperator with a nil environment (NewGitOperator(dir, log,
+	// nil)), which falls back to os.Environ() (environmentValues in git.go).
+	// An inherited KANDEV_GITLAB_HOST / GITLAB_HOST / GITLAB_TOKEN then leaks
+	// into GitLab remote-host detection and PR-provider auth, failing tests that
+	// assume these are unset. Scrub them here so the suite is hermetic regardless
+	// of the parent shell's environment; tests that need a specific value set it
+	// explicitly via t.Setenv.
+	_ = os.Unsetenv(gitLabHostEnv)
+	_ = os.Unsetenv(legacyGitLabHostEnv)
+	_ = os.Unsetenv(gitLabTokenEnv)
 	goleak.VerifyTestMain(m)
 }
 

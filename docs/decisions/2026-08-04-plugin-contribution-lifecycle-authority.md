@@ -33,6 +33,15 @@ timer:
 - stale generations cannot publish lifecycle completion or registrations over a newer
   load.
 
+Repository and review provider callbacks use the same authority. The registry does not
+only request cooperative cancellation: it races every callback against the owning
+generation's abort signal, refuses to start already-aborted work, and rejects late
+results with `AbortError` even when third-party code ignores its signal. Subscription
+cleanup is likewise owner-tracked and idempotent. Unloaded code therefore cannot
+publish stale repositories, review snapshots, or callback results into a newer UI.
+Synchronous coarse callbacks such as repository `matchesURL` are also fault-isolated:
+a throw is treated as no match in every host call site, never as a task-dialog crash.
+
 Desktop dockview and the phone task layout consume the same lifecycle authority. If a
 removed plugin panel is focused on a phone, the mobile session state changes to `chat`.
 Mobile-enabled registrations are exposed through one touch-sized **Panels** bottom-nav
@@ -64,6 +73,10 @@ one extra tap to choose a plugin panel. Per-user state cleanup failures become v
 uninstall failures instead of warnings, so an operator may need to retry after a
 database problem; this is preferable to reporting success while retaining private
 data.
+
+Provider work becomes result-fenced as well as cancellation-aware. This adds a small
+host wrapper around callbacks, but makes unload safety independent of third-party abort
+discipline.
 
 ## Alternatives Considered
 

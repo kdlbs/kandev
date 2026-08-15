@@ -1,7 +1,20 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { summarizeObservations } from "./retry-summary";
-import type { ShardMetadata } from "./e2e-timings";
+import { computeOutcome, summarizeObservations, type TestOutcome } from "./retry-summary";
+import { parseBlobReports, type ShardMetadata } from "./e2e-timings";
 import type { TimingObservation } from "./e2e-timings";
+
+const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixtures__");
+const parityFixtureDir = path.join(fixturesDir, "playwright-parity");
+const repeatEachFixtureDir = path.join(fixturesDir, "repeat-each-parity");
+
+function playwrightStats(directory: string): Record<string, number> {
+  return JSON.parse(
+    fs.readFileSync(path.join(directory, "playwright-stats.json"), "utf8"),
+  ) as Record<string, number>;
+}
 
 function observation(overrides: Partial<TimingObservation>): TimingObservation {
   return {
@@ -68,6 +81,13 @@ describe("retry summary", () => {
       timedOut: 1,
       skipped: 0,
     });
+    expect(summary.flake).toEqual({
+      flaky: 1,
+      unexpected: 2,
+      executed: 4,
+      ratePerThousand: 250,
+      flakyTests: ["chromium::tests/flaky.spec.ts::flaky"],
+    });
     expect(summary.tests).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ key: "chromium::tests/flaky.spec.ts::flaky", attempts: 2 }),
@@ -90,6 +110,141 @@ describe("retry summary", () => {
         }),
       ]),
     );
+  });
+
+  it("matches Playwright's outcome algorithm, including the cases a retry count gets wrong", () => {
+    // A retried-then-passed test is the flake we want to count.
+    expect(computeOutcome(["failed", "passed"])).toBe("flaky");
+    expect(computeOutcome(["timedOut", "timedOut", "passed"])).toBe("flaky");
+    // Playwright never counts an interrupted attempt as unexpected, so an
+    // interrupted-then-passed test is expected, not flaky.
+    expect(computeOutcome(["interrupted", "passed"])).toBe("expected");
+    expect(computeOutcome(["passed"])).toBe("expected");
+    expect(computeOutcome(["failed", "failed", "failed"])).toBe("unexpected");
+    // A did-not-run attempt of a test expected to pass is neither expected nor
+    // unexpected, so failing and then skipping stays unexpected.
+    expect(computeOutcome(["failed", "skipped"])).toBe("unexpected");
+    expect(computeOutcome(["skipped"])).toBe("skipped");
+    expect(computeOutcome(["interrupted"])).toBe("skipped");
+    // `test.fail()` inverts the expectation: failing is expected, passing is not.
+    expect(computeOutcome(["failed"], "failed")).toBe("expected");
+    expect(computeOutcome(["passed"], "failed")).toBe("unexpected");
+    expect(computeOutcome(["passed", "failed"], "failed")).toBe("flaky");
+  });
+
+  it("reads the expected status recorded on each attempt", () => {
+    const summary = summarizeObservations(
+      [
+        observation({
+          key: "chromium::tests/expected-failure.spec.ts::fails on purpose",
+          status: "failed",
+          expectedStatus: "failed",
+        }),
+      ],
+      "2026-08-10T10:02:00.000Z",
+    );
+
+    expect(summary.tests[0]?.outcome).toBe("expected");
+    expect(summary.flake).toMatchObject({ flaky: 0, unexpected: 0, executed: 1 });
+  });
+
+  it("reports the flake rate per thousand executed tests, ignoring skipped ones", () => {
+    const observations = Array.from({ length: 8 }, (_, index) =>
+      observation({ key: `chromium::tests/bulk.spec.ts::case ${index}`, title: `case ${index}` }),
+    );
+    observations.push(
+      observation({ key: "chromium::tests/skipped.spec.ts::off", status: "skipped" }),
+      observation({ key: "chromium::tests/flaky.spec.ts::flaky", status: "failed" }),
+      observation({ key: "chromium::tests/flaky.spec.ts::flaky", retry: 1, status: "passed" }),
+    );
+
+    const summary = summarizeObservations(observations, "2026-08-10T10:02:00.000Z");
+
+    expect(summary.flake.executed).toBe(9);
+    expect(summary.flake.ratePerThousand).toBe(111.11);
+  });
+
+  it("ignores a blob report that was parsed twice instead of inventing retries", () => {
+    const attempt = observation({ key: "chromium::tests/a.spec.ts::a", status: "passed" });
+
+    const summary = summarizeObservations([attempt, { ...attempt }], "2026-08-10T10:02:00.000Z");
+
+    expect(summary.tests[0]?.attempts).toBe(1);
+    expect(summary.tests[0]?.outcome).toBe("expected");
+    expect(summary.flake).toMatchObject({ flaky: 0, executed: 1 });
+  });
+
+  // The whole point of the flake rate is that it is Playwright's number. This
+  // parses a real blob report and asserts our totals against the `stats` block
+  // Playwright itself produced from that same blob; see the fixture's README.
+  it("reproduces Playwright's own per-outcome totals for a recorded run", () => {
+    const summary = summarizeObservations(
+      parseBlobReports(parityFixtureDir),
+      "2026-08-13T10:00:00.000Z",
+    );
+    const tally = (outcome: TestOutcome) =>
+      summary.tests.filter((test) => test.outcome === outcome).length;
+
+    const stats = playwrightStats(parityFixtureDir);
+
+    expect({
+      expected: tally("expected"),
+      unexpected: tally("unexpected"),
+      flaky: tally("flaky"),
+      skipped: tally("skipped"),
+    }).toEqual(stats);
+    expect(summary.flake.flaky).toBe(stats.flaky);
+    expect(summary.flake.flakyTests).toEqual([
+      "chromium::tests/outcomes.spec.ts::flakes once then passes",
+      "chromium::tests/outcomes.spec.ts::flakes twice then passes",
+    ]);
+
+    // Totals alone are not enough: misreading `expectedStatus` swaps the two
+    // `test.fail()` tests between expected and unexpected and leaves every
+    // total identical, so pin each test's verdict as well.
+    expect(Object.fromEntries(summary.tests.map((test) => [test.title, test.outcome]))).toEqual({
+      "always passes": "expected",
+      "flakes once then passes": "flaky",
+      "flakes twice then passes": "flaky",
+      "always fails": "unexpected",
+      "is skipped": "skipped",
+      "is expected to fail and does": "expected",
+      "is expected to fail but passes": "unexpected",
+    });
+  });
+
+  // `--repeat-each` is the flag used to verify de-flaking work, so undercounting
+  // here would be undercounting exactly when the number is being relied on.
+  it("counts every --repeat-each repetition as its own execution", () => {
+    const summary = summarizeObservations(
+      parseBlobReports(repeatEachFixtureDir),
+      "2026-08-13T10:00:00.000Z",
+    );
+    const stats = playwrightStats(repeatEachFixtureDir);
+
+    expect(summary.flake.executed).toBe(4);
+    expect(summary.flake.flaky).toBe(stats.flaky);
+    expect(summary.tests.map((test) => test.statuses)).toEqual([
+      ["passed"],
+      ["passed"],
+      ["failed", "passed"],
+      ["failed", "passed"],
+    ]);
+    // All four repetitions share one project/file/title; only the test id splits them.
+    expect(new Set(summary.tests.map((test) => test.key)).size).toBe(1);
+    expect(new Set(summary.tests.map((test) => test.testId)).size).toBe(4);
+  });
+
+  it("still collapses a repeated report copy of the same execution", () => {
+    const observations = parseBlobReports(repeatEachFixtureDir);
+
+    const summary = summarizeObservations(
+      [...observations, ...observations.map((observation) => ({ ...observation }))],
+      "2026-08-13T10:00:00.000Z",
+    );
+
+    expect(summary.flake.executed).toBe(4);
+    expect(summary.tests.map((test) => test.attempts)).toEqual([1, 1, 2, 2]);
   });
 
   it("compares planned and actual shard durations and keeps plan health counters", () => {

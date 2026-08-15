@@ -5,6 +5,32 @@ import (
 	"strings"
 )
 
+// NormalizeReleaseVersion returns a dotted numeric release version suitable
+// for compatibility comparisons. Kandev release builds are tagged `vX.Y.Z`,
+// while plugin manifests use `X.Y.Z`; development and git-describe strings
+// are deliberately not release versions and must not fall through to the
+// byte-wise fallback in CompareVersions.
+func NormalizeReleaseVersion(raw string) (string, bool) {
+	version := strings.TrimSpace(raw)
+	if strings.HasPrefix(version, "v") || strings.HasPrefix(version, "V") {
+		version = version[1:]
+	}
+	parts := strings.Split(version, ".")
+	if version == "" || len(parts) > 3 {
+		return "", false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return "", false
+		}
+		value, err := strconv.Atoi(part)
+		if err != nil || value < 0 {
+			return "", false
+		}
+	}
+	return version, true
+}
+
 // CompareVersions performs a best-effort, dependency-free comparison of two
 // dotted version strings (e.g. plugin manifest "version" values), for
 // callers that need to pick the "greatest" of a small set of versions

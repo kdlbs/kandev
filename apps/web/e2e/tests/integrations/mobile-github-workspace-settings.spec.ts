@@ -18,6 +18,12 @@ test.describe("GitHub workspace settings on mobile", () => {
     ]);
     await stubGitHubRateLimits(testPage, workspaceId);
     await testPage.goto(`/settings/workspaces/${workspaceId}/integrations/github`);
+    const accessCard = testPage.getByTestId("github-workspace-access-card");
+    const accessContent = accessCard.locator('[data-slot="card-content"]');
+    const accessContentPaddingTop = await accessContent.evaluate(
+      (element) => getComputedStyle(element).paddingTop,
+    );
+    expect(Number.parseFloat(accessContentPaddingTop)).toBeLessThan(24);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
       "Inherit executor Git credentials",
@@ -50,16 +56,22 @@ test.describe("GitHub workspace settings on mobile", () => {
     await testPage.keyboard.press("Escape");
     const rateLimitHelp = automation.getByRole("button", { name: "Show GitHub API limits" });
     await expect(rateLimitHelp).toBeVisible();
+    await expect(rateLimitHelp.getByTestId("github-rate-limit-icon")).toHaveClass(
+      /tabler-icon-gauge/,
+    );
     const rateLimitHelpBox = await rateLimitHelp.boundingBox();
     expect(rateLimitHelpBox?.height).toBeGreaterThanOrEqual(44);
     await rateLimitHelp.tap();
     const rateLimitDrawer = testPage.getByRole("dialog", { name: "GitHub API limits" });
     await expect(rateLimitDrawer).toContainText(
-      "API rate limit: 4,321 of 5,000 requests remaining",
+      "API rate limit: 3,210 of 5,000 requests remaining",
     );
     await expect(rateLimitDrawer).toContainText(
-      "GraphQL query limit: 4,900 of 5,000 points remaining",
+      "GraphQL query limit: 4,789 of 5,000 points remaining",
     );
+    await prCapture.screenshot("mobile-github-rate-limit-drawer", {
+      caption: "GitHub API rate limits refresh in the mobile drawer",
+    });
     await testPage.keyboard.press("Escape");
 
     await automation.getByRole("button", { name: "Change connection" }).tap();

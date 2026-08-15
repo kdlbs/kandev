@@ -141,8 +141,12 @@ func TestPostgresSessionCommitLifecycle(t *testing.T) {
 		FilesChanged: 9, Insertions: 123, Deletions: 45,
 		CreatedAt: time.Date(2026, 4, 2, 3, 4, 6, 0, time.UTC),
 	}
-	if err := repo.CreateSessionCommit(ctx, want); err != nil {
+	inserted, err := repo.CreateSessionCommit(ctx, want)
+	if err != nil {
 		t.Fatalf("CreateSessionCommit: %v", err)
+	}
+	if !inserted {
+		t.Error("CreateSessionCommit(want) inserted = false, want true (first observation)")
 	}
 	got, err := repo.GetLatestSessionCommit(ctx, "session-commit-pg")
 	if err != nil {
@@ -150,7 +154,26 @@ func TestPostgresSessionCommitLifecycle(t *testing.T) {
 	}
 	assertSessionCommitEqual(t, got, want)
 
-	if err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
+	// The unique index on (session_id, commit_sha) must hold on Postgres too
+	// (ADR-0027 parity): the same commit observed by a second trigger (live
+	// event, sweep, archive) is a no-op, not a duplicate row or an error.
+	dupInserted, err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
+		ID: "commit-pg-duplicate", SessionID: "session-commit-pg", CommitSHA: want.CommitSHA,
+		CommittedAt: want.CommittedAt,
+	})
+	if err != nil {
+		t.Fatalf("CreateSessionCommit(duplicate): %v", err)
+	}
+	if dupInserted {
+		t.Error("CreateSessionCommit(duplicate) inserted = true, want false (ON CONFLICT DO NOTHING)")
+	}
+	if got := countRows(t, repo,
+		`SELECT COUNT(1) FROM task_session_commits WHERE session_id = ? AND commit_sha = ?`,
+		"session-commit-pg", want.CommitSHA); got != 1 {
+		t.Errorf("rows for %s after duplicate insert = %d, want 1", want.CommitSHA, got)
+	}
+
+	if _, err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
 		ID: "commit-pg-older", SessionID: "session-commit-pg", CommitSHA: "older",
 		CommittedAt: want.CommittedAt.Add(-time.Hour),
 	}); err != nil {
@@ -173,6 +196,98 @@ func TestPostgresSessionCommitLifecycle(t *testing.T) {
 	}
 	if _, err := repo.GetLatestSessionCommit(ctx, "session-commit-pg-missing"); !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("GetLatestSessionCommit(missing) = %v, want sql.ErrNoRows", err)
+	}
+}
+
+// TestPostgresSessionCommitsDedupeAndActivationMigration mirrors
+// TestSessionCommitsDedupeAndActivationMigration (session_commits_migration_test.go)
+// on Postgres: migrateSessionCommitsDedupeAndActivation is dialect-sensitive
+// (ROW_NUMBER() OVER (PARTITION BY ...), CREATE UNIQUE INDEX IF NOT EXISTS,
+// ON CONFLICT(key) DO NOTHING), and the SQLite test asserts index presence
+// through sqlite_master, which does not exist on Postgres — this asserts the
+// same end state through pg_indexes instead (ADR-0027 parity).
+func TestPostgresSessionCommitsDedupeAndActivationMigration(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	seedPostgresTask(t, repo, "task-commits-migration-pg")
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-commits-migration-pg", TaskID: "task-commits-migration-pg",
+		State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	// Simulate a legacy database: no unique index yet, and a duplicate
+	// (session_id, commit_sha) pair that a plain INSERT (pre-ON CONFLICT)
+	// could have produced, e.g. via a re-run archive capture.
+	if _, err := repo.db.Exec(`DROP INDEX IF EXISTS uniq_session_commits_session_sha`); err != nil {
+		t.Fatalf("drop unique index to simulate legacy schema: %v", err)
+	}
+
+	earlier := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	later := time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)
+	insertRawCommit(t, repo, "commit-earliest-pg", "session-commits-migration-pg", "dup-sha-pg", earlier)
+	insertRawCommit(t, repo, "commit-latest-pg", "session-commits-migration-pg", "dup-sha-pg", later)
+	insertRawCommit(t, repo, "commit-unique-pg", "session-commits-migration-pg", "solo-sha-pg", later)
+
+	if got := countRows(t, repo,
+		`SELECT COUNT(1) FROM task_session_commits WHERE session_id = ?`,
+		"session-commits-migration-pg"); got != 3 {
+		t.Fatalf("pre-migration commit rows = %d, want 3", got)
+	}
+
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay migrations: %v", err)
+	}
+
+	var indexName string
+	if err := repo.db.Get(&indexName, `
+		SELECT indexname FROM pg_indexes WHERE indexname = 'uniq_session_commits_session_sha'
+	`); err != nil {
+		t.Fatalf("uniq_session_commits_session_sha index is missing: %v", err)
+	}
+
+	if got := countRows(t, repo,
+		`SELECT COUNT(1) FROM task_session_commits WHERE session_id = ? AND commit_sha = ?`,
+		"session-commits-migration-pg", "dup-sha-pg"); got != 1 {
+		t.Fatalf("duplicate (session_id, commit_sha) rows after migration = %d, want 1", got)
+	}
+
+	var survivorID string
+	if err := repo.db.Get(&survivorID, repo.db.Rebind(`
+		SELECT id FROM task_session_commits WHERE session_id = ? AND commit_sha = ?
+	`), "session-commits-migration-pg", "dup-sha-pg"); err != nil {
+		t.Fatalf("select dedupe survivor: %v", err)
+	}
+	if survivorID != "commit-earliest-pg" {
+		t.Errorf("dedupe kept %q, want commit-earliest-pg (earliest created_at)", survivorID)
+	}
+
+	activatedAt := readCommitCaptureActivatedAt(t, repo)
+	if activatedAt == "" {
+		t.Fatal("commit_capture_activated_at was not published")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, activatedAt); err != nil {
+		t.Errorf("commit_capture_activated_at = %q, not RFC3339Nano: %v", activatedAt, err)
+	}
+
+	// Replay: must not error, must not duplicate the index, and must not
+	// move the activation marker (legacy rows must stay pinned to the
+	// original activation instant, not silently drift on every boot).
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay migrations twice: %v", err)
+	}
+	if got := readCommitCaptureActivatedAt(t, repo); got != activatedAt {
+		t.Errorf("commit_capture_activated_at changed on replay: %q -> %q", activatedAt, got)
+	}
+	if got := countRows(t, repo,
+		`SELECT COUNT(1) FROM task_session_commits WHERE session_id = ?`,
+		"session-commits-migration-pg"); got != 2 {
+		t.Fatalf("commit rows after second replay = %d, want 2 (no re-duplication)", got)
 	}
 }
 

@@ -122,11 +122,11 @@ func (s *GitHubWebhookSubscriber) checkPushTrigger(
 	// dedup on the branch too so a later branch's push isn't suppressed.
 	dedupKey := fmt.Sprintf("push:%s/%s@%s@%s", payload.Owner, payload.Name, payload.Branch, payload.SHA)
 	data, _ := json.Marshal(map[string]interface{}{
-		"repo":         fmt.Sprintf("%s/%s", payload.Owner, payload.Name),
-		"branch":       payload.Branch,
-		"sha":          payload.SHA,
-		"pusher_login": payload.PusherLogin,
-		"message":      payload.HeadCommitMsg,
+		automationRepoKey: fmt.Sprintf("%s/%s", payload.Owner, payload.Name),
+		"branch":          payload.Branch,
+		"sha":             payload.SHA,
+		"pusher_login":    payload.PusherLogin,
+		"message":         payload.HeadCommitMsg,
 	})
 	if _, err := s.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPush, data, dedupKey); err != nil {
 		s.logger.Error("failed to fire push trigger", zap.String("trigger_id", t.ID), zap.Error(err))
@@ -168,13 +168,13 @@ func (s *GitHubWebhookSubscriber) checkCITrigger(
 
 	dedupKey := fmt.Sprintf("ci:%s/%s#%d", payload.Owner, payload.Name, payload.CheckRunID)
 	data, _ := json.Marshal(map[string]interface{}{
-		"repo":         fmt.Sprintf("%s/%s", payload.Owner, payload.Name),
-		"branch":       payload.Branch,
-		"sha":          payload.SHA,
-		"check_name":   payload.CheckName,
-		"conclusion":   payload.Conclusion,
-		"check_run_id": payload.CheckRunID,
-		"html_url":     payload.HTMLURL,
+		automationRepoKey:    fmt.Sprintf("%s/%s", payload.Owner, payload.Name),
+		"branch":             payload.Branch,
+		"sha":                payload.SHA,
+		"check_name":         payload.CheckName,
+		"conclusion":         payload.Conclusion,
+		"check_run_id":       payload.CheckRunID,
+		automationHTMLURLKey: payload.HTMLURL,
 	})
 	if _, err := s.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubCI, data, dedupKey); err != nil {
 		s.logger.Error("failed to fire CI trigger", zap.String("trigger_id", t.ID), zap.Error(err))

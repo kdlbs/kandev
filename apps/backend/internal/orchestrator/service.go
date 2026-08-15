@@ -288,7 +288,7 @@ type sessionExecutorStore interface {
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	DeleteLiveMonitorSnapshots(ctx context.Context, sessionID string) error
 	UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
-	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
+	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error)
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error
 	// Session listing + delete
@@ -388,6 +388,11 @@ type Service struct {
 	// Optional.
 	stepHistoryRecorder StepHistoryRecorder
 
+	// Reads task dependency state for the auto-start gate and the
+	// dependency-resolution reaction. Nil-safe: when unset, no task has
+	// dependencies so nothing is gated.
+	dependencyReader TaskDependencyReader
+
 	// Resolves the agent family names written in configure_session rules onto
 	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an
 	// exact string comparison.
@@ -407,6 +412,14 @@ type Service struct {
 	// onProcessOnEnterComplete is a package-test hook for synchronizing with
 	// applyEngineTransition's asynchronous processOnEnter goroutine.
 	onProcessOnEnterComplete func()
+	// queuedMoveExitStart and queuedMoveExitComplete are package-test hooks
+	// for the durable source-exit barrier.
+	onQueuedMoveExitStart             func()
+	onQueuedMoveExitComplete          func()
+	onTaskQueuePromotionEntryComplete func()
+	// queuedMoveLifecycleLocks serializes source-exit work per task. The
+	// completion marker remains durable so a restart can safely resume work.
+	queuedMoveLifecycleLocks sync.Map
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
@@ -804,6 +817,17 @@ func NewService(
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
 	}
+	// Always publish queue-status after a task-scoped queue purge so the
+	// status-summary projector zeros queued_prompt_count. Unlike the
+	// ephemeral purger above, this must never call PurgeTask on the SQLite
+	// queue — the rows are already gone in-transaction.
+	if registrar, ok := repo.(interface {
+		SetTaskQueuePurgeNotifier(func(context.Context, string))
+	}); ok {
+		registrar.SetTaskQueuePurgeNotifier(func(ctx context.Context, taskID string) {
+			s.publishTaskQueueStatusEvent(ctx, taskID, "")
+		})
+	}
 	exec.SetOnContextWindowReset(s.clearContextWindowForReset)
 
 	// Wire executor state changes through the orchestrator so events are published
@@ -925,13 +949,23 @@ func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.Rep
 // only the persisted local path; clone credentials remain private to the
 // orchestrator executor pipeline.
 type RepositoryHostCloner interface {
-	EnsureRepositoryCloned(context.Context, *models.Repository) (string, error)
+	EnsureRepositoryClonedForSession(
+		context.Context, string, string, *models.Repository,
+	) (string, error)
 }
 
 // EnsureRepositoryCloned delegates host cloning through the executor's
 // authenticated clone pipeline.
 func (s *Service) EnsureRepositoryCloned(ctx context.Context, repository *models.Repository) (string, error) {
 	return s.executor.EnsureRepositoryCloned(ctx, repository)
+}
+
+// EnsureRepositoryClonedForSession delegates host cloning with exact task and
+// session scope for plugin repository credentials.
+func (s *Service) EnsureRepositoryClonedForSession(
+	ctx context.Context, taskID, sessionID string, repository *models.Repository,
+) (string, error) {
+	return s.executor.EnsureRepositoryClonedForSession(ctx, taskID, sessionID, repository)
 }
 
 // SetGitHubCredentialBroker configures renewable workspace GitHub credentials
@@ -1115,6 +1149,10 @@ func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromW
 	if s.eventBus == nil || task == nil {
 		return
 	}
+	queuePromotion := false
+	if task.Metadata != nil {
+		_, queuePromotion = task.Metadata[models.MetaKeyQueuePromotionPending]
+	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
 		"from_workflow_id":          fromWorkflowID,
@@ -1126,6 +1164,14 @@ func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromW
 		"task_description":          task.Description,
 		"parent_id":                 task.ParentID,
 		"assignee_agent_profile_id": task.AssigneeAgentProfileID,
+		"wip_admitted":              task.WIPAdmitted,
+		"queued_for_step_id":        task.QueuedForStepID,
+		"queue_promotion":           queuePromotion,
+	}
+	if task.QueuedAt != nil {
+		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
+	} else {
+		data["queued_at"] = nil
 	}
 	event := bus.NewEvent(events.TaskMoved, "orchestrator", data)
 	if err := s.eventBus.Publish(ctx, events.TaskMoved, event); err != nil {
@@ -1230,7 +1276,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted, s.stepHistoryRecorder)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted, s.publishTaskStateChanged, s.stepHistoryRecorder)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	s.workflowEngine = engine.New(store, callbacks, s.engineOptions...)
@@ -1643,6 +1689,12 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
+	s.reconcileTaskLifecycleTokens(ctx)
+	// Chains whose predecessor completed while the process was down: the
+	// dependencies_resolved event is in-memory and is not replayed, so without
+	// this sweep a chain stalls silently across a restart. Runs after the WIP
+	// reconciler so an admitted-by-promotion task is already eligible.
+	s.reconcileDependencyLaunchesOnStartup(ctx)
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
@@ -2500,6 +2552,44 @@ func (s *Service) GetStatus() *Status {
 // GetMessageQueue returns the message queue service
 func (s *Service) GetMessageQueue() *messagequeue.Service {
 	return s.messageQueue
+}
+
+// QueueUserPrompt persists a prompt that must wait for workflow WIP admission.
+// The user message row is already written by the WebSocket handler, so the
+// queue marker prevents the drain path from creating a duplicate row.
+func (s *Service) QueueUserPrompt(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	metadata map[string]interface{},
+	userMessageRecorded bool,
+) error {
+	if s.messageQueue == nil {
+		return errors.New("message queue is not configured")
+	}
+	queueMetadata := make(map[string]interface{}, len(metadata)+1)
+	for key, value := range metadata {
+		queueMetadata[key] = value
+	}
+	if userMessageRecorded {
+		queueMetadata[metaKeyUserMessageRecorded] = true
+	}
+	if _, err := s.messageQueue.QueueMessageWithMetadata(
+		ctx,
+		sessionID,
+		taskID,
+		prompt,
+		model,
+		messagequeue.QueuedByUser,
+		planMode,
+		toQueuedAttachments(attachments),
+		queueMetadata,
+	); err != nil {
+		return fmt.Errorf("queue user prompt: %w", err)
+	}
+	s.publishQueueStatusEvent(ctx, sessionID)
+	return nil
 }
 
 // GetEventBus returns the event bus

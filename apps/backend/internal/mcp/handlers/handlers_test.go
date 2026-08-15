@@ -2114,7 +2114,10 @@ func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, strin
 func (m *mockSessionLauncher) ResumeTaskSession(context.Context, string, string) (*executor.TaskExecution, error) {
 	return nil, nil
 }
-func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string) error {
+func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string) (orchestrator.ProcessOnTurnStartResult, error) {
+	return orchestrator.ProcessOnTurnStartResult{}, nil
+}
+func (m *mockSessionLauncher) QueueUserPrompt(context.Context, string, string, string, string, bool, []v1.MessageAttachment, map[string]interface{}, bool) error {
 	return nil
 }
 func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }

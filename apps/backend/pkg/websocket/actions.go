@@ -253,6 +253,12 @@ const (
 	ActionAgentProfileCreated = "agent.profile.created"
 	ActionAgentProfileUpdated = "agent.profile.updated"
 
+	// ActionAgentSettingsUpdated carries a full agent settings record
+	// (dto.AgentDTO) after a settings-side change such as a custom TUI agent's
+	// MCP strategy. Distinct from ActionAgentUpdated, which is a runtime status
+	// ping keyed by {agentId, status} and feeds a different store slice.
+	ActionAgentSettingsUpdated = "agent.settings.updated"
+
 	// Permission request actions (agent -> user -> agent)
 	ActionPermissionRequested = "permission.requested" // Agent requesting permission
 	ActionPermissionRespond   = "permission.respond"   // User responding to permission request
@@ -360,6 +366,8 @@ const (
 	ActionSecretUpdate = "secrets.update"
 	ActionSecretDelete = "secrets.delete"
 	ActionSecretReveal = "secrets.reveal"
+	ActionSecretCopy   = "secrets.copy"
+	ActionSecretMove   = "secrets.move"
 
 	// Sprites actions
 	ActionSpritesStatus              = "sprites.status"
@@ -381,6 +389,8 @@ const (
 	ActionMCPUpdateTaskPRAutomation     = "mcp.update_task_pr_automation"
 	ActionMCPGetTaskMRAutomation        = "mcp.get_task_mr_automation"
 	ActionMCPUpdateTaskMRAutomation     = "mcp.update_task_mr_automation"
+	ActionMCPAddTaskDependency          = "mcp.add_task_dependency"
+	ActionMCPRemoveTaskDependency       = "mcp.remove_task_dependency"
 	ActionMCPAddBranchToTask            = "mcp.add_branch_to_task"
 	ActionMCPAddWorkspaceSources        = "mcp.add_workspace_sources"
 	ActionMCPUpdateRepositoryBaseBranch = "mcp.update_repository_base_branch"

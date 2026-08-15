@@ -49,6 +49,7 @@ import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
+import { dwell } from "../../helpers/causal-waits";
 
 const PLUGIN_ID = "kandev-plugin-e2e";
 const NAV_ITEM_ID = "e2e-hello";
@@ -83,6 +84,16 @@ async function uploadPackage(page: Page, filePath: string) {
   await page.getByTestId("install-plugin-tab-upload").click();
   await page.getByTestId("install-plugin-file-input").setInputFiles(filePath);
   await page.getByTestId("install-plugin-upload-submit").click();
+}
+
+async function waitForPluginBundleReady(page: Page): Promise<void> {
+  const navItem = page.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`);
+  await expect(navItem).toBeVisible({ timeout: 15_000 });
+  // The navigation item can be registered before the plugin bundle finishes
+  // evaluating. Visiting the plugin page makes the bundle's registration
+  // boundary explicit before a manifest keybinding is exercised.
+  await navItem.click();
+  await expect(page.locator("#hello-plugin-page")).toBeVisible({ timeout: 15_000 });
 }
 
 async function uninstallViaApi(apiClient: ApiClient) {
@@ -465,12 +476,11 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await uploadPackage(testPage, PACKAGE_PATH);
     const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
     await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+    await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible({ timeout: 30_000 });
 
     await testPage.goto("/");
     await testPage.reload();
-    await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForPluginBundleReady(testPage);
 
     // --- manifest.yaml declares `ui.keybindings: [{ id: open-demo, default:
     // mod+shift+j }]`; bundle.js binds it to host.openModal(...). "mod"
@@ -490,9 +500,9 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(modal).not.toBeVisible();
   });
 
-  // `PluginModalHost` mounts as a sibling of `<AppShell>` (src/main.tsx), so it
-  // is outside the app-wide TooltipProvider in app/layout.tsx and needs its
-  // own. The unit test for this asserts via focus, because jsdom does not
+  // `PluginModalHost` owns a TooltipProvider so plugin modal content remains
+  // safe in both AppShell and isolated mounts. The unit test for this asserts
+  // via focus, because jsdom does not
   // reliably open a Radix tooltip from synthetic hover (apps/web/CLAUDE.md) —
   // real pointer hover, and the portaled role="tooltip" it produces, are only
   // assertable in a browser.
@@ -504,12 +514,13 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await openInstallDialog(testPage);
     await uploadPackage(testPage, PACKAGE_PATH);
     await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+    await expect(
+      testPage.getByTestId(`plugin-row-${PLUGIN_ID}`).getByText("Active", { exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
 
     await testPage.goto("/");
     await testPage.reload();
-    await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForPluginBundleReady(testPage);
 
     await testPage.keyboard.press("ControlOrMeta+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");
@@ -568,7 +579,12 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     // every .error, so a polling plugin would file an Error-level backend log
     // entry per cycle. The report is scheduled in a microtask and sent async,
     // so give it a real chance to fire before asserting it never did.
-    await testPage.waitForTimeout(500);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "the report is scheduled in a microtask and sent async, and the assertion is that it never fires; a request that must not happen has no event, so it needs a real chance to arrive",
+    );
     expect(reportRequests).toEqual([]);
 
     // Attribution goes to the console instead, matching every other plugin

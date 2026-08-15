@@ -10,6 +10,7 @@ import {
   WORKSPACE_SETTINGS_TABS,
   workspaceSettingsHref,
 } from "@/lib/settings/workspace-settings-tabs";
+import { orderWorkspacesForDisplay } from "@/lib/settings/workspace-display-order";
 
 /**
  * What the settings menu grows *underneath* a row when a tree mode is on.
@@ -97,6 +98,11 @@ export type SettingsMenuNode = {
 
 /** The store shapes the builders need, narrowed to what they actually read. */
 export type BranchWorkspace = { id: string; name: string };
+export type BranchIntegrationContribution = {
+  id: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+};
 export type BranchAgent = {
   name: string;
   profiles: ReadonlyArray<{
@@ -153,20 +159,28 @@ function integrationNodes(
   workspaceId: string,
   integrationsHref: string,
   visibleSlugs?: ReadonlySet<IntegrationSlug>,
+  contributions: ReadonlyArray<BranchIntegrationContribution> = [],
 ): SettingsMenuNode[] {
   // Configured status gates the badge only, never the row itself — the branch
   // always lists every integration regardless of credentials, so the filter
   // here hides only disabled ones (intentionally looser than
   // useNavAvailability's `configured && (!hideDisabled || enabled)`).
-  return WORKSPACE_INTEGRATIONS.filter(([slug]) => !visibleSlugs || visibleSlugs.has(slug)).map(
-    ([slug, label]) => ({
-      key: `workspace:${workspaceId}:integrations:${slug}`,
-      href: `${integrationsHref}/${slug}`,
-      label: { text: label },
-      icon: INTEGRATION_ICONS[slug],
-      integrationSlug: slug,
-    }),
-  );
+  const builtIns = WORKSPACE_INTEGRATIONS.filter(
+    ([slug]) => !visibleSlugs || visibleSlugs.has(slug),
+  ).map(([slug, label]) => ({
+    key: `workspace:${workspaceId}:integrations:${slug}`,
+    href: `${integrationsHref}/${slug}`,
+    label: { text: label },
+    icon: INTEGRATION_ICONS[slug],
+    integrationSlug: slug,
+  }));
+  const registered = contributions.map(({ id, label, icon }) => ({
+    key: `workspace:${workspaceId}:integrations:${id}`,
+    href: `${integrationsHref}/${id}`,
+    label: { text: label } as const,
+    icon,
+  }));
+  return [...builtIns, ...registered];
 }
 
 /**
@@ -182,13 +196,16 @@ export function buildWorkspacesBranch(
   workspaces: ReadonlyArray<BranchWorkspace>,
   activeWorkspaceId?: string | null,
   /**
-   * Which integrations the Integrations branch may list. Omitted — the default
-   * — lists all of them; a set is passed only while "Hide disabled integrations
-   * from left panel navigation" is on.
+   * Which integrations a given workspace's Integrations branch may list.
+   * Returning `undefined` — the default — lists all of them; a set comes back
+   * only while "Hide disabled integrations from left panel navigation" is on.
+   * Resolved per workspace because the enable toggles are per workspace: one
+   * workspace hiding GitHub must not strip it from its siblings' branches.
    */
-  visibleIntegrationSlugs?: ReadonlySet<IntegrationSlug>,
+  visibleIntegrationSlugsFor?: (workspaceId: string) => ReadonlySet<IntegrationSlug> | undefined,
+  integrationContributions: ReadonlyArray<BranchIntegrationContribution> = [],
 ): SettingsMenuNode[] {
-  return workspaces.map((workspace) => {
+  return orderWorkspacesForDisplay(workspaces, activeWorkspaceId).map((workspace) => {
     const integrationsHref = workspaceSettingsHref(workspace.id, "integrations");
     return {
       key: `workspace:${workspace.id}`,
@@ -209,7 +226,12 @@ export function buildWorkspacesBranch(
           icon,
           ...(tab === "integrations"
             ? {
-                children: integrationNodes(workspace.id, integrationsHref, visibleIntegrationSlugs),
+                children: integrationNodes(
+                  workspace.id,
+                  integrationsHref,
+                  visibleIntegrationSlugsFor?.(workspace.id),
+                  integrationContributions,
+                ),
                 integrationsWorkspaceId: workspace.id,
               }
             : {}),

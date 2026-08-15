@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/scriptengine"
 )
 
@@ -228,7 +229,7 @@ func (r *SpritesExecutor) runPrepareScript(
 		return nil
 	}
 
-	stepCtx, cancel := context.WithTimeout(ctx, spritePrepareTimeout)
+	stepCtx, cancel := context.WithTimeout(preparationContext(ctx), constants.SetupScriptTimeout)
 	defer cancel()
 
 	r.logger.Debug("running prepare script")

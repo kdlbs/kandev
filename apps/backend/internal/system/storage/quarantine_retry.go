@@ -20,6 +20,21 @@ type quarantineRetryStore interface {
 	) (QuarantineEntry, error)
 }
 
+// ActiveQuarantineIntentError reports that a retained quarantine entry still
+// owns the original path. It remains compatible with ErrConflict so callers
+// that treat the condition as an error keep their existing behavior.
+type ActiveQuarantineIntentError struct {
+	OriginalPath string
+}
+
+func (e *ActiveQuarantineIntentError) Error() string {
+	return fmt.Sprintf("%s: quarantine intent for %s is still active", ErrConflict, e.OriginalPath)
+}
+
+func (e *ActiveQuarantineIntentError) Unwrap() error {
+	return ErrConflict
+}
+
 // ReleaseFailedQuarantineIntent releases a failed intent only when filesystem
 // state proves its move did not occur. Ambiguous states remain active for
 // recovery or reconciliation.
@@ -39,7 +54,7 @@ func ReleaseFailedQuarantineIntent(
 			continue
 		}
 		if entry.State == QuarantineStateQuarantined {
-			return false, fmt.Errorf("%w: quarantine intent for %s is still active", ErrConflict, originalPath)
+			return false, &ActiveQuarantineIntentError{OriginalPath: originalPath}
 		}
 		if entry.State == QuarantineStateFailed {
 			return releaseFailedIntentIfUnmoved(ctx, store, entry)

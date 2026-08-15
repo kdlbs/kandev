@@ -169,7 +169,7 @@ func runnerProjection(alias string) string {
 func (r *Repository) CreateTask(ctx context.Context, task *models.Task) error {
 	if task.WorkflowStepID != "" && task.QueuedForStepID == "" && !task.IsEphemeral {
 		task.WIPAdmitted = true
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		models.DropWIPDeferredLaunch(task)
 	}
 	return r.createTask(ctx, task, "", 0)
 }
@@ -202,7 +202,7 @@ func (r *Repository) CreateTaskWithWorkflowStepAdmission(
 		task.WIPAdmitted = !task.IsEphemeral
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		models.DropWIPDeferredLaunch(task)
 		return r.CreateTask(ctx, task)
 	}
 
@@ -215,6 +215,13 @@ func (r *Repository) CreateTaskWithWorkflowStepAdmission(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Same order as createTask and the workspace cascade: workspace row
+	// first, then workflow-step locks. Without it an admission holding a step
+	// lock while the cascade holds the workspace and waits for that step
+	// deadlocks on Postgres.
+	if err := r.lockWorkspaceRowStdTx(ctx, tx, task.WorkspaceID); err != nil {
+		return err
+	}
 	if err := r.lockWorkflowStepsForAdmission(ctx, tx, targetStepID, feederStepID); err != nil {
 		return err
 	}
@@ -248,7 +255,7 @@ func (r *Repository) applyAdmissionPlacement(
 		task.WIPAdmitted = true
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		models.DropWIPDeferredLaunch(task)
 	case feederStepID == "":
 		task.WorkflowStepID = targetStepID
 		task.WIPAdmitted = false
@@ -282,6 +289,17 @@ func (r *Repository) createTask(ctx context.Context, task *models.Task, targetSt
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// Serialize with the workspace delete cascade: the cascade locks the
+	// workspace row before inventorying its tasks, so a task created here
+	// either commits before the cascade's inventory (and is purged with the
+	// rest) or blocks until the cascade finishes, when the workspace is gone
+	// and the insert fails its foreign key. The workspace lock is taken
+	// before any workflow-step lock so the creation/admission paths share one
+	// order with the cascade.
+	if err := r.lockWorkspaceRowStdTx(ctx, tx, task.WorkspaceID); err != nil {
+		return err
+	}
 
 	if err := r.ensureWorkflowStepCapacity(ctx, tx, targetStepID, limit); err != nil {
 		return err
@@ -336,7 +354,7 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		return err
 	}
 	if task.AssigneeAgentProfileID != "" && task.WorkflowStepID != "" {
-		return upsertRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
+		return upsertRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
 	}
 	return nil
 }
@@ -403,53 +421,53 @@ func lockWorkflowStepForCapacity(ctx context.Context, tx *sql.Tx, driver string,
 // upsertRunnerInTx writes (or replaces) a 'runner' participant row for
 // (stepID, taskID) inside the provided transaction. Mirrors
 // workflow.Repository.SetTaskRunner but reuses the caller's tx.
-func upsertRunnerInTx(ctx context.Context, tx *sql.Tx, stepID, taskID, agentProfileID string) error {
+func upsertRunnerInTx(ctx context.Context, tx *sql.Tx, rebind func(string) string, stepID, taskID, agentProfileID string) error {
 	if stepID == "" || taskID == "" || agentProfileID == "" {
 		return nil
 	}
 	var existing string
-	err := tx.QueryRowContext(ctx, `SELECT id FROM workflow_step_participants
+	err := tx.QueryRowContext(ctx, rebind(`SELECT id FROM workflow_step_participants
 		WHERE step_id = ? AND task_id = ? AND role = 'runner' LIMIT 1`,
-		stepID, taskID).Scan(&existing)
+	), stepID, taskID).Scan(&existing)
 	if err == nil {
-		_, uerr := tx.ExecContext(ctx,
+		_, uerr := tx.ExecContext(ctx, rebind(
 			`UPDATE workflow_step_participants SET agent_profile_id = ? WHERE id = ?`,
-			agentProfileID, existing)
+		), agentProfileID, existing)
 		return uerr
 	}
 	if err != sql.ErrNoRows {
 		return err
 	}
 	id := uuid.New().String()
-	_, ierr := tx.ExecContext(ctx, `INSERT INTO workflow_step_participants
+	_, ierr := tx.ExecContext(ctx, rebind(`INSERT INTO workflow_step_participants
 		(id, step_id, task_id, role, agent_profile_id, decision_required, position)
 		VALUES (?, ?, ?, 'runner', ?, 0, 0)`,
-		id, stepID, taskID, agentProfileID)
+	), id, stepID, taskID, agentProfileID)
 	return ierr
 }
 
 // clearRunnerInTx removes any 'runner' participant row for (stepID, taskID).
-func clearRunnerInTx(ctx context.Context, tx *sql.Tx, stepID, taskID string) error {
+func clearRunnerInTx(ctx context.Context, tx *sql.Tx, rebind func(string) string, stepID, taskID string) error {
 	if stepID == "" || taskID == "" {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx,
+	_, err := tx.ExecContext(ctx, rebind(
 		`DELETE FROM workflow_step_participants
 		 WHERE step_id = ? AND task_id = ? AND role = 'runner'`,
-		stepID, taskID)
+	), stepID, taskID)
 	return err
 }
 
 // syncRunnerInTx upserts the runner participant when agentProfileID is set,
 // otherwise clears it. No-op when stepID is empty.
-func syncRunnerInTx(ctx context.Context, tx *sql.Tx, stepID, taskID, agentProfileID string) error {
+func syncRunnerInTx(ctx context.Context, tx *sql.Tx, rebind func(string) string, stepID, taskID, agentProfileID string) error {
 	if stepID == "" {
 		return nil
 	}
 	if agentProfileID != "" {
-		return upsertRunnerInTx(ctx, tx, stepID, taskID, agentProfileID)
+		return upsertRunnerInTx(ctx, tx, rebind, stepID, taskID, agentProfileID)
 	}
-	return clearRunnerInTx(ctx, tx, stepID, taskID)
+	return clearRunnerInTx(ctx, tx, rebind, stepID, taskID)
 }
 
 // GetTask retrieves a task by ID
@@ -480,6 +498,14 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := r.updateTaskTx(ctx, tx, task, metadata); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task, metadata []byte) error {
 	updateQuery := `
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
@@ -501,22 +527,132 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	if err != nil {
 		return err
 	}
-
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
+	return syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
+}
 
-	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
-		return err
+// UpdateTaskWithWorkflowStepAdmission atomically moves a task into a workflow
+// step. A limited full target stores the task in that destination as queued;
+// it never rejects the move for WIP capacity.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
+	ctx context.Context,
+	task *models.Task,
+	targetStepID string,
+	limit int,
+) (bool, error) {
+	return r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false)
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndState is the manual-move variant of
+// UpdateTaskWithWorkflowStepAdmission. It keeps the destination admission,
+// the state that applies after admission, and the queued source-exit marker
+// in one transaction so a later full-row update cannot strand the move.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
+	ctx context.Context,
+	task *models.Task,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+) (bool, error) {
+	return r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, admittedState, queueExitPending)
+}
+
+func (r *Repository) updateTaskWithWorkflowStepAdmission(
+	ctx context.Context,
+	task *models.Task,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+) (bool, error) {
+	now := time.Now().UTC()
+	task.UpdatedAt = now
+	if task.Metadata == nil {
+		task.Metadata = map[string]interface{}{}
 	}
 
-	return tx.Commit()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Workspace row before workflow-step lock, matching createTask and the
+	// workspace cascade: the update path must not hold a step lock while the
+	// cascade holds the workspace and waits for that step (Postgres
+	// deadlock). The task's workspace is read from its row so the caller's
+	// model cannot bypass the ordering.
+	var workspaceID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workspace_id FROM tasks WHERE id = ?`), task.ID).Scan(&workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Preserve the ErrTaskNotFound sentinel callers relied on before
+			// the workspace read was introduced (a task deleted concurrently
+			// with a move is reachable).
+			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+		}
+		return false, fmt.Errorf("read task workspace for admission: %w", err)
+	}
+	if err := r.lockWorkspaceRowStdTx(ctx, tx, workspaceID); err != nil {
+		return false, err
+	}
+	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
+		return false, err
+	}
+	occupants, err := r.countAdmittedInTx(ctx, tx, targetStepID, task.ID)
+	if err != nil {
+		return false, err
+	}
+	admitted := task.IsEphemeral || limit <= 0 || occupants < limit
+	task.WorkflowStepID = targetStepID
+	if admitted {
+		task.WIPAdmitted = !task.IsEphemeral
+		task.QueuedForStepID = ""
+		task.QueuedAt = nil
+		if admittedState != nil {
+			task.State = *admittedState
+		}
+	} else {
+		task.WIPAdmitted = false
+		task.QueuedForStepID = targetStepID
+		task.QueuedAt = &now
+	}
+	if queueExitPending {
+		if admitted {
+			delete(task.Metadata, models.MetaKeyQueuedMoveExitPending)
+		} else {
+			if _, exists := task.Metadata[models.MetaKeyQueuedMoveExitPending]; !exists {
+				task.Metadata[models.MetaKeyQueuedMoveExitPending] = true
+			}
+		}
+	}
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
+	}
+	if err := r.updateTaskTx(ctx, tx, task, metadata); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return admitted, nil
 }
 
 // RemoveTaskMetadataKey removes one metadata key without replacing concurrent
 // task fields. It returns whether the key was present and removed.
 func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error) {
+	return r.removeTaskMetadataKeyWithExecutor(ctx, r.db, taskID, key)
+}
+
+func (r *Repository) removeTaskMetadataKeyWithExecutor(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	taskID, key string,
+) (bool, error) {
 	var query string
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query = `
@@ -533,7 +669,7 @@ func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key stri
 	if dialect.IsPostgres(r.db.DriverName()) {
 		path = key
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, time.Now().UTC(), taskID, path)
+	result, err := exec.ExecContext(ctx, r.db.Rebind(query), path, time.Now().UTC(), taskID, path)
 	if err != nil {
 		return false, err
 	}
@@ -818,7 +954,7 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
-	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -865,15 +1001,30 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 			return false, nil
 		}
 	}
+	queuePredicate := `
+		  AND workflow_step_id = ?
+		  AND (queued_for_step_id = ? OR queued_for_step_id = '' OR queued_for_step_id IS NULL)`
+	predicateArgs := []interface{}{fromStepID, destinationStepID}
+	if fromStepID == destinationStepID {
+		// A same-step promotion is a claim on a visible queue row. Once the
+		// first reconciler admits it, the row has no queue marker and must not
+		// satisfy a second promotion attempt. The empty-marker form remains
+		// reserved for legacy feeder rows below.
+		queuePredicate = `
+		  AND workflow_step_id = ?
+		  AND wip_admitted = 0
+		  AND queued_for_step_id = ?`
+	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
-		  AND workflow_step_id = ?
-		  AND (queued_for_step_id = ? OR queued_for_step_id = '' OR queued_for_step_id IS NULL)
+		`+queuePredicate+`
 		  AND archived_at IS NULL
 		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
-	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID, fromStepID, destinationStepID)
+	`), append([]interface{}{
+		task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID,
+	}, predicateArgs...)...)
 	if err != nil {
 		return false, err
 	}
@@ -881,7 +1032,7 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	if rows == 0 {
 		return false, nil
 	}
-	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -897,6 +1048,20 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Serialize with session/worktree creation FIRST (task-row lock), then
+	// capture the authoritative session set: a concurrent CreateTaskSession
+	// holds the same task-row barrier, so every session committed before this
+	// lock is visible to the capture and anything after blocks until the task
+	// row is gone. Capturing before the lock could use a stale set (a session
+	// created mid-flight would never be purged). The session capture must also
+	// precede the task-row DELETE because task_sessions cascades on deletion.
+	if err := r.lockTaskRowInTx(ctx, tx, id); err != nil {
+		return err
+	}
+	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
+	if err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
 	if err != nil {
 		return err
@@ -906,7 +1071,7 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
-	if err := r.purgeTaskQueueInTx(ctx, tx, id); err != nil {
+	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1219,6 +1384,34 @@ func (r *Repository) ListQueuedTasks(ctx context.Context) ([]*models.Task, error
 		  AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.queued_at ASC, t.created_at ASC, t.id ASC
 	`))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
+// ListTasksWithMetadataKey returns active, non-ephemeral tasks carrying a
+// named metadata key. It is used by startup lifecycle recovery, where queue
+// destination columns alone cannot find already-admitted work whose entry or
+// source-exit side effect still needs to run.
+func (r *Repository) ListTasksWithMetadataKey(ctx context.Context, key string) ([]*models.Task, error) {
+	var predicate, path string
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		predicate = "jsonb_extract_path(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}'::jsonb ELSE t.metadata::jsonb END, ?) IS NOT NULL"
+		path = key
+	} else {
+		predicate = "json_type(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}' ELSE t.metadata END, ?) IS NOT NULL"
+		path = jsonPath(key)
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE `+predicate+`
+		  AND t.archived_at IS NULL
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		ORDER BY t.updated_at ASC, t.created_at ASC, t.id ASC
+	`), path)
 	if err != nil {
 		return nil, err
 	}
@@ -1604,7 +1797,11 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
-	if err := r.purgeTaskQueueInTx(ctx, tx, id); err != nil {
+	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1643,7 +1840,11 @@ func (r *Repository) ArchiveTaskIfActive(ctx context.Context, id, cascadeID stri
 	if rows == 0 {
 		return false, tx.Commit()
 	}
-	if err := r.purgeTaskQueueInTx(ctx, tx, id); err != nil {
+	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1653,8 +1854,37 @@ func (r *Repository) ArchiveTaskIfActive(ctx context.Context, id, cascadeID stri
 	return true, nil
 }
 
-func (r *Repository) purgeTaskQueueInTx(ctx context.Context, tx *sqlx.Tx, taskID string) error {
-	_, err := messagequeue.PurgeTaskInTransaction(ctx, tx, r.db, taskID)
+// taskQueueSessionsInTx returns the task's authoritative session set (its
+// task_sessions rows). Callers must capture it BEFORE any statement that
+// deletes the task row: task_sessions cascades on task deletion, so a
+// post-delete discovery returns nothing and a concurrent admission to an
+// empty session could survive the purge.
+func (r *Repository) taskQueueSessionsInTx(ctx context.Context, tx *sqlx.Tx, taskID string) ([]string, error) {
+	var sessions []string
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`SELECT id FROM task_sessions WHERE task_id = ?`), taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task purge sessions: %w", err)
+	}
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan task purge session: %w", err)
+		}
+		sessions = append(sessions, sessionID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate task purge sessions: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close task purge sessions: %w", err)
+	}
+	return sessions, nil
+}
+
+func (r *Repository) purgeTaskQueueInTx(ctx context.Context, tx *sqlx.Tx, taskID string, sessions []string) error {
+	_, err := messagequeue.PurgeTaskInTransaction(ctx, tx, r.db, taskID, sessions)
 	if internaldb.IsMissingTableError(err) {
 		return nil
 	}
@@ -2078,7 +2308,7 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	if rows == 0 {
 		return false, tx.Commit()
 	}
-	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+	if err := syncRunnerInTx(ctx, tx, r.db.Rebind, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {

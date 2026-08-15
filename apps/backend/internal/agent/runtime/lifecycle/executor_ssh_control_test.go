@@ -116,7 +116,7 @@ func TestCreateRemoteAgentInstancePostsTheBuiltRequest(t *testing.T) {
 	}
 
 	port, err := createRemoteAgentInstance(context.Background(), server.dial(t),
-		39429, "/remote/task", req, "bearer-token", newTestLogger())
+		39429, "/remote/task", "/remote/agentctl", req, "bearer-token", newTestLogger())
 	if err != nil {
 		t.Fatalf("createRemoteAgentInstance: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestCreateRemoteAgentInstanceErrors(t *testing.T) {
 			server.forwardTo(strings.TrimPrefix(httpServer.URL, "http://"))
 
 			_, err := createRemoteAgentInstance(context.Background(), server.dial(t), 39429,
-				"/remote/task", &ExecutorCreateRequest{InstanceID: "i"}, "", newTestLogger())
+				"/remote/task", "/remote/agentctl", &ExecutorCreateRequest{InstanceID: "i"}, "", newTestLogger())
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want %q", err, tc.wantErr)
 			}
@@ -194,7 +194,7 @@ func TestBuildSSHCreateInstanceRequestMapsEveryField(t *testing.T) {
 		},
 	}
 
-	got := buildSSHCreateInstanceRequest(req, "/remote/task")
+	got := buildSSHCreateInstanceRequest(req, "/remote/task", "/remote/agentctl")
 
 	if got.ID != "instance-9" || got.SessionID != "session-9" || got.TaskID != "task-9" {
 		t.Fatalf("identity = %+v", got)
