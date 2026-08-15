@@ -299,8 +299,10 @@ describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
     const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
     const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
     const plugin = screen.getByTestId(PLUGIN_TEST_ID);
+    const pluginSlot = plugin.parentElement;
+    expect(pluginSlot?.getAttribute("data-plugin-slot")).toBe("sidebar-workspace-actions");
     expect(terminal.nextElementSibling).toBe(quickChat);
-    expect(quickChat.nextElementSibling).toBe(plugin);
+    expect(quickChat.nextElementSibling).toBe(pluginSlot);
   });
 
   it("A2: forwards the active workspace id and label as slotProps", () => {
@@ -335,7 +337,9 @@ describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
     const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
     const firstPlugin = screen.getByTestId(`${PLUGIN_TEST_ID}-one`);
     const secondPlugin = screen.getByTestId(`${PLUGIN_TEST_ID}-two`);
-    expect(quickChat.nextElementSibling).toBe(firstPlugin);
+    const pluginSlot = firstPlugin.parentElement;
+    expect(pluginSlot).toBe(secondPlugin.parentElement);
+    expect(quickChat.nextElementSibling).toBe(pluginSlot);
     expect(firstPlugin.nextElementSibling).toBe(secondPlugin);
   });
 
