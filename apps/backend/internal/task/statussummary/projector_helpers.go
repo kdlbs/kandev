@@ -1,12 +1,73 @@
 package statussummary
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/events"
 )
+
+func isPendingSensitiveEvent(eventType string) bool {
+	switch eventType {
+	case events.TaskUpdated,
+		events.TaskSessionStateChanged,
+		events.MessageAdded,
+		events.MessageUpdated,
+		events.MessageDeleted,
+		events.ClarificationAnswered,
+		events.ClarificationPrimaryAnswered,
+		events.ClarificationCancelled,
+		events.ClarificationStaleDismissed,
+		events.PermissionRequestReceived:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *Projector) refreshPendingLocked(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) (bool, error) {
+	actions, err := p.loadPendingActions(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("load pending actions for task status summary %q: %w", taskID, err)
+	}
+	next := make(map[string]string, len(actions))
+	for sessionID, action := range actions {
+		sessionID = strings.TrimSpace(sessionID)
+		action = strings.TrimSpace(action)
+		if sessionID == "" || (action != pendingClarification && action != pendingPermission) {
+			continue
+		}
+		next[sessionID] = action
+	}
+	changed := !pendingActionsEqual(state.pending, next)
+	previousTaskPending := state.taskPending
+	state.pendingObserved = true
+	state.pending = next
+	state.pendingRequests = make(map[string]pendingRequestIdentity)
+	recomputeTaskPending(state)
+	return changed || state.taskPending != previousTaskPending, nil
+}
+
+func pendingActionsEqual(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for sessionID, action := range left {
+		if right[sessionID] != action {
+			return false
+		}
+	}
+	return true
+}
 
 func (p *Projector) clearPendingLocked(state *projectionState, sessionID string) bool {
 	if sessionID == "" {

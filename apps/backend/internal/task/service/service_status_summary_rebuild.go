@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -31,11 +34,10 @@ func (s *Service) SetTaskStatusSummaryPRReader(reader TaskStatusSummaryPRReader)
 	}
 }
 
-// HydrateMissingTaskStatusSummaries repairs only absent rows. All durable
-// inputs are batch-loaded by the caller or by optional batch readers; this is
-// intentionally a lazy repair so startup does not scan every historical task.
-// The returned map includes both existing and newly repaired summaries.
-func (s *Service) HydrateMissingTaskStatusSummaries(
+// ReconcileTaskStatusSummaries repairs stale pending state in existing rows and
+// builds absent rows. All durable inputs are batch-loaded by the caller or by
+// optional batch readers, so startup does not scan every historical task.
+func (s *Service) ReconcileTaskStatusSummaries(
 	ctx context.Context,
 	tasks []*models.Task,
 	sessionsByTask map[string][]*models.TaskSession,
@@ -48,26 +50,43 @@ func (s *Service) HydrateMissingTaskStatusSummaries(
 	if s == nil || s.statusSummaries == nil || len(tasks) == 0 {
 		return summaries, nil
 	}
+	s.reconcileExistingSummaries(ctx, tasks, sessionsByTask, pendingBySession, summaries)
+	return s.rebuildMissingSummaries(ctx, tasks, sessionsByTask, pendingBySession, summaries), nil
+}
 
+func (s *Service) reconcileExistingSummaries(
+	ctx context.Context,
+	tasks []*models.Task,
+	sessionsByTask map[string][]*models.TaskSession,
+	pendingBySession map[string]models.TaskPendingAction,
+	summaries map[string]*statussummary.TaskStatusSummary,
+) {
+	for _, task := range tasks {
+		if task == nil || task.ID == "" || summaries[task.ID] == nil {
+			continue
+		}
+		action := pendingActionForTask(sessionsByTask[task.ID], pendingBySession)
+		summaries[task.ID] = s.reconcileExistingSummary(ctx, task, summaries[task.ID], action)
+	}
+}
+
+func (s *Service) rebuildMissingSummaries(
+	ctx context.Context,
+	tasks []*models.Task,
+	sessionsByTask map[string][]*models.TaskSession,
+	pendingBySession map[string]models.TaskPendingAction,
+	summaries map[string]*statussummary.TaskStatusSummary,
+) map[string]*statussummary.TaskStatusSummary {
 	missing := missingSummaryTasks(tasks, summaries)
 	if len(missing) == 0 {
-		return summaries, nil
+		return summaries
 	}
 	prByTask, prObserved := s.loadSummaryPRs(ctx, taskIDs(missing))
 	gitBySession, gitObserved := s.loadSummaryGit(ctx, sessionIDsForTasks(missing, sessionsByTask))
-	queuedByTask, queuedErr := s.CountPendingQueuedByTaskIDs(ctx, taskIDs(missing))
-	if queuedErr != nil {
-		if s.logger != nil {
-			s.logger.Warn("failed to load queued prompt counts for status summary repair", zap.Error(queuedErr))
-		}
-		queuedByTask = map[string]int{}
-	}
+	queuedByTask := s.loadQueuedSummaryCounts(ctx, taskIDs(missing))
 	now := time.Now().UTC()
 	for _, task := range missing {
-		if task == nil || task.ID == "" {
-			continue
-		}
-		input := s.rebuildInput(
+		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
 			sessionsByTask[task.ID],
 			pendingBySession,
 			gitBySession,
@@ -76,13 +95,86 @@ func (s *Service) HydrateMissingTaskStatusSummaries(
 			prObserved,
 			queuedByTask[task.ID],
 			now,
-		)
-		next := statussummary.BuildFromAuthoritative(input)
-		next.Revision = 1
-		next.UpdatedAt = now
+		))
+	}
+	return summaries
+}
+
+func (s *Service) loadQueuedSummaryCounts(ctx context.Context, taskIDs []string) map[string]int {
+	queuedByTask, err := s.CountPendingQueuedByTaskIDs(ctx, taskIDs)
+	if err == nil {
+		return queuedByTask
+	}
+	if s.logger != nil {
+		s.logger.Warn("failed to load queued prompt counts for status summary repair", zap.Error(err))
+	}
+	return map[string]int{}
+}
+
+func (s *Service) rebuildMissingSummary(
+	ctx context.Context,
+	task *models.Task,
+	summaries map[string]*statussummary.TaskStatusSummary,
+	input statussummary.RebuildInput,
+) {
+	if task == nil || task.ID == "" {
+		return
+	}
+	next := statussummary.BuildFromAuthoritative(input)
+	next.Revision = 1
+	next.UpdatedAt = input.Now
+	if err := next.Validate(); err != nil {
+		s.logSummaryRepairFailure(task.ID, "validate", err)
+		return
+	}
+	accepted, err := s.statusSummaries.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
+		TaskID:      task.ID,
+		WorkspaceID: task.WorkspaceID,
+		Summary:     next,
+	})
+	if err != nil {
+		s.logSummaryRepairFailure(task.ID, "persist", err)
+		return
+	}
+	if accepted {
+		summaries[task.ID] = &next
+		return
+	}
+	// A projector event may have won the race while this repair was running.
+	// Return that authoritative row instead of exposing a stale repair.
+	rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{task.ID})
+	if err != nil {
+		s.logSummaryRepairFailure(task.ID, "reload", err)
+		return
+	}
+	if stored := rows[task.ID]; stored != nil {
+		summaries[task.ID] = stored
+	}
+}
+
+const maxSummaryReconcileAttempts = 3
+
+func (s *Service) reconcileExistingSummary(
+	ctx context.Context,
+	task *models.Task,
+	current *statussummary.TaskStatusSummary,
+	pendingAction string,
+) *statussummary.TaskStatusSummary {
+	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
+		if current.PendingAction == pendingAction {
+			return current
+		}
+		if current.Revision == ^uint64(0) {
+			s.logSummaryRepairFailure(task.ID, "revision", fmt.Errorf("revision overflow"))
+			return current
+		}
+		next := *current
+		next.PendingAction = pendingAction
+		next.Revision = current.Revision + 1
+		next.UpdatedAt = advancedSummaryTime(current.UpdatedAt, time.Now().UTC())
 		if err := next.Validate(); err != nil {
 			s.logSummaryRepairFailure(task.ID, "validate", err)
-			continue
+			return current
 		}
 		accepted, err := s.statusSummaries.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
 			TaskID:      task.ID,
@@ -91,24 +183,72 @@ func (s *Service) HydrateMissingTaskStatusSummaries(
 		})
 		if err != nil {
 			s.logSummaryRepairFailure(task.ID, "persist", err)
-			continue
+			return current
 		}
 		if accepted {
-			summaries[task.ID] = &next
-			continue
+			s.publishReconciledSummary(ctx, task, next)
+			return &next
 		}
-		// A projector event may have won the race while this repair was running.
-		// Return that authoritative row instead of exposing a stale repair.
 		rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{task.ID})
 		if err != nil {
 			s.logSummaryRepairFailure(task.ID, "reload", err)
+			return current
+		}
+		current = rows[task.ID]
+	}
+	if current != nil && current.PendingAction != pendingAction {
+		s.logSummaryRepairFailure(task.ID, "persist", fmt.Errorf("exhausted compare-and-set retries"))
+	}
+	return current
+}
+
+func advancedSummaryTime(previous, now time.Time) time.Time {
+	if !now.After(previous) {
+		return previous.Add(time.Nanosecond)
+	}
+	return now
+}
+
+func (s *Service) publishReconciledSummary(
+	ctx context.Context,
+	task *models.Task,
+	summary statussummary.TaskStatusSummary,
+) {
+	if s.eventBus == nil {
+		return
+	}
+	payload := statussummary.SummaryUpdated{
+		TaskID:      task.ID,
+		WorkspaceID: task.WorkspaceID,
+		Summary:     summary,
+	}
+	if err := s.eventBus.Publish(ctx, events.TaskStatusSummaryUpdated,
+		bus.NewEvent(events.TaskStatusSummaryUpdated, "task-status-summary-reconciler", payload)); err != nil {
+		s.logSummaryRepairFailure(task.ID, "publish", err)
+	}
+}
+
+func pendingActionForTask(
+	sessions []*models.TaskSession,
+	actions map[string]models.TaskPendingAction,
+) string {
+	hasClarification := false
+	for _, session := range sessions {
+		if session == nil || (session.State != models.TaskSessionStateRunning &&
+			session.State != models.TaskSessionStateWaitingForInput) {
 			continue
 		}
-		if stored := rows[task.ID]; stored != nil {
-			summaries[task.ID] = stored
+		switch actions[session.ID] {
+		case models.TaskPendingActionPermission:
+			return string(models.TaskPendingActionPermission)
+		case models.TaskPendingActionClarification:
+			hasClarification = true
 		}
 	}
-	return summaries, nil
+	if hasClarification {
+		return string(models.TaskPendingActionClarification)
+	}
+	return ""
 }
 
 func (s *Service) logSummaryRepairFailure(taskID, stage string, err error) {

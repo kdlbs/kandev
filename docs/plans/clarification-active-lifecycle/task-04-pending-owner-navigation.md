@@ -1,7 +1,7 @@
 ---
 id: "04-pending-owner-navigation"
 title: "Pending-owner navigation"
-status: pending
+status: completed
 wave: 4
 depends_on: ["03-summary-pending-convergence"]
 plan: "plan.md"
@@ -74,4 +74,13 @@ update task/plan status.
 
 ## Results
 
-Pending.
+- Clarification discovery now follows the newest durable turn, treats the newest bundle's terminal
+  state as authoritative, remains deletion-proof, and gates unavailable turn history on the compact
+  session pending action while retaining legacy no-turn behavior.
+- Added one shared pending-owner resolver. Desktop waits for session loading when a task advertises
+  input, including non-task routes; phone selection waits, navigates to the owning session, then
+  closes the drawer, with safe load-failure fallback.
+- `cd apps && pnpm install --frozen-lockfile` passed.
+- The exact three-file Vitest command passed: 3 files, 68 tests.
+- `cd apps/web && pnpm run typecheck` passed.
+- `cd apps/web && pnpm run i18n:check` passed; existing real-locale parity warnings remain advisory.

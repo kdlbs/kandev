@@ -6,12 +6,13 @@
 
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
-import type { TaskSession } from "@/lib/types/http";
+import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
 import { performLayoutSwitch, releaseLayoutToDefault } from "@/lib/state/dockview-store";
 import { replaceTaskUrl } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { isInputCapableSessionState } from "@/lib/utils/task-pending-input";
 
 const debug = createDebugLogger("dockview:task-select");
 let taskSelectionSequence = 0;
@@ -36,6 +37,22 @@ export function resolveLoadedSessionId(
     sessions[0]?.id ??
     preferredSessionId
   );
+}
+
+export function resolveTaskSessionId(args: {
+  sessions: TaskSession[];
+  preferredSessionId: string;
+  taskPendingAction?: TaskPendingAction | null;
+}): string {
+  const { sessions, preferredSessionId, taskPendingAction } = args;
+  if (taskPendingAction) {
+    const owner = sessions.find(
+      (session) =>
+        isInputCapableSessionState(session.state) && session.pending_action === taskPendingAction,
+    );
+    if (owner) return owner.id;
+  }
+  return resolveLoadedSessionId(sessions, preferredSessionId);
 }
 
 /**
@@ -118,6 +135,32 @@ function taskSelectionWasSuperseded(selectionToken: number): boolean {
   return selectionToken !== taskSelectionSequence;
 }
 
+function createTaskSelectionGuard(
+  store: StoreApi<AppState>,
+  taskId: string,
+  selectionToken: number,
+) {
+  const startActiveTaskId = store.getState().tasks.activeTaskId ?? null;
+  let activeTaskChangedExternally = false;
+  const unsubscribe = store.subscribe((current, previous) => {
+    const currentTaskId = current.tasks.activeTaskId ?? null;
+    const previousTaskId = previous.tasks.activeTaskId ?? null;
+    if (currentTaskId !== previousTaskId && currentTaskId !== taskId) {
+      activeTaskChangedExternally = true;
+    }
+  });
+  return {
+    dispose: () => {
+      if (typeof unsubscribe === "function") unsubscribe();
+    },
+    wasSuperseded: () => {
+      if (taskSelectionWasSuperseded(selectionToken) || activeTaskChangedExternally) return true;
+      const activeTaskId = store.getState().tasks.activeTaskId ?? null;
+      return activeTaskId !== startActiveTaskId && activeTaskId !== taskId;
+    },
+  };
+}
+
 export async function prepareAndSwitchTask(
   taskId: string,
   store: StoreApi<AppState>,
@@ -161,35 +204,26 @@ export async function prepareAndSwitchTask(
 
 export function selectTaskWithLayout(params: {
   taskId: string;
-  task: { primarySessionId?: string | null; isArchived?: boolean } | undefined;
+  task:
+    | {
+        primarySessionId?: string | null;
+        taskPendingAction?: TaskPendingAction | null;
+        isArchived?: boolean;
+      }
+    | undefined;
   store: StoreApi<AppState>;
   switchToSession: SwitchToSessionFn;
   loadTaskSessionsForTask: (taskId: string) => Promise<TaskSession[]>;
   setActiveTask: (taskId: string) => void;
   setPreparingTaskId: (id: string | null) => void;
+  navigateToTask?: (taskId: string) => void;
 }): void {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
   const state = store.getState();
   const selectionToken = nextTaskSelectionToken();
-  const startActiveTaskId = state.tasks.activeTaskId ?? null;
   const oldSessionId = state.tasks.activeSessionId;
-  let activeTaskChangedExternally = false;
-  const unsubscribeSelectionGuard = store.subscribe((current, previous) => {
-    const currentTaskId = current.tasks.activeTaskId ?? null;
-    const previousTaskId = previous.tasks.activeTaskId ?? null;
-    if (currentTaskId !== previousTaskId && currentTaskId !== taskId) {
-      activeTaskChangedExternally = true;
-    }
-  });
-  const disposeSelectionGuard = () => {
-    if (typeof unsubscribeSelectionGuard === "function") unsubscribeSelectionGuard();
-  };
-  const selectionWasSuperseded = () => {
-    if (taskSelectionWasSuperseded(selectionToken)) return true;
-    if (activeTaskChangedExternally) return true;
-    const activeTaskId = store.getState().tasks.activeTaskId ?? null;
-    return activeTaskId !== startActiveTaskId && activeTaskId !== taskId;
-  };
+  const navigateToTask = params.navigateToTask ?? replaceTaskUrl;
+  const selectionGuard = createTaskSelectionGuard(store, taskId, selectionToken);
   if (isDebug()) {
     debug("selectTaskWithLayout: entry", {
       taskId,
@@ -199,9 +233,9 @@ export function selectTaskWithLayout(params: {
     });
   }
   if (task?.isArchived) {
-    disposeSelectionGuard();
+    selectionGuard.dispose();
     params.setActiveTask(taskId);
-    replaceTaskUrl(taskId);
+    navigateToTask(taskId);
     return;
   }
   if (task?.primarySessionId) {
@@ -213,33 +247,41 @@ export function selectTaskWithLayout(params: {
       taskSessionsById: state.taskSessions.items,
     });
     const hasEnvId = !!state.environmentIdBySessionId[targetSessionId];
-    if (hasEnvId) {
-      disposeSelectionGuard();
+    if (hasEnvId && !task.taskPendingAction) {
+      selectionGuard.dispose();
       switchToSession(taskId, targetSessionId, oldSessionId);
       loadTaskSessionsForTask(taskId);
-      replaceTaskUrl(taskId);
+      navigateToTask(taskId);
       return;
     }
     void loadTaskSessionsForTask(taskId)
       .then((sessions) => {
-        if (selectionWasSuperseded()) return;
-        switchToSession(taskId, resolveLoadedSessionId(sessions, targetSessionId), oldSessionId);
-        replaceTaskUrl(taskId);
+        if (selectionGuard.wasSuperseded()) return;
+        const resolvedSessionId = resolveTaskSessionId({
+          sessions,
+          preferredSessionId: targetSessionId,
+          taskPendingAction: task.taskPendingAction,
+        });
+        switchToSession(taskId, resolvedSessionId, oldSessionId);
+        navigateToTask(taskId);
       })
-      .finally(disposeSelectionGuard)
+      .finally(selectionGuard.dispose)
       .catch(() => undefined);
     return;
   }
 
   void loadTaskSessionsForTask(taskId)
     .then(async (sessions) => {
-      if (selectionWasSuperseded()) return;
+      if (selectionGuard.wasSuperseded()) return;
       const currentOldSessionId = store.getState().tasks.activeSessionId;
-      const primary = sessions.find((s) => s.is_primary);
-      const sessionId = primary?.id ?? sessions[0]?.id ?? null;
+      const sessionId = resolveTaskSessionId({
+        sessions,
+        preferredSessionId: "",
+        taskPendingAction: task?.taskPendingAction,
+      });
       if (sessionId) {
         switchToSession(taskId, sessionId, currentOldSessionId);
-        replaceTaskUrl(taskId);
+        navigateToTask(taskId);
         return;
       }
 
@@ -248,13 +290,13 @@ export function selectTaskWithLayout(params: {
         store,
         switchToSession,
         params.setPreparingTaskId,
-        () => !selectionWasSuperseded(),
+        () => !selectionGuard.wasSuperseded(),
       );
       if (switched) {
-        replaceTaskUrl(taskId);
+        navigateToTask(taskId);
         return;
       }
-      if (selectionWasSuperseded()) return;
+      if (selectionGuard.wasSuperseded()) return;
 
       // Failure path: prepareAndSwitchTask already called releaseLayoutToDefault
       // before awaiting, so the outgoing env's layout is already saved and the
@@ -262,8 +304,8 @@ export function selectTaskWithLayout(params: {
       // overwrite the just-saved env layout with `api.toJSON()` (the default),
       // losing the user's real layout for the originating task.
       params.setActiveTask(taskId);
-      replaceTaskUrl(taskId);
+      navigateToTask(taskId);
     })
-    .finally(disposeSelectionGuard)
+    .finally(selectionGuard.dispose)
     .catch(() => undefined);
 }

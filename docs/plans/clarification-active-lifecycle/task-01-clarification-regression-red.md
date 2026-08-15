@@ -1,7 +1,7 @@
 ---
 id: "01-clarification-regression-red"
 title: "Clarification regression red"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -69,4 +69,18 @@ the plan checkbox/results.
 
 ## Results
 
-Pending.
+- Added production-build regressions for older detached clarification supersession, desktop
+  secondary-session ownership, and phone drawer secondary-session ownership.
+- `cd apps && pnpm install --frozen-lockfile` passed (already up to date).
+- `cd apps/web && pnpm e2e:run tests/task/sidebar-pending-question.spec.ts` discovered 3 tests:
+  1 passed and 2 failed for the expected defects. Reload found one superseded
+  `clarification-overlay` instead of zero; desktop activation selected the clean primary session
+  instead of the clarification-owning secondary. Artifacts were reported under
+  `/tmp/pw-out/task-sidebar-pending-quest-5d9bc-r-a-newer-bundle-is-skipped-chromium/` and
+  `/tmp/pw-out/task-sidebar-pending-quest-6afec-ion-that-owns-clarification-chromium/`.
+- `cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts`
+  discovered 12 tests. The new phone regression failed for the expected reason: active session was
+  the clean primary instead of the clarification-owning secondary. Artifact was reported under
+  `/tmp/pw-out/task-mobile-sidebar-task-a-5cc01-ation-from-the-phone-drawer-mobile-chrome/`.
+  Ten baselines passed; one unrelated existing create-subtask case timed out during setup and will be
+  rerun in the GREEN wave.

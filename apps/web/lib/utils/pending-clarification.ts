@@ -1,4 +1,15 @@
-import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
+import type {
+  ClarificationRequestMetadata,
+  Message,
+  TaskPendingAction,
+  Turn,
+} from "@/lib/types/http";
+
+export type PendingClarificationScope = {
+  /** Undefined means turn history is unavailable; null means loaded legacy history has no turns. */
+  currentTurnId?: string | null;
+  pendingAction?: TaskPendingAction | null;
+};
 
 export function isPendingClarificationMessage(message: Message): boolean {
   if (message.type !== "clarification_request") return false;
@@ -6,10 +17,43 @@ export function isPendingClarificationMessage(message: Message): boolean {
   return !metadata?.status || metadata.status === "pending";
 }
 
-export function findPendingClarification(messages?: readonly Message[] | null): Message | null {
+export function newestDurableTurnId(turns?: readonly Turn[]): string | null | undefined {
+  if (turns === undefined) return undefined;
+  if (turns.length === 0) return null;
+  let newest = turns[0];
+  for (let index = 1; index < turns.length; index++) {
+    const candidate = turns[index];
+    const newestKey = [newest.started_at, newest.created_at, newest.id];
+    const candidateKey = [candidate.started_at, candidate.created_at, candidate.id];
+    for (let part = 0; part < candidateKey.length; part++) {
+      if (candidateKey[part] === newestKey[part]) continue;
+      if (candidateKey[part] > newestKey[part]) newest = candidate;
+      break;
+    }
+  }
+  return newest.id;
+}
+
+function clarificationMessagesInScope(
+  messages: readonly Message[],
+  scope?: PendingClarificationScope,
+): readonly Message[] {
+  if (!scope || scope.currentTurnId === null) return messages;
+  if (scope.currentTurnId === undefined) {
+    return scope.pendingAction === "clarification" ? messages : [];
+  }
+  return messages.filter((message) => message.turn_id === scope.currentTurnId);
+}
+
+export function findPendingClarification(
+  messages?: readonly Message[] | null,
+  scope?: PendingClarificationScope,
+): Message | null {
   if (!messages) return null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (isPendingClarificationMessage(messages[i])) return messages[i];
+  const scoped = clarificationMessagesInScope(messages, scope);
+  for (let i = scoped.length - 1; i >= 0; i--) {
+    if (scoped[i].type !== "clarification_request") continue;
+    return isPendingClarificationMessage(scoped[i]) ? scoped[i] : null;
   }
   return null;
 }
@@ -24,14 +68,18 @@ export function findPendingClarification(messages?: readonly Message[] | null): 
 // a user from acting on a partially-arrived bundle (clicking an option before
 // the rest of the N messages have been streamed in via the WS), which would
 // otherwise trigger a 400 from the backend's all-required gate.
-export function findPendingClarificationGroup(messages?: readonly Message[] | null): Message[] {
+export function findPendingClarificationGroup(
+  messages?: readonly Message[] | null,
+  scope?: PendingClarificationScope,
+): Message[] {
   if (!messages) return [];
-  const last = findPendingClarification(messages);
+  const scoped = clarificationMessagesInScope(messages, scope);
+  const last = findPendingClarification(scoped);
   if (!last) return [];
   const meta = last.metadata as ClarificationRequestMetadata | undefined;
   const pendingID = meta?.pending_id;
   if (!pendingID) return [last];
-  const group = messages.filter((m) => {
+  const group = scoped.filter((m) => {
     if (m.type !== "clarification_request") return false;
     const mMeta = m.metadata as ClarificationRequestMetadata | undefined;
     return mMeta?.pending_id === pendingID;
@@ -43,8 +91,11 @@ export function findPendingClarificationGroup(messages?: readonly Message[] | nu
   return group;
 }
 
-export function hasPendingClarification(messages?: readonly Message[] | null): boolean {
-  return findPendingClarification(messages) !== null;
+export function hasPendingClarification(
+  messages?: readonly Message[] | null,
+  scope?: PendingClarificationScope,
+): boolean {
+  return findPendingClarification(messages, scope) !== null;
 }
 
 export function hasPendingClarificationForSession(

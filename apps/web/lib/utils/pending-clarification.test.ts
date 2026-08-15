@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import {
+  findPendingClarification,
   findPendingClarificationGroup,
   hasPendingClarification,
   hasPendingPermissionRequest,
+  newestDurableTurnId,
 } from "./pending-clarification";
+
+const CURRENT_TURN_ID = "turn-new";
+const TURN_TIMESTAMP = "2026-08-14T12:00:00Z";
 
 function message(overrides: Partial<Message>): Message {
   return {
@@ -134,6 +139,118 @@ describe("findPendingClarificationGroup", () => {
       metadata: { pending_id: "p1", question_total: 1, status: "pending" },
     });
     expect(findPendingClarificationGroup([old, a]).map((m) => m.id)).toEqual(["a"]);
+  });
+});
+
+describe("current-turn clarification ownership", () => {
+  it("ignores an older pending request when a newer durable turn exists", () => {
+    const messages = [
+      message({
+        id: "old",
+        turn_id: "turn-old",
+        type: "clarification_request",
+        metadata: { pending_id: "pending-old", status: "pending" },
+      }),
+      message({ id: "new", turn_id: CURRENT_TURN_ID, type: "message" }),
+    ];
+    expect(findPendingClarification(messages, { currentTurnId: CURRENT_TURN_ID })).toBeNull();
+    expect(findPendingClarificationGroup(messages, { currentTurnId: CURRENT_TURN_ID })).toEqual([]);
+  });
+
+  it("does not reactivate history when every newer-turn message is deleted", () => {
+    const messages = [
+      message({
+        id: "old",
+        turn_id: "turn-old",
+        type: "clarification_request",
+        metadata: { pending_id: "pending-old", status: "pending" },
+      }),
+    ];
+    expect(findPendingClarification(messages, { currentTurnId: CURRENT_TURN_ID })).toBeNull();
+  });
+
+  it("returns only the current turn's exact pending bundle", () => {
+    const messages = [
+      message({
+        id: "old",
+        turn_id: "turn-old",
+        type: "clarification_request",
+        metadata: { pending_id: "pending-old", status: "pending" },
+      }),
+      message({
+        id: "current-a",
+        turn_id: CURRENT_TURN_ID,
+        type: "clarification_request",
+        metadata: { pending_id: "pending-new", question_total: 2, status: "pending" },
+      }),
+      message({
+        id: "current-b",
+        turn_id: CURRENT_TURN_ID,
+        type: "clarification_request",
+        metadata: { pending_id: "pending-new", question_total: 2, status: "pending" },
+      }),
+    ];
+    expect(
+      findPendingClarificationGroup(messages, { currentTurnId: CURRENT_TURN_ID }).map(
+        (item) => item.id,
+      ),
+    ).toEqual(["current-a", "current-b"]);
+  });
+
+  it("lets the newest clarification bundle's terminal state win", () => {
+    const messages = [
+      message({
+        id: "pending",
+        turn_id: CURRENT_TURN_ID,
+        type: "clarification_request",
+        metadata: { pending_id: "pending-1", status: "pending" },
+      }),
+      message({
+        id: "rejected",
+        turn_id: CURRENT_TURN_ID,
+        type: "clarification_request",
+        metadata: { pending_id: "pending-2", status: "rejected" },
+      }),
+    ];
+    expect(findPendingClarification(messages, { currentTurnId: CURRENT_TURN_ID })).toBeNull();
+  });
+});
+
+describe("clarification authority fallbacks", () => {
+  it("uses compact session authority while turn history is unavailable", () => {
+    const messages = [message({ type: "clarification_request", metadata: { status: "pending" } })];
+    expect(findPendingClarification(messages, { pendingAction: null })).toBeNull();
+    expect(findPendingClarification(messages, { pendingAction: "clarification" })?.id).toBe(
+      "msg-1",
+    );
+  });
+
+  it("preserves legacy discovery when turn history is loaded but empty", () => {
+    const messages = [message({ type: "clarification_request", metadata: { status: "pending" } })];
+    expect(findPendingClarification(messages, { currentTurnId: null })?.id).toBe("msg-1");
+  });
+
+  it("selects the newest durable turn with backend tie-break ordering", () => {
+    expect(
+      newestDurableTurnId([
+        {
+          id: "turn-a",
+          session_id: toSessionId("session-1"),
+          task_id: toTaskId("task-1"),
+          started_at: TURN_TIMESTAMP,
+          created_at: TURN_TIMESTAMP,
+          updated_at: TURN_TIMESTAMP,
+        },
+        {
+          id: "turn-b",
+          session_id: toSessionId("session-1"),
+          task_id: toTaskId("task-1"),
+          started_at: TURN_TIMESTAMP,
+          created_at: TURN_TIMESTAMP,
+          updated_at: TURN_TIMESTAMP,
+        },
+      ]),
+    ).toBe("turn-b");
   });
 });
 

@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { toSheetItem } from "./session-task-switcher-sheet-hooks";
+import { describe, expect, it, vi } from "vitest";
+import { toSheetItem } from "./session-task-switcher-sheet-item";
+import { selectPendingTaskFromSheet } from "./session-task-switcher-sheet-selection";
+import type { TaskSession } from "@/lib/types/http";
 
 type SheetTask = Parameters<typeof toSheetItem>[0];
 type SheetCtx = Parameters<typeof toSheetItem>[1];
@@ -165,5 +167,64 @@ describe("toSheetItem queued prompt count", () => {
 
     expect(item.wipQueue).toEqual(wipQueue);
     expect(item.queuedCount).toBeUndefined();
+  });
+});
+
+describe("selectPendingTaskFromSheet", () => {
+  it("waits for the owner session before navigating and closing", async () => {
+    const order: string[] = [];
+    const setActiveSession = vi.fn((_taskId: string, sessionId: string) => {
+      order.push(`session:${sessionId}`);
+    });
+    await selectPendingTaskFromSheet({
+      taskId: "task-1",
+      preferredSessionId: "primary",
+      taskPendingAction: "clarification",
+      loadTaskSessionsForTask: vi.fn(
+        async () =>
+          [
+            {
+              id: "secondary",
+              task_id: "task-1",
+              state: "WAITING_FOR_INPUT",
+              pending_action: "clarification",
+              started_at: UPDATED_AT,
+              updated_at: UPDATED_AT,
+            },
+            {
+              id: "primary",
+              task_id: "task-1",
+              state: "WAITING_FOR_INPUT",
+              is_primary: true,
+              started_at: UPDATED_AT,
+              updated_at: UPDATED_AT,
+            },
+          ] as TaskSession[],
+      ),
+      setActiveSession,
+      setActiveTask: vi.fn(),
+      navigate: () => order.push("navigate"),
+      onOpenChange: () => order.push("close"),
+    });
+
+    expect(setActiveSession).toHaveBeenCalledWith("task-1", "secondary");
+    expect(order).toEqual(["session:secondary", "navigate", "close"]);
+  });
+
+  it("falls back safely when session loading fails", async () => {
+    const order: string[] = [];
+    await selectPendingTaskFromSheet({
+      taskId: "task-1",
+      preferredSessionId: "primary",
+      taskPendingAction: "permission",
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+      setActiveSession: (_taskId, sessionId) => order.push(`session:${sessionId}`),
+      setActiveTask: () => order.push("task"),
+      navigate: () => order.push("navigate"),
+      onOpenChange: () => order.push("close"),
+    });
+    expect(order).toEqual(["session:primary", "navigate", "close"]);
   });
 });

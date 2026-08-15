@@ -1,7 +1,7 @@
 ---
 id: "05-clarification-regression-green"
 title: "Clarification regression green"
-status: pending
+status: completed
 wave: 5
 depends_on:
   [
@@ -76,4 +76,11 @@ green, and leave no temporary capture specs or processes.
 
 ## Results
 
-Pending.
+- Fresh managed production artifacts built successfully; no retry or widened timeout was used.
+- Chromium discovered 3 tests in `sidebar-pending-question.spec.ts`; all 3 passed, including stale
+  reload suppression and secondary-session ownership.
+- Chromium discovered 1 matching detached-timeout test; it passed and accepted the deferred answer.
+- `mobile-chrome` discovered 12 tests; all 12 passed. The new `.tap()` owner-selection case verified
+  drawer dismissal, active secondary session, task URL, question visibility, and horizontal fit.
+- `git diff --check` passed. Managed runners exited cleanly and used isolated `/tmp/kandev-e2e-*`
+  databases/repositories; the read-only :9998 instance was not mutated.

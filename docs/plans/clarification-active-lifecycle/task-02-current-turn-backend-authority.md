@@ -1,7 +1,7 @@
 ---
 id: "02-current-turn-backend-authority"
 title: "Current-turn backend authority"
-status: pending
+status: completed
 wave: 2
 depends_on: ["01-clarification-regression-red"]
 plan: "plan.md"
@@ -79,4 +79,11 @@ blockers/risks, and update task/plan status.
 
 ## Results
 
-Pending.
+- Added newest-durable-turn clarification authority for SQLite and PostgreSQL, including stable turn
+  ordering, missing-status compatibility, and deletion-proof ownership.
+- Routed canceller, workflow guard, and detached-response fallback through that authority. Repeated
+  detachment is a no-op; superseded/terminal responses return conflict without writes or resume
+  events; repository errors fail closed.
+- `cd apps/backend && go test ./internal/task/repository/sqlite ./internal/clarification ./internal/orchestrator`
+  passed. The environment-gated PostgreSQL case skipped locally because
+  `KANDEV_TEST_POSTGRES_DSN` was unset; it remains enabled for PostgreSQL CI.

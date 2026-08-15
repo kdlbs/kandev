@@ -44,13 +44,17 @@ func isTerminalStatus(status string) bool {
 // markMessagesDetached unblocks WaitForResponse and keeps the clarification
 // interactive: status stays pending and agent_disconnected is set so the UI
 // can route a late answer through the event fallback path.
-func (c *Canceller) markMessagesDetached(ctx context.Context, msgs []*taskmodels.Message, pendingID string) {
+func (c *Canceller) markMessagesDetached(ctx context.Context, msgs []*taskmodels.Message, pendingID string) bool {
 	writeCtx := context.WithoutCancel(ctx)
+	changed := false
 	for _, msg := range msgs {
 		if msg.Metadata == nil {
 			msg.Metadata = map[string]any{}
 		}
 		if current, _ := msg.Metadata["status"].(string); isTerminalStatus(current) {
+			continue
+		}
+		if detached, _ := msg.Metadata["agent_disconnected"].(bool); detached {
 			continue
 		}
 		msg.Metadata["agent_disconnected"] = true
@@ -61,15 +65,18 @@ func (c *Canceller) markMessagesDetached(ctx context.Context, msgs []*taskmodels
 				zap.Error(err))
 			continue
 		}
+		changed = true
 		c.publishMessageUpdated(writeCtx, msg)
 	}
+	return changed
 }
 
 // markMessagesExpired updates the given messages to status=expired and publishes
 // a message.updated event for each one. It is idempotent: already-terminal
 // messages are skipped.
-func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.Message, pendingID string) {
+func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.Message, pendingID string) bool {
 	writeCtx := context.WithoutCancel(ctx)
+	changed := false
 	for _, msg := range msgs {
 		if msg.Metadata == nil {
 			msg.Metadata = map[string]any{}
@@ -86,8 +93,10 @@ func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.
 				zap.Error(err))
 			continue
 		}
+		changed = true
 		c.publishMessageUpdated(writeCtx, msg)
 	}
+	return changed
 }
 
 func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) int {
@@ -106,7 +115,7 @@ func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) 
 		handled[id] = true
 	}
 
-	msgs, err := c.repo.FindPendingClarificationMessagesBySessionID(ctx, sessionID)
+	msgs, err := c.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil || len(msgs) == 0 {
 		return len(pendingIDs)
 	}
@@ -119,10 +128,13 @@ func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) 
 		}
 		byPendingID[pid] = append(byPendingID[pid], msg)
 	}
+	changedBundles := len(pendingIDs)
 	for pid, bundle := range byPendingID {
-		c.markMessagesDetached(ctx, bundle, pid)
+		if c.markMessagesDetached(ctx, bundle, pid) {
+			changedBundles++
+		}
 	}
-	return len(pendingIDs) + len(byPendingID)
+	return changedBundles
 }
 
 // DetachSessionAndNotify cancels in-memory WaitForResponse waiters for a session
@@ -149,7 +161,7 @@ func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string
 		handled[id] = true
 	}
 
-	msgs, err := c.repo.FindPendingClarificationMessagesBySessionID(ctx, sessionID)
+	msgs, err := c.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil || len(msgs) == 0 {
 		return len(pendingIDs)
 	}
@@ -162,10 +174,13 @@ func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string
 		}
 		byPendingID[pid] = append(byPendingID[pid], msg)
 	}
+	changedBundles := len(pendingIDs)
 	for pid, bundle := range byPendingID {
-		c.markMessagesExpired(ctx, bundle, pid)
+		if c.markMessagesExpired(ctx, bundle, pid) {
+			changedBundles++
+		}
 	}
-	return len(pendingIDs) + len(byPendingID)
+	return changedBundles
 }
 
 // publishMessageUpdated publishes a message.updated event to the event bus.

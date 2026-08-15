@@ -86,9 +86,9 @@ func TestMessageCRUDPaginationSearchAndMetadataLookups(t *testing.T) {
 	if err != nil || latestPending.ID != "message-b" {
 		t.Fatalf("FindMessageByPendingID = %+v, %v", latestPending, err)
 	}
-	pendingClarifications, err := repo.FindPendingClarificationMessagesBySessionID(ctx, "session-message-crud")
+	pendingClarifications, err := repo.FindActiveClarificationMessagesBySessionID(ctx, "session-message-crud")
 	if err != nil || strings.Join(messageIDs(pendingClarifications), ",") != "message-a" {
-		t.Fatalf("FindPendingClarificationMessagesBySessionID = %v, %v", messageIDs(pendingClarifications), err)
+		t.Fatalf("FindActiveClarificationMessagesBySessionID = %v, %v", messageIDs(pendingClarifications), err)
 	}
 	question, err := repo.FindMessageByPendingIDAndQuestion(ctx, "session-message-crud", "pending-shared", "question-b")
 	if err != nil || question.ID != "message-b" {

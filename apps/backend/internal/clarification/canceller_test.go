@@ -12,8 +12,10 @@ import (
 )
 
 type stubMessageStore struct {
-	messages map[string][]*taskmodels.Message
-	updated  []*taskmodels.Message
+	messages        map[string][]*taskmodels.Message
+	activeBySession map[string][]*taskmodels.Message
+	activeErr       error
+	updated         []*taskmodels.Message
 }
 
 func (s *stubMessageStore) GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error) {
@@ -36,7 +38,13 @@ func (s *stubMessageStore) FindMessagesByPendingID(_ context.Context, pendingID 
 	return msgs, nil
 }
 
-func (s *stubMessageStore) FindPendingClarificationMessagesBySessionID(_ context.Context, sessionID string) ([]*taskmodels.Message, error) {
+func (s *stubMessageStore) FindActiveClarificationMessagesBySessionID(_ context.Context, sessionID string) ([]*taskmodels.Message, error) {
+	if s.activeErr != nil {
+		return nil, s.activeErr
+	}
+	if s.activeBySession != nil {
+		return s.activeBySession[sessionID], nil
+	}
 	var out []*taskmodels.Message
 	for _, msgs := range s.messages {
 		for _, m := range msgs {
@@ -227,6 +235,32 @@ func TestCanceller_MarksDetachedWhenStoreAlreadyDrained(t *testing.T) {
 	}
 	if got, _ := updated.Metadata["agent_disconnected"].(bool); !got {
 		t.Errorf("expected agent_disconnected=true")
+	}
+}
+
+func TestCanceller_RepeatedDetachIsNoOp(t *testing.T) {
+	pendingID := "already-detached"
+	msgs := map[string][]*taskmodels.Message{
+		pendingID: {{
+			ID:            "m-detached",
+			TaskSessionID: "s1",
+			Metadata: map[string]any{
+				"status":             "pending",
+				"pending_id":         pendingID,
+				"agent_disconnected": true,
+			},
+		}},
+	}
+	c, repo, eventBus := newTestCanceller(t, msgs)
+
+	if got := c.DetachSessionAndNotify(context.Background(), "s1"); got != 0 {
+		t.Fatalf("repeated detach count = %d, want 0", got)
+	}
+	if len(repo.updated) != 0 {
+		t.Fatalf("repeated detach wrote %d messages", len(repo.updated))
+	}
+	if len(eventBus.events) != 0 {
+		t.Fatalf("repeated detach published %d events", len(eventBus.events))
 	}
 }
 

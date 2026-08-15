@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -43,6 +45,26 @@ type statusSummaryQueuedPromptCounter struct {
 	counts map[string]int
 }
 
+type rejectingStatusSummaryRepository struct {
+	repository.TaskStatusSummaryRepository
+	competing statussummary.StoredTaskStatusSummary
+	rejected  bool
+}
+
+func (r *rejectingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
+	ctx context.Context,
+	stored *statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	if !r.rejected {
+		r.rejected = true
+		if _, err := r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, &r.competing); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	return r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, stored)
+}
+
 func (c statusSummaryQueuedPromptCounter) CountPendingByTaskIDs(_ context.Context, taskIDs []string) (map[string]int, error) {
 	out := make(map[string]int, len(taskIDs))
 	for _, id := range taskIDs {
@@ -51,7 +73,7 @@ func (c statusSummaryQueuedPromptCounter) CountPendingByTaskIDs(_ context.Contex
 	return out, nil
 }
 
-func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) {
+func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	createTaskWithoutRepositories(t, ctx, repo)
@@ -101,11 +123,11 @@ func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) 
 	sessions := map[string][]*models.TaskSession{task.ID: {session}}
 	pending := map[string]models.TaskPendingAction{session.ID: models.TaskPendingActionPermission}
 
-	got, err := svc.HydrateMissingTaskStatusSummaries(
+	got, err := svc.ReconcileTaskStatusSummaries(
 		ctx, []*models.Task{task}, sessions, pending, map[string]*statussummary.TaskStatusSummary{},
 	)
 	if err != nil {
-		t.Fatalf("HydrateMissingTaskStatusSummaries: %v", err)
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
 	}
 	summary := got[task.ID]
 	if summary == nil {
@@ -144,8 +166,8 @@ func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) 
 		t.Fatalf("persisted summary = %+v", persisted[task.ID])
 	}
 
-	if _, err := svc.HydrateMissingTaskStatusSummaries(ctx, []*models.Task{task}, sessions, pending, got); err != nil {
-		t.Fatalf("second HydrateMissingTaskStatusSummaries: %v", err)
+	if _, err := svc.ReconcileTaskStatusSummaries(ctx, []*models.Task{task}, sessions, pending, got); err != nil {
+		t.Fatalf("second ReconcileTaskStatusSummaries: %v", err)
 	}
 	if prReader.calls != 1 {
 		t.Fatalf("PR reader calls after existing summary = %d, want one", prReader.calls)
@@ -154,7 +176,7 @@ func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) 
 
 // The rebuild path is what runs after a restart, so it is where a stale record
 // used to come back. A session whose error was cleared must rebuild clean.
-func TestHydrateMissingTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) {
+func TestReconcileTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	createTaskWithoutRepositories(t, ctx, repo)
@@ -180,7 +202,7 @@ func TestHydrateMissingTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) 
 
 	svc.statusSummaries = repo
 	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
-	got, err := svc.HydrateMissingTaskStatusSummaries(
+	got, err := svc.ReconcileTaskStatusSummaries(
 		ctx,
 		[]*models.Task{task},
 		map[string][]*models.TaskSession{task.ID: {stored}},
@@ -188,7 +210,7 @@ func TestHydrateMissingTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) 
 		map[string]*statussummary.TaskStatusSummary{},
 	)
 	if err != nil {
-		t.Fatalf("HydrateMissingTaskStatusSummaries: %v", err)
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
 	}
 	summary := got[task.ID]
 	if summary == nil {
@@ -196,5 +218,116 @@ func TestHydrateMissingTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) 
 	}
 	if summary.ActiveError != nil {
 		t.Fatalf("active error = %+v, want a cleared record to stay invisible", summary.ActiveError)
+	}
+}
+
+func TestReconcileTaskStatusSummariesRepairsExistingPendingOnly(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	svc.statusSummaries = repo
+
+	storedAt := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	stored := statussummary.TaskStatusSummary{
+		Revision:            7,
+		UpdatedAt:           storedAt,
+		PrimarySession:      &statussummary.PrimarySessionSummary{ID: "primary-1", State: "RUNNING"},
+		ForegroundActivity:  "generating",
+		ActiveSubagentCount: 2,
+		PendingAction:       string(models.TaskPendingActionClarification),
+		Git:                 &statussummary.GitSummary{ChangedFiles: 4, Ahead: 1},
+		QueuedPromptCount:   3,
+	}
+	accepted, err := repo.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
+		TaskID:      "task-1",
+		WorkspaceID: "ws-1",
+		Summary:     stored,
+	})
+	if err != nil || !accepted {
+		t.Fatalf("seed task status summary: accepted=%v err=%v", accepted, err)
+	}
+	eventBus.ClearEvents()
+
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{"task-1": &stored},
+	)
+	if err != nil {
+		t.Fatalf("repair existing pending state: %v", err)
+	}
+	repaired := got[task.ID]
+	if repaired == nil || repaired.PendingAction != "" || repaired.Revision != 8 {
+		t.Fatalf("repaired existing summary = %+v", repaired)
+	}
+	if repaired.PrimarySession == nil || repaired.PrimarySession.ID != "primary-1" ||
+		repaired.ForegroundActivity != "generating" || repaired.ActiveSubagentCount != 2 ||
+		repaired.Git == nil || repaired.Git.ChangedFiles != 4 || repaired.QueuedPromptCount != 3 {
+		t.Fatalf("unrelated summary fields changed: %+v", repaired)
+	}
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 || published[0].Type != events.TaskStatusSummaryUpdated {
+		t.Fatalf("repair events = %+v, want one complete summary update", published)
+	}
+
+	eventBus.ClearEvents()
+	if _, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		got,
+	); err != nil {
+		t.Fatalf("repeat existing pending repair: %v", err)
+	}
+	if len(eventBus.GetPublishedEvents()) != 0 {
+		t.Fatalf("no-op repair published events = %+v", eventBus.GetPublishedEvents())
+	}
+}
+
+func TestReconcileTaskStatusSummariesReloadsAfterCASRejection(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	stored := statussummary.TaskStatusSummary{
+		Revision:      4,
+		PendingAction: string(models.TaskPendingActionClarification),
+	}
+	accepted, err := repo.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
+		TaskID: "task-1", WorkspaceID: "ws-1", Summary: stored,
+	})
+	if err != nil || !accepted {
+		t.Fatalf("seed task status summary: accepted=%v err=%v", accepted, err)
+	}
+	svc.statusSummaries = &rejectingStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		competing: statussummary.StoredTaskStatusSummary{
+			TaskID:      "task-1",
+			WorkspaceID: "ws-1",
+			Summary: statussummary.TaskStatusSummary{
+				Revision:          5,
+				PendingAction:     string(models.TaskPendingActionClarification),
+				QueuedPromptCount: 9,
+			},
+		},
+	}
+
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{"task-1": &stored},
+	)
+	if err != nil {
+		t.Fatalf("reconcile after CAS rejection: %v", err)
+	}
+	repaired := got[task.ID]
+	if repaired == nil || repaired.Revision != 6 || repaired.PendingAction != "" || repaired.QueuedPromptCount != 9 {
+		t.Fatalf("summary after CAS rejection = %+v", repaired)
 	}
 }

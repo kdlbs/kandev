@@ -5,7 +5,36 @@
  */
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { seedSecondaryClarificationTask } from "../../helpers/clarification";
+import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+
+type ClarificationMessage = {
+  type?: string;
+  content?: string;
+  metadata?: Record<string, unknown>;
+};
+
+function pendingID(message: ClarificationMessage): string | null {
+  if (message.type !== "clarification_request") return null;
+  const value = message.metadata?.pending_id;
+  return typeof value === "string" ? value : null;
+}
+
+async function clarificationMessages(apiClient: ApiClient, sessionId: string) {
+  return (await apiClient.listSessionMessages(sessionId)).messages as ClarificationMessage[];
+}
+
+async function activeSessionId(page: import("@playwright/test").Page): Promise<string | null> {
+  return page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __KANDEV_E2E_STORE__?: { getState: () => { tasks: { activeSessionId: string | null } } };
+        }
+      ).__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? null,
+  );
+}
 
 async function waitForSessionWaitingForInput(
   apiClient: ApiClient,
@@ -24,6 +53,130 @@ async function waitForSessionWaitingForInput(
 }
 
 test.describe("Sidebar pending-question indicator without opening the task", () => {
+  test("older detached clarification stays superseded after a newer bundle is skipped", async ({
+    apiClient,
+    seedData,
+    testPage,
+  }) => {
+    test.setTimeout(180_000);
+    const title = "Superseded clarification task";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      title,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:clarification-timeout",
+        repository_ids: [seedData.repositoryId],
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+    if (!task.session_id) throw new Error("supersession setup has no session");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.clarificationDeferredNotice()).toBeVisible({ timeout: 30_000 });
+
+    let olderPendingID: string | null = null;
+    await expect
+      .poll(async () => {
+        const messages = await clarificationMessages(apiClient, task.session_id!);
+        const detached = messages.find(
+          (message) =>
+            pendingID(message) &&
+            message.metadata?.status === "pending" &&
+            message.metadata?.agent_disconnected === true,
+        );
+        olderPendingID = detached ? pendingID(detached) : null;
+        return olderPendingID;
+      })
+      .not.toBeNull();
+
+    await apiClient.addUserMessage(task.id, task.session_id, "/e2e:clarification");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "newer clarification should wait for input",
+      timeout: 60_000,
+    });
+
+    let newerPendingID: string | null = null;
+    await expect
+      .poll(async () => {
+        const ids = (await clarificationMessages(apiClient, task.session_id!))
+          .map(pendingID)
+          .filter((id): id is string => id !== null);
+        newerPendingID = ids.find((id) => id !== olderPendingID) ?? null;
+        return new Set(ids).size;
+      })
+      .toBe(2);
+    expect(newerPendingID).not.toBe(olderPendingID);
+
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await session.clarificationSkip().click();
+    await expect
+      .poll(async () => {
+        const newer = (await clarificationMessages(apiClient, task.session_id!)).find(
+          (message) => pendingID(message) === newerPendingID,
+        );
+        return newer?.metadata?.status;
+      })
+      .toBe("rejected");
+
+    await apiClient.addUserMessage(
+      task.id,
+      task.session_id,
+      'e2e:message("post-skip turn completed")',
+    );
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(task.session_id!);
+        return messages.some((message) => message.content?.includes("post-skip turn completed"));
+      })
+      .toBe(true);
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.clarificationOverlay()).toHaveCount(0);
+    const row = session.sidebarTaskItem(title);
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId("task-state-waiting-for-input")).toHaveCount(0);
+  });
+
+  test("task activation opens the secondary session that owns clarification", async ({
+    apiClient,
+    seedData,
+    testPage,
+  }) => {
+    test.setTimeout(180_000);
+    const target = await seedSecondaryClarificationTask(
+      apiClient,
+      seedData,
+      "Secondary clarification owner",
+    );
+    const navTask = await apiClient.createTask(seedData.workspaceId, "Secondary owner nav task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    await testPage.goto(`/t/${navTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const targetRow = session.sidebarTaskItem(target.title);
+    await expect(targetRow).toBeVisible();
+    await expect(targetRow.getByTestId("task-state-waiting-for-input")).toBeVisible();
+    await targetRow.click();
+
+    await expect(testPage).toHaveURL(new RegExp(`/t/${target.id}$`));
+    await expect.poll(() => activeSessionId(testPage)).toBe(target.clarificationSessionId);
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await expect(session.clarificationOverlay()).toContainText(
+      "Which database should we use for this project?",
+    );
+  });
+
   test("blocked task shows the question icon on a fresh page load; idle task does not", async ({
     apiClient,
     seedData,

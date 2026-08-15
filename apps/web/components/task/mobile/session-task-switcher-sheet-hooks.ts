@@ -4,89 +4,20 @@ import { useCallback, useMemo, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { replaceTaskUrl } from "@/lib/links";
 import { fetchWorkflowSnapshot, listWorkflows } from "@/lib/api";
-import { launchSession } from "@/lib/services/session-launch-service";
-import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
-import {
-  repositoryId as toRepositoryId,
-  type TaskState,
-  type TaskSessionState,
-  type Repository,
-  type Task,
-} from "@/lib/types/http";
+import { type Repository, type Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
-import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
-import { resolvePreferredSessionId } from "../task-select-helpers";
 import { mapSnapshotToKanban, sortByUpdatedAtDesc } from "./session-task-switcher-sheet-helpers";
+import { toSheetItem, type SheetItemCtx } from "./session-task-switcher-sheet-item";
+import { selectTaskFromSheet } from "./session-task-switcher-sheet-selection";
 import { useTranslation } from "react-i18next";
-import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
-
-type SheetItemCtx = {
-  repositoryPathsById: Map<string, string | undefined>;
-  workflowNameById: Map<string, string>;
-  stepTitleById: Map<string, string>;
-  wipQueueByTaskId?: Map<string, WipQueueStatus>;
-  acknowledgedAgentErrors?: Record<string, string>;
-  dismissedAgentErrors?: Record<string, string>;
-};
-
-function sheetDiffStats(summary: KanbanState["tasks"][number]["statusSummary"]) {
-  const git = summary?.git;
-  if (!git || ((git.additions ?? 0) <= 0 && (git.deletions ?? 0) <= 0)) return undefined;
-  return { additions: git.additions ?? 0, deletions: git.deletions ?? 0 };
-}
-
-function sheetRepositoryPath(
-  task: KanbanState["tasks"][number],
-  ctx: SheetItemCtx,
-): string | undefined {
-  return task.repositoryId
-    ? ctx.repositoryPathsById.get(toRepositoryId(task.repositoryId))
-    : undefined;
-}
-
-function sheetPendingFlags(
-  summary: KanbanState["tasks"][number]["statusSummary"],
-  fallback?: string | null,
-) {
-  const action = summary != null ? summary.pending_action : fallback;
-  return {
-    clarification: action === "clarification",
-    permission: action === "permission",
-  };
-}
-
-function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
-  const summary = task.statusSummary;
-  const hasSummary = summary != null;
-  const pending = sheetPendingFlags(hasSummary ? summary : undefined, task.taskPendingAction);
-  return {
-    sessionState: hasSummary
-      ? summary?.primary_session?.state
-      : (task.primarySessionState as TaskSessionState | undefined),
-    foregroundActivity: hasSummary ? summary?.foreground_activity : task.foregroundActivity,
-    repositoryPath: sheetRepositoryPath(task, ctx),
-    diffStats: sheetDiffStats(summary),
-    updatedAt: hasSummary ? summary?.updated_at : task.updatedAt,
-    primarySessionId: hasSummary
-      ? (summary?.primary_session?.id ?? null)
-      : (task.primarySessionId ?? null),
-    hasPendingClarification: pending.clarification,
-    hasPendingPermission: pending.permission,
-    agentErrorMessage: statusSummaryActiveErrorPreview(
-      summary,
-      ctx.acknowledgedAgentErrors,
-      ctx.dismissedAgentErrors,
-    ),
-  };
-}
 
 function findSheetTask(
   state: ReturnType<ReturnType<typeof useAppStoreApi>["getState"]>,
@@ -99,40 +30,6 @@ function findSheetTask(
     if (archivedTask) return archivedTask;
   }
   return undefined;
-}
-
-export function toSheetItem(
-  task: KanbanState["tasks"][number] & { _workflowId: string },
-  ctx: SheetItemCtx,
-) {
-  const status = sheetStatus(task, ctx);
-  return {
-    id: task.id,
-    title: task.title,
-    autopilot: task.autopilot,
-    // Carry the parent link so the mobile task switcher nests subtasks the same
-    // way the desktop sidebar does (applyView/TaskSwitcher read parentTaskId).
-    parentTaskId: task.parentTaskId ?? undefined,
-    workspaceMode: task.workspaceMode,
-    state: task.state as TaskState | undefined,
-    ...status,
-    // Same interruption marker the desktop sidebar reads — the mobile
-    // task-switcher row shares TaskItem rendering.
-    interrupted: task.interrupted,
-    description: task.description,
-    workflowId: task._workflowId,
-    workflowName: ctx.workflowNameById.get(task._workflowId),
-    workflowStepId: task.workflowStepId,
-    workflowStepTitle: ctx.stepTitleById.get(task.workflowStepId),
-    isArchived: task.isArchived === true,
-    isRemoteExecutor: task.isRemoteExecutor,
-    remoteExecutorType: task.primaryExecutorType ?? undefined,
-    remoteExecutorName: task.primaryExecutorName ?? undefined,
-    // Queued prompt count badge — same status summary source as the desktop
-    // sidebar mapper (buildSidebarItem) so both surfaces agree.
-    queuedCount: task.statusSummary?.queued_prompt_count,
-    wipQueue: ctx.wipQueueByTaskId?.get(task.id),
-  };
 }
 
 export function useSheetData(workspaceId: string | null) {
@@ -433,47 +330,6 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
   return { handleWorkspaceChange, handleTaskCreated };
 }
 
-type SelectTaskOptions = {
-  setActiveTask: (taskId: string) => void;
-  setActiveSession: (taskId: string, sessionId: string) => void;
-  loadTaskSessionsForTask: SheetNavOptions["loadTaskSessionsForTask"];
-  onOpenChange: (open: boolean) => void;
-};
-
-async function selectTaskWithoutPrimarySession(taskId: string, opts: SelectTaskOptions) {
-  const { setActiveTask, setActiveSession, loadTaskSessionsForTask, onOpenChange } = opts;
-  try {
-    const sessions = await loadTaskSessionsForTask(taskId);
-    const sessionId = sessions[0]?.id ?? null;
-    if (sessionId) {
-      setActiveSession(taskId, sessionId);
-      replaceTaskUrl(taskId);
-      onOpenChange(false);
-      return;
-    }
-    // No session — prepare workspace.
-    const { request } = buildPrepareRequest(taskId);
-    try {
-      const resp = await launchSession(request);
-      if (resp.session_id) {
-        setActiveSession(taskId, resp.session_id);
-        replaceTaskUrl(taskId);
-        onOpenChange(false);
-        return;
-      }
-    } catch {
-      // Fall through to default navigation.
-    }
-  } catch (error) {
-    // Loading sessions can reject (network / 5xx). Don't strand the user;
-    // fall back to plain task navigation so URL + state still align with tap.
-    console.error("Failed to load sessions for task:", error);
-  }
-  setActiveTask(taskId);
-  replaceTaskUrl(taskId);
-  onOpenChange(false);
-}
-
 function useSheetDeleteActions(
   store: ReturnType<typeof useAppStoreApi>,
   removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
@@ -556,31 +412,18 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
   const handleSelectTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findSheetTask(state, taskId);
-      if (task?.isArchived) {
-        setActiveTask(taskId);
-        replaceTaskUrl(taskId);
-        onOpenChange(false);
-        return;
-      }
-      if (task?.primarySessionId) {
-        const targetSessionId = resolvePreferredSessionId({
-          taskId,
-          primarySessionId: task.primarySessionId,
+      selectTaskFromSheet({
+        taskId,
+        task: findSheetTask(state, taskId),
+        state: {
           lastSessionByTaskId: state.tasks.lastSessionByTaskId,
           environmentIdBySessionId: state.environmentIdBySessionId,
           taskSessionsById: state.taskSessions.items,
-        });
-        setActiveSession(taskId, targetSessionId);
-        loadTaskSessionsForTask(taskId);
-        replaceTaskUrl(taskId);
-        onOpenChange(false);
-        return;
-      }
-      void selectTaskWithoutPrimarySession(taskId, {
+        },
         setActiveTask,
         setActiveSession,
         loadTaskSessionsForTask,
+        navigate: replaceTaskUrl,
         onOpenChange,
       });
     },

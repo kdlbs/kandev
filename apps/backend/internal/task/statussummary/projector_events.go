@@ -8,7 +8,6 @@ import (
 	"github.com/kandev/kandev/internal/events"
 )
 
-
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
 	switch eventType {
 	case events.TaskUpdated:
@@ -23,8 +22,14 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 		return p.applyMessageEventLocked(state, eventType, data)
 	case events.ClarificationAnswered, events.ClarificationPrimaryAnswered,
 		events.ClarificationCancelled, events.ClarificationStaleDismissed:
+		if p.loadPendingActions != nil {
+			return false
+		}
 		return p.clearPendingLocked(state, stringField(data, "session_id"))
 	case events.PermissionRequestReceived:
+		if p.loadPendingActions != nil {
+			return false
+		}
 		return applyPermissionEventLocked(state, data)
 	case events.GitEvent:
 		return p.applyGitEventLocked(state, data)
@@ -58,6 +63,9 @@ func applyPermissionEventLocked(state *projectionState, data map[string]interfac
 
 func (p *Projector) applyTaskUpdatedEventLocked(state *projectionState, data map[string]interface{}) bool {
 	primarySessionID, primaryChanged := p.applyTaskPrimaryUpdateLocked(state, data)
+	if p.loadPendingActions != nil {
+		return primaryChanged
+	}
 	pendingChanged := applyTaskPendingUpdateLocked(state, data, primarySessionID)
 	return primaryChanged || pendingChanged
 }
@@ -392,6 +400,9 @@ func (p *Projector) clearSupersededErrorFromMessageLocked(
 }
 
 func (p *Projector) applyPendingMessageLocked(state *projectionState, eventType string, data map[string]interface{}, sessionID string) bool {
+	if p.loadPendingActions != nil {
+		return false
+	}
 	messageType := strings.ToLower(stringField(data, "type"))
 	metadata, _ := data["metadata"].(map[string]interface{})
 	status := strings.ToLower(stringField(metadata, "status"))

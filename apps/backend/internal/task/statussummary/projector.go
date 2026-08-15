@@ -37,6 +37,10 @@ type GitObservation struct {
 // needed when a projector is recreated after a process restart.
 type GitObservationLoader func(context.Context, string) ([]GitObservation, error)
 
+// PendingActionLoader returns the authoritative pending action for every
+// input-capable session belonging to one task.
+type PendingActionLoader func(context.Context, string) (map[string]string, error)
+
 // SummaryUpdated is the complete replacement payload sent to workspace
 // subscribers. It intentionally contains no transcript, file list, or source
 // event payload.
@@ -55,6 +59,7 @@ type ProjectorConfig struct {
 	EventBus            bus.EventBus
 	ResolveWorkspace    WorkspaceResolver
 	LoadGitObservations GitObservationLoader
+	LoadPendingActions  PendingActionLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
 	// message.queue.get). Wired from the messagequeue service at the
@@ -73,6 +78,7 @@ type Projector struct {
 	eventBus            bus.EventBus
 	resolveWorkspace    WorkspaceResolver
 	loadGitObservations GitObservationLoader
+	loadPendingActions  PendingActionLoader
 	countQueuedPrompts  func(context.Context, string) (int, error)
 	logger              *logger.Logger
 	now                 func() time.Time
@@ -155,6 +161,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		eventBus:            cfg.EventBus,
 		resolveWorkspace:    cfg.ResolveWorkspace,
 		loadGitObservations: cfg.LoadGitObservations,
+		loadPendingActions:  cfg.LoadPendingActions,
 		countQueuedPrompts:  cfg.CountQueuedPrompts,
 		logger:              log.WithFields(zap.String("component", "task-status-summary-projector")),
 		now:                 now,
@@ -274,7 +281,27 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 	}
 
 	if event.Type == events.MessageQueueStatusChanged {
+		if p.loadPendingActions != nil && !state.pendingObserved {
+			pendingChanged, refreshErr := p.refreshPendingLocked(ctx, taskID, state)
+			if refreshErr != nil {
+				return refreshErr
+			}
+			if err := p.persistPendingRefreshLocked(ctx, taskID, state, pendingChanged); err != nil {
+				return err
+			}
+		}
 		return p.applyQueueStatusEvent(ctx, state, taskID)
+	}
+
+	refreshPending := p.loadPendingActions != nil &&
+		(!state.pendingObserved || isPendingSensitiveEvent(event.Type))
+	if refreshPending {
+		pendingChanged, refreshErr := p.refreshPendingLocked(ctx, taskID, state)
+		if refreshErr != nil {
+			return refreshErr
+		}
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged
+		return p.persistPendingRefreshLocked(ctx, taskID, state, changed)
 	}
 
 	changed := p.applySourceEventLocked(state, event.Type, data)
@@ -283,6 +310,35 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 	}
 	_, err = p.persistAndPublishLocked(ctx, taskID, state)
 	return err
+}
+
+const maxPendingPersistAttempts = 3
+
+func (p *Projector) persistPendingRefreshLocked(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+	changed bool,
+) error {
+	if !changed {
+		return nil
+	}
+	for attempt := 0; attempt < maxPendingPersistAttempts; attempt++ {
+		accepted, err := p.persistAndPublishLocked(ctx, taskID, state)
+		if err != nil {
+			return err
+		}
+		if accepted {
+			return nil
+		}
+		if _, err := p.refreshPendingLocked(ctx, taskID, state); err != nil {
+			return err
+		}
+	}
+	p.logger.Warn("exhausted CAS retries refreshing pending task status",
+		zap.String("task_id", taskID),
+		zap.Int("attempts", maxPendingPersistAttempts))
+	return nil
 }
 
 // maxQueueCountPersistAttempts bounds the retry loop when a competing writer
@@ -417,4 +473,3 @@ func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, 
 	}
 	return true, nil
 }
-

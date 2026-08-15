@@ -233,11 +233,11 @@ func buildTaskDTOsWithSessionInfo(
 		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
 	}
 	if summaryErr == nil && pendingErr == nil {
-		statusSummaries, err = svc.HydrateMissingTaskStatusSummaries(
+		statusSummaries, err = svc.ReconcileTaskStatusSummaries(
 			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
 		)
 		if err != nil {
-			log.Warn("failed to repair missing task status summaries", zap.Error(err))
+			log.Warn("failed to reconcile task status summaries", zap.Error(err))
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -141,7 +142,7 @@ func TestHttpRespond_AnsweredAfterTimeout_PublishesEvent(t *testing.T) {
 			TaskID:        "t1",
 			TaskSessionID: "s1",
 			Metadata: map[string]any{
-				"status":             "expired",
+				"status":             "pending",
 				"agent_disconnected": true,
 				"pending_id":         "pending-456",
 				"question_id":        "q1",
@@ -149,7 +150,7 @@ func TestHttpRespond_AnsweredAfterTimeout_PublishesEvent(t *testing.T) {
 			},
 		}},
 	}
-	h, _, eventBus, _ := setupTestHandler(t, msgs)
+	h, _, eventBus, messageCreator := setupTestHandler(t, msgs)
 
 	body := RespondBody{
 		Answers: []Answer{{
@@ -162,15 +163,93 @@ func TestHttpRespond_AnsweredAfterTimeout_PublishesEvent(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	var found bool
+	answerEvents := 0
 	for _, ev := range eventBus.events {
 		if ev.Type == events.ClarificationAnswered {
-			found = true
-			break
+			answerEvents++
 		}
 	}
-	if !found {
-		t.Errorf("expected %s event to be published", events.ClarificationAnswered)
+	if answerEvents != 1 {
+		t.Errorf("%s events = %d, want exactly 1", events.ClarificationAnswered, answerEvents)
+	}
+	if len(messageCreator.updates) != 1 || messageCreator.updates[0].status != "answered" {
+		t.Errorf("detached answer updates = %+v, want one answered write", messageCreator.updates)
+	}
+}
+
+func TestHttpRespond_FallbackInactiveBundleReturnsConflictWithoutSideEffects(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     string
+		rejected   bool
+		superseded bool
+	}{
+		{name: "superseded answer", status: "pending", superseded: true},
+		{name: "superseded rejection", status: "pending", rejected: true, superseded: true},
+		{name: "terminal answer", status: "answered"},
+		{name: "terminal rejection", status: "rejected", rejected: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			old := &taskmodels.Message{
+				ID: "old-message", TaskID: "t1", TaskSessionID: "s1",
+				Metadata: map[string]any{
+					"status": tt.status, "agent_disconnected": true,
+					"pending_id": "pending-old", "question_id": "q1",
+					"question": map[string]any{"id": "q1", "prompt": "old question"},
+				},
+			}
+			h, repo, eventBus, messageCreator := setupTestHandler(
+				t,
+				map[string][]*taskmodels.Message{"pending-old": {old}},
+			)
+			repo.activeBySession = map[string][]*taskmodels.Message{"s1": {}}
+			if tt.superseded {
+				repo.activeBySession["s1"] = []*taskmodels.Message{{
+					ID: "new-message", TaskID: "t1", TaskSessionID: "s1",
+					Metadata: map[string]any{"status": "pending", "pending_id": "pending-new"},
+				}}
+			}
+			body := RespondBody{Rejected: tt.rejected, RejectReason: "skip"}
+			if !tt.rejected {
+				body.Answers = []Answer{{QuestionID: "q1", SelectedOptions: []string{"one"}}}
+			}
+
+			rec := runRespond(t, h, "pending-old", body)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+			}
+			if len(messageCreator.updates) != 0 {
+				t.Fatalf("inactive response wrote messages: %+v", messageCreator.updates)
+			}
+			if len(eventBus.events) != 0 {
+				t.Fatalf("inactive response published events: %+v", eventBus.events)
+			}
+		})
+	}
+}
+
+func TestHttpRespond_FallbackAuthorityErrorHasNoSideEffects(t *testing.T) {
+	msg := &taskmodels.Message{
+		ID: "message", TaskID: "t1", TaskSessionID: "s1",
+		Metadata: map[string]any{
+			"status": "pending", "pending_id": "pending", "question_id": "q1",
+			"question": map[string]any{"id": "q1", "prompt": "question"},
+		},
+	}
+	h, repo, eventBus, messageCreator := setupTestHandler(
+		t,
+		map[string][]*taskmodels.Message{"pending": {msg}},
+	)
+	repo.activeErr = errors.New("read failed")
+	rec := runRespond(t, h, "pending", RespondBody{
+		Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"one"}}},
+	})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if len(messageCreator.updates) != 0 || len(eventBus.events) != 0 {
+		t.Fatalf("authority error produced writes=%+v events=%+v", messageCreator.updates, eventBus.events)
 	}
 }
 

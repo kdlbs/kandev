@@ -282,6 +282,9 @@ func provideGateway(
 		projector := statussummary.NewProjector(statussummary.ProjectorConfig{
 			Store:    taskRepo,
 			EventBus: eventBus,
+			LoadPendingActions: func(ctx context.Context, taskID string) (map[string]string, error) {
+				return loadTaskPendingActions(ctx, taskRepo, taskID)
+			},
 			LoadGitObservations: func(ctx context.Context, taskID string) ([]statussummary.GitObservation, error) {
 				return loadTaskGitObservations(ctx, taskRepo, taskID)
 			},
@@ -399,6 +402,34 @@ func provideGateway(
 	}
 
 	return gateway, notificationSvc, notificationCtrl, terminalSvc, nil
+}
+
+func loadTaskPendingActions(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	taskID string,
+) (map[string]string, error) {
+	sessions, err := taskRepo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session == nil || (session.State != models.TaskSessionStateRunning &&
+			session.State != models.TaskSessionStateWaitingForInput) {
+			continue
+		}
+		sessionIDs = append(sessionIDs, session.ID)
+	}
+	actions, err := taskRepo.GetPendingActionsBySessionIDs(ctx, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(actions))
+	for sessionID, action := range actions {
+		result[sessionID] = string(action)
+	}
+	return result, nil
 }
 
 func loadTaskGitObservations(

@@ -292,6 +292,72 @@ function useDeleteActions(
   };
 }
 
+function useSidebarTaskSelection(params: {
+  store: StoreApi;
+  pathname: string | null;
+  router: ReturnType<typeof useRouter>;
+  loadTaskSessionsForTask: ReturnType<typeof useTaskRemoval>["loadTaskSessionsForTask"];
+  setActiveSession: (taskId: string, sessionId: string) => void;
+  setActiveTask: (taskId: string) => void;
+  setPreparingTaskId: (taskId: string | null) => void;
+}) {
+  const {
+    store,
+    pathname,
+    router,
+    loadTaskSessionsForTask,
+    setActiveSession,
+    setActiveTask,
+    setPreparingTaskId,
+  } = params;
+  const switchToSession = useMemo(
+    () => buildSwitchToSession(store, setActiveSession),
+    [store, setActiveSession],
+  );
+  return useCallback(
+    (taskId: string) => {
+      const state = store.getState();
+      const task = findSidebarTask(state, taskId);
+      const onTaskRoute =
+        !!pathname && (pathname.startsWith("/t/") || pathname.startsWith("/office/tasks/"));
+      if (!onTaskRoute && (!task?.taskPendingAction || task.isArchived)) {
+        setActiveTask(taskId);
+        router.push(linkToTask(taskId));
+        return;
+      }
+      if (task?.isArchived) {
+        setActiveTask(taskId);
+        replaceTaskUrl(taskId);
+        return;
+      }
+      selectTaskWithLayout({
+        taskId,
+        task: task ?? undefined,
+        store,
+        switchToSession: onTaskRoute
+          ? switchToSession
+          : (selectedTaskId, sessionId) => setActiveSession(selectedTaskId, sessionId),
+        loadTaskSessionsForTask,
+        setActiveTask,
+        setPreparingTaskId,
+        navigateToTask: onTaskRoute
+          ? replaceTaskUrl
+          : (selectedTaskId) => router.push(linkToTask(selectedTaskId)),
+      });
+    },
+    [
+      loadTaskSessionsForTask,
+      pathname,
+      router,
+      setActiveSession,
+      setActiveTask,
+      setPreparingTaskId,
+      store,
+      switchToSession,
+    ],
+  );
+}
+
 export function useSidebarActions(store: StoreApi) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
@@ -304,44 +370,15 @@ export function useSidebarActions(store: StoreApi) {
     useLayoutSwitch: true,
   });
 
-  const switchToSession = useMemo(
-    () => buildSwitchToSession(store, setActiveSession),
-    [store, setActiveSession],
-  );
-
-  const handleSelectTask = useCallback(
-    (taskId: string) => {
-      // The AppSidebar is mounted globally. On a non-task route the dockview
-      // isn't mounted, so the in-place layout switch (which only rewrites the
-      // URL via history.replaceState) would change the address bar without
-      // ever showing the task. Navigate to the task page in that case; the
-      // in-place fast-switch is only correct once the dockview is on screen.
-      const onTaskRoute =
-        !!pathname && (pathname.startsWith("/t/") || pathname.startsWith("/office/tasks/"));
-      if (!onTaskRoute) {
-        setActiveTask(taskId);
-        router.push(linkToTask(taskId));
-        return;
-      }
-      const state = store.getState();
-      const task = findSidebarTask(state, taskId);
-      if (task?.isArchived) {
-        setActiveTask(taskId);
-        replaceTaskUrl(taskId);
-        return;
-      }
-      selectTaskWithLayout({
-        taskId,
-        task: task ?? undefined,
-        store,
-        switchToSession,
-        loadTaskSessionsForTask,
-        setActiveTask,
-        setPreparingTaskId,
-      });
-    },
-    [loadTaskSessionsForTask, switchToSession, setActiveTask, store, router, pathname],
-  );
+  const handleSelectTask = useSidebarTaskSelection({
+    store,
+    pathname,
+    router,
+    loadTaskSessionsForTask,
+    setActiveSession,
+    setActiveTask,
+    setPreparingTaskId,
+  });
 
   const archiveActions = useArchiveActions(store);
   const deleteActions = useDeleteActions(store, removeTaskFromBoard);

@@ -1,7 +1,7 @@
 ---
 id: "03-summary-pending-convergence"
 title: "Summary pending convergence"
-status: pending
+status: completed
 wave: 3
 depends_on: ["02-current-turn-backend-authority"]
 plan: "plan.md"
@@ -72,4 +72,13 @@ actual files, then update task/plan status.
 
 ## Results
 
-Pending.
+- Added an authoritative pending-action loader to the live projector. Restore, message,
+  clarification, permission, task, and session-state occurrences refresh bounded repository state;
+  lookup failure retains the stored action, and CAS rejection reloads/retries.
+- Replaced missing-only hydration with summary reconciliation. Existing rows update only
+  `pending_action`, advance revision/time, preserve unrelated fields, and publish one complete
+  `task.status_summary.updated` replacement. Boot and task-list assembly now invoke it.
+- Added restore, ordinary-message, deletion, loader-error, CAS-contention, boot, and task-list
+  regressions.
+- `cd apps/backend && go test ./internal/task/statussummary ./internal/task/service ./internal/backendapp`
+  passed. The focused task-handler reconciliation test also passed.

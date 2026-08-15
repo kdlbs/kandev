@@ -151,3 +151,29 @@ func TestTaskDTOBuilderPreservesProjectedCountWhenCounterUnwired(t *testing.T) {
 	assert.Equal(t, 5, result[0].StatusSummary.QueuedPromptCount,
 		"an unwired counter must preserve the projected count, not zero it")
 }
+
+func TestTaskDTOBuilderReconcilesExistingPendingSummary(t *testing.T) {
+	svc, h, repo := newQueuedTaskDTOBuilder(t)
+	ctx := context.Background()
+	task := createQueuedTestTask(t, svc, repo, fakeQueuedPromptCounter{byTask: map[string]int{}})
+	changed, err := repo.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
+		TaskID:      task.ID,
+		WorkspaceID: task.WorkspaceID,
+		Summary: statussummary.TaskStatusSummary{
+			Revision:      5,
+			PendingAction: string(models.TaskPendingActionClarification),
+			Git:           &statussummary.GitSummary{ChangedFiles: 2},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	result, err := h.toTaskDTOsWithSessionInfo(ctx, []*models.Task{task})
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	require.NotNil(t, result[0].StatusSummary)
+	assert.Equal(t, uint64(6), result[0].StatusSummary.Revision)
+	assert.Empty(t, result[0].StatusSummary.PendingAction)
+	require.NotNil(t, result[0].StatusSummary.Git)
+	assert.Equal(t, 2, result[0].StatusSummary.Git.ChangedFiles)
+}

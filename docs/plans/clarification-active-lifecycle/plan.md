@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/clarification-active-lifecycle/spec.md
 created: 2026-08-14
-status: draft
+status: completed
 ---
 
 # Implementation Plan: Active Clarification Lifecycle
@@ -213,8 +213,14 @@ survive reload. Managed runner builds production artifacts. No fixed sleeps or w
 
 ## Verification Results
 
-Pending. On completion, synchronize this section with each task's `## Results`: exact commands,
-test counts/outcomes, generated artifacts, and cleanup evidence.
+All task gates passed:
+
+- Backend authority: repository, clarification, and orchestrator packages passed; PostgreSQL parity
+  remains env-gated and skipped locally without `KANDEV_TEST_POSTGRES_DSN`.
+- Summary convergence: status-summary, task-service, backend-app, and focused handler tests passed.
+- Frontend: 3 Vitest files / 68 tests, TypeScript, i18n, and frozen install passed.
+- Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
+- `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---
 
@@ -224,23 +230,23 @@ Execution remains sequential in the primary conversation.
 
 Wave 1:
 
-- [ ] [task-01-clarification-regression-red](task-01-clarification-regression-red.md)
+- [x] [task-01-clarification-regression-red](task-01-clarification-regression-red.md)
 
 Wave 2:
 
-- [ ] [task-02-current-turn-backend-authority](task-02-current-turn-backend-authority.md)
+- [x] [task-02-current-turn-backend-authority](task-02-current-turn-backend-authority.md)
 
 Wave 3:
 
-- [ ] [task-03-summary-pending-convergence](task-03-summary-pending-convergence.md)
+- [x] [task-03-summary-pending-convergence](task-03-summary-pending-convergence.md)
 
 Wave 4:
 
-- [ ] [task-04-pending-owner-navigation](task-04-pending-owner-navigation.md)
+- [x] [task-04-pending-owner-navigation](task-04-pending-owner-navigation.md)
 
 Wave 5:
 
-- [ ] [task-05-clarification-regression-green](task-05-clarification-regression-green.md)
+- [x] [task-05-clarification-regression-green](task-05-clarification-regression-green.md)
 
 No task is marked parallel-safe. Tasks 02 and 03 share pending repository contracts; tasks 03 and 04
 share projection semantics; task 05 spans all layers. Waves do not authorize subagents.

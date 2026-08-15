@@ -3027,7 +3027,7 @@ func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 
-	msgs, err := repo.FindPendingClarificationMessagesBySessionID(ctx, sess.ID)
+	msgs, err := repo.FindActiveClarificationMessagesBySessionID(ctx, sess.ID)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1, "clarification should stay pending for deferred answer")
 	require.Equal(t, true, msgs[0].Metadata["agent_disconnected"])

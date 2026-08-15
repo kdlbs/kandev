@@ -31,7 +31,7 @@ type messageStore interface {
 	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*taskmodels.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error)
-	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
+	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
 	UpdateMessage(ctx context.Context, message *taskmodels.Message) error
 }
 
@@ -261,12 +261,10 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		return
 	}
 
-	// Gate: when not rejecting, the user must have answered every question and
-	// each answer must reference a question id from the original bundle (no
-	// duplicates, no fabricated ids). We compare against the in-store request
-	// first; if the entry is gone (agent already moved on), fall back to the
-	// persisted messages so we still validate even after the in-memory cleanup.
-	if !body.Rejected {
+	// Validate before delivering to a live waiter. Detached responses are first
+	// checked against durable current-turn ownership below, then validated.
+	_, hasLiveRequest := h.store.GetRequest(pendingID)
+	if hasLiveRequest && !body.Rejected {
 		if errMsg := h.validateRespondAnswers(c.Request.Context(), pendingID, body.Answers); errMsg != "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
 			return
@@ -305,6 +303,25 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		return
 	}
 
+	active, activeErr := h.fallbackBundleIsActive(c.Request.Context(), pendingID)
+	if activeErr != nil {
+		h.logger.Error("failed to validate clarification fallback ownership",
+			zap.String("pending_id", pendingID),
+			zap.Error(activeErr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate clarification state"})
+		return
+	}
+	if !active {
+		c.JSON(http.StatusConflict, gin.H{"error": "clarification request is no longer active"})
+		return
+	}
+	if !body.Rejected {
+		if errMsg := h.validateRespondAnswers(c.Request.Context(), pendingID, body.Answers); errMsg != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
+			return
+		}
+	}
+
 	// Fallback path: entry not found (agent timed out, entry was cleaned up).
 	// If the user rejected (clicked X to dismiss), they're discarding a stale
 	// overlay — not continuing the conversation. Treat as a no-op so we don't
@@ -334,6 +351,29 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 	h.respondViaEventFallback(c, pendingID, body.Answers, body.Rejected, body.RejectReason)
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *Handlers) fallbackBundleIsActive(ctx context.Context, pendingID string) (bool, error) {
+	if h.repo == nil {
+		return false, fmt.Errorf("message repository unavailable")
+	}
+	bundle, err := h.repo.FindMessagesByPendingID(ctx, pendingID)
+	if err != nil {
+		return false, err
+	}
+	if len(bundle) == 0 || bundle[0].TaskSessionID == "" {
+		return false, nil
+	}
+	active, err := h.repo.FindActiveClarificationMessagesBySessionID(ctx, bundle[0].TaskSessionID)
+	if err != nil {
+		return false, err
+	}
+	for _, msg := range active {
+		if stringFromMetadata(msg.Metadata, "pending_id") == pendingID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // validateRespondAnswers enforces the all-required gate **and** the question-id

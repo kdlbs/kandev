@@ -425,19 +425,28 @@ func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID stri
 	return result, err
 }
 
-// FindPendingClarificationMessagesBySessionID returns every clarification_request
-// message for the session whose metadata.status is still "pending". Used by the
-// canceller as a fallback when the in-memory store entry has already been drained
-// by a racing timeout path.
-func (r *Repository) FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
+// FindActiveClarificationMessagesBySessionID returns pending clarification rows
+// owned by the session's newest durable turn. Older pending rows remain history.
+func (r *Repository) FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	drv := r.ro.DriverName()
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
-		FROM task_session_messages
-		WHERE task_session_id = ? AND type = 'clarification_request' AND %s = 'pending'
-		ORDER BY created_at ASC
-	`, dialect.JSONExtract(drv, "metadata", "status"))
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID)
+		WITH current_turn AS (
+			SELECT id
+			FROM task_session_turns
+			WHERE task_session_id = ?
+			ORDER BY started_at DESC, created_at DESC, id DESC
+			LIMIT 1
+		)
+		SELECT m.id, m.task_session_id, m.task_id, m.turn_id, m.author_type, m.author_id,
+		       m.content, m.requests_input, m.type, m.metadata, m.created_at, m.updated_at
+		FROM task_session_messages m
+		JOIN current_turn current ON current.id = m.turn_id
+		WHERE m.task_session_id = ?
+		  AND m.type = 'clarification_request'
+		  AND COALESCE(%s, '') IN ('', 'pending')
+		ORDER BY m.created_at ASC, m.id ASC
+	`, dialect.JSONExtract(drv, "m.metadata", "status"))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -454,12 +463,9 @@ func (r *Repository) GetPendingActionsBySessionIDs(ctx context.Context, sessionI
 		return result, nil
 	}
 	placeholders := make([]string, len(sessionIDs))
-	args := make([]interface{}, 0, len(sessionIDs)*2)
+	args := make([]interface{}, 0, len(sessionIDs))
 	for i, id := range sessionIDs {
 		placeholders[i] = "?"
-		args = append(args, id)
-	}
-	for _, id := range sessionIDs {
 		args = append(args, id)
 	}
 	query := pendingActionsBySessionQuery(r.ro.DriverName(), placeholders)
@@ -490,19 +496,18 @@ func (r *Repository) GetPendingActionsBySessionIDs(ctx context.Context, sessionI
 func pendingActionsBySessionQuery(driverName string, placeholders []string) string {
 	placeholderList := strings.Join(placeholders, ",")
 	statusExpr := dialect.JSONExtract(driverName, "m.metadata", "status")
-	latestOrderExpr := pendingActionMessageOrder(driverName, "")
 	permissionOrderExpr := pendingActionMessageOrder(driverName, "m")
 	return fmt.Sprintf(`
-		WITH latest_message AS (
-			SELECT task_session_id, turn_id
+		WITH current_turn AS (
+			SELECT task_session_id, id AS turn_id
 			FROM (
 				SELECT task_session_id,
-				       turn_id,
+				       id,
 				       ROW_NUMBER() OVER (
 				         PARTITION BY task_session_id
-				         ORDER BY created_at DESC, %s DESC
+				         ORDER BY started_at DESC, created_at DESC, id DESC
 				       ) AS rn
-				FROM task_session_messages
+				FROM task_session_turns
 				WHERE task_session_id IN (%s)
 			) ranked
 			WHERE rn = 1
@@ -510,11 +515,10 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 		pending_clarifications AS (
 			SELECT DISTINCT m.task_session_id, 'clarification' AS action
 			FROM task_session_messages m
-			JOIN latest_message latest
-			  ON latest.task_session_id = m.task_session_id
-			 AND latest.turn_id = m.turn_id
-			WHERE m.task_session_id IN (%s)
-			  AND m.type = 'clarification_request'
+			JOIN current_turn current
+			  ON current.task_session_id = m.task_session_id
+			 AND current.turn_id = m.turn_id
+			WHERE m.type = 'clarification_request'
 			  AND COALESCE(%s, '') IN ('', 'pending')
 		),
 		latest_permissions AS (
@@ -525,9 +529,9 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 			         ORDER BY m.created_at DESC, %s DESC
 			       ) AS rn
 			FROM task_session_messages m
-			JOIN latest_message latest
-			  ON latest.task_session_id = m.task_session_id
-			 AND latest.turn_id = m.turn_id
+			JOIN current_turn current
+			  ON current.task_session_id = m.task_session_id
+			 AND current.turn_id = m.turn_id
 			WHERE m.type = 'permission_request'
 		)
 		SELECT task_session_id, action
@@ -536,7 +540,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 		SELECT task_session_id, 'permission' AS action
 		FROM latest_permissions
 		WHERE rn = 1 AND status IN ('', 'pending')
-	`, latestOrderExpr, placeholderList, placeholderList, statusExpr, statusExpr, permissionOrderExpr)
+	`, placeholderList, statusExpr, statusExpr, permissionOrderExpr)
 }
 
 func pendingActionMessageOrder(driverName string, qualifier string) string {
