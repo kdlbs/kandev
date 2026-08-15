@@ -474,6 +474,35 @@ const shellEnv = "SHELL"
 	}
 }
 
+// TestUncoveredEnvReadsUnreadableSpecDoesNotPoisonItsBlock bounds the rule
+// above: a name is marked unresolvable individually, not by association with a
+// const block that happens to contain one. Both guarded packages declare their
+// env names beside only other string literals — git_pr_providers.go's block is
+// literals throughout — so nothing live would notice if a refactor hoisted the
+// marking to spec or block level, and every constant in a mixed block would
+// start reporting unresolvable at once.
+func TestUncoveredEnvReadsUnreadableSpecDoesNotPoisonItsBlock(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+import "os"
+
+const timeout = 30
+
+const (
+	fooEnv = "FOO"
+	scale  = timeout
+	bazEnv = "BAZ"
+)
+
+func read() string { return os.Getenv(fooEnv) + os.Getenv(bazEnv) }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, []string{"FOO", "BAZ"}, nil)
+	if len(messages) != 0 {
+		t.Fatalf("literal siblings of an unreadable spec reported as unresolvable: %v", messages)
+	}
+}
+
 func TestUncoveredEnvReadsExemptName(t *testing.T) {
 	fileSet, file := parseSnippet(t, `package example
 
