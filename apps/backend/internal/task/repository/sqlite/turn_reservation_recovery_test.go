@@ -30,6 +30,7 @@ func TestReconcileUnpublishedPromptTurnsRestoresOnlyClaimedMessages(t *testing.T
 		models.TurnMetaKeyPromptDispatchClarificationTurnID:     "turn-clarification",
 		models.TurnMetaKeyPromptDispatchClarificationMessageIDs: []string{"message-claimed"},
 	})
+	previousUpdatedAt := setMessageUpdatedAtJustAfterSecond(t, repo, "message-claimed")
 
 	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
 	if err != nil || reconciled != 1 {
@@ -44,6 +45,9 @@ func TestReconcileUnpublishedPromptTurnsRestoresOnlyClaimedMessages(t *testing.T
 	}
 	if claimed.Metadata["status"] != "pending" || claimed.Metadata["response"] != nil {
 		t.Fatalf("claimed metadata = %#v, want pending without response", claimed.Metadata)
+	}
+	if !claimed.UpdatedAt.After(previousUpdatedAt) {
+		t.Fatalf("restored updated_at = %s, want after %s", claimed.UpdatedAt, previousUpdatedAt)
 	}
 	terminal, err := repo.GetMessage(ctx, "message-terminal")
 	if err != nil {
@@ -74,6 +78,7 @@ func TestReconcileUnpublishedPromptTurnsAcceptsMessageBackedReservation(t *testi
 	}); err != nil {
 		t.Fatalf("CreateMessage(output): %v", err)
 	}
+	previousUpdatedAt := setTurnUpdatedAtJustAfterSecond(t, repo, "turn-message-backed")
 
 	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
 	if err != nil || reconciled != 1 {
@@ -82,6 +87,9 @@ func TestReconcileUnpublishedPromptTurnsAcceptsMessageBackedReservation(t *testi
 	turn, err := repo.GetTurn(ctx, "turn-message-backed")
 	if err != nil {
 		t.Fatalf("GetTurn(message-backed): %v", err)
+	}
+	if !turn.UpdatedAt.After(previousUpdatedAt) {
+		t.Fatalf("published updated_at = %s, want after %s", turn.UpdatedAt, previousUpdatedAt)
 	}
 	for _, key := range []string{
 		models.TurnMetaKeyPromptDispatchPending,
@@ -93,6 +101,22 @@ func TestReconcileUnpublishedPromptTurnsAcceptsMessageBackedReservation(t *testi
 			t.Fatalf("message-backed turn retained %q: %#v", key, turn.Metadata)
 		}
 	}
+}
+
+func setTurnUpdatedAtJustAfterSecond(t *testing.T, repo *Repository, turnID string) time.Time {
+	t.Helper()
+	for time.Now().UTC().Nanosecond() >= int((100 * time.Millisecond).Nanoseconds()) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	updatedAt := time.Now().UTC().Truncate(time.Second).Add(time.Nanosecond)
+	if _, err := repo.db.Exec(
+		repo.db.Rebind(`UPDATE task_session_turns SET updated_at = ? WHERE id = ?`),
+		updatedAt,
+		turnID,
+	); err != nil {
+		t.Fatalf("seed turn updated_at: %v", err)
+	}
+	return updatedAt
 }
 
 func createRecoveryTurn(

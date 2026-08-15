@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -90,11 +91,12 @@ func (r *Repository) reconcileUnpublishedPromptTurn(
 	if err != nil {
 		return false, err
 	}
+	updatedAt := time.Now().UTC()
 	if referenced {
 		deletePromptDispatchMetadata(metadata)
-		err = updateTurnMetadata(ctx, tx, r.db, turn.id, metadata)
+		err = updateTurnMetadata(ctx, tx, r.db, turn.id, metadata, updatedAt)
 	} else {
-		err = r.restoreReservedClarificationClaim(ctx, tx, metadata)
+		err = r.restoreReservedClarificationClaim(ctx, tx, metadata, updatedAt)
 		if err == nil {
 			err = r.deleteEmptyUnpublishedPromptTurn(ctx, tx, turn)
 		}
@@ -148,14 +150,15 @@ func updateTurnMetadata(
 	db *sqlx.DB,
 	turnID string,
 	metadata map[string]interface{},
+	updatedAt time.Time,
 ) error {
 	raw, err := json.Marshal(metadata)
 	if err != nil {
 		return fmt.Errorf("encode published prompt turn %s metadata: %w", turnID, err)
 	}
 	if _, err := tx.ExecContext(ctx, db.Rebind(`
-		UPDATE task_session_turns SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-	`), string(raw), turnID); err != nil {
+		UPDATE task_session_turns SET metadata = ?, updated_at = ? WHERE id = ?
+	`), string(raw), updatedAt, turnID); err != nil {
 		return fmt.Errorf("publish message-backed prompt turn %s: %w", turnID, err)
 	}
 	return nil
@@ -172,6 +175,7 @@ func (r *Repository) restoreReservedClarificationClaim(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	metadata map[string]interface{},
+	updatedAt time.Time,
 ) error {
 	pendingID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID].(string)
 	turnID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationTurnID].(string)
@@ -180,7 +184,9 @@ func (r *Repository) restoreReservedClarificationClaim(
 		return nil
 	}
 	for _, messageID := range messageIDs {
-		if err := r.restoreReservedClarificationMessage(ctx, tx, messageID, pendingID, turnID); err != nil {
+		if err := r.restoreReservedClarificationMessage(
+			ctx, tx, messageID, pendingID, turnID, updatedAt,
+		); err != nil {
 			return err
 		}
 	}
@@ -191,6 +197,7 @@ func (r *Repository) restoreReservedClarificationMessage(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	messageID, pendingID, turnID string,
+	updatedAt time.Time,
 ) error {
 	driverName := r.db.DriverName()
 	pendingIDExpr := dialect.JSONExtract(driverName, "metadata", "pending_id")
@@ -221,9 +228,9 @@ func (r *Repository) restoreReservedClarificationMessage(
 	}
 	statusExpr := dialect.JSONExtract(driverName, "metadata", "status")
 	result, err := tx.ExecContext(ctx, r.db.Rebind(fmt.Sprintf(`
-		UPDATE task_session_messages SET metadata = ?, updated_at = CURRENT_TIMESTAMP
+		UPDATE task_session_messages SET metadata = ?, updated_at = ?
 		WHERE id = ? AND %s = ?
-	`, statusExpr)), string(updated), messageID, clarificationStatusAnswered)
+	`, statusExpr)), string(updated), updatedAt, messageID, clarificationStatusAnswered)
 	if err != nil {
 		return fmt.Errorf("restore clarification message %s after unpublished prompt: %w", messageID, err)
 	}
