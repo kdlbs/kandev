@@ -48,8 +48,8 @@ failure consistently without sharing the same retry policy.
 ### Kanban interactive recovery
 
 - `network_unavailable`, `provider_overloaded`, `provider_unavailable`,
-  `model_capacity`, and confirmed short `rate_limited` failures are eligible for
-  automatic retry.
+  `model_capacity`, `agent_transport_lost`, and confirmed short `rate_limited`
+  failures are eligible for automatic retry.
 - Before replaying, Kandev verifies that the prompt has produced no assistant
   content or tool activity, unless the adapter provides a resumable retry
   guarantee. A transient failure after potentially effectful progress remains a

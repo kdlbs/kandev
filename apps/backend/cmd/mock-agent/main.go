@@ -431,6 +431,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	delete(a.commandsEmitted, req.SessionId)
 	a.mu.Unlock()
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
+	_ = os.Remove(transportLostCounterPath(req.SessionId))
 	return acp.CloseSessionResponse{}, nil
 }
 
