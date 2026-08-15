@@ -62,6 +62,8 @@ replays leave user values unchanged.
 - GREEN: `cd apps/backend && go test -tags fts5 ./internal/task/repository/sqlite -run 'Test(WorktreeBranchTemplateMigration|PostgresWorktreeBranchTemplateMigration)' -count=1` passed its two SQLite tests; the Postgres test was skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
 - Service checks: `cd apps/backend && go test -tags fts5 ./internal/task/service -run 'TestService_(CreateRepository_DefaultWorktreeBranchTemplate|UpdateRepository_WorktreeBranchTemplate)' -count=1` passed both tests.
 - `git diff --check` passed.
+- Fixup: the custom-template regression now replays `runMigrations()` twice;
+  the migration and service checks passed again after this test-only change.
 
 ## Implementation Waves And Parallel Candidates
 

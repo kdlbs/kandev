@@ -66,3 +66,5 @@ task and plan statuses in the primary session.
   `KANDEV_TEST_POSTGRES_DSN` is unset.
 - Existing repository create and update service checks passed.
 - `git diff --check` passed.
+- Fixup added a second replay to the custom-template regression; both focused
+  migration and service commands passed again.

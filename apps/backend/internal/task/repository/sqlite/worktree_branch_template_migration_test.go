@@ -27,6 +27,9 @@ func TestWorktreeBranchTemplateMigrationPreservesCustomValue(t *testing.T) {
 	if err := repo.runMigrations(); err != nil {
 		t.Fatalf("replay migrations: %v", err)
 	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("second replay migrations: %v", err)
+	}
 
 	got, err := repo.GetRepository(ctx, custom.ID)
 	if err != nil {
