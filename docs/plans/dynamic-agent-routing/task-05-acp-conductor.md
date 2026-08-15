@@ -32,12 +32,15 @@ spec: "../../specs/agents/dynamic-agent-routing.md"
 In progress. Added the shared profile-execution resolver, dynamic conductor
 contracts, route-aware resume lookup, and concrete-profile launch boundaries.
 Task launches, prepared launches, resumes, and utility calls no longer pass a
-virtual profile ID to lifecycle execution.
+virtual profile ID to lifecycle execution. The rollout-blocker repair adds
+explicit output/effect evidence, bounded durable continuation persistence and
+delivery, fail-closed mid-turn fallback, and bounded fallback across all
+eligible candidates.
 
 Verification:
 
 - `go test -tags fts5 ./internal/agent/runtime ./internal/orchestrator ./internal/backendapp -count=1`
 
 The command passed. The conductor is not yet the sole owner of lifecycle
-launch, stop, event subscription, bounded continuation, or restart
-reconciliation, so those acceptance items remain open.
+launch, stop, event subscription, or restart reconciliation, so those broader
+acceptance items remain open.

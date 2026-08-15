@@ -7,6 +7,7 @@ import { computeExecutorHint, useAgentProfileOptions } from "./task-create-dialo
 
 // Minimal store shape consumed by useAvailableAgents.
 type MockStore = {
+  features: { dynamicAgentRouting: boolean };
   availableAgents: {
     items: AvailableAgent[];
     loading: boolean;
@@ -16,6 +17,7 @@ type MockStore = {
 };
 
 let mockStore: MockStore = {
+  features: { dynamicAgentRouting: true },
   availableAgents: { items: [], loading: false, loaded: true, tools: [] },
 };
 
@@ -24,7 +26,10 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 function setAvailableAgents(items: AvailableAgent[]) {
-  mockStore = { availableAgents: { items, loading: false, loaded: true, tools: [] } };
+  mockStore = {
+    features: { dynamicAgentRouting: true },
+    availableAgents: { items, loading: false, loaded: true, tools: [] },
+  };
 }
 
 const AGENT_WITH_GPT: AvailableAgent = {

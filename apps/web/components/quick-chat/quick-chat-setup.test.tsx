@@ -13,6 +13,7 @@ const AGENT_SELECTOR_TEST_ID = "agent-profile-selector";
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
+      features: { dynamicAgentRouting: true },
       agentProfiles: { items: agentProfiles },
       workspaces: {
         items: [{ id: "workspace-1", default_agent_profile_id: defaultAgentId }],

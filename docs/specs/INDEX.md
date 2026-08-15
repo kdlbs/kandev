@@ -120,6 +120,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 | [settings-profile-layout](agents/settings-profile-layout.md) | shipped |
 | [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
 | [dynamic-agent-routing](agents/dynamic-agent-routing.md) | draft |
+| [dynamic-agent-routing-rollout-blockers](agents/dynamic-agent-routing-rollout-blockers.md) | draft |
 | [dynamic-agent-telemetry-routing](agents/dynamic-agent-telemetry-routing.md) | draft |
 | [utility-agent-profiles](agents/utility-agent-profiles.md) | approved |
 | [collapsible-agent-blocks](agents/collapsible-agent-blocks.md) | draft |

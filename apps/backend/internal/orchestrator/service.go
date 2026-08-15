@@ -300,6 +300,8 @@ type sessionExecutorStore interface {
 	// Messages — used by resume to backfill the initial user prompt when a
 	// prior launch failed before recordInitialMessage ran.
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	// Session history + plan used to build a provider-neutral continuation.
+	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 	// Pending clarification rows — durable guard for on_turn_complete while the user is answering.
 	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	// Workspace
@@ -732,6 +734,12 @@ type Service struct {
 	// transient-failure retry can re-drive the same turn without the caller's
 	// context. key: sessionID, value: capturedPrompt. Replaced every turn.
 	lastTurnPrompt sync.Map
+
+	// dynamicAttemptEvidence is keyed by logical session. A dynamic attempt is
+	// replaced at every concrete launch, and its execution ID fences late
+	// stream/lifecycle events from a predecessor. Fallback requires an explicit
+	// no-output/no-effect result from this map.
+	dynamicAttemptEvidence sync.Map
 
 	// Service state
 	mu        sync.RWMutex

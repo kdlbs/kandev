@@ -16,6 +16,7 @@ import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CliModeIcon } from "@/components/cli-mode-icon";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
@@ -29,6 +30,7 @@ import { linearIssueWatchPlaceholders } from "./linear-issue-watch-placeholders"
 import { STEP_DEFAULT, resolveProfileId } from "@/lib/watcher-profile-default";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import {
   type FormState,
   buildWatchPayload,
@@ -59,6 +61,12 @@ function useFormData(workspaceId: string) {
   const allWorkflows = useAppStore((s) => s.workflows.items);
   const workflows = useMemo(() => allWorkflows.filter((w) => !w.hidden), [allWorkflows]);
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  const selectableAgentProfiles = useMemo(
+    () =>
+      agentProfiles.filter((profile) => isSelectableAgentProfile(profile, dynamicRoutingEnabled)),
+    [agentProfiles, dynamicRoutingEnabled],
+  );
   const executors = useAppStore((s) => s.executors.items);
   const allExecutorProfiles = useMemo(
     () =>
@@ -67,7 +75,7 @@ function useFormData(workspaceId: string) {
         .flatMap((e) => e.profiles ?? []),
     [executors],
   );
-  return { workflows, agentProfiles, allExecutorProfiles };
+  return { workflows, agentProfiles: selectableAgentProfiles, allExecutorProfiles };
 }
 
 function PlaceholdersHelp() {

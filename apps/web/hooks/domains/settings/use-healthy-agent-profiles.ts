@@ -1,6 +1,7 @@
 "use client";
 
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import type { AgentProfileOption } from "@/lib/state/slices";
 
 /**
@@ -10,11 +11,13 @@ import type { AgentProfileOption } from "@/lib/state/slices";
  */
 export function useHealthyAgentProfiles(selectedId?: string): AgentProfileOption[] {
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   return agentProfiles.filter(
     (p) =>
-      !p.capability_status ||
-      p.capability_status === "ok" ||
-      p.capability_status === "probing" ||
-      p.id === selectedId,
+      (dynamicRoutingEnabled || p.kind !== "dynamic") &&
+      (!p.capability_status ||
+        p.capability_status === "ok" ||
+        p.capability_status === "probing" ||
+        p.id === selectedId),
   );
 }

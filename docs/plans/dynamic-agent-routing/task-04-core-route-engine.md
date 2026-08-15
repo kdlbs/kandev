@@ -40,10 +40,14 @@ In progress. Implemented fixed-order selection, semantic retry/next actions,
 durable route state and attempts, HMAC installation-key fingerprints,
 profile-scoped unknown bindings, circuit state and half-open probe leases, and
 generation-checked claims. Added restart loading and atomic SQLite claim tests.
+The rollout-blocker repair now connects concrete binding descriptors to route
+candidates, opens qualifying circuits, releases probe leases on production
+failures, and routes expired circuits through exclusive probes.
 
 Verification:
 
 - `go test -tags fts5 ./internal/agent/runtime/dynamic ./internal/task/repository/sqlite -run "Test(DynamicRoute|Engine|Circuit|SQLiteRepository)" -count=1`
 
-The command passed. Concrete adapter descriptor producers, automatic circuit
-open/close integration, and dedicated observability are not implemented yet.
+The command passed. Family-specific descriptor producers, complete automatic
+circuit close observability, and the broader observability migration remain
+open.

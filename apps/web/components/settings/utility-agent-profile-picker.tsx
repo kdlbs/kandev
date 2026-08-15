@@ -5,10 +5,17 @@ import { useTranslation } from "react-i18next";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { AgentLogo } from "@/components/agent-logo";
 import { cn } from "@/lib/utils";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 
-export const utilityProfileEligibility = (profile: AgentProfileOption) =>
-  profile.enabled !== false && !profile.cli_passthrough && !profile.workspace_id;
+export const utilityProfileEligibility = (
+  profile: AgentProfileOption,
+  dynamicRoutingEnabled = true,
+) =>
+  profile.enabled !== false &&
+  (dynamicRoutingEnabled || profile.kind !== "dynamic") &&
+  !profile.cli_passthrough &&
+  !profile.workspace_id;
 
 type UtilityAgentProfilePickerProps = {
   profiles: AgentProfileOption[];
@@ -45,10 +52,16 @@ export function UtilityAgentProfilePicker({
   includeWorkspaceProfiles = false,
 }: UtilityAgentProfilePickerProps) {
   const { t } = useTranslation();
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const selectableProfiles = useMemo(
     () =>
-      profiles.filter((profile) => includeWorkspaceProfiles || utilityProfileEligibility(profile)),
-    [includeWorkspaceProfiles, profiles],
+      profiles.filter(
+        (profile) =>
+          profile.enabled !== false &&
+          (dynamicRoutingEnabled || profile.kind !== "dynamic") &&
+          (includeWorkspaceProfiles || (!profile.cli_passthrough && !profile.workspace_id)),
+      ),
+    [dynamicRoutingEnabled, includeWorkspaceProfiles, profiles],
   );
   const selectedProfile = selectableProfiles.find((profile) => profile.id === value);
   const unavailableId = unavailableValue ?? value;

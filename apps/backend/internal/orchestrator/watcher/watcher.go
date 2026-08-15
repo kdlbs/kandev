@@ -40,6 +40,13 @@ type AgentEventData struct {
 	ErrorMessage       string                 `json:"error_message,omitempty"`
 	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
 	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
+	// DynamicRouteAttempt marks failures and stream evidence that belong to a
+	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
+	// explicitly known to contain no output or effects.
+	DynamicRouteAttempt bool `json:"dynamic_route_attempt,omitempty"`
+	EvidenceKnown       bool `json:"evidence_known,omitempty"`
+	OutputObserved      bool `json:"output_observed,omitempty"`
+	EffectObserved      bool `json:"effect_observed,omitempty"`
 }
 
 // ACPSessionEventData contains data from ACP session events

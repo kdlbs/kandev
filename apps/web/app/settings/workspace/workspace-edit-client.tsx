@@ -24,6 +24,7 @@ import { updateWorkspaceAction, deleteWorkspaceAction } from "@/app/actions/work
 import type { TFunction } from "i18next";
 import type { Executor } from "@/lib/types/http";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 
 type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
@@ -153,11 +154,14 @@ function WorkspaceSettingsCard({
   agentProfiles,
 }: WorkspaceSettingsCardProps) {
   const { t } = useTranslation();
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const executorOptions = activeExecutors.map((e: Executor) => ({ id: e.id, name: e.name }));
-  const profileOptions = agentProfiles.map((p: AgentProfileOption) => ({
-    id: p.id,
-    name: p.label,
-  }));
+  const profileOptions = agentProfiles
+    .filter((profile) => isSelectableAgentProfile(profile, dynamicRoutingEnabled))
+    .map((p: AgentProfileOption) => ({
+      id: p.id,
+      name: p.label,
+    }));
   return (
     <SettingsCard isDirty={nameIsDirty || executorIsDirty || agentProfileIsDirty}>
       <CardHeader>

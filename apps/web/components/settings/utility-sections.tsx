@@ -8,6 +8,7 @@ import { Label } from "@kandev/ui/label";
 import type { UtilityAgent } from "@/lib/api/domains/utility-api";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
 import { isUtilityAgentDirty } from "@/components/settings/utility-dirty";
 import {
@@ -49,7 +50,10 @@ export function DefaultModelSection({
   isDirty: boolean;
 }) {
   const { t } = useTranslation();
-  const eligibleProfiles = profiles.filter(utilityProfileEligibility);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  const eligibleProfiles = profiles.filter((profile) =>
+    utilityProfileEligibility(profile, dynamicRoutingEnabled),
+  );
   const selected = eligibleProfiles.find((profile) => profile.id === profileId);
   return (
     <SettingsCard

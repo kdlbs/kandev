@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync/atomic"
 
 	"github.com/google/uuid"
@@ -37,10 +39,11 @@ type ProfileExecution struct {
 // It intentionally returns a route decision rather than launching an agent;
 // the conductor/lifecycle layer owns downstream ACP sessions.
 type ProfileExecutionResolver struct {
-	profiles store.Repository
-	dynamic  store.DynamicProfileRepository
-	engine   *dynamic.Engine
-	enabled  atomic.Bool
+	profiles        store.Repository
+	dynamic         store.DynamicProfileRepository
+	engine          *dynamic.Engine
+	bindingResolver *dynamic.CredentialBindingResolver
+	enabled         atomic.Bool
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -55,12 +58,23 @@ func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engi
 
 func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled.Store(enabled) }
 
+// SetCredentialBindingResolver supplies the installation-scoped fingerprint
+// used to share provider health between concrete profiles that prove the same
+// credential binding. A missing or incomplete descriptor remains isolated to
+// the concrete profile through the resolver's conservative fallback.
+func (r *ProfileExecutionResolver) SetCredentialBindingResolver(resolver *dynamic.CredentialBindingResolver) {
+	r.bindingResolver = resolver
+}
+
 // NewConductor creates the lifecycle-facing conductor with the same engine,
 // profile loader, and feature-gate state as this resolver.
 func (r *ProfileExecutionResolver) NewConductor(
 	downstream dynamic.DownstreamRuntime,
 	options ...dynamic.ConductorOption,
 ) *dynamic.Conductor {
+	if persistence := r.engine.ContinuationPersistence(); persistence != nil {
+		options = append(options, dynamic.WithContinuationPersistence(persistence))
+	}
 	return dynamic.NewConductor(r.engine, r, downstream, options...)
 }
 
@@ -133,17 +147,15 @@ func (r *ProfileExecutionResolver) ResolveExecutionDetails(ctx context.Context, 
 	if !r.enabled.Load() {
 		return ProfileExecution{}, ErrDynamicRoutingDisabled
 	}
-	if sessionID == "" {
-		// Sessionless utility calls still need an isolated route state. The
-		// caller without a session must not share a generation with another
-		// invocation, so use a fresh opaque identity for this decision.
-		sessionID = "utility:" + uuid.NewString()
-	}
-	decision, err := r.Resolve(ctx, sessionID, profileID, 0, "")
+	// Utility calls always get an isolated route state, even when the template
+	// context belongs to an already-routed task session. Reusing that session
+	// would consume or fence the task's durable generation.
+	routeSessionID := "utility:" + uuid.NewString()
+	decision, err := r.Resolve(ctx, routeSessionID, profileID, 0, "")
 	if err != nil {
 		return ProfileExecution{}, err
 	}
-	decision.RouteSessionID = sessionID
+	decision.RouteSessionID = routeSessionID
 	return decision, nil
 }
 
@@ -333,16 +345,51 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			candidate.Rules = rawRules
 		}
 		concrete, profileErr := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
-		if profileErr != nil {
+		switch {
+		case profileErr != nil:
 			if errors.Is(profileErr, sql.ErrNoRows) || errors.Is(profileErr, store.ErrAgentProfileDeleted) {
 				candidate.Enabled = false
 			} else {
 				return dynamic.Profile{}, fmt.Errorf("load dynamic candidate %s: %w", route.ExecutionProfileID, profileErr)
 			}
-		} else if concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled {
+		case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
 			candidate.Enabled = false
+		case r.bindingResolver != nil:
+			binding := profileCredentialBindingDescriptor(concrete)
+			candidate.BindingKey = dynamic.ResourceKey(
+				dynamic.ScopeCredential,
+				r.bindingResolver.Resolve(binding, route.ExecutionProfileID),
+			)
 		}
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
 	return profile, nil
+}
+
+func profileCredentialBindingDescriptor(profile *agentsettingsmodels.AgentProfile) dynamic.CredentialBindingDescriptor {
+	if profile == nil {
+		return dynamic.CredentialBindingDescriptor{}
+	}
+	descriptor := dynamic.CredentialBindingDescriptor{
+		Version:              1,
+		AgentFamilyID:        profile.AgentID,
+		AuthenticationMethod: strings.TrimSpace(profile.BillingType),
+		ExecutorNamespace:    "local",
+		AuthorizationScope:   "agent_runtime",
+	}
+	secretIDs := make([]string, 0, len(profile.EnvVars))
+	for _, envVar := range profile.EnvVars {
+		if strings.TrimSpace(envVar.SecretID) != "" {
+			secretIDs = append(secretIDs, strings.TrimSpace(envVar.SecretID))
+		}
+	}
+	if len(secretIDs) > 0 {
+		sort.Strings(secretIDs)
+		descriptor.CredentialSourceKind = "profile_secret"
+		descriptor.CredentialLocator = strings.Join(secretIDs, ",")
+	} else if descriptor.AuthenticationMethod != "" {
+		descriptor.CredentialSourceKind = "agent_credentials"
+		descriptor.CredentialLocator = profile.AgentID + ":" + descriptor.AuthenticationMethod
+	}
+	return descriptor
 }

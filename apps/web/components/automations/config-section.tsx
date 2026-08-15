@@ -6,6 +6,7 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { discoverRepositoriesAction } from "@/app/actions/workspaces";
 import { listWorkflows } from "@/lib/api";
@@ -201,7 +202,12 @@ function useWorkflowSteps(workflowId: string) {
   return steps;
 }
 
-type AgentProfileLike = { id: string; label: string; cli_passthrough?: boolean };
+type AgentProfileLike = {
+  id: string;
+  label: string;
+  cli_passthrough?: boolean;
+  kind?: "concrete" | "dynamic";
+};
 type ExecutorLike = { type: string; name: string; profiles?: ExecutorProfile[] };
 
 // useConfigSectionComputed derives the Agent Profile / Executor Profile /
@@ -224,7 +230,10 @@ function useConfigSectionComputed({
   discoveredRepos: LocalRepository[];
 }) {
   const { t } = useTranslation();
-  const filteredAgentProfiles = agentProfiles.filter((profile) => !profile.cli_passthrough);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
+  const filteredAgentProfiles = agentProfiles.filter(
+    (profile) => !profile.cli_passthrough && (dynamicRoutingEnabled || profile.kind !== "dynamic"),
+  );
   // Profiles returned by the executors list/boot payload don't always carry
   // their own executor_type/executor_name (only the settings > Executors
   // page's local mapper attaches those today) — fall back to the parent

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
@@ -42,15 +43,20 @@ func WithContinuationBuilder(builder func(context.Context, ContinuationInput) (C
 	return func(conductor *Conductor) { conductor.continuationBuilder = builder }
 }
 
+func WithContinuationPersistence(persistence ContinuationPersistence) ConductorOption {
+	return func(conductor *Conductor) { conductor.continuationPersistence = persistence }
+}
+
 // Conductor owns the logical session while concrete runtimes own downstream
 // process and ACP identities.
 type Conductor struct {
-	mu                  sync.Mutex
-	engine              *Engine
-	profiles            ProfileLoader
-	downstream          DownstreamRuntime
-	continuationBuilder func(context.Context, ContinuationInput) (Continuation, error)
-	active              map[string]DownstreamExecution
+	mu                      sync.Mutex
+	engine                  *Engine
+	profiles                ProfileLoader
+	downstream              DownstreamRuntime
+	continuationBuilder     func(context.Context, ContinuationInput) (Continuation, error)
+	continuationPersistence ContinuationPersistence
+	active                  map[string]DownstreamExecution
 }
 
 func NewConductor(engine *Engine, profiles ProfileLoader, downstream DownstreamRuntime, options ...ConductorOption) *Conductor {
@@ -78,11 +84,12 @@ type ConductorLaunch struct {
 // preserve the existing session generation while still delegating classified
 // pre-result fallback to the conductor.
 type ConductorSelectedLaunch struct {
-	SessionID        string
-	LogicalProfileID string
-	Decision         RouteDecision
-	Prompt           string
-	Continuation     ContinuationInput
+	SessionID            string
+	LogicalProfileID     string
+	Decision             RouteDecision
+	Prompt               string
+	Continuation         ContinuationInput
+	PrebuiltContinuation *Continuation
 }
 
 type ConductorResult struct {
@@ -132,15 +139,21 @@ func (c *Conductor) LaunchSelected(ctx context.Context, request ConductorSelecte
 	if err != nil {
 		return ConductorResult{}, err
 	}
-	continuation, err := c.buildContinuation(ctx, request.Continuation)
-	if err != nil {
-		return ConductorResult{}, err
+	var continuation Continuation
+	if request.PrebuiltContinuation != nil {
+		continuation = *request.PrebuiltContinuation
+	} else {
+		var err error
+		continuation, err = c.buildContinuation(ctx, request.Continuation)
+		if err != nil {
+			return ConductorResult{}, err
+		}
 	}
 	execution, decision, err := c.launchWithFallback(
 		ctx,
 		profile,
 		request.Decision,
-		ConductorLaunch{SessionID: request.SessionID, LogicalProfileID: request.LogicalProfileID, Prompt: request.Prompt},
+		ConductorLaunch{SessionID: request.SessionID, LogicalProfileID: request.LogicalProfileID, Prompt: request.Prompt, Continuation: request.Continuation},
 		continuation,
 	)
 	if err != nil {
@@ -176,6 +189,21 @@ func (c *Conductor) RouteAfterFailure(
 	)
 }
 
+// BuildContinuation creates the bounded provider-neutral handoff package used
+// by a successor launch. Callers that already classified a failed turn build
+// it before advancing the route, then persist it against the successor
+// generation before launching that generation.
+func (c *Conductor) BuildContinuation(ctx context.Context, input ContinuationInput) (Continuation, error) {
+	return c.buildContinuation(ctx, input)
+}
+
+// PersistContinuation records a handoff package only after its successor
+// generation has been claimed. The repository implementation fences the
+// write to that generation.
+func (c *Conductor) PersistContinuation(ctx context.Context, decision RouteDecision, continuation Continuation) error {
+	return c.persistContinuation(ctx, decision, continuation)
+}
+
 func (c *Conductor) launchWithFallback(
 	ctx context.Context,
 	profile Profile,
@@ -183,34 +211,49 @@ func (c *Conductor) launchWithFallback(
 	request ConductorLaunch,
 	continuation Continuation,
 ) (DownstreamExecution, RouteDecision, error) {
-	execution, err := c.downstream.Launch(ctx, DownstreamLaunch{
-		ExecutionProfileID: decision.ExecutionProfileID,
-		Decision:           decision,
-		Prompt:             request.Prompt,
-		Continuation:       continuation,
-	})
-	if err == nil {
-		return execution, decision, nil
+	maxAttempts := len(profile.Candidates)
+	if maxAttempts == 0 {
+		return DownstreamExecution{}, decision, ErrNoEligibleCandidate
 	}
-	next, shouldFallback, fallbackErr := c.nextAfterLaunchFailure(
-		ctx, profile, decision, request.SessionID, err,
-	)
-	if fallbackErr != nil {
-		return DownstreamExecution{}, decision, fallbackErr
+	current := decision
+	currentContinuation := continuation
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		execution, err := c.downstream.Launch(ctx, DownstreamLaunch{
+			ExecutionProfileID: current.ExecutionProfileID,
+			Decision:           current,
+			Prompt:             ContinuationPrompt(request.Prompt, currentContinuation),
+			Continuation:       currentContinuation,
+		})
+		if err == nil {
+			c.engine.ReleaseProbe(current, true)
+			return execution, current, nil
+		}
+		// Every probe attempt has a terminal launch result. Release it before
+		// applying policy so unclassified or post-start failures do not leave a
+		// half-open circuit lease stranded until its timeout.
+		c.engine.ReleaseProbe(current, false)
+		next, shouldFallback, fallbackErr := c.nextAfterLaunchFailure(
+			ctx, profile, current, request.SessionID, err,
+		)
+		if fallbackErr != nil {
+			if errors.Is(fallbackErr, ErrNoEligibleCandidate) {
+				return DownstreamExecution{}, current, err
+			}
+			return DownstreamExecution{}, current, fallbackErr
+		}
+		if !shouldFallback || attempt+1 >= maxAttempts {
+			return DownstreamExecution{}, current, err
+		}
+		classified := classifiedLaunchFailure(err)
+		if classified != nil {
+			currentContinuation = continuationWithFailure(currentContinuation, classified.Error())
+		}
+		if persistErr := c.persistContinuation(ctx, next, currentContinuation); persistErr != nil {
+			return DownstreamExecution{}, current, persistErr
+		}
+		current = next
 	}
-	if !shouldFallback {
-		return DownstreamExecution{}, decision, err
-	}
-	execution, err = c.downstream.Launch(ctx, DownstreamLaunch{
-		ExecutionProfileID: next.ExecutionProfileID,
-		Decision:           next,
-		Prompt:             request.Prompt,
-		Continuation:       continuation,
-	})
-	if err != nil {
-		return DownstreamExecution{}, next, err
-	}
-	return execution, next, nil
+	return DownstreamExecution{}, current, ErrNoEligibleCandidate
 }
 
 func (c *Conductor) nextAfterLaunchFailure(
@@ -222,6 +265,10 @@ func (c *Conductor) nextAfterLaunchFailure(
 ) (RouteDecision, bool, error) {
 	var classified *routingerr.Error
 	if !errors.As(launchErr, &classified) {
+		return RouteDecision{}, false, nil
+	}
+	if classified.Phase != "" && classified.Phase != routingerr.PhaseAuthCheck &&
+		classified.Phase != routingerr.PhaseProcessStart && classified.Phase != routingerr.PhaseSessionInit {
 		return RouteDecision{}, false, nil
 	}
 	if !classified.FallbackAllowed {
@@ -237,6 +284,29 @@ func (c *Conductor) nextAfterLaunchFailure(
 		return RouteDecision{}, true, err
 	}
 	return next, true, nil
+}
+
+func classifiedLaunchFailure(err error) *routingerr.Error {
+	var classified *routingerr.Error
+	if errors.As(err, &classified) {
+		return classified
+	}
+	return nil
+}
+
+func continuationWithFailure(current Continuation, reason string) Continuation {
+	current.FailureReason = bounded(reason)
+	return current
+}
+
+func (c *Conductor) persistContinuation(ctx context.Context, decision RouteDecision, continuation Continuation) error {
+	if c.continuationPersistence == nil {
+		return nil
+	}
+	return c.continuationPersistence.SaveRouteContinuation(ctx, ContinuationRecord{
+		SessionID: decision.SessionID, Generation: decision.Generation,
+		Continuation: continuation, UpdatedAt: time.Now().UTC(),
+	})
 }
 
 // Resume reuses a downstream ACP session only when its concrete profile owns
@@ -308,6 +378,39 @@ func BuildBoundedContinuation(input ContinuationInput) Continuation {
 		PlanSummary:       bounded(input.PlanSummary),
 		FailureReason:     bounded(input.FailureReason),
 	}
+}
+
+// ContinuationPrompt renders a bounded, provider-neutral handoff. The
+// original prompt remains first so providers that do not understand the
+// optional package still receive the user's request.
+func ContinuationPrompt(prompt string, continuation Continuation) string {
+	fields := make([]string, 0, 7)
+	if continuation.TaskDescription != "" {
+		fields = append(fields, "Task: "+continuation.TaskDescription)
+	}
+	if continuation.WorkflowStep != "" {
+		fields = append(fields, "Workflow step: "+continuation.WorkflowStep)
+	}
+	if continuation.Conversation != "" {
+		fields = append(fields, "Durable conversation: "+continuation.Conversation)
+	}
+	if continuation.ToolSummary != "" {
+		fields = append(fields, "Tool summary: "+continuation.ToolSummary)
+	}
+	if continuation.RepositorySummary != "" {
+		fields = append(fields, "Repository summary: "+continuation.RepositorySummary)
+	}
+	if continuation.PlanSummary != "" {
+		fields = append(fields, "Plan summary: "+continuation.PlanSummary)
+	}
+	if continuation.FailureReason != "" {
+		fields = append(fields, "Predecessor failure: "+continuation.FailureReason)
+	}
+	if len(fields) == 0 {
+		return prompt
+	}
+	return strings.TrimSpace(prompt) + "\n\n[Kandev continuation package]\n" + strings.Join(fields, "\n") +
+		"\nVerify durable state before repeating any uncertain action."
 }
 
 func bounded(value string) string {

@@ -40,13 +40,6 @@ async function applyRouteAction(
       },
       30000,
     );
-    if (result.state !== "waiting" && result.state !== "action_required") {
-      await client.request(
-        "session.launch",
-        { task_id: session.task_id, session_id: session.id, intent: "resume" },
-        30000,
-      );
-    }
     return result;
   } catch {
     return null;

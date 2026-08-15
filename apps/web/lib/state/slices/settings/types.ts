@@ -20,6 +20,7 @@ import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
+import type { AgentProfileKind } from "@/lib/types/agent-profile";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -47,6 +48,7 @@ export type AgentProfileOption = {
   label: string;
   agent_id: string;
   agent_name: string;
+  kind?: AgentProfileKind;
   cli_passthrough: boolean;
   /** Configured start model (ACP model ID). Empty = agent default. */
   model?: string;
@@ -73,8 +75,11 @@ export type AgentProfileOption = {
 };
 
 /** Profiles with an omitted enabled field remain selectable for compatibility. */
-export function isSelectableAgentProfile(profile: Pick<AgentProfileOption, "enabled">): boolean {
-  return profile.enabled !== false;
+export function isSelectableAgentProfile(
+  profile: Pick<AgentProfileOption, "enabled" | "kind">,
+  dynamicRoutingEnabled = true,
+): boolean {
+  return profile.enabled !== false && (dynamicRoutingEnabled || profile.kind !== "dynamic");
 }
 
 /**
@@ -124,6 +129,7 @@ export function toAgentProfileOption(
   agent: Pick<Agent, "id" | "name" | "capability_status" | "capability_error">,
   profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name" | "workspaceId"> & {
     updatedAt?: string;
+    kind?: AgentProfileKind;
     cliPassthrough?: boolean;
     model?: string;
     fallbackModel?: string;
@@ -136,6 +142,7 @@ export function toAgentProfileOption(
     label: `${profile.agentDisplayName ?? ""} • ${profile.name}`,
     agent_id: agent.id,
     agent_name: agent.name,
+    kind: profile.kind,
     cli_passthrough: profile.cliPassthrough ?? false,
     model: profile.model ?? undefined,
     fallback_model: profile.fallbackModel ?? undefined,

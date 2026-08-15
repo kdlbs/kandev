@@ -2,8 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -37,6 +40,7 @@ func (d *dynamicTaskDownstream) Launch(
 	options := d.options
 	options.AgentProfileID = launch.ExecutionProfileID
 	options.Prompt = launch.Prompt
+	d.service.beginDynamicAttempt(d.sessionID)
 	execution, err := d.service.executor.LaunchPreparedSession(ctx, d.task, d.sessionID, options)
 	if err != nil {
 		var classified *routingerr.Error
@@ -55,11 +59,16 @@ func (d *dynamicTaskDownstream) Launch(
 		}
 		return dynamicruntime.DownstreamExecution{}, fmt.Errorf("%w: %v", classified, err)
 	}
+	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
 	d.execution = execution
+	acpSessionID := ""
+	if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
+		acpSessionID = session.DownstreamACPSessionID
+	}
 	return dynamicruntime.DownstreamExecution{
 		ID:                 execution.AgentExecutionID,
 		ExecutionProfileID: launch.ExecutionProfileID,
-		ACPSessionID:       "",
+		ACPSessionID:       acpSessionID,
 	}, nil
 }
 
@@ -111,6 +120,16 @@ func (s *Service) launchPreparedSessionWithDynamicFallback(
 	sessionID string,
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
+	return s.launchPreparedSessionWithDynamicFallbackWithContinuation(ctx, task, sessionID, options, nil)
+}
+
+func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
+	ctx context.Context,
+	task *v1.Task,
+	sessionID string,
+	options executor.LaunchOptions,
+	continuationInput *dynamicruntime.ContinuationInput,
+) (*executor.TaskExecution, error) {
 	if s.profileExecutionResolver == nil {
 		return s.executor.LaunchPreparedSession(ctx, task, sessionID, options)
 	}
@@ -129,12 +148,22 @@ func (s *Service) launchPreparedSessionWithDynamicFallback(
 		service: s, task: task, sessionID: sessionID, options: options,
 	}
 	conductor := s.profileExecutionResolver.NewConductor(downstream)
-	result, err := conductor.LaunchSelected(ctx, dynamicruntime.ConductorSelectedLaunch{
-		SessionID:        session.ID,
-		LogicalProfileID: session.AgentProfileID,
-		Decision:         decision,
-		Prompt:           options.Prompt,
-	})
+	prebuiltContinuation, continuationInput, err := s.dynamicContinuationForLaunch(
+		ctx, task, sessionID, options.Prompt, continuationInput,
+	)
+	if err != nil {
+		return nil, err
+	}
+	selected := dynamicruntime.ConductorSelectedLaunch{
+		SessionID: session.ID, LogicalProfileID: session.AgentProfileID,
+		Decision: decision, Prompt: options.Prompt,
+	}
+	if prebuiltContinuation != nil {
+		selected.PrebuiltContinuation = prebuiltContinuation
+	} else {
+		selected.Continuation = *continuationInput
+	}
+	result, err := conductor.LaunchSelected(ctx, selected)
 	if err != nil {
 		return nil, err
 	}
@@ -145,6 +174,128 @@ func (s *Service) launchPreparedSessionWithDynamicFallback(
 		result.Execution.ExecutionProfileID = session.ExecutionProfileID
 	}
 	return downstream.execution, nil
+}
+
+func (s *Service) dynamicContinuationForLaunch(
+	ctx context.Context,
+	task *v1.Task,
+	sessionID, prompt string,
+	continuationInput *dynamicruntime.ContinuationInput,
+) (*dynamicruntime.Continuation, *dynamicruntime.ContinuationInput, error) {
+	if loader, ok := s.repo.(dynamicRouteStateLoader); ok {
+		state, err := loader.LoadRouteState(ctx, sessionID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if state != nil && state.ContinuationJSON != "" {
+			var continuation dynamicruntime.Continuation
+			if err := json.Unmarshal([]byte(state.ContinuationJSON), &continuation); err != nil {
+				return nil, nil, fmt.Errorf("decode dynamic continuation: %w", err)
+			}
+			return &continuation, nil, nil
+		}
+	}
+	if continuationInput != nil {
+		return nil, continuationInput, nil
+	}
+	input, err := s.buildDynamicContinuation(ctx, task, sessionID, prompt, "")
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, &input, nil
+}
+
+func (s *Service) buildDynamicContinuation(
+	ctx context.Context,
+	task *v1.Task,
+	sessionID, prompt, failureReason string,
+) (dynamicruntime.ContinuationInput, error) {
+	if task == nil || sessionID == "" {
+		return dynamicruntime.ContinuationInput{}, errors.New("dynamic continuation requires task and session")
+	}
+	input := dynamicruntime.ContinuationInput{
+		TaskDescription: task.Description,
+		FailureReason:   failureReason,
+	}
+	if strings.TrimSpace(prompt) != "" {
+		input.UserMessages = append(input.UserMessages, prompt)
+	}
+	if err := s.addDynamicTaskMetadata(ctx, task, &input); err != nil {
+		return dynamicruntime.ContinuationInput{}, err
+	}
+	if err := s.addDynamicConversation(ctx, sessionID, &input); err != nil {
+		return dynamicruntime.ContinuationInput{}, err
+	}
+	if err := s.addDynamicPlan(ctx, task.ID, &input); err != nil {
+		return dynamicruntime.ContinuationInput{}, err
+	}
+	input.RepositorySummary = dynamicRepositorySummary(task)
+	return input, nil
+}
+
+func (s *Service) addDynamicTaskMetadata(ctx context.Context, task *v1.Task, input *dynamicruntime.ContinuationInput) error {
+	dbTask, err := s.repo.GetTask(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("load task for dynamic continuation: %w", err)
+	}
+	if dbTask != nil {
+		input.WorkflowStep = dbTask.WorkflowStepID
+	}
+	return nil
+}
+
+func (s *Service) addDynamicConversation(ctx context.Context, sessionID string, input *dynamicruntime.ContinuationInput) error {
+	messages, err := s.repo.ListMessages(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("load conversation for dynamic continuation: %w", err)
+	}
+	conversation := make([]string, 0, len(messages))
+	toolSummary := make([]string, 0)
+	for _, message := range messages {
+		if message == nil || strings.TrimSpace(message.Content) == "" {
+			continue
+		}
+		content := strings.TrimSpace(message.Content)
+		if message.AuthorType == models.MessageAuthorUser {
+			input.UserMessages = append(input.UserMessages, content)
+			continue
+		}
+		switch message.Type {
+		case models.MessageTypeToolCall, models.MessageTypeToolEdit,
+			models.MessageTypeToolRead, models.MessageTypeToolExecute:
+			toolSummary = append(toolSummary, string(message.Type)+": "+content)
+		default:
+			conversation = append(conversation, string(message.AuthorType)+": "+content)
+		}
+	}
+	input.Conversation = strings.Join(conversation, "\n")
+	input.ToolSummary = strings.Join(toolSummary, "\n")
+	return nil
+}
+
+func (s *Service) addDynamicPlan(ctx context.Context, taskID string, input *dynamicruntime.ContinuationInput) error {
+	plan, err := s.repo.GetTaskPlan(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("load plan for dynamic continuation: %w", err)
+	}
+	if plan != nil {
+		input.PlanSummary = strings.TrimSpace(plan.Title + "\n" + plan.Content)
+	}
+	return nil
+}
+
+func dynamicRepositorySummary(task *v1.Task) string {
+	repositories := make([]string, 0, len(task.Repositories)+len(task.WorkspaceFolders))
+	for _, repository := range task.Repositories {
+		repositories = append(repositories, repository.RepositoryID+" @ "+repository.BaseBranch)
+	}
+	for _, folder := range task.WorkspaceFolders {
+		repositories = append(repositories, "folder: "+folder.DisplayName+" @ "+folder.LocalPath)
+	}
+	return strings.Join(repositories, "\n")
 }
 
 func (s *Service) dynamicLaunchDecision(
@@ -219,16 +370,40 @@ func (s *Service) routeDynamicAgentFailure(
 	if classified == nil || !classified.FallbackAllowed {
 		return false
 	}
+	data = s.withDynamicAttemptEvidence(data)
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
 		return false
 	}
+	if !dynamicPreResultSafe(data) {
+		// A dynamic route is never allowed to guess that a failed turn was
+		// pre-result. Missing evidence is as unsafe as observed output or a
+		// tool effect because the replacement could repeat a side effect.
+		return false
+	}
 	conductor := s.profileExecutionResolver.NewConductor(nil)
+	task, err := s.scheduler.GetTask(ctx, data.TaskID)
+	if err != nil {
+		return false
+	}
+	continuationInput, err := s.buildDynamicContinuation(
+		ctx, task, session.ID, "", classified.Error(),
+	)
+	if err != nil {
+		return false
+	}
 	decision, err := conductor.RouteAfterFailure(
 		ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
 		session.RouteGeneration, classified,
 	)
 	if err != nil {
+		return false
+	}
+	continuation, err := conductor.BuildContinuation(ctx, continuationInput)
+	if err != nil {
+		return false
+	}
+	if err := conductor.PersistContinuation(ctx, decision, continuation); err != nil {
 		return false
 	}
 	next, err := s.profileExecutionResolver.ResolveExisting(
@@ -244,6 +419,59 @@ func (s *Service) routeDynamicAgentFailure(
 		return false
 	}
 	return s.relaunchDynamicTaskAfterFailure(ctx, data, next.ExecutionProfileID)
+}
+
+// LaunchDynamicRouteAction completes a manual retry/try-next operation after
+// the backend route-action handler has claimed the successor generation. It
+// owns the predecessor shutdown, continuation persistence, successor launch,
+// and final launch error surface so the UI never has to issue a second launch
+// request.
+func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string) error {
+	if s.profileExecutionResolver == nil || sessionID == "" {
+		return errors.New("dynamic route action launch is not configured")
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		if err != nil {
+			return err
+		}
+		return errors.New("dynamic route action session not found")
+	}
+	task, err := s.scheduler.GetTask(ctx, session.TaskID)
+	if err != nil {
+		return err
+	}
+	input, err := s.buildDynamicContinuation(ctx, task, sessionID, "", "manual dynamic route action")
+	if err != nil {
+		return err
+	}
+	conductor := s.profileExecutionResolver.NewConductor(nil)
+	continuation, err := conductor.BuildContinuation(ctx, input)
+	if err != nil {
+		return err
+	}
+	decision := dynamicruntime.RouteDecision{
+		SessionID:          session.ID,
+		LogicalProfileID:   session.AgentProfileID,
+		ExecutionProfileID: session.ExecutionProfileID,
+		Generation:         session.RouteGeneration,
+		Reason:             session.RouteReason,
+	}
+	if err := conductor.PersistContinuation(ctx, decision, continuation); err != nil {
+		return err
+	}
+	data := watcher.AgentEventData{
+		TaskID:             task.ID,
+		SessionID:          session.ID,
+		AgentExecutionID:   session.AgentExecutionID,
+		AgentProfileID:     session.AgentProfileID,
+		ExecutionProfileID: session.ExecutionProfileID,
+		ErrorMessage:       "manual dynamic route action",
+	}
+	if !s.relaunchDynamicTaskAfterFailure(ctx, data, session.ExecutionProfileID) {
+		return errors.New("dynamic route action successor launch failed")
+	}
+	return nil
 }
 
 func (s *Service) dynamicFailureSession(
@@ -269,11 +497,7 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	data watcher.AgentEventData,
 	executionProfileID string,
 ) bool {
-	v, ok := s.lastTurnPrompt.Load(data.SessionID)
-	if !ok {
-		return false
-	}
-	prompt, ok := v.(capturedPrompt)
+	prompt, ok := s.dynamicRelaunchPrompt(ctx, data.SessionID)
 	if !ok {
 		return false
 	}
@@ -310,4 +534,29 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 		McpMode:              executor.McpModeOffice,
 	})
 	return err == nil
+}
+
+// dynamicRelaunchPrompt prefers the in-memory prompt cache for an automatic
+// fallback, but reconstructs the latest durable user prompt for a manual route
+// action or a backend restart. A route action must not strand a claimed route
+// merely because the process-local retry cache was lost.
+func (s *Service) dynamicRelaunchPrompt(ctx context.Context, sessionID string) (capturedPrompt, bool) {
+	if value, ok := s.lastTurnPrompt.Load(sessionID); ok {
+		if prompt, ok := value.(capturedPrompt); ok && strings.TrimSpace(prompt.text) != "" {
+			return prompt, true
+		}
+	}
+	messages, err := s.repo.ListMessages(ctx, sessionID)
+	if err != nil {
+		return capturedPrompt{}, false
+	}
+	for index := len(messages) - 1; index >= 0; index-- {
+		message := messages[index]
+		if message == nil || message.AuthorType != models.MessageAuthorUser ||
+			strings.TrimSpace(message.Content) == "" {
+			continue
+		}
+		return capturedPrompt{text: message.Content}, true
+	}
+	return capturedPrompt{}, false
 }

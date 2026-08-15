@@ -125,6 +125,10 @@ func (s *Service) rememberTurnPrompt(sessionID, text, model string, planMode boo
 // handleRecoverableFailure); false for non-transient errors, office tasks,
 // or an exhausted retry budget.
 func (s *Service) handleTransientFailure(ctx context.Context, data watcher.AgentEventData) bool {
+	data = s.withDynamicAttemptEvidence(data)
+	if data.DynamicRouteAttempt && !dynamicPreResultSafe(data) {
+		return false
+	}
 	classified := classifyKanbanFailure(data)
 	if data.SessionID == "" || routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry {
 		return false
@@ -388,8 +392,22 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 		}
 		resetHint = providerError.ResetAt
 	}
+	phase := routingerr.PhasePromptSend
+	if data.DynamicRouteAttempt {
+		switch {
+		case data.EffectObserved:
+			phase = routingerr.PhaseToolExecution
+		case data.OutputObserved:
+			phase = routingerr.PhaseStreaming
+		case !data.EvidenceKnown:
+			// Unknown attempt state is deliberately classified outside the
+			// pre-result phases. The dynamic route gate also requires explicit
+			// evidence, so this remains a defensive second fence.
+			phase = routingerr.PhaseStreaming
+		}
+	}
 	return routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
+		Phase:      phase,
 		ProviderID: providerID,
 		ResetHint:  resetHint,
 		Stderr:     message,

@@ -3,6 +3,7 @@ package dynamic
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -193,6 +194,25 @@ func TestCircuitProbeLeaseIsExclusive(t *testing.T) {
 	}
 }
 
+func TestEngineUsesExclusiveProbeForExpiredCircuit(t *testing.T) {
+	now := time.Unix(500, 0)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	engine.Circuits().Open("shared-binding", now.Add(-time.Second), routingerr.CodeQuotaLimited)
+	profile := Profile{ID: "dynamic-probe", Candidates: []Candidate{
+		{ID: "first", Enabled: true, BindingKey: "shared-binding"},
+		{ID: "second", Enabled: true, BindingKey: "other"},
+	}}
+	first, err := engine.Select("probe-session-1", profile, 0, "")
+	if err != nil || first.ExecutionProfileID != "first" {
+		t.Fatalf("first selection = %#v, %v; want probe candidate", first, err)
+	}
+	second, err := engine.Select("probe-session-2", profile, 0, "")
+	if err != nil || second.ExecutionProfileID != "second" {
+		t.Fatalf("second selection = %#v, %v; want other candidate while probe is held", second, err)
+	}
+	engine.ReleaseProbe(first, true)
+}
+
 func containsSensitive(value, sensitive string) bool {
-	return sensitive != "" && len(value) >= len(sensitive) && value == sensitive
+	return sensitive != "" && strings.Contains(value, sensitive)
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -392,31 +393,55 @@ func (h *Handlers) executeSessionProfilePrompt(
 			}
 			return response, nil
 		}
+		// A provider response with any user-visible content is already a
+		// result. Retrying it through another profile could repeat tool calls
+		// or make the caller see two incompatible answers.
+		if response != nil && strings.TrimSpace(response.Response) != "" {
+			return response, executeErr
+		}
 
-		responseError := ""
-		if response != nil {
-			responseError = response.Error
-		}
-		classified := utilityFailure(executeErr, responseError, prepared.AgentCLI)
-		if prepared.RouteSessionID == "" || !classified.FallbackAllowed {
-			return response, executeErr
-		}
-		next, resolveErr := h.controller.ResolveExecutionAfterFailure(
-			ctx, prepared.RouteSessionID, prepared.AgentProfileID,
-			currentExecutionProfileID, prepared.RouteGeneration, classified,
+		nextProfileID, advanced := h.advanceSessionProfileRoute(
+			ctx, prepared, currentExecutionProfileID, response, executeErr,
 		)
-		if resolveErr != nil || next.ExecutionProfileID == "" {
+		if !advanced {
 			return response, executeErr
 		}
-		currentExecutionProfileID = next.ExecutionProfileID
-		prepared.ExecutionProfileID = next.ExecutionProfileID
-		prepared.RouteGeneration = next.Generation
-		if next.Profile != nil {
-			prepared.AgentCLI = next.Profile.AgentID
-			prepared.Model = next.Profile.Model
-		}
+		currentExecutionProfileID = nextProfileID
 	}
 	return response, executeErr
+}
+
+func (h *Handlers) advanceSessionProfileRoute(
+	ctx context.Context,
+	prepared *service.PromptRequest,
+	currentExecutionProfileID string,
+	response *agentctlutil.PromptResponse,
+	executeErr error,
+) (string, bool) {
+	responseError := ""
+	if response != nil {
+		responseError = response.Error
+	}
+	classified := utilityFailure(executeErr, responseError, prepared.AgentCLI)
+	if prepared.RouteSessionID == "" ||
+		prepared.AgentProfileID == currentExecutionProfileID ||
+		!classified.FallbackAllowed {
+		return "", false
+	}
+	next, err := h.controller.ResolveExecutionAfterFailure(
+		ctx, prepared.RouteSessionID, prepared.AgentProfileID,
+		currentExecutionProfileID, prepared.RouteGeneration, classified,
+	)
+	if err != nil || next.ExecutionProfileID == "" {
+		return "", false
+	}
+	prepared.ExecutionProfileID = next.ExecutionProfileID
+	prepared.RouteGeneration = next.Generation
+	if next.Profile != nil {
+		prepared.AgentCLI = next.Profile.AgentID
+		prepared.Model = next.Profile.Model
+	}
+	return next.ExecutionProfileID, true
 }
 
 func (h *Handlers) executeSessionlessProfilePrompt(

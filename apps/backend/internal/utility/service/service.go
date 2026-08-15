@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
@@ -403,24 +405,20 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 			var concreteID string
 			var resolveErr error
 			if detailsResolver, ok := s.executionResolver.(ExecutionDetailsResolver); ok {
-				sessionID := ""
-				if tmplCtx != nil {
-					sessionID = tmplCtx.SessionID
-				}
-				details, detailsErr := detailsResolver.ResolveExecutionDetails(ctx, sessionID, profileID)
+				routeSessionID = "utility:" + uuid.NewString()
+				details, detailsErr := detailsResolver.ResolveExecutionDetails(ctx, routeSessionID, profileID)
 				if detailsErr != nil {
 					return nil, detailsErr
 				}
 				resolved = details.Profile
 				concreteID = details.ExecutionProfileID
-				routeSessionID = details.RouteSessionID
+				if details.RouteSessionID != "" {
+					routeSessionID = details.RouteSessionID
+				}
 				routeGeneration = details.Generation
 			} else if sessionResolver, ok := s.executionResolver.(SessionExecutionProfileResolver); ok {
-				sessionID := ""
-				if tmplCtx != nil {
-					sessionID = tmplCtx.SessionID
-				}
-				resolved, concreteID, resolveErr = sessionResolver.ResolveExecutionForSession(ctx, sessionID, profileID)
+				routeSessionID = "utility:" + uuid.NewString()
+				resolved, concreteID, resolveErr = sessionResolver.ResolveExecutionForSession(ctx, routeSessionID, profileID)
 			} else {
 				resolved, concreteID, resolveErr = s.executionResolver.ResolveExecution(ctx, profileID)
 			}

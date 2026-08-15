@@ -30,6 +30,7 @@ const mockUseTaskExecutorProfile = vi.fn(
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
+      features: { dynamicAgentRouting: true },
       agentProfiles: { items: mockProfiles },
     }),
 }));

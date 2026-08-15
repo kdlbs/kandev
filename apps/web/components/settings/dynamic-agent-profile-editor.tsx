@@ -7,6 +7,8 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Switch } from "@kandev/ui/switch";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -23,11 +25,17 @@ type DynamicAgentProfileEditorProps = {
   agent: Agent;
   profile: AgentProfile;
   /** When supplied, render as a draft editor owned by the parent save flow. */
-  onDraftChange?: (patch: Pick<AgentProfile, "name" | "dynamic">) => void;
+  onDraftChange?: (patch: Pick<AgentProfile, "name" | "dynamic" | "enabled">) => void;
 };
 
-function dynamicDraftRevision(name: string, candidates: DynamicAgentCandidate[]): string {
-  return JSON.stringify({ name, candidates });
+const defaultProviderErrorAction = "try_next";
+
+function dynamicDraftRevision(
+  name: string,
+  candidates: DynamicAgentCandidate[],
+  enabled: boolean,
+): string {
+  return JSON.stringify({ name, candidates, enabled });
 }
 
 function candidateLabel(candidate: DynamicAgentCandidate, profiles: AgentProfile[]): string {
@@ -44,6 +52,7 @@ export function DynamicAgentProfileEditor({
   onDraftChange,
 }: DynamicAgentProfileEditorProps) {
   const { t } = useTranslation();
+  const enabledLabel = t("agents:enabled");
   const { toast } = useToast();
   const enabled = useFeature("dynamicAgentRouting");
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
@@ -53,9 +62,14 @@ export function DynamicAgentProfileEditor({
   const [candidates, setCandidates] = useState<DynamicAgentCandidate[]>(
     profile.dynamic?.candidates ?? [],
   );
+  const [profileEnabled, setProfileEnabled] = useState(profile.enabled !== false);
   const [dynamicVersion, setDynamicVersion] = useState(profile.dynamic?.version ?? 1);
   const initialCandidates = profile.dynamic?.candidates ?? [];
-  const initialRevision = dynamicDraftRevision(profile.name, initialCandidates);
+  const initialRevision = dynamicDraftRevision(
+    profile.name,
+    initialCandidates,
+    profile.enabled !== false,
+  );
   const [savedRevision, setSavedRevision] = useState(initialRevision);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -75,9 +89,14 @@ export function DynamicAgentProfileEditor({
     (candidate) => !candidates.some((item) => item.executionProfileId === candidate.id),
   );
 
-  const notifyDraft = (nextName: string, nextCandidates: DynamicAgentCandidate[]) => {
+  const notifyDraft = (
+    nextName: string,
+    nextCandidates: DynamicAgentCandidate[],
+    nextEnabled = profileEnabled,
+  ) => {
     onDraftChange?.({
       name: nextName,
+      enabled: nextEnabled,
       dynamic: {
         version: dynamicVersion,
         candidates: nextCandidates,
@@ -93,7 +112,7 @@ export function DynamicAgentProfileEditor({
           position: current.length,
           executionProfileId: toAgentProfileId(executionProfileId),
           enabled: true,
-          rules: { on_provider_error: "try_next" },
+          rules: { on_provider_error: defaultProviderErrorAction },
         },
       ];
       notifyDraft(name, next);
@@ -127,12 +146,35 @@ export function DynamicAgentProfileEditor({
     });
   };
 
+  const updateCandidate = (index: number, patch: Partial<DynamicAgentCandidate>) => {
+    setCandidates((current) => {
+      const next = current.map((candidate, candidateIndex) =>
+        candidateIndex === index ? { ...candidate, ...patch } : candidate,
+      );
+      notifyDraft(name, next);
+      return next;
+    });
+  };
+
+  const updateCandidateAction = (index: number, action: string) => {
+    setCandidates((current) => {
+      const next = current.map((candidate, candidateIndex) =>
+        candidateIndex === index
+          ? { ...candidate, rules: { ...candidate.rules, on_provider_error: action } }
+          : candidate,
+      );
+      notifyDraft(name, next);
+      return next;
+    });
+  };
+
   const save = async () => {
     if (!enabled || !name.trim() || candidates.length === 0 || !profile.dynamic) return;
     setSaving(true);
     try {
       const draftPayload = {
         name: name.trim(),
+        enabled: profileEnabled,
         dynamic: {
           version: dynamicVersion,
           candidates,
@@ -140,6 +182,7 @@ export function DynamicAgentProfileEditor({
       };
       const payload = {
         name: name.trim(),
+        enabled: profileEnabled,
         dynamic: {
           version: dynamicVersion,
           candidates: candidates.map((candidate, position) => ({
@@ -172,10 +215,13 @@ export function DynamicAgentProfileEditor({
         ),
       );
       setName(updated.name);
+      setProfileEnabled(updated.enabled !== false);
       const nextCandidates = updated.dynamic?.candidates ?? candidates;
       setCandidates(nextCandidates);
       setDynamicVersion(updated.dynamic?.version ?? dynamicVersion + 1);
-      setSavedRevision(dynamicDraftRevision(updated.name, nextCandidates));
+      setSavedRevision(
+        dynamicDraftRevision(updated.name, nextCandidates, updated.enabled !== false),
+      );
       toast({ title: t("agents:dynamicProfileSaved") });
     } catch (error) {
       toast({
@@ -189,7 +235,7 @@ export function DynamicAgentProfileEditor({
   };
 
   const standalone = onDraftChange === undefined;
-  const draftRevision = dynamicDraftRevision(name, candidates);
+  const draftRevision = dynamicDraftRevision(name, candidates, profileEnabled);
   useSettingsSaveContributor({
     id: `dynamic-profile:${profile.id}`,
     revision: draftRevision,
@@ -200,6 +246,7 @@ export function DynamicAgentProfileEditor({
     discard: () => {
       if (!standalone) return;
       setName(profile.name);
+      setProfileEnabled(profile.enabled !== false);
       setCandidates(initialCandidates);
       setDynamicVersion(profile.dynamic?.version ?? 1);
       setSavedRevision(initialRevision);
@@ -235,6 +282,21 @@ export function DynamicAgentProfileEditor({
           <CardTitle>{t("agents:dynamicProfileSettings")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
+          <div className="flex min-h-11 items-center justify-between gap-3 rounded-md border p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{enabledLabel}</p>
+              <p className="text-xs text-muted-foreground">{t("agents:enabledProfileHelper")}</p>
+            </div>
+            <Switch
+              id={`dynamic-profile-enabled-${profile.id}`}
+              checked={profileEnabled}
+              onCheckedChange={(checked) => {
+                setProfileEnabled(checked);
+                notifyDraft(name, candidates, checked);
+              }}
+              aria-label={enabledLabel}
+            />
+          </div>
           <label className="grid gap-2 text-sm font-medium" htmlFor="dynamic-profile-name">
             {t("agents:profileName")}
             <Input
@@ -279,12 +341,42 @@ export function DynamicAgentProfileEditor({
                 {candidates.map((candidate, index) => (
                   <li
                     key={candidate.executionProfileId}
-                    className="flex min-w-0 items-center gap-2 rounded-md border p-2"
+                    className="flex min-w-0 flex-col gap-2 rounded-md border p-2 sm:flex-row sm:items-center"
                   >
                     <Badge variant="outline">{index + 1}</Badge>
                     <span className="min-w-0 flex-1 truncate text-sm">
                       {candidateLabel(candidate, concreteProfiles)}
                     </span>
+                    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
+                      <div className="flex min-h-11 items-center gap-2 rounded-md border px-2">
+                        <span className="text-xs text-muted-foreground">{enabledLabel}</span>
+                        <Switch
+                          checked={candidate.enabled}
+                          onCheckedChange={(checked) =>
+                            updateCandidate(index, { enabled: checked })
+                          }
+                          aria-label={`${enabledLabel}: ${candidateLabel(candidate, concreteProfiles)}`}
+                        />
+                      </div>
+                      <Select
+                        value={candidate.rules?.on_provider_error ?? defaultProviderErrorAction}
+                        onValueChange={(action) => updateCandidateAction(index, action)}
+                      >
+                        <SelectTrigger
+                          className="min-h-11 w-full sm:w-40"
+                          aria-label={t("agents:retry")}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="retry_same">{t("agents:retry")}</SelectItem>
+                          <SelectItem value={defaultProviderErrorAction}>
+                            {t("task:dynamicRouteTryNext")}
+                          </SelectItem>
+                          <SelectItem value="stop">{t("task:stop")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <Button
                       variant="ghost"
                       size="sm"

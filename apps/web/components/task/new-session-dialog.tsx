@@ -16,6 +16,7 @@ import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
@@ -50,6 +51,7 @@ function agentProfileDisplayLabel(profile: AgentProfileOption): string {
 
 function useNewSessionDialogState(taskId: string) {
   const { t } = useTranslation();
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const resolvedWorkspaceId = useAppStore((state) =>
     resolveComposerWorkspaceId({
       sessionId: null,
@@ -98,7 +100,9 @@ function useNewSessionDialogState(taskId: string) {
   // The default for a NEW session must be selectable: a current session
   // that uses a now-disabled profile still runs (no effect on existing
   // sessions), but the dialog falls back to the first enabled profile.
-  const selectableProfiles = agentProfiles.filter(isSelectableAgentProfile);
+  const selectableProfiles = agentProfiles.filter((profile) =>
+    isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+  );
   const profileIsValid = selectableProfiles.some((p: { id: string }) => p.id === sessionProfileId);
   const effectiveDefaultProfileId: string = profileIsValid
     ? sessionProfileId
@@ -164,12 +168,15 @@ function useCompatibleAgentProfiles(
   agentProfiles: AgentProfileOption[],
   executorProfile: ExecutorProfile | null,
 ): AgentProfileOption[] {
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
   return useMemo(() => {
-    const selectable = agentProfiles.filter(isSelectableAgentProfile);
+    const selectable = agentProfiles.filter((profile) =>
+      isSelectableAgentProfile(profile, dynamicRoutingEnabled),
+    );
     if (!executorProfile || !authLoaded) return selectable;
     return selectable.filter((ap) => isAgentConfiguredOnExecutor(ap, executorProfile, authSpecs));
-  }, [agentProfiles, executorProfile, authSpecs, authLoaded]);
+  }, [agentProfiles, dynamicRoutingEnabled, executorProfile, authSpecs, authLoaded]);
 }
 
 function useHandoffAutoSummarize(

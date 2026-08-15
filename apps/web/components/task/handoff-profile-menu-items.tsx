@@ -17,6 +17,7 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
@@ -42,18 +43,21 @@ function profileDisplayLabel(profile: AgentProfileOption): { label: string; agen
 export function useHandoffProfiles(taskId: string, enabled = true): HandoffProfile[] {
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   const executorProfile = useTaskExecutorProfile(taskId, enabled);
+  const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
 
   return useMemo(() => {
-    return agentProfiles.filter(isSelectableAgentProfile).map((profile) => {
-      const { label, agentName } = profileDisplayLabel(profile);
-      let disabled = false;
-      if (executorProfile && authLoaded) {
-        disabled = !isAgentConfiguredOnExecutor(profile, executorProfile, authSpecs);
-      }
-      return { id: profile.id, label, agentName, disabled };
-    });
-  }, [agentProfiles, executorProfile, authSpecs, authLoaded]);
+    return agentProfiles
+      .filter((profile) => isSelectableAgentProfile(profile, dynamicRoutingEnabled))
+      .map((profile) => {
+        const { label, agentName } = profileDisplayLabel(profile);
+        let disabled = false;
+        if (executorProfile && authLoaded) {
+          disabled = !isAgentConfiguredOnExecutor(profile, executorProfile, authSpecs);
+        }
+        return { id: profile.id, label, agentName, disabled };
+      });
+  }, [agentProfiles, dynamicRoutingEnabled, executorProfile, authSpecs, authLoaded]);
 }
 
 function HandoffProfileList({

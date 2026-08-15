@@ -11,7 +11,7 @@ const configPromptPlaceholder = "Ask anything about your configuration...";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({ agentProfiles: { items: profiles } }),
+    selector({ features: { dynamicAgentRouting: true }, agentProfiles: { items: profiles } }),
 }));
 
 afterEach(() => {

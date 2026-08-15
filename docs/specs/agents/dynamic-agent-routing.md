@@ -15,6 +15,9 @@ Turn attribution follows
 Implementation plan:
 [Dynamic Agent Routing](../../plans/dynamic-agent-routing/plan.md).
 
+Rollout blocker repair:
+[Dynamic Agent Routing Rollout Blockers](dynamic-agent-routing-rollout-blockers.md).
+
 ## Why
 
 Users often name profiles by the capability they want rather than a provider

@@ -99,6 +99,89 @@ func TestConductorDoesNotFallbackForUnclassifiedLaunchFailure(t *testing.T) {
 	}
 }
 
+func TestConductorWalksEveryCandidateAndPersistsFailureContext(t *testing.T) {
+	profile := Profile{
+		ID: "dynamic-profile",
+		Candidates: []Candidate{
+			{ID: "candidate-first", Enabled: true, BindingKey: "first", Rules: map[string]Action{
+				string(routingerr.CodeProviderUnavailable): ActionTryNext,
+			}},
+			{ID: "candidate-second", Enabled: true, BindingKey: "second", Rules: map[string]Action{
+				string(routingerr.CodeProviderUnavailable): ActionTryNext,
+			}},
+			{ID: "candidate-third", Enabled: true, BindingKey: "third"},
+		},
+	}
+	downstream := &multiFailureConductorTestDownstream{failures: 2}
+	store := &conductorContinuationStore{}
+	conductor := NewConductor(
+		NewEngine(), conductorTestProfileLoader{profile: profile}, downstream,
+		WithContinuationPersistence(store),
+	)
+
+	result, err := conductor.Launch(context.Background(), ConductorLaunch{
+		SessionID: "session-three", LogicalProfileID: profile.ID,
+		Prompt:       "continue the work",
+		Continuation: ContinuationInput{TaskDescription: "ship the change"},
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if result.Decision.ExecutionProfileID != "candidate-third" || result.Decision.Generation != 3 {
+		t.Fatalf("final decision = %#v", result.Decision)
+	}
+	if len(downstream.launches) != 3 {
+		t.Fatalf("launch count = %d, want 3", len(downstream.launches))
+	}
+	if downstream.launches[1].Continuation.FailureReason == "" || downstream.launches[2].Continuation.FailureReason == "" {
+		t.Fatalf("fallback continuation did not retain failure context: %#v", downstream.launches)
+	}
+	if len(store.saved) != 2 || store.saved[0].Generation != 2 || store.saved[1].Generation != 3 {
+		t.Fatalf("persisted continuations = %#v, want generations 2 and 3", store.saved)
+	}
+}
+
+func TestConductorDoesNotFallbackAfterPostStartLaunchFailure(t *testing.T) {
+	profile := Profile{
+		ID: "dynamic-profile",
+		Candidates: []Candidate{
+			{ID: "candidate-first", Enabled: true, Rules: map[string]Action{
+				string(routingerr.CodeProviderUnavailable): ActionTryNext,
+			}},
+			{ID: "candidate-second", Enabled: true},
+		},
+	}
+	failure := &routingerr.Error{Code: routingerr.CodeProviderUnavailable, Phase: routingerr.PhaseStreaming, FallbackAllowed: true}
+	conductor := NewConductor(NewEngine(), conductorTestProfileLoader{profile: profile}, failingConductorTestDownstream{err: failure})
+	_, err := conductor.Launch(context.Background(), ConductorLaunch{SessionID: "session-post-start", LogicalProfileID: profile.ID})
+	if !errors.Is(err, failure) {
+		t.Fatalf("Launch error = %v, want %v", err, failure)
+	}
+}
+
+type multiFailureConductorTestDownstream struct {
+	launches []DownstreamLaunch
+	failures int
+}
+
+func (d *multiFailureConductorTestDownstream) Launch(_ context.Context, launch DownstreamLaunch) (DownstreamExecution, error) {
+	d.launches = append(d.launches, launch)
+	if len(d.launches) <= d.failures {
+		return DownstreamExecution{}, &routingerr.Error{Code: routingerr.CodeProviderUnavailable, Phase: routingerr.PhaseProcessStart, FallbackAllowed: true}
+	}
+	return DownstreamExecution{ID: "execution-third"}, nil
+}
+
+func (*multiFailureConductorTestDownstream) Resume(context.Context, string, string) error { return nil }
+func (*multiFailureConductorTestDownstream) Stop(context.Context, string, string) error   { return nil }
+
+type conductorContinuationStore struct{ saved []ContinuationRecord }
+
+func (s *conductorContinuationStore) SaveRouteContinuation(_ context.Context, record ContinuationRecord) error {
+	s.saved = append(s.saved, record)
+	return nil
+}
+
 type failingConductorTestDownstream struct{ err error }
 
 func (d failingConductorTestDownstream) Launch(context.Context, DownstreamLaunch) (DownstreamExecution, error) {

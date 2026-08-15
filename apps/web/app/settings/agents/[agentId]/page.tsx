@@ -174,7 +174,9 @@ function useAgentStoreSync() {
           label: `${profile.agentDisplayName ?? ""} • ${profile.name}`,
           agent_id: agent.id,
           agent_name: agent.name,
+          kind: profile.kind,
           cli_passthrough: profile.cliPassthrough ?? false,
+          enabled: profile.enabled ?? true,
         })),
       ),
     );

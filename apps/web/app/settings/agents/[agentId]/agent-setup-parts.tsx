@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
+import Link from "@/components/routing/app-link";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -205,6 +206,29 @@ export type ProfilesCardProps = {
   onToastError: (error: unknown) => void;
 };
 
+function dynamicProfileRoute(agent: Agent, profile: DraftProfile): string {
+  return `/settings/agents/${encodeURIComponent(agent.name)}/profiles/${encodeURIComponent(profile.id)}`;
+}
+
+function DynamicProfileRouteRow({ agent, profile }: { agent: Agent; profile: DraftProfile }) {
+  const { t } = useTranslation();
+  const candidateCount = profile.dynamic?.candidates.length ?? 0;
+  return (
+    <Link
+      href={dynamicProfileRoute(agent, profile)}
+      className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-md border p-3 transition-colors hover:border-foreground/30 hover:bg-muted/50"
+      data-testid={`dynamic-profile-route-${profile.id}`}
+    >
+      <span className="min-w-0 truncate text-sm font-medium">
+        {profile.name || t("agents:profileName")}
+      </span>
+      <span className="shrink-0 text-xs text-muted-foreground">
+        {t("agents:dynamicCandidates")}: {candidateCount}
+      </span>
+    </Link>
+  );
+}
+
 export function ProfilesCard({
   displayName,
   isCreateMode,
@@ -222,17 +246,41 @@ export function ProfilesCard({
   onToastError,
 }: ProfilesCardProps) {
   const { t } = useTranslation();
-  const dynamicProfile =
-    draftAgent.profiles.find((profile) => profile.kind === "dynamic") ??
-    (draftAgent.name === "dynamic" ? draftAgent.profiles[0] : undefined);
+  const dynamicProfiles = draftAgent.profiles.filter(
+    (profile) => profile.kind === "dynamic" || draftAgent.name === "dynamic",
+  );
 
-  if (dynamicProfile) {
+  if (dynamicProfiles.length > 0) {
     return (
-      <DynamicAgentProfileEditor
-        agent={draftAgent}
-        profile={dynamicProfile}
-        onDraftChange={(patch) => onProfileChange(dynamicProfile.id, patch)}
-      />
+      <SettingsCard isDirty={isAgentDirty}>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle>{t("agents:dynamicProfileSettings")}</CardTitle>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onAddProfile}
+            className="min-h-11 cursor-pointer"
+          >
+            <IconPlus className="mr-2 h-4 w-4" />
+            {t("agents:addProfile")}
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {dynamicProfiles.map((profile) => (
+            <div key={profile.id}>
+              {profile.isNew ? (
+                <DynamicAgentProfileEditor
+                  agent={draftAgent}
+                  profile={profile}
+                  onDraftChange={(patch) => onProfileChange(profile.id, patch)}
+                />
+              ) : (
+                <DynamicProfileRouteRow agent={draftAgent} profile={profile} />
+              )}
+            </div>
+          ))}
+        </CardContent>
+      </SettingsCard>
     );
   }
 

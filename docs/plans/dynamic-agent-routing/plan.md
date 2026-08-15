@@ -235,16 +235,19 @@ Implementation slice validated on 2026-08-15:
   ordering, semantic actions, binding fingerprints, circuit/probe contracts,
   generation claims, restart loading, and stale-writer rejection.
 - Task 05 and Task 06 resolver, launch-boundary, logical-session, settled-turn
-  route-action, turn-attribution, and persistence changes compile and pass the
-  focused orchestrator/backend suite. The conductor package exists, but full
-  lifecycle continuation and event-subscription wiring remain open.
+  route-action, turn-attribution, persistence, continuation, and fail-closed
+  evidence changes compile and pass the focused orchestrator/backend suite.
+  The rollout-blocker repair also makes route actions atomic and delivers
+  durable continuation before supported mid-turn fallback. Full lifecycle
+  ownership, event-subscription wiring, and restart reconciliation remain
+  open.
 - Task 07 utility routing passes its focused backend suite. Utility calls keep
-  logical attribution, execute the concrete profile, and can advance only
-  classified pre-result failures. Plugin-host utility wiring and full caller
-  E2E coverage remain open.
-- Task 08 and Task 09 settings, route state, recovery UI, typecheck, i18n, and
-  focused frontend tests pass. Full immutable per-turn badge presentation and
-  Playwright coverage remain open.
+  logical attribution, execute the concrete profile, use isolated invocation
+  identities, and can advance only classified pre-result failures. Plugin-host
+  utility wiring and full caller E2E coverage remain open.
+- Task 08 and Task 09 settings, route state, recovery UI, picker filtering,
+  typecheck, i18n, and focused frontend tests pass. Full immutable per-turn
+  badge presentation and Playwright coverage remain open.
 - Task 15 public documentation validation passes after documenting the flag,
   fixed-order behavior, recovery boundary, and restart requirement.
 - Tasks 10 through 14 and 16 remain pending because Office handoff,

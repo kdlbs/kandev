@@ -46,6 +46,7 @@ type RouteState struct {
 	Generation         int64
 	ProfileVersion     int64
 	Status             string
+	ContinuationJSON   string
 	UpdatedAt          time.Time
 }
 
@@ -66,6 +67,22 @@ type RouteAttempt struct {
 	ProfileVersion     int64
 	Reason             string
 	CreatedAt          time.Time
+}
+
+// ContinuationRecord is the bounded handoff package persisted for a route
+// generation before a successor launch. It contains context, not provider
+// native session state.
+type ContinuationRecord struct {
+	SessionID    string
+	Generation   int64
+	Continuation Continuation
+	UpdatedAt    time.Time
+}
+
+// ContinuationPersistence stores the handoff package with the route
+// generation that owns it. Implementations must reject a stale generation.
+type ContinuationPersistence interface {
+	SaveRouteContinuation(context.Context, ContinuationRecord) error
 }
 
 // Persistence is the narrow durable seam for route state and immutable

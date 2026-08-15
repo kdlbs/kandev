@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -30,6 +32,20 @@ func TestDynamicRouteStateAndAttemptsPersistAcrossRepositoryReads(t *testing.T) 
 	if err := repo.SaveRouteState(ctx, state); err != nil {
 		t.Fatalf("SaveRouteState: %v", err)
 	}
+	continuation := dynamicruntime.Continuation{
+		TaskDescription: "continue the migration",
+		Conversation:    "The predecessor completed the schema scan.",
+	}
+	if err := repo.SaveRouteContinuation(ctx, dynamicruntime.ContinuationRecord{
+		SessionID: state.SessionID, Generation: state.Generation, Continuation: continuation,
+	}); err != nil {
+		t.Fatalf("SaveRouteContinuation: %v", err)
+	}
+	if err := repo.SaveRouteContinuation(ctx, dynamicruntime.ContinuationRecord{
+		SessionID: state.SessionID, Generation: state.Generation - 1, Continuation: continuation,
+	}); !errors.Is(err, dynamicruntime.ErrStaleGeneration) {
+		t.Fatalf("stale SaveRouteContinuation error = %v", err)
+	}
 	if err := repo.AppendRouteAttempt(ctx, dynamicruntime.RouteAttempt{
 		SessionID: "session-dynamic-route", LogicalProfileID: "dynamic-1",
 		ExecutionProfileID: "concrete-1", Generation: 7, ProfileVersion: 3,
@@ -46,6 +62,14 @@ func TestDynamicRouteStateAndAttemptsPersistAcrossRepositoryReads(t *testing.T) 
 	}
 	if loaded.Generation != 7 || loaded.ExecutionProfileID != "concrete-1" {
 		t.Fatalf("loaded state = %#v", loaded)
+	}
+	var loadedContinuation dynamicruntime.Continuation
+	if err := json.Unmarshal([]byte(loaded.ContinuationJSON), &loadedContinuation); err != nil {
+		t.Fatalf("decode continuation: %v", err)
+	}
+	if loadedContinuation.TaskDescription != continuation.TaskDescription ||
+		loadedContinuation.Conversation != continuation.Conversation {
+		t.Fatalf("loaded continuation = %#v", loadedContinuation)
 	}
 	attempts, err := repo.ListRouteAttempts(ctx, "session-dynamic-route")
 	if err != nil {

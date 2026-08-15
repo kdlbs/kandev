@@ -35,7 +35,10 @@ turn attribution persistence, generation-fenced `session.route_action`, stale
 conflict snapshots, recovery-state handling, and resolver-backed task launch
 and resume paths. Route actions now also require a settled turn. The
 retry-same path preserves the failed candidate and stale route claims fail
-closed after restart.
+closed after restart. The rollout-blocker repair makes the route action own
+selection, predecessor shutdown, successor launch, and durable recovery state
+as one backend operation, and fails closed when continuation evidence is
+ambiguous.
 
 Verification:
 

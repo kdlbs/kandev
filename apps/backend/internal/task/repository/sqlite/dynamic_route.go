@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 )
 
 var _ dynamicruntime.Persistence = (*Repository)(nil)
+var _ dynamicruntime.ContinuationPersistence = (*Repository)(nil)
 
 func (r *Repository) SaveRouteState(ctx context.Context, state dynamicruntime.RouteState) error {
 	if isTransientRouteSession(state.SessionID) {
@@ -27,17 +29,18 @@ func (r *Repository) SaveRouteState(ctx context.Context, state dynamicruntime.Ro
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO dynamic_route_states (
 			session_id, logical_profile_id, execution_profile_id,
-			route_generation, profile_version, state, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+			route_generation, profile_version, state, continuation_json, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			logical_profile_id = excluded.logical_profile_id,
 			execution_profile_id = excluded.execution_profile_id,
 			route_generation = excluded.route_generation,
 			profile_version = excluded.profile_version,
 			state = excluded.state,
+			continuation_json = excluded.continuation_json,
 			updated_at = excluded.updated_at
 	`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
-		state.Generation, state.ProfileVersion, state.Status, updatedAt)
+		state.Generation, state.ProfileVersion, state.Status, state.ContinuationJSON, updatedAt)
 	return err
 }
 
@@ -57,19 +60,19 @@ func (r *Repository) ClaimRouteState(ctx context.Context, expectedGeneration int
 		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO dynamic_route_states (
 				session_id, logical_profile_id, execution_profile_id,
-				route_generation, profile_version, state, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
+				route_generation, profile_version, state, continuation_json, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(session_id) DO NOTHING
 		`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
-			state.Generation, state.ProfileVersion, state.Status, state.UpdatedAt)
+			state.Generation, state.ProfileVersion, state.Status, state.ContinuationJSON, state.UpdatedAt)
 	} else {
 		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
 			UPDATE dynamic_route_states
 			SET logical_profile_id = ?, execution_profile_id = ?,
-				route_generation = ?, profile_version = ?, state = ?, updated_at = ?
+				route_generation = ?, profile_version = ?, state = ?, continuation_json = ?, updated_at = ?
 			WHERE session_id = ? AND route_generation = ?
 		`), state.LogicalProfileID, state.ExecutionProfileID, state.Generation,
-			state.ProfileVersion, state.Status, state.UpdatedAt, state.SessionID,
+			state.ProfileVersion, state.Status, state.ContinuationJSON, state.UpdatedAt, state.SessionID,
 			expectedGeneration)
 	}
 	if err != nil {
@@ -96,19 +99,19 @@ func (r *Repository) RecordRouteDecision(ctx context.Context, decision dynamicru
 		result, err = tx.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO dynamic_route_states (
 				session_id, logical_profile_id, execution_profile_id,
-				route_generation, profile_version, state, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
+				route_generation, profile_version, state, continuation_json, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(session_id) DO NOTHING
 		`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
-			state.Generation, state.ProfileVersion, state.Status, state.UpdatedAt)
+			state.Generation, state.ProfileVersion, state.Status, state.ContinuationJSON, state.UpdatedAt)
 	} else {
 		result, err = tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE dynamic_route_states
 			SET logical_profile_id = ?, execution_profile_id = ?,
-				route_generation = ?, profile_version = ?, state = ?, updated_at = ?
+				route_generation = ?, profile_version = ?, state = ?, continuation_json = ?, updated_at = ?
 			WHERE session_id = ? AND route_generation = ?
 		`), state.LogicalProfileID, state.ExecutionProfileID, state.Generation,
-			state.ProfileVersion, state.Status, state.UpdatedAt, state.SessionID,
+			state.ProfileVersion, state.Status, state.ContinuationJSON, state.UpdatedAt, state.SessionID,
 			expectedGeneration)
 	}
 	if err != nil {
@@ -168,11 +171,11 @@ func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dyn
 	state := &dynamicruntime.RouteState{}
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT session_id, logical_profile_id, execution_profile_id,
-			route_generation, profile_version, state, updated_at
+			route_generation, profile_version, state, continuation_json, updated_at
 		FROM dynamic_route_states WHERE session_id = ?
 	`), sessionID).Scan(
 		&state.SessionID, &state.LogicalProfileID, &state.ExecutionProfileID,
-		&state.Generation, &state.ProfileVersion, &state.Status, &state.UpdatedAt,
+		&state.Generation, &state.ProfileVersion, &state.Status, &state.ContinuationJSON, &state.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -181,6 +184,36 @@ func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dyn
 		return nil, err
 	}
 	return state, nil
+}
+
+func (r *Repository) SaveRouteContinuation(ctx context.Context, record dynamicruntime.ContinuationRecord) error {
+	if isTransientRouteSession(record.SessionID) {
+		return nil
+	}
+	payload, err := json.Marshal(record.Continuation)
+	if err != nil {
+		return err
+	}
+	updatedAt := record.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE dynamic_route_states
+		SET continuation_json = ?, updated_at = ?
+		WHERE session_id = ? AND route_generation = ?
+	`), string(payload), updatedAt, record.SessionID, record.Generation)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return dynamicruntime.ErrStaleGeneration
+	}
+	return nil
 }
 
 func (r *Repository) SaveCircuit(ctx context.Context, snapshot dynamicruntime.CircuitSnapshot) error {

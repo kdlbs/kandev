@@ -33,7 +33,10 @@ spec: "../../specs/agents/dynamic-agent-routing.md"
 
 In progress. Added generation-aware session state updates, route fields in
 session events, localized waiting/action-required recovery UI, and desktop and
-mobile recovery controls that keep the composer mounted.
+mobile recovery controls that keep the composer mounted. The rollout-blocker
+repair adds one-request route recovery, restores the Dynamic profile list and
+dedicated profile navigation, and filters disabled dynamic profiles from new
+selection surfaces.
 
 Verification:
 

@@ -10,6 +10,12 @@ describe("isSelectableAgentProfile", () => {
   ])("treats %s profiles correctly", (_label, enabled, expected) => {
     expect(isSelectableAgentProfile({ enabled })).toBe(expected);
   });
+
+  it("excludes dynamic profiles when dynamic routing is disabled", () => {
+    expect(isSelectableAgentProfile({ enabled: true, kind: "dynamic" }, false)).toBe(false);
+    expect(isSelectableAgentProfile({ enabled: true, kind: "dynamic" }, true)).toBe(true);
+    expect(isSelectableAgentProfile({ enabled: true, kind: "concrete" }, false)).toBe(true);
+  });
 });
 
 describe("toAgentProfileOption", () => {
@@ -35,5 +41,15 @@ describe("toAgentProfileOption", () => {
       name: "legacy",
     });
     expect(legacy.enabled).toBe(true);
+  });
+
+  it("preserves profile kind for picker filtering", () => {
+    const option = toAgentProfileOption(agent, {
+      id: agentProfileId("dynamic"),
+      agentDisplayName: "Dynamic",
+      name: "Frontier",
+      kind: "dynamic",
+    });
+    expect(option.kind).toBe("dynamic");
   });
 });

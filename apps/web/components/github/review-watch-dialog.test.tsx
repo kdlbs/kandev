@@ -6,6 +6,7 @@ const store = {
   workspaces: { activeId: "ws-1", items: [] },
   workflows: { items: [{ id: "workflow", name: "Delivery", hidden: false }] },
   agentProfiles: { items: [] },
+  features: { dynamicAgentRouting: true },
   executors: { items: [] },
   prompts: { items: [], loaded: true, loading: false },
 };

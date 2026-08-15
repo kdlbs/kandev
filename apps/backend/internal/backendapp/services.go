@@ -107,6 +107,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		dynamicEngine,
 		cfg.Features.DynamicAgentRouting,
 	)
+	dynamicResolver.SetCredentialBindingResolver(dynamicBindingResolver)
 	utilitySvc.SetExecutionProfileResolver(dynamicResolver)
 	workflowSvc := workflowservice.NewService(repos.Workflow, log)
 	taskSvc := taskservice.NewService(

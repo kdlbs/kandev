@@ -77,6 +77,20 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	} else if s.shouldDropCompletedExecutionStreamEvent(payload) {
 		return
 	}
+	switch eventType {
+	case "message_streaming", "thinking_streaming", agentEventComplete:
+		s.observeDynamicAttempt(
+			payload.SessionID,
+			payload.ExecutionID,
+			strings.TrimSpace(payload.Data.Text) != "",
+			false,
+		)
+	case agentEventToolCall, agentEventToolUpdate:
+		s.observeDynamicAttempt(payload.SessionID, payload.ExecutionID, false, true)
+	}
+	if eventType == agentEventComplete {
+		defer s.clearDynamicAttemptEvidence(payload.SessionID, payload.ExecutionID)
+	}
 
 	if !terminalCompleteStream {
 		// Any live agent stream activity means the agent resumed after clarification.
@@ -102,7 +116,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
 
-	case "tool_update":
+	case agentEventToolUpdate:
 		s.handleToolUpdateEvent(ctx, payload)
 
 	case agentEventComplete:
@@ -214,6 +228,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		if failure.ErrorMessage == "" {
 			failure.ErrorMessage = payload.Data.Text
 		}
+		failure = s.withDynamicAttemptEvidence(failure)
 		if s.routeDynamicAgentFailure(ctx, failure, classifyKanbanFailure(failure)) {
 			return
 		}

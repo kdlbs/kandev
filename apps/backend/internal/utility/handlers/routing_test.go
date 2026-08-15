@@ -82,6 +82,58 @@ func TestExecuteSessionProfilePromptUsesConcreteProfileAndUpdatesAttribution(t *
 	}
 }
 
+func TestExecuteSessionProfilePromptDoesNotFallbackAfterPartialResponse(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	svc := service.NewService(newFakeUtilityRepo())
+	svc.SetExecutionProfileResolver(typedProfileFailureResolver{})
+	h := NewHandlers(controller.NewController(svc), nil, nil, nil, log)
+	executor := &profilePromptExecutor{responses: []*agentctlutil.PromptResponse{
+		{Success: false, Response: "partially generated answer", Error: "provider disconnected"},
+		{Success: true, Response: "must not run"},
+	}}
+	prepared := &service.PromptRequest{
+		AgentProfileID: "logical", ExecutionProfileID: "first", RouteSessionID: "route-session",
+		RouteGeneration: 1, AgentCLI: "codex-acp", ResolvedPrompt: "prompt",
+	}
+
+	response, err := h.executeSessionProfilePrompt(context.Background(), executor, "task-session", prepared, "call")
+	if err != nil || response == nil || response.Response != "partially generated answer" {
+		t.Fatalf("response = %#v, err = %v", response, err)
+	}
+	if len(executor.calls) != 1 {
+		t.Fatalf("profile calls = %#v, want one attempt", executor.calls)
+	}
+}
+
+func TestExecuteSessionProfilePromptDoesNotRouteConcreteProfile(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+	svc := service.NewService(newFakeUtilityRepo())
+	svc.SetExecutionProfileResolver(typedProfileFailureResolver{})
+	h := NewHandlers(controller.NewController(svc), nil, nil, nil, log)
+	executor := &profilePromptExecutor{responses: []*agentctlutil.PromptResponse{
+		{Success: false, Error: "provider disconnected"},
+		{Success: true, Response: "must not run"},
+	}}
+	prepared := &service.PromptRequest{
+		AgentProfileID: "concrete", ExecutionProfileID: "concrete", RouteSessionID: "utility:call",
+		RouteGeneration: 1, AgentCLI: "codex-acp", ResolvedPrompt: "prompt",
+	}
+
+	response, err := h.executeSessionProfilePrompt(context.Background(), executor, "task-session", prepared, "call")
+	if err != nil || response == nil || response.Error != "provider disconnected" {
+		t.Fatalf("response = %#v, err = %v", response, err)
+	}
+	if len(executor.calls) != 1 {
+		t.Fatalf("concrete profile calls = %#v, want one attempt", executor.calls)
+	}
+}
+
 type typedProfileFailureResolver struct{}
 
 func (typedProfileFailureResolver) ResolveExecution(context.Context, string) (*agentsettingsmodels.AgentProfile, string, error) {

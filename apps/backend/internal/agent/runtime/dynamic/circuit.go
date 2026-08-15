@@ -121,7 +121,10 @@ func (r *CircuitRegistry) IsOpen(key string, now time.Time) bool {
 	if entry.state == CircuitHalfOpen {
 		return true
 	}
-	return now.Before(entry.until)
+	// An expired open circuit remains unavailable until one caller acquires
+	// the exclusive probe lease. Treating it as closed here would let every
+	// selector stampede the provider between expiry and probe acquisition.
+	return entry.state == CircuitOpen && !entry.until.IsZero()
 }
 
 type ProbeLease struct {

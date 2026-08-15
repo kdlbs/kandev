@@ -2,6 +2,7 @@ package dynamic
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -14,6 +15,9 @@ func WithClock(now func() time.Time) EngineOption {
 	return func(engine *Engine) {
 		if now != nil {
 			engine.now = now
+			if engine.circuits != nil {
+				engine.circuits.now = now
+			}
 		}
 	}
 }
@@ -39,6 +43,7 @@ type Engine struct {
 	states      map[string]RouteState
 	persistence Persistence
 	loader      StateLoader
+	probes      map[string]ProbeLease
 }
 
 func NewEngine(options ...EngineOption) *Engine {
@@ -46,6 +51,7 @@ func NewEngine(options ...EngineOption) *Engine {
 		now:      time.Now,
 		circuits: NewCircuitRegistry(),
 		states:   make(map[string]RouteState),
+		probes:   make(map[string]ProbeLease),
 	}
 	for _, option := range options {
 		option(engine)
@@ -54,6 +60,16 @@ func NewEngine(options ...EngineOption) *Engine {
 }
 
 func (e *Engine) Circuits() *CircuitRegistry { return e.circuits }
+
+// ContinuationPersistence exposes the durable handoff seam without exposing
+// the engine's other persistence responsibilities to the conductor.
+func (e *Engine) ContinuationPersistence() ContinuationPersistence {
+	if e == nil || e.persistence == nil {
+		return nil
+	}
+	persistence, _ := e.persistence.(ContinuationPersistence)
+	return persistence
+}
 
 // WithStateLoader enables restart recovery for sessions that are not already
 // present in the process-local state map.
@@ -110,7 +126,7 @@ func (e *Engine) selectContext(
 	generation := currentGeneration + 1
 	now := e.now()
 	for _, candidate := range profile.Candidates {
-		if !e.candidateSelectable(candidate, excludeProfileID, preferredProfileID, now) {
+		if !e.candidateSelectable(candidate, sessionID, generation, excludeProfileID, preferredProfileID, now) {
 			continue
 		}
 		decision := RouteDecision{
@@ -171,14 +187,30 @@ func (e *Engine) loadStateLocked(ctx context.Context, sessionID string) (RouteSt
 	return *loaded, true, nil
 }
 
-func (e *Engine) candidateSelectable(candidate Candidate, excludeProfileID, preferredProfileID string, now time.Time) bool {
+const probeLeaseDuration = 30 * time.Second
+
+func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, generation int64, excludeProfileID, preferredProfileID string, now time.Time) bool {
 	if !candidate.Enabled || candidate.ID == excludeProfileID {
 		return false
 	}
 	if preferredProfileID != "" && candidate.ID != preferredProfileID {
 		return false
 	}
-	return candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now)
+	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
+		return true
+	}
+	lease, ok := e.circuits.AcquireProbe(candidate.BindingKey, probeLeaseDuration)
+	if !ok {
+		return false
+	}
+	// The caller owns the generation fencing. The conductor releases this
+	// lease after the concrete launch result is known.
+	e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
+	return true
+}
+
+func probeKey(sessionID string, generation int64, candidateID string) string {
+	return sessionID + ":" + fmt.Sprint(generation) + ":" + candidateID
 }
 
 func (e *Engine) persistNoEligible(ctx context.Context, expectedGeneration int64, state RouteState) error {
@@ -283,6 +315,8 @@ func (e *Engine) ApplyFailureContext(
 	if failure == nil {
 		return RouteDecision{}, ErrNoEligibleCandidate
 	}
+	e.openCircuitForFailure(profile, currentCandidateID, failure)
+	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
 	action := e.ActionFor(profile, currentCandidateID, failure.Code)
 	switch action {
 	case ActionRetrySame:
@@ -291,5 +325,61 @@ func (e *Engine) ApplyFailureContext(
 		return e.selectContext(ctx, sessionID, profile, expectedGeneration, currentCandidateID, "")
 	default:
 		return RouteDecision{}, ErrNoEligibleCandidate
+	}
+}
+
+// ReleaseProbe closes a successful half-open resource probe or applies the
+// standard failure backoff. It is safe to call when the selected candidate did
+// not hold a probe lease.
+func (e *Engine) ReleaseProbe(decision RouteDecision, success bool) {
+	if e == nil || e.circuits == nil {
+		return
+	}
+	e.mu.Lock()
+	key := probeKey(decision.SessionID, decision.Generation, decision.ExecutionProfileID)
+	lease, ok := e.probes[key]
+	if ok {
+		delete(e.probes, key)
+	}
+	e.mu.Unlock()
+	if ok {
+		e.circuits.ReleaseProbe(lease, success, circuitBackoff)
+	}
+}
+
+func (e *Engine) releaseProbeForFailure(sessionID string, generation int64, candidateID string) {
+	e.ReleaseProbe(RouteDecision{SessionID: sessionID, Generation: generation, ExecutionProfileID: candidateID}, false)
+}
+
+func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, failure *routingerr.Error) {
+	if failure == nil || e.circuits == nil || !qualifiesForCircuit(failure.Code) {
+		return
+	}
+	for _, candidate := range profile.Candidates {
+		if candidate.ID != candidateID || candidate.BindingKey == "" {
+			continue
+		}
+		until := e.now().Add(circuitBackoff)
+		if failure.ResetHint != nil && failure.ResetHint.After(until) {
+			until = *failure.ResetHint
+		}
+		e.circuits.Open(candidate.BindingKey, until, failure.Code)
+		return
+	}
+}
+
+const circuitBackoff = time.Minute
+
+func qualifiesForCircuit(code routingerr.Code) bool {
+	switch code {
+	case routingerr.CodeAuthRequired, routingerr.CodeMissingCredentials,
+		routingerr.CodeSubscriptionRequired, routingerr.CodeProviderNotConfigured,
+		routingerr.CodeRateLimited, routingerr.CodeQuotaLimited,
+		routingerr.CodeNetworkUnavailable, routingerr.CodeModelCapacity,
+		routingerr.CodeProviderUnavailable, routingerr.CodeProviderOverloaded,
+		routingerr.CodeModelUnavailable:
+		return true
+	default:
+		return false
 	}
 }

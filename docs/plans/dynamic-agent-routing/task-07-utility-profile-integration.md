@@ -32,7 +32,9 @@ spec: "../../specs/agents/dynamic-agent-routing.md"
 In progress. Utility bindings now retain the logical profile, persist the
 concrete execution profile, pass the concrete ID to session and host executors,
 expose that attribution in call DTOs, and advance only classified pre-result
-failures. Ambiguous or post-start runtime failures remain fail-closed.
+failures. Each utility invocation has an isolated transient route identity, and
+partial responses are rejected before fallback. Ambiguous or post-start
+runtime failures remain fail-closed.
 
 Verification:
 
