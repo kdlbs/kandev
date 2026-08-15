@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { StateProvider } from "@/components/state-provider";
 import type { TaskMR } from "@/lib/types/gitlab";
 import { MRTaskIcon } from "./mr-task-icon";
 
@@ -39,19 +39,18 @@ function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
   };
 }
 
-// Seeds the store and renders MRTaskIcon inside the same provider tree in one
-// pass — each StateProvider mount owns an independent store instance, so a
-// separate seed-then-render step would seed a store the render never reads.
+// Seeds the store via StateProvider's initialState rather than a render-time
+// setTaskMRs call, matching the pattern task-title-hover-card.test.tsx uses.
 function renderMRTaskIcon(mrs: TaskMR[]) {
-  function Fixture() {
-    const setTaskMRs = useAppStore((s) => s.setTaskMRs);
-    setTaskMRs("ws-1", { "task-1": mrs });
-    return <MRTaskIcon taskId="task-1" />;
-  }
   return render(
     <TooltipProvider>
-      <StateProvider initialState={{ workspaces: { items: [], activeId: "ws-1" } }}>
-        <Fixture />
+      <StateProvider
+        initialState={{
+          workspaces: { items: [], activeId: "ws-1" },
+          taskMRs: { byWorkspaceId: { "ws-1": { "task-1": mrs } } },
+        }}
+      >
+        <MRTaskIcon taskId="task-1" />
       </StateProvider>
     </TooltipProvider>,
   );
@@ -159,16 +158,16 @@ describe("MRTaskIcon", () => {
   });
 
   it("malformed store value still bails to null instead of throwing", () => {
-    function Fixture() {
-      const setTaskMRs = useAppStore((s) => s.setTaskMRs);
-      // @ts-expect-error simulating a partial hydration payload
-      setTaskMRs("ws-1", { "task-1": { not: "an array" } });
-      return <MRTaskIcon taskId="task-1" />;
-    }
     render(
       <TooltipProvider>
-        <StateProvider initialState={{ workspaces: { items: [], activeId: "ws-1" } }}>
-          <Fixture />
+        <StateProvider
+          initialState={{
+            workspaces: { items: [], activeId: "ws-1" },
+            // @ts-expect-error simulating a partial hydration payload
+            taskMRs: { byWorkspaceId: { "ws-1": { "task-1": { not: "an array" } } } },
+          }}
+        >
+          <MRTaskIcon taskId="task-1" />
         </StateProvider>
       </TooltipProvider>,
     );
