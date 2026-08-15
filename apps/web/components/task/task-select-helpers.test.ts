@@ -361,9 +361,17 @@ describe("selectTaskWithLayout pending summary authority", () => {
     expect(setActiveTask).toHaveBeenCalledWith(TASK_ID);
     expect(replaceTaskUrl).toHaveBeenCalledWith(TASK_ID);
   });
+});
+
+describe("selectTaskWithLayout sessionless layout cleanup", () => {
+  beforeEach(() => vi.clearAllMocks());
 
   it("navigates without launching when a pending task has no loaded owner", async () => {
-    const store = makeKanbanStore({ activeSessionId: OTHER_SESSION_ID, envIds: {} });
+    const outgoingEnvId = "env-outgoing";
+    const store = makeKanbanStore({
+      activeSessionId: OTHER_SESSION_ID,
+      envIds: { [OTHER_SESSION_ID]: outgoingEnvId },
+    });
     const setActiveTask = vi.fn();
 
     selectTaskWithLayout({
@@ -378,7 +386,11 @@ describe("selectTaskWithLayout pending summary authority", () => {
 
     await flushTaskSelection();
     expect(launchSession).not.toHaveBeenCalled();
+    expect(releaseLayoutToDefault).toHaveBeenCalledWith(outgoingEnvId);
     expect(setActiveTask).toHaveBeenCalledWith(TASK_ID);
+    expect(vi.mocked(releaseLayoutToDefault).mock.invocationCallOrder[0]).toBeLessThan(
+      setActiveTask.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(replaceTaskUrl).toHaveBeenCalledWith(TASK_ID);
   });
 });

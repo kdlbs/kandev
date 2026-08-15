@@ -44,6 +44,27 @@ type RemoveFromBoardResult = {
   excludedTaskIds?: ReadonlySet<string>;
 };
 
+const taskSessionLoadGenerations = new WeakMap<StoreApi<AppState>, Map<string, number>>();
+
+function beginTaskSessionLoad(store: StoreApi<AppState>, taskId: string): number {
+  let generations = taskSessionLoadGenerations.get(store);
+  if (!generations) {
+    generations = new Map();
+    taskSessionLoadGenerations.set(store, generations);
+  }
+  const generation = (generations.get(taskId) ?? 0) + 1;
+  generations.set(taskId, generation);
+  return generation;
+}
+
+function taskSessionLoadIsCurrent(
+  store: StoreApi<AppState>,
+  taskId: string,
+  generation: number,
+): boolean {
+  return taskSessionLoadGenerations.get(store)?.get(taskId) === generation;
+}
+
 function cachedSessionsHaveEnvIds(sessions: TaskSession[]): boolean {
   return sessions.length === 0 || sessions.every((session) => !!session.task_environment_id);
 }
@@ -61,17 +82,23 @@ async function loadTaskSessionsForTaskFromStore(
   if (!options?.force && state.taskSessionsByTask.loadingByTaskId[taskId]) {
     return cachedSessions;
   }
+  const loadGeneration = beginTaskSessionLoad(store, taskId);
   store.getState().setTaskSessionsLoading(taskId, true);
   try {
     const response = await listTaskSessions(taskId, { cache: "no-store" });
-    store.getState().setTaskSessionsForTask(taskId, response.sessions ?? []);
-    return response.sessions ?? [];
+    const sessions = response.sessions ?? [];
+    if (taskSessionLoadIsCurrent(store, taskId, loadGeneration)) {
+      store.getState().setTaskSessionsForTask(taskId, sessions);
+    }
+    return sessions;
   } catch (error) {
     console.error("Failed to load task sessions:", error);
     if (options?.force) throw error;
     return cachedSessions;
   } finally {
-    store.getState().setTaskSessionsLoading(taskId, false);
+    if (taskSessionLoadIsCurrent(store, taskId, loadGeneration)) {
+      store.getState().setTaskSessionsLoading(taskId, false);
+    }
   }
 }
 

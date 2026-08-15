@@ -304,6 +304,10 @@ function openTaskWithoutSession(
   params: SelectTaskWithLayoutParams,
   navigateToTask: (taskId: string) => void,
 ): void {
+  const state = params.store.getState();
+  const oldSessionId = state.tasks.activeSessionId;
+  const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
+  releaseLayoutToDefault(oldEnvId);
   params.setActiveTask(params.taskId);
   navigateToTask(params.taskId);
 }

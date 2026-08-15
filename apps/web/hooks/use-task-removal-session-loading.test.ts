@@ -68,4 +68,34 @@ describe("useTaskRemoval session loading", () => {
       "offline",
     );
   });
+
+  it("does not let an older forced response overwrite a newer snapshot", async () => {
+    type SessionResponse = { sessions: TaskSession[] };
+    let resolveOlder: (response: SessionResponse) => void = () => {};
+    let resolveNewer: (response: SessionResponse) => void = () => {};
+    const olderResponse = new Promise<SessionResponse>((resolve) => {
+      resolveOlder = resolve;
+    });
+    const newerResponse = new Promise<SessionResponse>((resolve) => {
+      resolveNewer = resolve;
+    });
+    listTaskSessionsMock.mockReturnValueOnce(olderResponse).mockReturnValueOnce(newerResponse);
+    const store = makeStore(makeSession("cached-session"));
+    const { result } = renderHook(() => useTaskRemoval({ store }));
+
+    const olderLoad = result.current.loadTaskSessionsForTask(TASK_ID, { force: true });
+    const newerLoad = result.current.loadTaskSessionsForTask(TASK_ID, { force: true });
+    const newerSession = makeSession("newer-session");
+    resolveNewer({ sessions: [newerSession] });
+    await newerLoad;
+    resolveOlder({ sessions: [makeSession("older-session")] });
+    await olderLoad;
+
+    expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledTimes(1);
+    expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [newerSession]);
+    expect(store.getState().setTaskSessionsLoading).toHaveBeenNthCalledWith(1, TASK_ID, true);
+    expect(store.getState().setTaskSessionsLoading).toHaveBeenNthCalledWith(2, TASK_ID, true);
+    expect(store.getState().setTaskSessionsLoading).toHaveBeenNthCalledWith(3, TASK_ID, false);
+    expect(store.getState().setTaskSessionsLoading).toHaveBeenCalledTimes(3);
+  });
 });

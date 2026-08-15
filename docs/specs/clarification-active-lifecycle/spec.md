@@ -60,10 +60,12 @@ hiding the action the icon represents.
 - When a task row advertises a pending action, desktop and phone task activation load the task's
   sessions from the server and select the newest input-capable session whose `pending_action` matches
   the task action. Before applying that response, activation revalidates the task-summary revision and
-  pending action; a changed summary makes the delayed selection inert. This pending owner outranks
-  remembered-session and primary-session preferences. If the task still advertises pending input but
-  no matching input-capable owner exists, activation fails closed to the task route without guessing a
-  session. Normal preference order returns only for a clean task.
+  pending action; a changed summary makes the delayed selection inert. Overlapping authoritative loads
+  are generation-guarded per task, so an older response cannot replace a newer session snapshot. This
+  pending owner outranks remembered-session and primary-session preferences. If the task still
+  advertises pending input but no matching input-capable owner exists, activation releases the outgoing
+  session layout and fails closed to the task route without guessing a session. Normal preference order
+  returns only for a clean task.
 
 ## Data model
 
@@ -194,6 +196,10 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** pending-owner loading began for one task-summary revision, **WHEN** a newer summary changes
   the pending action before the session response is applied, **THEN** desktop and phone activation do
   not navigate to the obsolete owner or close the phone drawer.
+- **GIVEN** two forced session loads overlap for one task, **WHEN** the older response finishes last,
+  **THEN** it cannot overwrite the newer session snapshot or revive an obsolete pending owner.
+- **GIVEN** a pending task has no loaded owner, **WHEN** activation falls back to its task route,
+  **THEN** the outgoing session layout is released before the active session is cleared.
 - **GIVEN** a stale browser still displays a superseded question, **WHEN** it submits an answer,
   **THEN** the server returns conflict and does not resume or otherwise prompt the agent.
 - **GIVEN** a detached current-turn answer is not accepted by the orchestrator, **WHEN** the response

@@ -92,8 +92,14 @@ update task/plan status.
 - Final review remediation forces a no-cache session request for pending selections and rejects a
   failed forced refresh instead of using a stale owner. Desktop and phone capture the click-time
   summary revision/action and discard delayed session results after either value changes.
+- Later review remediation generation-guards every per-task session request that reaches the network,
+  preventing an older forced response from overwriting a newer snapshot. Sessionless pending fallback
+  also releases the outgoing layout before clearing the active session on desktop; the shared loader
+  preserves the same freshness rule for phone selection.
 - Focused races cover a newer summary arriving before the delayed HTTP continuation on both desktop
   and phone; shared session-loader tests cover cached success and failed forced refresh.
+- Six shared desktop/mobile selection and removal suites passed 75 tests; web typecheck, zero-warning
+  full lint, and the i18n ratchet passed.
 - `cd apps && pnpm install --frozen-lockfile` passed.
 - The exact three-file Vitest command passed: 3 files, 68 tests.
 - `cd apps/web && pnpm run typecheck` passed.
