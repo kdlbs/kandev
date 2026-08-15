@@ -751,10 +751,10 @@ func TestManager_ResetAgentContext_ReappliesSessionModel(t *testing.T) {
 	resetIndex := slices.Index(actions, "agent.session.reset")
 	modelIndex := slices.Index(actions, "agent.session.set_model")
 	require.GreaterOrEqual(t, resetIndex, 0)
-	require.Greater(t, modelIndex, resetIndex,
-		"the model must be reapplied after the fresh ACP session is created")
-	require.Equal(t, []string{"mock-smart"}, mock.getSetModelIDs(),
-		"reset must restore the persisted effective model, not the fresh-session default")
+	require.Equal(t, -1, modelIndex,
+		"an empty fresh-session model catalog must not receive a model-selection request")
+	require.Empty(t, mock.getSetModelIDs(),
+		"reset must continue on the fresh-session provider default when no model is advertised")
 }
 
 // TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache is the

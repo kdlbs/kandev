@@ -232,8 +232,8 @@ func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.
 	return nil, false
 }
 
-// seedSessionDir copies the agent's auth files (auth.json / config.toml /
-// etc.) into the per-container session dir. Replaces the older pattern of
+// seedSessionDir copies the agent's auth files and selected configuration
+// bundles into the per-container session dir. Replaces the older pattern of
 // bind-mounting the host's whole ~/.<agent>, which leaked absolute host
 // paths into agent state DBs and broke resume on codex.
 func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreateRequest) {
@@ -241,7 +241,17 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 		return
 	}
 	instanceRoot := InstanceSessionRoot(r.kandevHomeDir, req.InstanceID)
-	if err := SeedAgentSessionDir(ctx, req.AgentConfig, instanceRoot, r.logger); err != nil {
+	selectedBundles := selectedPortableConfigBundleIDs(req.Metadata)
+	if err := seedAgentSessionDir(
+		ctx,
+		req.AgentConfig,
+		instanceRoot,
+		r.logger,
+		selectedBundles,
+		func(warnings []PortableConfigWarning) {
+			reportPortableConfigWarnings(req.OnProgress, warnings)
+		},
+	); err != nil {
 		r.logger.Warn("failed to seed agent session dir (continuing)",
 			zap.String("instance_id", req.InstanceID),
 			zap.String("agent_id", req.AgentConfig.ID()),

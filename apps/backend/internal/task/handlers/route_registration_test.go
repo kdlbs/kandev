@@ -99,6 +99,7 @@ func TestRegisterExecutorProfileRoutesWiresBothDeleteRoutes(t *testing.T) {
 		"GET /api/v1/executor-profiles",
 		"GET /api/v1/executor-profiles/default-script",
 		"GET /api/v1/remote-credentials",
+		"GET /api/v1/agent-config-bundles",
 		"GET /api/v1/git/identity",
 		"GET /api/v1/script-placeholders",
 		"GET /api/v1/executors/:id/profiles",

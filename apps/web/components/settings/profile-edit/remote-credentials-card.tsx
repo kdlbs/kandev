@@ -20,8 +20,10 @@ import {
   type RemoteAuthSpec,
   type RemoteAuthMethod,
 } from "@/lib/api/domains/settings-api";
+import { listAgentConfigBundles, type AgentConfigBundle } from "@/lib/api/domains/agent-config-api";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import { useTranslation } from "react-i18next";
+import { PortableConfigBundles } from "./portable-config-bundles";
 
 type AuthChoice = "files" | "env" | "none";
 export type { GitIdentityMode, GitIdentityState } from "./git-identity-fields";
@@ -38,6 +40,10 @@ type RemoteCredentialsCardProps = {
   selectedIds: string[];
   baselineSelectedIds?: string[];
   onChange: (ids: string[]) => void;
+  configBundleIds: string[];
+  baselineConfigBundleIds?: string[];
+  onConfigBundleChange: (ids: string[]) => void;
+  isSSH?: boolean;
   agentEnvVars: Record<string, string | null>;
   baselineAgentEnvVars?: Record<string, string | null>;
   onAgentEnvVarChange: (methodId: string, secretId: string | null) => void;
@@ -59,6 +65,10 @@ export function RemoteCredentialsCard({
   selectedIds,
   baselineSelectedIds = [],
   onChange,
+  configBundleIds,
+  baselineConfigBundleIds = [],
+  onConfigBundleChange,
+  isSSH = false,
   agentEnvVars,
   baselineAgentEnvVars = {},
   onAgentEnvVarChange,
@@ -74,26 +84,23 @@ export function RemoteCredentialsCard({
   onGitUserEmailChange,
   localGitIdentity,
 }: RemoteCredentialsCardProps) {
-  const { t } = useTranslation();
-  const [authSpecs, setAuthSpecs] = useState<RemoteAuthSpec[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    listRemoteCredentials()
-      .then((res) => setAuthSpecs(res.auth_specs ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
+  const { authSpecs, configBundles, loading } = useRemoteCredentialCatalog();
+  const isDirty = hasRemoteCredentialsChanges({
+    selectedIds,
+    baselineSelectedIds,
+    configBundleIds,
+    baselineConfigBundleIds,
+    agentEnvVars,
+    baselineAgentEnvVars,
+    gitIdentityMode,
+    baselineGitIdentityMode,
+    gitUserName,
+    gitUserEmail,
+    baselineGitUserName,
+    baselineGitUserEmail,
+  });
   const selectedSet = new Set(selectedIds);
   const baselineSelectedSet = new Set(baselineSelectedIds);
-  const credentialsDirty = !sameStringSet(selectedSet, baselineSelectedSet);
-  const agentEnvVarsDirty = JSON.stringify(agentEnvVars) !== JSON.stringify(baselineAgentEnvVars);
-  const gitIdentityDirty =
-    gitIdentityMode !== baselineGitIdentityMode ||
-    (gitIdentityMode === "override" &&
-      (gitUserName !== baselineGitUserName || gitUserEmail !== baselineGitUserEmail));
-  const isDirty = credentialsDirty || agentEnvVarsDirty || gitIdentityDirty;
 
   if (loading) {
     return <RemoteCredentialsLoading isDirty={isDirty} />;
@@ -101,54 +108,75 @@ export function RemoteCredentialsCard({
 
   return (
     <SettingsCard isDirty={isDirty}>
-      <CardHeader>
-        <CardTitle>{t("executors:remoteCredentials")}</CardTitle>
-        <CardDescription>{t("executors:configureAuthenticationForToolsAndAgents")}</CardDescription>
-      </CardHeader>
+      <RemoteCredentialsHeader />
       <CardContent className="space-y-4">
-        {authSpecs.length > 0 || isRemote ? (
-          <Accordion type="multiple">
-            {isRemote && (
-              <GitIdentityAccordionItem
-                mode={gitIdentityMode}
-                baselineMode={baselineGitIdentityMode}
-                onModeChange={onGitIdentityModeChange}
-                gitUserName={gitUserName}
-                gitUserEmail={gitUserEmail}
-                baselineGitUserName={baselineGitUserName}
-                baselineGitUserEmail={baselineGitUserEmail}
-                onGitUserNameChange={onGitUserNameChange}
-                onGitUserEmailChange={onGitUserEmailChange}
-                localGitIdentity={localGitIdentity}
-              />
-            )}
-            {authSpecs.map((spec) => {
-              const methods = getSpecMethods(spec);
-              const envMethod = methods.find((m) => m.type === "env");
-              return (
-                <AuthSection
-                  key={spec.id}
-                  spec={spec}
-                  selectedIds={selectedSet}
-                  baselineSelectedIds={baselineSelectedSet}
-                  onCredentialsChange={onChange}
-                  envSecretId={envMethod ? (agentEnvVars[envMethod.method_id] ?? null) : null}
-                  baselineEnvSecretId={
-                    envMethod ? (baselineAgentEnvVars[envMethod.method_id] ?? null) : null
-                  }
-                  onMethodSecretChange={onAgentEnvVarChange}
-                  secrets={secrets}
+        {authSpecs.length > 0 || isRemote || configBundles.length > 0 ? (
+          <>
+            <Accordion type="multiple">
+              {isRemote && (
+                <GitIdentityAccordionItem
+                  mode={gitIdentityMode}
+                  baselineMode={baselineGitIdentityMode}
+                  onModeChange={onGitIdentityModeChange}
+                  gitUserName={gitUserName}
+                  gitUserEmail={gitUserEmail}
+                  baselineGitUserName={baselineGitUserName}
+                  baselineGitUserEmail={baselineGitUserEmail}
+                  onGitUserNameChange={onGitUserNameChange}
+                  onGitUserEmailChange={onGitUserEmailChange}
+                  localGitIdentity={localGitIdentity}
                 />
-              );
-            })}
-          </Accordion>
+              )}
+              {authSpecs.map((spec) => {
+                const methods = getSpecMethods(spec);
+                const envMethod = methods.find((m) => m.type === "env");
+                return (
+                  <AuthSection
+                    key={spec.id}
+                    spec={spec}
+                    selectedIds={selectedSet}
+                    baselineSelectedIds={baselineSelectedSet}
+                    onCredentialsChange={onChange}
+                    envSecretId={envMethod ? (agentEnvVars[envMethod.method_id] ?? null) : null}
+                    baselineEnvSecretId={
+                      envMethod ? (baselineAgentEnvVars[envMethod.method_id] ?? null) : null
+                    }
+                    onMethodSecretChange={onAgentEnvVarChange}
+                    secrets={secrets}
+                  />
+                );
+              })}
+            </Accordion>
+            <PortableConfigBundles
+              bundles={configBundles}
+              selectedIds={configBundleIds}
+              baselineSelectedIds={baselineConfigBundleIds}
+              onChange={onConfigBundleChange}
+              isSSH={isSSH}
+            />
+          </>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            {t("executors:noTransferableCredentialsFound")}
-          </p>
+          <NoTransferableCredentials />
         )}
       </CardContent>
     </SettingsCard>
+  );
+}
+
+function RemoteCredentialsHeader() {
+  const { t } = useTranslation();
+  return (
+    <CardHeader>
+      <CardTitle>{t("executors:remoteCredentials")}</CardTitle>
+      <CardDescription>{t("executors:configureAuthenticationForToolsAndAgents")}</CardDescription>
+    </CardHeader>
+  );
+}
+
+function NoTransferableCredentials() {
+  const { t } = useTranslation();
+  return (
+    <p className="text-sm text-muted-foreground">{t("executors:noTransferableCredentialsFound")}</p>
   );
 }
 
@@ -167,6 +195,65 @@ function RemoteCredentialsLoading({ isDirty }: { isDirty: boolean }) {
       </CardContent>
     </SettingsCard>
   );
+}
+
+function useRemoteCredentialCatalog() {
+  const [authSpecs, setAuthSpecs] = useState<RemoteAuthSpec[]>([]);
+  const [configBundles, setConfigBundles] = useState<AgentConfigBundle[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    void Promise.allSettled([listRemoteCredentials(), listAgentConfigBundles()]).then(
+      ([authResult, configResult]) => {
+        if (authResult.status === "fulfilled") setAuthSpecs(authResult.value.auth_specs ?? []);
+        if (configResult.status === "fulfilled") setConfigBundles(configResult.value.bundles ?? []);
+        setLoading(false);
+      },
+    );
+  }, []);
+
+  return { authSpecs, configBundles, loading };
+}
+
+function hasRemoteCredentialsChanges({
+  selectedIds,
+  baselineSelectedIds,
+  configBundleIds,
+  baselineConfigBundleIds,
+  agentEnvVars,
+  baselineAgentEnvVars,
+  gitIdentityMode,
+  baselineGitIdentityMode,
+  gitUserName,
+  gitUserEmail,
+  baselineGitUserName,
+  baselineGitUserEmail,
+}: Pick<
+  RemoteCredentialsCardProps,
+  | "selectedIds"
+  | "baselineSelectedIds"
+  | "configBundleIds"
+  | "baselineConfigBundleIds"
+  | "agentEnvVars"
+  | "baselineAgentEnvVars"
+  | "gitIdentityMode"
+  | "baselineGitIdentityMode"
+  | "gitUserName"
+  | "gitUserEmail"
+  | "baselineGitUserName"
+  | "baselineGitUserEmail"
+>): boolean {
+  const credentialsDirty = !sameStringSet(new Set(selectedIds), new Set(baselineSelectedIds));
+  const configBundlesDirty = !sameStringSet(
+    new Set(configBundleIds),
+    new Set(baselineConfigBundleIds),
+  );
+  const agentEnvVarsDirty = JSON.stringify(agentEnvVars) !== JSON.stringify(baselineAgentEnvVars);
+  const gitIdentityDirty =
+    gitIdentityMode !== baselineGitIdentityMode ||
+    (gitIdentityMode === "override" &&
+      (gitUserName !== baselineGitUserName || gitUserEmail !== baselineGitUserEmail));
+  return credentialsDirty || configBundlesDirty || agentEnvVarsDirty || gitIdentityDirty;
 }
 
 function sameStringSet(left: Set<string>, right: Set<string>): boolean {

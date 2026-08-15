@@ -442,12 +442,8 @@ func (m *Manager) reapplySessionModeAfterReset(ctx context.Context, execution *A
 		zap.String("mode", mode))
 }
 
-// reapplySessionModelAfterReset re-applies the effective model to a freshly
-// initialized ACP session under the no-silent-model-fallback policy: a model
-// that is gone in the fresh session's advertised list fails the reset
-// explicitly (returning an error) unless the profile opted into a fallback
-// model or the legacy auto-fallback toggle. Previously the re-apply was
-// best-effort, silently leaving the fresh session on the provider default.
+// reapplySessionModelAfterReset applies the executor-authoritative model
+// decision to a freshly initialized ACP session.
 func (m *Manager) reapplySessionModelAfterReset(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -458,7 +454,7 @@ func (m *Manager) reapplySessionModelAfterReset(
 	}
 	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
 	policy.Model = modelID
-	appliedModel, usingFallback, err := applyStartModelPolicy(
+	decision, err := applyStartModelPolicy(
 		ctx, m.logger, execution.agentctl, execution.GetModelState(), policy,
 	)
 	if err != nil {
@@ -468,16 +464,17 @@ func (m *Manager) reapplySessionModelAfterReset(
 			zap.Error(err))
 		return err
 	}
-	if appliedModel != "" {
+	if decision.Warning && m.sessionManager != nil {
+		m.sessionManager.publishModelSelectionWarningEvent(execution, newSessionID, decision)
+	}
+	if decision.EffectiveModel != "" &&
+		(decision.Outcome == ModelSelectionOutcomeApplied || decision.Outcome == ModelSelectionOutcomeExplicitFallback) {
 		m.logger.Info("re-applied session model after context reset",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID),
 			zap.String("new_acp_session_id", newSessionID),
-			zap.String("model", appliedModel),
-			zap.Bool("using_fallback", usingFallback))
-		if usingFallback && m.sessionManager != nil {
-			m.sessionManager.publishModelFallbackEvent(execution, newSessionID, appliedModel)
-		}
+			zap.String("model", decision.EffectiveModel),
+			zap.Bool("using_fallback", decision.Outcome == ModelSelectionOutcomeExplicitFallback))
 	}
 	return nil
 }

@@ -125,6 +125,7 @@ type BuildProfileConfigInput = {
   isDocker: boolean;
   networkPolicyRules: NetworkPolicyRule[];
   remoteCredentials: string[];
+  configBundleIds: string[];
   agentEnvVars: Record<string, string | null>;
   gitIdentityMode: GitIdentityMode;
   localGitIdentity: GitIdentityState;
@@ -141,6 +142,7 @@ function buildProfileConfig(input: BuildProfileConfigInput): Record<string, stri
     isDocker,
     networkPolicyRules,
     remoteCredentials,
+    configBundleIds,
     agentEnvVars,
     gitIdentityMode,
     localGitIdentity,
@@ -155,6 +157,9 @@ function buildProfileConfig(input: BuildProfileConfigInput): Record<string, stri
   }
   if (isRemote && remoteCredentials.length > 0) {
     config.remote_credentials = JSON.stringify(remoteCredentials);
+  }
+  if (isRemote && configBundleIds.length > 0) {
+    config.agent_config_bundles = JSON.stringify(configBundleIds);
   }
   const nonNullEnvVars = Object.fromEntries(
     Object.entries(agentEnvVars).filter(([, v]) => v != null),
@@ -217,6 +222,7 @@ function useCreateRemoteFlags(executorType: ExecutorType) {
 
 function useCreateRemoteAuthState() {
   const [remoteCredentials, setRemoteCredentials] = useState<string[]>([]);
+  const [configBundleIds, setConfigBundleIds] = useState<string[]>([]);
   const [agentEnvVars, setAgentEnvVars] = useState<Record<string, string | null>>({});
   const [networkPolicyRules, setNetworkPolicyRules] = useState<NetworkPolicyRule[]>([]);
 
@@ -227,6 +233,8 @@ function useCreateRemoteAuthState() {
   return {
     remoteCredentials,
     setRemoteCredentials,
+    configBundleIds,
+    setConfigBundleIds,
     agentEnvVars,
     handleAgentEnvVarChange,
     networkPolicyRules,
@@ -344,6 +352,8 @@ function useCreateProfileFormState(executorType: ExecutorType) {
     setNetworkPolicyRules: remoteAuth.setNetworkPolicyRules,
     remoteCredentials: remoteAuth.remoteCredentials,
     setRemoteCredentials: remoteAuth.setRemoteCredentials,
+    configBundleIds: remoteAuth.configBundleIds,
+    setConfigBundleIds: remoteAuth.setConfigBundleIds,
     agentEnvVars: remoteAuth.agentEnvVars,
     handleAgentEnvVarChange: remoteAuth.handleAgentEnvVarChange,
     localGitIdentity: gitIdentity.localGitIdentity,
@@ -433,28 +443,7 @@ function CreateProfileSections({
           onBuildSuccess={form.recordDockerBuildSuccess}
         />
       )}
-      {form.isRemote && (
-        <RemoteCredentialsCard
-          isRemote={form.isRemote}
-          selectedIds={form.remoteCredentials}
-          baselineSelectedIds={[]}
-          onChange={form.setRemoteCredentials}
-          agentEnvVars={form.agentEnvVars}
-          baselineAgentEnvVars={{}}
-          onAgentEnvVarChange={form.handleAgentEnvVarChange}
-          secrets={secrets}
-          gitIdentityMode={form.gitIdentityMode}
-          baselineGitIdentityMode="override"
-          onGitIdentityModeChange={form.setGitIdentityMode}
-          gitUserName={form.gitUserName}
-          gitUserEmail={form.gitUserEmail}
-          baselineGitUserName=""
-          baselineGitUserEmail=""
-          onGitUserNameChange={form.setGitUserName}
-          onGitUserEmailChange={form.setGitUserEmail}
-          localGitIdentity={form.localGitIdentity}
-        />
-      )}
+      <CreateRemoteCredentialsSection executorType={executorType} form={form} secrets={secrets} />
       {form.isSprites && (
         <NetworkPoliciesCard
           rules={form.networkPolicyRules}
@@ -502,6 +491,43 @@ function CreateProfileSections({
   );
 }
 
+function CreateRemoteCredentialsSection({
+  executorType,
+  form,
+  secrets,
+}: {
+  executorType: ExecutorType;
+  form: ReturnType<typeof useCreateProfileFormState>;
+  secrets: ReturnType<typeof useSecrets>["items"];
+}) {
+  if (!form.isRemote) return null;
+  return (
+    <RemoteCredentialsCard
+      isRemote
+      selectedIds={form.remoteCredentials}
+      baselineSelectedIds={[]}
+      onChange={form.setRemoteCredentials}
+      configBundleIds={form.configBundleIds}
+      onConfigBundleChange={form.setConfigBundleIds}
+      isSSH={executorType === "ssh"}
+      agentEnvVars={form.agentEnvVars}
+      baselineAgentEnvVars={{}}
+      onAgentEnvVarChange={form.handleAgentEnvVarChange}
+      secrets={secrets}
+      gitIdentityMode={form.gitIdentityMode}
+      baselineGitIdentityMode="override"
+      onGitIdentityModeChange={form.setGitIdentityMode}
+      gitUserName={form.gitUserName}
+      gitUserEmail={form.gitUserEmail}
+      baselineGitUserName=""
+      baselineGitUserEmail=""
+      onGitUserNameChange={form.setGitUserName}
+      onGitUserEmailChange={form.setGitUserEmail}
+      localGitIdentity={form.localGitIdentity}
+    />
+  );
+}
+
 // Returns a catalog key (or null when the form is submittable) so the reason
 // resolves at render rather than at module load.
 function getCreateDisabledReasonKey(
@@ -531,6 +557,7 @@ function buildCreateProfilePayload(form: ReturnType<typeof useCreateProfileFormS
       isDocker: form.isDocker,
       networkPolicyRules: form.networkPolicyRules,
       remoteCredentials: form.remoteCredentials,
+      configBundleIds: form.configBundleIds,
       agentEnvVars: form.agentEnvVars,
       gitIdentityMode: form.gitIdentityMode,
       localGitIdentity: form.localGitIdentity,

@@ -149,7 +149,9 @@ func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentE
 	execution.resumeContextInjected = false
 	execution.needsResumeContext = m.historyManager != nil &&
 		m.historyManager.HasHistory(execution.SessionID)
-	m.reapplyReboundSessionConfig(ctx, execution, newSessionID, previousModel, previousMode)
+	if err := m.reapplyReboundSessionConfig(ctx, execution, newSessionID, previousModel, previousMode); err != nil {
+		return err
+	}
 	if m.eventPublisher != nil {
 		m.eventPublisher.PublishACPSessionCreated(execution, newSessionID)
 	}
@@ -162,13 +164,20 @@ func (m *Manager) reapplyReboundSessionConfig(
 	sessionID string,
 	model *CachedModelState,
 	mode *CachedModeState,
-) {
+) error {
 	if model != nil && model.CurrentModelID != "" {
-		if err := execution.agentctl.SetModel(ctx, model.CurrentModelID); err != nil {
+		policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
+		policy.Model = model.CurrentModelID
+		decision, err := applyStartModelPolicy(ctx, m.logger, execution.agentctl, model, policy)
+		if err != nil {
 			m.logger.Warn("failed to re-apply model after workspace rebind",
 				zap.String("execution_id", execution.ID),
 				zap.String("model", model.CurrentModelID),
 				zap.Error(err))
+			return err
+		}
+		if decision.Warning && m.sessionManager != nil {
+			m.sessionManager.publishModelSelectionWarningEvent(execution, sessionID, decision)
 		}
 	}
 	if model != nil {
@@ -187,6 +196,7 @@ func (m *Manager) reapplyReboundSessionConfig(
 		}
 	}
 	m.reapplySessionModeAfterReset(ctx, execution, sessionID, mode)
+	return nil
 }
 
 func waitForReboundAgentReady(ctx context.Context, execution *AgentExecution) error {

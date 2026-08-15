@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,12 @@ func (l *recordingAgentLister) ListEnabled() []agents.Agent {
 	l.calls++
 	return nil
 }
+
+type fixedAgentLister struct {
+	agents []agents.Agent
+}
+
+func (l fixedAgentLister) ListEnabled() []agents.Agent { return l.agents }
 
 func newProfileHandlers(t *testing.T, repo *executorRepo, lister AgentLister) *ExecutorProfileHandlers {
 	t.Helper()
@@ -154,6 +161,37 @@ func TestHTTPListRemoteCredentialsFallsBackWithoutAnAgentLister(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"auth_specs"`)
+}
+
+func TestHTTPListAgentConfigBundlesReturnsMetadataOnly(t *testing.T) {
+	h := newProfileHandlers(t, executorFixture(), fixedAgentLister{
+		agents: []agents.Agent{agents.NewClaudeACP(), agents.NewCodexACP(), agents.NewOpenCodeACP()},
+	})
+	c, rec := newWorkflowRequest(t, http.MethodGet, "/api/v1/agent-config-bundles", "")
+
+	h.httpListAgentConfigBundles(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var body struct {
+		Bundles []struct {
+			ID    string `json:"id"`
+			Files []struct {
+				SourcePath string `json:"source_path"`
+				TargetPath string `json:"target_path"`
+			} `json:"files"`
+		} `json:"bundles"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Len(t, body.Bundles, 3)
+	for _, bundle := range body.Bundles {
+		require.NotEmpty(t, bundle.ID)
+		for _, file := range bundle.Files {
+			require.NotEmpty(t, file.SourcePath)
+			require.NotEmpty(t, file.TargetPath)
+			require.NotContains(t, file.SourcePath, string(filepath.Separator)+"root"+string(filepath.Separator))
+		}
+	}
+	require.NotContains(t, rec.Body.String(), "host-only-secret")
 }
 
 // TestHTTPGetGitIdentityReportsDetectionConsistently shells out to the real

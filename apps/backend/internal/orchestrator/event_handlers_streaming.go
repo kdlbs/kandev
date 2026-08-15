@@ -143,6 +143,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "session_model_fallback":
 		s.handleSessionModelFallbackEvent(ctx, payload)
 
+	case streams.EventTypeSessionModelSelectionWarning:
+		s.handleSessionModelSelectionWarningEvent(ctx, payload)
+
 	case streams.EventTypeMCPAttachment:
 		s.handleSessionMCPAttachmentEvent(ctx, payload)
 
@@ -2934,6 +2937,124 @@ func (s *Service) handleSessionModelFallbackEvent(ctx context.Context, payload *
 		zap.String("fallback_model", eventPayload.FallbackModel))
 	subject := events.BuildSessionModelFallbackSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelFallbackUpdated, "orchestrator", eventPayload))
+}
+
+// handleSessionModelSelectionWarningEvent persists one structured status
+// message for an executor-authoritative model decision and publishes the same
+// data to live WebSocket subscribers. Persistence is best-effort and never
+// blocks the task launch.
+func (s *Service) handleSessionModelSelectionWarningEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	warning, sessionID, ok := s.modelSelectionWarningEvent(ctx, payload)
+	if !ok {
+		return
+	}
+	if !s.claimModelSelectionWarning(ctx, sessionID, warning.DecisionID) {
+		return
+	}
+	s.persistModelSelectionWarningMessage(ctx, payload.TaskID, sessionID, warning)
+	s.publishModelSelectionWarning(ctx, payload.TaskID, sessionID, warning)
+}
+
+func (s *Service) modelSelectionWarningEvent(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) (streams.ModelSelectionWarning, string, bool) {
+	if payload == nil || payload.Data == nil || payload.Data.ModelSelectionWarning == nil {
+		return streams.ModelSelectionWarning{}, "", false
+	}
+	sessionID := payload.SessionID
+	if sessionID == "" && payload.TaskID != "" && s.repo != nil {
+		if sess, err := s.repo.GetActiveTaskSessionByTaskID(ctx, payload.TaskID); err == nil && sess != nil {
+			sessionID = sess.ID
+		}
+	}
+	if sessionID == "" {
+		return streams.ModelSelectionWarning{}, "", false
+	}
+	return *payload.Data.ModelSelectionWarning, sessionID, true
+}
+
+func (s *Service) claimModelSelectionWarning(ctx context.Context, sessionID, decisionID string) bool {
+	if s.repo == nil || decisionID == "" {
+		return true
+	}
+	// A decision ID is created by lifecycle and is stable across event replay.
+	// Use the structured metadata key as an atomic claim so two deliveries cannot
+	// create duplicate status messages after a reconnect or restart.
+	claimed, err := s.repo.SetSessionMetadataKeyIfAbsent(
+		context.WithoutCancel(ctx), sessionID,
+		"model_selection_warning:"+decisionID, true,
+	)
+	if err != nil {
+		s.logger.Warn("failed to claim model selection warning persistence",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return false
+	}
+	return claimed
+}
+
+func modelSelectionWarningMetadata(warning streams.ModelSelectionWarning) map[string]interface{} {
+	metadata := map[string]interface{}{
+		"variant":             "warning",
+		"kind":                warning.Kind,
+		"reason":              warning.Reason,
+		"requested_model":     warning.RequestedModel,
+		"effective_model":     warning.EffectiveModel,
+		"agent_id":            warning.AgentID,
+		"executor_type":       warning.ExecutorType,
+		"executor_profile_id": warning.ExecutorProfileID,
+		"decision_id":         warning.DecisionID,
+		"remediation":         []string{"executor_credentials", "copied_agent_configuration", "agent_version"},
+	}
+	if warning.FallbackModel != "" {
+		metadata["fallback_model"] = warning.FallbackModel
+	}
+	return metadata
+}
+
+func (s *Service) persistModelSelectionWarningMessage(
+	ctx context.Context,
+	taskID, sessionID string,
+	warning streams.ModelSelectionWarning,
+) {
+	if s.messageCreator == nil {
+		return
+	}
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx,
+		taskID,
+		"The executor could not use the saved model selection.",
+		sessionID,
+		string(v1.MessageTypeStatus),
+		s.getActiveTurnID(sessionID),
+		modelSelectionWarningMetadata(warning),
+		false,
+	); err != nil {
+		s.logger.Warn("failed to persist model selection warning",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+func (s *Service) publishModelSelectionWarning(
+	ctx context.Context,
+	taskID, sessionID string,
+	warning streams.ModelSelectionWarning,
+) {
+	if s.eventBus == nil {
+		return
+	}
+	eventPayload := lifecycle.SessionModelSelectionWarningEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		AgentID:   warning.AgentID,
+		Warning:   warning,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	subject := events.BuildSessionModelSelectionWarningSubject(sessionID)
+	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(
+		events.SessionModelSelectionWarningUpdated, "orchestrator", eventPayload,
+	))
 }
 
 func workflowSessionConfigFailures(raw any) []string {

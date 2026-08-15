@@ -2,10 +2,16 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RemoteCredentialsCard } from "./remote-credentials-card";
+import { PortableConfigBundles } from "./portable-config-bundles";
 import { listRemoteCredentials } from "@/lib/api/domains/settings-api";
+import { listAgentConfigBundles, type AgentConfigBundle } from "@/lib/api/domains/agent-config-api";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   listRemoteCredentials: vi.fn(),
+}));
+
+vi.mock("@/lib/api/domains/agent-config-api", () => ({
+  listAgentConfigBundles: vi.fn(),
 }));
 
 const codexFileMethodId = "agent:codex-acp:files:0";
@@ -25,6 +31,8 @@ function RemoteCredentialsHarness({ onChange }: { onChange: (ids: string[]) => v
         setSelectedIds(ids);
         onChange(ids);
       }}
+      configBundleIds={[]}
+      onConfigBundleChange={() => {}}
       agentEnvVars={{}}
       onAgentEnvVarChange={() => {}}
       secrets={[]}
@@ -40,6 +48,7 @@ function RemoteCredentialsHarness({ onChange }: { onChange: (ids: string[]) => v
 }
 
 beforeEach(() => {
+  vi.mocked(listAgentConfigBundles).mockResolvedValue({ bundles: [] });
   vi.mocked(listRemoteCredentials).mockResolvedValue({
     auth_specs: [
       {
@@ -142,5 +151,78 @@ describe("RemoteCredentialsCard", () => {
     expect(
       screen.getByText(".codex/auth.json, .codex/config.toml; files not found on this machine"),
     ).toBeTruthy();
+  });
+});
+
+const PORTABLE_BUNDLES: AgentConfigBundle[] = [
+  {
+    id: "claude.settings",
+    agent_id: "claude-acp",
+    display_name: "Claude settings",
+    label: "Claude settings",
+    available: true,
+    files: [
+      {
+        source_path: ".claude/settings.json",
+        target_path: ".claude/settings.json",
+        available: true,
+      },
+    ],
+  },
+  {
+    id: "codex.config",
+    agent_id: "codex-acp",
+    display_name: "Codex configuration",
+    label: "Codex configuration",
+    available: false,
+    files: [
+      { source_path: ".codex/config.toml", target_path: ".codex/config.toml", available: false },
+    ],
+  },
+];
+
+describe("PortableConfigBundles", () => {
+  it("keeps configuration selection independent from authentication", () => {
+    const onChange = vi.fn();
+
+    const { rerender } = render(
+      <PortableConfigBundles
+        bundles={PORTABLE_BUNDLES}
+        selectedIds={[]}
+        baselineSelectedIds={[]}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Claude settings" }));
+    rerender(
+      <PortableConfigBundles
+        bundles={PORTABLE_BUNDLES}
+        selectedIds={["claude.settings"]}
+        baselineSelectedIds={[]}
+        onChange={onChange}
+      />,
+    );
+
+    expect(onChange).toHaveBeenCalledWith(["claude.settings"]);
+    expect(screen.getByTestId("portable-config-bundles").getAttribute("data-settings-dirty")).toBe(
+      "true",
+    );
+  });
+
+  it("keeps unavailable bundles selectable and explains the source state", () => {
+    render(
+      <PortableConfigBundles
+        bundles={PORTABLE_BUNDLES}
+        selectedIds={[]}
+        baselineSelectedIds={[]}
+        onChange={vi.fn()}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: "Codex configuration" });
+    expect((checkbox as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByText("Not found")).toBeTruthy();
+    expect(screen.getByText(/editing hint/i)).toBeTruthy();
   });
 });

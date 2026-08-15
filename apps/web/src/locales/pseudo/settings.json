@@ -488,6 +488,7 @@
   "profileForTasksCreatedByAgents": "Ƥŕōƒĩĺē ƒōŕ Ţàśķś Ćŕēàţēď ƀŷ Àĝēńţś",
   "programming": "Ƥŕōĝŕàḿḿĩńĝ",
   "profileFallbackWillBeUsed": "Śţàŕţ ḿōďēĺ {{model}} ĩś ńō ĺōńĝēŕ àvàĩĺàƀĺē; ƒàĺĺƀàćķ {{fallback}} ŵĩĺĺ ƀē ũśēď.",
+  "profileStartModelNotAdvertisedOnHost": "Ţĥē ĥōśţ ƥŕōƀē ďĩď ńōţ àďvēŕţĩśē {{model}}. Ţĥē śēĺēćţēď ēxēćũţōŕ ŵĩĺĺ ďēćĩďē ţĥē ḿōďēĺ àţ ĺàũńćĥ.",
   "profileStartModelUnavailable": "Śţàŕţ ḿōďēĺ {{model}} ĩś ńō ĺōńĝēŕ àvàĩĺàƀĺē; ćĥàńĝē ĩţ ĩń ţĥē àĝēńţ ƥŕōƒĩĺē.",
   "promptAdd": "Àďď ƥŕōḿƥţ",
   "promptContentPlaceholder": "Ƥŕōḿƥţ ćōńţēńţ",
