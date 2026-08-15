@@ -178,20 +178,25 @@ without provider CSS tokens. Unit, packaged-plugin desktop E2E, mobile contract 
 typecheck, and lint pass. The public authoring reference now includes a code-host hook
 surface map and focused captures of the shared dashboard, repository picker, Link flow,
 task status, CI, Review, and composer reference search.
-The packaged generic host contract passes on desktop and
-mobile. The actual package passes its unconfigured action, disable/re-enable, desktop,
-and mobile lifecycle checks; its canonical composer reference now rehydrates the
-repository/PR identity and performs live submit-time authorization. Plugin unit, race,
-build, and five-platform archive checks pass. Cloud acceptance is complete for the
-available disposable target. Task 13 remains in progress until a disposable Data Center
-target and a container-reachable HTTPS credential-broker URL are available, the host
-changes ship
-in a release that can be named by `min_kandev_version`, and the remaining live gates
-pass. The initial plugin release intentionally follows the current checksum-verified,
-unsigned marketplace contract under
+The packaged generic host contract passes on desktop and mobile. The actual package
+passes its unconfigured action, disable/re-enable, desktop, and mobile lifecycle checks;
+its canonical composer reference rehydrates repository/PR identity and performs live
+submit-time authorization. Plugin unit, race, build, and five-platform archive checks
+pass. Cloud acceptance is complete for the available disposable target. On 2026-08-14,
+the Docker and SSH container specs both passed real HTTPS clone, push, secret
+non-disclosure, and connection-generation revocation through the provider-neutral
+credential broker. That run also closed the generic remote-helper path used by future
+plugin providers on SSH executors.
+
+Kandev `v0.88.0` and `kandev-plugin-bitbucket` `v0.2.0` are published; the plugin
+declares `min_kandev_version: 0.88.0`, and exact build, verify, packaged-host, checksum,
+desktop, and mobile gates are green. Task 13 now waits only for the marketplace registry
+PR to merge. A configured live Data Center run remains a documented follow-up because
+no disposable target was available; Data Center behavior is covered by its separate
+adapter fixtures and contract suite. The initial plugin release intentionally follows
+the current checksum-verified, unsigned marketplace contract under
 [ADR-2026-08-01-bitbucket-initial-release-remains-unsigned](../../decisions/2026-08-01-bitbucket-initial-release-remains-unsigned.md);
-no signature or cryptographic publisher-provenance claim is made. No plugin tag,
-release, or marketplace entry is created before the other gates pass.
+no signature or cryptographic publisher-provenance claim is made.
 
 ## Risks
 

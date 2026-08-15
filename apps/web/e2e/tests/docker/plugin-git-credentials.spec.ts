@@ -46,7 +46,10 @@ test.describe("Bitbucket plugin contract — Docker executor credential leases",
         config: { image_tag: E2E_IMAGE_TAG },
         prepare_script: "",
         cleanup_script: "",
-        env_vars: fixture.profileGitEnv,
+        env_vars: [
+          ...fixture.profileGitEnv,
+          { key: "NO_PROXY", value: new URL(publicBrokerURL).hostname },
+        ],
       });
       const repository = await apiClient.createRepository(
         seedData.workspaceId,
@@ -80,18 +83,18 @@ test.describe("Bitbucket plugin contract — Docker executor credential leases",
       );
       const environment = await apiClient.getTaskEnvironment(task.id);
       expect(environment?.container_id).toBeTruthy();
-      const remoteURL = runDockerGit(
+      const remoteURL = await runDockerGit(
         environment!.container_id!,
         "cd /workspace && git remote get-url origin",
       );
-      expect(remoteURL.status).toBe(0);
+      expect(remoteURL.status, remoteURL.output).toBe(0);
       expect(remoteURL.output.trim()).toBe(fixtureGitURL);
 
-      const push = runDockerGit(
+      const push = await runDockerGit(
         environment!.container_id!,
         "cd /workspace && printf 'pushed\\n' >> README.md && git add README.md && git -c user.name=E2E -c user.email=e2e@test.local commit -m 'credential fixture push' && git push origin HEAD:main",
       );
-      expect(push.status).toBe(0);
+      expect(push.status, push.output).toBe(0);
       expect(fixture.pushed()).toBe(true);
       assertExactFixtureTransport(fixture);
 
@@ -107,7 +110,7 @@ test.describe("Bitbucket plugin contract — Docker executor credential leases",
       expect(revoke.status).toBe(200);
       expect(await revoke.text()).not.toContain(fixtureGitSecret);
 
-      const afterRevocation = runDockerGit(
+      const afterRevocation = await runDockerGit(
         environment!.container_id!,
         "cd /workspace && git fetch origin",
       );

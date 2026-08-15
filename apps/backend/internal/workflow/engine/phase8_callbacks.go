@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"fmt"
+
+	"github.com/kandev/kandev/internal/steptelemetry"
 )
 
 // CreateChildTaskCallback executes the create_child_task action by asking
@@ -38,7 +40,25 @@ func (c CreateChildTaskCallback) Execute(ctx context.Context, in ActionInput) (A
 		StepID:         cfg.StepID,
 		AgentProfileID: cfg.AgentProfileID,
 	}
-	if _, err := c.Creator.CreateChildTask(ctx, in.State.TaskID, spec); err != nil {
+	// The new child task's genesis ledger row must attribute the trigger's
+	// session when one exists — create_child_task typically fires from a
+	// session's own turn (on_turn_complete evaluating the step's actions),
+	// so leaving ctx unwrapped would let genesisAttribution fall through to
+	// the (session-less) authn seam and silently record actor_kind=system
+	// for a session-caused creation, the same bug already fixed for
+	// switch_workflow in SwitchWorkflowCallback.Execute. Unlike that
+	// callback, create_child_task doesn't require a session up front — a
+	// future non-session-originated trigger falls back to genesis's
+	// existing default rather than fabricating one.
+	createCtx := ctx
+	if in.State.SessionID != "" {
+		createCtx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+			ActorKind: steptelemetry.ActorAgent,
+			ActorID:   in.State.SessionID,
+			SessionID: in.State.SessionID,
+		})
+	}
+	if _, err := c.Creator.CreateChildTask(createCtx, in.State.TaskID, spec); err != nil {
 		return ActionResult{}, fmt.Errorf("create_child_task: %w", err)
 	}
 	return ActionResult{}, nil
@@ -91,7 +111,17 @@ func (c SwitchWorkflowCallback) Execute(ctx context.Context, in ActionInput) (Ac
 		}
 	}
 
-	if _, err := c.Switcher.SwitchTaskWorkflow(ctx, in.State.TaskID, cfg.WorkflowID, cfg.StepID); err != nil {
+	// A switch_workflow action is always genuinely caused by the trigger's
+	// session — validated above, since in.State.SessionID must be non-empty
+	// to reach this point — so the ledger row this writes must attribute
+	// that session, not fall back to the (session-less) authn seam.
+	switchCtx := steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger:   steptelemetry.TriggerWorkflowAttached,
+		ActorKind: steptelemetry.ActorAgent,
+		ActorID:   in.State.SessionID,
+		SessionID: in.State.SessionID,
+	})
+	if _, err := c.Switcher.SwitchTaskWorkflow(switchCtx, in.State.TaskID, cfg.WorkflowID, cfg.StepID); err != nil {
 		return ActionResult{}, fmt.Errorf("switch_workflow: %w", err)
 	}
 

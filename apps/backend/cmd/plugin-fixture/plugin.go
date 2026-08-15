@@ -32,7 +32,7 @@ const (
 	revokedPullRequestID   = "pull-request-revoked"
 	fixtureProviderID      = "fixture-source-control"
 	fixtureCredentialHost  = "bitbucket.example.test"
-	fixtureCredentialPath  = "/scm/TEAM/fixture.git"
+	fixtureCredentialPath  = "/scm/TEAM/fixture"
 	connectionStatusAction = "connection-status"
 	searchPurpose          = "search"
 	submissionPurpose      = "submission"

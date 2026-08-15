@@ -213,4 +213,8 @@ type PendingMove struct {
 	// Actor records provenance across the deferred move boundary. Agent is the
 	// value used by move_task_kandev; it prevents owner identity leakage.
 	Actor string `json:"actor,omitempty"`
+	// SenderSessionID identifies the session that requested the move. It is
+	// distinct from the session owning this queue, which is only the execution
+	// context used to apply the deferred move.
+	SenderSessionID string `json:"sender_session_id,omitempty"`
 }

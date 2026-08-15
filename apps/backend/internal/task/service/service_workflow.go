@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -519,7 +520,22 @@ func (s *Service) MoveTaskWithOptions(
 	if stepChanged {
 		admittedState = &stateAfterAdmission.State
 	}
-	_, err = s.updateMovedTask(ctx, task, oldStepID, targetStep, admittedState)
+
+	// manual_move only applies when no outer caller already declared a
+	// trigger — an mcp_move set by the MCP handler must survive this inner
+	// board-move default, since the agent (not a board click) is what caused
+	// the move.
+	moveCtx := ctx
+	if !steptelemetry.HasTrigger(moveCtx) {
+		actorKind, actorID := steptelemetry.HumanOrSystemActor(moveCtx)
+		moveCtx = steptelemetry.WithAttribution(moveCtx, steptelemetry.Attribution{
+			Trigger:   steptelemetry.TriggerManualMove,
+			ActorKind: actorKind,
+			ActorID:   actorID,
+		})
+	}
+
+	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState)
 	if err != nil {
 		s.logger.Error("failed to move task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
@@ -614,6 +630,15 @@ func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models
 }
 
 func (s *Service) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {
+	// A queue/WIP reconciliation is always wip_pull, unconditionally
+	// overriding whatever trigger the caller that vacated the step declared
+	// — the vacating move and the resulting pull are two distinct ledger
+	// rows with two distinct causes. No single session initiates a pull, so
+	// actor kind is always system with no session.
+	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger:   steptelemetry.TriggerWIPPull,
+		ActorKind: steptelemetry.ActorSystem,
+	})
 	vacatedStep := s.reconcilableStep(ctx, vacatedStepID)
 	if vacatedStep == nil {
 		return
@@ -1175,6 +1200,10 @@ func (s *Service) BulkMoveSelectedTasks(ctx context.Context, taskIDs []string, t
 	if len(ids) == 0 {
 		return &BulkMoveTasksResult{MovedCount: 0}, nil
 	}
+	bulkActorKind, bulkActorID := steptelemetry.HumanOrSystemActor(ctx)
+	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger: steptelemetry.TriggerBulkMove, ActorKind: bulkActorKind, ActorID: bulkActorID,
+	})
 
 	tasks, err := s.validateSelectedMoveBatch(ctx, ids, targetWorkflowID, targetStepID)
 	if err != nil {
@@ -1235,6 +1264,11 @@ func (s *Service) validateSelectedMoveBatch(ctx context.Context, taskIDs []strin
 // BulkMoveTasks moves all tasks from a source workflow/step to a target workflow/step.
 // If sourceStepID is empty, all tasks in the source workflow are moved.
 func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceStepID, targetWorkflowID, targetStepID string) (*BulkMoveTasksResult, error) {
+	bulkActorKind, bulkActorID := steptelemetry.HumanOrSystemActor(ctx)
+	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger: steptelemetry.TriggerBulkMove, ActorKind: bulkActorKind, ActorID: bulkActorID,
+	})
+
 	// Get the tasks to move
 	var tasks []*models.Task
 	var err error

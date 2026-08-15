@@ -31,7 +31,25 @@ type BootstrapOverrides = {
    * `loading` state long enough to assert the disabled submit UI.
    */
   bootstrapHold?: Promise<void>;
+  /**
+   * Issues returned by the mocked system/health endpoint. Defaults to none.
+   * The dialog must only gate on issues meaning "no GitHub credential exists
+   * anywhere"; anything else is scoped to something this flow never uses.
+   */
+  healthIssues?: Array<Record<string, string>>;
 };
+
+function githubHealthIssue(id: string, message: string): Record<string, string> {
+  return {
+    id,
+    category: "github",
+    title: "GitHub",
+    message,
+    severity: "warning",
+    fix_url: "/settings/integrations/github",
+    fix_label: "Configure GitHub",
+  };
+}
 
 async function mockImproveKandevApis(
   page: Page,
@@ -49,7 +67,10 @@ async function mockImproveKandevApis(
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ healthy: true, issues: [] }),
+      body: JSON.stringify({
+        healthy: (overrides.healthIssues ?? []).length === 0,
+        issues: overrides.healthIssues ?? [],
+      }),
     }),
   );
 
@@ -634,5 +655,72 @@ test.describe("Improve Kandev dialog", () => {
 
     await expect(testPage.getByText(/cannot be changed/i)).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByRole("button", { name: /Add Local Repository/i })).toHaveCount(0);
+  });
+
+  // The gate must ask "is there any GitHub credential at all", not "is every
+  // workspace's connection healthy". A user on GitHub in one workspace and a
+  // different code host in others carries the unhealthy issue permanently, and
+  // it used to lock this dialog behind a warning about workspaces the flow
+  // never touches.
+  test("an unhealthy connection in another workspace does not block the intro", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await apiClient.createWorkspace("Improve Kandev");
+    await mockImproveKandevApis(testPage, seedData, {
+      healthIssues: [
+        githubHealthIssue(
+          "github_workspace_connections_unhealthy",
+          "1 of 2 configured GitHub workspace connections need attention " +
+            "(1 invalid, 0 suspended, 0 revoked).",
+        ),
+      ],
+    });
+
+    await testPage.goto("/");
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
+
+    await expect(testPage.getByRole("dialog", { name: "Improve Kandev" })).toBeVisible();
+    await expect(testPage.getByText(/Kandev is open source/)).toBeVisible();
+    await expect(testPage.getByTestId("improve-kandev-proceed")).toBeEnabled();
+    await expect(testPage.getByText(/needs the/)).toHaveCount(0);
+
+    await prCapture.screenshot("intro-reachable-with-unrelated-connection-issue", {
+      caption: "Intro is reachable when an unrelated workspace's connection is unhealthy",
+    });
+  });
+
+  // The catalog string interpolates the CLI name inside its <code> element, so
+  // a values object missing `binary` renders the literal placeholder to users.
+  test("the gh-auth notice renders the CLI name, not a raw placeholder", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await apiClient.createWorkspace("Improve Kandev");
+    await mockImproveKandevApis(testPage, seedData, {
+      healthIssues: [
+        githubHealthIssue(
+          "github_not_authenticated",
+          "Configure a GitHub connection for a workspace.",
+        ),
+      ],
+    });
+
+    await testPage.goto("/");
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
+
+    const dialog = testPage.getByRole("dialog", { name: "Improve Kandev" });
+    await expect(dialog.getByText(/GitHub CLI not authenticated/i)).toBeVisible();
+    await expect(dialog.locator("code", { hasText: /^gh$/ })).toBeVisible();
+    await expect(dialog.getByText(/\{\{/)).toHaveCount(0);
+    await expect(testPage.getByTestId("improve-kandev-proceed")).toHaveCount(0);
+
+    await prCapture.screenshot("gh-auth-notice", {
+      caption: "The gh-auth notice renders the CLI name instead of {{binary}}",
+    });
   });
 });

@@ -34,6 +34,7 @@ const (
 	CodePermissionDeniedByUser Code = "permission_denied_by_user"
 	CodeNpxCacheCorrupted      Code = "npx_cache_corrupted"
 	CodeResumeCorrupted        Code = "resume_corrupted"
+	CodeAgentTransportLost     Code = "agent_transport_lost"
 )
 
 // RemediationStartFreshSession is the symbolic RemediationPath value for
@@ -283,6 +284,14 @@ func applyInvariants(e *Error) *Error {
 	case CodePermissionDeniedByUser, CodeTask, CodeRepo, CodeAgentRuntime:
 		e.FallbackAllowed = false
 		e.AutoRetryable = false
+	case CodeAgentTransportLost:
+		// The ACP pipe dropped mid-turn: a recoverable transport failure, not a
+		// model-availability problem. Retrying the same provider is expected to
+		// succeed (the resume token belongs to the current provider), so
+		// falling back to another provider can't fix it and isn't offered.
+		e.AutoRetryable = true
+		e.FallbackAllowed = false
+		e.UserAction = false
 	}
 	if isPostStartPhase(e.Phase) && e.Code == CodeAgentRuntime {
 		e.FallbackAllowed = false

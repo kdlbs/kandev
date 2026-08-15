@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -81,6 +82,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			terminalCompleteStream = true
 		}
 	} else if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		// Keep the message side suppressed for completed executions, but do not
+		// discard a late subagent frame before its durable context is recorded.
+		// This guard runs before the event-type switch below, so handler-level
+		// recording alone would not cover the production dispatch path.
+		if eventType == agentEventToolCall || eventType == agentEventToolUpdate {
+			s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
+		}
 		return
 	}
 
@@ -108,7 +116,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
 
-	case "tool_update":
+	case agentEventToolUpdate:
 		s.handleToolUpdateEvent(ctx, payload)
 
 	case agentEventComplete:
@@ -204,6 +212,74 @@ func (s *Service) foregroundIdleOwnsCurrentPrompt(payload *lifecycle.AgentStream
 	return false
 }
 
+// streamEventIsStalePrompt proves that a generation-bearing stream event came
+// from a prompt that no longer owns the execution. Generation-zero providers
+// do not expose enough identity to make that determination, so their terminal
+// events use the normal settlement path.
+func (s *Service) streamEventIsStalePrompt(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil || payload.Data.PromptGeneration == 0 {
+		return false
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	if !ok {
+		return false
+	}
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
+	return !generationOwner.OwnsPromptGeneration(
+		payload.SessionID, executionID, payload.Data.PromptGeneration,
+	)
+}
+
+func (s *Service) completeTurnForStreamEvent(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	capturedTurnIDs ...string,
+) {
+	if payload == nil {
+		return
+	}
+	var capturedTurnID string
+	if len(capturedTurnIDs) > 0 {
+		capturedTurnID = capturedTurnIDs[0]
+	}
+	if capturedTurnID != "" {
+		// A durable turn ID is authoritative. If the event is stale and an
+		// accepted successor exists, preserve that successor while settling
+		// the predecessor; otherwise close only the captured turn so a late
+		// completion cannot sweep an unrelated active turn.
+		stale := s.streamEventIsStalePrompt(payload)
+		successorTurnID := s.acceptedDispatchSuccessorTurn(payload.SessionID)
+		if successorTurnID != "" && successorTurnID != capturedTurnID {
+			stale = true
+		}
+		if stale && s.acceptedDispatchInFlight(payload.SessionID) {
+			s.completeTurnForTaskSessionWithSuccessorPolicy(ctx, payload.TaskID, payload.SessionID, true)
+			return
+		}
+		if err := s.completeTurnForTaskSessionCheckedOwned(ctx, payload.TaskID, payload.SessionID, capturedTurnID); err != nil {
+			s.logger.Warn("failed to complete stream event's captured turn",
+				zap.String("session_id", payload.SessionID),
+				zap.String("turn_id", capturedTurnID),
+				zap.Error(err))
+		}
+		if successorTurnID == capturedTurnID {
+			s.clearAcceptedQueuedDispatch(payload.SessionID)
+		}
+		return
+	}
+	s.completeTurnForTaskSessionWithSuccessorPolicy(
+		ctx,
+		payload.TaskID,
+		payload.SessionID,
+		s.streamEventIsStalePrompt(payload),
+	)
+}
+
 // handleAgentErrorEvent handles agentEventError events by creating an error message and completing the turn.
 func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	taskID := payload.TaskID
@@ -232,7 +308,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 				zap.Error(err))
 		}
 	}
-	s.completeTurnForTaskSession(ctx, taskID, sessionID)
+	s.completeTurnForStreamEvent(ctx, payload)
 }
 
 // handleSessionStatusEvent handles session_status events by storing resume token and creating a status message.
@@ -321,9 +397,20 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		s.logger.Warn("missing session_id for tool_call",
 			zap.String("task_id", payload.TaskID),
 			zap.String("tool_call_id", payload.Data.ToolCallID))
+		// A recognized subagent_task frame with no session id is exactly the
+		// AC-2 identity-skip case (skipped_no_identity++): this guard predates
+		// the subagent-context feature and exists to protect message
+		// creation, so it must not silently swallow that counter too.
+		s.recordSubagentContextFromFrame(ctx, payload, "")
 		return
 	}
 	if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		// A late-arriving frame for an already-completed execution is
+		// correctly dropped for message purposes (see the guard's own
+		// contract), but it can be the ONLY frame that ever recognizes and
+		// settles this subagent — dropping it here too would permanently
+		// omit the row's status/token/duration data (AC-1, AC-11).
+		s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		return
 	}
 
@@ -356,6 +443,11 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		// the task to REVIEW) leaves session=RUNNING with task=REVIEW.
 		s.setSessionRunningForExecution(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID)
 	}
+	// Recording a subagent-context observation must never itself start a
+	// turn as a side effect (that would mutate durable state purely to label
+	// a telemetry row) — use the non-creating lookup here even though
+	// message creation above may have legitimately started one already.
+	s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 
 	ownership := toolOwnershipForeground
 	if payload.Data.ParentToolCallID != "" {
@@ -532,9 +624,17 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		s.logger.Warn("missing session_id for tool_update",
 			zap.String("task_id", payload.TaskID),
 			zap.String("tool_call_id", payload.Data.ToolCallID))
+		// See the matching comment in handleToolCallEvent: this guard
+		// predates the subagent-context feature and must not silently
+		// swallow the AC-2 skipped_no_identity counter.
+		s.recordSubagentContextFromFrame(ctx, payload, "")
 		return
 	}
 	if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		// See the matching guard in handleToolCallEvent: a dropped update can
+		// be the subagent's final terminal frame, and must still settle the
+		// durable row even though the message side is correctly ignored.
+		s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		return
 	}
 	ownership := s.resolveToolUpdateOwnership(payload)
@@ -571,10 +671,6 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 // Split out of handleToolUpdateEvent to keep that function within the
 // package's function-length limits; no behavior change.
 func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	if s.messageCreator == nil {
-		return
-	}
-
 	// Determine message type from normalized payload for fallback creation
 	msgType := toolKindToMessageType(payload.Data.Normalized)
 	status := payload.Data.ToolStatus
@@ -598,34 +694,45 @@ func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecyc
 			// update-only reconciliation and cannot wake a settled session.
 			turnID = ""
 		}
-	} else {
+	} else if s.messageCreator != nil {
+		// Only message creation needs a turn to attach a fallback-created
+		// card to, which is why this branch alone may lazily start one.
+		// Recording subagent context must never create a turn merely to
+		// label a row — see nonCreatingActiveTurnID.
 		turnID = s.getActiveTurnID(payload.SessionID)
-	}
-	fallbackMsgType := msgType
-	if terminal && turnID == "" {
-		// A late terminal update can update its existing card, but must not
-		// create a message (and implicitly a turn) after the turn settled.
-		fallbackMsgType = ""
+	} else {
+		turnID = s.nonCreatingActiveTurnID(ctx, payload.SessionID)
 	}
 
-	if err := s.messageCreator.UpdateToolCallMessage(
-		ctx,
-		payload.TaskID,
-		payload.Data.ToolCallID,
-		payload.Data.ParentToolCallID, // Pass parent for subagent nesting
-		status,
-		"", // result - no longer used, tool results in NormalizedPayload
-		payload.SessionID,
-		payload.Data.ToolTitle,  // Include title from update event
-		turnID,                  // Turn ID for fallback creation
-		fallbackMsgType,         // Empty for settled terminal reconciliations
-		payload.Data.Normalized, // Pass normalized tool data for message metadata
-	); err != nil {
-		s.logger.Warn("failed to update tool call message",
-			zap.String("task_id", payload.TaskID),
-			zap.String("tool_call_id", payload.Data.ToolCallID),
-			zap.Error(err))
+	// Message persistence is optional (see SetMessageCreator); turn-id
+	// resolution and subagent-context recording below must not depend on it.
+	if s.messageCreator != nil {
+		fallbackMsgType := msgType
+		if terminal && turnID == "" {
+			// A late terminal update can update its existing card, but must not
+			// create a message (and implicitly a turn) after the turn settled.
+			fallbackMsgType = ""
+		}
+		if err := s.messageCreator.UpdateToolCallMessage(
+			ctx,
+			payload.TaskID,
+			payload.Data.ToolCallID,
+			payload.Data.ParentToolCallID, // Pass parent for subagent nesting
+			status,
+			"", // result - no longer used, tool results in NormalizedPayload
+			payload.SessionID,
+			payload.Data.ToolTitle,  // Include title from update event
+			turnID,                  // Turn ID for fallback creation
+			fallbackMsgType,         // Empty for settled terminal reconciliations
+			payload.Data.Normalized, // Pass normalized tool data for message metadata
+		); err != nil {
+			s.logger.Warn("failed to update tool call message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("tool_call_id", payload.Data.ToolCallID),
+				zap.Error(err))
+		}
 	}
+	s.recordSubagentContextFromFrame(ctx, payload, turnID)
 
 	// Terminal updates only wake an async turn that was established by prior
 	// substantive output. A standalone terminal reconciliation belongs to the
@@ -773,6 +880,59 @@ func isTerminalToolStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+// recordSubagentContextFromFrame persists a durable relational record of a
+// subagent (Task tool) invocation when this frame's normalized payload is a
+// recognized subagent_task. No-op when subagentContexts is unwired, when the
+// frame isn't a subagent_task, or when the normalizer hasn't yet attached the
+// typed payload (the initial tool_call for Claude/OpenCode carries none —
+// recognition happens on a later tool_call_update, see AC-1a). turnID is
+// whatever the call site already resolved; this helper never re-derives one.
+//
+// payload.SessionID is the Kandev task session id despite the
+// agentSessionID-shaped naming downstream: messageCreatorAdapter passes the
+// same value into CreateMessageRequest.TaskSessionID
+// (internal/backendapp/adapters.go:879).
+func (s *Service) recordSubagentContextFromFrame(ctx context.Context, payload *lifecycle.AgentStreamEventPayload, turnID string) {
+	if s.subagentContexts == nil || payload == nil || payload.Data == nil {
+		return
+	}
+	normalized := payload.Data.Normalized
+	if normalized == nil || normalized.Kind() != streams.ToolKindSubagentTask {
+		return
+	}
+	subagentTask := normalized.SubagentTask()
+	if subagentTask == nil {
+		return
+	}
+	s.subagentContexts.RecordSubagentContext(ctx, taskservice.RecordSubagentContextRequest{
+		TaskSessionID:    payload.SessionID,
+		TaskID:           payload.TaskID,
+		TurnID:           turnID,
+		ToolCallID:       payload.Data.ToolCallID,
+		ParentToolCallID: payload.Data.ParentToolCallID,
+		ExecutionID:      payload.ExecutionID,
+		ToolStatus:       payload.Data.ToolStatus,
+		Payload:          subagentTask,
+		ObservedAt:       time.Now().UTC(),
+	})
+}
+
+// nonCreatingActiveTurnID resolves sessionID's active turn without ever
+// starting one — unlike getActiveTurnID, whose doc comment explains it
+// lazily starts a turn "even in edge cases like resumed sessions". Every
+// caller here uses the result only to label a subagent-context row, never to
+// attach a message, so recording an observation must never itself mutate
+// state by creating a durable turn as a side effect. A lookup error is
+// treated as "no turn known", matching the fail-closed pattern already used
+// for terminal tool updates below.
+func (s *Service) nonCreatingActiveTurnID(ctx context.Context, sessionID string) string {
+	turnID, err := s.peekActiveTurnID(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	return turnID
 }
 
 func (s *Service) shouldDropCompletedExecutionStreamEvent(payload *lifecycle.AgentStreamEventPayload) bool {
@@ -2079,18 +2239,12 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		s.saveAgentTextForTurn(ctx, payload, completionTurnID)
 		s.publishAgentPlanForTurn(ctx, payload, completionTurnID, false)
 		s.persistTurnPromptMetadataForTurn(ctx, payload, session, completionTurnID)
-		if err := s.completeTurnForTaskSessionCheckedOwned(ctx, payload.TaskID, payload.SessionID, completionTurnID); err != nil {
-			s.logger.Warn("failed to complete stream event's captured turn",
-				zap.String("session_id", payload.SessionID),
-				zap.String("turn_id", completionTurnID),
-				zap.Error(err))
-		}
 	} else {
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.publishAgentPlanIfPresent(ctx, payload)
 		s.persistTurnPromptMetadata(ctx, payload, session)
-		s.completeTurnForTaskSession(ctx, payload.TaskID, payload.SessionID)
 	}
+	s.completeTurnForStreamEvent(ctx, payload, completionTurnID)
 
 	// Publish agent turn message event so the office comment bridge can
 	// auto-post the agent's response as a task comment. Published here

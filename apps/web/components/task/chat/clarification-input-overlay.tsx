@@ -597,7 +597,7 @@ export function ClarificationInputOverlay({
       {sharedContext && (
         <div
           data-testid="clarification-context"
-          className="mx-4 mt-3 mb-2 break-words whitespace-pre-wrap"
+          className="mx-4 mt-3 mb-2 break-words whitespace-pre-wrap text-[13px]"
         >
           {sharedContext}
         </div>

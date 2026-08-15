@@ -1121,22 +1121,6 @@ func firstArg(args []string) string {
 	return args[0]
 }
 
-// ghRateLimitResponse mirrors the GET /rate_limit JSON shape so we can seed
-// the tracker on startup and after CLI failures without parsing prose.
-type ghRateLimitResponse struct {
-	Resources struct {
-		Core    ghRateLimitBucket `json:"core"`
-		GraphQL ghRateLimitBucket `json:"graphql"`
-		Search  ghRateLimitBucket `json:"search"`
-	} `json:"resources"`
-}
-
-type ghRateLimitBucket struct {
-	Limit     int   `json:"limit"`
-	Remaining int   `json:"remaining"`
-	Reset     int64 `json:"reset"`
-}
-
 // FetchRateLimit calls `gh api rate_limit` and seeds the tracker with the
 // returned snapshots. Best-effort: a failure (e.g. CLI absent, network) is
 // logged and ignored.
@@ -1148,26 +1132,11 @@ func (c *GHClient) FetchRateLimit(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("fetch rate limit: %w", err)
 	}
-	var raw ghRateLimitResponse
-	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+	raw, err := decodeRateLimitResponse([]byte(out))
+	if err != nil {
 		return fmt.Errorf("parse rate_limit response: %w", err)
 	}
-	now := time.Now().UTC()
-	record := func(resource Resource, b ghRateLimitBucket) {
-		if b.Limit == 0 && b.Remaining == 0 && b.Reset == 0 {
-			return
-		}
-		c.rateTracker.Record(RateSnapshot{
-			Resource:  resource,
-			Limit:     b.Limit,
-			Remaining: b.Remaining,
-			ResetAt:   time.Unix(b.Reset, 0).UTC(),
-			UpdatedAt: now,
-		})
-	}
-	record(ResourceCore, raw.Resources.Core)
-	record(ResourceGraphQL, raw.Resources.GraphQL)
-	record(ResourceSearch, raw.Resources.Search)
+	recordRateLimitResources(c.rateTracker, raw.Resources)
 	return nil
 }
 
