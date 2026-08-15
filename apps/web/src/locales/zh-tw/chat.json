@@ -128,6 +128,7 @@
   "transientRetryReasonProviderOverloaded": "服務商過載",
   "transientRetryReasonProviderUnavailable": "服務商暫時不可用",
   "transientRetryReasonRateLimited": "請求受限",
+  "transientRetryReasonAgentTransportLost": "代理連線已中斷",
   "transientRetryReasonGeneric": "服務商錯誤",
   "transientRetryIn": "將在 {{countdown}} 後重試",
   "transientRetryNow": "正在重試…",

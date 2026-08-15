@@ -1,11 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
-import { SessionResumeStartButton } from "@/components/task/chat/session-resume-start-button";
-import { useAppStore } from "@/components/state-provider";
 
 type MessageListFooterProps = {
   sessionState?: TaskSessionState;
@@ -37,6 +34,11 @@ function findCurrentActionableFailure(
   return footerActionMessages.at(-1);
 }
 
+/**
+ * Footer rendered below the transcript rows: the agent status summary plus
+ * any footer action messages (actionable failures / recovery), with
+ * missing-branch recovery owning the failure presentation when present.
+ */
 export function MessageListFooter({
   sessionState,
   sessionId,
@@ -52,39 +54,6 @@ export function MessageListFooter({
   const visibleFooterActionMessages = footerActionMessages.filter(
     (message) => !isMissingBranchFailure(message) || message.id === currentActionableFailure?.id,
   );
-  // The task-description start button only renders for EMPTY sessions. A
-  // resume-skipped session (prevent-auto-start-on-open preference, agent
-  // stopped with history) gets its Start agent button here instead — but only
-  // when no recovery actions are already visible: if the conversation shows
-  // "Resume session" / "Start fresh session" (an agent-kill recovery action
-  // message), that is the manual affordance and a second Start agent button
-  // would be duplicate noise.
-  const resumeSkipped = useAppStore((state) =>
-    sessionId ? state.tasks.resumeSkippedSessionIds[sessionId] === true : false,
-  );
-  const hasRecoveryActions = useMemo(
-    () =>
-      messages.some(
-        (message) =>
-          (message.metadata as Record<string, unknown> | undefined)?.recovery_actions === true,
-      ) ||
-      footerActionMessages.some(
-        (message) =>
-          (message.metadata as Record<string, unknown> | undefined)?.recovery_actions === true,
-      ),
-    [messages, footerActionMessages],
-  );
-  // The footer is the single Start-agent surface for resume-skipped sessions
-  // (prevent-auto-start-on-open): it must render even when the session has
-  // no messages or the task has no description, so every gated recovered-idle
-  // session keeps the manual affordance.
-  const showResumeStartButton =
-    resumeSkipped &&
-    !hasRecoveryActions &&
-    sessionState !== "FAILED" &&
-    sessionState !== "RUNNING" &&
-    sessionState !== "STARTING" &&
-    sessionId !== null;
   return (
     <>
       {!recoveryOwnsFailure && (
@@ -94,9 +63,6 @@ export function MessageListFooter({
           messages={messages}
           isWorking={isWorking}
         />
-      )}
-      {showResumeStartButton && sessionId !== null && (
-        <SessionResumeStartButton sessionId={sessionId} />
       )}
       {visibleFooterActionMessages.map((message) => (
         <MessageRenderer key={message.id} comment={message} isTaskDescription={false} />

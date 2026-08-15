@@ -247,6 +247,22 @@ describe("ActionMessage — transient retry (warning variant)", () => {
   });
 });
 
+describe("ActionMessage — agent transport lost", () => {
+  it("renders the agent-transport-lost reason for a dropped ACP connection", () => {
+    renderAction(
+      retryMessage({
+        content: "Agent connection lost",
+        metadata: {
+          ...transientRetryMetadata(1, 5),
+          failure_code: "agent_transport_lost",
+        },
+      }),
+      "WAITING_FOR_INPUT",
+    );
+    expect(screen.getByText(/Agent connection lost/i)).toBeTruthy();
+  });
+});
+
 describe("ActionMessage — retry schedule updates", () => {
   it("resets the fallback countdown when a later retry schedule arrives", () => {
     vi.useFakeTimers();

@@ -9,7 +9,12 @@ import type { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint"
 import type { AppState } from "@/lib/state/store";
 import type * as PluginSDK from "@kandev/plugin-sdk";
 import type { PluginUIApi } from "@kandev/plugin-sdk";
-export type { PluginContextApi, PluginHostRepository, PluginUIApi } from "@kandev/plugin-sdk";
+export type {
+  PluginContextApi,
+  PluginHostRepository,
+  PluginNavSection,
+  PluginUIApi,
+} from "@kandev/plugin-sdk";
 export type { PluginIcon } from "@kandev/plugin-sdk";
 
 /** Entry in the boot payload's `plugins` array (backend `ActivePlugin`). */
@@ -32,9 +37,13 @@ export interface NavItem {
   /**
    * Where the item renders: "main" (default) as a top-level sidebar entry,
    * "integrations" inside the sidebar's Integrations section alongside the
-   * first-party integration links.
+   * first-party integration links, "sidebar-footer" as an icon button in the
+   * sidebar footer's icon row and as a labelled row in the phone menu's
+   * Utilities group (subject to the footer's inline budget — an over-budget
+   * item is reached through the footer's overflow menu instead), "settings"
+   * accepted but rendered on no surface.
    */
-  section?: "main" | "settings" | "integrations";
+  section?: PluginSDK.PluginNavSection;
 }
 
 /**
@@ -115,11 +124,15 @@ export interface IntegrationSettingsRegistration {
  * another plugin's page and authors don't gate on the current id themselves.
  * "task-card-indicators" (small icon/badge rendered beside the PR status icon
  * on every kanban card — receives `{ taskId, workspaceId, workflowStepId }`
- * as `slotProps`), and "task-card-tags" (its own row on every kanban card,
+ * as `slotProps`), "task-card-tags" (its own row on every kanban card,
  * rendered below the badges row — for contributions too wide for the cramped
  * title-row `task-card-indicators` spot, e.g. a row of tag chips — receives
- * `TaskCardTagsSlotProps` as `slotProps`). Not a closed union — hosts may
- * register additional slot names.
+ * `TaskCardTagsSlotProps` as `slotProps`), and "sidebar-workspace-actions"
+ * (icon-button cluster in the sidebar's New Task row, after the built-in
+ * Quick Terminal and Quick Chat actions, with the same action group exposed
+ * through mobile navigation — receives `SidebarWorkspaceActionsSlotProps`
+ * as `slotProps`). Not a closed union — hosts may register additional slot
+ * names.
  */
 export type PluginSlotName = string;
 
@@ -142,6 +155,16 @@ export type TaskCardTagsSlotProps = {
   taskId: string;
   workspaceId: string | null;
   workflowStepId: string | null;
+};
+
+/** Context the host forwards to every `sidebar-workspace-actions` component. */
+export type SidebarWorkspaceActionsSlotProps = {
+  /** Active workspace for the current navigation surface. */
+  workspaceId: string;
+  /** Human-readable label of that workspace, when known. */
+  workspaceLabel?: string;
+  /** Desktop sidebar cluster or phone navigation action group. */
+  presentation: "desktop" | "mobile";
 };
 
 /** Component registered for a named slot; receives host-provided `slotProps`. */

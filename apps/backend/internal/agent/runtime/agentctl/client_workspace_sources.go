@@ -14,11 +14,12 @@ import (
 // request accepted by agentctl. It intentionally has no credential field;
 // lifecycle wiring supplies Git credentials separately when that is needed.
 type MaterializeRepositoryRequest struct {
-	RepositoryURL      string                     `json:"repository_url"`
-	Destination        string                     `json:"destination"`
-	BaseBranch         string                     `json:"base_branch"`
-	CheckoutBranch     string                     `json:"checkout_branch,omitempty"`
-	RemoteContribution *models.RemoteContribution `json:"remote_contribution,omitempty"`
+	RepositoryURL           string                          `json:"repository_url"`
+	Destination             string                          `json:"destination"`
+	BaseBranch              string                          `json:"base_branch"`
+	CheckoutBranch          string                          `json:"checkout_branch,omitempty"`
+	RemoteContribution      *models.RemoteContribution      `json:"remote_contribution,omitempty"`
+	ContributionDestination *models.ContributionDestination `json:"contribution_destination,omitempty"`
 }
 
 // MaterializeRepositoryResponse reports the adopted workspace subdirectory.

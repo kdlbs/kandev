@@ -13,6 +13,7 @@ import {
   type ChatInputContainerHandle,
 } from "@/components/task/chat/chat-input-container";
 import { QueueAffordance } from "@/components/task/chat/queued-ghost-list";
+import { ComposerAgentStartHint } from "./composer-agent-start-hint";
 import {
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
@@ -340,6 +341,10 @@ type ChatInputAreaProps = {
    * dependency chip is about.
    */
   statusTaskId?: string | null;
+  /** Recovered-idle (resume-skipped) sessions render the "a message will
+   * auto-start the agent" hint above the composer while the agent is
+   * stopped. */
+  showAgentStartHint?: boolean;
 };
 
 /** Resolves whether this session's executor environment is unavailable, and why. */
@@ -427,6 +432,7 @@ export function ChatInputArea({
   showScrollToStart,
   onScrollToStart,
   statusTaskId = null,
+  showAgentStartHint = false,
 }: ChatInputAreaProps) {
   const { resolvedSessionId, taskId, isAgentBusy } = panelState;
   const statusRowTaskId = resolveStatusRowTaskId(taskId, statusTaskId);
@@ -463,6 +469,12 @@ export function ChatInputArea({
       className={cn("bg-card flex-shrink-0 px-2 pb-2 pt-1", surfaceClassName)}
     >
       <DynamicRouteRecovery session={panelState.session} />
+      <ComposerAgentStartHint
+        show={showAgentStartHint}
+        needsRecovery={panelState.needsRecovery}
+        executorUnavailable={executor.unavailable}
+        hasPendingClarification={Boolean(panelState.pendingClarification)}
+      />
       <QueueAffordance
         sessionId={resolvedSessionId}
         canDrain={canDrainQueue}

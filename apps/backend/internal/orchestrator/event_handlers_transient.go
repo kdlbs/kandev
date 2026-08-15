@@ -427,6 +427,8 @@ func transientFailureLabel(classified *routingerr.Error) string {
 		return "Provider overloaded"
 	case routingerr.CodeRateLimited:
 		return "Rate limited"
+	case routingerr.CodeAgentTransportLost:
+		return "Agent connection lost"
 	default:
 		return "Provider temporarily unavailable"
 	}
@@ -446,6 +448,8 @@ func transientFailureExhaustedMessage(classified *routingerr.Error) string {
 			condition = "The rate limit remained active"
 		case routingerr.CodeProviderUnavailable:
 			condition = "The provider remained unavailable"
+		case routingerr.CodeAgentTransportLost:
+			condition = "The agent connection kept dropping"
 		}
 	}
 	return condition + " after several retries. Resume to try again, or start a fresh session."

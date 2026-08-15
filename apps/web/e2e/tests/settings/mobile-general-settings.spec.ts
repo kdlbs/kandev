@@ -60,12 +60,17 @@ test.describe("Mobile general settings", () => {
       expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
         await testPage.evaluate(() => document.documentElement.clientWidth),
       );
-      await testPage.waitForTimeout(1_000);
-      await testPage
-        .locator("[data-sonner-toast], [data-testid='toast-message']")
-        .evaluateAll((toasts) => {
-          for (const toast of toasts) (toast as HTMLElement).style.display = "none";
-        });
+      // Keeping stray toasts out of the capture. This ran unconditionally and
+      // cost every mobile shard a second, even though `prCapture.screenshot` is
+      // a no-op without `CAPTURE_PR_ASSETS` -- so the second bought nothing on
+      // the runs that pay for it. Gated, and waiting for the toasts to go
+      // rather than for a budget and then painting over whatever is left: a
+      // toast that outlives this fails the capture instead of being hidden.
+      if (prCapture.capturing) {
+        await expect(
+          testPage.locator("[data-sonner-toast], [data-testid='toast-message']"),
+        ).toHaveCount(0, { timeout: 10_000 });
+      }
       await prCapture.screenshot("sleep-inhibition-mobile-draft", {
         caption: "Mobile Task Actions sleep inhibition card above Save changes",
       });

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/kandev/kandev/internal/backendapp"
 	"github.com/kandev/kandev/internal/launcher"
@@ -14,6 +16,8 @@ var (
 	Commit    = "unknown"
 	BuildTime = "unknown"
 )
+
+const backendPIDFileEnv = "KANDEV_BACKEND_PID_FILE"
 
 type buildInfo struct {
 	Version   string
@@ -35,6 +39,10 @@ func run(args []string) int {
 
 func dispatch(args []string, build buildInfo, backend backendRunner, launch launcherRunner) int {
 	if len(args) > 0 && args[0] == "__backend" {
+		if err := writeBackendPIDFile(); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to write backend pid file: %v\n", err)
+			return 1
+		}
 		return backend(args[1:], backendapp.BuildInfo{
 			Version:   build.Version,
 			Commit:    build.Commit,
@@ -46,4 +54,12 @@ func dispatch(args []string, build buildInfo, backend backendRunner, launch laun
 		Commit:    build.Commit,
 		BuildTime: build.BuildTime,
 	})
+}
+
+func writeBackendPIDFile() error {
+	path := os.Getenv(backendPIDFileEnv)
+	if path == "" {
+		return nil
+	}
+	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
 }

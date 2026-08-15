@@ -309,6 +309,7 @@ func TestAttemptPassthroughRestartAbortsWhenTerminalDisconnects(t *testing.T) {
 func TestHandlePassthroughExitFastFailsResumeLaunch(t *testing.T) {
 	mgr, runner, execution := newPassthroughRunnerManager(t)
 	execution.WorkspacePath = missingWorkspace(t)
+	execution.PassthroughProcessID = "pty-1"
 	recorder := &terminalRecorder{}
 	runner.TrackSessionWebSocket(execution.SessionID, recorder)
 
@@ -330,6 +331,7 @@ func TestHandlePassthroughExitFastFailsResumeLaunch(t *testing.T) {
 
 func TestHandlePassthroughExitFastFailsFreshLaunch(t *testing.T) {
 	mgr, runner, execution := newPassthroughRunnerManager(t)
+	execution.PassthroughProcessID = "pty-1"
 	recorder := &terminalRecorder{}
 	runner.TrackSessionWebSocket(execution.SessionID, recorder)
 
@@ -372,6 +374,7 @@ func TestHandlePassthroughExitSkipsWithoutTerminal(t *testing.T) {
 // delay cannot push a genuine fast fail outside the window.
 func TestHandlePassthroughExitUsesStatusTimestampNotWallClock(t *testing.T) {
 	mgr, runner, execution := newPassthroughRunnerManager(t)
+	execution.PassthroughProcessID = "pty-1"
 	recorder := &terminalRecorder{}
 	runner.TrackSessionWebSocket(execution.SessionID, recorder)
 
@@ -387,6 +390,26 @@ func TestHandlePassthroughExitUsesStatusTimestampNotWallClock(t *testing.T) {
 
 	require.True(t, strings.Contains(recorder.text(), "Agent exited (code 3)"),
 		"uptime must be measured from the exit event, not from time.Now()")
+}
+
+func TestHandlePassthroughExitSkipsReplacedProcess(t *testing.T) {
+	mgr, runner, execution := newPassthroughRunnerManager(t)
+	recorder := &terminalRecorder{}
+	runner.TrackSessionWebSocket(execution.SessionID, recorder)
+	execution.PassthroughProcessID = "pty-new"
+
+	exitCode := 1
+	startedAt := time.Now().Add(-time.Hour)
+	mgr.handlePassthroughExit(execution, &agentctltypes.ProcessStatusUpdate{
+		SessionID: execution.SessionID,
+		ProcessID: "pty-old",
+		Status:    agentctltypes.ProcessStatusExited,
+		ExitCode:  &exitCode,
+		Timestamp: time.Now(),
+	}, startedAt, false)
+
+	require.Empty(t, recorder.text(), "a delayed exit from a replaced process must not restart the active PTY")
+	require.Equal(t, "pty-new", execution.PassthroughProcessID)
 }
 
 // TestStopPassthroughProcessLeavesExecutionStateToItsCaller pins that a failed

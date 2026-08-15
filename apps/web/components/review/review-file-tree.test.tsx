@@ -7,6 +7,10 @@ import { ReviewFileTree } from "./review-file-tree";
 afterEach(cleanup);
 
 const APP_PATH = "src/app.tsx";
+const README_PATH = "README.md";
+const OUTER_SCOPE = "vendor/outer";
+const INNER_SCOPE = "vendor/outer/vendor/inner";
+const SUBMODULE_NODE_TEST_ID = "submodule-node";
 
 function file(overrides: Partial<ReviewFile>): ReviewFile {
   return {
@@ -75,7 +79,7 @@ describe("ReviewFileTree ordering", () => {
   it("preserves review-list order when a directory is interleaved with a root file", () => {
     const files = [
       file({ path: "src/a.ts" }),
-      file({ path: "README.md" }),
+      file({ path: README_PATH }),
       file({ path: "src/b.ts" }),
     ];
 
@@ -201,11 +205,11 @@ describe("ReviewFileTree", () => {
 
   it("marks a nested submodule boundary with an accessible scope label", () => {
     renderTree([
-      file({ path: "README.md" }),
+      file({ path: README_PATH }),
       file({ path: "src/a.ts", repository_name: "vendor/lib" }),
     ]);
 
-    const node = screen.getByTestId("submodule-node");
+    const node = screen.getByTestId(SUBMODULE_NODE_TEST_ID);
     expect(node.textContent).toContain("lib");
     expect(within(node).getByRole("button").getAttribute("aria-label")).toBe(
       "Submodule: vendor/lib",
@@ -213,14 +217,103 @@ describe("ReviewFileTree", () => {
   });
 });
 
+describe("ReviewFileTree late updates", () => {
+  it("expands directories introduced by a later review-source update", () => {
+    const initialFiles = [
+      file({ path: README_PATH }),
+      file({ path: README_PATH, repository_name: OUTER_SCOPE }),
+    ];
+    const props: Parameters<typeof ReviewFileTree>[0] = {
+      files: initialFiles,
+      reviewedFiles: new Set<string>(),
+      staleFiles: new Set<string>(),
+      commentCountByFile: {},
+      selectedFile: null,
+      filter: "",
+      onFilterChange: vi.fn(),
+      onSelectFile: vi.fn(),
+      onToggleReviewed: vi.fn(),
+    };
+    const { rerender } = render(<ReviewFileTree {...props} />);
+    const findScope = (repositoryName: string) =>
+      screen
+        .queryAllByTestId(SUBMODULE_NODE_TEST_ID)
+        .find((node) => node.getAttribute("data-repository-name") === repositoryName);
+
+    expect(findScope(OUTER_SCOPE)).toBeTruthy();
+    expect(findScope(INNER_SCOPE)).toBeUndefined();
+
+    rerender(
+      <ReviewFileTree
+        {...props}
+        files={[
+          ...initialFiles,
+          file({
+            path: README_PATH,
+            repository_name: INNER_SCOPE,
+          }),
+        ]}
+      />,
+    );
+
+    expect(findScope(INNER_SCOPE)).toBeTruthy();
+  });
+});
+
+describe("ReviewFileTree late-update collapse state", () => {
+  it("preserves a manually collapsed directory when later files arrive", () => {
+    const initialFiles = [
+      file({ path: README_PATH }),
+      file({ path: "src/a.ts", repository_name: OUTER_SCOPE }),
+    ];
+    const props: Parameters<typeof ReviewFileTree>[0] = {
+      files: initialFiles,
+      reviewedFiles: new Set<string>(),
+      staleFiles: new Set<string>(),
+      commentCountByFile: {},
+      selectedFile: null,
+      filter: "",
+      onFilterChange: vi.fn(),
+      onSelectFile: vi.fn(),
+      onToggleReviewed: vi.fn(),
+    };
+    const { rerender } = render(<ReviewFileTree {...props} />);
+    const outer = screen
+      .getAllByTestId(SUBMODULE_NODE_TEST_ID)
+      .find((node) => node.getAttribute("data-repository-name") === OUTER_SCOPE);
+    fireEvent.click(within(outer!).getByRole("button"));
+    expect(screen.queryByText("a.ts")).toBeNull();
+
+    rerender(
+      <ReviewFileTree
+        {...props}
+        files={[
+          ...initialFiles,
+          file({
+            path: README_PATH,
+            repository_name: INNER_SCOPE,
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText("a.ts")).toBeNull();
+    expect(
+      screen
+        .queryAllByTestId(SUBMODULE_NODE_TEST_ID)
+        .find((node) => node.getAttribute("data-repository-name") === INNER_SCOPE),
+    ).toBeUndefined();
+  });
+});
+
 describe("ReviewFileTree multi-repo identity", () => {
   it("disambiguates same-named files in different repos via composite key", () => {
-    const fA = file({ path: "README.md", repository_name: "frontend", repository_id: "f" });
-    const fB = file({ path: "README.md", repository_name: "backend", repository_id: "b" });
+    const fA = file({ path: README_PATH, repository_name: "frontend", repository_id: "f" });
+    const fB = file({ path: README_PATH, repository_name: "backend", repository_id: "b" });
     const { onSelectFile } = renderTree([fA, fB]);
     // There are two rows with the same display name; clicking each must
     // dispatch a distinct key.
-    const rows = screen.getAllByText("README.md");
+    const rows = screen.getAllByText(README_PATH);
     expect(rows).toHaveLength(2);
     fireEvent.click(rows[0]);
     fireEvent.click(rows[1]);
@@ -232,14 +325,14 @@ describe("ReviewFileTree multi-repo identity", () => {
 
   it("exposes a stable repository discriminator for same-path rows", () => {
     renderTree([
-      file({ path: "README.md", repository_name: "frontend", repository_id: "f" }),
-      file({ path: "README.md", repository_name: "backend", repository_id: "b" }),
+      file({ path: README_PATH, repository_name: "frontend", repository_id: "f" }),
+      file({ path: README_PATH, repository_name: "backend", repository_id: "b" }),
     ]);
 
     const identities = screen
       .getAllByTestId("review-file-row")
       .map((row) => `${row.dataset.repositoryName}:${row.dataset.filePath}`)
       .sort();
-    expect(identities).toEqual(["backend:README.md", "frontend:README.md"]);
+    expect(identities).toEqual([`backend:${README_PATH}`, `frontend:${README_PATH}`]);
   });
 });

@@ -153,6 +153,106 @@ func TestUserStateGETFromDifferentUserReturns404(t *testing.T) {
 	}
 }
 
+// TestUserStateWorkspaceScopeIsolatesUsersAndScopes covers the workspace
+// scope the way TestUserStateGETFromDifferentUserReturns404 covers the task
+// scope. Workspace-scoped entries only became a shipping surface with the
+// sidebar-workspace-actions slot (kandev-plugin-notes' per-workspace note),
+// and that note's UI promises "only you can see this note" — so the negative
+// is asserted for every verb, not just GET: a second user must not read,
+// overwrite, delete, or enumerate the first user's workspace note.
+//
+// The same subtest also pins scope separation on an identical raw id:
+// task/X and workspace/X are different entries, which is what lets the
+// plugin key one cache by "<scope>:<id>" without conflating the two.
+func TestUserStateWorkspaceScopeIsolatesUsersAndScopes(t *testing.T) {
+	router, svc, _ := newUserStateTestRouter(t)
+	installUserStatePlugin(t, svc, "kandev-plugin-notes", true)
+
+	const (
+		wsPath   = "/api/plugins/kandev-plugin-notes/user-state/workspace/ws_1/note"
+		wsList   = "/api/plugins/kandev-plugin-notes/user-state/workspace/ws_1"
+		taskPath = "/api/plugins/kandev-plugin-notes/user-state/task/ws_1/note"
+	)
+
+	rec := userStateReq(router, http.MethodPut, wsPath, "user_1", `{"value":"alice's workspace note"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if rec = userStateReq(router, http.MethodPut, taskPath, "user_1", `{"value":"task-scoped"}`); rec.Code != http.StatusOK {
+		t.Fatalf("PUT task scope status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+
+	// user_2 must not read it.
+	if rec = userStateReq(router, http.MethodGet, wsPath, "user_2", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("GET (different user) status = %d, want 404, body=%s", rec.Code, rec.Body.String())
+	}
+
+	// user_2 must not enumerate it.
+	rec = userStateReq(router, http.MethodGet, wsList, "user_2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("LIST (different user) status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var user2List struct {
+		Entries []state.UserStateEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &user2List); err != nil {
+		t.Fatalf("unmarshal LIST (different user): %v", err)
+	}
+	if len(user2List.Entries) != 0 {
+		t.Fatalf("LIST (different user) returned entries: %+v", user2List.Entries)
+	}
+
+	assertUserStateValue(t, router, taskPath, "user_1", `"task-scoped"`)
+	rec = userStateReq(router, http.MethodGet, wsList, "user_1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("LIST (workspace scope) status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var workspaceList struct {
+		Entries []state.UserStateEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &workspaceList); err != nil {
+		t.Fatalf("unmarshal LIST (workspace scope): %v", err)
+	}
+	if len(workspaceList.Entries) != 1 || workspaceList.Entries[0].Key != "note" {
+		t.Fatalf("LIST (workspace scope) entries = %+v, want only note", workspaceList.Entries)
+	}
+
+	// user_2 writing the same path must not disturb user_1's value, and
+	// user_2 deleting it must not delete user_1's.
+	if rec = userStateReq(router, http.MethodPut, wsPath, "user_2", `{"value":"bob's own"}`); rec.Code != http.StatusOK {
+		t.Fatalf("PUT (different user) status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if rec = userStateReq(router, http.MethodDelete, wsPath, "user_2", ""); rec.Code != http.StatusOK {
+		t.Fatalf("DELETE (different user) status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	assertUserStateValue(t, router, wsPath, "user_1", `"alice's workspace note"`)
+	assertUserStateValue(t, router, taskPath, "user_1", `"task-scoped"`)
+
+	// task/ws_1 and workspace/ws_1 are distinct entries for the same user.
+	if rec = userStateReq(router, http.MethodDelete, wsPath, "user_1", ""); rec.Code != http.StatusOK {
+		t.Fatalf("DELETE workspace scope status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	assertUserStateValue(t, router, taskPath, "user_1", `"task-scoped"`)
+}
+
+// assertUserStateValue fails unless userID's entry at path holds want.
+func assertUserStateValue(t *testing.T, router *gin.Engine, path, userID, want string) {
+	t.Helper()
+	rec := userStateReq(router, http.MethodGet, path, userID, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s status = %d, want 200, body=%s", path, rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal %s: %v", path, err)
+	}
+	if string(resp.Value) != want {
+		t.Fatalf("GET %s value = %s, want %s", path, resp.Value, want)
+	}
+}
+
 // TestUserStateWithoutCapabilityReturns403 pins AC17.
 func TestUserStateWithoutCapabilityReturns403(t *testing.T) {
 	router, svc, _ := newUserStateTestRouter(t)

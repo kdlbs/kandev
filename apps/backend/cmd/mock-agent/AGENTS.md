@@ -42,6 +42,8 @@ Scenarios in `scenarioRegistry` can only emit `SessionUpdate` notifications — 
 
 `/overloaded[:N]` is the reference example (`handler.go: handleOverloaded`): it returns the production `529 Overloaded` error for the first `N` prompts of a session (default 1), then recovers with a normal text response. The orchestrator's backoff retry tears the agent process down and relaunches it between attempts, so the fail-count is persisted in a **temp file** keyed by the session id (`overloadedCounterPath`) rather than an in-memory map — it survives the relaunch (and is cleaned up on recovery and in `CloseSession`). Use `/overloaded` to demo the yellow retry status, or a large `N` like `/overloaded:9` to keep failing so the retry loop stays visible / exhausts to the red recovery banner.
 
+`/transport-lost[:N]` (`handler.go: handleTransportLost`) follows the same shape for the ACP wire-level transport-death signature (`peer disconnected before response` — the acp-go-sdk's own `ErrPeerDisconnected` payload shape), which `routingerr`'s `acp.transport_lost.v1` rule classifies as `CodeAgentTransportLost` and admits to the short-retry ladder. Use `/transport-lost` or a large `N` like `/transport-lost:9` the same way as `/overloaded`.
+
 ## Emitter helpers worth knowing
 
 `emitter.go` wraps the ACP `sessionUpdater` with helpers that shield scenarios from SDK plumbing:

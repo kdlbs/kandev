@@ -1249,6 +1249,7 @@
   "start2": "Iniciar",
   "startAgent": "Iniciar o agente",
   "startAgent2": "Iniciar o agente",
+  "composerStartAgentHint": "Enviar uma mensagem iniciará automaticamente o agente.",
   "startDevServerPreview": "Iniciar a pré-visualização do servidor de desenvolvimento",
   "startFreshSession": "Iniciar uma sessão nova",
   "startPlanMode": "Iniciar o modo de planeamento",

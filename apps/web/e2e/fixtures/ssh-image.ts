@@ -9,7 +9,7 @@ import path from "node:path";
  *
  * The image carries:
  *   - openssh-server + openssh-sftp-server (the remote target)
- *   - git + bash + sudo + coreutils (for the SSH executor's prepare scripts)
+ *   - git + bash + curl + sudo + coreutils (for prepare scripts and broker health checks)
  *   - iproute2 + iptables (for fault-injection: drop traffic mid-session)
  *   - a pre-baked `mock-agent` binary at /usr/local/bin/mock-agent so the
  *     agentctl process the SSH executor uploads has something to spawn when
@@ -72,6 +72,7 @@ RUN apk add --no-cache \\
     openssh-sftp-server \\
     git \\
     bash \\
+    curl \\
     sudo \\
     shadow \\
     coreutils \\

@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionState } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { errors, type Page } from "@playwright/test";
@@ -267,6 +268,18 @@ test.describe("Terminal agent (TUI passthrough)", () => {
 
     const session = await openTaskSession(testPage, "TUI Reset Task");
     await session.expectPassthroughHasText("Mock Agent");
+
+    // The terminal header can render before the auto-started boot turn ends.
+    // Wait for the backend lifecycle state before moving the task. Otherwise
+    // the workflow reset can race with that first PTY turn under CI load.
+    expect(task.session_id, "task must have a session to await").toBeTruthy();
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id as string,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "the initial passthrough turn did not settle before the cascade",
+      timeout: 30_000,
+    });
 
     // Trigger cascade: Analyze → (turn complete) → Implement (reset + auto_start) → Review
     await apiClient.moveTask(task.id, workflow.id, analyzeStep.id);

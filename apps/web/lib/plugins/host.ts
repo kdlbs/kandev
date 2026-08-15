@@ -265,16 +265,32 @@ async function loadPlugin(
   }
 }
 
-/** Removes a failed generation without disturbing a newer concurrent load. */
+/**
+ * Removes a failed generation without disturbing a newer concurrent load.
+ * Leaves the plugin's registry entries (nav items, routes, etc.) in place: a
+ * registration made before `initialize()` threw or timed out must survive —
+ * only the runtime (resources, styles, modals) is torn down. `loadPlugin`
+ * already marked the plugin `"failed"` before calling this.
+ */
 function revokeFailedLoad(pluginId: string, generation: number): void {
   if (!isCurrentLoad(pluginId, generation)) return;
-  deactivatePluginRuntime(pluginId, generation);
+  deactivatePluginRuntime(pluginId, generation, { unregister: false });
   // Fence delayed registrations from an initializer that timed out.
   claimLoadGeneration(pluginId);
 }
 
-/** Revokes one active runtime without changing its published lifecycle state. */
-function deactivatePluginRuntime(pluginId: string, expectedGeneration?: number): void {
+/**
+ * Revokes one active runtime without changing its published lifecycle state.
+ * Pass `unregister: false` to keep the plugin's existing registry entries —
+ * used by the failed-load path (see `revokeFailedLoad`) so a nav item
+ * registered before `initialize()` failed is retained, per the
+ * partial-initialization-failure retention contract (spec.md's AC).
+ */
+function deactivatePluginRuntime(
+  pluginId: string,
+  expectedGeneration?: number,
+  options?: { unregister?: boolean },
+): void {
   if (expectedGeneration !== undefined && !isCurrentLoad(pluginId, expectedGeneration)) return;
   const runtime = activePluginRuntimes.get(pluginId);
   if (runtime && expectedGeneration !== undefined && runtime.generation !== expectedGeneration) {
@@ -289,7 +305,9 @@ function deactivatePluginRuntime(pluginId: string, expectedGeneration?: number):
       console.error(`[plugins] error destroying plugin "${pluginId}"`, error);
     }
   }
-  pluginRegistry.unregisterPlugin(pluginId);
+  if (options?.unregister ?? true) {
+    pluginRegistry.unregisterPlugin(pluginId);
+  }
   pluginModalManager.closeAllForPlugin(pluginId);
   removeStyles(pluginId);
 }

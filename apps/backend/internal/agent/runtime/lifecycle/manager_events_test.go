@@ -120,6 +120,35 @@ func TestHandleAgentEvent_UserMessageChunkNotBufferedAsAssistant(t *testing.T) {
 	}
 }
 
+func TestHandleAgentEvent_CompleteCarriesPromptTurnID(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-turn-id", "task-1", "session-1")
+	execution.promptTurnID = "turn-1"
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	generation, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin prompt: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		SessionID:        execution.SessionID,
+		PromptGeneration: generation,
+	})
+
+	for _, payload := range eventBus.getStreamEvents() {
+		if payload.Data != nil && payload.Data.Type == streams.EventTypeComplete {
+			if payload.Data.TurnID != "turn-1" {
+				t.Fatalf("completion turn_id = %q, want turn-1", payload.Data.TurnID)
+			}
+			return
+		}
+	}
+	t.Fatal("no complete stream event published")
+}
+
 func TestHandleAgentEvent_RecordsStreamedAssistantTextForResumeContext(t *testing.T) {
 	mgr, _ := createTestManagerWithTracking()
 	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())

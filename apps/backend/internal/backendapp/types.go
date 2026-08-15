@@ -81,6 +81,7 @@ type Services struct {
 	Workflow                 *workflowservice.Service
 	GitHub                   *github.Service
 	GitLab                   *gitlab.Service
+	GitLabCleanup            func() error
 	AzureDevOps              *azuredevops.Service
 	Jira                     *jira.Service
 	Linear                   *linear.Service

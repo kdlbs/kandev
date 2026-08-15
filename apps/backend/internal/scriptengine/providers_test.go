@@ -81,6 +81,36 @@ func TestRemoteContributionSetupScriptRejectsInvalidBinding(t *testing.T) {
 	}
 }
 
+func TestContributionDestinationSetupScriptPreservesOriginAndRoutesPushes(t *testing.T) {
+	destination := &models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "agent/kandev", ProviderID: "200", RemoteURL: "https://github.com/agent/kandev.git",
+		},
+	}
+	script, err := ContributionDestinationSetupScriptAt(destination, "/remote/task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"cd '/remote/task'",
+		"remote.$destination_remote.pushurl",
+		"branch.$current_branch.pushRemote",
+		"https://github.com/agent/kandev.git",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("destination setup script missing %q", want)
+		}
+	}
+	if strings.Contains(script, "remote.origin") || strings.Contains(script, "origin.url") {
+		t.Error("destination setup script rewrites origin")
+	}
+}
+
 // TestProviders_ShellEscapeDataPlaceholders is the scriptengine-level
 // regression guard for the branch-name command-injection RCE. Every data
 // placeholder that lands in shell text (branch/url/path) must be emitted as a

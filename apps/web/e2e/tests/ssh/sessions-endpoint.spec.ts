@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
+import { dwell } from "../../helpers/causal-waits";
 /**
  * HTTP contract for GET /api/v1/ssh/executors/:id/sessions. Backs the
  * SSHSessionsCard table. Filtered to ssh-runtime ExecutorRunning rows for
@@ -144,7 +145,11 @@ test.describe("ssh sessions-endpoint contract", () => {
     const beforeRow = before.find((s) => s.task_id === task.id);
     expect(beforeRow).toBeDefined();
 
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    await dwell(
+      2_000,
+      "clock-separation",
+      "the assertion below is that uptime_seconds grew, so real time has to pass between the two reads; the thing being waited for is the clock, not an app event",
+    );
 
     const after = await apiClient.listSSHSessions(seedData.sshExecutorId);
     const afterRow = after.find((s) => s.task_id === task.id);

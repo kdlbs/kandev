@@ -189,7 +189,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
       icon={<IconBrandSentry className="h-5 w-5" />}
       title={t("sentry:sentryIntegration")}
       description={t("sentry:sentryIntegrationDescription")}
-      action={<SentryEnabledControl />}
+      action={<SentryEnabledControl workspaceId={workspaceId} />}
     >
       <SettingsCard isDirty={formDirty}>
         <CardContent className="space-y-3 pt-6">
@@ -197,7 +197,10 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
             {t("sentry:instances")}
           </h3>
           {loading && instances.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">
+            <p
+              className="text-sm text-muted-foreground py-4 text-center"
+              data-testid="sentry-instance-list-loading"
+            >
               {t("sentry:loadingEllipsis")}
             </p>
           ) : (

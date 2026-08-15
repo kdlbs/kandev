@@ -15,6 +15,7 @@ import (
 	quickterminalrepository "github.com/kandev/kandev/internal/quickterminal/repository"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/telemetrycontract"
 	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
 	utilitystore "github.com/kandev/kandev/internal/utility/store"
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
@@ -102,6 +103,10 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		return nil, nil, nil, fmt.Errorf("secret store: %w", err)
 	}
 	cleanups = append(cleanups, cleanup)
+
+	// All repositories have finished their initSchema calls, so every
+	// telemetry contract's backing objects are known to exist (or not).
+	activateTelemetryContracts(ctx, writer, reader, log)
 
 	// All repositories have finished their initSchema calls. Record the
 	// current binary version so the next boot can detect upgrades correctly.
@@ -208,6 +213,26 @@ func provideSupportRepos(ctx context.Context, writer, reader *sqlx.DB) (supportR
 	repos.utility = utilityRepo
 
 	return repos, cleanups, nil
+}
+
+// activateTelemetryContracts writes the boot activation row for any
+// newly-active telemetry contract and logs one health line per registered
+// contract. Neither step is fatal: a failure logs and boot continues,
+// matching recordSchemaVersion's contract directly below.
+func activateTelemetryContracts(ctx context.Context, writer, reader *sqlx.DB, log *logger.Logger) {
+	store, err := telemetrycontract.NewWithDB(writer, reader)
+	if err != nil {
+		if log != nil {
+			log.Warn("failed to initialize telemetry_activations", zap.Error(err))
+		}
+		return
+	}
+	if err := store.Activate(ctx); err != nil {
+		if log != nil {
+			log.Warn("failed to activate telemetry contracts", zap.Error(err))
+		}
+	}
+	store.LogHealth(ctx, log)
 }
 
 // recordSchemaVersion writes the current binary version into kandev_meta so the

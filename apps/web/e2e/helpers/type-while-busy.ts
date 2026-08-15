@@ -35,23 +35,45 @@ export async function typeWhileBusy(page: Page, editor: Locator, text: string): 
     const box = await editor.boundingBox();
     if (!box) throw new Error("Editor bounding box not found");
     await page.mouse.click(box.x + 20, box.y + box.height / 2);
-    // deliberate-sleep(unverified): pre-existing spacing in this retry loop.
-    // Unlike the other retained sleeps these are not tied to an identified
-    // timer, so they are debt rather than intent: the likely reactive
-    // replacement is waiting for the editor to take focus. They are left alone
-    // here only because this helper is on the hot path of ~16 specs that were
-    // just verified against it, and changing it would invalidate that run.
-    await page.waitForTimeout(200);
+    // Typing requires the editor to own focus, and `mouse.click` only queues
+    // that: ProseMirror commits focus on a later tick. This waits for the
+    // commit rather than for a number.
+    //
+    // It replaces an `unverified` 200ms sleep. The hypothesis for that sleep
+    // was that keystrokes sent before the focus commit go to the previously
+    // focused element -- but that is NOT confirmed: with the sleep removed and
+    // nothing in its place, 9/9 calls still landed their text on the first
+    // attempt locally. So this is a precondition guard, not a fix for an
+    // observed failure. It is kept because it is free when focus is already
+    // committed and correct if a loaded shard ever does reorder the two, which
+    // a 9-call sample on an idle machine cannot rule out.
+    await expect(editor).toBeFocused({ timeout: 5_000 });
     await page.keyboard.type(text);
-    // deliberate-sleep(unverified): as above.
-    await page.waitForTimeout(100);
-    const content = await editor.textContent();
-    if (content?.includes(text)) return;
-    // Text wasn't entered; select all and clear for retry
-    await page.keyboard.press(`${modifier}+a`);
-    await page.keyboard.press("Backspace");
-    // deliberate-sleep(unverified): as above.
-    await page.waitForTimeout(200);
+    // Auto-retrying, so it returns as soon as ProseMirror renders the text
+    // rather than after a fixed settle. A miss here is the retry's cue, not a
+    // failure, hence the catch.
+    const typed = await expect(editor)
+      .toContainText(text, { timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (typed) return;
+    // Text wasn't entered; select all and clear for retry. Scoped to the editor
+    // rather than sent through `page.keyboard`, because this branch runs
+    // precisely when the typing may have gone somewhere else -- a page-level
+    // select-all + Backspace is aimed at whatever holds focus, which is the one
+    // thing this path cannot assume. `locator.press` focuses first.
+    await editor.press(`${modifier}+a`);
+    await editor.press("Backspace");
+    // Wait for the clear to land instead of guessing, and require the editor to
+    // be *empty*: asserting only that `text` is gone would let leftovers from a
+    // partial attempt survive and concatenate with the next one, which the
+    // following `toContainText` would then happily accept.
+    await expect
+      .poll(async () => (await editor.innerText()).trim(), {
+        timeout: 5_000,
+        message: "editor still had content after select-all + Backspace",
+      })
+      .toBe("");
   }
   throw new Error(`Failed to type "${text}" into editor after 3 attempts`);
 }

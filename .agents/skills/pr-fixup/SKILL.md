@@ -22,12 +22,13 @@ replies, and refresh current-head state after pushes and review aggregation.
 Create a visible checklist:
 
 1. Gather PR state
-2. Fix failing CI checks
-3. Triage review comments
-4. Address valid comments
-5. Commit, rerun affected checks, and push
-6. Re-check the new head
-7. Report
+2. Resolve an authorized PR merge conflict
+3. Fix failing CI checks
+4. Triage review comments
+5. Address valid comments
+6. Commit, rerun affected checks, and push
+7. Re-check the new head
+8. Report
 
 ## 1. Gather PR State
 
@@ -45,10 +46,14 @@ classification, authentication fallbacks, and hidden-thread handling. Inspect
 mergeability separately through `references/merge-conflicts.md`.
 
 If the fresh mergeability query reports `mergeable=CONFLICTING` or
-`mergeStateStatus=DIRTY`, stop CI and review triage. Load
-`references/merge-conflicts.md`, resolve or rebase the conflict, verify the
-result, push it, and restart this section with a new PR-state snapshot. Do not
-triage comments or checks against a conflicted head.
+`mergeStateStatus=DIRTY`, stop CI and review triage. This is an actionable PR
+blocker, not a clean or report-only terminal state. Load
+`references/merge-conflicts.md`. If the user has explicitly authorized PR
+fixup or conflict resolution, resolve the conflict now (prefer a merge of the
+fresh base unless the user requests a rebase), verify the result, push it, and
+restart this section with a new PR-state snapshot. If authorization is absent,
+report the conflict and ask for it before mutating the branch. Do not triage
+comments or checks against a conflicted head.
 
 For pending CI, do not run a rapid polling loop. Wait at a reasonable interval,
 then run the same summary again. Stop after about 20 minutes and report the

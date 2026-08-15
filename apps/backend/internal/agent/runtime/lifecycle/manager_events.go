@@ -299,6 +299,11 @@ func setProviderError(execution *AgentExecution, providerError *streams.Provider
 
 // handleCompleteEvent handles a "complete" agent event: flushes buffers, marks state, and signals SendPrompt.
 func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl.AgentEvent) bool {
+	if event.TurnID == "" {
+		// Snapshot before publishing AgentReady. A queued successor may bind a
+		// new turn while the complete stream frame is still crossing the bus.
+		event.TurnID = execution.promptTurnIDSnapshot()
+	}
 	isError, stopReason := completeEventResult(event)
 	claim, claimed := m.claimPromptCompletion(execution, event, isError)
 	if !claimed {

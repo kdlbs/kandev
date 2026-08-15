@@ -119,31 +119,44 @@ steps:
       implemented and verified in the previous steps.
 
       STEP 1: PRE-FLIGHT
-      - Run `gh auth status` to confirm GitHub CLI is authenticated.
       - Confirm your changes are committed (`git status`).
+      - For executor-owned credentials without a server-authored managed
+        destination, run `gh auth status` to confirm GitHub CLI access.
 
-      STEP 2: ENSURE A FORK EXISTS AND WIRE REMOTES
-      The local clone's `origin` initially points at `kdlbs/kandev`, which
-      most contributors cannot push to. Run:
+      STEP 2: PUBLISH THROUGH THE TASK'S PREPARED ROUTE
+      Task creation prepares the publication route before a managed task
+      launches. Do not run a fork command, rename `origin`, or rewrite the
+      canonical remote in this workflow.
 
-          gh repo fork --remote --remote-name=origin
+      For Managed workspace credentials:
+      - `origin` remains the canonical `kdlbs/kandev` repository. Use it for
+        pulls, base comparisons, issue lookup, and the pull request target.
+      - The task branch has a prepared push remote. Run ordinary `git push`
+        and let Git use the branch's configured push remote.
+      - Confirm that the configured push remote points at the task's exact
+        GitHub fork. If it is missing or points at another repository, stop
+        and report that the managed publication route is unavailable. Do not
+        repair it with ambient credentials.
+      - Create the pull request with an explicit canonical target and fork
+        head: `gh pr create --repo kdlbs/kandev --base main --head
+        <fork-owner>:<branch>` plus the title, body, and draft options.
 
-      `gh` will fork `kdlbs/kandev` to your account if a fork does not
-      already exist, rename the existing `origin` remote to `upstream`,
-      and point `origin` at `<your-login>/kandev`. The command is a no-op
-      on subsequent runs, so it is safe to re-run.
-
-      Verify with `git remote -v`: `origin` must point at your fork and
-      `upstream` at `kdlbs/kandev`. Skip this step only if you confirmed
-      via `gh api repos/kdlbs/kandev --jq .permissions.push` that you
-      already have push access to the upstream repo.
+      Executor-owned credentials are a separate compatibility path. It may
+      use the executor's own publication setup only when the task has no
+      server-authored managed destination. In that case, verify `gh auth
+      status`, then run `gh repo fork kdlbs/kandev --remote
+      --remote-name=origin` when the executor does not already have a
+      writable fork. Verify that `origin` points at the executor-owned fork
+      and that the canonical repository remains available as `upstream`.
+      Never select this path to recover from a managed preparation failure or
+      a missing managed push remote.
 
       STEP 3: INVOKE THE PR SKILL
       Use the `pr` skill (see `.claude/skills/pr/SKILL.md`):
-      - Push the current branch to `origin` (your fork, after step 2).
+      - Push the current branch through the prepared route from step 2.
       - Open a pull request against `main` in `kdlbs/kandev` with a clear
         title and description summarising the change and how it was tested.
-        `gh pr create` auto-detects the cross-fork setup.
+        Use the explicit repository and fork head from step 2.
       - Reference the original task title in the PR description.
 
       STEP 4: REPORT
