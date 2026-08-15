@@ -123,6 +123,9 @@ blockers/risks, and update task/plan status.
 - A ready event resumes normal predecessor completion after a reservation rolls back and its prompt
   generation remains authoritative. Startup now fails before watcher, scheduler, or prompt admission
   when any unpublished reservation cannot be reconciled.
+- Follow-up review remediation represents a wired no-active-turn snapshot explicitly during
+  clarification-pause cancellation. A first turn created during detachment now rejects the stale pause
+  just like a successor to an existing turn; the unwired turn-service fallback stays unchanged.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - Final review remediation makes that durable detach an atomic `UPDATE ... RETURNING` claim over the
@@ -141,3 +144,6 @@ blockers/risks, and update task/plan status.
 - Bot-review remediation passed the full clarification and orchestrator suites, changed-code
   `golangci-lint` with zero issues, and ten race-enabled repetitions of the reservation-ready and
   post-acceptance failure regressions.
+- The explicit no-turn cancellation regression and the existing successor-turn case passed ten
+  focused repetitions; the full orchestrator and clarification suites passed, and changed-code
+  `golangci-lint` reported zero issues.

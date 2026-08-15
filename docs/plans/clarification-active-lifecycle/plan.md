@@ -250,6 +250,11 @@ All task gates passed:
   prompt admission; and stale pending-owner loads still open the requested task on desktop and mobile.
   Full clarification/orchestrator tests, ten race-enabled focused repetitions, changed-code backend
   lint, 55 focused web tests, zero-warning focused web lint, typecheck, and i18n ratchet passed.
+- Follow-up bot review: clarification detach database failures are error-level diagnostics, and pause
+  cancellation treats a wired no-active-turn snapshot as explicit authority. A first turn created
+  during detachment is preserved, matching the existing successor-turn protection; both focused races
+  passed ten repetitions, followed by the full orchestrator and clarification suites and zero-issue
+  changed-code backend lint.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

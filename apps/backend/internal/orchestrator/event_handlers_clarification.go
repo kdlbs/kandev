@@ -511,9 +511,14 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	if session == nil {
 		return 0, nil
 	}
-	expectedTurnID, err := s.peekActiveTurnID(writeCtx, sessionID)
-	if err != nil {
-		return 0, fmt.Errorf("inspect clarification turn before pause: %w", err)
+	expectedTurnID := ""
+	var expectedTurn *string
+	if s.turnService != nil {
+		expectedTurnID, err = s.peekActiveTurnID(writeCtx, sessionID)
+		if err != nil {
+			return 0, fmt.Errorf("inspect clarification turn before pause: %w", err)
+		}
+		expectedTurn = &expectedTurnID
 	}
 
 	hasPendingClarification := s.sessionHasPendingClarification(writeCtx, sessionID)
@@ -540,7 +545,7 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 		writeCtx,
 		session.TaskID,
 		sessionID,
-		expectedTurnID,
+		expectedTurn,
 		guard.unlock,
 		guard.relock,
 	); errors.Is(err, ErrSendNowTurnChanged) {
@@ -723,16 +728,19 @@ func (s *Service) cancelAgentSilentWithGuard(
 	relockGuard func(),
 ) error {
 	return s.cancelAgentSilentExpectedWithGuard(
-		ctx, taskID, sessionID, "", unlockGuard, relockGuard,
+		ctx, taskID, sessionID, nil, unlockGuard, relockGuard,
 	)
 }
 
 // cancelAgentSilentExpectedWithGuard registers cancellation before releasing
 // the caller's guard. A prompt claim therefore cannot slip into the gap, and a
 // turn created outside the orchestrator is rejected by the expected identity.
+// A non-nil expectedTurnID records either one specific turn or an explicit
+// no-turn expectation; nil preserves the fallback when turnService is unwired.
 func (s *Service) cancelAgentSilentExpectedWithGuard(
 	ctx context.Context,
-	taskID, sessionID, expectedTurnID string,
+	taskID, sessionID string,
+	expectedTurnID *string,
 	unlockGuard, relockGuard func(),
 ) error {
 	if s.repo == nil {
@@ -743,8 +751,8 @@ func (s *Service) cancelAgentSilentExpectedWithGuard(
 		cancellationKindSilent,
 		nil,
 	)
-	if owner && expectedTurnID != "" {
-		s.setCancellationExpectedTurn(sessionID, operation, expectedTurnID)
+	if owner && expectedTurnID != nil {
+		s.setCancellationExpectedTurn(sessionID, operation, *expectedTurnID)
 	}
 	if owner {
 		go s.runSilentCancellation(ctx, taskID, sessionID, operation)

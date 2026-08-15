@@ -35,6 +35,10 @@ hiding the action the icon represents.
 - Detachment claims pending, non-detached rows from the current durable turn in one database update
   and publishes only the rows that update returns. A concurrent answer or newer turn cannot be
   overwritten by a stale read-modify-write detachment.
+- Clarification-pause cancellation snapshots turn authority before detachment. With a wired turn
+  service, both a specific turn and the absence of a turn are explicit expectations; a first or
+  successor turn created during detachment cannot be cancelled by the stale pause. Installations
+  without a turn service retain the legacy unscoped fallback.
 - Resolving, rejecting, cancelling, expiring, or deleting one bundle changes only that bundle. It
   cannot clear or re-arm another bundle in the same session.
 - The chat's Skip action rejects the exact visible bundle through the existing response endpoint. A
@@ -244,6 +248,9 @@ session they can already access. Session selection does not broaden task visibil
   clean, **WHEN** the user activates the task from the desktop sidebar or phone task drawer, **THEN**
   Kandev bypasses any cached session list, selects the secondary session, closes the drawer when
   applicable, and shows the question.
+- **GIVEN** clarification pause observes no active turn, **WHEN** detachment creates the session's first
+  turn before cancellation registration completes, **THEN** the pause rejects its stale cancellation
+  and does not cancel or complete that new turn.
 - **GIVEN** pending-owner loading began for one task-summary revision, **WHEN** a newer summary changes
   the pending action before the session response is applied, **THEN** desktop and phone activation do
   not navigate to the obsolete owner or close the phone drawer.

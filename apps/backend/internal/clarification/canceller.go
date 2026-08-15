@@ -39,7 +39,7 @@ func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) 
 	writeCtx := context.WithoutCancel(ctx)
 	messages, err := c.repo.DetachActiveClarificationMessagesBySessionID(writeCtx, sessionID)
 	if err != nil {
-		c.logger.Warn("failed to detach current clarification bundles",
+		c.logger.Error("failed to detach current clarification bundles",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return 0

@@ -958,6 +958,48 @@ func TestPauseForClarificationInput_DoesNotCancelSuccessorCreatedDuringDetach(t 
 	}
 }
 
+func TestPauseForClarificationInput_DoesNotCancelFirstTurnCreatedDuringDetach(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	canceller := &blockingClarificationCanceller{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.SetClarificationCanceller(canceller)
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.PauseForClarificationInput(ctx, "s1")
+		done <- err
+	}()
+	select {
+	case <-canceller.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for clarification detach")
+	}
+	if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
+		t.Fatalf("start first turn during detach: %v", err)
+	}
+	close(canceller.release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("pause after first turn: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for clarification pause")
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 0 {
+		t.Fatalf("stale clarification pause cancelled first turn: %d calls", got)
+	}
+}
+
 func TestPauseForClarificationInput_IgnoresStaleTimeoutWithoutPendingClarification(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
