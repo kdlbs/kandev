@@ -223,6 +223,7 @@ type AttachmentRepository interface {
 // TurnRepository handles conversation turn persistence.
 type TurnRepository interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
+	DeleteTurnIfUnreferenced(ctx context.Context, sessionID, turnID string) (bool, error)
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error

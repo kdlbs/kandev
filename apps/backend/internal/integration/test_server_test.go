@@ -230,6 +230,21 @@ func (a *testTurnServiceAdapter) StartTurn(ctx context.Context, sessionID string
 	return a.svc.StartTurn(ctx, sessionID)
 }
 
+func (a *testTurnServiceAdapter) ReserveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return a.svc.ReserveTurn(ctx, sessionID)
+}
+
+func (a *testTurnServiceAdapter) PublishReservedTurn(turn *models.Turn) {
+	a.svc.PublishReservedTurn(turn)
+}
+
+func (a *testTurnServiceAdapter) RollbackReservedTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	return a.svc.RollbackReservedTurn(ctx, sessionID, turnID)
+}
+
 func (a *testTurnServiceAdapter) CompleteTurn(ctx context.Context, turnID string) error {
 	return a.svc.CompleteTurn(ctx, turnID)
 }

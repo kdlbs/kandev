@@ -28,6 +28,30 @@ func (c *zeroClarificationCanceller) DetachSessionAndNotify(_ context.Context, s
 	return 0
 }
 
+type failingStartTurnService struct {
+	TurnService
+	err error
+}
+
+func (s *failingStartTurnService) StartTurn(context.Context, string) (*models.Turn, error) {
+	return nil, s.err
+}
+
+func (s *failingStartTurnService) ReserveTurn(context.Context, string) (*models.Turn, error) {
+	return nil, s.err
+}
+
+type blockingClarificationCanceller struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingClarificationCanceller) DetachSessionAndNotify(context.Context, string) int {
+	close(c.entered)
+	<-c.release
+	return 1
+}
+
 func TestHandleClarificationAnswered(t *testing.T) {
 	ctx := context.Background()
 
@@ -228,6 +252,53 @@ func TestResumeDetachedClarificationDispatchFailureLeavesBundleRestorable(t *tes
 	}
 	if len(turns) != 2 || turns[1].ID != "turn-session-retry" {
 		t.Fatalf("turns after accepted retry = %#v, want one successor turn", turns)
+	}
+}
+
+func TestResumeDetachedClarificationRejectsBeforeDispatchWhenTurnPersistenceFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-turn-failure", "session-turn-failure", "step-1")
+	seedExecutorRunning(t, repo, "session-turn-failure", "task-turn-failure", "exec-turn-failure")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session-turn-failure",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	persistenceErr := errors.New("persist successor turn")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.turnService = &failingStartTurnService{
+		TurnService: &repoBackedTurnService{repo: repo},
+		err:         persistenceErr,
+	}
+
+	err := svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-turn-failure",
+		SessionID:  "session-turn-failure",
+		PendingID:  "pending-turn-failure",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if !errors.Is(err, persistenceErr) {
+		t.Fatalf("resume error = %v, want %v", err, persistenceErr)
+	}
+	agentMgr.mu.Lock()
+	promptCalls := len(agentMgr.capturedPromptCalls)
+	agentMgr.mu.Unlock()
+	if promptCalls != 0 {
+		t.Fatalf("prompt dispatch calls = %d, want none before successor persistence", promptCalls)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-turn-failure")
+	if err != nil {
+		t.Fatalf("load session after persistence failure: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after persistence failure = %q, want waiting", session.State)
 	}
 }
 
@@ -680,6 +751,49 @@ func TestPauseForClarificationInput_CancelsWhileSessionAlreadyWaiting(t *testing
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
 		t.Fatalf("waiting ask session must still cancel active agent, got %d calls", got)
+	}
+}
+
+func TestPauseForClarificationInput_DoesNotCancelSuccessorCreatedDuringDetach(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	canceller := &blockingClarificationCanceller{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.SetClarificationCanceller(canceller)
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.PauseForClarificationInput(ctx, "s1")
+		done <- err
+	}()
+	select {
+	case <-canceller.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for clarification detach")
+	}
+	if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
+		t.Fatalf("start successor turn: %v", err)
+	}
+	close(canceller.release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("pause after successor turn: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for clarification pause")
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 0 {
+		t.Fatalf("stale clarification pause cancelled successor: %d calls", got)
 	}
 }
 

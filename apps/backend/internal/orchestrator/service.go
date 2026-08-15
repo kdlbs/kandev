@@ -114,6 +114,9 @@ type MessageCreator interface {
 // TurnService is an interface for managing session turns
 type TurnService interface {
 	StartTurn(ctx context.Context, sessionID string) (*models.Turn, error)
+	ReserveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
+	PublishReservedTurn(turn *models.Turn)
+	RollbackReservedTurn(ctx context.Context, sessionID, turnID string) (bool, error)
 	CompleteTurn(ctx context.Context, turnID string) error
 	GetTurn(ctx context.Context, turnID string) (*models.Turn, error)
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
@@ -1381,39 +1384,59 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 // active turn. Callers that must compensate a failed dispatch may only close a
 // turn they created; an adopted turn belongs to an earlier dispatch.
 func (s *Service) startTurnForSessionWithOwnership(ctx context.Context, sessionID string) (string, bool) {
-	if s.turnService == nil {
-		return "", false
-	}
-
-	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
-		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
-			return turnID, false
-		}
-	}
-
-	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); turn != nil {
-		s.activeTurns.Store(sessionID, turn.ID)
-		return turn.ID, false
-	} else if err != nil {
-		// A real DB read failure here would otherwise be silently dropped, and
-		// we'd fall through to StartTurn — potentially writing a duplicate next
-		// to an existing open turn we couldn't see. Log it; the next sweep via
-		// completeTurnForSession will mop up any duplicate.
-		s.logger.Warn("failed to look up active turn before starting a new one",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
-
-	turn, err := s.turnService.StartTurn(ctx, sessionID)
+	turnID, created, _, err := s.startTurnForSessionWithOwnershipChecked(ctx, sessionID, false)
 	if err != nil {
 		s.logger.Warn("failed to start turn",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return "", false
 	}
+	return turnID, created
+}
+
+// startTurnForSessionWithOwnershipChecked makes persistence failure part of
+// prompt admission. A caller may reserve a newly created turn so turn.started
+// is published only after the external dispatch is acknowledged.
+func (s *Service) startTurnForSessionWithOwnershipChecked(
+	ctx context.Context,
+	sessionID string,
+	reserve bool,
+) (string, bool, *models.Turn, error) {
+	if s.turnService == nil {
+		return "", false, nil, nil
+	}
+
+	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
+		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
+			return turnID, false, nil, nil
+		}
+	}
+
+	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); turn != nil {
+		s.activeTurns.Store(sessionID, turn.ID)
+		return turn.ID, false, nil, nil
+	} else if err != nil {
+		return "", false, nil, fmt.Errorf("look up active turn: %w", err)
+	}
+
+	var (
+		turn *models.Turn
+		err  error
+	)
+	if reserve {
+		turn, err = s.turnService.ReserveTurn(ctx, sessionID)
+	} else {
+		turn, err = s.turnService.StartTurn(ctx, sessionID)
+	}
+	if err != nil {
+		return "", false, nil, fmt.Errorf("persist turn: %w", err)
+	}
 
 	s.activeTurns.Store(sessionID, turn.ID)
-	return turn.ID, true
+	if reserve {
+		return turn.ID, true, turn, nil
+	}
+	return turn.ID, true, nil, nil
 }
 
 // completeTurnForSession closes any open turn for the session.

@@ -33,6 +33,10 @@ type mockRepository struct {
 	executors     map[string]*models.Executor
 }
 
+func (m *mockRepository) DeleteTurnIfUnreferenced(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
 func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {
 	return nil
 }

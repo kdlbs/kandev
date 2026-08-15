@@ -165,8 +165,8 @@ func (s *Service) ResumeDetachedClarification(
 		Rejected:     request.Rejected,
 		RejectReason: request.RejectReason,
 	}, true, promptTaskOptions{
-		preservePromptContext:  true,
-		deferTurnUntilDispatch: true,
+		preservePromptContext:    true,
+		reserveTurnUntilDispatch: true,
 	})
 }
 
@@ -511,39 +511,6 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clarificationInputPauseTimeout)
 	defer cancel()
-	session, err := s.repo.GetTaskSession(writeCtx, sessionID)
-	if err != nil {
-		return 0, fmt.Errorf("load session for clarification pause: %w", err)
-	}
-	if session == nil {
-		return 0, nil
-	}
-
-	hasPendingClarification := s.sessionHasPendingClarification(writeCtx, sessionID)
-	detached := 0
-	if s.clarificationCanceller != nil {
-		detached = s.clarificationCanceller.DetachSessionAndNotify(writeCtx, sessionID)
-	}
-	if isTerminalSessionState(session.State) {
-		return detached, nil
-	}
-	if !hasPendingClarification && detached == 0 {
-		return detached, nil
-	}
-	if _, has := models.LoadPendingStepSignal(session.Metadata); has {
-		s.clearPendingStepSignal(writeCtx, session)
-	}
-
-	// The backend wait path and agentctl timeout notification can race for the
-	// same ask_user_question call. A duplicate cancel is safe: lifecycle returns
-	// ErrCancelEscalated/ErrNoExecutionForSession once the first pause wins, and
-	// completeTurnForSession is idempotent when there is no active turn left.
-	//
-	// Claim the shared per-session guard around the cancel itself — see the
-	// Service.cancelInFlight field doc comment: every cancel/take-and-dispatch
-	// decision for a session must serialize through this one guard, including
-	// this clarification-timeout cancel, or it can race a concurrent parent
-	// interrupt (or another drain) for the same session.
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
 	guardLocked := true
@@ -563,7 +530,52 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 		unlockGuard()
 		release()
 	}()
-	if err := s.cancelAgentSilentWithGuard(writeCtx, session.TaskID, sessionID, unlockGuard, relockGuard); err != nil {
+	session, err := s.repo.GetTaskSession(writeCtx, sessionID)
+	if err != nil {
+		return 0, fmt.Errorf("load session for clarification pause: %w", err)
+	}
+	if session == nil {
+		return 0, nil
+	}
+	expectedTurnID, err := s.peekActiveTurnID(writeCtx, sessionID)
+	if err != nil {
+		return 0, fmt.Errorf("inspect clarification turn before pause: %w", err)
+	}
+
+	hasPendingClarification := s.sessionHasPendingClarification(writeCtx, sessionID)
+	detached := 0
+	if s.clarificationCanceller != nil {
+		detached = s.clarificationCanceller.DetachSessionAndNotify(writeCtx, sessionID)
+	}
+	if isTerminalSessionState(session.State) {
+		return detached, nil
+	}
+	if !hasPendingClarification && detached == 0 {
+		return detached, nil
+	}
+	if _, has := models.LoadPendingStepSignal(session.Metadata); has {
+		s.clearPendingStepSignal(writeCtx, session)
+	}
+
+	// Detach and cancellation registration share the same guard as prompt turn
+	// creation. The backend wait path and agentctl timeout notification can race for the
+	// same ask_user_question call. A duplicate cancel is safe: lifecycle returns
+	// ErrCancelEscalated/ErrNoExecutionForSession once the first pause wins, and
+	// completeTurnForSession is idempotent when there is no active turn left.
+	if err := s.cancelAgentSilentExpectedWithGuard(
+		writeCtx,
+		session.TaskID,
+		sessionID,
+		expectedTurnID,
+		unlockGuard,
+		relockGuard,
+	); errors.Is(err, ErrSendNowTurnChanged) {
+		s.logger.Debug("skipping stale clarification pause after successor turn",
+			zap.String("task_id", session.TaskID),
+			zap.String("session_id", sessionID),
+			zap.String("expected_turn_id", expectedTurnID))
+		return detached, nil
+	} else if err != nil {
 		return detached, err
 	}
 	return detached, nil
@@ -751,8 +763,38 @@ func (s *Service) cancelAgentSilentWithGuard(
 	unlockGuard func(),
 	relockGuard func(),
 ) error {
-	_, err := s.cancelAgentSilentWithGuardAction(ctx, taskID, sessionID, unlockGuard, relockGuard, nil)
-	return err
+	return s.cancelAgentSilentExpectedWithGuard(
+		ctx, taskID, sessionID, "", unlockGuard, relockGuard,
+	)
+}
+
+// cancelAgentSilentExpectedWithGuard registers cancellation before releasing
+// the caller's guard. A prompt claim therefore cannot slip into the gap, and a
+// turn created outside the orchestrator is rejected by the expected identity.
+func (s *Service) cancelAgentSilentExpectedWithGuard(
+	ctx context.Context,
+	taskID, sessionID, expectedTurnID string,
+	unlockGuard, relockGuard func(),
+) error {
+	if s.repo == nil {
+		return errors.New("cancel agent silently: repository is not configured")
+	}
+	operation, owner, _ := s.claimCancellationWithAction(
+		sessionID,
+		cancellationKindSilent,
+		nil,
+	)
+	if owner && expectedTurnID != "" {
+		s.setCancellationExpectedTurn(sessionID, operation, expectedTurnID)
+	}
+	if owner {
+		go s.runSilentCancellation(ctx, taskID, sessionID, operation)
+	}
+	if unlockGuard != nil {
+		unlockGuard()
+		defer relockGuard()
+	}
+	return operation.wait(ctx)
 }
 
 func (s *Service) cancelAgentSilentWithGuardAction(

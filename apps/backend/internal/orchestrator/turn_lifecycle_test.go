@@ -37,6 +37,19 @@ func (a *repoTurnService) StartTurn(ctx context.Context, sessionID string) (*mod
 	return turn, nil
 }
 
+func (a *repoTurnService) ReserveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return a.StartTurn(ctx, sessionID)
+}
+
+func (a *repoTurnService) PublishReservedTurn(*models.Turn) {}
+
+func (a *repoTurnService) RollbackReservedTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	return a.repo.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+}
+
 func (a *repoTurnService) CompleteTurn(ctx context.Context, turnID string) error {
 	return a.repo.CompleteTurn(ctx, turnID)
 }

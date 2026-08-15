@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -20,6 +22,45 @@ import (
 
 type nilTaskSessionRepo struct {
 	repository.SessionRepository
+}
+
+func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	rejected, err := svc.ReserveTurn(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ReserveTurn(rejected): %v", err)
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type == events.TurnStarted {
+			t.Fatal("reserved turn published before dispatch acceptance")
+		}
+	}
+	rolledBack, err := svc.RollbackReservedTurn(ctx, sessionID, rejected.ID)
+	if err != nil || !rolledBack {
+		t.Fatalf("RollbackReservedTurn: rolledBack=%v err=%v", rolledBack, err)
+	}
+	if _, err := repo.GetTurn(ctx, rejected.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetTurn(rolled back) error = %v, want sql.ErrNoRows", err)
+	}
+
+	accepted, err := svc.ReserveTurn(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ReserveTurn(accepted): %v", err)
+	}
+	svc.PublishReservedTurn(accepted)
+	started := 0
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type == events.TurnStarted {
+			started++
+		}
+	}
+	if started != 1 {
+		t.Fatalf("turn.started events = %d, want 1 after acceptance", started)
+	}
 }
 
 func TestStartTurnPersistsImmutableEffectiveRuntimeConfigSnapshot(t *testing.T) {

@@ -336,7 +336,9 @@ func (p *Projector) persistPendingRefreshLocked(
 		// The rejected writer reloaded the winning summary into state.current.
 		// Rebase every derived source before replaying this event; otherwise stale
 		// observation maps can overwrite unrelated fields from the winner.
-		rebaseProjectionStateFromCurrent(state)
+		if err := p.rebaseProjectionStateFromCurrent(ctx, taskID, state); err != nil {
+			return err
+		}
 		if _, err := p.refreshPendingLocked(ctx, taskID, state); err != nil {
 			return err
 		}

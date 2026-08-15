@@ -234,11 +234,19 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 		},
 	}
 	loaderCalls := 0
+	gitLoaderCalls := 0
 	projector := NewProjector(ProjectorConfig{
 		Store: store,
 		LoadPendingActions: func(context.Context, string) (map[string]string, error) {
 			loaderCalls++
 			return map[string]string{}, nil
+		},
+		LoadGitObservations: func(context.Context, string) ([]GitObservation, error) {
+			gitLoaderCalls++
+			return []GitObservation{
+				{Repository: "repo-a", Summary: GitSummary{ChangedFiles: 1}},
+				{Repository: "repo-b", Summary: GitSummary{ChangedFiles: 1}},
+			}, nil
 		},
 		Now: func() time.Time { return storedAt.Add(2 * time.Second) },
 	})
@@ -260,5 +268,26 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 	}
 	if loaderCalls != 2 {
 		t.Fatalf("pending loader calls = %d, want reload after rejection", loaderCalls)
+	}
+	if gitLoaderCalls != 2 {
+		t.Fatalf("Git loader calls = %d, want reload after rejection", gitLoaderCalls)
+	}
+
+	err = projector.HandleEvent(context.Background(), bus.NewEvent(events.GitEvent, "test", map[string]interface{}{
+		"task_id":      "task-cas",
+		"workspace_id": "workspace-1",
+		"session_id":   "session-current",
+		"type":         "status_update",
+		"status": map[string]interface{}{
+			"repository_name": "repo-a",
+			"changed_files":   3,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Git replay after CAS rejection: %v", err)
+	}
+	got = base.summary("task-cas")
+	if got == nil || got.Git == nil || got.Git.ChangedFiles != 4 {
+		t.Fatalf("Git summary after CAS replay = %+v, want both repositories (4 changed files)", got)
 	}
 }

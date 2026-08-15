@@ -36,6 +36,25 @@ func (s *repoBackedTurnService) StartTurn(ctx context.Context, sessionID string)
 	return turn, nil
 }
 
+func (s *repoBackedTurnService) ReserveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return s.StartTurn(ctx, sessionID)
+}
+
+func (s *repoBackedTurnService) PublishReservedTurn(*models.Turn) {}
+
+func (s *repoBackedTurnService) RollbackReservedTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	deleter, ok := s.repo.(interface {
+		DeleteTurnIfUnreferenced(context.Context, string, string) (bool, error)
+	})
+	if !ok {
+		return false, errors.New("test turn repository cannot roll back reserved turns")
+	}
+	return deleter.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+}
+
 func (s *repoBackedTurnService) CompleteTurn(ctx context.Context, turnID string) error {
 	return s.repo.CompleteTurn(ctx, turnID)
 }
@@ -45,7 +64,11 @@ func (s *repoBackedTurnService) GetTurn(ctx context.Context, turnID string) (*mo
 }
 
 func (s *repoBackedTurnService) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return s.repo.GetActiveTurnBySessionID(ctx, sessionID)
+	turn, err := s.repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return turn, err
 }
 
 func (s *repoBackedTurnService) UpdateTurn(ctx context.Context, turn *models.Turn) error {

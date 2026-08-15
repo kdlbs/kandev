@@ -255,9 +255,13 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 // rebaseProjectionStateFromCurrent rebuilds all derived source state from the
 // summary that won a rejected compare-and-set. Pending authority and the
 // triggering source event are refreshed by the caller before retrying.
-func rebaseProjectionStateFromCurrent(state *projectionState) {
+func (p *Projector) rebaseProjectionStateFromCurrent(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) error {
 	if state.current == nil {
-		return
+		return nil
 	}
 	current := state.current
 	state.sessions = make(map[string]sessionObservation)
@@ -274,6 +278,10 @@ func rebaseProjectionStateFromCurrent(state *projectionState) {
 	state.prBaseline = nil
 	state.prObserved = false
 	applySummaryBaseline(state, current)
+	if current.Git != nil {
+		return p.restoreGitObservations(ctx, taskID, state)
+	}
+	return nil
 }
 
 func (p *Projector) restoreGitObservations(ctx context.Context, taskID string, state *projectionState) error {

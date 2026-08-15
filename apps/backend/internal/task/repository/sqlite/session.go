@@ -49,12 +49,71 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 		metadataJSON = string(metadataBytes)
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	executor := taskSessionExecutor(r.db)
+	var tx *sqlx.Tx
+	if dialect.IsPostgres(r.db.DriverName()) {
+		var err error
+		tx, err = r.db.BeginTxx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin turn creation: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
+			return err
+		}
+		executor = tx
+	}
+
+	_, err := executor.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit turn creation: %w", err)
+		}
+	}
+	return nil
+}
 
-	return err
+// DeleteTurnIfUnreferenced removes a rejected pre-dispatch turn only while it
+// has no messages. The message guard preserves an ambiguously accepted prompt.
+func (r *Repository) DeleteTurnIfUnreferenced(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin turn rollback: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM task_session_turns
+		WHERE id = ?
+		  AND task_session_id = ?
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM task_session_messages
+			WHERE turn_id = task_session_turns.id
+		  )
+	`), turnID, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("delete unreferenced turn: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect unreferenced turn deletion: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit turn rollback: %w", err)
+	}
+	return deleted == 1, nil
 }
 
 func scanTurnRow(row *sql.Row) (*models.Turn, error) {

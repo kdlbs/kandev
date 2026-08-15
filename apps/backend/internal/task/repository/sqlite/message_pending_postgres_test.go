@@ -140,6 +140,131 @@ func TestPostgresDetachActiveClarificationMessagesClaimsCurrentRows(t *testing.T
 	}
 }
 
+func TestPostgresTurnCreationSerializesWithClarificationDetach(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 16, 15, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-detach-lock-pg", "session-detach-lock-pg")
+	createPendingActionTurn(
+		t, repo, "task-detach-lock-pg", "session-detach-lock-pg", "turn-detach-lock-pg", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-detach-lock-pg", "task-detach-lock-pg", "session-detach-lock-pg",
+		"turn-detach-lock-pg", "pending-detach-lock-pg", "q1", base,
+	)
+
+	blocker, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin row blocker: %v", err)
+	}
+	t.Cleanup(func() { _ = blocker.Rollback() })
+	var lockedMessageID string
+	if err := blocker.QueryRowxContext(
+		ctx,
+		repo.db.Rebind(`SELECT id FROM task_session_messages WHERE id = ? FOR UPDATE`),
+		"message-detach-lock-pg",
+	).Scan(&lockedMessageID); err != nil {
+		t.Fatalf("lock clarification row: %v", err)
+	}
+
+	type detachResult struct {
+		messages []*models.Message
+		err      error
+	}
+	detachDone := make(chan detachResult, 1)
+	go func() {
+		messages, detachErr := repo.DetachActiveClarificationMessagesBySessionID(
+			ctx,
+			"session-detach-lock-pg",
+		)
+		detachDone <- detachResult{messages: messages, err: detachErr}
+	}()
+	waitForPostgresLockWait(t, ctx, repo, "UPDATE task_session_messages")
+
+	createStarted := make(chan struct{})
+	createDone := make(chan error, 1)
+	go func() {
+		close(createStarted)
+		createDone <- repo.CreateTurn(ctx, &models.Turn{
+			ID:            "turn-successor-lock-pg",
+			TaskSessionID: "session-detach-lock-pg",
+			TaskID:        "task-detach-lock-pg",
+			StartedAt:     base.Add(time.Minute),
+		})
+	}()
+	<-createStarted
+	select {
+	case createErr := <-createDone:
+		t.Fatalf("CreateTurn completed before clarification detach released its session lock: %v", createErr)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	if err := blocker.Commit(); err != nil {
+		t.Fatalf("release clarification row: %v", err)
+	}
+	select {
+	case result := <-detachDone:
+		if result.err != nil {
+			t.Fatalf("detach clarification: %v", result.err)
+		}
+		if ids := messageIDs(result.messages); len(ids) != 1 || ids[0] != "message-detach-lock-pg" {
+			t.Fatalf("detached message IDs = %v", ids)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for clarification detach")
+	}
+	select {
+	case createErr := <-createDone:
+		if createErr != nil {
+			t.Fatalf("CreateTurn after clarification detach: %v", createErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for successor turn creation")
+	}
+}
+
+func waitForPostgresLockWait(
+	t *testing.T,
+	ctx context.Context,
+	repo *Repository,
+	queryFragment string,
+) {
+	t.Helper()
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiting bool
+		err := repo.db.QueryRowxContext(waitCtx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity
+				WHERE datname = current_database()
+				  AND pid != pg_backend_pid()
+				  AND state = 'active'
+				  AND wait_event_type = 'Lock'
+				  AND query LIKE '%' || $1 || '%'
+			)
+		`, queryFragment).Scan(&waiting)
+		if err != nil {
+			t.Fatalf("inspect PostgreSQL lock wait: %v", err)
+		}
+		if waiting {
+			return
+		}
+		select {
+		case <-waitCtx.Done():
+			t.Fatalf("timed out waiting for PostgreSQL query containing %q to block", queryFragment)
+		case <-ticker.C:
+		}
+	}
+}
+
 func TestPostgresRestoreClarificationMessagesRechecksCurrentTurn(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

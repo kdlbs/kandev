@@ -28,7 +28,15 @@ func (r *Repository) DetachActiveClarificationMessagesBySessionID(
 	ctx context.Context,
 	sessionID string,
 ) ([]*models.Message, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin clarification detach: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	drv := r.db.DriverName()
+	if err := lockSessionTurnWrites(ctx, tx, drv, sessionID); err != nil {
+		return nil, err
+	}
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
@@ -48,14 +56,20 @@ func (r *Repository) DetachActiveClarificationMessagesBySessionID(
 	`, clarificationDetachedMetadataExpr(drv),
 		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
 		clarificationNotDetachedPredicate(drv))
-	rows, err := r.db.QueryxContext(ctx, r.db.Rebind(query), sessionID)
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("detach active clarification messages: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
 	messages, _, err := scanMessageRows(rows, 0)
+	closeErr := rows.Close()
 	if err != nil {
 		return nil, fmt.Errorf("scan detached clarification messages: %w", err)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close detached clarification rows: %w", closeErr)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit clarification detach: %w", err)
 	}
 	return messages, nil
 }
@@ -93,6 +107,9 @@ func (r *Repository) CompleteActiveClarificationBundle(
 	defer func() { _ = tx.Rollback() }()
 
 	drv := r.db.DriverName()
+	if err := r.lockClarificationBundleTurnWrites(ctx, tx, drv, pendingID); err != nil {
+		return nil, false, err
+	}
 	claimedRows, err := r.claimActiveClarificationBundle(ctx, tx, drv, pendingID)
 	if err != nil {
 		return nil, false, err
@@ -137,7 +154,11 @@ func (r *Repository) RestoreActiveClarificationBundle(
 	if err != nil {
 		return false, err
 	}
-	messages, err := r.loadRestorableClarificationBundle(ctx, tx, r.db.DriverName(), pendingID)
+	drv := r.db.DriverName()
+	if err := r.lockClarificationBundleTurnWrites(ctx, tx, drv, pendingID); err != nil {
+		return false, err
+	}
+	messages, err := r.loadRestorableClarificationBundle(ctx, tx, drv, pendingID)
 	if err != nil {
 		return false, err
 	}
@@ -167,6 +188,28 @@ func (r *Repository) RestoreActiveClarificationBundle(
 		return false, fmt.Errorf("commit clarification bundle restore: %w", err)
 	}
 	return true, nil
+}
+
+func (r *Repository) lockClarificationBundleTurnWrites(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	driverName, pendingID string,
+) error {
+	if !dialect.IsPostgres(driverName) {
+		return nil
+	}
+	pendingIDExpr := dialect.JSONExtract(driverName, "metadata", "pending_id")
+	query := fmt.Sprintf(`
+		SELECT DISTINCT task_session_id
+		FROM task_session_messages
+		WHERE type = 'clarification_request'
+		  AND %s = ?
+	`, pendingIDExpr)
+	var sessionIDs []string
+	if err := tx.SelectContext(ctx, &sessionIDs, r.db.Rebind(query), pendingID); err != nil {
+		return fmt.Errorf("load clarification bundle sessions: %w", err)
+	}
+	return lockSessionTurnWrites(ctx, tx, driverName, sessionIDs...)
 }
 
 func clarificationClaimIDs(messages []*models.Message) (map[string]struct{}, error) {

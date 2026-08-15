@@ -3257,9 +3257,9 @@ type promptTaskOptions struct {
 	lifecyclePrompt       bool
 	afterClaim            func() error
 	preservePromptContext bool
-	// deferTurnUntilDispatch keeps a failed detached resume from superseding
-	// the clarification bundle it must restore.
-	deferTurnUntilDispatch bool
+	// reserveTurnUntilDispatch persists detached-resume ownership before agentctl
+	// dispatch, while delaying the visible turn.started event until acceptance.
+	reserveTurnUntilDispatch bool
 }
 
 func (options promptTaskOptions) executorContext(ctx context.Context) context.Context {
@@ -3369,7 +3369,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 
 	session, rollback, err := s.claimPromptDispatch(
 		ctx, taskID, sessionID, options.claimEntryID, options.lifecyclePrompt,
-		options.deferTurnUntilDispatch, options.afterClaim, session, foregroundClaim,
+		options.reserveTurnUntilDispatch, options.afterClaim, foregroundClaim,
 	)
 	if err != nil {
 		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
@@ -3388,7 +3388,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// their context explicitly.
 	promptCtx := options.executorContext(ctx)
 	onDispatched := s.promptDispatchCallback(
-		promptCtx, taskID, sessionID, options.deferTurnUntilDispatch, foregroundDispatch,
+		promptCtx, taskID, sessionID, rollback.reservedTurn, foregroundDispatch,
 	)
 	result, err := s.executor.PromptWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
@@ -3485,17 +3485,12 @@ func (s *Service) rollbackForegroundDispatchOnFailure(
 func (s *Service) promptDispatchCallback(
 	ctx context.Context,
 	taskID, sessionID string,
-	deferTurnUntilDispatch bool,
+	reservedTurn *models.Turn,
 	dispatch *foregroundDispatch,
 ) func() {
 	return func() {
-		if deferTurnUntilDispatch {
-			// A detached clarification must remain restorable if agentctl rejects
-			// the answer. Create its successor turn only after acceptance; agentctl
-			// acknowledges before it runs the prompt, so output still has a turn.
-			turnCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
-			defer cancel()
-			s.startTurnForSession(turnCtx, sessionID)
+		if reservedTurn != nil && s.turnService != nil {
+			s.turnService.PublishReservedTurn(reservedTurn)
 		}
 		if s.acceptForegroundDispatch(dispatch) {
 			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
@@ -3527,15 +3522,15 @@ type promptClaimRollback struct {
 	taskStateClaimed     bool
 	turnID               string
 	createdTurn          bool
+	reservedTurn         *models.Turn
 }
 
 func (s *Service) claimPromptDispatch(
 	ctx context.Context,
 	taskID, sessionID, claimEntryID string,
 	lifecyclePrompt bool,
-	deferTurnUntilDispatch bool,
+	reserveTurnUntilDispatch bool,
 	afterClaim func() error,
-	session *models.TaskSession,
 	foregroundClaim *foregroundClaim,
 ) (*models.TaskSession, promptClaimRollback, error) {
 	if lifecyclePrompt {
@@ -3543,15 +3538,17 @@ func (s *Service) claimPromptDispatch(
 			ctx, taskID, sessionID, claimEntryID, afterClaim,
 		)
 	}
-	rollback := promptClaimRollback{previousSessionState: session.State}
-	claimed, err := s.claimSessionRunningForPrompt(
-		ctx, taskID, sessionID, claimEntryID, session, foregroundClaim,
+	claimed, previousState, turnID, createdTurn, reservedTurn, err := s.claimSessionRunningForPrompt(
+		ctx, taskID, sessionID, claimEntryID, reserveTurnUntilDispatch, foregroundClaim,
 	)
 	if err != nil {
 		return nil, promptClaimRollback{}, err
 	}
-	if !deferTurnUntilDispatch {
-		rollback.turnID, rollback.createdTurn = s.startTurnForSessionWithOwnership(ctx, sessionID)
+	rollback := promptClaimRollback{
+		previousSessionState: previousState,
+		turnID:               turnID,
+		createdTurn:          createdTurn,
+		reservedTurn:         reservedTurn,
 	}
 	return claimed, rollback, nil
 }
@@ -3574,7 +3571,13 @@ func (s *Service) claimLifecyclePromptDispatch(
 	if err != nil {
 		return nil, promptClaimRollback{}, err
 	}
-	rollback.turnID, rollback.createdTurn = s.startTurnForSessionWithOwnership(ctx, sessionID)
+	rollback.turnID, rollback.createdTurn, _, err = s.startTurnForSessionWithOwnershipChecked(
+		ctx, sessionID, false,
+	)
+	if err != nil {
+		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
+		return nil, promptClaimRollback{}, fmt.Errorf("persist lifecycle prompt turn: %w", err)
+	}
 	if err := s.acknowledgePromptClaim(ctx, taskID, sessionID, afterClaim, rollback); err != nil {
 		return nil, promptClaimRollback{}, err
 	}
@@ -3610,7 +3613,28 @@ func (s *Service) rollbackPromptClaim(
 		s.restoreLifecycleTaskState(ctx, taskID, rollback.previousTaskState)
 	}
 	if rollback.createdTurn {
-		s.completeTurnIfCurrent(ctx, sessionID, rollback.turnID)
+		if rollback.reservedTurn != nil {
+			s.rollbackReservedPromptTurn(ctx, sessionID, rollback.turnID)
+		} else {
+			s.completeTurnIfCurrent(ctx, sessionID, rollback.turnID)
+		}
+	}
+}
+
+func (s *Service) rollbackReservedPromptTurn(ctx context.Context, sessionID, turnID string) {
+	if s.turnService == nil || turnID == "" {
+		return
+	}
+	rolledBack, err := s.turnService.RollbackReservedTurn(ctx, sessionID, turnID)
+	if err != nil {
+		s.logger.Warn("failed to roll back reserved prompt turn",
+			zap.String("session_id", sessionID),
+			zap.String("turn_id", turnID),
+			zap.Error(err))
+		return
+	}
+	if rolledBack {
+		s.activeTurns.CompareAndDelete(sessionID, turnID)
 	}
 }
 
@@ -3720,7 +3744,7 @@ func (s *Service) handlePromptDispatchFailure(
 	lifecyclePrompt bool,
 	promptErr error,
 ) (*PromptResult, error) {
-	if resumedForPrompt && errors.Is(promptErr, executor.ErrExecutionNotFound) {
+	if resumedForPrompt && rollback.reservedTurn == nil && errors.Is(promptErr, executor.ErrExecutionNotFound) {
 		s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
@@ -3735,6 +3759,9 @@ func (s *Service) handlePromptDispatchFailure(
 	if lifecyclePrompt {
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
 		return nil, promptErr
+	}
+	if rollback.createdTurn && rollback.reservedTurn != nil {
+		s.rollbackReservedPromptTurn(ctx, sessionID, rollback.turnID)
 	}
 	return nil, s.handlePromptError(ctx, taskID, sessionID, rollback.previousSessionState, promptErr)
 }
@@ -3796,41 +3823,49 @@ func (e *lifecyclePromptReselectedError) Error() string {
 func (s *Service) claimSessionRunningForPrompt(
 	ctx context.Context,
 	taskID, sessionID, claimEntryID string,
-	session *models.TaskSession,
+	reserveTurnUntilDispatch bool,
 	foregroundClaim *foregroundClaim,
-) (*models.TaskSession, error) {
+) (*models.TaskSession, models.TaskSessionState, string, bool, *models.Turn, error) {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
 	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
-		return nil, err
+		return nil, "", "", false, nil, err
 	}
 
 	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
-		return nil, errQueuedDispatchSuperseded
+		return nil, "", "", false, nil, errQueuedDispatchSuperseded
 	}
 	freshSession, sessErr := s.repo.GetTaskSession(ctx, sessionID)
 	if sessErr != nil {
-		return nil, fmt.Errorf("reload session before claiming queued dispatch: %w", sessErr)
+		return nil, "", "", false, nil, fmt.Errorf("reload session before claiming queued dispatch: %w", sessErr)
 	}
 	if freshSession == nil {
-		return nil, errQueuedDispatchSuperseded
+		return nil, "", "", false, nil, errQueuedDispatchSuperseded
 	}
 	if promptErr := s.recheckPromptableWithForegroundClaim(
 		taskID, sessionID, freshSession.State, foregroundClaim,
 	); promptErr != nil {
-		return nil, promptErr
+		return nil, "", "", false, nil, promptErr
 	}
+	previousState := freshSession.State
 	s.setSessionRunning(ctx, taskID, sessionID, freshSession)
 	// setSessionRunning refreshes freshSession in place when its guarded write
 	// loses, so a cancellation landing after the promptability check is visible
 	// here as a terminal state.
 	if isTerminalSessionState(freshSession.State) && freshSession.State != models.TaskSessionStateCompleted {
-		return nil, &executor.SessionStateSupersededError{
+		return nil, "", "", false, nil, &executor.SessionStateSupersededError{
 			SessionID: freshSession.ID,
 			State:     freshSession.State,
 		}
+	}
+	turnID, createdTurn, reservedTurn, err := s.startTurnForSessionWithOwnershipChecked(
+		ctx, sessionID, reserveTurnUntilDispatch,
+	)
+	if err != nil {
+		s.restoreLifecycleClaim(ctx, taskID, sessionID, previousState)
+		return nil, "", "", false, nil, fmt.Errorf("persist prompt turn: %w", err)
 	}
 	// Remove only the pre-acceptance marker here. The accepted ownership record
 	// remains until the turn settles, so Send Now cannot cancel or duplicate
@@ -3841,7 +3876,7 @@ func (s *Service) claimSessionRunningForPrompt(
 			s.queuedDispatchReservationForEntry(sessionID, claimEntryID),
 		)
 	}
-	return freshSession, nil
+	return freshSession, previousState, turnID, createdTurn, reservedTurn, nil
 }
 
 func (s *Service) claimLifecycleSessionRunning(

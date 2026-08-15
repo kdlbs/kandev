@@ -29,6 +29,20 @@ const runtimeModelConfigID = "model"
 // StartTurn creates a new turn for a session and publishes the turn.started event.
 // Returns the created turn.
 func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return s.createTurn(ctx, sessionID, true)
+}
+
+// ReserveTurn durably creates a turn before an external prompt dispatch, but
+// delays turn.started until the dispatch is acknowledged.
+func (s *Service) ReserveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return s.createTurn(ctx, sessionID, false)
+}
+
+func (s *Service) createTurn(
+	ctx context.Context,
+	sessionID string,
+	publishStarted bool,
+) (*models.Turn, error) {
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
@@ -51,8 +65,10 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 		return nil, err
 	}
 
-	// had_output is only meaningful on turn.completed; omit it from turn.started.
-	s.publishTurnEvent(events.TurnStarted, turn, nil)
+	if publishStarted {
+		// had_output is only meaningful on turn.completed; omit it from turn.started.
+		s.publishTurnEvent(events.TurnStarted, turn, nil)
+	}
 
 	s.logger.Debug("started turn",
 		zap.String("turn_id", turn.ID),
@@ -60,6 +76,23 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 		zap.String("task_id", turn.TaskID))
 
 	return turn, nil
+}
+
+// PublishReservedTurn reveals a durably reserved turn after agentctl accepts
+// its prompt. A crash before this notification is harmless: boot hydration
+// still discovers the persisted turn.
+func (s *Service) PublishReservedTurn(turn *models.Turn) {
+	s.publishTurnEvent(events.TurnStarted, turn, nil)
+}
+
+// RollbackReservedTurn removes only an empty rejected reservation. If output
+// already references the row, the prompt was ambiguously accepted and the
+// durable turn is preserved.
+func (s *Service) RollbackReservedTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	return s.turns.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
 }
 
 // createCompletedTurn persists a synthetic turn that is never observable as

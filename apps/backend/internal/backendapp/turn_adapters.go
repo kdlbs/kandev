@@ -28,6 +28,21 @@ func (a *turnServiceAdapter) StartTurn(ctx context.Context, sessionID string) (*
 	return a.svc.StartTurn(ctx, sessionID)
 }
 
+func (a *turnServiceAdapter) ReserveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return a.svc.ReserveTurn(ctx, sessionID)
+}
+
+func (a *turnServiceAdapter) PublishReservedTurn(turn *models.Turn) {
+	a.svc.PublishReservedTurn(turn)
+}
+
+func (a *turnServiceAdapter) RollbackReservedTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	return a.svc.RollbackReservedTurn(ctx, sessionID, turnID)
+}
+
 func (a *turnServiceAdapter) CompleteTurn(ctx context.Context, turnID string) error {
 	return a.svc.CompleteTurn(ctx, turnID)
 }
