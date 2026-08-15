@@ -7,7 +7,11 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	dbutil "github.com/kandev/kandev/internal/db"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 )
@@ -175,5 +179,62 @@ func TestIsDue_PerPairTaskInfoQueryErrorFailsOpen(t *testing.T) {
 	}
 	if len(due) != 1 {
 		t.Fatalf("due = %+v, want the pair selected as due (fail open on a per-pair query error)", due)
+	}
+}
+
+// TestPublishWriterHealth_LogsStalledWarnWhenThresholdExceeded is the
+// firing-state half of Review round 1, finding #4: every
+// TestComputeStallSignal_* case in the external suite keeps StallSeconds
+// at 0, and none of them drives Sweep.publishWriterHealth's own threshold
+// comparison (sweep.go), which is where the "delivery_ledger.stalled" warn
+// actually lives (ComputeStallSignal only computes the number). Calling
+// publishWriterHealth directly — rather than through RunPass — sidesteps
+// an unrelated interaction: any session on a resolvable (task, repository)
+// pair becomes a Candidate, and a pair with no ledger row is
+// unconditionally due, so RunPass would immediately re-evaluate and
+// overwrite the very last_evaluated_at gap this test needs to keep
+// intact. Testing this unexported method from the same package is exactly
+// what evaluatePair's own soft-delete race test above does for the same
+// reason.
+func TestPublishWriterHealth_LogsStalledWarnWhenThresholdExceeded(t *testing.T) {
+	repo, db := newInternalTestRepo(t)
+	seedInternalWorkspace(t, db, "ws-1")
+	seedInternalRepository(t, db, "repo-1", "ws-1")
+	seedInternalTask(t, db, "task-1", "ws-1")
+	if _, err := repo.Upsert(context.Background(), UpsertInput{
+		TaskID: "task-1", RepositoryID: "repo-1", WorkspaceID: "ws-1",
+		Classification: Classification{Outcome: OutcomeUnknown, Basis: BasisNoObservations, Rank: 2},
+		EvaluatedAt:    time.Now().UTC().Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("seed ledger row: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_sessions (id, task_id, repository_id, started_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "sess-live", "task-1", "repo-1", now, now); err != nil {
+		t.Fatalf("seed task_session: %v", err)
+	}
+
+	core, observed := observer.New(zapcore.WarnLevel)
+	testLogger, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("build logger: %v", err)
+	}
+
+	sweep := NewSweep(repo, nil, testLogger)
+	sweep.publishWriterHealth()
+
+	entries := observed.FilterMessage("delivery_ledger.stalled").All()
+	if len(entries) != 1 {
+		t.Fatalf("got %d %q warnings, want 1 (all warnings: %+v)", len(entries), "delivery_ledger.stalled", observed.All())
+	}
+	fields := entries[0].ContextMap()
+	stallSeconds, ok := fields["stall_seconds"].(int64)
+	if !ok || stallSeconds <= int64(StallThreshold.Seconds()) {
+		t.Fatalf("stall_seconds field = %v, want an int64 > %d", fields["stall_seconds"], int64(StallThreshold.Seconds()))
+	}
+	if _, ok := fields["last_evaluated_unix"].(int64); !ok {
+		t.Fatalf("last_evaluated_unix field = %v, want an int64", fields["last_evaluated_unix"])
 	}
 }

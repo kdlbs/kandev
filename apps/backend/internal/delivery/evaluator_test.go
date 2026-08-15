@@ -265,6 +265,9 @@ func TestClassify_DegradedProviderPRWithEmptyBaseBranchNeverReachesDefault(t *te
 	if got.ReachedDefault {
 		t.Fatal("empty default_branch must never match an equally-empty base_branch")
 	}
+	if got.Ref != nil {
+		t.Fatalf("ref = %v, want nil: every degraded row must have a NULL delivery_ref, not just rules 3-6", *got.Ref)
+	}
 }
 
 func TestClassify_TwoInheritedBranchesNeverPooledAcrossSessions(t *testing.T) {

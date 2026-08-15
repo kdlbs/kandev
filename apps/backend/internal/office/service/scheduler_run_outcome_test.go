@@ -13,6 +13,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
@@ -272,4 +274,45 @@ func TestSchedulerOutcome_NoAgentLaunched_WritesOutcome(t *testing.T) {
 
 	run := findRunForAgent(t, svc, ctx, "ws-1", agent.ID, service.RunReasonTaskAssigned)
 	assertOutcome(t, run, service.RunOutcomeNoAgentLaunched)
+}
+
+// TestSchedulerOutcome_Processed_WritesOutcome covers
+// event_subscribers.go:312 (handleAgentCompleted), the only path that
+// yields "processed" — every other FinishRun call site in this file is
+// driven through its own real trigger, but until now nothing drove the
+// agent-completed subscriber itself and checked runs.outcome: existing
+// coverage (TestRunLifecycle_StepCompleteEventsEmitted) publishes the
+// same AgentCompleted event but only asserts the run's Events log, never
+// the outcome column (spec.md:2118-2120).
+func TestSchedulerOutcome_Processed_WritesOutcome(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-processed")
+	taskID := createOfficeTask(t, svc, "ws-1", "worker-processed")
+
+	if err := svc.QueueRun(
+		ctx, "worker-processed", service.RunReasonTaskAssigned,
+		`{"task_id":"`+taskID+`"}`, "processed-outcome",
+	); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v (run=%v)", err, run)
+	}
+
+	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
+		"task_id":    taskID,
+		"session_id": "sess-processed",
+	})
+	if err := eb.Publish(ctx, events.AgentCompleted, completed); err != nil {
+		t.Fatalf("publish completed: %v", err)
+	}
+
+	got, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	assertOutcome(t, got, service.RunOutcomeProcessed)
 }

@@ -123,6 +123,11 @@ func Classify(in PairInput) Classification {
 
 	if degraded {
 		basis = BasisDefaultBranchUnknown
+		// delivery_ref is NULL for every degraded row, not just rules 3-6
+		// (spec "Classification": degraded is its own category regardless of
+		// which rule matched) — rule 1 still runs unconditionally above and
+		// would otherwise leak a real PR URL into a degraded row.
+		ref = ""
 	}
 
 	return Classification{
