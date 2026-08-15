@@ -26,7 +26,7 @@ type activeClarificationBundleCompleter interface {
 		ctx context.Context,
 		pendingID, terminalStatus string,
 		claimedMessages []*models.Message,
-	) (bool, error)
+	) ([]*models.Message, bool, error)
 }
 
 // CreateMessage creates a new message on an agent session
@@ -803,15 +803,15 @@ func (s *Service) CompleteActiveClarificationBundle(
 }
 
 // RestoreActiveClarificationBundle reopens a terminal bundle after detached
-// resume acceptance fails, preserving an idempotent HTTP retry path.
+// resume acceptance fails and returns the committed pending rows for publication.
 func (s *Service) RestoreActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, terminalStatus string,
 	claimedMessages []*models.Message,
-) (bool, error) {
+) ([]*models.Message, bool, error) {
 	completer, ok := s.messages.(activeClarificationBundleCompleter)
 	if !ok {
-		return false, errors.New("message repository does not support clarification restore")
+		return nil, false, errors.New("message repository does not support clarification restore")
 	}
 	return completer.RestoreActiveClarificationBundle(
 		ctx,
@@ -821,8 +821,8 @@ func (s *Service) RestoreActiveClarificationBundle(
 	)
 }
 
-// PublishClarificationBundleUpdates exposes a completed bundle only after its
-// same-turn delivery or detached resume has been accepted.
+// PublishClarificationBundleUpdates exposes a committed terminal bundle after
+// delivery or a committed pending bundle after rejected resume restoration.
 func (s *Service) PublishClarificationBundleUpdates(ctx context.Context, messages []*models.Message) {
 	for _, message := range messages {
 		s.publishMessageEvent(ctx, events.MessageUpdated, message)

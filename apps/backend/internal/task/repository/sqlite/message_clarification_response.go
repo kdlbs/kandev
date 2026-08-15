@@ -202,33 +202,34 @@ func (r *Repository) CompleteActiveClarificationBundle(
 }
 
 // RestoreActiveClarificationBundle reopens a current-turn terminal bundle when
-// its detached resume event could not be published. The status check makes the
-// rollback idempotent and prevents an older turn from becoming active again.
+// its detached resume event could not be published and returns the committed
+// pending rows. The status check makes the rollback idempotent and prevents an
+// older turn from becoming active again.
 func (r *Repository) RestoreActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, terminalStatus string,
 	claimedMessages []*models.Message,
-) (bool, error) {
+) ([]*models.Message, bool, error) {
 	if terminalStatus != clarificationStatusAnswered && terminalStatus != clarificationStatusRejected {
-		return false, fmt.Errorf("invalid clarification terminal status %q", terminalStatus)
+		return nil, false, fmt.Errorf("invalid clarification terminal status %q", terminalStatus)
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	claimIDs, err := clarificationClaimIDs(claimedMessages)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	drv := r.db.DriverName()
 	if err := r.lockClarificationBundleTurnWrites(ctx, tx, drv, pendingID); err != nil {
-		return false, err
+		return nil, false, err
 	}
 	messages, err := r.loadRestorableClarificationBundle(ctx, tx, drv, pendingID)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	restorable := make([]*models.Message, 0, len(claimIDs))
 	for _, message := range messages {
@@ -236,12 +237,12 @@ func (r *Repository) RestoreActiveClarificationBundle(
 			continue
 		}
 		if status, _ := message.Metadata["status"].(string); status != terminalStatus {
-			return false, nil
+			return nil, false, nil
 		}
 		restorable = append(restorable, message)
 	}
 	if len(restorable) != len(claimIDs) {
-		return false, nil
+		return nil, false, nil
 	}
 	if err := r.restoreClarificationMessages(
 		ctx,
@@ -250,12 +251,12 @@ func (r *Repository) RestoreActiveClarificationBundle(
 		restorable,
 		terminalStatus,
 	); err != nil {
-		return false, err
+		return nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit clarification bundle restore: %w", err)
+		return nil, false, fmt.Errorf("commit clarification bundle restore: %w", err)
 	}
-	return true, nil
+	return restorable, true, nil
 }
 
 func (r *Repository) lockClarificationBundleTurnWrites(
@@ -371,7 +372,8 @@ func (r *Repository) restoreClarificationMessages(
 			LIMIT 1
 		  )
 	`, statusExpr, turnAuthorityPredicate(drv, "turn_row")))
-	for _, message := range messages {
+	restoredMetadataByMessage := make([]map[string]interface{}, len(messages))
+	for i, message := range messages {
 		restoredMetadata := maps.Clone(message.Metadata)
 		restoredMetadata["status"] = clarificationStatusPending
 		delete(restoredMetadata, "response")
@@ -397,6 +399,11 @@ func (r *Repository) restoreClarificationMessages(
 		if updatedRows != 1 {
 			return fmt.Errorf("clarification message %s lost its terminal claim", message.ID)
 		}
+		restoredMetadataByMessage[i] = restoredMetadata
+	}
+	for i, message := range messages {
+		message.Metadata = restoredMetadataByMessage[i]
+		message.UpdatedAt = updatedAt
 	}
 	return nil
 }

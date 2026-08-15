@@ -83,13 +83,15 @@ hiding the action the icon represents.
 - When a task row advertises a pending action, desktop and phone task activation load the task's
   sessions from the server and select the newest input-capable session whose `pending_action` matches
   the task action. Before applying that response, activation revalidates the task-summary revision and
-  pending action; a changed summary makes the delayed selection inert. Overlapping authoritative loads
-  are generation-guarded per task, so an older response cannot replace a newer session snapshot. This
-  pending owner outranks remembered-session and primary-session preferences. If the task still
-  advertises pending input but no matching input-capable owner exists, activation releases the outgoing
-  session layout and fails closed to the task route without guessing a session. Normal preference order
-  returns only for a clean task. If the task projection disappears while that authoritative load is in
-  flight, desktop and phone leave the selection inert instead of navigating to a deleted task.
+  pending action. If either changes while the task remains present, activation discards the delayed
+  session choice and opens the task-only route; phone activation also closes the sheet. Overlapping
+  authoritative loads are generation-guarded per task, so an older response cannot replace a newer
+  session snapshot. This pending owner outranks remembered-session and primary-session preferences. If
+  the task still advertises pending input but no matching input-capable owner exists, activation releases
+  the outgoing session layout and fails closed to the task route without guessing a session. Normal
+  preference order returns only for a clean task. If the task projection disappears while that
+  authoritative load is in flight, desktop and phone leave the selection inert instead of navigating to
+  a deleted task.
 
 ## Data model
 
@@ -183,7 +185,8 @@ session they can already access. Session selection does not broaden task visibil
   do not dispatch a prompt.
 - Detached resume context resolution or orchestrator acceptance fails: use a non-cancelled write context,
   withhold terminal message events, restore the still-current bundle to pending, and return a retryable
-  server error instead of reporting false success.
+  server error instead of reporting false success. Publish the restored pending rows after commit so a
+  task summary or another client that observed the temporary terminal claim converges back to pending.
 - Persisting the dispatch-attempt marker fails: roll back the reserved successor before making any
   external executor call, restore the still-current bundle, and return a retryable server error.
 - Reserved-successor rollback fails or has an ambiguous durable outcome: keep the live reservation
@@ -298,6 +301,9 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** pending ownership changes while desktop or mobile task selection loads sessions, **WHEN** the
   delayed load settles, **THEN** Kandev ignores its stale owner choice but still opens the selected task
   through the task-only fallback, and the mobile sheet closes.
+- **GIVEN** a task-list refresh observes a detached answer's temporary terminal claim, **WHEN** resume
+  rejection restores that claim, **THEN** Kandev publishes the restored pending rows after commit so
+  summaries and other clients converge to retryable input.
 - **GIVEN** the selected task projection disappears while desktop or mobile session loading is in
   flight, **WHEN** the delayed load settles, **THEN** Kandev leaves task and session selection unchanged.
 - **GIVEN** authoritative pending-action projection fails while listing a task's sessions, **WHEN** the

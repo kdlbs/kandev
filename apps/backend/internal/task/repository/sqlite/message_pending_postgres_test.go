@@ -76,7 +76,7 @@ func TestPostgresCompleteActiveClarificationBundleClaimsOnce(t *testing.T) {
 	if claimed {
 		t.Fatal("already-answered Postgres bundle was claimed twice")
 	}
-	restored, err := repo.RestoreActiveClarificationBundle(
+	_, restored, err := repo.RestoreActiveClarificationBundle(
 		ctx,
 		"pending-claim-pg",
 		"answered",

@@ -433,7 +433,7 @@ func TestCompleteActiveClarificationBundleRecoversMixedStatusBundle(t *testing.T
 	if completed.Metadata["status"] != "answered" {
 		t.Fatalf("pending sibling status = %v, want answered", completed.Metadata["status"])
 	}
-	restored, err := repo.RestoreActiveClarificationBundle(
+	_, restored, err := repo.RestoreActiveClarificationBundle(
 		ctx,
 		"pending-mixed",
 		"answered",
@@ -478,7 +478,7 @@ func TestRestoreActiveClarificationBundleAllowsRetryAfterDeliveryFailure(t *test
 	if err != nil || !claimed {
 		t.Fatalf("complete before restore: claimed=%v err=%v", claimed, err)
 	}
-	restored, err := repo.RestoreActiveClarificationBundle(
+	restoredMessages, restored, err := repo.RestoreActiveClarificationBundle(
 		ctx,
 		"pending-restore",
 		"answered",
@@ -486,6 +486,9 @@ func TestRestoreActiveClarificationBundleAllowsRetryAfterDeliveryFailure(t *test
 	)
 	if err != nil || !restored {
 		t.Fatalf("restore: restored=%v err=%v", restored, err)
+	}
+	if len(restoredMessages) != 1 || restoredMessages[0].Metadata["status"] != "pending" {
+		t.Fatalf("returned restored messages = %#v, want one pending row", restoredMessages)
 	}
 	message, err := repo.GetMessage(ctx, "message-restore")
 	if err != nil {
@@ -609,7 +612,7 @@ func TestRestoreActiveClarificationBundleDoesNotReactivateSupersededTurn(t *test
 		base.Add(time.Second), base.Add(time.Second),
 	)
 
-	restored, err := repo.RestoreActiveClarificationBundle(
+	_, restored, err := repo.RestoreActiveClarificationBundle(
 		ctx,
 		"pending-restore-old",
 		"answered",

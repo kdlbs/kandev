@@ -212,7 +212,7 @@ func TestResumeDetachedClarificationDispatchFailureLeavesBundleRestorable(t *tes
 		t.Fatalf("resume error = %v, want %v", err, dispatchErr)
 	}
 
-	restored, err := repo.RestoreActiveClarificationBundle(
+	_, restored, err := repo.RestoreActiveClarificationBundle(
 		ctx,
 		"pending-retry",
 		"answered",

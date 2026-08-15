@@ -72,13 +72,13 @@ type MessageCreator interface {
 	// when it still belongs to the session's current durable turn.
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*taskmodels.Message, bool, error)
 	// RestoreActiveClarificationBundle reopens a claimed bundle when detached
-	// resume acceptance fails, so the same response can be retried safely.
+	// resume acceptance fails and returns the committed pending rows for publication.
 	RestoreActiveClarificationBundle(
 		ctx context.Context,
 		pendingID, terminalStatus string,
 		claimedMessages []*taskmodels.Message,
-	) (bool, error)
-	// PublishClarificationBundleUpdates exposes terminal rows after delivery.
+	) ([]*taskmodels.Message, bool, error)
+	// PublishClarificationBundleUpdates exposes committed terminal or restored-pending rows.
 	PublishClarificationBundleUpdates(ctx context.Context, messages []*taskmodels.Message)
 }
 
@@ -509,7 +509,7 @@ func (h *Handlers) restoreFailedClarificationClaim(
 ) bool {
 	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
 	defer cancel()
-	restored, err := h.messageCreator.RestoreActiveClarificationBundle(
+	restoredMessages, restored, err := h.messageCreator.RestoreActiveClarificationBundle(
 		persistenceCtx,
 		pendingID,
 		terminalStatus,
@@ -524,8 +524,10 @@ func (h *Handlers) restoreFailedClarificationClaim(
 	if !restored {
 		h.logger.Warn("clarification claim was not restorable after delivery failure",
 			zap.String("pending_id", pendingID))
+		return false
 	}
-	return restored
+	h.messageCreator.PublishClarificationBundleUpdates(persistenceCtx, restoredMessages)
+	return true
 }
 
 func clarificationPersistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {

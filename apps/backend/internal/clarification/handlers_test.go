@@ -28,6 +28,7 @@ type stubMessageCreator struct {
 	created            [][]Question
 	repo               *stubMessageStore
 	publishedBundles   int
+	publishedMessages  [][]*taskmodels.Message
 	claimedMessages    []*taskmodels.Message
 	restoreErr         error
 	refuseRestore      bool
@@ -116,26 +117,27 @@ func (s *stubMessageCreator) RestoreActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, terminalStatus string,
 	claimedMessages []*taskmodels.Message,
-) (bool, error) {
+) ([]*taskmodels.Message, bool, error) {
 	_, s.restoreHasDeadline = ctx.Deadline()
 	s.restoreContextErr = ctx.Err()
 	if s.restoreErr != nil {
-		return false, s.restoreErr
+		return nil, false, s.restoreErr
 	}
 	if s.refuseRestore {
-		return false, nil
+		return nil, false, nil
 	}
 	if len(claimedMessages) == 0 {
-		return false, nil
+		return nil, false, nil
 	}
 	for _, message := range claimedMessages {
 		if stringFromMetadata(message.Metadata, "pending_id") != pendingID {
-			return false, nil
+			return nil, false, nil
 		}
 		if stringFromMetadata(message.Metadata, "status") != terminalStatus {
-			return false, nil
+			return nil, false, nil
 		}
 	}
+	restoredMessages := make([]*taskmodels.Message, 0, len(claimedMessages))
 	for _, claimedMessage := range claimedMessages {
 		var storedMessage *taskmodels.Message
 		for _, candidate := range s.repo.messages[pendingID] {
@@ -145,7 +147,7 @@ func (s *stubMessageCreator) RestoreActiveClarificationBundle(
 			}
 		}
 		if storedMessage == nil || stringFromMetadata(storedMessage.Metadata, "status") != terminalStatus {
-			return false, nil
+			return nil, false, nil
 		}
 		questionID := stringFromMetadata(storedMessage.Metadata, "question_id")
 		storedMessage.Metadata = maps.Clone(storedMessage.Metadata)
@@ -156,15 +158,25 @@ func (s *stubMessageCreator) RestoreActiveClarificationBundle(
 			questionID string
 			status     string
 		}{pendingID, questionID, "pending"})
+		copyMessage := *storedMessage
+		copyMessage.Metadata = maps.Clone(storedMessage.Metadata)
+		restoredMessages = append(restoredMessages, &copyMessage)
 	}
-	return true, nil
+	return restoredMessages, true, nil
 }
 
 func (s *stubMessageCreator) PublishClarificationBundleUpdates(
-	context.Context,
-	[]*taskmodels.Message,
+	_ context.Context,
+	messages []*taskmodels.Message,
 ) {
 	s.publishedBundles++
+	published := make([]*taskmodels.Message, 0, len(messages))
+	for _, message := range messages {
+		copyMessage := *message
+		copyMessage.Metadata = maps.Clone(message.Metadata)
+		published = append(published, &copyMessage)
+	}
+	s.publishedMessages = append(s.publishedMessages, published)
 }
 
 func setupTestHandler(t *testing.T, msgs map[string][]*taskmodels.Message) (*Handlers, *stubMessageStore, *stubEventBus, *stubMessageCreator) {
@@ -357,7 +369,7 @@ func TestHttpRespond_DetachedAnswerPublishesOnlyForWinningClaim(t *testing.T) {
 	}
 }
 
-func TestHttpRespond_DetachedResumeFailureRestoresRetryableBundle(t *testing.T) {
+func TestHttpRespond_DetachedResumeFailurePublishesRestoredRetryableBundle(t *testing.T) {
 	msg := &taskmodels.Message{
 		ID: "message-retry", TaskID: "task-retry", TaskSessionID: "session-retry",
 		Metadata: map[string]any{
@@ -365,10 +377,18 @@ func TestHttpRespond_DetachedResumeFailureRestoresRetryableBundle(t *testing.T) 
 			"question": map[string]any{"id": "q1", "prompt": "Continue?"},
 		},
 	}
-	h, _, eventBus, messageCreator := setupTestHandler(t, map[string][]*taskmodels.Message{
+	h, repo, eventBus, messageCreator := setupTestHandler(t, map[string][]*taskmodels.Message{
 		"pending-retry": {msg},
 	})
 	eventBus.resumeErr = errors.New("orchestrator rejected resume")
+	refreshSawNoPending := false
+	eventBus.beforeResume = func() {
+		active, err := repo.FindActiveClarificationMessagesBySessionID(context.Background(), "session-retry")
+		if err != nil {
+			t.Fatalf("interleaved pending refresh: %v", err)
+		}
+		refreshSawNoPending = len(active) == 0
+	}
 	body := RespondBody{Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}}}
 
 	cancelledCtx, cancel := context.WithCancel(context.Background())
@@ -383,8 +403,14 @@ func TestHttpRespond_DetachedResumeFailureRestoresRetryableBundle(t *testing.T) 
 	if got := messageCreator.claimedMessages[0].Metadata["status"]; got != "answered" {
 		t.Fatalf("restore mutated caller-owned claim status = %v, want answered", got)
 	}
-	if messageCreator.publishedBundles != 0 {
-		t.Fatalf("published terminal bundles after failed resume = %d, want 0", messageCreator.publishedBundles)
+	if !refreshSawNoPending {
+		t.Fatal("interleaved refresh did not observe the temporary terminal claim")
+	}
+	if messageCreator.publishedBundles != 1 {
+		t.Fatalf("published bundles after failed resume = %d, want restored pending bundle", messageCreator.publishedBundles)
+	}
+	if got := messageCreator.publishedMessages[0][0].Metadata["status"]; got != "pending" {
+		t.Fatalf("published restored status = %v, want pending", got)
 	}
 	if !messageCreator.claimHasDeadline || messageCreator.claimContextErr != nil {
 		t.Fatalf("claim context deadline=%v err=%v, want fresh bounded context",
@@ -396,6 +422,7 @@ func TestHttpRespond_DetachedResumeFailureRestoresRetryableBundle(t *testing.T) 
 	}
 
 	eventBus.resumeErr = nil
+	eventBus.beforeResume = nil
 	second := runRespond(t, h, "pending-retry", body)
 	if second.Code != http.StatusOK {
 		t.Fatalf("retry status = %d, want 200; body=%s", second.Code, second.Body.String())
@@ -403,8 +430,8 @@ func TestHttpRespond_DetachedResumeFailureRestoresRetryableBundle(t *testing.T) 
 	if got := msg.Metadata["status"]; got != "answered" {
 		t.Fatalf("status after retry = %v, want answered", got)
 	}
-	if messageCreator.publishedBundles != 1 {
-		t.Fatalf("published terminal bundles after retry = %d, want 1", messageCreator.publishedBundles)
+	if messageCreator.publishedBundles != 2 {
+		t.Fatalf("published bundles after retry = %d, want restored plus terminal", messageCreator.publishedBundles)
 	}
 	if len(eventBus.resumeRequests) != 2 {
 		t.Fatalf("resume attempts = %d, want failed attempt plus retry", len(eventBus.resumeRequests))

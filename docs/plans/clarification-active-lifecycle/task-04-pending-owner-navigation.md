@@ -110,6 +110,8 @@ update task/plan status.
   focused lint, typecheck, and the i18n ratchet.
 - Claude review confirms the durable-turn resolver's existing load-state, start-time, ID, and nanosecond
   ordering coverage; a focused created-time tie-break case closes the remaining comparison branch.
+- Final Codex review reconciles the durable wording with implemented behavior: a changed owner opens the
+  task-only fallback, while a disappeared task projection alone leaves selection inert.
 - Six shared desktop/mobile selection and removal suites passed 75 tests; web typecheck, zero-warning
   full lint, and the i18n ratchet passed.
 - `cd apps && pnpm install --frozen-lockfile` passed.

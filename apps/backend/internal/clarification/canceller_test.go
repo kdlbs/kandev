@@ -123,6 +123,7 @@ type stubEventBus struct {
 	resumeRequests    []DetachedClarificationResume
 	resumeErr         error
 	resumeContextErrs []error
+	beforeResume      func()
 }
 
 func (s *stubEventBus) Publish(ctx context.Context, _ string, ev *bus.Event) error {
@@ -138,6 +139,9 @@ func (s *stubEventBus) ResumeDetachedClarification(
 	ctx context.Context,
 	request DetachedClarificationResume,
 ) error {
+	if s.beforeResume != nil {
+		s.beforeResume()
+	}
 	s.resumeContextErrs = append(s.resumeContextErrs, ctx.Err())
 	s.resumeRequests = append(s.resumeRequests, request)
 	return s.resumeErr

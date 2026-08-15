@@ -1054,7 +1054,7 @@ func (a *messageCreatorAdapter) RestoreActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, terminalStatus string,
 	claimedMessages []*models.Message,
-) (bool, error) {
+) ([]*models.Message, bool, error) {
 	return a.svc.RestoreActiveClarificationBundle(
 		ctx,
 		pendingID,

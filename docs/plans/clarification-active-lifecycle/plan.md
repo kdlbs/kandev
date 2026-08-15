@@ -267,6 +267,11 @@ All task gates passed:
   repository interfaces, keeps caller metadata unchanged across any partial completion failure, and
   documents the transaction-local claim timestamp. Durable-turn ordering coverage now includes the
   created-time tie-break alongside existing load-state, start-time, ID, and nanosecond cases.
+- Final Codex review returns restored clarification rows through the repository/service boundary and
+  publishes their pending state after commit, closing the interleaved task-summary refresh race. The
+  durable selection overview now matches task-only fallback for changed summaries and inert handling
+  only when the task projection disappears. Broader clarification-focused handler, repository, and
+  orchestrator tests passed, followed by zero-issue changed-code Go lint.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

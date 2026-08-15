@@ -158,3 +158,6 @@ blockers/risks, and update task/plan status.
 - Claude review remediation splits the handler and canceller repository surfaces, removes the unused
   pending-session lookup, and clones completion metadata without exposing partial in-memory mutation on
   write failure. The failed second-write regression and adjacent claim/restore cases passed.
+- Final Codex review returns committed pending rows from restoration and publishes them before reporting
+  a retryable resume rejection. The interleaved-refresh handler regression, repository restore cases,
+  detached-resume orchestrator case, and service/adapter compile checks passed.
