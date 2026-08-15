@@ -427,6 +427,9 @@ func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID stri
 
 // FindActiveClarificationMessagesBySessionID returns pending clarification rows
 // owned by the session's newest durable turn. Older pending rows remain history.
+// The canceller still drains live legacy waiters before this lookup. Persisted
+// rows without their schema-required turn are malformed and need explicit data
+// cleanup; they never become current input authority.
 func (r *Repository) FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	drv := r.ro.DriverName()
 	query := fmt.Sprintf(`

@@ -403,12 +403,13 @@ export function buildTodoItems(visibleMessages: Message[]) {
 }
 
 function usePendingClarificationState(messages: Message[], options: ProcessedMessagesOptions) {
+  const hasScopeKeys = "currentTurnId" in options || "pendingAction" in options;
   const scope = useMemo(
     () =>
-      "currentTurnId" in options || "pendingAction" in options
+      hasScopeKeys
         ? { currentTurnId: options.currentTurnId, pendingAction: options.pendingAction }
         : undefined,
-    [options.currentTurnId, options.pendingAction],
+    [hasScopeKeys, options.currentTurnId, options.pendingAction],
   );
   return {
     pendingClarification: useMemo(

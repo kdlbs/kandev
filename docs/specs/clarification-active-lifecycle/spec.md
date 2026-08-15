@@ -137,6 +137,9 @@ session they can already access. Session selection does not broaden task visibil
   server error instead of reporting false success.
 - Historical partial terminalization leaves pending and terminal siblings in one current-turn bundle:
   complete the pending siblings without rewriting terminal history or returning a permanent conflict.
+- A malformed persisted pending row has no matching durable turn: drain any live in-memory waiter, but
+  keep the row inert. If such pre-turn history is encountered, repair it through explicit data cleanup
+  rather than treating it as current input authority.
 - Session loading fails during task activation: retain existing navigation fallback instead of
   stranding the user in the task drawer or on an unchanged URL.
 

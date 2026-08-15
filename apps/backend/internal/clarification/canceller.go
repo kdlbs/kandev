@@ -99,44 +99,43 @@ func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.
 	return changed
 }
 
-func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) int {
-	pendingIDs := c.store.CancelSession(sessionID)
-	changedBundles := 0
+type clarificationBundleMarker func(context.Context, []*taskmodels.Message, string) bool
 
-	handled := make(map[string]bool, len(pendingIDs))
-	for _, id := range pendingIDs {
-		msgs, err := c.repo.FindMessagesByPendingID(ctx, id)
-		if err != nil || len(msgs) == 0 {
-			c.logger.Debug("messages not found for detached clarification",
-				zap.String("pending_id", id),
-				zap.Error(err))
-			continue
-		}
-		if c.markMessagesDetached(ctx, msgs, id) {
-			changedBundles++
-		}
-		handled[id] = true
+func (c *Canceller) updateCurrentSessionBundles(
+	ctx context.Context,
+	sessionID string,
+	marker clarificationBundleMarker,
+) int {
+	// Always drain in-memory waiters, but never use their identities as durable
+	// current-turn authority. A stale timeout may arrive after a newer turn.
+	c.store.CancelSession(sessionID)
+	writeCtx := context.WithoutCancel(ctx)
+	msgs, err := c.repo.FindActiveClarificationMessagesBySessionID(writeCtx, sessionID)
+	if err != nil {
+		c.logger.Warn("failed to load current clarification bundles",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return 0
 	}
-
-	msgs, err := c.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
-	if err != nil || len(msgs) == 0 {
-		return changedBundles
-	}
-
 	byPendingID := make(map[string][]*taskmodels.Message)
 	for _, msg := range msgs {
 		pid := stringFromMetadata(msg.Metadata, "pending_id")
-		if pid == "" || handled[pid] {
+		if pid == "" {
 			continue
 		}
 		byPendingID[pid] = append(byPendingID[pid], msg)
 	}
+	changedBundles := 0
 	for pid, bundle := range byPendingID {
-		if c.markMessagesDetached(ctx, bundle, pid) {
+		if marker(writeCtx, bundle, pid) {
 			changedBundles++
 		}
 	}
 	return changedBundles
+}
+
+func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) int {
+	return c.updateCurrentSessionBundles(ctx, sessionID, c.markMessagesDetached)
 }
 
 // DetachSessionAndNotify cancels in-memory WaitForResponse waiters for a session
@@ -151,40 +150,7 @@ func (c *Canceller) DetachSessionAndNotify(ctx context.Context, sessionID string
 // TODO: wire this into terminal teardown paths that should close the overlay
 // instead of preserving the deferred-answer UX.
 func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string) int {
-	pendingIDs := c.store.CancelSession(sessionID)
-	changedBundles := 0
-
-	handled := make(map[string]bool, len(pendingIDs))
-	for _, id := range pendingIDs {
-		msgs, err := c.repo.FindMessagesByPendingID(ctx, id)
-		if err != nil || len(msgs) == 0 {
-			continue
-		}
-		if c.markMessagesExpired(ctx, msgs, id) {
-			changedBundles++
-		}
-		handled[id] = true
-	}
-
-	msgs, err := c.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
-	if err != nil || len(msgs) == 0 {
-		return changedBundles
-	}
-
-	byPendingID := make(map[string][]*taskmodels.Message)
-	for _, msg := range msgs {
-		pid := stringFromMetadata(msg.Metadata, "pending_id")
-		if pid == "" || handled[pid] {
-			continue
-		}
-		byPendingID[pid] = append(byPendingID[pid], msg)
-	}
-	for pid, bundle := range byPendingID {
-		if c.markMessagesExpired(ctx, bundle, pid) {
-			changedBundles++
-		}
-	}
-	return changedBundles
+	return c.updateCurrentSessionBundles(ctx, sessionID, c.markMessagesExpired)
 }
 
 // publishMessageUpdated publishes a message.updated event to the event bus.

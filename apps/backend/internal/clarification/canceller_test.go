@@ -98,7 +98,8 @@ func TestCanceller_MarksDetachedOnDisconnect(t *testing.T) {
 		ID:            "m1",
 		TaskSessionID: "s1",
 		Metadata: map[string]any{
-			"status": "pending",
+			"status":     "pending",
+			"pending_id": pendingID,
 		},
 	}}
 
@@ -130,7 +131,8 @@ func TestCanceller_ExpireSessionAndNotify_MarksExpired(t *testing.T) {
 		ID:            "m1",
 		TaskSessionID: "s1",
 		Metadata: map[string]any{
-			"status": "pending",
+			"status":     "pending",
+			"pending_id": pendingID,
 		},
 	}}
 
@@ -171,7 +173,7 @@ func TestCanceller_PublishesMessageUpdatedEvent(t *testing.T) {
 	msgs[pendingID] = []*taskmodels.Message{{
 		ID:            "m1",
 		TaskSessionID: "s1",
-		Metadata:      map[string]any{"status": "pending"},
+		Metadata:      map[string]any{"status": "pending", "pending_id": pendingID},
 		UpdatedAt:     updatedAt,
 	}}
 
@@ -197,9 +199,9 @@ func TestCanceller_MultiQuestion_MarksAllMessagesDetached(t *testing.T) {
 
 	pendingID, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
 	msgs[pendingID] = []*taskmodels.Message{
-		{ID: "m1", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "question_id": "q1"}},
-		{ID: "m2", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "question_id": "q2"}},
-		{ID: "m3", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "question_id": "q3"}},
+		{ID: "m1", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "pending_id": pendingID, "question_id": "q1"}},
+		{ID: "m2", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "pending_id": pendingID, "question_id": "q2"}},
+		{ID: "m3", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "pending_id": pendingID, "question_id": "q3"}},
 	}
 
 	cancelled := c.DetachSessionAndNotify(context.Background(), "s1")
@@ -241,6 +243,38 @@ func TestCanceller_MarksDetachedWhenStoreAlreadyDrained(t *testing.T) {
 	}
 	if got, _ := updated.Metadata["agent_disconnected"].(bool); !got {
 		t.Errorf("expected agent_disconnected=true")
+	}
+}
+
+func TestCanceller_SupersededStoreBundleDoesNotCount(t *testing.T) {
+	pendingID := "superseded-store-bundle"
+	msgs := map[string][]*taskmodels.Message{
+		pendingID: {{
+			ID:            "message-superseded-store",
+			TaskSessionID: "s1",
+			Metadata: map[string]any{
+				"status":     "pending",
+				"pending_id": pendingID,
+			},
+		}},
+	}
+	c, repo, eventBus := newTestCanceller(t, msgs)
+	repo.activeBySession = map[string][]*taskmodels.Message{"s1": {}}
+	if _, created := c.store.CreateRequest(&Request{
+		PendingID: pendingID,
+		SessionID: "s1",
+	}); !created {
+		t.Fatal("expected superseded in-memory request to be created")
+	}
+
+	if got := c.DetachSessionAndNotify(context.Background(), "s1"); got != 0 {
+		t.Fatalf("superseded store bundle count = %d, want 0", got)
+	}
+	if _, exists := c.store.GetRequest(pendingID); exists {
+		t.Fatal("superseded in-memory waiter was not drained")
+	}
+	if len(repo.updated) != 0 || len(eventBus.events) != 0 {
+		t.Fatalf("superseded store bundle produced writes=%d events=%d", len(repo.updated), len(eventBus.events))
 	}
 }
 
@@ -315,8 +349,8 @@ func TestCanceller_Idempotent_SkipsAnsweredMessages(t *testing.T) {
 
 	pendingID, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
 	msgs[pendingID] = []*taskmodels.Message{
-		{ID: "m1", TaskSessionID: "s1", Metadata: map[string]any{"status": "answered"}},
-		{ID: "m2", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending"}},
+		{ID: "m1", TaskSessionID: "s1", Metadata: map[string]any{"status": "answered", "pending_id": pendingID}},
+		{ID: "m2", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "pending_id": pendingID}},
 	}
 
 	c.DetachSessionAndNotify(context.Background(), "s1")

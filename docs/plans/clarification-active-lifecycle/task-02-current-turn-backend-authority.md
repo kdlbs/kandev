@@ -92,6 +92,8 @@ blockers/risks, and update task/plan status.
   their schema-required durable turn remain inert instead of becoming pending authority.
 - Final review remediation lets atomic response claims recover pending rows from a mixed-status bundle,
   while targeted rollback restores only rows owned by the failed delivery attempt.
+- Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
+  durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - `cd apps/backend && go test ./internal/task/repository/sqlite ./internal/clarification ./internal/orchestrator`
   passed. The environment-gated PostgreSQL case skipped locally because
   `KANDEV_TEST_POSTGRES_DSN` was unset; it remains enabled for PostgreSQL CI.
