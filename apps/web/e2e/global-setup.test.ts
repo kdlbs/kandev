@@ -75,6 +75,38 @@ describe("assertBackendBinaryFresh", () => {
     ).not.toThrow();
   });
 
+  it("throws when an embedded non-Go asset is newer than the binary", () => {
+    // profiles.yaml is //go:embed-ed, so a runtime feature-flag edit here
+    // changes backend behaviour without touching a single .go file.
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2025-01-01T00:00:00Z"),
+    );
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    fs.mkdirSync(path.join(backendDir, "internal", "profiles"), { recursive: true });
+    const profiles = path.join(backendDir, "internal", "profiles", "profiles.yaml");
+    fs.writeFileSync(profiles, "e2e:\n");
+    touch(profiles, new Date("2026-01-02T00:00:00Z"));
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).toThrow(/profiles\.yaml/);
+  });
+
+  it("ignores the synced web bundle under internal/webapp/embedded/generated", () => {
+    // `make sync-embedded-web` writes this after the backend is built, and E2E
+    // serves apps/web/dist instead — counting it would fail every run.
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2025-01-01T00:00:00Z"),
+    );
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    const generated = path.join(backendDir, "internal", "webapp", "embedded", "generated");
+    fs.mkdirSync(generated, { recursive: true });
+    fs.writeFileSync(path.join(generated, "index.html"), "<html></html>");
+    touch(path.join(generated, "index.html"), new Date("2026-06-01T00:00:00Z"));
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
+  });
+
   it("ignores files under bin/, .build/, and testdata/ when finding the newest source", () => {
     touch(binPath, new Date("2026-01-01T00:00:00Z"));
     touch(

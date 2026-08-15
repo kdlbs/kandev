@@ -37,6 +37,26 @@ export default function globalSetup() {
 
 const BACKEND_SOURCE_SKIP_DIRS = new Set(["bin", ".build", "testdata"]);
 
+/**
+ * `make sync-embedded-web` copies apps/web/dist here so the binary can serve
+ * the SPA itself. E2E never uses that copy — fixtures/backend.ts points the
+ * backend at apps/web/dist directly — and it is written *after* the backend
+ * builds, so counting it would fail every run over a bundle the tests ignore.
+ */
+const EMBEDDED_WEB_DIR = path.join("internal", "webapp", "embedded", "generated");
+
+/**
+ * Every file counts, not just `*.go`: the binary `//go:embed`s a large asset
+ * surface (`internal/profiles/profiles.yaml`, `config/workflows/*.yml`,
+ * `config/prompts/*.md`, `internal/i18n/locales/*.json`,
+ * `internal/office/configloader/{instructions,skills}/*`, …). Editing a
+ * runtime feature-flag default in profiles.yaml changes backend behaviour
+ * exactly as much as editing a `.go` file does, and an extension allowlist
+ * cannot tell an embedded `*.md` under config/prompts from a stray AGENTS.md.
+ *
+ * The bias is deliberate: a spurious hit costs one `make build`, while a miss
+ * costs the silent-stale-binary confusion this whole guard exists to prevent.
+ */
 function findNewestBackendSource(
   backendDir: string,
 ): { file: string; mtimeMs: number } | undefined {
@@ -44,19 +64,18 @@ function findNewestBackendSource(
 
   const walk = (dir: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (BACKEND_SOURCE_SKIP_DIRS.has(entry.name)) continue;
-        walk(path.join(dir, entry.name));
+        if (path.relative(backendDir, entryPath) === EMBEDDED_WEB_DIR) continue;
+        walk(entryPath);
         continue;
       }
       if (!entry.isFile()) continue;
-      if (!entry.name.endsWith(".go") && entry.name !== "go.mod" && entry.name !== "go.sum")
-        continue;
 
-      const filePath = path.join(dir, entry.name);
-      const mtimeMs = fs.statSync(filePath).mtimeMs;
+      const mtimeMs = fs.statSync(entryPath).mtimeMs;
       if (!newest || mtimeMs > newest.mtimeMs) {
-        newest = { file: filePath, mtimeMs };
+        newest = { file: entryPath, mtimeMs };
       }
     }
   };

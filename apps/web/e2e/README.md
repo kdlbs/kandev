@@ -26,11 +26,21 @@ cd apps/web && pnpm run build:e2e
 ```
 
 These are prerequisites, not optional steps — `global-setup.ts` fails fast with the
-exact remedy command if the backend binary is older than any `apps/backend` source
-file (or is missing entirely), and separately if the plugin package or Vite build is
-missing. Skip the freshness check with `KANDEV_E2E_SKIP_FRESHNESS=1` (e.g. CI paths
-that stage artifacts out of band) or by setting `KANDEV_E2E_BIN` to point at your own
-binary.
+exact remedy command if the backend binary is older than any file under
+`apps/backend` (or is missing entirely), and separately if the plugin package or
+Vite build is missing.
+
+"Any file", not just `*.go`: the binary `//go:embed`s a large asset surface, so
+editing `internal/profiles/profiles.yaml` (runtime feature-flag defaults), a
+`config/workflows/*.yml`, a `config/prompts/*.md`, or an `internal/i18n/locales/*.json`
+changes backend behaviour without touching a single `.go` file. `bin/`, `.build/`,
+`testdata/`, and the synced web bundle at `internal/webapp/embedded/generated/` are
+excluded.
+
+Skip the freshness check with `KANDEV_E2E_SKIP_FRESHNESS=1` (both E2E CI jobs set
+this — they stage the binary from the `build` job's artifact after their own
+checkout, so source mtimes are always newer) or by setting `KANDEV_E2E_BIN` to point
+at your own binary.
 
 ## Playwright projects
 
