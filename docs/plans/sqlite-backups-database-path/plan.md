@@ -10,7 +10,7 @@ status: complete
 
 Resolve the live SQLite path once in the System composer. Pass that exact path to the Database and Backups services. Both services derive one sibling `backups/` directory from the path.
 
-This change aligns manual, pre-reset, and pre-migration snapshots. It also makes restore replace the configured file, including a custom filename.
+This change aligns manual, pre-reset, and pre-migration snapshots. It also makes restore replace the configured file, including a custom filename, after quiescing the SQLite pool and removing stale WAL sidecars.
 
 ## Confirmed root cause
 
@@ -42,6 +42,8 @@ Update `apps/backend/internal/system/backups/store.go` so `Service` owns `databa
 
 Use `databasePath` directly for restore staging and replacement. Do not infer the filename `kandev.db`.
 
+Before replacement, stop active executions, checkpoint and close the shared SQLite pool, and remove its `-wal` and `-shm` sidecars. The frontend already requires a restart after restore, so the closed pool prevents stale WAL frames from replaying onto the restored file.
+
 ### Database service
 
 Update `apps/backend/internal/system/database/stats.go` so `NewService` accepts the exact database path. Derive its backup directory from the path.
@@ -67,7 +69,7 @@ Update `apps/backend/AGENTS.md` so the backend backup convention names the confi
   **How:** construct `system.Provide` with a custom filename, register the routes, request the backup list, and assert the sibling snapshot appears.
 - **What:** restore stages and replaces the exact custom database filename.
   **File:** `apps/backend/internal/system/backups/path_test.go`.
-  **How:** restore known bytes through the service and assert the configured file changes while the default-home file remains absent.
+  **How:** restore known bytes through the service and assert the configured file changes, the orchestrator shutdown hook runs, the pool closes, sidecars are removed, and the default-home file remains absent.
 - **What:** database statistics and pre-reset snapshots use the custom path and its sibling backup directory.
   **File:** `apps/backend/internal/system/database/path_test.go`.
   **How:** assert the reported path, WAL lookup, last-backup time, and pre-reset snapshot parent.
@@ -82,8 +84,8 @@ No new browser test is planned. The frontend contract and rendering logic do not
 ## Verification Results
 
 - `cd apps/backend && go test ./internal/system/... -run 'Test.*(Configured|Custom)DatabasePath' -count=1 -v`
-  passed 4 tests across 19 packages.
-- `cd apps/backend && go test ./internal/system/... -count=1` passed 503 tests across 19 packages.
+  passed 5 tests across 19 packages.
+- `cd apps/backend && go test ./internal/system/... -count=1` passed 504 tests across 19 packages.
 - `rg -n 'KANDEV_DATABASE_PATH|data/backups|database path|backup caveat' docs/public apps/backend/AGENTS.md`
   confirmed the corrected terminology and intentional default-path references.
 - `node --test scripts/validate-public-docs.test.mjs` passed 61 tests.

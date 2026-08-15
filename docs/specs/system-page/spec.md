@@ -202,7 +202,7 @@ The page reads the JSON statically; no backend endpoint is needed.
 - **GIVEN** the backend uses Postgres, **WHEN** the user opens the Database page, **THEN** the page shows the PostgreSQL driver and database size without issuing SQLite-only PRAGMA queries, and SQLite-only maintenance controls are not rendered.
 - **GIVEN** the user clicks **Factory Reset**, types `RESET`, and confirms, **WHEN** the backend executes, **THEN** a fresh snapshot is created first, all tables are dropped and migrations re-run, the backend restarts, and the frontend redirects to the empty onboarding state once it reconnects.
 - **GIVEN** `KANDEV_DATABASE_PATH` points to `<custom>/named.db`, **WHEN** the user opens Database and Backups, **THEN** Database reports that exact path and Backups lists snapshots from `<custom>/backups/`.
-- **GIVEN** `KANDEV_DATABASE_PATH` points to `<custom>/named.db`, **WHEN** a restore succeeds, **THEN** Kandev stages `<custom>/named.db.new` and replaces `<custom>/named.db`.
+- **GIVEN** `KANDEV_DATABASE_PATH` points to `<custom>/named.db`, **WHEN** a restore succeeds, **THEN** Kandev stages `<custom>/named.db.new`, stops active executions, closes the SQLite pool, removes stale WAL sidecars, and replaces `<custom>/named.db`.
 - **GIVEN** a snapshot exists only in the old default directory, **WHEN** a custom database path is active, **THEN** Kandev does not list or move it.
 - **GIVEN** the backend cannot reach GitHub, **WHEN** the poller fires, **THEN** the failure is logged but the previous `latest_version` and `latest_version_checked_at` remain in `kandev_meta`; the Updates page surfaces the stale value with a "Last checked <time>" subtitle.
 - **GIVEN** the user clicks **Check now** twice within 30 seconds, **WHEN** the second click fires, **THEN** the endpoint returns `429 Too Many Requests` and the UI shows "Already checked, try again in <N>s".
@@ -251,7 +251,7 @@ The Message Queue settings GET is readable by members, while its PATCH is admin-
 - **VACUUM failure** — DB is unaffected (VACUUM is atomic); the job ends `failed` with the SQLite error string. Status page shows a recoverable error issue.
 - **Non-SQLite maintenance call** — `vacuum`, `optimize`, and `reset` jobs fail with `not supported for <driver> driver` before running SQLite-only SQL; factory reset also rejects before stopping active executions.
 - **Factory reset failure mid-run** — the pre-reset snapshot remains in the sibling SQLite backup directory. The user can restore it from the Backups page on the next boot. Recovery is documented inline in the failure UI.
-- **Restore failure** — original DB file is left untouched; restore writes to a temp file and atomic-renames only on success.
+- **Restore failure** — original DB file is left untouched; restore writes to a temp file and atomic-renames only on success. A successful restore closes the pool and removes `-wal` and `-shm` sidecars before replacement so stale frames cannot replay onto the restored file.
 - **Log file missing / unreadable** — bundle creation continues with available
   sources, marks the result partial, and records the missing/unreadable backend
   source in `manifest.json`.
@@ -261,12 +261,12 @@ The Message Queue settings GET is readable by members, while its PATCH is admin-
 - `kandev_meta` writes are SQLite-atomic.
 - The SQLite backup directory is `backups/` under the parent of the configured database path. The default remains `<home>/data/backups/`.
 - Snapshot files in the SQLite backup directory are created via `VACUUM INTO <tmp>` then atomic-renamed. Partial files cannot appear.
-- Restore writes the snapshot to `<configured-database-path>.new` and atomically renames it over the configured database path. The running pool keeps the old file open until restart.
+- Restore writes the snapshot to `<configured-database-path>.new`, stops active executions, checkpoints and closes the SQLite pool, removes `-wal` and `-shm` sidecars, and atomically renames the staged file over the configured database path. The frontend requires an immediate backend restart before database-backed work resumes.
 - Kandev does not migrate snapshots from another backup directory. It cannot prove that those files belong to the configured database.
 - The existing boot-time backup retention (newest 2) is preserved, but **only auto-snapshots are subject to it**. Snapshots are distinguished by filename prefix:
-  - `auto-<version>-<ts>.db` — created automatically on a version-change boot or as the pre-reset snapshot before factory reset. Pruned by the existing "keep newest 2" rule (operating only on files with the `auto-` prefix).
+  - `kandev-<version>-<ts>.db` — created automatically on a version-change boot or as the pre-reset snapshot before factory reset. Pruned by the existing "keep newest 2" rule (operating only on files with the `kandev-` prefix).
   - `manual-<ts>.db` — created by the user clicking **Create snapshot** in the Backups page. Never auto-pruned; lives until the user deletes it explicitly from the same page.
-- The existing pre-migration backup path is updated to use the `auto-` prefix (a one-shot rename of existing snapshots happens on first boot after this change, treating any extension-less / unprefixed `*.db` file under `<data-dir>/backups/` as `auto-<existing-name>` for retention purposes).
+- Existing snapshots are not renamed or moved. Kandev cannot verify that an unprefixed or legacy snapshot belongs to the active configured database.
 
 ## Out of scope (v1)
 

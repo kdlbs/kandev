@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/system/jobs"
 )
@@ -44,14 +45,20 @@ var ErrInvalidName = errors.New("invalid backup name")
 //
 // Restore intentionally does not attempt to re-exec the backend: the staged
 // DB file is written in place and the user is told (via the frontend dialog)
-// to quit and relaunch Kandev to load the restored data. The previous
-// syscall.Exec approach was brittle under desktop launchers and `make dev`
-// watchers, and left the web UI disconnected from a fresh backend.
+// to quit and relaunch Kandev to load the restored data. Before replacing the
+// file, restore stops the orchestrator, checkpoints and closes the SQLite
+// pool, and removes the WAL sidecars. The previous syscall.Exec approach was
+// brittle under desktop launchers and `make dev` watchers, and left the web UI
+// disconnected from a fresh backend.
 type Service struct {
 	databasePath string
 	pool         *db.Pool
 	jobs         *jobs.Tracker
 	log          *logger.Logger
+
+	// OrchestratorShutdown stops active executions before restore closes the
+	// shared database pool. Wired by cmd/kandev; tests may leave it nil.
+	OrchestratorShutdown func()
 
 	// failWritesForTest, when true, causes Restore's staged-write step to
 	// fail before the configured database file is touched. Only set by tests.
@@ -220,6 +227,17 @@ func (s *Service) runRestore(_ context.Context, snapshotPath string) (map[string
 		_ = os.Remove(stagedPath)
 		return nil, err
 	}
+	if s.OrchestratorShutdown != nil {
+		s.OrchestratorShutdown()
+	}
+	if err := s.quiesceDatabase(); err != nil {
+		_ = os.Remove(stagedPath)
+		return nil, err
+	}
+	if err := removeSQLiteSidecars(s.databasePath); err != nil {
+		_ = os.Remove(stagedPath)
+		return nil, err
+	}
 	if err := os.Rename(stagedPath, s.databasePath); err != nil {
 		_ = os.Remove(stagedPath)
 		return nil, fmt.Errorf("atomic rename failed: %w", err)
@@ -231,6 +249,37 @@ func (s *Service) runRestore(_ context.Context, snapshotPath string) (map[string
 		"restored_from":    filepath.Base(snapshotPath),
 		"restart_required": true,
 	}, nil
+}
+
+// quiesceDatabase flushes pending SQLite WAL frames and closes the shared
+// pool before the configured database file is replaced. Closing the pool is
+// intentional: the frontend receives restart_required and must relaunch the
+// backend before it accepts database-backed work again.
+func (s *Service) quiesceDatabase() error {
+	if s.pool == nil || s.pool.Writer() == nil {
+		return nil
+	}
+	writer := s.pool.Writer()
+	if writer.DriverName() == dialect.SQLite3 {
+		if _, err := writer.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+			return fmt.Errorf("checkpoint sqlite WAL: %w", err)
+		}
+	}
+	if err := s.pool.Close(); err != nil {
+		return fmt.Errorf("close database pool: %w", err)
+	}
+	return nil
+}
+
+// removeSQLiteSidecars removes WAL files that could otherwise be replayed
+// against the newly restored main database file after restart.
+func removeSQLiteSidecars(databasePath string) error {
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Remove(databasePath + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove sqlite %s sidecar: %w", suffix, err)
+		}
+	}
+	return nil
 }
 
 // writeStagedRestore copies snapshotPath to stagedPath. Honors

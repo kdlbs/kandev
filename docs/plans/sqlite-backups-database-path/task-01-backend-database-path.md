@@ -18,6 +18,7 @@ Make the System Database and Backups services use the live SQLite file path. Kee
 
 - A custom SQLite filename is the reported database path and the restore destination.
 - Manual, pre-reset, and pre-migration snapshots use the `backups/` directory beside that file.
+- Restore stops active executions, closes the SQLite pool, removes WAL sidecars, and requires a restart before database-backed work resumes.
 - The default `<home>/data/kandev.db` behavior and existing backup safety rules remain unchanged.
 
 ## Files likely touched
@@ -49,7 +50,7 @@ Sequential. The constructors and the System composer share one path contract.
 
 ## Verification
 
-Write the three custom-path regressions first. Run them before production changes and make sure that they fail for the path split:
+Write the custom-path regression cases first. Run them before production changes and make sure that they fail for the path split:
 
 ```bash
 cd apps/backend && go test ./internal/system/... -run 'Test.*(Configured|Custom)DatabasePath' -count=1 -v
@@ -74,10 +75,10 @@ Report the exact changed files and test counts. Include the expected red failure
   filename, stats missed the custom WAL and backup, and reset used the wrong
   parent directory.
 - Green phase: `cd apps/backend && go test ./internal/system/... -run
-  'Test.*(Configured|Custom)DatabasePath' -count=1 -v` passed 4 tests across 19
-  packages.
+  'Test.*(Configured|Custom)DatabasePath' -count=1 -v` passed 5 tests across 19
+  packages, including restore quiescing.
 - Full affected suite: `cd apps/backend && go test ./internal/system/... -count=1`
-  passed 503 tests across 19 packages.
+  passed 504 tests across 19 packages.
 - Changed files: `system.go`, `system_database_path_test.go`,
   `backups/store.go`, `backups/store_test.go`, `backups/path_test.go`,
   `database/stats.go`, `database/stats_test.go`, `database/reset.go`,

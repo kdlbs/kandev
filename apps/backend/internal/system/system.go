@@ -105,6 +105,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	dbSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
 
 	backupsSvc := backups.NewService(databasePath, pool, tracker, log)
+	backupsSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
 
 	settingsStore, err := systemsettings.NewStore(pool)
 	if err != nil {

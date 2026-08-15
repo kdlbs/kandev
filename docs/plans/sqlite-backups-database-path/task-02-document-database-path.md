@@ -18,6 +18,7 @@ Replace the documented custom-path limitation with the corrected System behavior
 
 - Public references state that SQLite snapshots use `backups/` beside the configured database file.
 - Restore documentation names `<configured-database-path>.new` and the exact configured destination.
+- Restore documentation explains that active executions stop, the SQLite pool closes, WAL sidecars are removed, and an immediate restart is required.
 - Public and agent guidance states that old misrouted snapshots do not move automatically.
 
 ## Files likely touched

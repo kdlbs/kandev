@@ -249,11 +249,11 @@ Every long-running goroutine must have a single owner with explicit start and st
 - **Leak testing:** packages that spawn goroutines add `goleak.VerifyTestMain(m)` in a per-package `TestMain`. New packages of this kind must follow suit. When a third-party background goroutine genuinely can't be drained, suppress it with `goleak.IgnoreTopFunction(...)` and leave a comment explaining why. Currently instrumented: `internal/gateway/websocket/`, `internal/agent/runtime/lifecycle/`, `internal/agentctl/server/process/`, `internal/orchestrator/`, `internal/github/`, `internal/gitlab/`, `internal/jira/`, `internal/linear/`, `internal/integrations/healthpoll/`.
 
 ## Backups
-
 - On every SQLite boot, `persistence.Provide` reads `kandev_meta.kandev_version`. If the stored version differs from the binary version (or any user tables exist but no version is recorded), it takes a `VACUUM INTO` snapshot into `backups/` beside the configured SQLite database file before running migrations. The default path is `<home>/data/kandev.db`, with backups in `<home>/data/backups/`.
 - Retention: 2 backups kept (newest two by mtime); older ones are pruned after the snapshot succeeds.
 - Postgres: backup is skipped with a log line. Use `pg_dump` for Postgres backups.
 - Boot aborts if the backup fails — the pool is closed and `Provide` returns an error.
+- Restore stops active executions, checkpoints and closes the shared SQLite pool, removes `-wal` and `-shm` sidecars, then atomically replaces the configured database file. The frontend requires a restart before database-backed work resumes.
 - After all repos complete `initSchema`, `cmd/kandev/storage.go:recordSchemaVersion` writes the current binary version into `kandev_meta` (non-fatal; a failure just means the next boot will take a fresh snapshot).
 - Migration logging: `db.MigrateLogger.Apply(name, stmt)` — success logs Info, "already exists" / "duplicate column name" is silently swallowed, anything else logs Warn but never returns an error (preserving the existing swallow-error contract).
 - Schema replay handling: use `internal/db` helpers such as `IsDuplicateColumnError` / `IsAlreadyExistsError` instead of local error-string matching. When adding or changing startup schema code, include fresh-DB plus same-DB replay tests for SQLite; add the same env-gated Postgres replay coverage when the path supports Postgres. See `docs/decisions/0027-replayable-schema-migrations.md`.
