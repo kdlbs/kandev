@@ -280,6 +280,70 @@ func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *tes
 	}
 }
 
+func TestSwitchWorkflowDispatcherSkipsPreflightForAppliedOperation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step2")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-a"
+	session.ExecutorID = "exec-local"
+	session.ExecutorProfileID = "executor-profile"
+	session.IsPrimary = true
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID:             "step2",
+		WorkflowID:     "wf1",
+		AgentProfileID: "profile-b",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+			Type:   wfmodels.OnEnterSetSessionMode,
+			Config: map[string]any{"mode": "acceptEdits"},
+		}}},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", WorkflowID: "wf1", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	log := testLogger()
+	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.logger = log
+	svc.executor = exec
+	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(10), exec, taskRepo, log, scheduler.SchedulerConfig{})
+	svc.initWorkflowEngine()
+	if err := svc.workflowStore.MarkOperationApplied(ctx, "op-replay"); err != nil {
+		t.Fatalf("mark operation applied: %v", err)
+	}
+
+	if err := switchWorkflowDispatcher(svc)(ctx, "t1", "s1", engine.TriggerOnEnter, "op-replay"); err != nil {
+		t.Fatalf("dispatcher returned error: %v", err)
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, "t1")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("session count = %d, want original session only", len(sessions))
+	}
+	unchanged, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("reload initiating session: %v", err)
+	}
+	if unchanged.State != models.TaskSessionStateRunning {
+		t.Fatalf("initiating session state = %s, want running", unchanged.State)
+	}
+	if len(agentMgr.setSessionModeCalls) != 0 {
+		t.Fatalf("set_session_mode calls = %+v, want none", agentMgr.setSessionModeCalls)
+	}
+}
+
 type workflowMetaProbeCallback struct {
 	svc             *Service
 	step            *wfmodels.WorkflowStep

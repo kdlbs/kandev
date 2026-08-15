@@ -97,6 +97,19 @@ func switchWorkflowDispatcher(svc *Service) engine.DispatchTriggerFn {
 		if eng == nil {
 			return nil // engine not initialised; treat as no-op
 		}
+		// Direct on_enter preflight can create/promote sessions and retire the
+		// initiating session, so it must not run for a replayed operation. The
+		// engine performs the same check before executing actions, but that is
+		// necessarily after this dispatcher-side preparation.
+		if operationID != "" && svc.workflowStore != nil {
+			applied, err := svc.workflowStore.IsOperationApplied(ctx, operationID)
+			if err != nil {
+				return err
+			}
+			if applied {
+				return nil
+			}
+		}
 		ctx = withWorkflowMetaCache(ctx)
 		var preloadedState *engine.MachineState
 		if trigger == engine.TriggerOnEnter {
