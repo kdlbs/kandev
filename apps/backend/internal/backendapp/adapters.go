@@ -1068,8 +1068,8 @@ func (a *messageCreatorAdapter) RestoreActiveClarificationBundle(
 func (a *messageCreatorAdapter) PublishClarificationBundleUpdates(
 	ctx context.Context,
 	messages []*models.Message,
-) {
-	a.svc.PublishClarificationBundleUpdates(ctx, messages)
+) error {
+	return a.svc.PublishClarificationBundleUpdates(ctx, messages)
 }
 
 // CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.

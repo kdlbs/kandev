@@ -30,7 +30,9 @@ func TestReconcileUnpublishedPromptTurnsRestoresOnlyClaimedMessages(t *testing.T
 		models.TurnMetaKeyPromptDispatchClarificationTurnID:     "turn-clarification",
 		models.TurnMetaKeyPromptDispatchClarificationMessageIDs: []string{"message-claimed"},
 	})
-	previousUpdatedAt := setMessageUpdatedAtJustAfterSecond(t, repo, "message-claimed")
+	mutationTime := base.Add(2*time.Hour + 123*time.Millisecond)
+	repo.clockNow = func() time.Time { return mutationTime }
+	previousUpdatedAt := setMessageUpdatedAtBeforeMutation(t, repo, "message-claimed", mutationTime)
 
 	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
 	if err != nil || reconciled != 1 {
@@ -48,6 +50,9 @@ func TestReconcileUnpublishedPromptTurnsRestoresOnlyClaimedMessages(t *testing.T
 	}
 	if !claimed.UpdatedAt.After(previousUpdatedAt) {
 		t.Fatalf("restored updated_at = %s, want after %s", claimed.UpdatedAt, previousUpdatedAt)
+	}
+	if !claimed.UpdatedAt.Equal(mutationTime) {
+		t.Fatalf("restored updated_at = %s, want injected mutation time %s", claimed.UpdatedAt, mutationTime)
 	}
 	terminal, err := repo.GetMessage(ctx, "message-terminal")
 	if err != nil {
@@ -78,7 +83,9 @@ func TestReconcileUnpublishedPromptTurnsAcceptsMessageBackedReservation(t *testi
 	}); err != nil {
 		t.Fatalf("CreateMessage(output): %v", err)
 	}
-	previousUpdatedAt := setTurnUpdatedAtJustAfterSecond(t, repo, "turn-message-backed")
+	mutationTime := base.Add(2*time.Hour + 456*time.Millisecond)
+	repo.clockNow = func() time.Time { return mutationTime }
+	previousUpdatedAt := setTurnUpdatedAtBeforeMutation(t, repo, "turn-message-backed", mutationTime)
 
 	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
 	if err != nil || reconciled != 1 {
@@ -90,6 +97,9 @@ func TestReconcileUnpublishedPromptTurnsAcceptsMessageBackedReservation(t *testi
 	}
 	if !turn.UpdatedAt.After(previousUpdatedAt) {
 		t.Fatalf("published updated_at = %s, want after %s", turn.UpdatedAt, previousUpdatedAt)
+	}
+	if !turn.UpdatedAt.Equal(mutationTime) {
+		t.Fatalf("published updated_at = %s, want injected mutation time %s", turn.UpdatedAt, mutationTime)
 	}
 	for _, key := range []string{
 		models.TurnMetaKeyPromptDispatchPending,
@@ -208,12 +218,14 @@ func TestDeleteTurnIfUnreferencedRemovesDefinitivelyRejectedAttempt(t *testing.T
 	}
 }
 
-func setTurnUpdatedAtJustAfterSecond(t *testing.T, repo *Repository, turnID string) time.Time {
+func setTurnUpdatedAtBeforeMutation(
+	t *testing.T,
+	repo *Repository,
+	turnID string,
+	mutationTime time.Time,
+) time.Time {
 	t.Helper()
-	for time.Now().UTC().Nanosecond() >= int((100 * time.Millisecond).Nanoseconds()) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	updatedAt := time.Now().UTC().Truncate(time.Second).Add(time.Nanosecond)
+	updatedAt := mutationTime.Add(-time.Nanosecond)
 	if _, err := repo.db.Exec(
 		repo.db.Rebind(`UPDATE task_session_turns SET updated_at = ? WHERE id = ?`),
 		updatedAt,

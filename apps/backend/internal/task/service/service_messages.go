@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	messageCreateMaxRetries = 5
-	messageCreateRetryDelay = 50 * time.Millisecond
+	messageCreateMaxRetries    = 5
+	messageCreateRetryDelay    = 50 * time.Millisecond
+	clarificationPendingStatus = "pending"
 )
 
 type activeClarificationBundleCompleter interface {
@@ -821,10 +822,41 @@ func (s *Service) RestoreActiveClarificationBundle(
 	)
 }
 
-// PublishClarificationBundleUpdates exposes a committed terminal bundle after
-// delivery or a committed pending bundle after rejected resume restoration.
-func (s *Service) PublishClarificationBundleUpdates(ctx context.Context, messages []*models.Message) {
-	for _, message := range messages {
-		s.publishMessageEvent(ctx, events.MessageUpdated, message)
+// PublishClarificationBundleUpdates exposes committed rows to ordinary bus
+// subscribers. A restored pending bundle first drives the live summary
+// projector synchronously, so callers report retryability only after durable
+// summary convergence has succeeded.
+func (s *Service) PublishClarificationBundleUpdates(ctx context.Context, messages []*models.Message) error {
+	if restored := firstRestoredClarification(messages); restored != nil {
+		if s.statusSummaryProjector == nil {
+			return errors.New("task status summary projector is unavailable")
+		}
+		if err := s.statusSummaryProjector.HandleEvent(
+			ctx,
+			newMessageEvent(events.MessageUpdated, restored),
+		); err != nil {
+			return fmt.Errorf("converge clarification status summary: %w", err)
+		}
 	}
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		if err := s.publishMessageEvent(ctx, events.MessageUpdated, message); err != nil {
+			return fmt.Errorf("publish clarification message update: %w", err)
+		}
+	}
+	return nil
+}
+
+func firstRestoredClarification(messages []*models.Message) *models.Message {
+	for _, message := range messages {
+		if message == nil || message.Type != models.MessageTypeClarificationRequest {
+			continue
+		}
+		if status, _ := message.Metadata["status"].(string); status == clarificationPendingStatus {
+			return message
+		}
+	}
+	return nil
 }

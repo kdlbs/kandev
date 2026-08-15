@@ -298,6 +298,7 @@ type Service struct {
 	subagentContexts                repository.SubagentContextRepository
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
+	statusSummaryProjector          TaskStatusSummaryEventProjector
 	queuedPromptCounter             QueuedPromptCounter
 	eventBus                        bus.EventBus
 	logger                          *logger.Logger

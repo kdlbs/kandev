@@ -123,6 +123,7 @@ type stubEventBus struct {
 	resumeRequests    []DetachedClarificationResume
 	resumeErr         error
 	resumeContextErrs []error
+	resumeHasDeadline []bool
 	beforeResume      func()
 }
 
@@ -142,6 +143,8 @@ func (s *stubEventBus) ResumeDetachedClarification(
 	if s.beforeResume != nil {
 		s.beforeResume()
 	}
+	_, hasDeadline := ctx.Deadline()
+	s.resumeHasDeadline = append(s.resumeHasDeadline, hasDeadline)
 	s.resumeContextErrs = append(s.resumeContextErrs, ctx.Err())
 	s.resumeRequests = append(s.resumeRequests, request)
 	return s.resumeErr

@@ -164,3 +164,6 @@ blockers/risks, and update task/plan status.
 - CodeRabbit remediation decodes boolean, string, and numeric attempted markers consistently with SQL,
   preventing ambiguous accepted reservations from being deleted during recovery. Claude follow-up adds
   direct coverage for dropping a generationless ready after rollback; both groups passed ten times.
+- Final review remediation bounds synchronous detached resume with the same fresh 30-second context as
+  durable claim and restore work. Repository tests now inject exact mutation clocks, removing
+  scheduler-dependent timestamp-boundary sleeps while retaining nanosecond ordering coverage.

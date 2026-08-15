@@ -39,7 +39,9 @@ The session's current turn owns active clarification state.
 - Response handling follows the same ownership rule. An atomic current-turn claim precedes both live
   waiter delivery and detached resume publication. Terminal message updates become visible only after
   delivery succeeds; a failed detached publication returns an error and restores the bundle to pending
-  when its turn is still current, preserving a safe retry. A detached current-turn rejection persists
+  when its turn is still current. Retryability is acknowledged only after the live projector durably
+  refreshes the task summary from those restored rows; message publication then converges other clients.
+  Detached orchestrator acceptance uses a finite deadline. A detached current-turn rejection persists
   without resuming; any response to a superseded or terminal bundle returns conflict without a write or
   resume event.
 - If historical per-row failures leave a current-turn bundle with both terminal and pending siblings,

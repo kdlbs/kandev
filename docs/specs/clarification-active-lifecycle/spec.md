@@ -185,10 +185,11 @@ session they can already access. Session selection does not broaden task visibil
   corrected summary; other clients converge on their next event or read.
 - A stale browser submits an older-turn answer: return conflict, do not update runtime ownership, and
   do not dispatch a prompt.
-- Detached resume context resolution or orchestrator acceptance fails: use a non-cancelled write context,
-  withhold terminal message events, restore the still-current bundle to pending, and return a retryable
-  server error instead of reporting false success. Publish the restored pending rows after commit so a
-  task summary or another client that observed the temporary terminal claim converges back to pending.
+- Detached resume context resolution or orchestrator acceptance fails: use a non-cancelled context with
+  a finite deadline for acceptance and persistence, withhold terminal message events, restore the
+  still-current bundle to pending, and return a retryable server error instead of reporting false
+  success. Before promising retryability, synchronously refresh and persist the task summary from
+  authoritative pending rows, then publish the restored messages for other clients.
 - Persisting the dispatch-attempt marker fails: roll back the reserved successor before making any
   external executor call, restore the still-current bundle, and return a retryable server error.
 - Reserved-successor rollback fails or has an ambiguous durable outcome: keep the live reservation
@@ -304,14 +305,17 @@ session they can already access. Session selection does not broaden task visibil
   back, **THEN** Kandev drops the uncorrelatable event without changing session or workflow state.
 - **GIVEN** a cancelled request triggers clarification detach or expiry, **WHEN** repository work
   begins, **THEN** it uses a non-cancelled context with a finite deadline.
+- **GIVEN** a detached answer reaches synchronous orchestrator resume, **WHEN** the orchestrator does
+  not acknowledge it before the bounded deadline, **THEN** Kandev treats acceptance as failed and
+  restores the still-current bundle.
 - **GIVEN** startup cannot reconcile an unpublished prompt reservation, **WHEN** the orchestrator starts,
   **THEN** startup returns an error before watcher, scheduler, or prompt admission begins.
 - **GIVEN** pending ownership changes while desktop or mobile task selection loads sessions, **WHEN** the
   delayed load settles, **THEN** Kandev ignores its stale owner choice but still opens the selected task
   through the task-only fallback, and the mobile sheet closes.
 - **GIVEN** a task-list refresh observes a detached answer's temporary terminal claim, **WHEN** resume
-  rejection restores that claim, **THEN** Kandev publishes the restored pending rows after commit so
-  summaries and other clients converge to retryable input.
+  rejection restores that claim, **THEN** Kandev acknowledges durable summary convergence before
+  reporting retryability and publishes the restored pending rows so other clients converge.
 - **GIVEN** the selected task projection disappears while desktop or mobile session loading is in
   flight, **WHEN** the delayed load settles, **THEN** Kandev leaves task and session selection unchanged.
 - **GIVEN** authoritative pending-action projection fails while listing a task's sessions, **WHEN** the

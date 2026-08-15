@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"time"
 
@@ -856,11 +857,23 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 // publishMessageEvent publishes message events to the event bus.
 // Only true system-injected content (wrapped in <kandev-system> tags) is stripped
 // from the visible message content delivered to clients.
-func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) {
+func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
 	if s.eventBus == nil {
 		s.logger.Warn("publishMessageEvent: eventBus is nil, skipping")
-		return
+		return errors.New("event bus is unavailable")
 	}
+	event := newMessageEvent(eventType, message)
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish message event",
+			zap.String("event_type", eventType),
+			zap.String("message_id", message.ID),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func newMessageEvent(eventType string, message *models.Message) *bus.Event {
 
 	messageType := string(message.Type)
 	if messageType == "" {
@@ -906,14 +919,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		data["metadata"] = meta
 	}
 
-	event := bus.NewEvent(eventType, "task-service", data)
-
-	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
-		s.logger.Error("failed to publish message event",
-			zap.String("event_type", eventType),
-			zap.String("message_id", message.ID),
-			zap.Error(err))
-	}
+	return bus.NewEvent(eventType, "task-service", data)
 }
 
 func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, repository *models.Repository) {

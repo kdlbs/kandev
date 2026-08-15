@@ -86,3 +86,6 @@ actual files, then update task/plan status.
 - `cd apps/backend && go test ./internal/task/statussummary ./internal/task/service ./internal/backendapp`
   passed. The focused task-handler reconciliation test also passed.
 - Full `go test ./internal/task/service -count=1` passed after the follow-up (291.044s).
+- Final review remediation wires the live projector back into the task service as a synchronous
+  acknowledgement boundary. Restored clarification publication now returns an error until durable
+  pending-summary convergence succeeds, with focused service and handler regressions.

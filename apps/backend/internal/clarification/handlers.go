@@ -79,7 +79,8 @@ type MessageCreator interface {
 		claimedMessages []*taskmodels.Message,
 	) ([]*taskmodels.Message, bool, error)
 	// PublishClarificationBundleUpdates exposes committed terminal or restored-pending rows.
-	PublishClarificationBundleUpdates(ctx context.Context, messages []*taskmodels.Message)
+	// Restored rows synchronously converge the durable task summary before publication.
+	PublishClarificationBundleUpdates(ctx context.Context, messages []*taskmodels.Message) error
 }
 
 // EventBus interface for publishing events.
@@ -411,7 +412,7 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 	// yet drained the superseded in-memory request.
 	deliveryErr := h.store.Respond(pendingID, claim.response)
 	if deliveryErr == nil {
-		h.messageCreator.PublishClarificationBundleUpdates(ctx, claim.messages)
+		h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
 		h.publishPrimaryAnsweredEvent(ctx, pendingID, body.Answers, body.Rejected, body.RejectReason)
 		h.logger.Info("clarification answered via primary path (same turn)",
 			zap.String("pending_id", pendingID),
@@ -422,7 +423,7 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 	if errors.Is(deliveryErr, ErrAlreadyResponded) {
 		// Defensive only: the durable claim above is exclusive. Retain this as a
 		// safety net if the in-memory waiter ever diverges from durable state.
-		h.messageCreator.PublishClarificationBundleUpdates(ctx, claim.messages)
+		h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
 		h.logger.Warn("duplicate response attempt", zap.String("pending_id", pendingID))
 		return http.StatusConflict, "response already submitted"
 	}
@@ -457,7 +458,7 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 	// pending-clarification guard would keep blocking future workflow transitions.
 	if body.Rejected {
 		h.publishStaleDismissedEvent(ctx, pendingID)
-		h.messageCreator.PublishClarificationBundleUpdates(ctx, claim.messages)
+		h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
 		h.logger.Info("clarification rejected after agent moved on; no-op",
 			zap.String("pending_id", pendingID))
 		return 0, ""
@@ -477,7 +478,7 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 			// The prompt reached agentctl. Keep the durable answer terminal so an
 			// HTTP retry cannot dispatch it again, even though turn publication
 			// failed and the caller must receive a server error.
-			h.messageCreator.PublishClarificationBundleUpdates(ctx, claim.messages)
+			h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
 			h.logger.Error("accepted clarification resume was not durably published",
 				zap.String("pending_id", pendingID),
 				zap.Error(err))
@@ -493,8 +494,20 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 		}
 		return http.StatusInternalServerError, "failed to resume clarification and recover pending clarification state"
 	}
-	h.messageCreator.PublishClarificationBundleUpdates(ctx, claim.messages)
+	h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
 	return 0, ""
+}
+
+func (h *Handlers) publishClarificationBundleUpdates(
+	ctx context.Context,
+	pendingID string,
+	messages []*taskmodels.Message,
+) {
+	if err := h.messageCreator.PublishClarificationBundleUpdates(ctx, messages); err != nil {
+		h.logger.Error("failed to publish clarification bundle updates",
+			zap.String("pending_id", pendingID),
+			zap.Error(err))
+	}
 }
 
 func detachedResumeWasAccepted(err error) bool {
@@ -526,7 +539,12 @@ func (h *Handlers) restoreFailedClarificationClaim(
 			zap.String("pending_id", pendingID))
 		return false
 	}
-	h.messageCreator.PublishClarificationBundleUpdates(persistenceCtx, restoredMessages)
+	if err := h.messageCreator.PublishClarificationBundleUpdates(persistenceCtx, restoredMessages); err != nil {
+		h.logger.Error("failed to converge restored clarification state",
+			zap.String("pending_id", pendingID),
+			zap.Error(err))
+		return false
+	}
 	return true
 }
 
@@ -693,7 +711,9 @@ func (h *Handlers) resumeDetachedClarification(
 		Rejected:            rejected,
 		RejectReason:        rejectReason,
 	}
-	if err := h.detachedResumer.ResumeDetachedClarification(ctx, request); err != nil {
+	resumeCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
+	if err := h.detachedResumer.ResumeDetachedClarification(resumeCtx, request); err != nil {
 		return fmt.Errorf("resume detached clarification: %w", err)
 	}
 

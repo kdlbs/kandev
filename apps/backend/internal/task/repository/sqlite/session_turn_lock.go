@@ -13,6 +13,9 @@ const sessionTurnLockNamespace = "task-session-turn:"
 // lockSessionTurnWrites serializes current-turn decisions with successor-turn
 // creation on PostgreSQL. The lock must be acquired in its own statement so a
 // following READ COMMITTED statement observes commits made by the prior owner.
+// All message types participate intentionally: any durable successor-turn
+// message is acceptance evidence during reserved-prompt recovery, including
+// ordinary agent output and tool results, not only clarification messages.
 func lockSessionTurnWrites(
 	ctx context.Context,
 	tx taskSessionExecutor,

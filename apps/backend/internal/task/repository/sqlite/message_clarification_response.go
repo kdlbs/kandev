@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -37,7 +36,7 @@ func (r *Repository) DetachActiveClarificationMessagesBySessionID(
 	if err := lockSessionTurnWrites(ctx, tx, drv, sessionID); err != nil {
 		return nil, err
 	}
-	updatedAt := time.Now().UTC()
+	updatedAt := r.nowUTC()
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s, updated_at = ?
@@ -94,7 +93,7 @@ func (r *Repository) ExpireActiveClarificationBundle(
 	if err := lockSessionTurnWrites(ctx, tx, drv, sessionID); err != nil {
 		return nil, err
 	}
-	updatedAt := time.Now().UTC()
+	updatedAt := r.nowUTC()
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s, updated_at = ?
@@ -357,7 +356,7 @@ func (r *Repository) restoreClarificationMessages(
 	messages []*models.Message,
 	terminalStatus string,
 ) error {
-	updatedAt := time.Now().UTC()
+	updatedAt := r.nowUTC()
 	statusExpr := dialect.JSONExtract(drv, "metadata", "status")
 	updateQuery := r.db.Rebind(fmt.Sprintf(`
 		UPDATE task_session_messages
@@ -498,7 +497,7 @@ func (r *Repository) completeClaimedClarificationMessages(
 	status string,
 	responses map[string]interface{},
 ) error {
-	updatedAt := time.Now().UTC()
+	updatedAt := r.nowUTC()
 	claimedStatusExpr := dialect.JSONExtract(drv, "metadata", "status")
 	updateQuery := r.db.Rebind(fmt.Sprintf(`
 		UPDATE task_session_messages

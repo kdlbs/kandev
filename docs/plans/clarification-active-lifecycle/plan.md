@@ -276,6 +276,10 @@ All task gates passed:
   and pin the generationless-ready drop after a reservation rollback. Boolean, string, and numeric flag
   encodings plus adjacent recovery/ready races passed ten focused repetitions; broader recovery and
   ready suites passed, followed by zero-issue changed-code Go lint.
+- Latest review remediation bounds synchronous detached resume, acknowledges restored pending state
+  through the live projector before promising retryability, removes wall-clock polling from repository
+  timestamp tests through an injected clock, and clarifies why every successor-turn message shares the
+  PostgreSQL session lock.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

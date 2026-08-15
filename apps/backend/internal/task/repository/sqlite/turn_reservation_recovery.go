@@ -93,7 +93,7 @@ func (r *Repository) reconcileUnpublishedPromptTurn(
 	if err != nil {
 		return false, err
 	}
-	updatedAt := time.Now().UTC()
+	updatedAt := r.nowUTC()
 	attempted := metadataFlagIsTrue(metadata[models.TurnMetaKeyPromptDispatchAttempted])
 	if attempted || referenced {
 		models.ClearPromptDispatchMetadata(metadata)

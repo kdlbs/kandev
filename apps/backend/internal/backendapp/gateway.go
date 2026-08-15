@@ -318,6 +318,7 @@ func provideGateway(
 			CountQueuedPrompts: countQueuedPrompts,
 			Logger:             log,
 		})
+		taskSvc.SetTaskStatusSummaryEventProjector(projector)
 		if err := projector.Start(ctx); err != nil {
 			log.Error("failed to start task status summary projector", zap.Error(err))
 		}

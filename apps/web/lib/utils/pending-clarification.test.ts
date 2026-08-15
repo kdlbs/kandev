@@ -263,10 +263,10 @@ describe("newestDurableTurnId load states", () => {
   it("selects the turn with the later start time", () => {
     expect(
       newestDurableTurnId([
-        turn("turn-later-id", "2026-08-14T12:00:00Z"),
-        turn("turn-earlier-id", "2026-08-14T12:00:01Z"),
+        turn("turn-id-at-noon", "2026-08-14T12:00:00Z"),
+        turn("turn-id-one-second-later", "2026-08-14T12:00:01Z"),
       ]),
-    ).toBe("turn-earlier-id");
+    ).toBe("turn-id-one-second-later");
   });
 });
 

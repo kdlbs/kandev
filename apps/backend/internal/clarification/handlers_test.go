@@ -32,6 +32,7 @@ type stubMessageCreator struct {
 	claimedMessages    []*taskmodels.Message
 	restoreErr         error
 	refuseRestore      bool
+	publishErr         error
 	claimHasDeadline   bool
 	claimContextErr    error
 	restoreHasDeadline bool
@@ -168,7 +169,10 @@ func (s *stubMessageCreator) RestoreActiveClarificationBundle(
 func (s *stubMessageCreator) PublishClarificationBundleUpdates(
 	_ context.Context,
 	messages []*taskmodels.Message,
-) {
+) error {
+	if s.publishErr != nil {
+		return s.publishErr
+	}
 	s.publishedBundles++
 	published := make([]*taskmodels.Message, 0, len(messages))
 	for _, message := range messages {
@@ -177,6 +181,7 @@ func (s *stubMessageCreator) PublishClarificationBundleUpdates(
 		published = append(published, &copyMessage)
 	}
 	s.publishedMessages = append(s.publishedMessages, published)
+	return nil
 }
 
 func setupTestHandler(t *testing.T, msgs map[string][]*taskmodels.Message) (*Handlers, *stubMessageStore, *stubEventBus, *stubMessageCreator) {
@@ -440,6 +445,9 @@ func TestHttpRespond_DetachedResumeFailurePublishesRestoredRetryableBundle(t *te
 		if contextErr != nil {
 			t.Fatalf("resume attempt %d used cancelled context: %v", index, contextErr)
 		}
+		if !eventBus.resumeHasDeadline[index] {
+			t.Fatalf("resume attempt %d used unbounded context", index)
+		}
 	}
 }
 
@@ -493,14 +501,16 @@ func TestHttpRespond_AcceptedResumePublicationFailureIsNotRestored(t *testing.T)
 	}
 }
 
-func TestHttpRespond_DetachedResumeFailureDoesNotPromiseRetryWhenRestoreFails(t *testing.T) {
+func TestHttpRespond_DetachedResumeFailureDoesNotPromiseRetryWhenRecoveryFails(t *testing.T) {
 	for _, tt := range []struct {
 		name          string
 		restoreErr    error
 		refuseRestore bool
+		publishErr    error
 	}{
 		{name: "restore error", restoreErr: errors.New("database unavailable")},
 		{name: "claim no longer restorable", refuseRestore: true},
+		{name: "restored state convergence error", publishErr: errors.New("summary unavailable")},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			msg := &taskmodels.Message{
@@ -516,6 +526,7 @@ func TestHttpRespond_DetachedResumeFailureDoesNotPromiseRetryWhenRestoreFails(t 
 			eventBus.resumeErr = errors.New("orchestrator rejected resume")
 			messageCreator.restoreErr = tt.restoreErr
 			messageCreator.refuseRestore = tt.refuseRestore
+			messageCreator.publishErr = tt.publishErr
 
 			rec := runRespond(t, h, "pending-recovery", RespondBody{
 				Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}},

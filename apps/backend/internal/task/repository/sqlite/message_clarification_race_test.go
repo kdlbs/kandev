@@ -38,7 +38,9 @@ func TestDetachActiveClarificationMessagesClaimsOnlyCurrentPendingRows(t *testin
 	setClarificationMessageMetadata(t, repo, "message-detached", func(metadata map[string]interface{}) {
 		metadata["agent_disconnected"] = true
 	})
-	previousUpdatedAt := setMessageUpdatedAtJustAfterSecond(t, repo, "message-current")
+	mutationTime := base.Add(2*time.Hour + 123*time.Millisecond)
+	repo.clockNow = func() time.Time { return mutationTime }
+	previousUpdatedAt := setMessageUpdatedAtBeforeMutation(t, repo, "message-current", mutationTime)
 
 	updated, err := repo.DetachActiveClarificationMessagesBySessionID(ctx, "session-detach")
 	if err != nil {
@@ -49,6 +51,9 @@ func TestDetachActiveClarificationMessagesClaimsOnlyCurrentPendingRows(t *testin
 	}
 	if !updated[0].UpdatedAt.After(previousUpdatedAt) {
 		t.Fatalf("detached updated_at = %v, want after prior Go timestamp %v", updated[0].UpdatedAt, previousUpdatedAt)
+	}
+	if !updated[0].UpdatedAt.Equal(mutationTime) {
+		t.Fatalf("detached updated_at = %v, want injected mutation time %v", updated[0].UpdatedAt, mutationTime)
 	}
 	current, err := repo.GetMessage(ctx, "message-current")
 	if err != nil {
@@ -102,7 +107,9 @@ func TestExpireActiveClarificationMessagesClaimsOnlyCurrentPendingRows(t *testin
 	setClarificationMessageMetadata(t, repo, "message-answered", func(metadata map[string]interface{}) {
 		metadata["status"] = "answered"
 	})
-	previousUpdatedAt := setMessageUpdatedAtJustAfterSecond(t, repo, "message-current")
+	mutationTime := base.Add(2*time.Hour + 456*time.Millisecond)
+	repo.clockNow = func() time.Time { return mutationTime }
+	previousUpdatedAt := setMessageUpdatedAtBeforeMutation(t, repo, "message-current", mutationTime)
 
 	updated, err := repo.ExpireActiveClarificationBundle(ctx, "session-expire", "pending-current")
 	if err != nil {
@@ -113,6 +120,9 @@ func TestExpireActiveClarificationMessagesClaimsOnlyCurrentPendingRows(t *testin
 	}
 	if !updated[0].UpdatedAt.After(previousUpdatedAt) {
 		t.Fatalf("expired updated_at = %v, want after prior Go timestamp %v", updated[0].UpdatedAt, previousUpdatedAt)
+	}
+	if !updated[0].UpdatedAt.Equal(mutationTime) {
+		t.Fatalf("expired updated_at = %v, want injected mutation time %v", updated[0].UpdatedAt, mutationTime)
 	}
 	current, err := repo.GetMessage(ctx, "message-current")
 	if err != nil {
@@ -151,15 +161,16 @@ func TestExpireActiveClarificationMessagesClaimsOnlyCurrentPendingRows(t *testin
 	}
 }
 
-// setMessageUpdatedAtJustAfterSecond gives CURRENT_TIMESTAMP's second-only
-// SQLite value a deterministic chance to regress the row. The production
-// mutation must bind a full-precision Go timestamp newer than this fixture.
-func setMessageUpdatedAtJustAfterSecond(t *testing.T, repo *Repository, messageID string) time.Time {
+// setMessageUpdatedAtBeforeMutation seeds the immediate predecessor to a
+// controlled repository clock so timestamp ordering needs no wall-clock wait.
+func setMessageUpdatedAtBeforeMutation(
+	t *testing.T,
+	repo *Repository,
+	messageID string,
+	mutationTime time.Time,
+) time.Time {
 	t.Helper()
-	for time.Now().UTC().Nanosecond() >= int((100 * time.Millisecond).Nanoseconds()) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	updatedAt := time.Now().UTC().Truncate(time.Second).Add(time.Nanosecond)
+	updatedAt := mutationTime.Add(-time.Nanosecond)
 	if _, err := repo.db.Exec(
 		repo.db.Rebind(`UPDATE task_session_messages SET updated_at = ? WHERE id = ?`),
 		updatedAt,
