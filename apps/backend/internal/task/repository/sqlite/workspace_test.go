@@ -291,6 +291,15 @@ func seedWorkspaceCascadeRows(t *testing.T, repo *Repository, workspaceID string
 	}); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
+	turnDeleteID := "turn-delete"
+	if err := repo.UpsertSubagentContext(ctx, &models.SubagentContext{
+		TaskSessionID: "session-delete",
+		TaskID:        "task-delete",
+		TurnID:        &turnDeleteID,
+		ToolCallID:    "tc-delete",
+	}); err != nil {
+		t.Fatalf("UpsertSubagentContext: %v", err)
+	}
 	if err := repo.CreateTaskPlan(ctx, &models.TaskPlan{
 		ID:        "plan-delete",
 		TaskID:    "task-delete",
@@ -323,6 +332,7 @@ func assertNoWorkspaceCascadeDependents(t *testing.T, repo *Repository) {
 		"task_environment_repos",
 		"task_session_turns",
 		"task_session_messages",
+		"task_session_subagents",
 		"task_plans",
 		"task_plan_revisions",
 	} {

@@ -613,7 +613,11 @@ echo "$AGENTCTL_PID"
 
 const sshAgentctlLogTailLines = 25
 
-func buildSSHCreateInstanceRequest(req *ExecutorCreateRequest, workspacePath string) agentctl.CreateInstanceRequest {
+func buildSSHCreateInstanceRequest(
+	req *ExecutorCreateRequest,
+	workspacePath string,
+	agentctlBin string,
+) agentctl.CreateInstanceRequest {
 	return agentctl.CreateInstanceRequest{
 		ID:            req.InstanceID,
 		WorkspacePath: workspacePath,
@@ -633,7 +637,7 @@ func buildSSHCreateInstanceRequest(req *ExecutorCreateRequest, workspacePath str
 		StripEnv:            stripEnvFromReq(req),
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions: req.RemoteContributions,
-		Env:                 sshRemoteAgentEnv(req),
+		Env:                 sshRemoteContributionEnv(req, agentctlBin),
 	}
 }
 
@@ -648,11 +652,12 @@ func createRemoteAgentInstance(
 	client *ssh.Client,
 	controlPort int,
 	workspacePath string,
+	agentctlBin string,
 	req *ExecutorCreateRequest,
 	authToken string,
 	log *logger.Logger,
 ) (int, error) {
-	body, err := json.Marshal(buildSSHCreateInstanceRequest(req, workspacePath))
+	body, err := json.Marshal(buildSSHCreateInstanceRequest(req, workspacePath, agentctlBin))
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
 	}

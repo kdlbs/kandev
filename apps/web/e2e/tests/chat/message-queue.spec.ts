@@ -225,7 +225,7 @@ test.describe("Task session queue", () => {
     apiClient,
     seedData,
   }) => {
-    const session = await seedFullQueueTask(
+    const { session } = await seedFullQueueTask(
       testPage,
       apiClient,
       seedData,
@@ -269,6 +269,35 @@ test.describe("Task session queue", () => {
     await expect(entries).toHaveCount(3, { timeout: 10_000 });
     await expect(entries.nth(1)).toHaveText("separate third");
     await expect(entries.nth(2)).toHaveText("separate fourth");
+  });
+
+  test("automatic merge accepts a compatible message into a full queue", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { taskId, sessionId, session } = await seedFullQueueTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Full queue auto merge",
+    );
+
+    // The queue is at capacity (10 separate rows, auto-merge off per spec
+    // isolation). Enabling automatic merge must fold the next compatible
+    // message into the tail instead of rejecting it as "queue full".
+    await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
+    await apiClient.queueMessage(taskId, sessionId, "folded while full");
+
+    const chat = session.activeChat();
+    const chip = chat.getByTestId("queue-chip");
+    await expect(chip).toBeVisible({ timeout: 10_000 });
+    await chip.click();
+    const panel = chat.getByTestId("queued-ghost-list");
+    const entries = panel.getByTestId("queue-entry-text");
+    await expect(entries).toHaveCount(10);
+    await expect(entries.last()).toContainText("Queued item 10");
+    await expect(entries.last()).toContainText("folded while full");
   });
 
   test("queue message via submit button on task session page", async ({

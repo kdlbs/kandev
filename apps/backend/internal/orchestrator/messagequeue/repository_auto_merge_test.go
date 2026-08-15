@@ -17,6 +17,10 @@ type automaticMergeRepository interface {
 	AutoMergeIntoAbove(context.Context, string, string) (*QueuedMessage, bool, error)
 }
 
+type automaticMergeCandidateRepository interface {
+	AutoMergeCandidateIntoAbove(context.Context, *QueuedMessage) (*QueuedMessage, bool, error)
+}
+
 type autoMergeRepositoryFactory struct {
 	name string
 	new  func(*testing.T) Repository
@@ -236,6 +240,106 @@ func TestRepository_AutoMergeIntoAbove_EmptyContentHasNoExtraSeparator(t *testin
 	}
 }
 
+func TestRepository_AutoMergeCandidateIntoAbove_FoldsIntoTail(t *testing.T) {
+	for _, tt := range autoMergeRepositoryFactories() {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := tt.new(t)
+			autoRepo, ok := repo.(automaticMergeCandidateRepository)
+			if !ok {
+				t.Fatalf("repository %T does not implement candidate tail merge", repo)
+			}
+
+			insertAutoMergeEntry(t, repo, defaultAutoMergeEntry("candidate", "first"))
+			tail := insertAutoMergeEntry(t, repo, defaultAutoMergeEntry("candidate", "second"))
+			candidate := defaultAutoMergeEntry("candidate", "third")
+
+			merged, didMerge, err := autoRepo.AutoMergeCandidateIntoAbove(context.Background(), &candidate)
+			if err != nil || !didMerge || merged == nil {
+				t.Fatalf("candidate merge: result=%+v merged=%v err=%v", merged, didMerge, err)
+			}
+			if merged.ID != tail.ID {
+				t.Fatalf("survivor = %s, want tail %s", merged.ID, tail.ID)
+			}
+			if merged.Content != "second\n\nthird" {
+				t.Errorf("content = %q, want %q", merged.Content, "second\n\nthird")
+			}
+			entries, err := repo.ListBySession(context.Background(), "candidate")
+			if err != nil {
+				t.Fatalf("list: %v", err)
+			}
+			if len(entries) != 2 || entries[1].ID != tail.ID {
+				t.Fatalf("entries after candidate fold = %+v, want two rows with folded tail", entries)
+			}
+		})
+	}
+}
+
+func TestRepository_AutoMergeCandidateIntoAbove_IncompatibleSkips(t *testing.T) {
+	for _, tt := range autoMergeRepositoryFactories() {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := tt.new(t)
+			autoRepo, ok := repo.(automaticMergeCandidateRepository)
+			if !ok {
+				t.Fatalf("repository %T does not implement candidate tail merge", repo)
+			}
+			insertAutoMergeEntry(t, repo, defaultAutoMergeEntry("candidate-skip", "first"))
+			candidate := defaultAutoMergeEntry("candidate-skip", "other-model")
+			candidate.Model = "other-model"
+			before := autoQueueSnapshot(t, repo, "candidate-skip")
+
+			merged, didMerge, err := autoRepo.AutoMergeCandidateIntoAbove(context.Background(), &candidate)
+			if err != nil || didMerge || merged != nil {
+				t.Fatalf("incompatible candidate: result=%+v merged=%v err=%v", merged, didMerge, err)
+			}
+			if after := autoQueueSnapshot(t, repo, "candidate-skip"); after != before {
+				t.Fatalf("queue mutated on skip\nbefore=%s\nafter=%s", before, after)
+			}
+		})
+	}
+}
+
+func TestRepository_AutoMergeCandidateIntoAbove_EmptyQueueSkips(t *testing.T) {
+	for _, tt := range autoMergeRepositoryFactories() {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := tt.new(t)
+			autoRepo, ok := repo.(automaticMergeCandidateRepository)
+			if !ok {
+				t.Fatalf("repository %T does not implement candidate tail merge", repo)
+			}
+			candidate := defaultAutoMergeEntry("candidate-empty", "only")
+			merged, didMerge, err := autoRepo.AutoMergeCandidateIntoAbove(context.Background(), &candidate)
+			if err != nil || didMerge || merged != nil {
+				t.Fatalf("empty queue: result=%+v merged=%v err=%v", merged, didMerge, err)
+			}
+		})
+	}
+}
+
+func TestSQLiteRepository_AutoMergeCandidateIntoAbove_WriteFailureRollsBack(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	db := repo.(*sqliteRepository).db
+	insertAutoMergeEntry(t, repo, defaultAutoMergeEntry("candidate-rollback", "first"))
+	insertAutoMergeEntry(t, repo, defaultAutoMergeEntry("candidate-rollback", "second"))
+	before := autoQueueSnapshot(t, repo, "candidate-rollback")
+	if _, err := db.Exec(`
+		CREATE TRIGGER fail_auto_merge_candidate_update
+		BEFORE UPDATE ON queued_messages
+		BEGIN
+			SELECT RAISE(ABORT, 'forced automatic candidate merge failure');
+		END;
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+	candidate := defaultAutoMergeEntry("candidate-rollback", "third")
+	merged, didMerge, err := repo.(automaticMergeCandidateRepository).AutoMergeCandidateIntoAbove(context.Background(), &candidate)
+	if err == nil || didMerge || merged != nil {
+		t.Fatalf("forced write failure: result=%+v merged=%v err=%v", merged, didMerge, err)
+	}
+	if after := autoQueueSnapshot(t, repo, "candidate-rollback"); after != before {
+		t.Fatalf("write failure was not atomic\nbefore=%s\nafter=%s", before, after)
+	}
+}
+
 func TestSQLiteRepository_AutoMergeIntoAbove_WriteFailureRollsBack(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	testAutoMergeWriteRollback(t, repo, `
@@ -348,6 +452,20 @@ func autoMergeSkipCases() []autoMergeSkipCase {
 		{name: "agent sender mismatch", mutate: func(target, source *QueuedMessage) {
 			target.QueuedBy, source.QueuedBy = QueuedByAgent, QueuedByAgent
 			target.Metadata, source.Metadata = senderMetadata("one"), senderMetadata("two")
+		}},
+		{name: "agent session mismatch", mutate: func(target, source *QueuedMessage) {
+			// Different sessions of the same sender task are different agents
+			// and execution contexts; auto-merge must keep their prompts
+			// separate even though manual merge would allow the fold.
+			target.QueuedBy, source.QueuedBy = QueuedByAgent, QueuedByAgent
+			target.Metadata = map[string]interface{}{
+				"sender_task_id": "sender-task", "sender_session_id": "session-one",
+				"sender_session_name": "reviewer-one", "sender_task_title": "Sender task",
+			}
+			source.Metadata = map[string]interface{}{
+				"sender_task_id": "sender-task", "sender_session_id": "session-two",
+				"sender_session_name": "reviewer-two", "sender_task_title": "Sender task",
+			}
 		}},
 		{name: "workflow source", mutate: func(target, source *QueuedMessage) {
 			target.QueuedBy, source.QueuedBy = QueuedByWorkflow, QueuedByWorkflow

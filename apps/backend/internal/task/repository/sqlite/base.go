@@ -15,11 +15,11 @@ import (
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db           *sqlx.DB // writer
-	ro           *sqlx.DB // reader (read-only pool)
-	ownsDB       bool
-	log          *logger.Logger
-	migrate      *db.MigrateLogger
+	db               *sqlx.DB // writer
+	ro               *sqlx.DB // reader (read-only pool)
+	ownsDB           bool
+	log              *logger.Logger
+	migrate          *db.MigrateLogger
 	queuePurgeMu     sync.RWMutex
 	queuePurger      func(context.Context, string)
 	queuePurgeNotify func(context.Context, string)

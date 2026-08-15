@@ -70,6 +70,7 @@
   "transientRetryReasonProviderOverloaded": "Ƥŕōvĩďēŕ ōvēŕĺōàďēď",
   "transientRetryReasonProviderUnavailable": "Ƥŕōvĩďēŕ ţēḿƥōŕàŕĩĺŷ ũńàvàĩĺàƀĺē",
   "transientRetryReasonRateLimited": "Ŕàţē ĺĩḿĩţēď",
+  "transientRetryReasonAgentTransportLost": "Àĝēńţ ćōńńēćţĩōń ĺōśţ",
   "transientRetryReasonGeneric": "Ƥŕōvĩďēŕ ēŕŕōŕ",
   "transientRetryIn": "Ŕēţŕŷĩńĝ ĩń {{countdown}}",
   "transientRetryNow": "Ŕēţŕŷĩńĝ ńōŵ…",

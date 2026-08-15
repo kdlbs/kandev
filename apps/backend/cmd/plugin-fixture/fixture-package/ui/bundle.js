@@ -356,6 +356,29 @@
         );
       }
 
+      function WorkspaceActionsSlot(props) {
+        var slotProps = props.slotProps || {};
+        return jsx(
+          "button",
+          {
+            type: "button",
+            "data-testid": "e2e-sidebar-workspace-actions",
+            "data-workspace-id": slotProps.workspaceId,
+            "data-workspace-label": slotProps.workspaceLabel || "",
+            "data-presentation": slotProps.presentation || "unknown",
+            "aria-label": "Fixture workspace action",
+            className:
+              slotProps.presentation === "mobile"
+                ? "flex h-11 w-11 cursor-pointer items-center justify-center rounded-md border"
+                : "flex h-6 w-6 cursor-pointer items-center justify-center rounded-md border",
+            onClick: function (event) {
+              event.currentTarget.setAttribute("data-clicked", "true");
+            },
+          },
+          "W",
+        );
+      }
+
       function StatusSlot(props) {
         var slotProps = props.slotProps || {};
         var id = slotProps.placement === "left" ? "hello-status-left" : "hello-status-right";
@@ -637,6 +660,7 @@
       registry.registerComponent("new-session-input-actions", ComposerAction);
       registry.registerComponent("task-card-indicators", CardIndicator);
       registry.registerComponent("task-card-tags", CardTags);
+      registry.registerComponent("sidebar-workspace-actions", WorkspaceActionsSlot);
       registry.registerTaskMenuAction({
         id: "enhance-notes",
         label: "Enhance notes",
