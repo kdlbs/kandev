@@ -103,6 +103,74 @@ func TestReconcileUnpublishedPromptTurnsAcceptsMessageBackedReservation(t *testi
 	}
 }
 
+func TestReconcileUnpublishedPromptTurnsPreservesAmbiguousEmptyReservation(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-reservation-accepted"
+	const sessionID = "session-reservation-accepted"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	base := time.Date(2026, time.August, 15, 20, 30, 0, 0, time.UTC)
+	createRecoveryTurn(t, repo, taskID, sessionID, "turn-clarification", base, nil)
+	createRecoveryClarification(
+		t, repo, "message-accepted-claim", taskID, sessionID, "turn-clarification",
+		"pending-accepted", base,
+	)
+	createRecoveryTurn(t, repo, taskID, sessionID, "turn-accepted-reservation", base.Add(time.Minute), map[string]interface{}{
+		models.TurnMetaKeyPromptDispatchPending:                 true,
+		models.TurnMetaKeyPromptDispatchAttempted:               true,
+		models.TurnMetaKeyPromptDispatchClarificationPendingID:  "pending-accepted",
+		models.TurnMetaKeyPromptDispatchClarificationTurnID:     "turn-clarification",
+		models.TurnMetaKeyPromptDispatchClarificationMessageIDs: []string{"message-accepted-claim"},
+	})
+
+	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
+	if err != nil || reconciled != 1 {
+		t.Fatalf("ReconcileUnpublishedPromptTurns = %d, %v; want 1, nil", reconciled, err)
+	}
+	turn, err := repo.GetTurn(ctx, "turn-accepted-reservation")
+	if err != nil {
+		t.Fatalf("GetTurn(accepted reservation): %v", err)
+	}
+	for _, key := range []string{
+		models.TurnMetaKeyPromptDispatchPending,
+		models.TurnMetaKeyPromptDispatchAttempted,
+		models.TurnMetaKeyPromptDispatchClarificationPendingID,
+		models.TurnMetaKeyPromptDispatchClarificationTurnID,
+		models.TurnMetaKeyPromptDispatchClarificationMessageIDs,
+	} {
+		if _, exists := turn.Metadata[key]; exists {
+			t.Fatalf("accepted reservation retained %q: %#v", key, turn.Metadata)
+		}
+	}
+	claimed, err := repo.GetMessage(ctx, "message-accepted-claim")
+	if err != nil {
+		t.Fatalf("GetMessage(accepted claim): %v", err)
+	}
+	if claimed.Metadata["status"] != "answered" {
+		t.Fatalf("accepted claim status = %v, want answered", claimed.Metadata["status"])
+	}
+}
+
+func TestDeleteTurnIfUnreferencedRemovesDefinitivelyRejectedAttempt(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-reservation-rollback"
+	const sessionID = "session-reservation-rollback"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	createRecoveryTurn(t, repo, taskID, sessionID, "turn-accepted-rollback", time.Now().UTC(), map[string]interface{}{
+		models.TurnMetaKeyPromptDispatchPending:   true,
+		models.TurnMetaKeyPromptDispatchAttempted: true,
+	})
+
+	deleted, err := repo.DeleteTurnIfUnreferenced(ctx, sessionID, "turn-accepted-rollback")
+	if err != nil || !deleted {
+		t.Fatalf("DeleteTurnIfUnreferenced = %v, %v; want true, nil", deleted, err)
+	}
+	if _, err := repo.GetTurn(ctx, "turn-accepted-rollback"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("definitively rejected attempt remains: %v", err)
+	}
+}
+
 func setTurnUpdatedAtJustAfterSecond(t *testing.T, repo *Repository, turnID string) time.Time {
 	t.Helper()
 	for time.Now().UTC().Nanosecond() >= int((100 * time.Millisecond).Nanoseconds()) {

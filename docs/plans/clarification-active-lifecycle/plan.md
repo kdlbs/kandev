@@ -228,9 +228,9 @@ All task gates passed:
 - Dispatch-acknowledgement remediation: repository, clarification, and orchestrator packages passed;
   focused detached-resume tests and changed backend lint reported zero issues.
 - Restart-window remediation: unpublished successor reservations persist exact clarification recovery
-  identity, startup restores empty reservations before executor reconciliation, and message-backed
-  reservations become accepted authority. Focused SQLite/startup tests passed; PostgreSQL parity is
-  environment-gated.
+  identity, startup restores empty unattempted reservations before executor reconciliation, and
+  message-backed reservations become accepted authority. Focused SQLite/startup tests passed;
+  PostgreSQL parity is environment-gated.
 - Session-selection review remediation: six shared desktop/mobile selection and removal suites passed
   75 tests; typecheck, zero-warning full lint, and the i18n ratchet passed.
 - Rejected-load review remediation: both primary-session and sessionless pending-selection fallbacks
@@ -238,6 +238,9 @@ All task gates passed:
 - Review remediation: agentctl acceptance is not reported as success until the reserved successor is
   durably published; post-acceptance publication failure remains terminal and rollback-ineligible.
   Clarification overlay and transcript filtering now share the same optional authority scope.
+- At-most-once remediation: immediately before external executor dispatch, a durable attempt marker
+  makes restart recovery fail closed across the acceptance/publication crash window. Marker-write
+  failure rolls back before dispatch; known synchronous rejection remains safely rollback-eligible.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

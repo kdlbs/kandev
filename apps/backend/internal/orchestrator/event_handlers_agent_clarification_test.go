@@ -16,6 +16,15 @@ type repoBackedTurnService struct {
 	repo testRepo
 }
 
+type failingReservedTurnAttemptMarker struct {
+	TurnService
+	err error
+}
+
+func (s failingReservedTurnAttemptMarker) MarkReservedTurnDispatchAttempted(context.Context, *models.Turn) error {
+	return s.err
+}
+
 type testRepo interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
 	CompleteTurn(ctx context.Context, id string) error
@@ -45,6 +54,10 @@ func (s *repoBackedTurnService) ReserveTurn(
 }
 
 func (s *repoBackedTurnService) PublishReservedTurn(context.Context, *models.Turn) error { return nil }
+
+func (s *repoBackedTurnService) MarkReservedTurnDispatchAttempted(context.Context, *models.Turn) error {
+	return nil
+}
 
 func (s *repoBackedTurnService) RollbackReservedTurn(
 	ctx context.Context,

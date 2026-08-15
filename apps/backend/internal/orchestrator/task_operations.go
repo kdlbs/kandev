@@ -3784,15 +3784,14 @@ func (s *Service) promptDispatchCallback(
 			publicationErr = s.turnService.PublishReservedTurn(publishCtx, reservedTurn)
 			cancel()
 			if publicationErr != nil {
-				s.logger.Error("failed to publish accepted prompt turn",
+				s.logger.Error("failed to persist or publish accepted prompt turn",
 					zap.String("session_id", sessionID),
 					zap.String("turn_id", reservedTurn.ID),
 					zap.Error(publicationErr))
 			}
 			s.reservedPromptTurns.CompareAndDelete(sessionID, reservedTurn.ID)
-			// Callback itself proves agentctl accepted this turn. Keep process-local
-			// ownership even when durable publication failed. Removing the private
-			// reservation makes every later rollback fail closed for this accepted turn.
+			// The pre-dispatch attempt marker makes restart recovery and rollback
+			// fail closed even if this post-acceptance publication fails.
 			s.activeTurns.Store(sessionID, reservedTurn.ID)
 			s.bindAcceptedDispatchTurn(sessionID, reservedTurn.ID)
 		}
@@ -3856,6 +3855,12 @@ func (s *Service) claimPromptDispatch(
 		turnID:               turnID,
 		createdTurn:          createdTurn,
 		reservedTurn:         reservedTurn,
+	}
+	if reservedTurn != nil && s.turnService != nil {
+		if err := s.turnService.MarkReservedTurnDispatchAttempted(ctx, reservedTurn); err != nil {
+			s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
+			return nil, promptClaimRollback{}, fmt.Errorf("persist prompt dispatch attempt: %w", err)
+		}
 	}
 	return claimed, rollback, nil
 }

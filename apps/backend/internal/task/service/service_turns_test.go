@@ -49,6 +49,9 @@ func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testin
 			t.Fatal("reserved turn published before dispatch acceptance")
 		}
 	}
+	if err := svc.PublishReservedTurn(ctx, rejected); err == nil {
+		t.Fatal("PublishReservedTurn(unattempted) error = nil, want rejection")
+	}
 	rolledBack, err := svc.RollbackReservedTurn(ctx, sessionID, rejected.ID)
 	if err != nil || !rolledBack {
 		t.Fatalf("RollbackReservedTurn: rolledBack=%v err=%v", rolledBack, err)
@@ -61,6 +64,16 @@ func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testin
 	if err != nil {
 		t.Fatalf("ReserveTurn(accepted): %v", err)
 	}
+	if err := svc.MarkReservedTurnDispatchAttempted(ctx, accepted); err != nil {
+		t.Fatalf("MarkReservedTurnDispatchAttempted: %v", err)
+	}
+	marked, err := repo.GetTurn(ctx, accepted.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(marked accepted): %v", err)
+	}
+	if durable, _ := marked.Metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool); !durable {
+		t.Fatalf("attempted turn metadata = %#v, want durable dispatch marker", marked.Metadata)
+	}
 	if err := svc.PublishReservedTurn(ctx, accepted); err != nil {
 		t.Fatalf("PublishReservedTurn: %v", err)
 	}
@@ -70,6 +83,9 @@ func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testin
 	}
 	if _, pending := persisted.Metadata[models.TurnMetaKeyPromptDispatchPending]; pending {
 		t.Fatalf("published turn retained dispatch-pending marker: %#v", persisted.Metadata)
+	}
+	if _, attempted := persisted.Metadata[models.TurnMetaKeyPromptDispatchAttempted]; attempted {
+		t.Fatalf("published turn retained dispatch-attempt marker: %#v", persisted.Metadata)
 	}
 	if _, pending := persisted.Metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID]; pending {
 		t.Fatalf("published turn retained recovery metadata: %#v", persisted.Metadata)

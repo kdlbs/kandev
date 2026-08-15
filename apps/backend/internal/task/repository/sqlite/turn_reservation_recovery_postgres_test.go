@@ -51,3 +51,44 @@ func TestPostgresReconcileUnpublishedPromptTurns(t *testing.T) {
 		t.Fatalf("recovered postgres metadata = %#v", message.Metadata)
 	}
 }
+
+func TestPostgresReconcileAmbiguousEmptyPromptTurn(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	const taskID = "task-reservation-accepted-pg"
+	const sessionID = "session-reservation-accepted-pg"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	base := time.Date(2026, time.August, 15, 21, 30, 0, 0, time.UTC)
+	createRecoveryTurn(t, repo, taskID, sessionID, "turn-clarification-accepted-pg", base, nil)
+	createRecoveryClarification(
+		t, repo, "message-accepted-pg", taskID, sessionID,
+		"turn-clarification-accepted-pg", "pending-accepted-pg", base,
+	)
+	createRecoveryTurn(t, repo, taskID, sessionID, "turn-reservation-accepted-pg", base.Add(time.Minute), map[string]interface{}{
+		models.TurnMetaKeyPromptDispatchPending:                 true,
+		models.TurnMetaKeyPromptDispatchAttempted:               true,
+		models.TurnMetaKeyPromptDispatchClarificationPendingID:  "pending-accepted-pg",
+		models.TurnMetaKeyPromptDispatchClarificationTurnID:     "turn-clarification-accepted-pg",
+		models.TurnMetaKeyPromptDispatchClarificationMessageIDs: []string{"message-accepted-pg"},
+	})
+
+	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
+	if err != nil || reconciled != 1 {
+		t.Fatalf("ReconcileUnpublishedPromptTurns = %d, %v; want 1, nil", reconciled, err)
+	}
+	active, err := repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil || active.ID != "turn-reservation-accepted-pg" {
+		t.Fatalf("accepted active turn = %#v, %v", active, err)
+	}
+	message, err := repo.GetMessage(ctx, "message-accepted-pg")
+	if err != nil {
+		t.Fatalf("GetMessage(accepted): %v", err)
+	}
+	if message.Metadata["status"] != "answered" {
+		t.Fatalf("accepted postgres claim status = %v, want answered", message.Metadata["status"])
+	}
+}

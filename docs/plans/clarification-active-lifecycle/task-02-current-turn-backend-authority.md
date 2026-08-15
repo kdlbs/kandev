@@ -103,13 +103,17 @@ blockers/risks, and update task/plan status.
 - Detached resume now reserves its successor durably before agentctl acknowledgement so early provider
   frames retain a valid turn foreign key, while an unpublished marker keeps the empty row from becoming
   current-turn authority. The reservation stores source turn, pending ID, and exact claimed message IDs.
-- Startup reconciliation runs before executor discovery, deletes empty unpublished reservations, and
-  restores only their claimed clarification rows. A message-backed reservation is preserved and its
-  marker cleared as ambiguous acceptance. SQLite/startup regressions passed; PostgreSQL parity remains
-  environment-gated.
+- Startup reconciliation runs before executor discovery, deletes empty unattempted unpublished
+  reservations, and restores only their claimed clarification rows. A message-backed reservation is
+  preserved and its marker cleared as ambiguous acceptance. SQLite/startup regressions passed;
+  PostgreSQL parity remains environment-gated.
 - Review remediation now reports agentctl acceptance followed by successor-publication failure as a
   non-retryable server error. It keeps the answer terminal, removes rollback eligibility, and preserves
   active process ownership so the accepted prompt cannot be dispatched twice in-process.
+- At-most-once remediation persists `prompt_dispatch_attempted=true` immediately before the external
+  executor call. Startup preserves an attempted empty successor as dispatch-ambiguous authority;
+  marker-write failure rolls back before dispatch, while known synchronous rejection can still restore
+  the claimed clarification.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - Final review remediation makes that durable detach an atomic `UPDATE ... RETURNING` claim over the

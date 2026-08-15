@@ -92,7 +92,8 @@ func (r *Repository) reconcileUnpublishedPromptTurn(
 		return false, err
 	}
 	updatedAt := time.Now().UTC()
-	if referenced {
+	attempted, _ := metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool)
+	if attempted || referenced {
 		deletePromptDispatchMetadata(metadata)
 		err = updateTurnMetadata(ctx, tx, r.db, turn.id, metadata, updatedAt)
 	} else {
@@ -166,6 +167,7 @@ func updateTurnMetadata(
 
 func deletePromptDispatchMetadata(metadata map[string]interface{}) {
 	delete(metadata, models.TurnMetaKeyPromptDispatchPending)
+	delete(metadata, models.TurnMetaKeyPromptDispatchAttempted)
 	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationPendingID)
 	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationTurnID)
 	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationMessageIDs)

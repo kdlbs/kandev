@@ -98,11 +98,43 @@ func (s *Service) createTurn(
 	return turn, nil
 }
 
-// PublishReservedTurn makes a durably reserved turn authoritative after
-// agentctl accepts its prompt, then reveals it to connected clients.
+// MarkReservedTurnDispatchAttempted establishes an at-most-once boundary
+// immediately before external dispatch. Startup fails closed on this marker
+// because a crash can no longer prove whether agentctl accepted the prompt.
+func (s *Service) MarkReservedTurnDispatchAttempted(ctx context.Context, turn *models.Turn) error {
+	if turn == nil {
+		return errors.New("cannot mark nil reserved turn attempted")
+	}
+	attempted := *turn
+	attempted.Metadata = maps.Clone(turn.Metadata)
+	if attempted.Metadata == nil {
+		attempted.Metadata = map[string]interface{}{}
+	}
+	attempted.Metadata[models.TurnMetaKeyPromptDispatchAttempted] = true
+	if err := s.turns.UpdateTurn(ctx, &attempted); err != nil {
+		return fmt.Errorf("mark reserved turn %s dispatch attempted: %w", turn.ID, err)
+	}
+	persisted, err := s.turns.GetTurn(ctx, turn.ID)
+	if err != nil {
+		return fmt.Errorf("verify reserved turn %s dispatch attempt: %w", turn.ID, err)
+	}
+	durable, _ := persisted.Metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool)
+	if !durable {
+		return fmt.Errorf("verify reserved turn %s dispatch attempt: marker missing", turn.ID)
+	}
+	turn.Metadata = persisted.Metadata
+	turn.UpdatedAt = persisted.UpdatedAt
+	return nil
+}
+
+// PublishReservedTurn makes a durably attempted reservation authoritative,
+// removes its recovery metadata, then reveals it to connected clients.
 func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) error {
 	if turn == nil {
 		return errors.New("cannot publish nil reserved turn")
+	}
+	if attempted, _ := turn.Metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool); !attempted {
+		return fmt.Errorf("cannot publish unattempted reserved turn %s", turn.ID)
 	}
 	published := *turn
 	published.Metadata = maps.Clone(turn.Metadata)
@@ -117,6 +149,7 @@ func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) er
 
 func deletePromptDispatchMetadata(metadata map[string]interface{}) {
 	delete(metadata, models.TurnMetaKeyPromptDispatchPending)
+	delete(metadata, models.TurnMetaKeyPromptDispatchAttempted)
 	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationPendingID)
 	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationTurnID)
 	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationMessageIDs)

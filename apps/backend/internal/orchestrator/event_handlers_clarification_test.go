@@ -354,6 +354,63 @@ func TestResumeDetachedClarificationRejectsBeforeDispatchWhenTurnPersistenceFail
 	}
 }
 
+func TestResumeDetachedClarificationRejectsBeforeDispatchWhenAttemptMarkerFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-marker-failure", "session-marker-failure", "step-1")
+	seedExecutorRunning(t, repo, "session-marker-failure", "task-marker-failure", "exec-marker-failure")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session-marker-failure",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	persistenceErr := errors.New("persist dispatch attempt marker")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.turnService = failingReservedTurnAttemptMarker{
+		TurnService: &repoBackedTurnService{repo: repo},
+		err:         persistenceErr,
+	}
+
+	err := svc.ResumeDetachedClarification(ctx, clarification.DetachedClarificationResume{
+		TaskID:     "task-marker-failure",
+		SessionID:  "session-marker-failure",
+		PendingID:  "pending-marker-failure",
+		Question:   "Continue?",
+		AnswerText: "Continue",
+	})
+	if !errors.Is(err, persistenceErr) {
+		t.Fatalf("resume error = %v, want %v", err, persistenceErr)
+	}
+	agentMgr.mu.Lock()
+	promptCalls := len(agentMgr.capturedPromptCalls)
+	agentMgr.mu.Unlock()
+	if promptCalls != 0 {
+		t.Fatalf("prompt dispatch calls = %d, want none before attempt marker persistence", promptCalls)
+	}
+	if pending := svc.reservedPromptTurnID("session-marker-failure"); pending != "" {
+		t.Fatalf("private reservation = %q, want rollback after marker failure", pending)
+	}
+	turns, err := repo.ListTurnsBySession(ctx, "session-marker-failure")
+	if err != nil {
+		t.Fatalf("list turns after marker failure: %v", err)
+	}
+	if len(turns) != 0 {
+		t.Fatalf("turns after marker failure = %#v, want rolled-back reservation", turns)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-marker-failure")
+	if err != nil {
+		t.Fatalf("load session after marker failure: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after marker failure = %q, want waiting", session.State)
+	}
+}
+
 func TestResumeDetachedClarificationUsesBoundedDispatchOnlyPrompt(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-bounded", "session-bounded", "step-1")

@@ -60,6 +60,10 @@ func (a *repoTurnService) ReserveTurn(
 
 func (a *repoTurnService) PublishReservedTurn(context.Context, *models.Turn) error { return nil }
 
+func (a *repoTurnService) MarkReservedTurnDispatchAttempted(context.Context, *models.Turn) error {
+	return nil
+}
+
 func (a *repoTurnService) RollbackReservedTurn(
 	ctx context.Context,
 	sessionID, turnID string,

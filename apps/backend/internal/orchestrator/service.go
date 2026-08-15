@@ -131,6 +131,7 @@ type TurnService interface {
 		sessionID string,
 		recovery *models.PromptDispatchRecovery,
 	) (*models.Turn, error)
+	MarkReservedTurnDispatchAttempted(ctx context.Context, turn *models.Turn) error
 	PublishReservedTurn(ctx context.Context, turn *models.Turn) error
 	RollbackReservedTurn(ctx context.Context, sessionID, turnID string) (bool, error)
 	ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error)

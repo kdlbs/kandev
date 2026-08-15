@@ -148,6 +148,45 @@ func TestPendingClarificationIgnoresEmptyUnpublishedSuccessor(t *testing.T) {
 	}
 }
 
+func TestAmbiguousEmptySuccessorSupersedesClarification(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 18, 30, 0, 0, time.UTC)
+	const taskID = "task-accepted-successor"
+	const sessionID = "session-accepted-successor"
+	seedPendingActionSession(t, repo, taskID, sessionID)
+	createPendingActionTurn(t, repo, taskID, sessionID, "turn-clarification", base, base)
+	createPendingActionMessage(
+		t, repo, "clarification-predecessor", taskID, sessionID, "turn-clarification",
+		models.MessageTypeClarificationRequest, "pending", base,
+	)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-accepted-empty", TaskSessionID: sessionID, TaskID: taskID,
+		StartedAt: base.Add(time.Minute), CreatedAt: base.Add(time.Minute),
+		Metadata: map[string]interface{}{
+			models.TurnMetaKeyPromptDispatchPending:   true,
+			models.TurnMetaKeyPromptDispatchAttempted: true,
+		},
+	}); err != nil {
+		t.Fatalf("CreateTurn(accepted empty): %v", err)
+	}
+
+	active, err := repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveClarificationMessagesBySessionID: %v", err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("accepted successor left predecessor active: %v", messageIDs(active))
+	}
+	actions, err := repo.GetPendingActionsBySessionIDs(ctx, []string{sessionID})
+	if err != nil {
+		t.Fatalf("GetPendingActionsBySessionIDs: %v", err)
+	}
+	if _, ok := actions[sessionID]; ok {
+		t.Fatalf("accepted successor left predecessor pending: %#v", actions)
+	}
+}
+
 func TestFindActiveClarificationMessagesSupportsMissingStatusInCurrentTurn(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

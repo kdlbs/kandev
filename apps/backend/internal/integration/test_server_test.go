@@ -242,6 +242,10 @@ func (a *testTurnServiceAdapter) PublishReservedTurn(ctx context.Context, turn *
 	return a.svc.PublishReservedTurn(ctx, turn)
 }
 
+func (a *testTurnServiceAdapter) MarkReservedTurnDispatchAttempted(ctx context.Context, turn *models.Turn) error {
+	return a.svc.MarkReservedTurnDispatchAttempted(ctx, turn)
+}
+
 func (a *testTurnServiceAdapter) RollbackReservedTurn(
 	ctx context.Context,
 	sessionID, turnID string,

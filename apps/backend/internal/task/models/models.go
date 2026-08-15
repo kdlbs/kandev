@@ -263,12 +263,13 @@ const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
 
 // TurnMetaKeyPromptDispatchPending marks a successor created before agentctl
-// acknowledges its prompt. Empty marked turns are not current-turn authority;
-// publication clears the marker, while a referencing message proves ambiguous
-// acceptance after a crash.
+// acknowledges its prompt. Empty marked turns are not current-turn authority
+// unless dispatch ambiguity was recorded; publication clears the marker, while
+// a referencing message also proves ambiguous acceptance after a crash.
 const TurnMetaKeyPromptDispatchPending = "prompt_dispatch_pending"
 
 const (
+	TurnMetaKeyPromptDispatchAttempted               = "prompt_dispatch_attempted"
 	TurnMetaKeyPromptDispatchClarificationPendingID  = "prompt_dispatch_clarification_pending_id"
 	TurnMetaKeyPromptDispatchClarificationTurnID     = "prompt_dispatch_clarification_turn_id"
 	TurnMetaKeyPromptDispatchClarificationMessageIDs = "prompt_dispatch_clarification_message_ids"
