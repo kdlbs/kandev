@@ -1006,6 +1006,19 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 		return
 	}
 
+	// Reconcile task_session_commits before acquiring the per-session
+	// cancel-in-flight mutex below. This must still run before
+	// handleAgentCompletedLocked's rotated-execution/terminal-state guards
+	// (see captureSessionCommitsSweep's doc for why - GetGitLog is resolved
+	// by session ID, not execution ID, and a session's worktree is shared
+	// across executions), but it does not need this mutex's exclusivity: the
+	// sweep is read-mostly, best-effort, and idempotent on the write side
+	// (ON CONFLICT DO NOTHING). Running it here, before the lock, keeps
+	// Stop/Cancel/Delete on this session from blocking behind up to 10s of
+	// git I/O - the mutex below is needed by ~20 other call sites across
+	// internal/orchestrator/ for exactly those operations.
+	s.captureSessionCommitsSweep(context.WithoutCancel(ctx), data.SessionID)
+
 	// Completion owns workflow advancement only while serialized with every
 	// cancel/interrupt decision for this session. If coordinator stop won while
 	// the event waited, the guarded state reload below observes CANCELLED and
@@ -1048,6 +1061,13 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 		return
 	}
+
+	// task_session_commits reconciliation (captureSessionCommitsSweep) runs in
+	// the caller, handleAgentCompleted, before this function's rotated-
+	// execution/terminal-state guards below are even reached - and, for a
+	// session-scoped event, before the per-session cancel-in-flight mutex is
+	// acquired at all (see the comment at that call site for why the sweep
+	// does not need that mutex's exclusivity).
 
 	// Skip transition logic when this event is the side-effect of a deliberate
 	// stop (e.g. a workflow profile-switch calling completeAndStopSession). Two

@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
+
 import { test, expect } from "../../fixtures/test-base";
 
 const GLOBAL_VALUE = "e2e-copy-move-global-value";
 
 /** Unique per run so retries never collide with leftovers from a failed attempt. */
-const runToken = () => `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+const runToken = () => `${Date.now()}${randomUUID().slice(0, 8)}`;
 const WORKSPACE_VALUE = "e2e-copy-move-workspace-value";
 
 /** Creates a secret from the settings page via the Add secret dialog. */
@@ -192,7 +194,7 @@ test.describe("secrets-copy-move", () => {
   test("restores focus to the trigger after closing the dialog", async ({ testPage }) => {
     // Unique per run: retries must not collide with a secret a previous
     // attempt left behind (the fixture reset does not remove secrets).
-    const sourceName = `E2E Copy Move Focus ${Date.now()} ${Math.random().toString(36).slice(2, 6)}`;
+    const sourceName = `E2E Copy Move Focus ${runToken()}`;
     await createSecretFromSettings(testPage, "/settings/general/secrets", sourceName, GLOBAL_VALUE);
 
     await testPage.getByRole("button", { name: `Copy or move ${sourceName}` }).click();

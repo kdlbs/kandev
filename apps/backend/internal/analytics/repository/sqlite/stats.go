@@ -611,6 +611,14 @@ func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start 
 // does not specify one, mirroring GetTaskStats' default page size.
 const defaultSessionCodeStatsLimit = 500
 
+// commitCaptureActivatedAtMetaKey mirrors the kandev_meta key
+// task/repository/sqlite.migrateSessionCommitsDedupeAndActivation publishes
+// (same literal string; this package has its own read-only handle onto the
+// same database, and there is no shared cross-package helper for kandev_meta
+// reads — every owning package re-embeds the literal query, matching the
+// existing idiom in internal/persistence and internal/system/database).
+const commitCaptureActivatedAtMetaKey = "commit_capture_activated_at"
+
 // ListSessionCodeStats returns, per session, committed LOC (summed from
 // task_session_commits) and PEAK pending-diff LOC (the largest single
 // task_session_git_snapshots snapshot, not the latest — the latest snapshot
@@ -618,6 +626,17 @@ const defaultSessionCodeStatsLimit = 500
 // per-session line-of-code aggregation the kandev-plugin-agent-stats plugin
 // used to compute by reading the SQLite file directly (see ADR 0043); the
 // SQL here mirrors that plugin's sessionsQuery.
+//
+// lines_added_committed / lines_deleted_committed are NULL, not 0, for a
+// session with no observed commit rows that started before
+// commit_capture_activated_at (kandev_meta, published by
+// task/repository/sqlite.migrateSessionCommitsDedupeAndActivation): capture
+// wasn't running yet for that session, so zero cannot be told apart from
+// unknown. A session with any observed commit, or one that started after
+// activation, always gets a real sum (activation absent entirely — should
+// not happen once boot has completed successfully — falls through to the
+// pre-existing zero behavior via SQL's three-valued NULL comparison logic).
+// Peak-pending is unrelated to this marker and is always a real int64.
 //
 // Portability: the committed-sum half of this query is plain SQL and works
 // unchanged on both drivers. The peak-pending half must walk each snapshot's
@@ -646,11 +665,28 @@ func (r *Repository) ListSessionCodeStats(
 	// origin; the Host data API is one, so a plugin must not see through it
 	// what the UI deliberately does not show.
 	where += andNotAutomationOriginT
+	// Compare normalized forms, not the raw text or a naive cast on either
+	// side. ts.started_at is a naive TIMESTAMP column (no embedded zone) that
+	// is always written as UTC wall-clock time (time.Now().UTC()) — use
+	// NaiveUTCTimestampOf, not DateTimeOf, or Postgres reinterprets it in the
+	// session's timezone GUC and silently shifts it. activation.value is text
+	// formatted via time.RFC3339Nano, which already carries an explicit "Z" —
+	// use DateTimeOf, which respects that embedded zone.
+	startedAtNormalized := dialect.NaiveUTCTimestampOf(driver, "ts.started_at")
+	activationNormalized := dialect.DateTimeOf(driver, "activation.value")
 	query := fmt.Sprintf(`
 		SELECT
 			ts.id AS session_id,
-			COALESCE(commit_stats.insertions, 0) AS lines_added_committed,
-			COALESCE(commit_stats.deletions, 0) AS lines_deleted_committed,
+			CASE
+				WHEN commit_stats.session_id IS NOT NULL THEN commit_stats.insertions
+				WHEN %[1]s < %[2]s THEN NULL
+				ELSE 0
+			END AS lines_added_committed,
+			CASE
+				WHEN commit_stats.session_id IS NOT NULL THEN commit_stats.deletions
+				WHEN %[1]s < %[2]s THEN NULL
+				ELSE 0
+			END AS lines_deleted_committed,
 			COALESCE(peak_stats.peak_additions, 0) AS lines_added_peak_pending,
 			COALESCE(peak_stats.peak_deletions, 0) AS lines_deleted_peak_pending
 		FROM task_sessions ts
@@ -662,11 +698,12 @@ func (r *Repository) ListSessionCodeStats(
 			FROM task_session_commits c
 			GROUP BY c.session_id
 		) commit_stats ON commit_stats.session_id = ts.id
-		LEFT JOIN (%s) peak_stats ON peak_stats.session_id = ts.id
-		WHERE %s
+		LEFT JOIN (%[3]s) peak_stats ON peak_stats.session_id = ts.id
+		LEFT JOIN kandev_meta activation ON activation.key = '%[4]s'
+		WHERE %[5]s
 		ORDER BY ts.started_at ASC, ts.id ASC
 		LIMIT ? OFFSET ?
-	`, peakPendingSnapshotSubquery(driver), where)
+	`, startedAtNormalized, activationNormalized, peakPendingSnapshotSubquery(driver), commitCaptureActivatedAtMetaKey, where)
 
 	inQuery, inArgs, err := sqlx.In(query, args...)
 	if err != nil {

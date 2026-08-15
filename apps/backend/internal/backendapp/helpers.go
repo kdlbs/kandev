@@ -1453,12 +1453,10 @@ func (a githubWorkspaceHealthAdapter) GitHubConnectionHealth(
 		return health.GitHubConnectionHealth{}, err
 	}
 	return health.GitHubConnectionHealth{
-		WorkspaceCount: summary.WorkspaceCount,
-		Active:         summary.Active,
-		Disconnected:   summary.Disconnected,
-		Invalid:        summary.Invalid,
-		Suspended:      summary.Suspended,
-		Revoked:        summary.Revoked,
+		Active:    summary.Active,
+		Invalid:   summary.Invalid,
+		Suspended: summary.Suspended,
+		Revoked:   summary.Revoked,
 	}, nil
 }
 

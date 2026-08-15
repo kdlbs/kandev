@@ -15,6 +15,11 @@ import {
 const WORKSPACE_ID = "ws-1";
 const WORKSPACES_HREF = "/settings/workspaces";
 const WORKSPACES = [{ id: WORKSPACE_ID, name: "Main Workspace" }];
+const ORDERED_WORKSPACES = [
+  { id: "ws-first", name: "First" },
+  { id: "ws-active", name: "Active" },
+  { id: "ws-last", name: "Last" },
+];
 // Hoisted so the filter tests can build fixtures without re-spelling the
 // display name (sonar duplicate-literal rule).
 const AGENT_DISPLAY_NAME = "Claude Code";
@@ -46,6 +51,17 @@ function integrationsTabOf(tabs: readonly SettingsMenuNode[]): SettingsMenuNode 
 }
 
 describe("buildWorkspacesBranch", () => {
+  it("places the active workspace first without disturbing the remaining order", () => {
+    const branch = buildWorkspacesBranch(ORDERED_WORKSPACES, "ws-active");
+
+    expect(branch.map((workspace) => workspace.key)).toEqual([
+      "workspace:ws-active",
+      "workspace:ws-first",
+      "workspace:ws-last",
+    ]);
+    expect(branch[0].badge).toBe("active");
+  });
+
   it("hangs each workspace's tabs under it, minus its own overview page", () => {
     const [workspace] = buildWorkspacesBranch(WORKSPACES);
 

@@ -215,6 +215,13 @@ func (r *Repository) CreateTaskWithWorkflowStepAdmission(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Same order as createTask and the workspace cascade: workspace row
+	// first, then workflow-step locks. Without it an admission holding a step
+	// lock while the cascade holds the workspace and waits for that step
+	// deadlocks on Postgres.
+	if err := r.lockWorkspaceRowStdTx(ctx, tx, task.WorkspaceID); err != nil {
+		return err
+	}
 	if err := r.lockWorkflowStepsForAdmission(ctx, tx, targetStepID, feederStepID); err != nil {
 		return err
 	}
@@ -282,6 +289,17 @@ func (r *Repository) createTask(ctx context.Context, task *models.Task, targetSt
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// Serialize with the workspace delete cascade: the cascade locks the
+	// workspace row before inventorying its tasks, so a task created here
+	// either commits before the cascade's inventory (and is purged with the
+	// rest) or blocks until the cascade finishes, when the workspace is gone
+	// and the insert fails its foreign key. The workspace lock is taken
+	// before any workflow-step lock so the creation/admission paths share one
+	// order with the cascade.
+	if err := r.lockWorkspaceRowStdTx(ctx, tx, task.WorkspaceID); err != nil {
+		return err
+	}
 
 	if err := r.ensureWorkflowStepCapacity(ctx, tx, targetStepID, limit); err != nil {
 		return err
@@ -563,6 +581,24 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Workspace row before workflow-step lock, matching createTask and the
+	// workspace cascade: the update path must not hold a step lock while the
+	// cascade holds the workspace and waits for that step (Postgres
+	// deadlock). The task's workspace is read from its row so the caller's
+	// model cannot bypass the ordering.
+	var workspaceID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workspace_id FROM tasks WHERE id = ?`), task.ID).Scan(&workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Preserve the ErrTaskNotFound sentinel callers relied on before
+			// the workspace read was introduced (a task deleted concurrently
+			// with a move is reachable).
+			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+		}
+		return false, fmt.Errorf("read task workspace for admission: %w", err)
+	}
+	if err := r.lockWorkspaceRowStdTx(ctx, tx, workspaceID); err != nil {
+		return false, err
+	}
 	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
 		return false, err
 	}
@@ -1012,6 +1048,20 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Serialize with session/worktree creation FIRST (task-row lock), then
+	// capture the authoritative session set: a concurrent CreateTaskSession
+	// holds the same task-row barrier, so every session committed before this
+	// lock is visible to the capture and anything after blocks until the task
+	// row is gone. Capturing before the lock could use a stale set (a session
+	// created mid-flight would never be purged). The session capture must also
+	// precede the task-row DELETE because task_sessions cascades on deletion.
+	if err := r.lockTaskRowInTx(ctx, tx, id); err != nil {
+		return err
+	}
+	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
+	if err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
 	if err != nil {
 		return err
@@ -1021,7 +1071,7 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
-	if err := r.purgeTaskQueueInTx(ctx, tx, id); err != nil {
+	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1747,7 +1797,11 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
-	if err := r.purgeTaskQueueInTx(ctx, tx, id); err != nil {
+	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1786,7 +1840,11 @@ func (r *Repository) ArchiveTaskIfActive(ctx context.Context, id, cascadeID stri
 	if rows == 0 {
 		return false, tx.Commit()
 	}
-	if err := r.purgeTaskQueueInTx(ctx, tx, id); err != nil {
+	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1796,8 +1854,37 @@ func (r *Repository) ArchiveTaskIfActive(ctx context.Context, id, cascadeID stri
 	return true, nil
 }
 
-func (r *Repository) purgeTaskQueueInTx(ctx context.Context, tx *sqlx.Tx, taskID string) error {
-	_, err := messagequeue.PurgeTaskInTransaction(ctx, tx, r.db, taskID)
+// taskQueueSessionsInTx returns the task's authoritative session set (its
+// task_sessions rows). Callers must capture it BEFORE any statement that
+// deletes the task row: task_sessions cascades on task deletion, so a
+// post-delete discovery returns nothing and a concurrent admission to an
+// empty session could survive the purge.
+func (r *Repository) taskQueueSessionsInTx(ctx context.Context, tx *sqlx.Tx, taskID string) ([]string, error) {
+	var sessions []string
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`SELECT id FROM task_sessions WHERE task_id = ?`), taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task purge sessions: %w", err)
+	}
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan task purge session: %w", err)
+		}
+		sessions = append(sessions, sessionID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate task purge sessions: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close task purge sessions: %w", err)
+	}
+	return sessions, nil
+}
+
+func (r *Repository) purgeTaskQueueInTx(ctx context.Context, tx *sqlx.Tx, taskID string, sessions []string) error {
+	_, err := messagequeue.PurgeTaskInTransaction(ctx, tx, r.db, taskID, sessions)
 	if internaldb.IsMissingTableError(err) {
 		return nil
 	}
