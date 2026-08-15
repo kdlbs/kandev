@@ -26,6 +26,13 @@ import (
 // analysis, so a local variable shadowing one of those constants resolves to
 // the constant's value rather than its own.
 //
+// Only reads that name a variable are classified. An argument-less bulk read
+// such as os.Environ, or an accessor wrapping one (filterGitEnv(g.environmentValues())
+// in the process package), hands out the whole ambient environment with no name
+// to check, so this guard says nothing about it; a scrub list is not the tool
+// for that channel. Reads through an API other than os.Getenv/os.LookupEnv,
+// syscall.Getenv among them, are likewise not scanned.
+//
 // A package that funnels its reads through its own accessor (for example
 // (*GitOperator).environmentValue, which falls back to os.Environ) must name
 // that accessor in extraReaders, or the guard sees only the minority of its
@@ -48,9 +55,48 @@ func AssertEnvReadsCovered(t testing.TB, scrubbed, exempt []string, extraReaders
 
 // envScan carries the classification inputs shared by every file in one pass.
 type envScan struct {
-	constants    map[string]string
+	constants    packageConstants
 	covered      map[string]bool
 	extraReaders map[string]bool
+}
+
+// packageConstants holds every package-level string constant, plus the names
+// that more than one file declares with different values. Build-tagged platform
+// variants (foo_unix.go and foo_windows.go) may legally declare one name twice,
+// and every file is parsed regardless of its tags, so a plain name-to-value map
+// would silently keep whichever file was parsed last and classify the other
+// file's read against the wrong variable.
+type packageConstants struct {
+	values    map[string]string
+	conflicts map[string]bool
+}
+
+func newPackageConstants() packageConstants {
+	return packageConstants{
+		values:    make(map[string]string),
+		conflicts: make(map[string]bool),
+	}
+}
+
+// record keeps the first value seen for name and marks the name conflicting if
+// a later file declares it with a different one. Re-declaring the same value is
+// not a conflict: both spellings resolve to the same variable.
+func (c packageConstants) record(name, value string) {
+	if previous, seen := c.values[name]; seen && previous != value {
+		c.conflicts[name] = true
+		return
+	}
+	c.values[name] = value
+}
+
+// resolve refuses to guess for a conflicting name, so the read is reported as
+// unclassifiable rather than silently resolved to one platform's value.
+func (c packageConstants) resolve(name string) (string, bool) {
+	if c.conflicts[name] {
+		return "", false
+	}
+	value, ok := c.values[name]
+	return value, ok
 }
 
 // uncoveredEnvReads returns one message per environment read in files whose
@@ -132,8 +178,7 @@ func uncoveredEnvReadsInFile(fileSet *token.FileSet, file *ast.File, scan envSca
 		name, resolved := resolveEnvName(call, scan.constants)
 		pos := fileSet.Position(call.Pos())
 		if !resolved {
-			messages = append(messages, fmt.Sprintf("%s: environment variable name is not a string literal or a "+
-				"resolvable same-package constant; pass a literal or constant so AssertEnvReadsCovered can classify it", pos))
+			messages = append(messages, unresolvedMessage(pos, call.Args[0], scan.constants))
 			continue
 		}
 		if !scan.covered[name] {
@@ -169,33 +214,55 @@ func parseNonTestSources(t testing.TB, fileSet *token.FileSet) []*ast.File {
 	return files
 }
 
+// unresolvedMessage explains why an environment name could not be classified.
+// A name declared with different values in more than one file gets its own
+// message: the cause is build-tagged platform variants, all of which this guard
+// parses, and the generic "pass a literal or constant" advice would not lead an
+// author there.
+func unresolvedMessage(pos token.Position, arg ast.Expr, constants packageConstants) string {
+	if ident, ok := arg.(*ast.Ident); ok && constants.conflicts[ident.Name] {
+		return fmt.Sprintf("%s: constant %s is declared with different values in more than one file of this "+
+			"package, most likely build-tagged platform variants, and every file is scanned regardless of its "+
+			"tags, so the guard cannot tell which value applies here; read the variable through a string literal "+
+			"instead", pos, ident.Name)
+	}
+	return fmt.Sprintf("%s: environment variable name is not a string literal or a resolvable same-package "+
+		"constant; pass a literal or constant so AssertEnvReadsCovered can classify it", pos)
+}
+
 // stringConstants maps package-level string constant names to their values so
-// env reads written as os.Getenv(someConst) resolve to the variable name.
-func stringConstants(files []*ast.File) map[string]string {
-	constants := make(map[string]string)
+// env reads written as os.Getenv(someConst) resolve to the variable name, and
+// records the names whose value depends on which file you believe.
+func stringConstants(files []*ast.File) packageConstants {
+	constants := newPackageConstants()
 	for _, file := range files {
 		for _, decl := range file.Decls {
 			genDecl, ok := decl.(*ast.GenDecl)
 			if !ok || genDecl.Tok != token.CONST {
 				continue
 			}
-			for _, spec := range genDecl.Specs {
-				valueSpec, ok := spec.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				for i, name := range valueSpec.Names {
-					if i >= len(valueSpec.Values) {
-						continue
-					}
-					if value, ok := literalString(valueSpec.Values[i]); ok {
-						constants[name.Name] = value
-					}
-				}
-			}
+			recordConstSpecs(constants, genDecl.Specs)
 		}
 	}
 	return constants
+}
+
+// recordConstSpecs records every string-literal constant in one const block.
+func recordConstSpecs(constants packageConstants, specs []ast.Spec) {
+	for _, spec := range specs {
+		valueSpec, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		for i, name := range valueSpec.Names {
+			if i >= len(valueSpec.Values) {
+				continue
+			}
+			if value, ok := literalString(valueSpec.Values[i]); ok {
+				constants.record(name.Name, value)
+			}
+		}
+	}
 }
 
 // envReadCalls collects every os.Getenv / os.LookupEnv call in a file, plus
@@ -240,7 +307,7 @@ func isEnvRead(fun ast.Expr, extraReaders map[string]bool) bool {
 	}
 }
 
-func resolveEnvName(call *ast.CallExpr, constants map[string]string) (string, bool) {
+func resolveEnvName(call *ast.CallExpr, constants packageConstants) (string, bool) {
 	if value, ok := literalString(call.Args[0]); ok {
 		return value, true
 	}
@@ -248,8 +315,7 @@ func resolveEnvName(call *ast.CallExpr, constants map[string]string) (string, bo
 	if !ok {
 		return "", false
 	}
-	value, ok := constants[ident.Name]
-	return value, ok
+	return constants.resolve(ident.Name)
 }
 
 func literalString(expr ast.Expr) (string, bool) {

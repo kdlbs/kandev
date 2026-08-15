@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -291,6 +292,109 @@ func read(o *op) string { return o.environmentValue("FOO") }
 	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, []string{"FOO"}, nil, "environmentValue")
 	if len(messages) != 0 {
 		t.Fatalf("live extra reader reported: %v", messages)
+	}
+}
+
+// parseSnippets parses several files into one file set, for the cases that only
+// arise across files of a package rather than inside one.
+func parseSnippets(t *testing.T, srcs ...string) (*token.FileSet, []*ast.File) {
+	t.Helper()
+	fileSet := token.NewFileSet()
+	files := make([]*ast.File, 0, len(srcs))
+	for i, src := range srcs {
+		file, err := parser.ParseFile(fileSet, fmt.Sprintf("snippet%d.go", i), src, 0)
+		if err != nil {
+			t.Fatalf("parse snippet %d: %v", i, err)
+		}
+		files = append(files, file)
+	}
+	return fileSet, files
+}
+
+// TestUncoveredEnvReadsConflictingConstantIsUnresolvable pins the build-tag
+// blind spot. Every file is parsed regardless of its tags, so a platform pair
+// may legally declare one constant name twice with different values. Flattening
+// those into a single map meant the later file's value won and the earlier
+// file's read was classified against the wrong variable — silently, since a
+// read of an unscrubbed name resolved to an exempt one reports ok. Proven
+// against the real package: a //go:build !windows file reading
+// os.Getenv(qaShellEnv) where qaShellEnv is "KANDEV_QA_UNIXONLY", paired with a
+// //go:build windows file declaring the same name as "SHELL", left the process
+// guard reporting ok even though the uncovered read is the one that compiles on
+// Linux. The same probe now fails.
+func TestUncoveredEnvReadsConflictingConstantIsUnresolvable(t *testing.T) {
+	fileSet, files := parseSnippets(t, `//go:build !windows
+
+package example
+
+import "os"
+
+const shellEnv = "UNCOVERED_ON_UNIX"
+
+func read() string { return os.Getenv(shellEnv) }
+`, `//go:build windows
+
+package example
+
+const shellEnv = "SHELL"
+`)
+
+	messages := uncoveredEnvReads(fileSet, files, nil, []string{"SHELL"})
+	if len(messages) != 1 {
+		t.Fatalf("expected exactly one conflicting-constant message, got %v", messages)
+	}
+	if !strings.Contains(messages[0], "shellEnv") {
+		t.Fatalf("message %q does not name the conflicting constant", messages[0])
+	}
+	if !strings.Contains(messages[0], "different values in more than one file") {
+		t.Fatalf("message %q does not explain the conflict", messages[0])
+	}
+}
+
+// TestUncoveredEnvReadsRepeatedConstantWithSameValueStillResolves is the other
+// half: a platform pair that declares one name twice with the SAME value is not
+// ambiguous, and rejecting it would make the conflict check fire on a correct
+// package.
+func TestUncoveredEnvReadsRepeatedConstantWithSameValueStillResolves(t *testing.T) {
+	fileSet, files := parseSnippets(t, `//go:build !windows
+
+package example
+
+import "os"
+
+const shellEnv = "SHELL"
+
+func read() string { return os.Getenv(shellEnv) }
+`, `//go:build windows
+
+package example
+
+const shellEnv = "SHELL"
+`)
+
+	messages := uncoveredEnvReads(fileSet, files, nil, []string{"SHELL"})
+	if len(messages) != 0 {
+		t.Fatalf("unambiguous repeated constant reported: %v", messages)
+	}
+}
+
+// TestUncoveredEnvReadsConstantResolvesAcrossFiles guards the capability the
+// conflict check must not break: constants are package-scoped, so a read in one
+// file resolves against a constant declared in another.
+func TestUncoveredEnvReadsConstantResolvesAcrossFiles(t *testing.T) {
+	fileSet, files := parseSnippets(t, `package example
+
+import "os"
+
+func read() string { return os.Getenv(fooEnv) }
+`, `package example
+
+const fooEnv = "FOO"
+`)
+
+	messages := uncoveredEnvReads(fileSet, files, []string{"FOO"}, nil)
+	if len(messages) != 0 {
+		t.Fatalf("cross-file constant reported as uncovered: %v", messages)
 	}
 }
 
