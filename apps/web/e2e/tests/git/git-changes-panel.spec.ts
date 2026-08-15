@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionState } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
@@ -673,14 +674,27 @@ test.describe("Git Changes Panel", () => {
     test.setTimeout(120_000);
     const profile = await createStandardProfile(apiClient, "Git Reset Profile");
 
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Reset Test", profile.id, {
-      description: "Testing reset to commit",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Reset Test",
+      profile.id,
+      {
+        description: "Testing reset to commit",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
 
     const session = await openTaskSession(testPage, "Git Reset Test");
+    expect(task.session_id, "task must have a session to await").toBeTruthy();
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id as string,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "the initial reset-test turn did not settle before git actions",
+      timeout: 30_000,
+    });
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -743,8 +757,8 @@ test.describe("Git Changes Panel", () => {
     const resetButton = firstCommitRow.getByRole("button", { name: "Reset to this commit" });
     await expect(resetButton).toBeVisible({ timeout: 5_000 });
     // The action is rendered inside a group-hover span. Keep the row hovered
-    // for the user-facing check above, then bypass the CSS interception race
-    // if the hover slot disappears during React's status refresh.
+    // for the user-facing check above, then bypass CSS interception while the
+    // stable idle session keeps the row from being replaced by a status push.
     await resetButton.click({ force: true });
 
     // Confirm the reset in the dialog

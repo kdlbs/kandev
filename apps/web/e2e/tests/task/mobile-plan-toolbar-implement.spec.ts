@@ -5,6 +5,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
 import { planScript } from "../../helpers/seed-session-messages";
+import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 const PLAN_STEP = "Build the mobile toolbar implement action";
@@ -28,6 +29,14 @@ async function seedMobileTaskWithPlan(testPage: Page, apiClient: ApiClient, seed
   await expect.poll(() => apiClient.getTaskPlan(task.id), { timeout: 30_000 }).not.toBeNull();
   await session.waitForChatIdle({ timeout: 45_000 });
   await session.composerReady();
+  expect(task.session_id, "task must have a session to await").toBeTruthy();
+  await waitForSessionState(apiClient, {
+    taskId: task.id,
+    sessionId: task.session_id as string,
+    expectedState: "WAITING_FOR_INPUT",
+    message: "the plan session did not settle before enabling the toolbar",
+    timeout: 30_000,
+  });
   await openMobilePlanPanel(testPage, session);
   // The implement button is disabled until the panel actually holds the plan.
   // Two transports can deliver it -- the `task.plan.created` notification
