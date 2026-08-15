@@ -96,7 +96,7 @@ timeout.
 
 - Removing or redesigning the production 400ms blur gate
   in `file-context-menu.tsx` — this protects an unrelated blur race
-  documented in the spec.s own header comment and is not implicated by this
+  documented in the spec's own header comment and is not implicated by this
   flakiness.
 - The CI shard/timing-profile work tracked in
   `docs/specs/e2e-duration-aware-sharding/spec.md` and its "seven retry
