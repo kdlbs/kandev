@@ -48,10 +48,10 @@ func (s *Service) SetTaskPRDisposition(
 	if err != nil {
 		return nil, err
 	}
-	if tp == nil || (tp.WorkspaceID != "" && tp.WorkspaceID != workspaceID) {
+	if tp == nil {
 		return nil, ErrTaskPRNotFound
 	}
-	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+	if err := s.authorizeTaskPRMutation(ctx, tp, workspaceID); err != nil {
 		return nil, err
 	}
 	if !patch.HasAny() {

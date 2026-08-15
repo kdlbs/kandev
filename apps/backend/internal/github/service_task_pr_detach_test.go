@@ -2,9 +2,12 @@ package github
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 func TestServiceDetachTaskPRAuthorizesWorkspaceAndPublishesRemoval(t *testing.T) {
@@ -109,6 +112,9 @@ func TestServiceDetachTaskPRAllowsLegacyEmptyWorkspace(t *testing.T) {
 	if err := store.CreateTaskPR(ctx, pr); err != nil {
 		t.Fatalf("create legacy PR: %v", err)
 	}
+	svc.SetTaskIssueStore(&fakeTaskIssueStore{
+		task: &taskmodels.Task{ID: "task-legacy", WorkspaceID: "ws-legacy"},
+	})
 	var authorizedWorkspace string
 	svc.SetWorkspaceAuthorizer(func(_ context.Context, workspaceID string) error {
 		authorizedWorkspace = workspaceID
@@ -137,6 +143,79 @@ func TestServiceDetachTaskPRAllowsLegacyEmptyWorkspace(t *testing.T) {
 	}
 	if payload.FieldByName("WorkspaceID").String() != "ws-legacy" {
 		t.Fatalf("event workspace = %q, want ws-legacy", payload.FieldByName("WorkspaceID").String())
+	}
+}
+
+func TestServiceDetachTaskPRLegacyWorkspaceMismatchFailsClosed(t *testing.T) {
+	svc, store, eventBus := setupSyncTest(t)
+	ctx := context.Background()
+	pr := &TaskPR{
+		TaskID: "task-legacy", Owner: "acme", Repo: "demo", PRNumber: 8,
+		PRURL: "https://github.com/acme/demo/pull/8", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, pr); err != nil {
+		t.Fatalf("create legacy PR: %v", err)
+	}
+	svc.SetTaskIssueStore(&fakeTaskIssueStore{
+		task: &taskmodels.Task{ID: "task-legacy", WorkspaceID: "ws-owner"},
+	})
+	authorizerCalls := 0
+	svc.SetWorkspaceAuthorizer(func(context.Context, string) error {
+		authorizerCalls++
+		return nil
+	})
+
+	_, err := svc.DetachTaskPR(ctx, "ws-other", pr.ID)
+	if !errors.Is(err, ErrTaskPRNotFound) {
+		t.Fatalf("error = %v, want ErrTaskPRNotFound", err)
+	}
+	stored, err := store.GetTaskPRByID(ctx, pr.ID)
+	if err != nil {
+		t.Fatalf("reload legacy PR: %v", err)
+	}
+	if stored == nil || stored.DetachedAt != nil {
+		t.Fatalf("stored legacy PR = %+v, want active association", stored)
+	}
+	if authorizerCalls != 0 {
+		t.Fatalf("workspace authorizer calls = %d, want 0 on mismatch", authorizerCalls)
+	}
+	if eventBus.publishedCount() != 0 {
+		t.Fatalf("published events = %d, want 0 on rejected detach", eventBus.publishedCount())
+	}
+}
+
+func TestServiceDetachTaskPRLegacyWorkspaceRequiresTaskResolver(t *testing.T) {
+	svc, store, eventBus := setupSyncTest(t)
+	ctx := context.Background()
+	pr := &TaskPR{
+		TaskID: "task-legacy", Owner: "acme", Repo: "demo", PRNumber: 9,
+		PRURL: "https://github.com/acme/demo/pull/9", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, pr); err != nil {
+		t.Fatalf("create legacy PR: %v", err)
+	}
+	authorizerCalls := 0
+	svc.SetWorkspaceAuthorizer(func(context.Context, string) error {
+		authorizerCalls++
+		return nil
+	})
+
+	_, err := svc.DetachTaskPR(ctx, "ws-supplied", pr.ID)
+	if !errors.Is(err, ErrTaskPRNotFound) {
+		t.Fatalf("error = %v, want ErrTaskPRNotFound", err)
+	}
+	stored, err := store.GetTaskPRByID(ctx, pr.ID)
+	if err != nil {
+		t.Fatalf("reload legacy PR: %v", err)
+	}
+	if stored == nil || stored.DetachedAt != nil {
+		t.Fatalf("stored legacy PR = %+v, want active association", stored)
+	}
+	if authorizerCalls != 0 {
+		t.Fatalf("workspace authorizer calls = %d, want 0 without resolver", authorizerCalls)
+	}
+	if eventBus.publishedCount() != 0 {
+		t.Fatalf("published events = %d, want 0 on rejected detach", eventBus.publishedCount())
 	}
 }
 
