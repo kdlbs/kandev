@@ -14,6 +14,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const dynamicRouteStatusWaiting = "waiting"
+
 // dynamicTaskDownstream adapts the task executor to the provider-neutral
 // conductor. The callback updates the task-session attribution before every
 // concrete launch, including a cross-profile fallback.
@@ -169,10 +171,23 @@ func (s *Service) dynamicLaunchDecision(
 		return decision, dynamic, nil
 	}
 	if state.ExecutionProfileID == "" {
-		return dynamicruntime.RouteDecision{}, false, &dynamicruntime.NoEligibleCandidateError{
-			SessionID: session.ID, LogicalProfile: session.AgentProfileID,
-			Generation: state.Generation,
+		if state.Status != dynamicRouteStatusWaiting {
+			return dynamicruntime.RouteDecision{}, false, &dynamicruntime.NoEligibleCandidateError{
+				SessionID: session.ID, LogicalProfile: session.AgentProfileID,
+				Generation: state.Generation,
+			}
 		}
+		resolved, err := s.profileExecutionResolver.Resolve(
+			ctx, session.ID, session.AgentProfileID, state.Generation, "",
+		)
+		if err != nil {
+			return dynamicruntime.RouteDecision{}, false, err
+		}
+		decision = resolved.Decision
+		if err := s.persistDynamicLaunchDecision(ctx, session.ID, decision); err != nil {
+			return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
+		}
+		return decision, true, nil
 	}
 	resolved, err := s.profileExecutionResolver.ResolveExisting(
 		ctx, session.ID, session.AgentProfileID, state.ExecutionProfileID,

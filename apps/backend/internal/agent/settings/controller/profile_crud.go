@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -114,10 +115,15 @@ func (c *Controller) createDynamicProfile(
 	if !c.dynamicAgentRoutingEnabled {
 		return nil, ErrDynamicAgentRoutingDisabled
 	}
+	dynamicRepo, err := c.dynamicProfileRepository()
+	if err != nil {
+		return nil, err
+	}
 	if err := validateDynamicAgentProfile(req.Dynamic); err != nil {
 		return nil, err
 	}
 	profile := &models.AgentProfile{
+		ID:               uuid.NewString(),
 		AgentID:          agent.ID,
 		Name:             strings.TrimSpace(req.Name),
 		AgentDisplayName: displayName,
@@ -126,22 +132,18 @@ func (c *Controller) createDynamicProfile(
 		EnvVars:          []models.ProfileEnvVar{},
 		UserModified:     true,
 	}
-	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
-		return nil, err
-	}
 	routes, err := c.validateDynamicCandidates(ctx, profile.ID, req.Dynamic)
 	if err != nil {
-		_ = c.repo.DeleteAgentProfile(ctx, profile.ID)
 		return nil, err
 	}
-	dynamicRepo, err := c.dynamicProfileRepository()
-	if err != nil {
-		_ = c.repo.DeleteAgentProfile(ctx, profile.ID)
+	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 		return nil, err
 	}
 	dynamic := &models.DynamicAgentProfile{ProfileID: profile.ID, Version: 1}
 	if err := dynamicRepo.CreateDynamicAgentProfile(ctx, dynamic, routes); err != nil {
-		_ = c.repo.DeleteAgentProfile(ctx, profile.ID)
+		if cleanupErr := c.repo.DeleteAgentProfile(ctx, profile.ID); cleanupErr != nil {
+			return nil, fmt.Errorf("%w; cleanup dynamic profile parent: %v", err, cleanupErr)
+		}
 		return nil, err
 	}
 	result := toProfileDTO(profile)
@@ -483,14 +485,16 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return result, nil
 		}
 	}
+	if dynamicRepo != nil && dynamic != nil {
+		if err := dynamicRepo.UpdateDynamicAgentProfile(ctx, dynamic, req.Dynamic.Version, dynamicRoutes); err != nil {
+			return nil, err
+		}
+	}
 	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
 		return nil, err
 	}
 	result := toProfileDTO(profile)
-	if dynamicRepo != nil {
-		if err := dynamicRepo.UpdateDynamicAgentProfile(ctx, dynamic, req.Dynamic.Version, dynamicRoutes); err != nil {
-			return nil, err
-		}
+	if dynamicRepo != nil && dynamic != nil {
 		result.Dynamic, err = dynamicProfileDTO(dynamic, dynamicRoutes)
 		if err != nil {
 			return nil, err
@@ -559,6 +563,9 @@ func (c *Controller) DuplicateProfile(ctx context.Context, req DuplicateProfileR
 	// 404 keeps the existence of office profiles hidden.
 	if source.WorkspaceID != "" {
 		return nil, ErrAgentProfileNotFound
+	}
+	if profileKind(source) == dynamicProfileKind {
+		return nil, ErrDynamicProfileDuplicationUnsupported
 	}
 	for attempt := 0; ; attempt++ {
 		// A source without an MCP row leaves the copy without one: the

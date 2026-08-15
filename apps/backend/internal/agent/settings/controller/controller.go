@@ -39,24 +39,25 @@ func buildCommandString(cmd []string) string {
 }
 
 var (
-	ErrAgentNotFound                    = errors.New("agent not found")
-	ErrAgentAlreadyExists               = errors.New("agent already exists")
-	ErrAgentProfileNotFound             = errors.New("agent profile not found")
-	ErrAgentMcpUnsupported              = errors.New("mcp not supported by agent")
-	ErrModelRequired                    = errors.New("model is required for agent profiles")
-	ErrLogoNotAvailable                 = errors.New("logo not available for agent")
-	ErrInvalidSlug                      = errors.New("display name must produce a valid slug")
-	ErrCommandRequired                  = errors.New("command is required")
-	ErrInvalidProfileEnvVars            = errors.New("invalid profile env vars")
-	ErrInvalidCommandPrefix             = errors.New("invalid command prefix")
-	ErrUnknownMCPStrategy               = errors.New("unknown MCP strategy")
-	ErrNotCustomTUIAgent                = errors.New("agent is not a custom TUI agent")
-	ErrDynamicAgentRoutingDisabled      = errors.New("dynamic agent routing is disabled")
-	ErrDynamicProfileCandidatesRequired = errors.New("dynamic profile candidates are required")
-	ErrDynamicProfilePositions          = errors.New("dynamic profile candidate positions must be contiguous")
-	ErrDynamicProfileRule               = errors.New("unsupported dynamic profile rule")
-	ErrDynamicProfileCandidate          = errors.New("invalid dynamic profile candidate")
-	ErrDynamicProfileVersionConflict    = store.ErrDynamicProfileVersionConflict
+	ErrAgentNotFound                        = errors.New("agent not found")
+	ErrAgentAlreadyExists                   = errors.New("agent already exists")
+	ErrAgentProfileNotFound                 = errors.New("agent profile not found")
+	ErrAgentMcpUnsupported                  = errors.New("mcp not supported by agent")
+	ErrModelRequired                        = errors.New("model is required for agent profiles")
+	ErrLogoNotAvailable                     = errors.New("logo not available for agent")
+	ErrInvalidSlug                          = errors.New("display name must produce a valid slug")
+	ErrCommandRequired                      = errors.New("command is required")
+	ErrInvalidProfileEnvVars                = errors.New("invalid profile env vars")
+	ErrInvalidCommandPrefix                 = errors.New("invalid command prefix")
+	ErrUnknownMCPStrategy                   = errors.New("unknown MCP strategy")
+	ErrNotCustomTUIAgent                    = errors.New("agent is not a custom TUI agent")
+	ErrDynamicAgentRoutingDisabled          = errors.New("dynamic agent routing is disabled")
+	ErrDynamicProfileCandidatesRequired     = errors.New("dynamic profile candidates are required")
+	ErrDynamicProfilePositions              = errors.New("dynamic profile candidate positions must be contiguous")
+	ErrDynamicProfileRule                   = errors.New("unsupported dynamic profile rule")
+	ErrDynamicProfileCandidate              = errors.New("invalid dynamic profile candidate")
+	ErrDynamicProfileVersionConflict        = store.ErrDynamicProfileVersionConflict
+	ErrDynamicProfileDuplicationUnsupported = errors.New("dynamic profile duplication is not supported")
 )
 
 type Controller struct {

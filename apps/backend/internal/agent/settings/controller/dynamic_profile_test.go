@@ -142,3 +142,35 @@ func TestDynamicProfileCreateAndUpdatePersistsCandidates(t *testing.T) {
 		t.Fatalf("disabled dynamic delete error = %v, want %v", err, ErrDynamicAgentRoutingDisabled)
 	}
 }
+
+func TestDynamicProfileCreateValidatesBeforeCreatingParent(t *testing.T) {
+	ctrl, repo := newSQLiteBackedController(t)
+	if err := ctrl.agentRegistry.Register(agents.NewDynamicAgent()); err != nil {
+		t.Fatalf("register dynamic agent: %v", err)
+	}
+	ctrl.SetDynamicAgentRoutingEnabled(true)
+	ctx := context.Background()
+	if err := repo.CreateAgent(ctx, &models.Agent{ID: agents.DynamicAgentID, Name: agents.DynamicAgentID}); err != nil {
+		t.Fatalf("create dynamic family: %v", err)
+	}
+
+	_, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+		AgentID: agents.DynamicAgentID,
+		Name:    "Invalid",
+		Dynamic: &dto.DynamicAgentProfileDTO{Candidates: []dto.DynamicAgentCandidateDTO{{
+			Position:           0,
+			ExecutionProfileID: "missing-profile",
+			Enabled:            true,
+		}}},
+	})
+	if !errors.Is(err, ErrDynamicProfileCandidate) {
+		t.Fatalf("create error = %v, want invalid candidate", err)
+	}
+	profiles, err := repo.ListAgentProfiles(ctx, agents.DynamicAgentID)
+	if err != nil {
+		t.Fatalf("list dynamic profiles: %v", err)
+	}
+	if len(profiles) != 0 {
+		t.Fatalf("created %d parent rows after validation failure, want 0", len(profiles))
+	}
+}

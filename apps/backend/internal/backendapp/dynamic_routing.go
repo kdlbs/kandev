@@ -47,7 +47,15 @@ func dynamicRouteActionHandler(
 		if request.Action == orchestrator.RouteActionTryNext {
 			exclude = session.ExecutionProfileID
 		}
-		decision, err := resolver.Resolve(ctx, session.ID, session.AgentProfileID, request.ExpectedGeneration, exclude)
+		var decision agentruntime.ProfileExecution
+		if request.Action == orchestrator.RouteActionRetry {
+			decision, err = resolver.ResolveWithPreference(
+				ctx, session.ID, session.AgentProfileID, request.ExpectedGeneration,
+				exclude, session.ExecutionProfileID,
+			)
+		} else {
+			decision, err = resolver.Resolve(ctx, session.ID, session.AgentProfileID, request.ExpectedGeneration, exclude)
+		}
 		if err != nil {
 			var noCandidate *dynamicruntime.NoEligibleCandidateError
 			if errors.As(err, &noCandidate) {
@@ -56,7 +64,7 @@ func dynamicRouteActionHandler(
 				session.RouteReason = "no_eligible_candidate"
 				session.DownstreamACPSessionID = ""
 				if updateErr := repo.UpdateTaskSession(ctx, session); updateErr != nil {
-					return nil, updateErr
+					return nil, routeActionPersistenceError(ctx, repo, session, updateErr)
 				}
 				return &orchestrator.RouteActionResult{
 					SessionID: session.ID, LogicalProfileID: session.AgentProfileID,
@@ -74,7 +82,7 @@ func dynamicRouteActionHandler(
 		// profiles. The conductor will populate this after a fresh launch.
 		session.DownstreamACPSessionID = ""
 		if err := repo.UpdateTaskSession(ctx, session); err != nil {
-			return nil, err
+			return nil, routeActionPersistenceError(ctx, repo, session, err)
 		}
 		return &orchestrator.RouteActionResult{
 			SessionID:          session.ID,
@@ -97,9 +105,30 @@ func routeActionError(
 	if !errors.Is(err, dynamicruntime.ErrStaleGeneration) {
 		return err
 	}
+	return routeActionConflict(ctx, repo, session, err)
+}
+
+// routeActionPersistenceError reports the durable route state when the
+// session projection cannot be updated after the engine has claimed a
+// generation. The caller must not retry against the old session generation.
+func routeActionPersistenceError(
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	session *models.TaskSession,
+	err error,
+) error {
+	return routeActionConflict(ctx, repo, session, fmt.Errorf("persist route action session state: %w", err))
+}
+
+func routeActionConflict(
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	session *models.TaskSession,
+	err error,
+) error {
 	state, loadErr := repo.LoadRouteState(ctx, session.ID)
 	if loadErr != nil {
-		return fmt.Errorf("load authoritative route state: %w", loadErr)
+		return fmt.Errorf("%w; load authoritative route state: %v", err, loadErr)
 	}
 	result := &orchestrator.RouteActionResult{
 		SessionID:          session.ID,
@@ -113,6 +142,7 @@ func routeActionError(
 		result.RouteGeneration = state.Generation
 		result.ProfileVersion = state.ProfileVersion
 		result.State = state.Status
+		result.LogicalProfileID = state.LogicalProfileID
 	}
 	return &orchestrator.RouteActionConflictError{Result: result, Err: err}
 }

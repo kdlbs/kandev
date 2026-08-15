@@ -139,9 +139,8 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
   const incomingRouteGeneration = incoming.route_generation;
   const existingRouteGeneration = existing.route_generation;
   const routeIsStale =
-    incomingRouteGeneration !== undefined &&
     existingRouteGeneration !== undefined &&
-    incomingRouteGeneration < existingRouteGeneration;
+    (incomingRouteGeneration === undefined || incomingRouteGeneration < existingRouteGeneration);
   return {
     ...existing,
     ...incoming,

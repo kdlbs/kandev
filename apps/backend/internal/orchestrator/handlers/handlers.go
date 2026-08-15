@@ -60,6 +60,12 @@ func (h *Handlers) wsRouteAction(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.Action != string(orchestrator.RouteActionRetry) && req.Action != string(orchestrator.RouteActionTryNext) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unsupported route action", nil)
+	}
 	result, err := h.service.ApplyRouteAction(ctx, orchestrator.RouteActionRequest{
 		SessionID: req.SessionID, Action: orchestrator.RouteAction(req.Action),
 		ExpectedGeneration: req.ExpectedGeneration,
@@ -71,7 +77,14 @@ func (h *Handlers) wsRouteAction(ctx context.Context, msg *ws.Message) (*ws.Mess
 				"route": conflict.Result,
 			})
 		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "session not found", nil)
+		}
+		if errors.Is(err, orchestrator.ErrRouteActionActiveTurn) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+		}
+		h.logger.Warn("route action failed", zap.String("session_id", req.SessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "route action failed", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }

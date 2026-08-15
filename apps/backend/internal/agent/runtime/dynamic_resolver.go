@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -38,7 +40,7 @@ type ProfileExecutionResolver struct {
 	profiles store.Repository
 	dynamic  store.DynamicProfileRepository
 	engine   *dynamic.Engine
-	enabled  bool
+	enabled  atomic.Bool
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -46,10 +48,12 @@ func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engi
 	if repo, ok := profiles.(store.DynamicProfileRepository); ok {
 		dynamicRepo = repo
 	}
-	return &ProfileExecutionResolver{profiles: profiles, dynamic: dynamicRepo, engine: engine, enabled: enabled}
+	resolver := &ProfileExecutionResolver{profiles: profiles, dynamic: dynamicRepo, engine: engine}
+	resolver.enabled.Store(enabled)
+	return resolver
 }
 
-func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled = enabled }
+func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled.Store(enabled) }
 
 // NewConductor creates the lifecycle-facing conductor with the same engine,
 // profile loader, and feature-gate state as this resolver.
@@ -82,7 +86,7 @@ func (r *ProfileExecutionResolver) ValidateProfile(ctx context.Context, profileI
 	if err != nil {
 		return fmt.Errorf("validate profile family %s: %w", profileID, err)
 	}
-	if agent.Name == agents.DynamicAgentID && !r.enabled {
+	if agent.Name == agents.DynamicAgentID && !r.enabled.Load() {
 		return ErrDynamicRoutingDisabled
 	}
 	return nil
@@ -126,7 +130,7 @@ func (r *ProfileExecutionResolver) ResolveExecutionDetails(ctx context.Context, 
 	if agent.Name != agents.DynamicAgentID {
 		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profile.ID, Profile: profile}, nil
 	}
-	if !r.enabled {
+	if !r.enabled.Load() {
 		return ProfileExecution{}, ErrDynamicRoutingDisabled
 	}
 	if sessionID == "" {
@@ -236,6 +240,27 @@ func (r *ProfileExecutionResolver) ResolveExisting(
 }
 
 func (r *ProfileExecutionResolver) Resolve(ctx context.Context, sessionID, profileID string, expectedGeneration int64, excludeProfileID string) (ProfileExecution, error) {
+	return r.resolve(ctx, sessionID, profileID, expectedGeneration, excludeProfileID, "")
+}
+
+// ResolveWithPreference keeps the current concrete candidate for an explicit
+// retry when it remains eligible. Try-next callers continue to use Resolve and
+// pass the current candidate as the one-time exclusion.
+func (r *ProfileExecutionResolver) ResolveWithPreference(
+	ctx context.Context,
+	sessionID, profileID string,
+	expectedGeneration int64,
+	excludeProfileID, preferredProfileID string,
+) (ProfileExecution, error) {
+	return r.resolve(ctx, sessionID, profileID, expectedGeneration, excludeProfileID, preferredProfileID)
+}
+
+func (r *ProfileExecutionResolver) resolve(
+	ctx context.Context,
+	sessionID, profileID string,
+	expectedGeneration int64,
+	excludeProfileID, preferredProfileID string,
+) (ProfileExecution, error) {
 	if r.profiles == nil {
 		return ProfileExecution{}, errors.New("profile execution resolver has no profile store")
 	}
@@ -252,7 +277,7 @@ func (r *ProfileExecutionResolver) Resolve(ctx context.Context, sessionID, profi
 			LogicalProfileID: profileID, ExecutionProfileID: profileID, Profile: profile,
 		}, nil
 	}
-	if !r.enabled {
+	if !r.enabled.Load() {
 		return ProfileExecution{}, ErrDynamicRoutingDisabled
 	}
 	if r.dynamic == nil || r.engine == nil {
@@ -262,7 +287,9 @@ func (r *ProfileExecutionResolver) Resolve(ctx context.Context, sessionID, profi
 	if err != nil {
 		return ProfileExecution{}, err
 	}
-	decision, err := r.engine.SelectContext(ctx, sessionID, profileConfig, expectedGeneration, excludeProfileID)
+	decision, err := r.engine.SelectContextWithPreference(
+		ctx, sessionID, profileConfig, expectedGeneration, excludeProfileID, preferredProfileID,
+	)
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -279,7 +306,7 @@ func (r *ProfileExecutionResolver) Resolve(ctx context.Context, sessionID, profi
 }
 
 func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {
-	if !r.enabled {
+	if !r.enabled.Load() {
 		return dynamic.Profile{}, ErrDynamicRoutingDisabled
 	}
 	if r.dynamic == nil {
@@ -306,7 +333,13 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			candidate.Rules = rawRules
 		}
 		concrete, profileErr := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
-		if profileErr != nil || concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled {
+		if profileErr != nil {
+			if errors.Is(profileErr, sql.ErrNoRows) || errors.Is(profileErr, store.ErrAgentProfileDeleted) {
+				candidate.Enabled = false
+			} else {
+				return dynamic.Profile{}, fmt.Errorf("load dynamic candidate %s: %w", route.ExecutionProfileID, profileErr)
+			}
+		} else if concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled {
 			candidate.Enabled = false
 		}
 		profile.Candidates = append(profile.Candidates, candidate)

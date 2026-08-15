@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +17,9 @@ import (
 var _ dynamicruntime.Persistence = (*Repository)(nil)
 
 func (r *Repository) SaveRouteState(ctx context.Context, state dynamicruntime.RouteState) error {
+	if isTransientRouteSession(state.SessionID) {
+		return nil
+	}
 	updatedAt := state.UpdatedAt
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
@@ -41,25 +46,32 @@ func (r *Repository) SaveRouteState(ctx context.Context, state dynamicruntime.Ro
 // initial generation, so a restart cannot accidentally reset an existing
 // session to generation one.
 func (r *Repository) ClaimRouteState(ctx context.Context, expectedGeneration int64, state dynamicruntime.RouteState) (bool, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO dynamic_route_states (
-			session_id, logical_profile_id, execution_profile_id,
-			route_generation, profile_version, state, updated_at
-		) SELECT ?, ?, ?, ?, ?, ?, ?
-			WHERE ? = 0 AND NOT EXISTS (
-				SELECT 1 FROM dynamic_route_states WHERE session_id = ?
-			)
-		ON CONFLICT(session_id) DO UPDATE SET
-			logical_profile_id = excluded.logical_profile_id,
-			execution_profile_id = excluded.execution_profile_id,
-			route_generation = excluded.route_generation,
-			profile_version = excluded.profile_version,
-			state = excluded.state,
-			updated_at = excluded.updated_at
-		WHERE dynamic_route_states.route_generation = ?
-	`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
-		state.Generation, state.ProfileVersion, state.Status, state.UpdatedAt,
-		expectedGeneration, state.SessionID, expectedGeneration)
+	if isTransientRouteSession(state.SessionID) {
+		return true, nil
+	}
+	var (
+		result sql.Result
+		err    error
+	)
+	if expectedGeneration == 0 {
+		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO dynamic_route_states (
+				session_id, logical_profile_id, execution_profile_id,
+				route_generation, profile_version, state, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(session_id) DO NOTHING
+		`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
+			state.Generation, state.ProfileVersion, state.Status, state.UpdatedAt)
+	} else {
+		result, err = r.db.ExecContext(ctx, r.db.Rebind(`
+			UPDATE dynamic_route_states
+			SET logical_profile_id = ?, execution_profile_id = ?,
+				route_generation = ?, profile_version = ?, state = ?, updated_at = ?
+			WHERE session_id = ? AND route_generation = ?
+		`), state.LogicalProfileID, state.ExecutionProfileID, state.Generation,
+			state.ProfileVersion, state.Status, state.UpdatedAt, state.SessionID,
+			expectedGeneration)
+	}
 	if err != nil {
 		return false, err
 	}
@@ -70,30 +82,35 @@ func (r *Repository) ClaimRouteState(ctx context.Context, expectedGeneration int
 // RecordRouteDecision commits the generation claim and immutable attempt row
 // together. A stale claim returns dynamicruntime.ErrStaleGeneration.
 func (r *Repository) RecordRouteDecision(ctx context.Context, decision dynamicruntime.RouteDecision, state dynamicruntime.RouteState) error {
+	if isTransientRouteSession(state.SessionID) {
+		return nil
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO dynamic_route_states (
-			session_id, logical_profile_id, execution_profile_id,
-			route_generation, profile_version, state, updated_at
-		) SELECT ?, ?, ?, ?, ?, ?, ?
-			WHERE ? = 0 AND NOT EXISTS (
-				SELECT 1 FROM dynamic_route_states WHERE session_id = ?
-			)
-		ON CONFLICT(session_id) DO UPDATE SET
-			logical_profile_id = excluded.logical_profile_id,
-			execution_profile_id = excluded.execution_profile_id,
-			route_generation = excluded.route_generation,
-			profile_version = excluded.profile_version,
-			state = excluded.state,
-			updated_at = excluded.updated_at
-		WHERE dynamic_route_states.route_generation = ?
-	`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
-		state.Generation, state.ProfileVersion, state.Status, state.UpdatedAt,
-		state.Generation-1, state.SessionID, state.Generation-1)
+	expectedGeneration := state.Generation - 1
+	var result sql.Result
+	if expectedGeneration == 0 {
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO dynamic_route_states (
+				session_id, logical_profile_id, execution_profile_id,
+				route_generation, profile_version, state, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(session_id) DO NOTHING
+		`), state.SessionID, state.LogicalProfileID, state.ExecutionProfileID,
+			state.Generation, state.ProfileVersion, state.Status, state.UpdatedAt)
+	} else {
+		result, err = tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE dynamic_route_states
+			SET logical_profile_id = ?, execution_profile_id = ?,
+				route_generation = ?, profile_version = ?, state = ?, updated_at = ?
+			WHERE session_id = ? AND route_generation = ?
+		`), state.LogicalProfileID, state.ExecutionProfileID, state.Generation,
+			state.ProfileVersion, state.Status, state.UpdatedAt, state.SessionID,
+			expectedGeneration)
+	}
 	if err != nil {
 		return err
 	}
@@ -126,6 +143,9 @@ func decisionReasonTime(_ dynamicruntime.RouteDecision, state dynamicruntime.Rou
 }
 
 func (r *Repository) AppendRouteAttempt(ctx context.Context, attempt dynamicruntime.RouteAttempt) error {
+	if isTransientRouteSession(attempt.SessionID) {
+		return nil
+	}
 	createdAt := attempt.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -142,6 +162,9 @@ func (r *Repository) AppendRouteAttempt(ctx context.Context, attempt dynamicrunt
 }
 
 func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dynamicruntime.RouteState, error) {
+	if isTransientRouteSession(sessionID) {
+		return nil, nil
+	}
 	state := &dynamicruntime.RouteState{}
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT session_id, logical_profile_id, execution_profile_id,
@@ -152,7 +175,7 @@ func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dyn
 		&state.Generation, &state.ProfileVersion, &state.Status, &state.UpdatedAt,
 	)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
@@ -214,7 +237,7 @@ func (r *Repository) LoadOrCreate(ctx context.Context) ([]byte, error) {
 	if err == nil {
 		return append([]byte(nil), key...), nil
 	}
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	key = make([]byte, 32)
@@ -242,6 +265,9 @@ func nullableTime(value time.Time) interface{} {
 }
 
 func (r *Repository) ListRouteAttempts(ctx context.Context, sessionID string) ([]dynamicruntime.RouteAttempt, error) {
+	if isTransientRouteSession(sessionID) {
+		return []dynamicruntime.RouteAttempt{}, nil
+	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT session_id, logical_profile_id, execution_profile_id,
 			route_generation, profile_version, reason, created_at
@@ -266,4 +292,8 @@ func (r *Repository) ListRouteAttempts(ctx context.Context, sessionID string) ([
 		return nil, err
 	}
 	return attempts, nil
+}
+
+func isTransientRouteSession(sessionID string) bool {
+	return strings.HasPrefix(sessionID, "utility:")
 }

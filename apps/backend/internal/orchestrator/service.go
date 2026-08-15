@@ -816,6 +816,12 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 	if err := s.authorizeSession(ctx, request.SessionID); err != nil {
 		return nil, err
 	}
+	lock, release := s.acquireCancelInFlightGuard(request.SessionID)
+	lock.Lock()
+	defer func() {
+		lock.Unlock()
+		release()
+	}()
 	if s.turnService != nil {
 		activeTurn, err := s.turnService.GetActiveTurn(ctx, request.SessionID)
 		if err != nil && !isNoActiveTurnError(err) {

@@ -338,6 +338,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 				if loadErr != nil {
 					s.logger.Warn("failed to reload prepared session for dynamic route resolution",
 						zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(loadErr))
+					_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, loadErr)
 					return
 				}
 				resolved, routeClaimed, resolveErr := s.resolveExecutionForLaunchSession(bgCtx, launchSession)
@@ -345,6 +346,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 					s.recordDynamicRouteResolutionFailure(bgCtx, launchSession, resolveErr)
 					s.logger.Warn("failed to resolve dynamic route for prepared session",
 						zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(resolveErr))
+					_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, resolveErr, launchSession)
 					return
 				}
 				if resolved.ExecutionProfileID != "" {
@@ -354,6 +356,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 						if updateErr := s.repo.UpdateTaskSession(bgCtx, launchSession); updateErr != nil {
 							s.logger.Warn("failed to persist dynamic route for prepared session",
 								zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(updateErr))
+							_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, updateErr, launchSession)
 							return
 						}
 					}
@@ -1020,8 +1023,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		return nil, fmt.Errorf("failed to reload launch session: %w", err)
 	}
 
-	if agentProfileID, err = s.resolveDynamicLaunchExecution(ctx, launchSession, agentProfileID, false); err != nil {
-		return nil, err
+	if route == nil {
+		if agentProfileID, err = s.resolveDynamicLaunchExecution(ctx, launchSession, agentProfileID, false); err != nil {
+			return nil, err
+		}
 	}
 	// Dynamic resolution updates the session snapshot after the initial
 	// passthrough check. Use the concrete candidate's snapshot for prompt
@@ -1342,24 +1347,8 @@ func (s *Service) resolveExecutionForLaunchSession(
 	if session == nil {
 		return agentruntime.ProfileExecution{}, false, errors.New("launch session is required for profile resolution")
 	}
-	if loader, ok := s.repo.(dynamicRouteStateLoader); ok {
-		state, err := loader.LoadRouteState(ctx, session.ID)
-		if err != nil {
-			return agentruntime.ProfileExecution{}, false, fmt.Errorf("load durable dynamic route state: %w", err)
-		}
-		if state != nil && state.LogicalProfileID == session.AgentProfileID && state.Generation > 0 {
-			if state.ExecutionProfileID == "" {
-				return agentruntime.ProfileExecution{}, false, &dynamicruntime.NoEligibleCandidateError{
-					SessionID: session.ID, LogicalProfile: session.AgentProfileID,
-					Generation: state.Generation,
-				}
-			}
-			resolved, err := s.profileExecutionResolver.ResolveExisting(
-				ctx, session.ID, session.AgentProfileID, state.ExecutionProfileID,
-				state.Generation, state.ProfileVersion, "durable_route_state",
-			)
-			return resolved, true, err
-		}
+	if resolved, routeClaimed, handled, err := s.resolveDurableExecutionForLaunch(ctx, session); handled {
+		return resolved, routeClaimed, err
 	}
 	if session.RouteGeneration > 0 && session.ExecutionProfileID != "" {
 		resolved, err := s.profileExecutionResolver.ResolveExisting(
@@ -1368,11 +1357,47 @@ func (s *Service) resolveExecutionForLaunchSession(
 		)
 		return resolved, false, err
 	}
-	resolved, err := s.profileExecutionResolver.Resolve(ctx, session.ID, session.AgentProfileID, 0, "")
+	resolved, err := s.profileExecutionResolver.Resolve(
+		ctx, session.ID, session.AgentProfileID, session.RouteGeneration, "",
+	)
 	if err != nil {
 		return agentruntime.ProfileExecution{}, false, err
 	}
 	return resolved, resolved.Generation > 0, nil
+}
+
+func (s *Service) resolveDurableExecutionForLaunch(
+	ctx context.Context,
+	session *models.TaskSession,
+) (agentruntime.ProfileExecution, bool, bool, error) {
+	loader, ok := s.repo.(dynamicRouteStateLoader)
+	if !ok {
+		return agentruntime.ProfileExecution{}, false, false, nil
+	}
+	state, err := loader.LoadRouteState(ctx, session.ID)
+	if err != nil {
+		return agentruntime.ProfileExecution{}, false, true, fmt.Errorf("load durable dynamic route state: %w", err)
+	}
+	if state == nil || state.LogicalProfileID != session.AgentProfileID || state.Generation <= 0 {
+		return agentruntime.ProfileExecution{}, false, false, nil
+	}
+	if state.ExecutionProfileID == "" {
+		if state.Status != dynamicRouteStatusWaiting {
+			return agentruntime.ProfileExecution{}, false, true, &dynamicruntime.NoEligibleCandidateError{
+				SessionID: session.ID, LogicalProfile: session.AgentProfileID,
+				Generation: state.Generation,
+			}
+		}
+		resolved, resolveErr := s.profileExecutionResolver.Resolve(
+			ctx, session.ID, session.AgentProfileID, state.Generation, "",
+		)
+		return resolved, resolved.Generation > 0, true, resolveErr
+	}
+	resolved, err := s.profileExecutionResolver.ResolveExisting(
+		ctx, session.ID, session.AgentProfileID, state.ExecutionProfileID,
+		state.Generation, state.ProfileVersion, "durable_route_state",
+	)
+	return resolved, true, true, err
 }
 
 func (s *Service) resolveDynamicLaunchExecution(
@@ -1454,7 +1479,7 @@ func (s *Service) recordDynamicRouteResolutionFailure(
 		return
 	}
 	session.RouteGeneration = noCandidate.Generation
-	session.RouteState = "waiting"
+	session.RouteState = dynamicRouteStatusWaiting
 	session.RouteReason = "no_eligible_candidate"
 	session.UpdatedAt = time.Now().UTC()
 	if updateErr := s.repo.UpdateTaskSession(ctx, session); updateErr != nil {

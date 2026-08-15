@@ -155,7 +155,7 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	entry, ok := r.circuits[lease.Key]
-	if !ok || entry.state != CircuitHalfOpen {
+	if !ok || entry.state != CircuitHalfOpen || !entry.probeUntil.Equal(lease.ExpiresAt) {
 		return
 	}
 	entry.probeUntil = time.Time{}

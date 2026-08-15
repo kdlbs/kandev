@@ -222,7 +222,9 @@ export function ProfilesCard({
   onToastError,
 }: ProfilesCardProps) {
   const { t } = useTranslation();
-  const dynamicProfile = draftAgent.name === "dynamic" ? draftAgent.profiles[0] : undefined;
+  const dynamicProfile =
+    draftAgent.profiles.find((profile) => profile.kind === "dynamic") ??
+    (draftAgent.name === "dynamic" ? draftAgent.profiles[0] : undefined);
 
   if (dynamicProfile) {
     return (

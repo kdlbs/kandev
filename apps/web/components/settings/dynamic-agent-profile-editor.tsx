@@ -12,7 +12,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
-import { listAgentsAction, updateAgentProfileAction } from "@/app/actions/agents";
+import { updateAgentProfileAction } from "@/app/actions/agents";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
@@ -155,10 +155,19 @@ export function DynamicAgentProfileEditor({
         return;
       }
       const updated = await updateAgentProfileAction(profile.id, payload);
-      const response = await listAgentsAction();
-      setSettingsAgents(response.agents);
+      const nextAgents = settingsAgents.map((item) =>
+        item.id !== agent.id
+          ? item
+          : {
+              ...item,
+              profiles: item.profiles.map((itemProfile) =>
+                itemProfile.id === updated.id ? updated : itemProfile,
+              ),
+            },
+      );
+      setSettingsAgents(nextAgents);
       setAgentProfiles(
-        response.agents.flatMap((item) =>
+        nextAgents.flatMap((item) =>
           item.profiles.map((itemProfile) => toAgentProfileOption(item, itemProfile)),
         ),
       );

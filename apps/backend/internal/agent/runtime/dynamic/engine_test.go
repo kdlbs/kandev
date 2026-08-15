@@ -1,6 +1,7 @@
 package dynamic
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -39,6 +40,26 @@ func TestEngineSelectsFixedOrderAndFencesGenerations(t *testing.T) {
 	}
 	if decision.ExecutionProfileID != "open" || decision.Generation != 2 {
 		t.Fatalf("try next decision = %#v", decision)
+	}
+}
+
+func TestEnginePreferenceKeepsRetryOnCurrentCandidate(t *testing.T) {
+	engine := NewEngine()
+	profile := Profile{
+		ID: "dynamic-1",
+		Candidates: []Candidate{
+			{ID: "first", Enabled: true},
+			{ID: "second", Enabled: true},
+		},
+	}
+	decision, err := engine.SelectContextWithPreference(
+		context.Background(), "session-1", profile, 0, "", "second",
+	)
+	if err != nil {
+		t.Fatalf("SelectContextWithPreference: %v", err)
+	}
+	if decision.ExecutionProfileID != "second" {
+		t.Fatalf("preferred decision = %#v", decision)
 	}
 }
 
@@ -156,7 +177,16 @@ func TestCircuitProbeLeaseIsExclusive(t *testing.T) {
 	if _, ok := registry.AcquireProbe("provider:claude", time.Minute); ok {
 		t.Fatal("second worker acquired the same half-open probe")
 	}
-	registry.ReleaseProbe(lease, false, time.Second)
+	now = now.Add(2 * time.Minute)
+	lease2, ok := registry.AcquireProbe("provider:claude", time.Minute)
+	if !ok {
+		t.Fatal("expired probe lease was not replaced")
+	}
+	registry.ReleaseProbe(lease, true, time.Second)
+	if _, ok := registry.AcquireProbe("provider:claude", time.Minute); ok {
+		t.Fatal("stale probe lease changed the current half-open circuit")
+	}
+	registry.ReleaseProbe(lease2, false, time.Second)
 	now = now.Add(2 * time.Second)
 	if _, ok := registry.AcquireProbe("provider:claude", time.Minute); !ok {
 		t.Fatal("probe lease was not released after failure backoff")

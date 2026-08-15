@@ -691,6 +691,10 @@ func (h *Handlers) httpDuplicateProfile(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
 			return
 		}
+		if errors.Is(err, controller.ErrDynamicProfileDuplicationUnsupported) {
+			c.JSON(http.StatusConflict, gin.H{"error": "dynamic profiles cannot be duplicated"})
+			return
+		}
 		h.logger.Error("failed to duplicate profile", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to duplicate profile"})
 		return

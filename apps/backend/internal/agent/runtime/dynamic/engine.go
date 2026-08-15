@@ -72,6 +72,20 @@ func (e *Engine) SelectContext(ctx context.Context, sessionID string, profile Pr
 	return e.selectContext(ctx, sessionID, profile, expectedGeneration, excludeProfileID, "")
 }
 
+// SelectContextWithPreference retries the requested candidate when it remains
+// eligible. A caller can still exclude that candidate for try-next behavior
+// by using the ordinary SelectContext method.
+func (e *Engine) SelectContextWithPreference(
+	ctx context.Context,
+	sessionID string,
+	profile Profile,
+	expectedGeneration int64,
+	excludeProfileID string,
+	preferredProfileID string,
+) (RouteDecision, error) {
+	return e.selectContext(ctx, sessionID, profile, expectedGeneration, excludeProfileID, preferredProfileID)
+}
+
 func (e *Engine) selectContext(
 	ctx context.Context,
 	sessionID string,
