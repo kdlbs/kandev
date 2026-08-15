@@ -51,6 +51,15 @@ func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engi
 
 func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled = enabled }
 
+// NewConductor creates the lifecycle-facing conductor with the same engine,
+// profile loader, and feature-gate state as this resolver.
+func (r *ProfileExecutionResolver) NewConductor(
+	downstream dynamic.DownstreamRuntime,
+	options ...dynamic.ConductorOption,
+) *dynamic.Conductor {
+	return dynamic.NewConductor(r.engine, r, downstream, options...)
+}
+
 // ValidateProfile performs the disabled-mode check without claiming a route
 // generation or writing any durable state. Callers use it before creating a
 // task session so a stored dynamic profile remains inert while the feature is

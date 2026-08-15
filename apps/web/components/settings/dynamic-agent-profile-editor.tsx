@@ -11,6 +11,7 @@ import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet"
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { AgentLogo } from "@/components/agent-logo";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { listAgentsAction, updateAgentProfileAction } from "@/app/actions/agents";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
@@ -23,8 +24,11 @@ type DynamicAgentProfileEditorProps = {
   profile: AgentProfile;
   /** When supplied, render as a draft editor owned by the parent save flow. */
   onDraftChange?: (patch: Pick<AgentProfile, "name" | "dynamic">) => void;
-  showSave?: boolean;
 };
+
+function dynamicDraftRevision(name: string, candidates: DynamicAgentCandidate[]): string {
+  return JSON.stringify({ name, candidates });
+}
 
 function candidateLabel(candidate: DynamicAgentCandidate, profiles: AgentProfile[]): string {
   return (
@@ -38,7 +42,6 @@ export function DynamicAgentProfileEditor({
   agent,
   profile,
   onDraftChange,
-  showSave = true,
 }: DynamicAgentProfileEditorProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -50,6 +53,10 @@ export function DynamicAgentProfileEditor({
   const [candidates, setCandidates] = useState<DynamicAgentCandidate[]>(
     profile.dynamic?.candidates ?? [],
   );
+  const [dynamicVersion, setDynamicVersion] = useState(profile.dynamic?.version ?? 1);
+  const initialCandidates = profile.dynamic?.candidates ?? [];
+  const initialRevision = dynamicDraftRevision(profile.name, initialCandidates);
+  const [savedRevision, setSavedRevision] = useState(initialRevision);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -72,7 +79,7 @@ export function DynamicAgentProfileEditor({
     onDraftChange?.({
       name: nextName,
       dynamic: {
-        version: profile.dynamic?.version ?? 1,
+        version: dynamicVersion,
         candidates: nextCandidates,
       },
     });
@@ -127,14 +134,14 @@ export function DynamicAgentProfileEditor({
       const draftPayload = {
         name: name.trim(),
         dynamic: {
-          version: profile.dynamic.version,
+          version: dynamicVersion,
           candidates,
         },
       };
       const payload = {
         name: name.trim(),
         dynamic: {
-          version: profile.dynamic.version,
+          version: dynamicVersion,
           candidates: candidates.map((candidate, position) => ({
             position,
             execution_profile_id: candidate.executionProfileId,
@@ -156,7 +163,10 @@ export function DynamicAgentProfileEditor({
         ),
       );
       setName(updated.name);
-      setCandidates(updated.dynamic?.candidates ?? candidates);
+      const nextCandidates = updated.dynamic?.candidates ?? candidates;
+      setCandidates(nextCandidates);
+      setDynamicVersion(updated.dynamic?.version ?? dynamicVersion + 1);
+      setSavedRevision(dynamicDraftRevision(updated.name, nextCandidates));
       toast({ title: t("agents:dynamicProfileSaved") });
     } catch (error) {
       toast({
@@ -168,6 +178,24 @@ export function DynamicAgentProfileEditor({
       setSaving(false);
     }
   };
+
+  const standalone = onDraftChange === undefined;
+  const draftRevision = dynamicDraftRevision(name, candidates);
+  useSettingsSaveContributor({
+    id: `dynamic-profile:${profile.id}`,
+    revision: draftRevision,
+    isDirty: standalone && draftRevision !== savedRevision,
+    canSave: enabled && !saving && Boolean(name.trim()) && candidates.length > 0,
+    invalidReason: !name.trim() ? t("agents:profileNameRequired") : t("agents:noDynamicCandidates"),
+    save,
+    discard: () => {
+      if (!standalone) return;
+      setName(profile.name);
+      setCandidates(initialCandidates);
+      setDynamicVersion(profile.dynamic?.version ?? 1);
+      setSavedRevision(initialRevision);
+    },
+  });
 
   if (!enabled) {
     return (
@@ -191,16 +219,6 @@ export function DynamicAgentProfileEditor({
             {t("agents:dynamicProfileDescription")}
           </p>
         </div>
-        {showSave && (
-          <Button
-            className="min-h-11 shrink-0"
-            onClick={() => void save()}
-            disabled={saving || !name.trim() || candidates.length === 0}
-            data-testid="save-dynamic-profile"
-          >
-            {saving ? t("agents:savingProfile") : t("common:save")}
-          </Button>
-        )}
       </div>
 
       <Card>

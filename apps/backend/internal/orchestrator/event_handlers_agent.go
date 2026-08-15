@@ -1188,6 +1188,9 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
 		return
 	}
+	if data.SessionID != "" && s.routeDynamicAgentFailure(ctx, data, classifyKanbanFailure(data)) {
+		return
+	}
 
 	// All paths below are terminal for this execution (resume recovery included).
 	// A transient retry returned above and retains activity until its execution

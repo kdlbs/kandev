@@ -367,11 +367,12 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		return nil, ErrAgentProfileNotFound
 	}
 	isDynamic := profileKind(profile) == dynamicProfileKind
-	if isDynamic && req.Dynamic != nil && !c.dynamicAgentRoutingEnabled {
+	if isDynamic && !c.dynamicAgentRoutingEnabled {
 		return nil, ErrDynamicAgentRoutingDisabled
 	}
 	var (
 		dynamicRepo   store.DynamicProfileRepository
+		dynamic       *models.DynamicAgentProfile
 		dynamicRoutes []models.DynamicAgentRoute
 	)
 	if isDynamic && req.Dynamic != nil {
@@ -386,6 +387,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if err != nil {
 			return nil, err
 		}
+		dynamic = &models.DynamicAgentProfile{ProfileID: profile.ID}
 	}
 	if req.Name != nil {
 		profile.Name = *req.Name
@@ -470,12 +472,22 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		profile.CommandPrefix = strings.TrimSpace(*req.CommandPrefix)
 	}
 	profile.UserModified = true
+	if dynamic != nil {
+		result, handled, atomicErr := c.updateDynamicProfileAtomically(
+			ctx, profile, dynamic, req.Dynamic.Version, dynamicRoutes,
+		)
+		if atomicErr != nil {
+			return nil, atomicErr
+		}
+		if handled {
+			return result, nil
+		}
+	}
 	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
 		return nil, err
 	}
 	result := toProfileDTO(profile)
 	if dynamicRepo != nil {
-		dynamic := &models.DynamicAgentProfile{ProfileID: profile.ID}
 		if err := dynamicRepo.UpdateDynamicAgentProfile(ctx, dynamic, req.Dynamic.Version, dynamicRoutes); err != nil {
 			return nil, err
 		}
@@ -485,6 +497,29 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 	}
 	return &result, nil
+}
+
+func (c *Controller) updateDynamicProfileAtomically(
+	ctx context.Context,
+	profile *models.AgentProfile,
+	dynamic *models.DynamicAgentProfile,
+	version int64,
+	routes []models.DynamicAgentRoute,
+) (*dto.AgentProfileDTO, bool, error) {
+	atomicRepo, ok := c.repo.(store.AtomicDynamicProfileRepository)
+	if !ok {
+		return nil, false, nil
+	}
+	if err := atomicRepo.UpdateAgentProfileWithDynamic(ctx, profile, dynamic, version, routes); err != nil {
+		return nil, true, err
+	}
+	result := toProfileDTO(profile)
+	var err error
+	result.Dynamic, err = dynamicProfileDTO(dynamic, routes)
+	if err != nil {
+		return nil, true, err
+	}
+	return &result, true, nil
 }
 
 type DuplicateProfileRequest struct {
@@ -759,6 +794,9 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 			return nil, ErrAgentProfileNotFound
 		}
 		return nil, err
+	}
+	if profileKind(profile) == dynamicProfileKind && !c.dynamicAgentRoutingEnabled {
+		return nil, ErrDynamicAgentRoutingDisabled
 	}
 	if err := c.prepareProfileDeletion(ctx, id, force); err != nil {
 		return nil, err

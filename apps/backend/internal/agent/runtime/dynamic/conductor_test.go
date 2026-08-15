@@ -1,0 +1,110 @@
+package dynamic
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+)
+
+type conductorTestProfileLoader struct {
+	profile Profile
+}
+
+func (l conductorTestProfileLoader) LoadDynamicProfile(context.Context, string) (Profile, error) {
+	return l.profile, nil
+}
+
+type conductorTestDownstream struct {
+	launches []DownstreamLaunch
+}
+
+func (d *conductorTestDownstream) Launch(_ context.Context, launch DownstreamLaunch) (DownstreamExecution, error) {
+	d.launches = append(d.launches, launch)
+	if len(d.launches) == 1 {
+		return DownstreamExecution{}, &routingerr.Error{
+			Code:            routingerr.CodeProviderUnavailable,
+			FallbackAllowed: true,
+		}
+	}
+	return DownstreamExecution{ID: "execution-second"}, nil
+}
+
+func (*conductorTestDownstream) Resume(context.Context, string, string) error { return nil }
+
+func (*conductorTestDownstream) Stop(context.Context, string, string) error { return nil }
+
+func TestConductorFallsBackAfterClassifiedLaunchFailure(t *testing.T) {
+	profile := Profile{
+		ID: "dynamic-profile",
+		Candidates: []Candidate{
+			{
+				ID:         "candidate-first",
+				Enabled:    true,
+				BindingKey: "first",
+				Rules:      map[string]Action{string(routingerr.CodeProviderUnavailable): ActionTryNext},
+			},
+			{ID: "candidate-second", Enabled: true, BindingKey: "second"},
+		},
+	}
+	downstream := &conductorTestDownstream{}
+	conductor := NewConductor(NewEngine(), conductorTestProfileLoader{profile: profile}, downstream)
+
+	result, err := conductor.Launch(context.Background(), ConductorLaunch{
+		SessionID:        "session-1",
+		LogicalProfileID: profile.ID,
+		Prompt:           "hello",
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if result.Decision.ExecutionProfileID != "candidate-second" || result.Decision.Generation != 2 {
+		t.Fatalf("final decision = %#v", result.Decision)
+	}
+	if result.Execution.ID != "execution-second" {
+		t.Fatalf("execution = %#v", result.Execution)
+	}
+	if len(downstream.launches) != 2 {
+		t.Fatalf("launch count = %d, want 2", len(downstream.launches))
+	}
+	if got := downstream.launches[0].Decision.ExecutionProfileID; got != "candidate-first" {
+		t.Fatalf("first decision profile = %q", got)
+	}
+	if got := downstream.launches[1].Decision.ExecutionProfileID; got != "candidate-second" {
+		t.Fatalf("fallback decision profile = %q", got)
+	}
+	if downstream.launches[1].Decision.Generation != 2 {
+		t.Fatalf("fallback generation = %d, want 2", downstream.launches[1].Decision.Generation)
+	}
+}
+
+func TestConductorDoesNotFallbackForUnclassifiedLaunchFailure(t *testing.T) {
+	profile := Profile{
+		ID:         "dynamic-profile",
+		Candidates: []Candidate{{ID: "candidate-first", Enabled: true}},
+	}
+	failure := errors.New("workspace failed")
+	conductor := NewConductor(
+		NewEngine(), conductorTestProfileLoader{profile: profile},
+		failingConductorTestDownstream{err: failure},
+	)
+
+	_, err := conductor.Launch(context.Background(), ConductorLaunch{
+		SessionID:        "session-2",
+		LogicalProfileID: profile.ID,
+	})
+	if !errors.Is(err, failure) {
+		t.Fatalf("Launch error = %v", err)
+	}
+}
+
+type failingConductorTestDownstream struct{ err error }
+
+func (d failingConductorTestDownstream) Launch(context.Context, DownstreamLaunch) (DownstreamExecution, error) {
+	return DownstreamExecution{}, d.err
+}
+
+func (failingConductorTestDownstream) Resume(context.Context, string, string) error { return nil }
+
+func (failingConductorTestDownstream) Stop(context.Context, string, string) error { return nil }

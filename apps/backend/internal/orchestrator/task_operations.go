@@ -86,6 +86,14 @@ type primarySessionTaskStateUpdater interface {
 	) (bool, error)
 }
 
+// dynamicRouteStateLoader exposes the durable route row without coupling the
+// orchestrator to the concrete task repository. The route row is authoritative
+// when a generation claim committed before task-session attribution could be
+// written; launch reconciliation repairs the session from that row.
+type dynamicRouteStateLoader interface {
+	LoadRouteState(context.Context, string) (*dynamicruntime.RouteState, error)
+}
+
 // ErrSessionNotPromptable is returned when a session cannot accept a prompt
 // because of its lifecycle state (STARTING, CREATED, FAILED, CANCELLED).
 // Distinct from ErrAgentPromptInProgress, which is RUNNING-only — confusing
@@ -589,7 +597,7 @@ func (s *Service) StartCreatedSession(
 	if isOfficeTask {
 		mcpMode = executor.McpModeOffice
 	}
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments})
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments})
 	if err != nil {
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
@@ -1083,7 +1091,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// re-drive this first turn — initial launches bypass PromptTask.
 	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID:       agentProfileID,
 		OfficeAgentProfileID: officeAgentProfileID,
 		ExecutorID:           executorID,
@@ -1334,6 +1342,25 @@ func (s *Service) resolveExecutionForLaunchSession(
 	if session == nil {
 		return agentruntime.ProfileExecution{}, false, errors.New("launch session is required for profile resolution")
 	}
+	if loader, ok := s.repo.(dynamicRouteStateLoader); ok {
+		state, err := loader.LoadRouteState(ctx, session.ID)
+		if err != nil {
+			return agentruntime.ProfileExecution{}, false, fmt.Errorf("load durable dynamic route state: %w", err)
+		}
+		if state != nil && state.LogicalProfileID == session.AgentProfileID && state.Generation > 0 {
+			if state.ExecutionProfileID == "" {
+				return agentruntime.ProfileExecution{}, false, &dynamicruntime.NoEligibleCandidateError{
+					SessionID: session.ID, LogicalProfile: session.AgentProfileID,
+					Generation: state.Generation,
+				}
+			}
+			resolved, err := s.profileExecutionResolver.ResolveExisting(
+				ctx, session.ID, session.AgentProfileID, state.ExecutionProfileID,
+				state.Generation, state.ProfileVersion, "durable_route_state",
+			)
+			return resolved, true, err
+		}
+	}
 	if session.RouteGeneration > 0 && session.ExecutionProfileID != "" {
 		resolved, err := s.profileExecutionResolver.ResolveExisting(
 			ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
@@ -1367,10 +1394,10 @@ func (s *Service) resolveDynamicLaunchExecution(
 		s.recordDynamicRouteResolutionFailure(ctx, session, err)
 		return "", err
 	}
-	if resolved.ExecutionProfileID == "" {
-		return profileID, nil
-	}
 	if !routeClaimed {
+		if resolved.ExecutionProfileID == "" {
+			return profileID, nil
+		}
 		return resolved.ExecutionProfileID, nil
 	}
 	applyResolvedExecution(session, resolved)
@@ -2346,7 +2373,7 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 	if _, err := s.ClaimTaskTitleSession(launchCtx, session.TaskID, sessionID); err != nil {
 		return fmt.Errorf("failed to claim first-turn task title: %w", err)
 	}
-	if _, err = s.executor.LaunchPreparedSession(launchCtx, task, sessionID, executor.LaunchOptions{
+	if _, err = s.launchPreparedSessionWithDynamicFallback(launchCtx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID: session.AgentProfileID,
 		ExecutorID:     session.ExecutorID,
 		StartAgent:     true,

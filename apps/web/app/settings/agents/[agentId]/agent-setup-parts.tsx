@@ -229,7 +229,6 @@ export function ProfilesCard({
       <DynamicAgentProfileEditor
         agent={draftAgent}
         profile={dynamicProfile}
-        showSave={false}
         onDraftChange={(patch) => onProfileChange(dynamicProfile.id, patch)}
       />
     );

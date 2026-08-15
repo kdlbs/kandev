@@ -80,6 +80,14 @@ func TestClaimRouteStateDoesNotInsertAfterRestartWithNonZeroExpectation(t *testi
 func TestRecordRouteDecisionClaimsInitialGenerationAndWritesAttemptAtomically(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-atomic-route", Title: "Atomic route"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "atomic-session", TaskID: "task-atomic-route", State: models.TaskSessionStateStarting,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
 	now := time.Now().UTC()
 	decision := dynamicruntime.RouteDecision{
 		SessionID: "atomic-session", LogicalProfileID: "dynamic-1",

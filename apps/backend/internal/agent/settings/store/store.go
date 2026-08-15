@@ -80,3 +80,17 @@ type DynamicProfileRepository interface {
 	UpdateDynamicAgentProfile(ctx context.Context, profile *models.DynamicAgentProfile, expectedVersion int64, routes []models.DynamicAgentRoute) error
 	ListDynamicProfileReferencesByExecutionProfile(ctx context.Context, profileID string) ([]models.DynamicProfileReference, error)
 }
+
+// AtomicDynamicProfileRepository updates the base profile row and its
+// optimistic-routing document in one transaction. Controllers use this
+// optional extension when a request changes both surfaces so a stale route
+// version cannot leave the base profile partially updated.
+type AtomicDynamicProfileRepository interface {
+	UpdateAgentProfileWithDynamic(
+		ctx context.Context,
+		profile *models.AgentProfile,
+		dynamic *models.DynamicAgentProfile,
+		expectedVersion int64,
+		routes []models.DynamicAgentRoute,
+	) error
+}

@@ -114,13 +114,31 @@ func TestDynamicProfileCreateAndUpdatePersistsCandidates(t *testing.T) {
 	if updated.Dynamic == nil || updated.Dynamic.Version != 2 || updated.Dynamic.Candidates[0].Enabled {
 		t.Fatalf("updated dynamic profile = %#v", updated)
 	}
+	staleName := "Stale overwrite"
 	if _, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{
-		ID: created.ID,
+		ID:   created.ID,
+		Name: &staleName,
 		Dynamic: &dto.DynamicAgentProfileDTO{
 			Version:    1,
 			Candidates: updated.Dynamic.Candidates,
 		},
 	}); !errors.Is(err, ErrDynamicProfileVersionConflict) {
 		t.Fatalf("stale update error = %v, want version conflict", err)
+	}
+	stored, err := repo.GetAgentProfile(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("read dynamic profile after stale update: %v", err)
+	}
+	if stored.Name != "Balanced" {
+		t.Fatalf("stale update changed base profile name to %q", stored.Name)
+	}
+
+	ctrl.SetDynamicAgentRoutingEnabled(false)
+	disabledName := "Disabled overwrite"
+	if _, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{ID: created.ID, Name: &disabledName}); !errors.Is(err, ErrDynamicAgentRoutingDisabled) {
+		t.Fatalf("disabled dynamic update error = %v, want %v", err, ErrDynamicAgentRoutingDisabled)
+	}
+	if _, err := ctrl.DeleteProfile(ctx, created.ID, false); !errors.Is(err, ErrDynamicAgentRoutingDisabled) {
+		t.Fatalf("disabled dynamic delete error = %v, want %v", err, ErrDynamicAgentRoutingDisabled)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -201,6 +202,22 @@ func (s *Service) foregroundIdleOwnsCurrentPrompt(payload *lifecycle.AgentStream
 func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
+	if sessionID != "" {
+		failure := watcher.AgentEventData{
+			TaskID:           taskID,
+			SessionID:        sessionID,
+			AgentExecutionID: payload.ExecutionID,
+			AgentID:          payload.AgentID,
+			ErrorMessage:     payload.Data.Error,
+			ProviderError:    payload.Data.ProviderError,
+		}
+		if failure.ErrorMessage == "" {
+			failure.ErrorMessage = payload.Data.Text
+		}
+		if s.routeDynamicAgentFailure(ctx, failure, classifyKanbanFailure(failure)) {
+			return
+		}
+	}
 	if sessionID != "" && s.messageCreator != nil {
 		errorMsg := payload.Data.Error
 		if errorMsg == "" {

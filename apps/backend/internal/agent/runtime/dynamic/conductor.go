@@ -14,6 +14,7 @@ import (
 // sent to a different candidate.
 type DownstreamLaunch struct {
 	ExecutionProfileID string
+	Decision           RouteDecision
 	Prompt             string
 	PriorACPSession    string
 	Continuation       Continuation
@@ -72,6 +73,18 @@ type ConductorLaunch struct {
 	Continuation       ContinuationInput
 }
 
+// ConductorSelectedLaunch hands the conductor a route that was already
+// claimed by the shared resolver. It is used by lifecycle adapters that must
+// preserve the existing session generation while still delegating classified
+// pre-result fallback to the conductor.
+type ConductorSelectedLaunch struct {
+	SessionID        string
+	LogicalProfileID string
+	Decision         RouteDecision
+	Prompt           string
+	Continuation     ContinuationInput
+}
+
 type ConductorResult struct {
 	Decision   RouteDecision
 	Execution  DownstreamExecution
@@ -107,6 +120,62 @@ func (c *Conductor) Launch(ctx context.Context, request ConductorLaunch) (Conduc
 	return ConductorResult{Decision: decision, Execution: execution, FreshRoute: true}, nil
 }
 
+// LaunchSelected launches a previously claimed route and applies the same
+// classified fallback policy as Launch. The caller owns durable session
+// attribution; the downstream adapter receives each immutable decision before
+// its corresponding launch.
+func (c *Conductor) LaunchSelected(ctx context.Context, request ConductorSelectedLaunch) (ConductorResult, error) {
+	if c.engine == nil || c.profiles == nil || c.downstream == nil {
+		return ConductorResult{}, errors.New("dynamic conductor is not configured")
+	}
+	profile, err := c.profiles.LoadDynamicProfile(ctx, request.LogicalProfileID)
+	if err != nil {
+		return ConductorResult{}, err
+	}
+	continuation, err := c.buildContinuation(ctx, request.Continuation)
+	if err != nil {
+		return ConductorResult{}, err
+	}
+	execution, decision, err := c.launchWithFallback(
+		ctx,
+		profile,
+		request.Decision,
+		ConductorLaunch{SessionID: request.SessionID, LogicalProfileID: request.LogicalProfileID, Prompt: request.Prompt},
+		continuation,
+	)
+	if err != nil {
+		return ConductorResult{}, err
+	}
+	if execution.ExecutionProfileID == "" {
+		execution.ExecutionProfileID = decision.ExecutionProfileID
+	}
+	c.mu.Lock()
+	c.active[request.SessionID] = execution
+	c.mu.Unlock()
+	return ConductorResult{Decision: decision, Execution: execution}, nil
+}
+
+// RouteAfterFailure applies the logical profile's classified failure policy
+// without launching a downstream process. Event handlers use it when a
+// lifecycle error frame arrives after the initial launch.
+func (c *Conductor) RouteAfterFailure(
+	ctx context.Context,
+	sessionID, logicalProfileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+) (RouteDecision, error) {
+	if c.engine == nil || c.profiles == nil {
+		return RouteDecision{}, errors.New("dynamic conductor is not configured")
+	}
+	profile, err := c.profiles.LoadDynamicProfile(ctx, logicalProfileID)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+	return c.engine.ApplyFailureContext(
+		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure,
+	)
+}
+
 func (c *Conductor) launchWithFallback(
 	ctx context.Context,
 	profile Profile,
@@ -116,6 +185,7 @@ func (c *Conductor) launchWithFallback(
 ) (DownstreamExecution, RouteDecision, error) {
 	execution, err := c.downstream.Launch(ctx, DownstreamLaunch{
 		ExecutionProfileID: decision.ExecutionProfileID,
+		Decision:           decision,
 		Prompt:             request.Prompt,
 		Continuation:       continuation,
 	})
@@ -133,6 +203,7 @@ func (c *Conductor) launchWithFallback(
 	}
 	execution, err = c.downstream.Launch(ctx, DownstreamLaunch{
 		ExecutionProfileID: next.ExecutionProfileID,
+		Decision:           next,
 		Prompt:             request.Prompt,
 		Continuation:       continuation,
 	})
@@ -151,6 +222,9 @@ func (c *Conductor) nextAfterLaunchFailure(
 ) (RouteDecision, bool, error) {
 	var classified *routingerr.Error
 	if !errors.As(launchErr, &classified) {
+		return RouteDecision{}, false, nil
+	}
+	if !classified.FallbackAllowed {
 		return RouteDecision{}, false, nil
 	}
 	if c.engine.ActionFor(profile, decision.ExecutionProfileID, classified.Code) != ActionTryNext {

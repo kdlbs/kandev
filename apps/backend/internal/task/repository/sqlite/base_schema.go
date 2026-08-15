@@ -48,7 +48,7 @@ func (r *Repository) initSchema() error {
 }
 
 func (r *Repository) initDynamicRoutingSchema() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.Exec(fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS dynamic_route_states (
 			session_id TEXT PRIMARY KEY,
 			logical_profile_id TEXT NOT NULL,
@@ -87,10 +87,10 @@ func (r *Repository) initDynamicRoutingSchema() error {
 
 		CREATE TABLE IF NOT EXISTS dynamic_installation_keys (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
-			key_bytes BLOB NOT NULL,
+			key_bytes %s NOT NULL,
 			created_at TIMESTAMP NOT NULL
 		);
-	`)
+	`, dialect.BlobType(r.db.DriverName())))
 	return err
 }
 

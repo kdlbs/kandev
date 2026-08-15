@@ -584,9 +584,9 @@ func (r *sqliteRepository) CreateDynamicAgentProfile(
 	return tx.Commit()
 }
 
-func insertDynamicRoutes(ctx context.Context, tx *sqlx.Tx, profileID string, routes []models.DynamicAgentRoute) error {
+func insertDynamicRoutes(ctx context.Context, execer profileExecer, profileID string, routes []models.DynamicAgentRoute) error {
 	for _, route := range routes {
-		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		if _, err := execer.ExecContext(ctx, execer.Rebind(`
 			INSERT INTO dynamic_agent_routes
 				(dynamic_profile_id, position, execution_profile_id, enabled, rules_json)
 			VALUES (?, ?, ?, ?, ?)
@@ -650,8 +650,21 @@ func (r *sqliteRepository) UpdateDynamicAgentProfile(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.updateDynamicAgentProfileTx(ctx, tx, profile, expectedVersion, routes); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) updateDynamicAgentProfileTx(
+	ctx context.Context,
+	execer profileExecer,
+	profile *models.DynamicAgentProfile,
+	expectedVersion int64,
+	routes []models.DynamicAgentRoute,
+) error {
 	now := time.Now().UTC()
-	result, err := tx.ExecContext(ctx, tx.Rebind(`
+	result, err := execer.ExecContext(ctx, execer.Rebind(`
 		UPDATE dynamic_agent_profiles
 		SET version = version + 1, updated_at = ?
 		WHERE profile_id = ? AND version = ?
@@ -666,18 +679,45 @@ func (r *sqliteRepository) UpdateDynamicAgentProfile(
 	if rowsAffected == 0 {
 		return ErrDynamicProfileVersionConflict
 	}
-	if _, err := tx.ExecContext(ctx, tx.Rebind(
+	if _, err := execer.ExecContext(ctx, execer.Rebind(
 		`DELETE FROM dynamic_agent_routes WHERE dynamic_profile_id = ?`), profile.ProfileID); err != nil {
 		return err
 	}
-	if err := insertDynamicRoutes(ctx, tx, profile.ProfileID, routes); err != nil {
+	if err := insertDynamicRoutes(ctx, execer, profile.ProfileID, routes); err != nil {
+		return err
+	}
+	profile.Version = expectedVersion + 1
+	profile.UpdatedAt = now
+	return nil
+}
+
+// UpdateAgentProfileWithDynamic commits the ordinary profile fields and the
+// versioned dynamic route document together. A version conflict rolls back
+// both writes, so a stale editor cannot persist a partial base-profile change.
+func (r *sqliteRepository) UpdateAgentProfileWithDynamic(
+	ctx context.Context,
+	profile *models.AgentProfile,
+	dynamic *models.DynamicAgentProfile,
+	expectedVersion int64,
+	routes []models.DynamicAgentRoute,
+) error {
+	if profile == nil || dynamic == nil || profile.ID == "" || dynamic.ProfileID != profile.ID {
+		return fmt.Errorf("profile and dynamic profile IDs are required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.updateAgentProfile(ctx, tx, profile); err != nil {
+		return err
+	}
+	if err := r.updateDynamicAgentProfileTx(ctx, tx, dynamic, expectedVersion, routes); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	profile.Version = expectedVersion + 1
-	profile.UpdatedAt = now
 	return nil
 }
 
@@ -1072,6 +1112,10 @@ func envVarsToJSON(envVars []models.ProfileEnvVar) (string, error) {
 }
 
 func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
+	return r.updateAgentProfile(ctx, r.db, profile)
+}
+
+func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profileExecer, profile *models.AgentProfile) error {
 	profile.UpdatedAt = time.Now().UTC()
 	cliFlagsJSON, err := cliFlagsToJSON(profile.CLIFlags)
 	if err != nil {
@@ -1085,7 +1129,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 	if err != nil {
 		return err
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := execer.ExecContext(ctx, execer.Rebind(`
 		UPDATE agent_profiles
 		SET agent_id = ?, name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?,
 			auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?,
