@@ -533,6 +533,58 @@ func TestRestoreClarificationMessagesLeavesInputUnchangedOnWriteFailure(t *testi
 	}
 }
 
+func TestCompleteClaimedClarificationMessagesLeavesInputUnchangedOnWriteFailure(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	base := time.Date(2026, time.August, 15, 22, 0, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-complete-input", "session-complete-input")
+	createPendingActionTurn(
+		t, repo, "task-complete-input", "session-complete-input", "turn-complete-input", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "existing-message", "task-complete-input", "session-complete-input",
+		"turn-complete-input", "pending-complete-input", "question-1", base,
+	)
+	setClarificationMessageMetadata(t, repo, "existing-message", func(metadata map[string]interface{}) {
+		metadata["status"] = clarificationStatusResponding
+	})
+	tx, err := repo.db.BeginTxx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTxx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	existingMessage := &models.Message{
+		ID: "existing-message",
+		Metadata: map[string]interface{}{
+			"question_id": "question-1",
+			"status":      clarificationStatusResponding,
+		},
+	}
+	missingMessage := &models.Message{
+		ID: "missing-message",
+		Metadata: map[string]interface{}{
+			"question_id": "question-2",
+			"status":      clarificationStatusResponding,
+		},
+	}
+
+	err = repo.completeClaimedClarificationMessages(
+		context.Background(),
+		tx,
+		repo.db.DriverName(),
+		[]*models.Message{existingMessage, missingMessage},
+		clarificationStatusAnswered,
+		map[string]interface{}{"question-1": "continue", "question-2": "continue"},
+	)
+	if err == nil {
+		t.Fatal("completeClaimedClarificationMessages succeeded for a missing row")
+	}
+	for _, message := range []*models.Message{existingMessage, missingMessage} {
+		if message.Metadata["status"] != clarificationStatusResponding || message.Metadata["response"] != nil {
+			t.Fatalf("failed completion mutated input metadata: %#v", message.Metadata)
+		}
+	}
+}
+
 func TestRestoreActiveClarificationBundleDoesNotReactivateSupersededTurn(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

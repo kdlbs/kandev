@@ -263,6 +263,10 @@ All task gates passed:
   projection disappears, avoiding navigation to a deleted task. The dual-transport handler regression,
   57 focused web tests, zero-warning focused web lint, typecheck, i18n ratchet, and changed-code Go lint
   passed.
+- Claude review remediation removes a dead clarification lookup, narrows handler and cancellation
+  repository interfaces, keeps caller metadata unchanged across any partial completion failure, and
+  documents the transaction-local claim timestamp. Durable-turn ordering coverage now includes the
+  created-time tie-break alongside existing load-state, start-time, ID, and nanosecond cases.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

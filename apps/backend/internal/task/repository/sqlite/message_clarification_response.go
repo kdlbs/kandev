@@ -411,6 +411,8 @@ func (r *Repository) claimActiveClarificationBundle(
 	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
 	// A pending ID spanning message types, sessions, or turns is malformed. The
 	// NOT EXISTS guard intentionally makes the whole bundle ineligible to claim.
+	// This transaction-local timestamp is overwritten by completion before commit;
+	// a failed transaction rolls it back, so no separate Go timestamp bind is needed.
 	claimQuery := fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
@@ -496,20 +498,22 @@ func (r *Repository) completeClaimedClarificationMessages(
 		SET metadata = ?, updated_at = ?
 		WHERE id = ? AND %s = ?
 	`, claimedStatusExpr))
-	for _, message := range messages {
+	completedMetadataByMessage := make([]map[string]interface{}, len(messages))
+	for i, message := range messages {
 		questionID, _ := message.Metadata["question_id"].(string)
 		if questionID == "" {
 			return fmt.Errorf("clarification message %s is missing question_id", message.ID)
 		}
-		message.Metadata["status"] = status
+		completedMetadata := maps.Clone(message.Metadata)
+		completedMetadata["status"] = status
 		if status == clarificationStatusAnswered {
 			response, ok := responses[questionID]
 			if !ok {
 				return fmt.Errorf("missing response for clarification question %s", questionID)
 			}
-			message.Metadata["response"] = response
+			completedMetadata["response"] = response
 		}
-		metadataJSON, marshalErr := json.Marshal(message.Metadata)
+		metadataJSON, marshalErr := json.Marshal(completedMetadata)
 		if marshalErr != nil {
 			return fmt.Errorf("marshal clarification message %s: %w", message.ID, marshalErr)
 		}
@@ -528,6 +532,10 @@ func (r *Repository) completeClaimedClarificationMessages(
 		if updatedRows != 1 {
 			return fmt.Errorf("clarification message %s lost its claim", message.ID)
 		}
+		completedMetadataByMessage[i] = completedMetadata
+	}
+	for i, message := range messages {
+		message.Metadata = completedMetadataByMessage[i]
 		message.UpdatedAt = updatedAt
 	}
 	return nil

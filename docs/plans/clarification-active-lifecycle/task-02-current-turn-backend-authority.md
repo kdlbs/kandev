@@ -155,3 +155,6 @@ blockers/risks, and update task/plan status.
 - Task-session HTTP and WebSocket list handlers now return an internal error when authoritative pending
   projection fails instead of silently presenting every session as clean; the focused dual-transport
   regression and changed-code Go lint passed.
+- Claude review remediation splits the handler and canceller repository surfaces, removes the unused
+  pending-session lookup, and clones completion metadata without exposing partial in-memory mutation on
+  write failure. The failed second-write regression and adjacent claim/restore cases passed.

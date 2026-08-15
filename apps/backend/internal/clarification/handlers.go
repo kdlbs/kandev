@@ -30,15 +30,17 @@ const (
 	clarificationPersistenceTimeout = 30 * time.Second
 )
 
-// messageStore is the minimal task repository interface required by clarification handlers.
-type messageStore interface {
+// handlerMessageStore is the task repository surface used by HTTP handlers.
+type handlerMessageStore interface {
 	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
-	FindMessageByPendingID(ctx context.Context, pendingID string) (*taskmodels.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error)
+}
+
+// cancellationMessageStore is the task repository surface used by session cancellation.
+type cancellationMessageStore interface {
 	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
 	DetachActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
 	ExpireActiveClarificationBundle(ctx context.Context, sessionID, pendingID string) ([]*taskmodels.Message, error)
-	UpdateMessage(ctx context.Context, message *taskmodels.Message) error
 }
 
 type clarificationStore interface {
@@ -110,7 +112,7 @@ type Handlers struct {
 	store           clarificationStore
 	hub             Broadcaster
 	messageCreator  MessageCreator
-	repo            messageStore
+	repo            handlerMessageStore
 	eventBus        EventBus
 	detachedResumer DetachedClarificationResumer
 	logger          *logger.Logger
@@ -121,7 +123,7 @@ func NewHandlers(
 	store *Store,
 	hub Broadcaster,
 	messageCreator MessageCreator,
-	repo messageStore,
+	repo handlerMessageStore,
 	eventBus EventBus,
 	detachedResumer DetachedClarificationResumer,
 	log *logger.Logger,
@@ -143,7 +145,7 @@ func RegisterRoutes(
 	store *Store,
 	hub Broadcaster,
 	messageCreator MessageCreator,
-	repo messageStore,
+	repo handlerMessageStore,
 	eventBus EventBus,
 	detachedResumer DetachedClarificationResumer,
 	log *logger.Logger,
@@ -742,22 +744,6 @@ func (h *Handlers) publishCancelledEvent(c *gin.Context, pendingID string, req *
 			zap.String("session_id", req.SessionID),
 			zap.Error(err))
 	}
-}
-
-// lookupSessionForPendingCtx returns the session ID for a pending clarification.
-// Falls back to finding it from the database message.
-func (h *Handlers) lookupSessionForPendingCtx(ctx context.Context, pendingID string) string {
-	if req, ok := h.store.GetRequest(pendingID); ok {
-		return req.SessionID
-	}
-	if h.repo == nil {
-		return ""
-	}
-	msg, err := h.repo.FindMessageByPendingID(ctx, pendingID)
-	if err != nil {
-		return ""
-	}
-	return msg.TaskSessionID
 }
 
 func (h *Handlers) publishStaleDismissedEvent(ctx context.Context, pendingID string) {

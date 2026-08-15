@@ -17,13 +17,13 @@ import (
 // and marks the database messages with agent_disconnected metadata.
 type Canceller struct {
 	store    *Store
-	repo     messageStore
+	repo     cancellationMessageStore
 	eventBus EventBus
 	logger   *logger.Logger
 }
 
 // NewCanceller creates a Canceller.
-func NewCanceller(store *Store, repo messageStore, eventBus EventBus, log *logger.Logger) *Canceller {
+func NewCanceller(store *Store, repo cancellationMessageStore, eventBus EventBus, log *logger.Logger) *Canceller {
 	return &Canceller{
 		store:    store,
 		repo:     repo,

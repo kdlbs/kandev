@@ -312,6 +312,15 @@ describe("clarification authority fallbacks", () => {
 });
 
 describe("newestDurableTurnId ordering", () => {
+  it("uses creation time before the turn id when start times match", () => {
+    expect(
+      newestDurableTurnId([
+        turn("turn-z", TURN_TIMESTAMP, TURN_TIMESTAMP),
+        turn("turn-a", TURN_TIMESTAMP, "2026-08-14T12:00:00.000000001Z"),
+      ]),
+    ).toBe("turn-a");
+  });
+
   it("selects the newest durable turn with backend tie-break ordering", () => {
     expect(
       newestDurableTurnId([
