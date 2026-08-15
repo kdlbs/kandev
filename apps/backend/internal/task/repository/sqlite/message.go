@@ -473,10 +473,11 @@ func (r *Repository) FindActiveClarificationMessagesBySessionID(ctx context.Cont
 	drv := r.ro.DriverName()
 	query := fmt.Sprintf(`
 		WITH current_turn AS (
-			SELECT id
-			FROM task_session_turns
-			WHERE task_session_id = ?
-			ORDER BY started_at DESC, created_at DESC, id DESC
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = ?
+			  AND %s
+			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
 			LIMIT 1
 		)
 		SELECT m.id, m.task_session_id, m.task_id, m.turn_id, m.author_type, m.author_id,
@@ -487,7 +488,9 @@ func (r *Repository) FindActiveClarificationMessagesBySessionID(ctx context.Cont
 		  AND m.type = 'clarification_request'
 		  AND COALESCE(%s, '') IN ('', 'pending')
 		ORDER BY m.created_at ASC, m.id ASC
-	`, dialect.JSONExtract(drv, "m.metadata", "status"))
+	`, turnAuthorityPredicate(drv, "turn_row"), dialect.JSONExtract(drv, "m.metadata", "status"))
+	// First sessionID selects current-turn authority; second scopes messages so
+	// a malformed cross-session turn reference cannot leak another session's row.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID, sessionID)
 	if err != nil {
 		return nil, err
@@ -554,8 +557,9 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 				         PARTITION BY task_session_id
 				         ORDER BY started_at DESC, created_at DESC, id DESC
 				       ) AS rn
-				FROM task_session_turns
-				WHERE task_session_id IN (%s)
+				FROM task_session_turns turn_row
+				WHERE turn_row.task_session_id IN (%s)
+				  AND %s
 			) ranked
 			WHERE rn = 1
 		),
@@ -587,7 +591,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 		SELECT task_session_id, 'permission' AS action
 		FROM latest_permissions
 		WHERE rn = 1 AND status IN ('', 'pending')
-	`, placeholderList, statusExpr, statusExpr, permissionOrderExpr)
+	`, placeholderList, turnAuthorityPredicate(driverName, "turn_row"), statusExpr, statusExpr, permissionOrderExpr)
 }
 
 func pendingActionMessageOrder(driverName string, qualifier string) string {

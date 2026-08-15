@@ -98,6 +98,8 @@ update task/plan status.
   preserves the same freshness rule for phone selection.
 - Focused races cover a newer summary arriving before the delayed HTTP continuation on both desktop
   and phone; shared session-loader tests cover cached success and failed forced refresh.
+- Rejected forced loads now perform the same click-time summary revision/action revalidation as
+  successful loads. Primary-session and sessionless race regressions passed in the 14-test focused suite.
 - Six shared desktop/mobile selection and removal suites passed 75 tests; web typecheck, zero-warning
   full lint, and the i18n ratchet passed.
 - `cd apps && pnpm install --frozen-lockfile` passed.

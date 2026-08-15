@@ -78,7 +78,12 @@ type AgentExecution struct {
 	// out a generation that was merely admitted (not yet dispatched — its buffers
 	// are still being reset) or already completed.
 	dispatchedPromptGeneration uint64
-	promptLifecycleMu          sync.Mutex
+	// promptTurnID is the durable Kandev turn bound to the currently
+	// dispatched prompt. It is snapshotted onto terminal AgentEvents before
+	// AgentReady is published, so a queued successor cannot overwrite the
+	// completion's attribution while its stream frame is in flight.
+	promptTurnID      string
+	promptLifecycleMu sync.Mutex
 
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
@@ -301,6 +306,24 @@ func (e *AgentExecution) promptGenerationSnapshot() uint64 {
 	e.promptLifecycleMu.Lock()
 	defer e.promptLifecycleMu.Unlock()
 	return e.promptGeneration
+}
+
+func (e *AgentExecution) promptTurnIDSnapshot() string {
+	if e == nil {
+		return ""
+	}
+	e.promptLifecycleMu.Lock()
+	defer e.promptLifecycleMu.Unlock()
+	return e.promptTurnID
+}
+
+func (e *AgentExecution) setPromptTurnID(turnID string) {
+	if e == nil {
+		return
+	}
+	e.promptLifecycleMu.Lock()
+	e.promptTurnID = turnID
+	e.promptLifecycleMu.Unlock()
 }
 
 // GetAgentCtlClient returns the agentctl client for this execution
@@ -656,6 +679,7 @@ type LaunchRequest struct {
 	// backward-compatible behavior by using AgentProfileID.
 	ExecutionProfileID string
 	StartAgent         bool                // Transfer launch activity through initial startup/prompt
+	TurnID             string              // Durable Kandev turn for the initial prompt, when present
 	WorkspacePath      string              // Host path to workspace (original repository path)
 	TaskDescription    string              // Task description to send via ACP prompt
 	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt

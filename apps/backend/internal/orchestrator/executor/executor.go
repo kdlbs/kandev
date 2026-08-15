@@ -293,6 +293,13 @@ type AgentManagerClient interface {
 	WaitForAgentctlReady(ctx context.Context, sessionID string) error
 }
 
+// PromptTurnIDSetter is an optional lifecycle capability. Keeping it out of
+// AgentManagerClient lets test and legacy adapters continue to work while the
+// production lifecycle carries durable turn identity with completion events.
+type PromptTurnIDSetter interface {
+	SetPromptTurnID(ctx context.Context, agentExecutionID, turnID string) error
+}
+
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
 type RemoteRuntimeStatus struct {
 	RuntimeName   agentruntime.Runtime
@@ -336,6 +343,7 @@ type LaunchAgentRequest struct {
 	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
 	TaskTitle         string // Human-readable task title for semantic worktree naming
 	AgentProfileID    string
+	TurnID            string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -477,6 +485,7 @@ type LaunchOptions struct {
 	AgentProfileID       string
 	OfficeAgentProfileID string
 	ExecutorID           string
+	TurnID               string
 	Prompt               string
 	WorkflowStepID       string
 	StartAgent           bool

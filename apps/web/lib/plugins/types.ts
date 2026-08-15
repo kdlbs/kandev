@@ -9,7 +9,12 @@ import type { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint"
 import type { AppState } from "@/lib/state/store";
 import type * as PluginSDK from "@kandev/plugin-sdk";
 import type { PluginUIApi } from "@kandev/plugin-sdk";
-export type { PluginContextApi, PluginHostRepository, PluginUIApi } from "@kandev/plugin-sdk";
+export type {
+  PluginContextApi,
+  PluginHostRepository,
+  PluginNavSection,
+  PluginUIApi,
+} from "@kandev/plugin-sdk";
 export type { PluginIcon } from "@kandev/plugin-sdk";
 
 /** Entry in the boot payload's `plugins` array (backend `ActivePlugin`). */
@@ -32,9 +37,13 @@ export interface NavItem {
   /**
    * Where the item renders: "main" (default) as a top-level sidebar entry,
    * "integrations" inside the sidebar's Integrations section alongside the
-   * first-party integration links.
+   * first-party integration links, "sidebar-footer" as an icon button in the
+   * sidebar footer's icon row and as a labelled row in the phone menu's
+   * Utilities group (subject to the footer's inline budget — an over-budget
+   * item is reached through the footer's overflow menu instead), "settings"
+   * accepted but rendered on no surface.
    */
-  section?: "main" | "settings" | "integrations";
+  section?: PluginSDK.PluginNavSection;
 }
 
 /**

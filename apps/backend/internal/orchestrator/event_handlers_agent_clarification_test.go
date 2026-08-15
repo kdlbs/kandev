@@ -36,11 +36,15 @@ func (s *repoBackedTurnService) StartTurn(ctx context.Context, sessionID string)
 	return turn, nil
 }
 
-func (s *repoBackedTurnService) ReserveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+func (s *repoBackedTurnService) ReserveTurn(
+	ctx context.Context,
+	sessionID string,
+	_ *models.PromptDispatchRecovery,
+) (*models.Turn, error) {
 	return s.StartTurn(ctx, sessionID)
 }
 
-func (s *repoBackedTurnService) PublishReservedTurn(*models.Turn) {}
+func (s *repoBackedTurnService) PublishReservedTurn(context.Context, *models.Turn) error { return nil }
 
 func (s *repoBackedTurnService) RollbackReservedTurn(
 	ctx context.Context,
@@ -53,6 +57,10 @@ func (s *repoBackedTurnService) RollbackReservedTurn(
 		return false, errors.New("test turn repository cannot roll back reserved turns")
 	}
 	return deleter.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+}
+
+func (s *repoBackedTurnService) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
+	return 0, nil
 }
 
 func (s *repoBackedTurnService) CompleteTurn(ctx context.Context, turnID string) error {

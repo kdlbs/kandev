@@ -249,6 +249,7 @@ func TestHttpRespond_AnsweredAfterTimeoutAwaitsResume(t *testing.T) {
 			ID:            "m2",
 			TaskID:        "t1",
 			TaskSessionID: "s1",
+			TurnID:        "turn-clarification",
 			Metadata: map[string]any{
 				"status":             "pending",
 				"agent_disconnected": true,
@@ -277,6 +278,10 @@ func TestHttpRespond_AnsweredAfterTimeoutAwaitsResume(t *testing.T) {
 	request := eventBus.resumeRequests[0]
 	if request.TaskID != "t1" || request.SessionID != "s1" || request.PendingID != "pending-456" {
 		t.Fatalf("resume request identifiers = %+v", request)
+	}
+	if request.ClarificationTurnID != "turn-clarification" ||
+		len(request.ClaimedMessageIDs) != 1 || request.ClaimedMessageIDs[0] != "m2" {
+		t.Fatalf("resume recovery identity = %+v", request)
 	}
 	if request.AnswerText != "User selected: [opt1]" {
 		t.Fatalf("resume answer text = %q", request.AnswerText)

@@ -210,12 +210,15 @@ func (r *Repository) GetTurn(ctx context.Context, id string) (*models.Turn, erro
 
 // GetActiveTurnBySessionID gets the currently active (non-completed) turn for a session
 func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
-		FROM task_session_turns
-		WHERE task_session_id = ? AND completed_at IS NULL
-		ORDER BY started_at DESC LIMIT 1
-	`), sessionID)
+		FROM task_session_turns turn_row
+		WHERE turn_row.task_session_id = ?
+		  AND turn_row.completed_at IS NULL
+		  AND %s
+		ORDER BY turn_row.started_at DESC LIMIT 1
+	`, turnAuthorityPredicate(r.ro.DriverName(), "turn_row"))
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID)
 	return scanTurnRow(row)
 }
 
@@ -271,10 +274,13 @@ func (r *Repository) AbandonTurn(ctx context.Context, id string) error {
 func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")
 	defer span.End()
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
-		FROM task_session_turns WHERE task_session_id = ? ORDER BY started_at ASC
-	`), sessionID)
+		FROM task_session_turns turn_row
+		WHERE turn_row.task_session_id = ? AND %s
+		ORDER BY turn_row.started_at ASC
+	`, turnAuthorityPredicate(r.ro.DriverName(), "turn_row"))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1662,13 +1668,37 @@ func (r *Repository) GetLastAgentMessage(ctx context.Context, sessionID string) 
 // stay in sync without re-summing office_cost_events. The model + DTO
 // don't surface these columns yet (DB-only per the office-costs
 // wedge); the cost explorer follow-up will expose them.
+//
+// Delegates to IncrementTaskSessionUsageTx using r.db as the executor; a
+// caller that needs this atomic with another write (e.g. the office cost
+// subscriber's ledger insert) should call the Tx variant directly with a
+// shared transaction instead.
 func (r *Repository) IncrementTaskSessionUsage(
 	ctx context.Context, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
+) error {
+	return r.IncrementTaskSessionUsageTx(ctx, nil, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents)
+}
+
+// IncrementTaskSessionUsageTx implements shared.SessionUsageWriterTx: same
+// write as IncrementTaskSessionUsage, but executed against tx when non-nil
+// (falling back to r.db, the shared writer connection, when tx is nil) so a
+// caller can make this atomic with another write in the same transaction.
+func (r *Repository) IncrementTaskSessionUsageTx(
+	ctx context.Context, tx *sqlx.Tx, sessionID string, tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
 ) error {
 	if sessionID == "" {
 		return nil
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	var exec interface {
+		ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+		Rebind(query string) string
+	}
+	if tx != nil {
+		exec = tx
+	} else {
+		exec = r.db
+	}
+	_, err := exec.ExecContext(ctx, exec.Rebind(`
 		UPDATE task_sessions
 		   SET tokens_in        = COALESCE(tokens_in, 0)        + ?,
 		       tokens_cached_in = COALESCE(tokens_cached_in, 0) + ?,

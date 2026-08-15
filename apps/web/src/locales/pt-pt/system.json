@@ -226,7 +226,7 @@
   "restartUnsupportedHelp": "O reinício automático não está disponível em pré-visualizações de implementação, execuções em terminal não geridas ou modos de arranque sem supervisor de reinício.",
   "restoreAction": "Restaurar",
   "restoreBody": "Restaurar <1>{{name}}</1> por cima da base de dados atual. Depois de a cópia preparada estar no lugar, ser-lhe-á pedido que feche e reabra o Kandev para que os novos dados sejam carregados de raiz - o backend não reinicia automaticamente.",
-  "restoreCompleteBody": "<0>{{name}}</0> foi escrito por cima da base de dados atual. Feche e reabra o Kandev para carregar os dados restaurados - o backend em execução mantém ligações à versão anterior e continuará a devolver dados desatualizados até reiniciar.",
+  "restoreCompleteBody": "<0>{{name}}</0> foi escrito por cima da base de dados atual. Reinicie o Kandev antes de continuar. O conjunto de ligações à base de dados está fechado até ao reinício. Se o reinício automático não estiver disponível, feche e reabra o Kandev manualmente.",
   "restoreCompleteTitle": "Restauro concluído",
   "restoreFailed": "Não foi possível restaurar",
   "restorePlaceholder": "Escreva {{token}} para confirmar",

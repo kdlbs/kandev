@@ -571,6 +571,9 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 	if req.SessionID != "" {
 		reqWithWorktree.Metadata["session_id"] = req.SessionID
 	}
+	if req.TurnID != "" {
+		reqWithWorktree.Metadata["prompt_turn_id"] = req.TurnID
+	}
 
 	if err := mergeRouteOverrideEnv(&reqWithWorktree); err != nil {
 		return LaunchRequest{}, "", err
@@ -725,6 +728,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
+		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
 		Protocol:                       string(agentConfig.Runtime().Protocol),
@@ -1593,6 +1597,18 @@ func (m *Manager) SetExecutionDescription(_ context.Context, executionID string,
 		return fmt.Errorf("execution %q not found", executionID)
 	}
 	execution.setMetadataValue("task_description", description)
+	return nil
+}
+
+// SetPromptTurnID binds the next prompt completion to a durable Kandev turn.
+// The value is kept on the in-memory execution so it can be snapshotted onto
+// the terminal stream event before AgentReady can admit a successor prompt.
+func (m *Manager) SetPromptTurnID(_ context.Context, executionID, turnID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+	execution.setPromptTurnID(turnID)
 	return nil
 }
 

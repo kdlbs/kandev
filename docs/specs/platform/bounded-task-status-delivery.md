@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-08-01
-updated: 2026-08-14
+updated: 2026-08-15
 owner: kandev
 ---
 
@@ -94,6 +94,9 @@ remain during migration, but switchers use the summary when present.
 - `active_error` is independent of the primary state icon. It represents the
   newest relevant recoverable agent error and clears after an authoritative
   dismissal or a newer agent response according to the existing error rules.
+- Successful session deletion is an authoritative removal of that session's
+  error. The summary removes the error without a backend restart or another
+  session event.
 - Git totals aggregate the latest observation for every repository in the
   task. A multi-repository update must not expose a partial replacement that
   forgets unchanged repositories.
@@ -140,6 +143,9 @@ remain during migration, but switchers use the summary when present.
   batch summary reads and may batch repairs; they do not perform an N+1 query.
 - Existing rows are repaired after startup recovery changes authoritative session state. Missing-row
   hydration is not the only recovery path for a stale summary.
+- Session deletion repair serializes the authoritative row removal, retained-error
+  selection, and inactive/active error publication by task. Concurrent deletions
+  therefore cannot restore an error for a session that has already been removed.
 - Live Git observations remain coalesced before persistence/publication.
   Running executions maintain the slow monitoring baseline independently of
   browser subscribers; active focus may request fast monitoring. Settled tasks
@@ -222,6 +228,10 @@ intermediate replacement.
 - If `status_summary` is temporarily absent during rollout, task rows use the
   existing coarse task fields and omit unavailable decorations; they do not
   subscribe to inactive sessions.
+- If recoverable-error handling cannot read a session because of a transient
+  database or metadata error, it logs the read failure and keeps the existing
+  recovery, state-reconciliation, and cleanup behavior. Only an authoritative
+  missing-session result suppresses those side effects.
 
 ## Scenarios
 
@@ -238,6 +248,16 @@ intermediate replacement.
 - **GIVEN** a recoverable error is dismissed or followed by a newer agent
   response, **WHEN** the projector processes that occurrence, **THEN** the
   independent error indicator clears on both task switchers.
+- **GIVEN** a stopped session owns the task's `active_error`, **WHEN** the user
+  deletes that session, **THEN** desktop and mobile task switchers remove its
+  error indicator while the task and replacement sessions remain available.
+- **GIVEN** two sessions have recoverable errors and the stored summary points
+  to the newer error, **WHEN** the projector restarts and the newer session is
+  deleted, **THEN** the retained session's error becomes the task's
+  `active_error` instead of leaving the summary empty.
+- **GIVEN** two sessions in one task have recoverable errors, **WHEN** both
+  sessions are deleted concurrently while retained-error repair is in flight,
+  **THEN** the final task summary contains no error for either deleted session.
 - **GIVEN** a session's agent requests permission and, before that request is
   answered, the same session emits an unrelated tool call/execute/read message
   that reaches its own terminal status, **WHEN** the projector processes that
@@ -303,3 +323,5 @@ intermediate replacement.
   [`../../plans/session-stream-overload-isolation/plan.md`](../../plans/session-stream-overload-isolation/plan.md)
 - Startup-summary repair:
   [`../../plans/backend-runtime-state-ownership/plan.md`](../../plans/backend-runtime-state-ownership/plan.md)
+- Deleted-session error repair:
+  [`../../plans/deleted-session-error-summary/plan.md`](../../plans/deleted-session-error-summary/plan.md)

@@ -120,6 +120,11 @@ type AgentEvent struct {
 	// attributed to a newer prompt on the same execution.
 	PromptGeneration uint64 `json:"prompt_generation,omitempty"`
 
+	// TurnID is the durable Kandev turn identity captured for terminal events.
+	// It travels with the completion frame so consumers do not have to infer
+	// ownership from cross-subject event ordering.
+	TurnID string `json:"turn_id,omitempty"`
+
 	// --- Message fields (for "message_chunk" type) ---
 
 	// Text contains streaming text content from the agent.
@@ -505,7 +510,12 @@ type PromptUsage struct {
 	ThoughtTokens                int64 `json:"thought_tokens,omitempty"`
 	TotalTokens                  int64 `json:"total_tokens"`
 	ProviderReportedCostSubcents int64 `json:"provider_reported_cost_subcents,omitempty"`
-	Estimated                    bool  `json:"estimated,omitempty"`
+	// ProviderReportedCostPresent distinguishes an explicit provider-reported
+	// zero from a missing cost sample. Providers can legitimately report zero
+	// for BYOK/free turns, and that value must still suppress list-price
+	// estimation downstream.
+	ProviderReportedCostPresent bool `json:"provider_reported_cost_present,omitempty"`
+	Estimated                   bool `json:"estimated,omitempty"`
 }
 
 // ToolCallContentItem represents a content item produced by a tool call.

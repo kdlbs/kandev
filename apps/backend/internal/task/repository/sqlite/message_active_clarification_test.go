@@ -106,6 +106,48 @@ func TestFindActiveClarificationMessagesBySessionIDUsesNewestDurableTurn(t *test
 	}
 }
 
+func TestPendingClarificationIgnoresEmptyUnpublishedSuccessor(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 18, 0, 0, 0, time.UTC)
+	const taskID = "task-unpublished"
+	const sessionID = "session-unpublished"
+	seedPendingActionSession(t, repo, taskID, sessionID)
+	createPendingActionTurn(t, repo, taskID, sessionID, "turn-clarification", base, base)
+	createPendingActionMessage(t, repo, "clarification-current", taskID, sessionID, "turn-clarification", models.MessageTypeClarificationRequest, "pending", base)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-unpublished", TaskSessionID: sessionID, TaskID: taskID,
+		StartedAt: base.Add(time.Minute), CreatedAt: base.Add(time.Minute),
+		Metadata: map[string]interface{}{models.TurnMetaKeyPromptDispatchPending: true},
+	}); err != nil {
+		t.Fatalf("CreateTurn(unpublished): %v", err)
+	}
+
+	active, err := repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("FindActiveClarificationMessagesBySessionID: %v", err)
+	}
+	if ids := messageIDs(active); len(ids) != 1 || ids[0] != "clarification-current" {
+		t.Fatalf("active clarification IDs = %v, want predecessor bundle", ids)
+	}
+	actions, err := repo.GetPendingActionsBySessionIDs(ctx, []string{sessionID})
+	if err != nil {
+		t.Fatalf("GetPendingActionsBySessionIDs: %v", err)
+	}
+	if actions[sessionID] != models.TaskPendingActionClarification {
+		t.Fatalf("pending action = %q, want clarification", actions[sessionID])
+	}
+
+	createPendingActionMessage(t, repo, "successor-output", taskID, sessionID, "turn-unpublished", models.MessageTypeMessage, "<missing>", base.Add(2*time.Minute))
+	actions, err = repo.GetPendingActionsBySessionIDs(ctx, []string{sessionID})
+	if err != nil {
+		t.Fatalf("GetPendingActionsBySessionIDs after output: %v", err)
+	}
+	if _, ok := actions[sessionID]; ok {
+		t.Fatalf("message-backed successor did not supersede clarification: %#v", actions)
+	}
+}
+
 func TestFindActiveClarificationMessagesSupportsMissingStatusInCurrentTurn(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

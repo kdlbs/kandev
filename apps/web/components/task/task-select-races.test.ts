@@ -283,6 +283,55 @@ describe("selectTaskWithLayout pending summary races", () => {
   });
 });
 
+describe("selectTaskWithLayout rejected pending-load races", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  for (const primarySessionId of [PENDING_SESSION_ID, null]) {
+    it(`discards a rejected ${primarySessionId ? "primary" : "sessionless"} load after the summary changes`, async () => {
+      const initialTask = {
+        id: PENDING_TASK_ID,
+        primarySessionId,
+        statusSummary: {
+          revision: 1,
+          updated_at: "2026-08-15T15:00:00Z",
+          pending_action: "clarification" as const,
+        },
+      };
+      const { state, store, setActiveTask } = makeSelectionHarness({
+        activeTaskId: ORIGINAL_TASK_ID,
+        activeSessionId: ORIGINAL_SESSION_ID,
+        taskRows: [initialTask],
+      });
+      const switchToSession = vi.fn();
+      const { loadTaskSessionsForTask, rejectLoad } = makeDeferredSessionLoader();
+
+      selectTaskWithLayout({
+        taskId: PENDING_TASK_ID,
+        task: initialTask,
+        store,
+        switchToSession,
+        loadTaskSessionsForTask,
+        setActiveTask,
+        setPreparingTaskId: vi.fn(),
+      });
+      state.kanban.tasks[0] = {
+        ...initialTask,
+        statusSummary: {
+          revision: 2,
+          updated_at: "2026-08-15T15:00:01Z",
+          pending_action: "permission",
+        },
+      };
+      rejectLoad(new Error("load failed"));
+      await flushTaskSelection();
+
+      expect(switchToSession).not.toHaveBeenCalled();
+      expect(setActiveTask).not.toHaveBeenCalled();
+      expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
+    });
+  }
+});
+
 describe("selectTaskWithLayout external active-task changes", () => {
   beforeEach(() => vi.clearAllMocks());
 

@@ -170,6 +170,11 @@ func (s *Service) ResumeDetachedClarification(
 	}, true, promptTaskOptions{
 		preservePromptContext:    true,
 		reserveTurnUntilDispatch: true,
+		promptDispatchRecovery: &models.PromptDispatchRecovery{
+			PendingID:  request.PendingID,
+			TurnID:     request.ClarificationTurnID,
+			MessageIDs: request.ClaimedMessageIDs,
+		},
 	})
 }
 

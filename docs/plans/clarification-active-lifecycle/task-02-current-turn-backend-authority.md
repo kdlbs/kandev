@@ -100,9 +100,13 @@ blockers/risks, and update task/plan status.
   in-memory terminal snapshot.
 - Detached HTTP resume now preserves a 30-second context through the executor and uses dispatch-only
   acknowledgement, so request completion cannot wait for the full agent turn.
-- Detached resume now defers successor-turn persistence until agentctl acknowledges dispatch. A real
-  orchestrator/SQLite regression proves failed dispatch leaves the claimed clarification bundle current
-  and restorable instead of recording a superseding empty turn.
+- Detached resume now reserves its successor durably before agentctl acknowledgement so early provider
+  frames retain a valid turn foreign key, while an unpublished marker keeps the empty row from becoming
+  current-turn authority. The reservation stores source turn, pending ID, and exact claimed message IDs.
+- Startup reconciliation runs before executor discovery, deletes empty unpublished reservations, and
+  restores only their claimed clarification rows. A message-backed reservation is preserved and its
+  marker cleared as ambiguous acceptance. SQLite/startup regressions passed; PostgreSQL parity remains
+  environment-gated.
 - Session cancellation now drains all in-memory waiters but mutates and counts only bundles returned by
   durable current-turn authority, so a stale timeout cannot cancel a newer active turn.
 - Final review remediation makes that durable detach an atomic `UPDATE ... RETURNING` claim over the

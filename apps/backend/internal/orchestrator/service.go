@@ -126,9 +126,14 @@ type SubagentContextRecorder interface {
 // TurnService is an interface for managing session turns
 type TurnService interface {
 	StartTurn(ctx context.Context, sessionID string) (*models.Turn, error)
-	ReserveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
-	PublishReservedTurn(turn *models.Turn)
+	ReserveTurn(
+		ctx context.Context,
+		sessionID string,
+		recovery *models.PromptDispatchRecovery,
+	) (*models.Turn, error)
+	PublishReservedTurn(ctx context.Context, turn *models.Turn) error
 	RollbackReservedTurn(ctx context.Context, sessionID, turnID string) (bool, error)
+	ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error)
 	CompleteTurn(ctx context.Context, turnID string) error
 	GetTurn(ctx context.Context, turnID string) (*models.Turn, error)
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
@@ -639,12 +644,42 @@ type Service struct {
 	// clobber the task back to REVIEW while work is active.
 	taskRuntimeStateMu sync.Mutex
 
+	// taskSessionErrorLocks serialize session deletion with retained-error
+	// selection and publication for each task. Entries are reference-counted
+	// and reclaimed after the last concurrent operation releases them.
+	taskSessionErrorLocksMu sync.Mutex
+	taskSessionErrorLocks   map[string]*taskSessionErrorGuard
+
 	// completedExecutions records execution IDs that have reached a terminal
 	// agent lifecycle event. Buffered stream/tool events for these executions
 	// must not wake their session back to RUNNING after the terminal path makes
 	// it promptable again. Entries expire after a short grace window so the
 	// guard does not grow without bound in long-running backend processes.
 	completedExecutions sync.Map
+
+	// readyTurnMarks records, per (session, execution, prompt generation),
+	// the turn ID handleAgentReady confirmed and is about to close via
+	// completeTurnForSession. handleCompleteStreamEvent reads this snapshot
+	// (on both the terminal and non-terminal path) instead of trusting live
+	// active-turn state or the terminal-execution marker: agent.ready is
+	// published before the complete-stream frame for the same completion
+	// (see markReadyTurn's doc comment for the ordering guarantee and its
+	// NATS-deployment caveat), so both of those alternatives can already
+	// find the turn gone or stale by the time this runs. Entries are
+	// consumed on read and expire after the same grace window as
+	// completedExecutions so an unread entry cannot grow the map unbounded.
+	// This map is per-process — see markReadyTurn's doc comment for why a
+	// horizontally-scaled NATS deployment can miss cross-instance.
+	readyTurnMarks sync.Map
+
+	// readyTurnMarksZeroGen is readyTurnMarks' sibling for promptGeneration==0
+	// completions (transports with no generation tracking at all), which share
+	// one key per (session, execution) with no generation to disambiguate
+	// them — so entries queue FIFO here instead of occupying a single slot in
+	// readyTurnMarks. Guarded by readyTurnMarksZeroGenMu since sync.Map has no
+	// atomic append. See markReadyTurn's doc comment.
+	readyTurnMarksZeroGenMu sync.Mutex
+	readyTurnMarksZeroGen   map[string][]readyTurnMark
 
 	// executionTeardownClaims arbitrates detached runtime teardown by
 	// "<session_id>::<execution_id>". Coordinator stop requests graceful
@@ -1429,6 +1464,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 	ctx context.Context,
 	sessionID string,
 	reserve bool,
+	recovery ...*models.PromptDispatchRecovery,
 ) (string, bool, *models.Turn, error) {
 	if s.turnService == nil {
 		return "", false, nil, nil
@@ -1462,7 +1498,11 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 		err  error
 	)
 	if reserve {
-		turn, err = s.turnService.ReserveTurn(ctx, sessionID)
+		var recoveryDetails *models.PromptDispatchRecovery
+		if len(recovery) > 0 {
+			recoveryDetails = recovery[0]
+		}
+		turn, err = s.turnService.ReserveTurn(ctx, sessionID, recoveryDetails)
 	} else {
 		turn, err = s.turnService.StartTurn(ctx, sessionID)
 	}
@@ -1942,6 +1982,14 @@ func (s *Service) Stop() error {
 //
 // Called by: Start() method during orchestrator initialization.
 func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
+	if s.turnService != nil {
+		reconciled, reconcileErr := s.turnService.ReconcileUnpublishedPromptTurns(ctx)
+		if reconcileErr != nil {
+			s.logger.Warn("failed to reconcile unpublished prompt turns on startup", zap.Error(reconcileErr))
+		} else if reconciled > 0 {
+			s.logger.Info("reconciled unpublished prompt turns on startup", zap.Int("count", reconciled))
+		}
+	}
 	runningExecutors, err := s.repo.ListExecutorsRunning(ctx)
 	if err != nil {
 		s.logger.Warn("failed to list executors running on startup", zap.Error(err))

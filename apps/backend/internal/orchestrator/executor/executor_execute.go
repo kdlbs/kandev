@@ -975,7 +975,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// overwrite the stale row.
 	hasRunning, _ := e.repo.HasExecutorRunningRow(ctx, sessionID)
 	if hasRunning {
-		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env)
+		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env, opts.TurnID)
 		if !errors.Is(err, ErrStaleExecution) && !errors.Is(err, ErrAgentCommandMissing) {
 			return result, err
 		}
@@ -1030,6 +1030,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		session.ExecutorID = execCfg.ExecutorID
 	}
 	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
+	req.TurnID = opts.TurnID
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
 		req.OfficeAgentProfileID = session.AgentProfileID
 	}
@@ -1587,7 +1588,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 // re-launch path. Pre-refactor this also consulted session.AgentExecutionID and
 // reconciled DB drift; that's now structurally impossible because executors_running
 // is owned by the lifecycle manager and writes are atomic with executionStore.Add.
-func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string) (*TaskExecution, error) {
+func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string, turnIDs ...string) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
 	if err != nil || executionID == "" {
 		// No execution exists in memory (e.g. backend restarted since workspace was prepared).
@@ -1624,32 +1625,9 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 			// Non-fatal: agent may start without description
 		}
 	}
-	credentialReq := &LaunchAgentRequest{WorkspaceID: task.WorkspaceID, Env: cloneStringMap(env)}
-	e.injectGitLabWorkspaceCredentials(ctx, credentialReq)
-	if len(credentialReq.Env) > 0 {
-		if err := e.agentManager.SetExecutionEnv(ctx, executionID, credentialReq.Env); err != nil {
-			e.logger.Warn("failed to set execution env for existing workspace",
-				zap.String("session_id", session.ID),
-				zap.String("agent_execution_id", executionID),
-				zap.Error(err))
-		}
-	}
-
-	// If config MCP mode is needed, reconfigure the MCP server before starting the agent.
-	// The workspace may have been prepared before config_mode was set on the session.
-	effectiveMcpMode := mcpMode
-	if effectiveMcpMode == "" && isConfigModeSession(session) {
-		effectiveMcpMode = McpModeConfig
-	}
-	if effectiveMcpMode != "" {
-		if err := e.agentManager.SetMcpMode(ctx, executionID, effectiveMcpMode); err != nil {
-			e.logger.Error("failed to set MCP mode for existing workspace",
-				zap.String("session_id", session.ID),
-				zap.String("agent_execution_id", executionID),
-				zap.String("mcp_mode", effectiveMcpMode),
-				zap.Error(err))
-			return nil, fmt.Errorf("set MCP mode %q: %w", effectiveMcpMode, err)
-		}
+	e.bindPromptTurnID(ctx, session.ID, executionID, turnIDs)
+	if err := e.configureExistingWorkspace(ctx, task, session, executionID, mcpMode, env); err != nil {
+		return nil, err
 	}
 
 	// Lazy workspace restoration creates an execution without an agent command.
@@ -1693,6 +1671,62 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		zap.String("agent_execution_id", executionID))
 
 	return execution, nil
+}
+
+func (e *Executor) configureExistingWorkspace(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	executionID, mcpMode string,
+	env map[string]string,
+) error {
+	credentialReq := &LaunchAgentRequest{WorkspaceID: task.WorkspaceID, Env: cloneStringMap(env)}
+	e.injectGitLabWorkspaceCredentials(ctx, credentialReq)
+	if len(credentialReq.Env) > 0 {
+		if err := e.agentManager.SetExecutionEnv(ctx, executionID, credentialReq.Env); err != nil {
+			e.logger.Warn("failed to set execution env for existing workspace",
+				zap.String("session_id", session.ID),
+				zap.String("agent_execution_id", executionID),
+				zap.Error(err))
+		}
+	}
+
+	// If config MCP mode is needed, reconfigure the MCP server before starting the agent.
+	// The workspace may have been prepared before config_mode was set on the session.
+	effectiveMcpMode := mcpMode
+	if effectiveMcpMode == "" && isConfigModeSession(session) {
+		effectiveMcpMode = McpModeConfig
+	}
+	if effectiveMcpMode == "" {
+		return nil
+	}
+	if err := e.agentManager.SetMcpMode(ctx, executionID, effectiveMcpMode); err != nil {
+		e.logger.Error("failed to set MCP mode for existing workspace",
+			zap.String("session_id", session.ID),
+			zap.String("agent_execution_id", executionID),
+			zap.String("mcp_mode", effectiveMcpMode),
+			zap.Error(err))
+		return fmt.Errorf("set MCP mode %q: %w", effectiveMcpMode, err)
+	}
+	return nil
+}
+
+func (e *Executor) bindPromptTurnID(ctx context.Context, sessionID, executionID string, turnIDs []string) {
+	if len(turnIDs) == 0 || turnIDs[0] == "" {
+		return
+	}
+	setter, ok := e.agentManager.(PromptTurnIDSetter)
+	if !ok {
+		return
+	}
+	turnID := turnIDs[0]
+	if err := setter.SetPromptTurnID(ctx, executionID, turnID); err != nil {
+		e.logger.Warn("failed to bind prompt turn for existing workspace",
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", executionID),
+			zap.String("turn_id", turnID),
+			zap.Error(err))
+	}
 }
 
 // captureBaseCommit retrieves the merge-base commit from agentctl and stores it

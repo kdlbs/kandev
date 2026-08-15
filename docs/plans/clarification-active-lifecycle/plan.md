@@ -227,8 +227,14 @@ All task gates passed:
   TypeScript, zero-warning full lint, i18n check, and i18n ratchet.
 - Dispatch-acknowledgement remediation: repository, clarification, and orchestrator packages passed;
   focused detached-resume tests and changed backend lint reported zero issues.
+- Restart-window remediation: unpublished successor reservations persist exact clarification recovery
+  identity, startup restores empty reservations before executor reconciliation, and message-backed
+  reservations become accepted authority. Focused SQLite/startup tests passed; PostgreSQL parity is
+  environment-gated.
 - Session-selection review remediation: six shared desktop/mobile selection and removal suites passed
   75 tests; typecheck, zero-warning full lint, and the i18n ratchet passed.
+- Rejected-load review remediation: both primary-session and sessionless pending-selection fallbacks
+  revalidate click-time summary ownership; the focused race suite passed 14 tests.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

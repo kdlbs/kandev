@@ -316,7 +316,7 @@ func run(cfg *config.Config, log *logger.Logger, cleanups *[]func() error, runCl
 	addCleanup(cleanup)
 	eventBus := eventBusProvider.Bus
 
-	return startServices(ctx, cfg, log, addCleanup, eventBus, runCleanups)
+	return startServices(ctx, cfg, log, addCleanup, eventBus, runCleanups, cancel)
 }
 
 // applyStartupRuntimeFlags resolves persisted runtime-flag overrides and
@@ -344,6 +344,7 @@ func startServices( //nolint:cyclop
 	addCleanup func(func() error),
 	eventBus bus.EventBus,
 	runCleanups func(),
+	cancelContext context.CancelFunc,
 ) bool {
 	// ============================================
 	// TASK SERVICE
@@ -437,7 +438,7 @@ func startServices( //nolint:cyclop
 	}
 
 	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, agentRuntimeAvailability,
-		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, runCleanups)
+		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, runCleanups, cancelContext)
 }
 
 // startAgentInfrastructure initializes the agent lifecycle manager, worktree, orchestrator,
@@ -458,7 +459,22 @@ func startAgentInfrastructure(
 	agentRegistry *registry.Registry,
 	agentctlBinaryPath string,
 	runCleanups func(),
+	cancelContext context.CancelFunc,
 ) bool {
+	restoreCleanups := make([]func() error, 0)
+	addRuntimeCleanup := func(fn func() error) {
+		if fn == nil {
+			return
+		}
+		var stopOnce sync.Once
+		var stopErr error
+		stop := func() error {
+			stopOnce.Do(func() { stopErr = fn() })
+			return stopErr
+		}
+		addCleanup(stop)
+		restoreCleanups = append(restoreCleanups, stop)
+	}
 	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	// ============================================
 	// AGENT MANAGER
@@ -490,7 +506,7 @@ func startAgentInfrastructure(
 		return false
 	}
 	services.WorktreeMgr = worktreeMgr
-	addCleanup(worktreeCleanup)
+	addRuntimeCleanup(worktreeCleanup)
 	log.Info("Worktree Manager initialized",
 		zap.Bool("enabled", cfg.Worktree.Enabled))
 
@@ -630,7 +646,7 @@ func startAgentInfrastructure(
 		services.GitLab.SetTaskAuthorizer(services.Task)
 		glPoller := gitlabpkg.NewPoller(services.GitLab, eventBus, log)
 		glPoller.Start(ctx)
-		addCleanup(func() error { glPoller.Stop(); return nil })
+		addRuntimeCleanup(func() error { glPoller.Stop(); return nil })
 		log.Info("GitLab poller started")
 	}
 	// Bind only the path-returning orchestrator seam after its clone pipeline
@@ -646,11 +662,11 @@ func startAgentInfrastructure(
 		if lifecycleErr != nil {
 			log.Warn("Azure DevOps lifecycle cleanup unavailable", zap.Error(lifecycleErr))
 		} else {
-			addCleanup(azureLifecycle.Close)
+			addRuntimeCleanup(azureLifecycle.Close)
 		}
 		azurePoller := azuredevopspkg.NewPoller(services.AzureDevOps, log)
 		azurePoller.Start(ctx)
-		addCleanup(func() error { azurePoller.Stop(); return nil })
+		addRuntimeCleanup(func() error { azurePoller.Stop(); return nil })
 		log.Info("Azure DevOps auth poller started")
 	}
 
@@ -662,7 +678,7 @@ func startAgentInfrastructure(
 		orchestratorSvc.SetJiraService(&jiraServiceAdapter{svc: services.Jira})
 		jiraPoller := jirapkg.NewPoller(services.Jira, log)
 		jiraPoller.Start(ctx)
-		addCleanup(func() error { jiraPoller.Stop(); return nil })
+		addRuntimeCleanup(func() error { jiraPoller.Stop(); return nil })
 	}
 
 	// Start Linear poller. Mirrors the Jira shape: auth-health probe plus an
@@ -672,7 +688,7 @@ func startAgentInfrastructure(
 		orchestratorSvc.SetLinearService(&linearServiceAdapter{svc: services.Linear})
 		linearPoller := linearpkg.NewPoller(services.Linear, log)
 		linearPoller.Start(ctx)
-		addCleanup(func() error { linearPoller.Stop(); return nil })
+		addRuntimeCleanup(func() error { linearPoller.Stop(); return nil })
 	}
 
 	// Start Sentry poller: an auth-health probe plus an issue-watch loop that
@@ -682,7 +698,7 @@ func startAgentInfrastructure(
 		orchestratorSvc.SetSentryService(&sentryServiceAdapter{svc: services.Sentry})
 		sentryPoller := sentrypkg.NewPoller(services.Sentry, log)
 		sentryPoller.Start(ctx)
-		addCleanup(func() error { sentryPoller.Stop(); return nil })
+		addRuntimeCleanup(func() error { sentryPoller.Stop(); return nil })
 	}
 
 	// Start workflow-sync poller: periodically pulls workflow definition
@@ -691,18 +707,18 @@ func startAgentInfrastructure(
 	if services.WorkflowSync != nil {
 		workflowSyncPoller := workflowsyncpkg.NewPoller(services.WorkflowSync, log)
 		workflowSyncPoller.Start(ctx)
-		addCleanup(func() error { workflowSyncPoller.Stop(); return nil })
+		addRuntimeCleanup(func() error { workflowSyncPoller.Stop(); return nil })
 		log.Info("Workflow sync poller started")
 	}
 
 	// Start the plugin system's event delivery and health monitor
 	// background loops.
 	if services.Plugins != nil {
-		startPluginsSubsystems(ctx, services.Plugins, lifecycleMgr, eventBus, log, addCleanup)
+		startPluginsSubsystems(ctx, services.Plugins, lifecycleMgr, eventBus, log, addRuntimeCleanup)
 	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
-		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addCleanup, runCleanups)
+		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addRuntimeCleanup, runCleanups, cancelContext, restoreCleanups)
 }
 
 // startOrchestratorAndAutomationConsumers establishes the event-consumer
@@ -743,6 +759,8 @@ func startGatewayAndServe(
 	agentctlBinaryPath string,
 	addCleanup func(func() error),
 	runCleanups func(),
+	cancelContext context.CancelFunc,
+	restoreCleanups []func() error,
 ) bool {
 	// ============================================
 	// WEBSOCKET GATEWAY
@@ -885,6 +903,24 @@ func startGatewayAndServe(
 		ctx, repos, services, eventBus, orchestratorSvc, runProcessorSvc, log,
 	)
 	addCleanup(scheduling.Stop)
+	var restoreQuiesceOnce sync.Once
+	var restoreQuiesceErr error
+	restoreQuiesce := func() error {
+		restoreQuiesceOnce.Do(func() {
+			workers := make([]func() error, 0, len(restoreCleanups))
+			for i := len(restoreCleanups) - 1; i >= 0; i-- {
+				workers = append(workers, restoreCleanups[i])
+			}
+			restoreQuiesceErr = quiesceForRestore(
+				cancelContext,
+				scheduling.Stop,
+				orchestratorSvc.Stop,
+				func() error { return stopLifecycleManager(lifecycleMgr, log) },
+				workers,
+			)
+		})
+		return restoreQuiesceErr
+	}
 
 	// Wire subscription usage provider into the office agents service so the
 	// /agents/:id/utilization endpoint can fetch live utilization data.
@@ -910,6 +946,7 @@ func startGatewayAndServe(
 		BuildTime: BuildTime,
 	}, systemsvc.Wiring{
 		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
+		RestoreQuiesce:       restoreQuiesce,
 		MessageQueue:         orchestratorSvc.GetMessageQueue(),
 		TaskSessions:         repos.Task,
 	})

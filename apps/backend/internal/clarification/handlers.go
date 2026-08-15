@@ -85,13 +85,15 @@ type EventBus interface {
 // DetachedClarificationResume contains the durable context required to resume
 // a session after its original clarification waiter has gone away.
 type DetachedClarificationResume struct {
-	TaskID       string
-	SessionID    string
-	PendingID    string
-	Question     string
-	AnswerText   string
-	Rejected     bool
-	RejectReason string
+	TaskID              string
+	SessionID           string
+	PendingID           string
+	ClarificationTurnID string
+	ClaimedMessageIDs   []string
+	Question            string
+	AnswerText          string
+	Rejected            bool
+	RejectReason        string
 }
 
 // DetachedClarificationResumer acknowledges whether the orchestrator accepted
@@ -461,7 +463,9 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 		zap.String("pending_id", pendingID),
 		zap.String("error", deliveryErr.Error()))
 
-	if err := h.resumeDetachedClarification(ctx, pendingID, body.Answers, body.Rejected, body.RejectReason); err != nil {
+	if err := h.resumeDetachedClarification(
+		ctx, pendingID, body.Answers, body.Rejected, body.RejectReason, claim.messages,
+	); err != nil {
 		restored := h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
 		h.logger.Error("failed to resume detached clarification",
 			zap.String("pending_id", pendingID),
@@ -620,7 +624,14 @@ func stringFromMetadata(meta map[string]any, key string) string {
 
 // resumeDetachedClarification synchronously asks the orchestrator to accept a new
 // turn. Used when the original clarification waiter has gone away.
-func (h *Handlers) resumeDetachedClarification(ctx context.Context, pendingID string, answers []Answer, rejected bool, rejectReason string) error {
+func (h *Handlers) resumeDetachedClarification(
+	ctx context.Context,
+	pendingID string,
+	answers []Answer,
+	rejected bool,
+	rejectReason string,
+	claimedMessages []*taskmodels.Message,
+) error {
 	if h.detachedResumer == nil {
 		return errors.New("detached clarification resumer unavailable")
 	}
@@ -638,15 +649,18 @@ func (h *Handlers) resumeDetachedClarification(ctx context.Context, pendingID st
 	}
 
 	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
+	clarificationTurnID, claimedMessageIDs := clarificationClaimRecovery(claimedMessages)
 
 	request := DetachedClarificationResume{
-		SessionID:    clarificationCtx.SessionID,
-		TaskID:       clarificationCtx.TaskID,
-		PendingID:    pendingID,
-		Question:     clarificationCtx.QuestionSummary,
-		AnswerText:   answerText,
-		Rejected:     rejected,
-		RejectReason: rejectReason,
+		SessionID:           clarificationCtx.SessionID,
+		TaskID:              clarificationCtx.TaskID,
+		PendingID:           pendingID,
+		ClarificationTurnID: clarificationTurnID,
+		ClaimedMessageIDs:   claimedMessageIDs,
+		Question:            clarificationCtx.QuestionSummary,
+		AnswerText:          answerText,
+		Rejected:            rejected,
+		RejectReason:        rejectReason,
 	}
 	if err := h.detachedResumer.ResumeDetachedClarification(ctx, request); err != nil {
 		return fmt.Errorf("resume detached clarification: %w", err)
@@ -657,6 +671,21 @@ func (h *Handlers) resumeDetachedClarification(ctx context.Context, pendingID st
 		zap.String("session_id", clarificationCtx.SessionID),
 		zap.String("task_id", clarificationCtx.TaskID))
 	return nil
+}
+
+func clarificationClaimRecovery(messages []*taskmodels.Message) (string, []string) {
+	messageIDs := make([]string, 0, len(messages))
+	turnID := ""
+	for _, message := range messages {
+		if message == nil || message.ID == "" {
+			continue
+		}
+		if turnID == "" {
+			turnID = message.TurnID
+		}
+		messageIDs = append(messageIDs, message.ID)
+	}
+	return turnID, messageIDs
 }
 
 func (h *Handlers) publishCancelledEvent(c *gin.Context, pendingID string, req *Request) {

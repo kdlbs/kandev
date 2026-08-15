@@ -42,9 +42,11 @@ hiding the action the icon represents.
   rejected without resuming the agent.
 - An affirmative response to a detached current-turn bundle returns success only after the
   orchestrator accepts one resume dispatch within a bounded wait. The response waits for prompt
-  acknowledgement, not agent-turn completion. Its successor turn becomes durable only after that
-  acknowledgement, so a rejected dispatch leaves the clarification turn current and restorable. A
-  rejection persists terminal status without resuming the agent.
+  acknowledgement, not agent-turn completion. Before dispatch, the successor is durably reserved but
+  marked unpublished so provider frames can reference it without making it current. Acknowledgement
+  publishes that reservation. Startup deletes an empty unpublished reservation and restores the exact
+  clarification rows claimed for its dispatch; message evidence instead proves ambiguous acceptance
+  and preserves the successor. A rejection persists terminal status without resuming the agent.
 - Every response atomically claims current-turn ownership before it can reach a live waiter or request
   a detached resume. Terminal message updates are published only after delivery succeeds. If detached
   resume acceptance fails, the endpoint returns an error and restores the still-current bundle to
@@ -74,9 +76,12 @@ No schema change.
 - Clarification questions remain `task_session_messages` rows with
   `type = "clarification_request"`.
 - Rows in one bundle share `metadata.pending_id`; terminal status remains in `metadata.status`.
-- `task_session_messages.turn_id` associates a question with its turn. The newest durable
+- `task_session_messages.turn_id` associates a question with its turn. The newest accepted durable
   `task_session_turns` record for the session identifies the current turn; deleting messages does not
   delete that parent turn or move ownership backward.
+- A pre-acknowledgement successor carries `metadata.prompt_dispatch_pending=true` plus the source
+  clarification turn, pending ID, and exact claimed message IDs. An empty marked row is not accepted
+  turn authority. A message referencing it is durable evidence of ambiguous acceptance.
 - `metadata.agent_disconnected=true` records that no in-memory waiter owns an otherwise active bundle.
 - A superseded row may retain `metadata.status = "pending"`. Pending metadata is historical evidence,
   not sufficient proof that the request is operational.
@@ -91,8 +96,8 @@ No new route or response field.
 
 - `GET /api/v1/tasks/:taskId/task-sessions` continues to expose each session's current derived
   `pending_action`; task navigation uses this existing field.
-- `GET /api/v1/task-sessions/:sessionId/turns` continues to expose durable turn history; active chat
-  uses its newest turn identity instead of inferring ownership from surviving messages.
+- `GET /api/v1/task-sessions/:sessionId/turns` continues to expose accepted durable turn history;
+  empty unpublished reservations are recovered at startup and excluded from turn authority.
 - Task list, workflow snapshot, and boot payloads continue to expose task-level `pending_action` in
   the status summary and legacy fallback fields.
 - `POST /api/v1/clarification/:pendingId/respond` uses one state-based contract:
@@ -158,15 +163,20 @@ session they can already access. Session selection does not broaden task visibil
   stranding the user in the task drawer or on an unchanged URL.
 - A newer task-summary revision arrives while pending-owner loading is in flight: discard the delayed
   owner result and let the newer projection drive the next activation.
+- Backend stops after reserving a detached-answer successor but before dispatch acknowledgement:
+  startup restores only the clarification rows claimed for that dispatch and removes the empty
+  reservation. If output already references the reservation, preserve it as ambiguously accepted.
 
 ## Persistence guarantees
 
 - Message history remains durable and is not destructively rewritten merely because a newer turn
   exists.
 - Active clarification state is reconstructable after restart from message status plus the newest
-  durable turn.
+  accepted durable turn.
 - Current-turn ownership is reconstructable from durable turn rows even when a turn has no remaining
   messages.
+- Unpublished detached-answer reservations carry enough recovery identity to restore only their own
+  claimed rows. Startup reconciliation runs even when no executor record remains.
 - Task summaries are caches. Boot and task-list reads correct a stale persisted `pending_action` with
   a monotonic revision while preserving all unrelated summary fields.
 - No one-off mutation or backfill of an existing installation database is required. Deploying the
@@ -205,6 +215,9 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** a detached current-turn answer is not accepted by the orchestrator, **WHEN** the response
   endpoint fails, **THEN** it returns a server error, keeps the question answerable, and a later retry
   delivers exactly one accepted resume request without a failed-dispatch turn superseding the bundle.
+- **GIVEN** the backend stops after terminalizing a detached answer and reserving its successor but
+  before acknowledgement, **WHEN** it starts again, **THEN** it deletes the empty reservation,
+  restores the exact claimed rows to pending, and leaves pre-existing terminal siblings unchanged.
 - **GIVEN** two request identities produce terminal and pending events close together, **WHEN** the
   projector refreshes, **THEN** its result matches current repository state rather than event order.
 

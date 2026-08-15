@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useRouter, usePathname } from "@/lib/routing/client-router";
 import {
   IconBuildings,
+  IconDots,
   IconLayoutKanban,
   IconSettings,
   IconSparkles,
@@ -12,8 +13,15 @@ import {
 } from "@tabler/icons-react";
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
 import type { DestinationIcon } from "@/lib/navigation/types";
+import { MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "@/lib/navigation/plugin-footer-budget";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 import { ReleaseNotesDialog } from "@/components/release-notes/release-notes-dialog";
 import { useAppStore } from "@/components/state-provider";
@@ -184,18 +192,117 @@ function SidebarFooterDialogs({
   );
 }
 
+/**
+ * Re-exported so existing unit-test imports from this module keep working —
+ * the value itself lives in `plugin-footer-budget.ts` (see that module's
+ * doc comment) so Playwright specs, which run outside the React tree, can
+ * import it too without pulling in this file's JSX/React dependencies.
+ */
+export { MAX_INLINE_PLUGIN_FOOTER_ITEMS };
+
+type InsightDestinations = ReturnType<typeof useStaticDestinations>;
+
+/**
+ * Splits the resolved `insights` destinations into the inline run and the
+ * overflow run. First-party entries (today, only `stats`) are never counted
+ * against the budget and always render inline; the budget applies to
+ * `source === "plugin"` entries only, partitioning them in place without
+ * reordering — concatenating `inline` and `overflow` reproduces the original
+ * order.
+ */
+function partitionInsightDestinations(destinations: InsightDestinations): {
+  inline: InsightDestinations;
+  overflow: InsightDestinations;
+} {
+  const inline: InsightDestinations = [];
+  const overflow: InsightDestinations = [];
+  let pluginCount = 0;
+
+  for (const destination of destinations) {
+    if (destination.source !== "plugin") {
+      inline.push(destination);
+      continue;
+    }
+    if (pluginCount < MAX_INLINE_PLUGIN_FOOTER_ITEMS) {
+      inline.push(destination);
+    } else {
+      overflow.push(destination);
+    }
+    pluginCount += 1;
+  }
+
+  return { inline, overflow };
+}
+
+/**
+ * Overflow trigger for plugin `insights` destinations past the inline
+ * budget. Reuses `FooterIconButton`'s icon-button treatment (size, tooltip,
+ * hover) wrapped as a `@kandev/ui/dropdown-menu` trigger. Each menu item
+ * carries the same `data-testid`/accessible-name derivation as the inline
+ * button it would otherwise be — see spec.md#Rendered-identity.
+ */
+function InsightOverflowMenu({
+  destinations,
+  collapsed,
+  router,
+}: {
+  destinations: InsightDestinations;
+  collapsed: boolean;
+  router: ReturnType<typeof useRouter>;
+}) {
+  const { t } = useTranslation();
+  const label = t("sidebar:morePluginItems");
+
+  return (
+    <Tooltip>
+      <DropdownMenu>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 cursor-pointer"
+              aria-label={label}
+              data-testid="sidebar-plugin-overflow-button"
+            >
+              <IconDots className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <DropdownMenuContent>
+          {destinations.map((destination) => (
+            <DropdownMenuItem
+              key={destination.id}
+              className="cursor-pointer"
+              data-testid={`sidebar-${destination.id}-button`}
+              onClick={() => router.push(destination.href)}
+            >
+              <destination.icon className="h-4 w-4 mr-2" />
+              {destination.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <TooltipContent side={collapsed ? "right" : "top"}>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function InsightFooterButtons({
   destinations,
   collapsed,
   router,
 }: {
-  destinations: ReturnType<typeof useStaticDestinations>;
+  destinations: InsightDestinations;
   collapsed: boolean;
   router: ReturnType<typeof useRouter>;
 }) {
+  const { inline, overflow } = partitionInsightDestinations(destinations);
+
   return (
     <>
-      {destinations.map((destination) => (
+      {inline.map((destination) => (
         <FooterIconButton
           key={destination.id}
           icon={destination.icon}
@@ -205,6 +312,9 @@ function InsightFooterButtons({
           testId={`sidebar-${destination.id}-button`}
         />
       ))}
+      {overflow.length > 0 && (
+        <InsightOverflowMenu destinations={overflow} collapsed={collapsed} router={router} />
+      )}
     </>
   );
 }

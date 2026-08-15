@@ -37,7 +37,11 @@ func (s *failingStartTurnService) StartTurn(context.Context, string) (*models.Tu
 	return nil, s.err
 }
 
-func (s *failingStartTurnService) ReserveTurn(context.Context, string) (*models.Turn, error) {
+func (s *failingStartTurnService) ReserveTurn(
+	context.Context,
+	string,
+	*models.PromptDispatchRecovery,
+) (*models.Turn, error) {
 	return nil, s.err
 }
 

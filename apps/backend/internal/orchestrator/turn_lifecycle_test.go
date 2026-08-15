@@ -21,6 +21,19 @@ type repoTurnService struct {
 	repo *sqliterepo.Repository
 }
 
+type failingReservedTurnPublisher struct {
+	TurnService
+	err error
+}
+
+func (s failingReservedTurnPublisher) PublishReservedTurn(context.Context, *models.Turn) error {
+	return s.err
+}
+
+func (failingReservedTurnPublisher) GetActiveTurn(context.Context, string) (*models.Turn, error) {
+	return nil, nil
+}
+
 func (a *repoTurnService) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
 	now := time.Now().UTC()
 	turn := &models.Turn{
@@ -37,17 +50,25 @@ func (a *repoTurnService) StartTurn(ctx context.Context, sessionID string) (*mod
 	return turn, nil
 }
 
-func (a *repoTurnService) ReserveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+func (a *repoTurnService) ReserveTurn(
+	ctx context.Context,
+	sessionID string,
+	_ *models.PromptDispatchRecovery,
+) (*models.Turn, error) {
 	return a.StartTurn(ctx, sessionID)
 }
 
-func (a *repoTurnService) PublishReservedTurn(*models.Turn) {}
+func (a *repoTurnService) PublishReservedTurn(context.Context, *models.Turn) error { return nil }
 
 func (a *repoTurnService) RollbackReservedTurn(
 	ctx context.Context,
 	sessionID, turnID string,
 ) (bool, error) {
 	return a.repo.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+}
+
+func (a *repoTurnService) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error) {
+	return a.repo.ReconcileUnpublishedPromptTurns(ctx)
 }
 
 func (a *repoTurnService) CompleteTurn(ctx context.Context, turnID string) error {
@@ -188,6 +209,26 @@ func TestReservedTurnCannotBeAdoptedBeforePublication(t *testing.T) {
 	cached, ok := svc.activeTurns.Load("session1")
 	if !ok || cached != turnID {
 		t.Fatalf("published turn cache = %v, %v; want %q", cached, ok, turnID)
+	}
+}
+
+func TestAcceptedReservationStaysActiveWhenPublicationWriteFails(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	reserved := &models.Turn{ID: "turn-accepted", TaskSessionID: "session1", TaskID: "task1"}
+	svc.turnService = failingReservedTurnPublisher{
+		TurnService: svc.turnService,
+		err:         errors.New("turn metadata write failed"),
+	}
+	svc.reservedPromptTurns.Store("session1", reserved.ID)
+
+	svc.promptDispatchCallback(context.Background(), "task1", "session1", reserved, nil)()
+
+	active, ok := svc.activeTurns.Load("session1")
+	if !ok || active != reserved.ID {
+		t.Fatalf("accepted reservation cache = %v, %v; want %q", active, ok, reserved.ID)
+	}
+	if pending := svc.reservedPromptTurnID("session1"); pending != "" {
+		t.Fatalf("private reservation cache = %q, want cleared after agentctl acceptance", pending)
 	}
 }
 
@@ -417,6 +458,59 @@ func TestReconcileSessionsOnStartupAbandonsOpenTurns(t *testing.T) {
 	if !got.CompletedAt.Equal(got.StartedAt) {
 		t.Fatalf("expected completed_at == started_at, got started=%v completed=%v",
 			got.StartedAt, *got.CompletedAt)
+	}
+}
+
+func TestReconcileSessionsOnStartupRestoresUnpublishedClarificationDispatch(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	completedAt := startedAt.Add(time.Second)
+
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-clarification", TaskSessionID: "session1", TaskID: "task1",
+		StartedAt: startedAt, CompletedAt: &completedAt,
+	}); err != nil {
+		t.Fatalf("create clarification turn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "message-clarification", TaskSessionID: "session1", TaskID: "task1",
+		TurnID: "turn-clarification", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeClarificationRequest, Content: "Continue?",
+		Metadata: map[string]interface{}{
+			"pending_id": "pending-restart", "question_id": "q1",
+			"status": "answered", "response": map[string]interface{}{"custom_text": "yes"},
+		},
+		CreatedAt: startedAt,
+	}); err != nil {
+		t.Fatalf("create terminal clarification: %v", err)
+	}
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-unpublished", TaskSessionID: "session1", TaskID: "task1",
+		StartedAt: startedAt.Add(time.Minute),
+		Metadata: map[string]interface{}{
+			"prompt_dispatch_pending":                   true,
+			"prompt_dispatch_clarification_pending_id":  "pending-restart",
+			"prompt_dispatch_clarification_turn_id":     "turn-clarification",
+			"prompt_dispatch_clarification_message_ids": []string{"message-clarification"},
+		},
+	}); err != nil {
+		t.Fatalf("create unpublished reservation: %v", err)
+	}
+
+	// No executors_running row exists. Recovery must still run before the
+	// ordinary startup reconciler takes its current early-return path.
+	svc.reconcileSessionsOnStartup(ctx)
+
+	if _, err := repo.GetTurn(ctx, "turn-unpublished"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("unpublished turn error = %v, want deleted reservation", err)
+	}
+	message, err := repo.GetMessage(ctx, "message-clarification")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if message.Metadata["status"] != "pending" || message.Metadata["response"] != nil {
+		t.Fatalf("recovered metadata = %#v, want pending without response", message.Metadata)
 	}
 }
 

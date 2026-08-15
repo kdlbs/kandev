@@ -39,12 +39,15 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    initialization finishes. Slow or failed reloads do not by themselves revoke
    open or saved task panels. On explicit plugin disable/uninstall the host calls
    `destroy?.()`, removes the plugin's registrations, and closes its panels.
-   Each initialization attempt is transactional: failure or timeout unregisters
-   its partial contributions, aborts plugin-owned work, and fences callbacks from
-   the expired generation. The same generation owns host-created subscriptions,
+   Each initialization attempt is transactional for plugin-owned runtime state:
+   failure or timeout aborts plugin-owned work and fences callbacks from the
+   expired generation. The same generation owns host-created subscriptions,
    modal and task-link handles, toasts, and review surfaces; the loader closes or
    unsubscribes them before calling `destroy` exactly once. Requests and callbacks
-   from an expired generation cannot mutate the replacement generation.
+   from an expired generation cannot mutate the replacement generation. Failure or
+   timeout does **not** unregister `registry` contributions (nav items, routes,
+   etc.) already made before the failure — those persist, and only the plugin's
+   lifecycle status becomes failed, until the plugin's *next* load revokes them.
 
 ## Global entry point
 
@@ -560,16 +563,23 @@ own write).
 // React. Unknown/missing names render a puzzle glyph in the sidebar.
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
-// the first-party integration links (GitHub, Jira, ...). Hosts predating a
-// section value simply don't render items targeting it (additive change).
+// the first-party integration links (GitHub, Jira, ...); "sidebar-footer"
+// renders as an icon button in the sidebar footer's icon row and as a
+// labelled row in the phone menu's Utilities group, subject to the footer's
+// inline budget — an over-budget item is reached through the footer's
+// overflow menu instead of an inline button; "settings" is accepted but
+// renders on no surface. Hosts predating a section value, or seeing an
+// unrecognised one, simply degrade to "main"'s placement — nothing is ever
+// silently dropped.
 type PluginIcon = string | React.ComponentType<{ className?: string }>;
+export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
 
 interface NavItem {
   id: string;
   label: string;
   path: string;
   icon?: PluginIcon;
-  section?: "main" | "settings" | "integrations";
+  section?: PluginNavSection;
 }
 
 // Configuration for the kandev-style title bar the host renders above a plugin

@@ -30,19 +30,27 @@ const runtimeModelConfigID = "model"
 // StartTurn creates a new turn for a session and publishes the turn.started event.
 // Returns the created turn.
 func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return s.createTurn(ctx, sessionID, true)
+	return s.createTurn(ctx, sessionID, true, nil)
 }
 
 // ReserveTurn durably creates a turn before an external prompt dispatch, but
 // delays turn.started until the dispatch is acknowledged.
-func (s *Service) ReserveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
-	return s.createTurn(ctx, sessionID, false)
+func (s *Service) ReserveTurn(
+	ctx context.Context,
+	sessionID string,
+	recovery *models.PromptDispatchRecovery,
+) (*models.Turn, error) {
+	if recovery == nil {
+		recovery = &models.PromptDispatchRecovery{}
+	}
+	return s.createTurn(ctx, sessionID, false, recovery)
 }
 
 func (s *Service) createTurn(
 	ctx context.Context,
 	sessionID string,
 	publishStarted bool,
+	recovery *models.PromptDispatchRecovery,
 ) (*models.Turn, error) {
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -51,12 +59,19 @@ func (s *Service) createTurn(
 	unlock := s.lockWorkspaceSources(session.TaskID)
 	defer unlock()
 
+	metadata := turnStartRuntimeMetadata(session)
+	if recovery != nil {
+		metadata[models.TurnMetaKeyPromptDispatchPending] = true
+		metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID] = recovery.PendingID
+		metadata[models.TurnMetaKeyPromptDispatchClarificationTurnID] = recovery.TurnID
+		metadata[models.TurnMetaKeyPromptDispatchClarificationMessageIDs] = recovery.MessageIDs
+	}
 	turn := &models.Turn{
 		ID:            uuid.New().String(),
 		TaskSessionID: sessionID,
 		TaskID:        session.TaskID,
 		StartedAt:     time.Now().UTC(),
-		Metadata:      turnStartRuntimeMetadata(session),
+		Metadata:      metadata,
 		CreatedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
 	}
@@ -83,11 +98,40 @@ func (s *Service) createTurn(
 	return turn, nil
 }
 
-// PublishReservedTurn reveals a durably reserved turn after agentctl accepts
-// its prompt. A crash before this notification is harmless: boot hydration
-// still discovers the persisted turn.
-func (s *Service) PublishReservedTurn(turn *models.Turn) {
+// PublishReservedTurn makes a durably reserved turn authoritative after
+// agentctl accepts its prompt, then reveals it to connected clients.
+func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) error {
+	if turn == nil {
+		return errors.New("cannot publish nil reserved turn")
+	}
+	published := *turn
+	published.Metadata = maps.Clone(turn.Metadata)
+	deletePromptDispatchMetadata(published.Metadata)
+	if err := s.turns.UpdateTurn(ctx, &published); err != nil {
+		return fmt.Errorf("publish reserved turn %s: %w", turn.ID, err)
+	}
+	turn.Metadata = published.Metadata
 	s.publishTurnEvent(events.TurnStarted, turn, nil)
+	return nil
+}
+
+func deletePromptDispatchMetadata(metadata map[string]interface{}) {
+	delete(metadata, models.TurnMetaKeyPromptDispatchPending)
+	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationPendingID)
+	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationTurnID)
+	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationMessageIDs)
+}
+
+// ReconcileUnpublishedPromptTurns restores clarification claims whose empty
+// successor never reached agentctl, or accepts reservations with output proof.
+func (s *Service) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error) {
+	reconciler, ok := s.turns.(interface {
+		ReconcileUnpublishedPromptTurns(context.Context) (int, error)
+	})
+	if !ok {
+		return 0, nil
+	}
+	return reconciler.ReconcileUnpublishedPromptTurns(ctx)
 }
 
 // RollbackReservedTurn removes only an empty rejected reservation. If output

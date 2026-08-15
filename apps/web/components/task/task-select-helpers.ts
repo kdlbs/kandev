@@ -373,9 +373,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
     void loadTaskSessionsForSelection(loadTaskSessionsForTask, taskId, !!taskPendingAction)
       .then((sessions) => {
         if (selectionGuard.wasSuperseded()) return;
-        if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) {
-          return;
-        }
+        if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) return;
         const currentOldSessionId = store.getState().tasks.activeSessionId;
         const resolvedSessionId = resolveTaskSessionId({
           sessions,
@@ -388,6 +386,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
       })
       .catch(() => {
         if (selectionGuard.wasSuperseded()) return;
+        if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) return;
         if (taskPendingAction) return openTaskWithoutSession(params, navigateToTask);
         switchToSession(taskId, targetSessionId, store.getState().tasks.activeSessionId);
         navigateToTask(taskId);
@@ -398,9 +397,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
   void loadTaskSessionsForSelection(loadTaskSessionsForTask, taskId, !!taskPendingAction)
     .then(async (sessions) => {
       if (selectionGuard.wasSuperseded()) return;
-      if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) {
-        return;
-      }
+      if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) return;
       const currentOldSessionId = store.getState().tasks.activeSessionId;
       const sessionId = resolveTaskSessionId({
         sessions,
@@ -434,6 +431,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
     })
     .catch(() => {
       if (selectionGuard.wasSuperseded()) return;
+      if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) return;
       openTaskWithoutSession(params, navigateToTask);
     })
     .finally(selectionGuard.dispose);

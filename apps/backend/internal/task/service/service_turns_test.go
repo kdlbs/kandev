@@ -30,9 +30,19 @@ func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testin
 	setupTestTask(t, repo)
 	sessionID := setupTestSession(t, repo)
 
-	rejected, err := svc.ReserveTurn(ctx, sessionID)
+	recovery := &models.PromptDispatchRecovery{
+		PendingID: "pending-reserved", TurnID: "turn-clarification",
+		MessageIDs: []string{"message-clarification"},
+	}
+	rejected, err := svc.ReserveTurn(ctx, sessionID, recovery)
 	if err != nil {
 		t.Fatalf("ReserveTurn(rejected): %v", err)
+	}
+	if pending, _ := rejected.Metadata[models.TurnMetaKeyPromptDispatchPending].(bool); !pending {
+		t.Fatalf("reserved turn metadata = %#v, want dispatch-pending marker", rejected.Metadata)
+	}
+	if rejected.Metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID] != recovery.PendingID {
+		t.Fatalf("reserved turn recovery metadata = %#v", rejected.Metadata)
 	}
 	for _, event := range eventBus.GetPublishedEvents() {
 		if event.Type == events.TurnStarted {
@@ -47,11 +57,23 @@ func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testin
 		t.Fatalf("GetTurn(rolled back) error = %v, want sql.ErrNoRows", err)
 	}
 
-	accepted, err := svc.ReserveTurn(ctx, sessionID)
+	accepted, err := svc.ReserveTurn(ctx, sessionID, recovery)
 	if err != nil {
 		t.Fatalf("ReserveTurn(accepted): %v", err)
 	}
-	svc.PublishReservedTurn(accepted)
+	if err := svc.PublishReservedTurn(ctx, accepted); err != nil {
+		t.Fatalf("PublishReservedTurn: %v", err)
+	}
+	persisted, err := repo.GetTurn(ctx, accepted.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(accepted): %v", err)
+	}
+	if _, pending := persisted.Metadata[models.TurnMetaKeyPromptDispatchPending]; pending {
+		t.Fatalf("published turn retained dispatch-pending marker: %#v", persisted.Metadata)
+	}
+	if _, pending := persisted.Metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID]; pending {
+		t.Fatalf("published turn retained recovery metadata: %#v", persisted.Metadata)
+	}
 	started := 0
 	for _, event := range eventBus.GetPublishedEvents() {
 		if event.Type == events.TurnStarted {

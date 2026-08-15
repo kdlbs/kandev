@@ -2052,6 +2052,64 @@ func TestGetActiveTurnBySessionIDPicksNewestOpenTurn(t *testing.T) {
 	}
 }
 
+func TestTurnReadsHideEmptyUnpublishedReservationUntilMessageEvidence(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-turn-reserved"
+	const sessionID = "session-turn-reserved"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	base := time.Date(2026, 8, 15, 18, 0, 0, 0, time.UTC)
+	for _, turn := range []*models.Turn{
+		{ID: "turn-accepted", TaskSessionID: sessionID, TaskID: taskID, StartedAt: base},
+		{
+			ID: "turn-unpublished", TaskSessionID: sessionID, TaskID: taskID,
+			StartedAt: base.Add(time.Minute),
+			Metadata:  map[string]interface{}{models.TurnMetaKeyPromptDispatchPending: true},
+		},
+	} {
+		if err := repo.CreateTurn(ctx, turn); err != nil {
+			t.Fatalf("CreateTurn(%s): %v", turn.ID, err)
+		}
+	}
+
+	active, err := repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID: %v", err)
+	}
+	if active.ID != "turn-accepted" {
+		t.Fatalf("active turn = %q, want accepted predecessor", active.ID)
+	}
+	listed, err := repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "turn-accepted" {
+		t.Fatalf("listed turns = %#v, want only accepted predecessor", listed)
+	}
+
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "message-reserved-output", TaskSessionID: sessionID, TaskID: taskID,
+		TurnID: "turn-unpublished", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeMessage, Content: "accepted output", CreatedAt: base.Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	active, err = repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID after output: %v", err)
+	}
+	if active.ID != "turn-unpublished" {
+		t.Fatalf("active turn after output = %q, want ambiguous accepted reservation", active.ID)
+	}
+	listed, err = repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession after output: %v", err)
+	}
+	if len(listed) != 2 || listed[1].ID != "turn-unpublished" {
+		t.Fatalf("listed turns after output = %#v, want reservation restored", listed)
+	}
+}
+
 func TestUpdateTurnWritesCompletionAndMetadata(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

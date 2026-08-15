@@ -61,4 +61,3 @@ a non-empty template.
 - Recovery of a custom template that an earlier Kandev version already replaced.
 - Changes to the template syntax, placeholders, validation, default value, or UI.
 - Replacement of the current schema migration system.
-

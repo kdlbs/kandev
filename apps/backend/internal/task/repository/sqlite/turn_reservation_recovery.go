@@ -1,0 +1,280 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+type unpublishedPromptTurn struct {
+	id        string
+	sessionID string
+}
+
+// ReconcileUnpublishedPromptTurns repairs durable reservations left behind by
+// a backend stop between turn insertion and prompt-dispatch acknowledgement.
+func (r *Repository) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error) {
+	turns, err := r.listUnpublishedPromptTurns(ctx)
+	if err != nil {
+		return 0, err
+	}
+	reconciled := 0
+	var reconcileErrs []error
+	for _, turn := range turns {
+		changed, reconcileErr := r.reconcileUnpublishedPromptTurn(ctx, turn)
+		if reconcileErr != nil {
+			reconcileErrs = append(reconcileErrs, reconcileErr)
+			continue
+		}
+		if changed {
+			reconciled++
+		}
+	}
+	return reconciled, errors.Join(reconcileErrs...)
+}
+
+func (r *Repository) listUnpublishedPromptTurns(ctx context.Context) ([]unpublishedPromptTurn, error) {
+	driverName := r.ro.DriverName()
+	query := fmt.Sprintf(`
+		SELECT turn_row.id, turn_row.task_session_id
+		FROM task_session_turns turn_row
+		WHERE %s
+		ORDER BY turn_row.task_session_id, turn_row.started_at, turn_row.id
+	`, turnDispatchPendingPredicate(driverName, "turn_row"))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query))
+	if err != nil {
+		return nil, fmt.Errorf("list unpublished prompt turns: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var turns []unpublishedPromptTurn
+	for rows.Next() {
+		var turn unpublishedPromptTurn
+		if err := rows.Scan(&turn.id, &turn.sessionID); err != nil {
+			return nil, fmt.Errorf("scan unpublished prompt turn: %w", err)
+		}
+		turns = append(turns, turn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate unpublished prompt turns: %w", err)
+	}
+	return turns, nil
+}
+
+func (r *Repository) reconcileUnpublishedPromptTurn(
+	ctx context.Context,
+	turn unpublishedPromptTurn,
+) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin unpublished prompt turn recovery: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.sessionID); err != nil {
+		return false, err
+	}
+	metadata, err := r.loadUnpublishedPromptTurnMetadata(ctx, tx, turn)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	referenced, err := r.promptTurnHasMessages(ctx, tx, turn.id)
+	if err != nil {
+		return false, err
+	}
+	if referenced {
+		deletePromptDispatchMetadata(metadata)
+		err = updateTurnMetadata(ctx, tx, r.db, turn.id, metadata)
+	} else {
+		err = r.restoreReservedClarificationClaim(ctx, tx, metadata)
+		if err == nil {
+			err = r.deleteEmptyUnpublishedPromptTurn(ctx, tx, turn)
+		}
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit unpublished prompt turn recovery: %w", err)
+	}
+	return true, nil
+}
+
+func (r *Repository) loadUnpublishedPromptTurnMetadata(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	turn unpublishedPromptTurn,
+) (map[string]interface{}, error) {
+	driverName := r.db.DriverName()
+	query := fmt.Sprintf(`
+		SELECT turn_row.metadata
+		FROM task_session_turns turn_row
+		WHERE turn_row.id = ? AND turn_row.task_session_id = ? AND %s
+	`, turnDispatchPendingPredicate(driverName, "turn_row"))
+	var raw string
+	if err := tx.GetContext(ctx, &raw, r.db.Rebind(query), turn.id, turn.sessionID); err != nil {
+		return nil, err
+	}
+	metadata := map[string]interface{}{}
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+			return nil, fmt.Errorf("decode unpublished prompt turn %s metadata: %w", turn.id, err)
+		}
+	}
+	return metadata, nil
+}
+
+func (r *Repository) promptTurnHasMessages(ctx context.Context, tx *sqlx.Tx, turnID string) (bool, error) {
+	var referenced bool
+	if err := tx.GetContext(ctx, &referenced, r.db.Rebind(`
+		SELECT EXISTS (SELECT 1 FROM task_session_messages WHERE turn_id = ?)
+	`), turnID); err != nil {
+		return false, fmt.Errorf("inspect unpublished prompt turn %s messages: %w", turnID, err)
+	}
+	return referenced, nil
+}
+
+func updateTurnMetadata(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	turnID string,
+	metadata map[string]interface{},
+) error {
+	raw, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("encode published prompt turn %s metadata: %w", turnID, err)
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		UPDATE task_session_turns SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+	`), string(raw), turnID); err != nil {
+		return fmt.Errorf("publish message-backed prompt turn %s: %w", turnID, err)
+	}
+	return nil
+}
+
+func deletePromptDispatchMetadata(metadata map[string]interface{}) {
+	delete(metadata, models.TurnMetaKeyPromptDispatchPending)
+	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationPendingID)
+	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationTurnID)
+	delete(metadata, models.TurnMetaKeyPromptDispatchClarificationMessageIDs)
+}
+
+func (r *Repository) restoreReservedClarificationClaim(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	metadata map[string]interface{},
+) error {
+	pendingID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID].(string)
+	turnID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationTurnID].(string)
+	messageIDs := metadataStringSlice(metadata[models.TurnMetaKeyPromptDispatchClarificationMessageIDs])
+	if pendingID == "" || turnID == "" || len(messageIDs) == 0 {
+		return nil
+	}
+	for _, messageID := range messageIDs {
+		if err := r.restoreReservedClarificationMessage(ctx, tx, messageID, pendingID, turnID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repository) restoreReservedClarificationMessage(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	messageID, pendingID, turnID string,
+) error {
+	driverName := r.db.DriverName()
+	pendingIDExpr := dialect.JSONExtract(driverName, "metadata", "pending_id")
+	query := fmt.Sprintf(`
+		SELECT metadata
+		FROM task_session_messages
+		WHERE id = ? AND turn_id = ? AND type = 'clarification_request' AND %s = ?
+	`, pendingIDExpr)
+	var raw string
+	if err := tx.GetContext(ctx, &raw, r.db.Rebind(query), messageID, turnID, pendingID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("load clarification message %s for prompt recovery: %w", messageID, err)
+	}
+	metadata := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return fmt.Errorf("decode clarification message %s for prompt recovery: %w", messageID, err)
+	}
+	if metadata["status"] != clarificationStatusAnswered {
+		return nil
+	}
+	metadata["status"] = clarificationStatusPending
+	delete(metadata, "response")
+	updated, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("encode clarification message %s for prompt recovery: %w", messageID, err)
+	}
+	statusExpr := dialect.JSONExtract(driverName, "metadata", "status")
+	result, err := tx.ExecContext(ctx, r.db.Rebind(fmt.Sprintf(`
+		UPDATE task_session_messages SET metadata = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND %s = ?
+	`, statusExpr)), string(updated), messageID, clarificationStatusAnswered)
+	if err != nil {
+		return fmt.Errorf("restore clarification message %s after unpublished prompt: %w", messageID, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count restored clarification message %s: %w", messageID, err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("clarification message %s changed during prompt recovery", messageID)
+	}
+	return nil
+}
+
+func (r *Repository) deleteEmptyUnpublishedPromptTurn(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	turn unpublishedPromptTurn,
+) error {
+	query := fmt.Sprintf(`
+		DELETE FROM task_session_turns
+		WHERE id = ? AND task_session_id = ? AND %s
+		  AND NOT EXISTS (SELECT 1 FROM task_session_messages WHERE turn_id = task_session_turns.id)
+	`, turnDispatchPendingPredicate(r.db.DriverName(), "task_session_turns"))
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), turn.id, turn.sessionID)
+	if err != nil {
+		return fmt.Errorf("delete unpublished prompt turn %s: %w", turn.id, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count deleted unpublished prompt turn %s: %w", turn.id, err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("unpublished prompt turn %s gained a message during recovery", turn.id)
+	}
+	return nil
+}
+
+func metadataStringSlice(value interface{}) []string {
+	values, ok := value.([]interface{})
+	if !ok {
+		if strings, ok := value.([]string); ok {
+			return strings
+		}
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		text, ok := value.(string)
+		if ok && text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
+}

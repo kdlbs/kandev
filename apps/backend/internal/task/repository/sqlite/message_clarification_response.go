@@ -46,17 +46,19 @@ func (r *Repository) DetachActiveClarificationMessagesBySessionID(
 		  AND COALESCE(%s, '') IN ('', 'pending')
 		  AND %s
 		  AND turn_id = (
-			SELECT id
-			FROM task_session_turns
-			WHERE task_session_id = task_session_messages.task_session_id
-			ORDER BY started_at DESC, created_at DESC, id DESC
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = task_session_messages.task_session_id
+			  AND %s
+			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
 			LIMIT 1
 		  )
 		RETURNING id, task_session_id, task_id, turn_id, author_type, author_id,
 		          content, requests_input, type, metadata, created_at, updated_at
 	`, clarificationDetachedMetadataExpr(drv),
 		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
-		clarificationNotDetachedPredicate(drv))
+		clarificationNotDetachedPredicate(drv),
+		turnAuthorityPredicate(drv, "turn_row"))
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), updatedAt, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("detach active clarification messages: %w", err)
@@ -101,17 +103,19 @@ func (r *Repository) ExpireActiveClarificationBundle(
 		  AND COALESCE(%s, '') IN ('', 'pending')
 		  AND %s = ?
 		  AND turn_id = (
-			SELECT id
-			FROM task_session_turns
-			WHERE task_session_id = task_session_messages.task_session_id
-			ORDER BY started_at DESC, created_at DESC, id DESC
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = task_session_messages.task_session_id
+			  AND %s
+			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
 			LIMIT 1
 		  )
 		RETURNING id, task_session_id, task_id, turn_id, author_type, author_id,
 		          content, requests_input, type, metadata, created_at, updated_at
 	`, clarificationExpiredMetadataExpr(drv),
 		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
-		dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id"))
+		dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id"),
+		turnAuthorityPredicate(drv, "turn_row"))
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), updatedAt, sessionID, pendingID)
 	if err != nil {
 		return nil, fmt.Errorf("expire active clarification messages: %w", err)
@@ -309,10 +313,11 @@ func (r *Repository) loadRestorableClarificationBundle(
 		WHERE %s = ?
 		  AND m.type = 'clarification_request'
 		  AND m.turn_id = (
-			SELECT id
-			FROM task_session_turns
-			WHERE task_session_id = m.task_session_id
-			ORDER BY started_at DESC, created_at DESC, id DESC
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = m.task_session_id
+			  AND %s
+			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
 			LIMIT 1
 		  )
 		  AND NOT EXISTS (
@@ -326,7 +331,7 @@ func (r *Repository) loadRestorableClarificationBundle(
 			  )
 		  )
 		ORDER BY m.created_at ASC, m.id ASC
-	`, pendingIDExpr, bundlePendingIDExpr)
+	`, pendingIDExpr, turnAuthorityPredicate(drv, "turn_row"), bundlePendingIDExpr)
 	rows, err := tx.QueryxContext(
 		ctx,
 		r.db.Rebind(query),
@@ -358,13 +363,14 @@ func (r *Repository) restoreClarificationMessages(
 		SET metadata = ?, updated_at = ?
 		WHERE id = ? AND %s = ?
 		  AND turn_id = (
-			SELECT id
-			FROM task_session_turns
-			WHERE task_session_id = task_session_messages.task_session_id
-			ORDER BY started_at DESC, created_at DESC, id DESC
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = task_session_messages.task_session_id
+			  AND %s
+			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
 			LIMIT 1
 		  )
-	`, statusExpr))
+	`, statusExpr, turnAuthorityPredicate(drv, "turn_row")))
 	for _, message := range messages {
 		restoredMetadata := maps.Clone(message.Metadata)
 		restoredMetadata["status"] = clarificationStatusPending
@@ -412,10 +418,11 @@ func (r *Repository) claimActiveClarificationBundle(
 		  AND type = 'clarification_request'
 		  AND COALESCE(%s, '') IN ('', 'pending')
 		  AND turn_id = (
-			SELECT id
-			FROM task_session_turns
-			WHERE task_session_id = task_session_messages.task_session_id
-			ORDER BY started_at DESC, created_at DESC, id DESC
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = task_session_messages.task_session_id
+			  AND %s
+			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
 			LIMIT 1
 		  )
 		  AND NOT EXISTS (
@@ -428,7 +435,8 @@ func (r *Repository) claimActiveClarificationBundle(
 				OR bundle.turn_id != task_session_messages.turn_id
 			  )
 		  )
-	`, dialect.JSONSet(drv, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr, bundlePendingIDExpr)
+	`, dialect.JSONSet(drv, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr,
+		turnAuthorityPredicate(drv, "turn_row"), bundlePendingIDExpr)
 	result, err := tx.ExecContext(ctx, r.db.Rebind(claimQuery), pendingID, pendingID)
 	if err != nil {
 		return 0, fmt.Errorf("claim active clarification bundle: %w", err)
@@ -452,14 +460,16 @@ func (r *Repository) loadClaimedClarificationBundle(
 		FROM task_session_messages m
 		WHERE %s = ? AND %s = ?
 		  AND m.turn_id = (
-			SELECT id
-			FROM task_session_turns
-			WHERE task_session_id = m.task_session_id
-			ORDER BY started_at DESC, created_at DESC, id DESC
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = m.task_session_id
+			  AND %s
+			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
 			LIMIT 1
 		  )
 		ORDER BY m.created_at ASC, m.id ASC
-	`, dialect.JSONExtract(drv, "m.metadata", "pending_id"), claimedStatusExpr)), pendingID, clarificationStatusResponding)
+	`, dialect.JSONExtract(drv, "m.metadata", "pending_id"), claimedStatusExpr,
+		turnAuthorityPredicate(drv, "turn_row"))), pendingID, clarificationStatusResponding)
 	if err != nil {
 		return nil, fmt.Errorf("load claimed clarification bundle: %w", err)
 	}

@@ -40,9 +40,22 @@ vi.mock("@/hooks/use-in-office", () => ({
   useInOffice: () => false,
 }));
 
+type NavRegistration = {
+  pluginId: string;
+  id: string;
+  label: string;
+  path: string;
+  section?: string;
+};
+
+// Mutable so a specific test can inject plugin registrations (e.g. an
+// `insights`-section item) without affecting the rest of the suite, which
+// exercises the default no-plugins case.
+let navRegistrations: NavRegistration[] = [];
+
 vi.mock("@/lib/plugins/registry", () => ({
   usePluginRegistry: () => ({
-    getNavRegistrations: () => [],
+    getNavRegistrations: () => navRegistrations,
     getSlotRegistrations: (name: string) =>
       name === "sidebar-workspace-actions" ? workspaceActionsRegistrations : [],
   }),
@@ -117,6 +130,7 @@ describe("AppNavSheet", () => {
   beforeEach(() => {
     healthHasIssues = false;
     resolvedTheme = "light";
+    navRegistrations = [];
     workspaceActionsRegistrations = [];
     vi.clearAllMocks();
   });
@@ -176,6 +190,7 @@ describe("AppNavSections", () => {
   beforeEach(() => {
     healthHasIssues = false;
     statusSeverity = "none";
+    navRegistrations = [];
     workspaceActionsRegistrations = [];
     vi.clearAllMocks();
   });
@@ -236,12 +251,58 @@ describe("AppNavSections", () => {
 
     expect(screen.getByTestId("app-nav-health-button")).not.toBeNull();
   });
+
+  it("orders the Utilities group's manifest rows as Stats, Settings, then a plugin sidebar-footer item", () => {
+    navRegistrations = [
+      {
+        pluginId: "acme",
+        id: "board",
+        label: "Acme Board",
+        path: "/plugins/acme",
+        section: "sidebar-footer",
+      },
+    ];
+
+    render(<SectionsHost />);
+
+    const links = screen.getAllByRole("link").map((link) => link.textContent);
+    const stats = links.indexOf("Stats");
+    const settings = links.indexOf("Settings");
+    const plugin = links.indexOf("Acme Board");
+
+    expect(stats).toBeGreaterThanOrEqual(0);
+    expect(settings).toBeGreaterThan(stats);
+    expect(plugin).toBeGreaterThan(settings);
+  });
+
+  // The phone Utilities group is deliberately uncapped (spec.md#Capacity-and-
+  // overflow: "the phone surface is uncapped"), unlike the desktop footer's
+  // MAX_INLINE_PLUGIN_FOOTER_ITEMS budget — well over that budget (8, per
+  // spec.md's own "well over the budget" scenario) must still render every
+  // item as a row, with no overflow menu of its own.
+  it("renders every plugin sidebar-footer item as a row, uncapped, with no overflow menu", () => {
+    navRegistrations = Array.from({ length: 8 }, (_, i) => ({
+      pluginId: "acme",
+      id: `board-${i}`,
+      label: `Acme Board ${i}`,
+      path: `/plugins/acme-${i}`,
+      section: "sidebar-footer",
+    }));
+
+    render(<SectionsHost />);
+
+    for (let i = 0; i < 8; i++) {
+      expect(screen.getByRole("link", { name: `Acme Board ${i}` })).not.toBeNull();
+    }
+    expect(screen.queryByTestId("sidebar-plugin-overflow-button")).toBeNull();
+  });
 });
 
 describe("AppNavSections theme toggle", () => {
   beforeEach(() => {
     healthHasIssues = false;
     resolvedTheme = "light";
+    navRegistrations = [];
     workspaceActionsRegistrations = [];
     vi.clearAllMocks();
   });

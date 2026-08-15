@@ -129,6 +129,7 @@ type AgentStreamEventData struct {
 	ProviderError    *streams.ProviderError `json:"provider_error,omitempty"`
 	SessionStatus    string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
 	PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
+	TurnID           string                 `json:"turn_id,omitempty"`
 	Data             interface{}            `json:"data,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
@@ -662,14 +663,23 @@ func (p SessionTodosEventPayload) GetSessionID() string {
 // AgentID is the lifecycle execution.ID (UUID); AgentType is the CLI engine
 // slug (claude-acp, codex-acp, ...). The office cost subscriber derives the
 // provider name from AgentType — AgentID is kept for legacy consumers.
+//
+// TurnID is captured on the lifecycle completion frame before AgentReady can
+// admit a successor prompt and is forwarded by the orchestrator. The
+// orchestrator mints UsageEventID once at publish time — rather than per
+// consumer — so it remains a stable idempotency key across event redelivery.
+// Both are empty when unavailable (e.g. no active turn), never a synthesized
+// placeholder.
 type SessionPromptUsageEventPayload struct {
-	TaskID    string               `json:"task_id"`
-	SessionID string               `json:"session_id"`
-	AgentID   string               `json:"agent_id"`
-	AgentType string               `json:"agent_type,omitempty"`
-	Model     string               `json:"model,omitempty"`
-	Usage     *streams.PromptUsage `json:"usage"`
-	Timestamp string               `json:"timestamp"`
+	TaskID       string               `json:"task_id"`
+	SessionID    string               `json:"session_id"`
+	AgentID      string               `json:"agent_id"`
+	AgentType    string               `json:"agent_type,omitempty"`
+	Model        string               `json:"model,omitempty"`
+	Usage        *streams.PromptUsage `json:"usage"`
+	Timestamp    string               `json:"timestamp"`
+	TurnID       string               `json:"turn_id,omitempty"`
+	UsageEventID string               `json:"usage_event_id,omitempty"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).
