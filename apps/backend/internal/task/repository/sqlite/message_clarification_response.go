@@ -37,9 +37,10 @@ func (r *Repository) DetachActiveClarificationMessagesBySessionID(
 	if err := lockSessionTurnWrites(ctx, tx, drv, sessionID); err != nil {
 		return nil, err
 	}
+	updatedAt := time.Now().UTC()
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
-		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
+		SET metadata = %s, updated_at = ?
 		WHERE task_session_id = ?
 		  AND type = 'clarification_request'
 		  AND COALESCE(%s, '') IN ('', 'pending')
@@ -56,7 +57,7 @@ func (r *Repository) DetachActiveClarificationMessagesBySessionID(
 	`, clarificationDetachedMetadataExpr(drv),
 		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
 		clarificationNotDetachedPredicate(drv))
-	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), sessionID)
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), updatedAt, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("detach active clarification messages: %w", err)
 	}
@@ -91,9 +92,10 @@ func (r *Repository) ExpireActiveClarificationBundle(
 	if err := lockSessionTurnWrites(ctx, tx, drv, sessionID); err != nil {
 		return nil, err
 	}
+	updatedAt := time.Now().UTC()
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
-		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
+		SET metadata = %s, updated_at = ?
 		WHERE task_session_id = ?
 		  AND type = 'clarification_request'
 		  AND COALESCE(%s, '') IN ('', 'pending')
@@ -110,7 +112,7 @@ func (r *Repository) ExpireActiveClarificationBundle(
 	`, clarificationExpiredMetadataExpr(drv),
 		dialect.JSONExtract(drv, "task_session_messages.metadata", "status"),
 		dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id"))
-	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), sessionID, pendingID)
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), updatedAt, sessionID, pendingID)
 	if err != nil {
 		return nil, fmt.Errorf("expire active clarification messages: %w", err)
 	}

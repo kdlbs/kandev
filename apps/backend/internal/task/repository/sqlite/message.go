@@ -50,12 +50,50 @@ func (r *Repository) CreateMessage(ctx context.Context, message *models.Message)
 		metadataJSON = string(metadataBytes)
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	return r.insertMessageWithSessionLock(ctx, message, requestsInput, messageType, metadataJSON)
+}
+
+func (r *Repository) insertMessageRow(
+	ctx context.Context,
+	execer taskSessionExecutor,
+	message *models.Message,
+	requestsInput int,
+	messageType, metadataJSON string,
+) error {
+	_, err := execer.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt, message.UpdatedAt)
-
 	return err
+}
+
+// insertMessageWithSessionLock serializes message insertion with rollback of
+// the message's turn on PostgreSQL. SQLite's writer pool already provides the
+// equivalent serialization.
+func (r *Repository) insertMessageWithSessionLock(
+	ctx context.Context,
+	message *models.Message,
+	requestsInput int,
+	messageType, metadataJSON string,
+) error {
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		return r.insertMessageRow(ctx, r.db, message, requestsInput, messageType, metadataJSON)
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin message creation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), message.TaskSessionID); err != nil {
+		return err
+	}
+	if err := r.insertMessageRow(ctx, tx, message, requestsInput, messageType, metadataJSON); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit message creation: %w", err)
+	}
+	return nil
 }
 
 // GetMessage retrieves a message by ID

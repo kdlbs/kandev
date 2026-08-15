@@ -276,6 +276,92 @@ func TestPostgresTurnCreationSerializesWithClarificationDetach(t *testing.T) {
 	}
 }
 
+func TestPostgresMessageCreationSerializesWithTurnRollback(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 4)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 16, 20, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-message-lock-pg", "session-message-lock-pg")
+	createPendingActionTurn(
+		t, repo, "task-message-lock-pg", "session-message-lock-pg", "turn-message-lock-pg", base, base,
+	)
+
+	blocker, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin session lock blocker: %v", err)
+	}
+	t.Cleanup(func() { _ = blocker.Rollback() })
+	if err := lockSessionTurnWrites(ctx, blocker, repo.db.DriverName(), "session-message-lock-pg"); err != nil {
+		t.Fatalf("hold session turn lock: %v", err)
+	}
+
+	createDone := make(chan error, 1)
+	go func() {
+		createDone <- repo.CreateMessage(ctx, &models.Message{
+			ID:            "message-lock-pg",
+			TaskSessionID: "session-message-lock-pg",
+			TaskID:        "task-message-lock-pg",
+			TurnID:        "turn-message-lock-pg",
+			AuthorType:    models.MessageAuthorUser,
+			Content:       "keep the accepted prompt",
+		})
+	}()
+	select {
+	case createErr := <-createDone:
+		t.Fatalf("CreateMessage bypassed the session turn lock: %v", createErr)
+	case <-time.After(150 * time.Millisecond):
+	}
+	waitForPostgresLockWait(t, ctx, repo, "pg_advisory_xact_lock")
+
+	type deleteResult struct {
+		deleted bool
+		err     error
+	}
+	deleteDone := make(chan deleteResult, 1)
+	go func() {
+		deleted, deleteErr := repo.DeleteTurnIfUnreferenced(
+			ctx,
+			"session-message-lock-pg",
+			"turn-message-lock-pg",
+		)
+		deleteDone <- deleteResult{deleted: deleted, err: deleteErr}
+	}()
+	select {
+	case result := <-deleteDone:
+		t.Fatalf("DeleteTurnIfUnreferenced bypassed the session turn lock: %+v", result)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	if err := blocker.Commit(); err != nil {
+		t.Fatalf("release session turn lock: %v", err)
+	}
+	select {
+	case createErr := <-createDone:
+		if createErr != nil {
+			t.Fatalf("CreateMessage after session lock release: %v", createErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for message creation")
+	}
+	select {
+	case result := <-deleteDone:
+		if result.err != nil || result.deleted {
+			t.Fatalf("turn rollback after message creation = %+v, want preserved turn", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for turn rollback")
+	}
+	if _, err := repo.GetTurn(ctx, "turn-message-lock-pg"); err != nil {
+		t.Fatalf("durable turn was lost: %v", err)
+	}
+	if _, err := repo.GetMessage(ctx, "message-lock-pg"); err != nil {
+		t.Fatalf("durable message was lost: %v", err)
+	}
+}
+
 func waitForPostgresLockWait(
 	t *testing.T,
 	ctx context.Context,

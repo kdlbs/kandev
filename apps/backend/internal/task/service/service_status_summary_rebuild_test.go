@@ -57,11 +57,14 @@ type vanishingStatusSummaryRepository struct {
 }
 
 func (r *vanishingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
-	context.Context,
-	*statussummary.StoredTaskStatusSummary,
+	ctx context.Context,
+	stored *statussummary.StoredTaskStatusSummary,
 ) (bool, error) {
 	r.compareCalls++
-	return false, nil
+	if r.compareCalls == 1 {
+		return false, nil
+	}
+	return r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, stored)
 }
 
 func (r *vanishingStatusSummaryRepository) LoadTaskStatusSummaries(
@@ -465,8 +468,10 @@ func TestReconcileTaskStatusSummariesReReadsSessionStateAfterCASRejection(t *tes
 	}
 }
 
-func TestReconcileTaskStatusSummariesKeepsSnapshotWhenTaskVanishesDuringRetry(t *testing.T) {
+func TestReconcileTaskStatusSummariesRebuildsSummaryThatVanishesDuringRetry(t *testing.T) {
 	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
 	vanishing := &vanishingStatusSummaryRepository{TaskStatusSummaryRepository: repo}
 	svc.statusSummaries = vanishing
 	stored := &statussummary.TaskStatusSummary{
@@ -475,19 +480,20 @@ func TestReconcileTaskStatusSummariesKeepsSnapshotWhenTaskVanishesDuringRetry(t 
 	}
 
 	got, err := svc.ReconcileTaskStatusSummaries(
-		context.Background(),
-		[]*models.Task{{ID: "deleted-task", WorkspaceID: "ws-1"}},
+		ctx,
+		[]*models.Task{{ID: "task-1", WorkspaceID: "ws-1"}},
 		map[string][]*models.TaskSession{},
 		map[string]models.TaskPendingAction{},
-		map[string]*statussummary.TaskStatusSummary{"deleted-task": stored},
+		map[string]*statussummary.TaskStatusSummary{"task-1": stored},
 	)
 	if err != nil {
 		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
 	}
-	if got["deleted-task"] != stored {
-		t.Fatalf("summary after vanished retry = %+v, want original snapshot", got["deleted-task"])
+	rebuilt := got["task-1"]
+	if rebuilt == nil || rebuilt == stored || rebuilt.Revision != 1 || rebuilt.PendingAction != "" {
+		t.Fatalf("summary after vanished retry = %+v, want rebuilt revision 1", rebuilt)
 	}
-	if vanishing.compareCalls != 1 {
-		t.Fatalf("compare calls = %d, want 1 without spurious rebuild", vanishing.compareCalls)
+	if vanishing.compareCalls != 2 {
+		t.Fatalf("compare calls = %d, want reconcile plus rebuild", vanishing.compareCalls)
 	}
 }

@@ -67,14 +67,17 @@ func (s *Service) reconcileExistingSummaries(
 		}
 		sessions := sessionsByTask[task.ID]
 		action := pendingActionForTask(sessions, pendingBySession)
-		if reconciled := s.reconcileExistingSummary(
+		reconciled := s.reconcileExistingSummary(
 			ctx,
 			task,
 			summaries[task.ID],
 			action,
-		); reconciled != nil {
-			summaries[task.ID] = reconciled
+		)
+		if reconciled == nil {
+			delete(summaries, task.ID)
+			continue
 		}
+		summaries[task.ID] = reconciled
 	}
 }
 
