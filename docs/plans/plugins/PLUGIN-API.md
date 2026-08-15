@@ -654,12 +654,12 @@ interface PluginRegistry {
   // controls) and forwards `{ workspaceId, workspaceLabel, currentPage }`. It is
   // the app-wide, task-agnostic counterpart to "chat-top-bar", so it carries no
   // task/session ids.
-  // "sidebar-workspace-actions" renders icon buttons in the sidebar's New Task
-  // row, after the built-in Quick Terminal and Quick Chat actions, and forwards
-  // `{ workspaceId: string | null, workspaceLabel?: string }` as `slotProps`.
-  // Hidden together with the built-in actions when the sidebar rail is
-  // collapsed or no workspace is active — a registered component never
-  // receives a null workspaceId from a mounted instance of this slot.
+  // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
+  // Terminal and Quick Chat actions in the desktop sidebar's New Task row and
+  // in the shared phone navigation sheet. It forwards
+  // `SidebarWorkspaceActionsSlotProps` as `slotProps`, with `presentation` set
+  // to "desktop" or "mobile". The mobile presentation must use a touch target
+  // of at least 44px in its active dimension.
   // Resolving a session id to an agent/ACP transcript id (e.g. to key
   // tokscale cost data on a session) is the plugin's job, done server-side in
   // the plugin backend via the Host data API; the host only propagates ids.

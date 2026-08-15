@@ -447,13 +447,19 @@ to strings, but an unmounted name renders nowhere.
 | plugin-settings           | Top of this plugin's Settings > Plugins page              | { pluginId, status }; owner-scoped to the plugin being viewed    |
 | task-card-indicators      | Kanban card, beside the PR status icon                    | { taskId, workspaceId, workflowStepId }                          |
 | task-card-tags            | Kanban card, its own row below the badges row             | { taskId, workspaceId, workflowStepId }                          |
-| sidebar-workspace-actions | Sidebar New Task row, after Quick Terminal and Quick Chat | { workspaceId, workspaceLabel? }                                 |
+| sidebar-workspace-actions | Desktop New Task row or phone navigation action group, after Quick Terminal and Quick Chat | SidebarWorkspaceActionsSlotProps |
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
 activeWorkspaceId, activeTaskId, activeSessionId }. Desktop presentation is a
 compact 24px bar; mobile presentation is an in-flow drawer, so render a
 touch-usable row. Status items can be reordered by the host; plugins do not get
 an ordering API.
+
+`SidebarWorkspaceActionsSlotProps` is `{ workspaceId, workspaceLabel?,
+presentation }`. The host uses `presentation: "desktop"` for the compact
+sidebar cluster and `presentation: "mobile"` for the phone navigation sheet.
+Mobile actions must keep their own buttons or links at least 44px in the active
+dimension and provide an accessible name.
 
 `PluginComposerSlotProps` is `{ surface, presentation, taskId, taskTitle?,
 activeSessionId, sessionIds, disabled, submittable, disabledReason?, composer }`.

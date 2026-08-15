@@ -120,10 +120,10 @@ export interface IntegrationSettingsRegistration {
  * title-row `task-card-indicators` spot, e.g. a row of tag chips — receives
  * `TaskCardTagsSlotProps` as `slotProps`), and "sidebar-workspace-actions"
  * (icon-button cluster in the sidebar's New Task row, after the built-in
- * Quick Terminal and Quick Chat actions — hidden together with them when the
- * sidebar is collapsed or no workspace is active — receives
- * `SidebarWorkspaceActionsSlotProps` as `slotProps`). Not a closed union —
- * hosts may register additional slot names.
+ * Quick Terminal and Quick Chat actions, with the same action group exposed
+ * through mobile navigation — receives `SidebarWorkspaceActionsSlotProps`
+ * as `slotProps`). Not a closed union — hosts may register additional slot
+ * names.
  */
 export type PluginSlotName = string;
 
@@ -146,6 +146,16 @@ export type TaskCardTagsSlotProps = {
   taskId: string;
   workspaceId: string | null;
   workflowStepId: string | null;
+};
+
+/** Context the host forwards to every `sidebar-workspace-actions` component. */
+export type SidebarWorkspaceActionsSlotProps = {
+  /** Active workspace for the current navigation surface. */
+  workspaceId: string;
+  /** Human-readable label of that workspace, when known. */
+  workspaceLabel?: string;
+  /** Desktop sidebar cluster or phone navigation action group. */
+  presentation: "desktop" | "mobile";
 };
 
 /** Component registered for a named slot; receives host-provided `slotProps`. */

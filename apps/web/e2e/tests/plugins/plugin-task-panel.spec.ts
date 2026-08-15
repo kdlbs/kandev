@@ -267,10 +267,11 @@ test.describe("Plugins — task panel / kanban Edit submenu / card indicator", (
     const notePath = `/api/plugins/${PLUGIN_ID}/user-state/task/${seedTask.id}/note`;
     const notePathPattern = `**${notePath}`;
 
-    // React Strict Mode replays mount effects in this e2e build. Hold both
-    // initial mount reads so the replay cannot make the editor loaded before
-    // the sibling write creates the newer read under test.
-    let holdInitialReads = true;
+    // Hold only the first mount read. A production E2E bundle does not replay
+    // effects through React Strict Mode, while a development bundle may issue
+    // a second read. Letting later reads continue keeps the causal stale-read
+    // setup valid in both modes without waiting for a dev-only request.
+    let firstReadHeld = false;
     let releaseInitialReads: () => void = () => {};
     const initialReadsHeld = new Promise<void>((resolve) => {
       releaseInitialReads = resolve;
@@ -279,25 +280,20 @@ test.describe("Plugins — task panel / kanban Edit submenu / card indicator", (
     const firstRequestStarted = new Promise<void>((resolve) => {
       signalFirstRequestStarted = resolve;
     });
-    let signalReplayRequestStarted: () => void = () => {};
-    const replayRequestStarted = new Promise<void>((resolve) => {
-      signalReplayRequestStarted = resolve;
-    });
     const initialRequestHandlers: Promise<void>[] = [];
 
     await testPage.route(notePathPattern, async (route) => {
-      if (route.request().method() !== "GET" || !holdInitialReads) {
+      if (route.request().method() !== "GET" || firstReadHeld) {
         return route.continue();
       }
 
-      const requestNumber = initialRequestHandlers.length + 1;
+      firstReadHeld = true;
       const handler = (async () => {
-        if (requestNumber === 1) signalFirstRequestStarted();
-        if (requestNumber === 2) signalReplayRequestStarted();
+        signalFirstRequestStarted();
         await initialReadsHeld;
         // Fulfilled with canned stale content instead of passed through, so
-        // their bodies are deterministically the pre-update value even
-        // though the real store has since moved on.
+        // its body is deterministically the pre-update value even though the
+        // real store has since moved on.
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -315,15 +311,11 @@ test.describe("Plugins — task panel / kanban Edit submenu / card indicator", (
       await session.addPanelButton().click();
       await session.addPanelPluginItem(PLUGIN_ID, PANEL_ID).click();
 
-      // Wait until the first mount GET and its Strict Mode replay are known
-      // to be held before asserting the panel's loading state.
+      // Wait until the first mount GET is held before issuing the newer write.
       await firstRequestStarted;
-      await replayRequestStarted;
-      await expect(testPage.getByTestId("e2e-notes-panel-loading")).toBeVisible();
 
       // Subsequent reads are the real subscription refreshes. The sibling
       // write now triggers one that resolves with the newer store value.
-      holdInitialReads = false;
       const res = await apiClient.rawRequest("PUT", notePath, {
         value: "second note",
         writerId: "e2e-sibling-surface",

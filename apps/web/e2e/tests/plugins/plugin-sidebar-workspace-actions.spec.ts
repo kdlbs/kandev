@@ -39,6 +39,7 @@ test.describe("Plugins — sidebar-workspace-actions slot", () => {
     const slot = testPage.getByTestId(SLOT_TEST_ID);
     await expect(slot).toBeVisible({ timeout: 15_000 });
     await expect(slot).toHaveAttribute("data-workspace-id", seedData.workspaceId);
+    await expect(slot).toHaveAttribute("data-presentation", "desktop");
 
     // A1: after both built-in icons, not before either of them.
     const terminal = testPage.getByTestId(QUICK_TERMINAL_TEST_ID);

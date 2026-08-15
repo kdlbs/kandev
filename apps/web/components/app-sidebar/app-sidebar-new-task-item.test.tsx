@@ -284,6 +284,14 @@ describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
     workspaceActionsRegistrations = [{ registrationId: "reg-1", pluginId: "plugin-1", Component }];
   }
 
+  function registerPlugins(components: Array<(props: { slotProps?: unknown }) => JSX.Element>) {
+    workspaceActionsRegistrations = components.map((Component, index) => ({
+      registrationId: `reg-${index + 1}`,
+      pluginId: `plugin-${index + 1}`,
+      Component,
+    }));
+  }
+
   it("A1: renders a registered component after Quick Terminal and Quick Chat", () => {
     registerPlugin(() => <button type="button" data-testid={PLUGIN_TEST_ID} />);
     renderItem(false);
@@ -303,18 +311,32 @@ describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
     });
     renderItem(false);
 
-    expect(captured).toEqual({ workspaceId: WORKSPACE_ID, workspaceLabel: WORKSPACE_NAME });
+    expect(captured).toEqual({
+      workspaceId: WORKSPACE_ID,
+      workspaceLabel: WORKSPACE_NAME,
+      presentation: "desktop",
+    });
   });
 
-  it("A3: widens the reserved inset only once the slot has a registration", () => {
+  it("A3: keeps the label and action cluster in one flow layout", () => {
     renderItem(false);
-    expect(screen.getByTestId(INSET_TEST_ID).className).toContain("pr-16");
-    cleanup();
+    const createTask = screen.getByTestId(INSET_TEST_ID);
+    expect(createTask.className).toContain("flex-1");
+    expect(createTask.parentElement?.className).toContain("items-center");
+  });
 
-    registerPlugin(() => <button type="button" data-testid={PLUGIN_TEST_ID} />);
+  it("A3: keeps multiple plugin actions from overlapping the task label", () => {
+    registerPlugins([
+      () => <button type="button" data-testid={`${PLUGIN_TEST_ID}-one`} />,
+      () => <button type="button" data-testid={`${PLUGIN_TEST_ID}-two`} />,
+    ]);
     renderItem(false);
-    expect(screen.getByTestId(INSET_TEST_ID).className).not.toContain("pr-16");
-    expect(screen.getByTestId(INSET_TEST_ID).className).toContain("pr-20");
+
+    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
+    const firstPlugin = screen.getByTestId(`${PLUGIN_TEST_ID}-one`);
+    const secondPlugin = screen.getByTestId(`${PLUGIN_TEST_ID}-two`);
+    expect(quickChat.nextElementSibling).toBe(firstPlugin);
+    expect(firstPlugin.nextElementSibling).toBe(secondPlugin);
   });
 
   it("A4: renders no plugin markup when the sidebar is collapsed or no workspace is active", () => {

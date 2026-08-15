@@ -178,6 +178,9 @@ func TestUserStateWorkspaceScopeIsolatesUsersAndScopes(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
+	if rec = userStateReq(router, http.MethodPut, taskPath, "user_1", `{"value":"task-scoped"}`); rec.Code != http.StatusOK {
+		t.Fatalf("PUT task scope status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
 
 	// user_2 must not read it.
 	if rec = userStateReq(router, http.MethodGet, wsPath, "user_2", ""); rec.Code != http.StatusNotFound {
@@ -189,8 +192,29 @@ func TestUserStateWorkspaceScopeIsolatesUsersAndScopes(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("LIST (different user) status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
-	if strings.Contains(rec.Body.String(), "alice") {
-		t.Fatalf("LIST (different user) leaked the owner's entry: %s", rec.Body.String())
+	var user2List struct {
+		Entries []state.UserStateEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &user2List); err != nil {
+		t.Fatalf("unmarshal LIST (different user): %v", err)
+	}
+	if len(user2List.Entries) != 0 {
+		t.Fatalf("LIST (different user) returned entries: %+v", user2List.Entries)
+	}
+
+	assertUserStateValue(t, router, taskPath, "user_1", `"task-scoped"`)
+	rec = userStateReq(router, http.MethodGet, wsList, "user_1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("LIST (workspace scope) status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var workspaceList struct {
+		Entries []state.UserStateEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &workspaceList); err != nil {
+		t.Fatalf("unmarshal LIST (workspace scope): %v", err)
+	}
+	if len(workspaceList.Entries) != 1 || workspaceList.Entries[0].Key != "note" {
+		t.Fatalf("LIST (workspace scope) entries = %+v, want only note", workspaceList.Entries)
 	}
 
 	// user_2 writing the same path must not disturb user_1's value, and
@@ -202,12 +226,9 @@ func TestUserStateWorkspaceScopeIsolatesUsersAndScopes(t *testing.T) {
 		t.Fatalf("DELETE (different user) status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
 	assertUserStateValue(t, router, wsPath, "user_1", `"alice's workspace note"`)
+	assertUserStateValue(t, router, taskPath, "user_1", `"task-scoped"`)
 
 	// task/ws_1 and workspace/ws_1 are distinct entries for the same user.
-	if rec = userStateReq(router, http.MethodPut, taskPath, "user_1", `{"value":"task-scoped"}`); rec.Code != http.StatusOK {
-		t.Fatalf("PUT task scope status = %d, want 200, body=%s", rec.Code, rec.Body.String())
-	}
-	assertUserStateValue(t, router, wsPath, "user_1", `"alice's workspace note"`)
 	if rec = userStateReq(router, http.MethodDelete, wsPath, "user_1", ""); rec.Code != http.StatusOK {
 		t.Fatalf("DELETE workspace scope status = %d, want 200, body=%s", rec.Code, rec.Body.String())
 	}
