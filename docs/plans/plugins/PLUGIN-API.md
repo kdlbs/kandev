@@ -39,12 +39,15 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    initialization finishes. Slow or failed reloads do not by themselves revoke
    open or saved task panels. On explicit plugin disable/uninstall the host calls
    `destroy?.()`, removes the plugin's registrations, and closes its panels.
-   Each initialization attempt is transactional: failure or timeout unregisters
-   its partial contributions, aborts plugin-owned work, and fences callbacks from
-   the expired generation. The same generation owns host-created subscriptions,
+   Each initialization attempt is transactional for plugin-owned runtime state:
+   failure or timeout aborts plugin-owned work and fences callbacks from the
+   expired generation. The same generation owns host-created subscriptions,
    modal and task-link handles, toasts, and review surfaces; the loader closes or
    unsubscribes them before calling `destroy` exactly once. Requests and callbacks
-   from an expired generation cannot mutate the replacement generation.
+   from an expired generation cannot mutate the replacement generation. Failure or
+   timeout does **not** unregister `registry` contributions (nav items, routes,
+   etc.) already made before the failure — those persist, and only the plugin's
+   lifecycle status becomes failed, until the plugin's *next* load revokes them.
 
 ## Global entry point
 

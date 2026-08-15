@@ -24,6 +24,9 @@ export interface PluginIconProps {
 /** Curated host icon name or a plugin-owned component rendered with host React. */
 export type PluginIcon = string | Component<PluginIconProps>;
 
+/** Placement for a registered nav item; see `PluginRegistry.registerNavItem`. */
+export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
+
 export type StateUpdater<Value> = Value | ((previous: Value) => Value);
 export type StateSetter<Value> = (value: StateUpdater<Value>) => void;
 
@@ -577,7 +580,7 @@ export interface PluginRegistry {
     label: string;
     path: string;
     icon?: PluginIcon;
-    section?: "main" | "settings" | "integrations" | "sidebar-footer";
+    section?: PluginNavSection;
   }): void;
   registerSettingsRoute(path: string, component: Component): void;
   registerComponent(slot: string, component: Component<{ slotProps?: unknown }>): void;
