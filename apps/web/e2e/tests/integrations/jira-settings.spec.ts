@@ -104,6 +104,7 @@ test.describe("Jira settings", () => {
     await apiClient.waitForIntegrationAuthHealthy("jira", { workspaceId: seedData.workspaceId });
 
     await apiClient.mockJiraSetAuthHealth({
+      workspaceId: seedData.workspaceId,
       ok: false,
       error: "session expired",
     });
