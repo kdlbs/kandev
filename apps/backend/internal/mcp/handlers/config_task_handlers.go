@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -21,11 +22,12 @@ import (
 
 func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID         string `json:"task_id"`
-		WorkflowID     string `json:"workflow_id"`
-		WorkflowStepID string `json:"workflow_step_id"`
-		Position       int    `json:"position"`
-		Prompt         string `json:"prompt"`
+		TaskID          string `json:"task_id"`
+		WorkflowID      string `json:"workflow_id"`
+		WorkflowStepID  string `json:"workflow_step_id"`
+		Position        int    `json:"position"`
+		Prompt          string `json:"prompt"`
+		SenderSessionID string `json:"sender_session_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -78,11 +80,12 @@ func (h *Handlers) deferMoveTask(
 	ctx context.Context,
 	msg *ws.Message,
 	req struct {
-		TaskID         string `json:"task_id"`
-		WorkflowID     string `json:"workflow_id"`
-		WorkflowStepID string `json:"workflow_step_id"`
-		Position       int    `json:"position"`
-		Prompt         string `json:"prompt"`
+		TaskID          string `json:"task_id"`
+		WorkflowID      string `json:"workflow_id"`
+		WorkflowStepID  string `json:"workflow_step_id"`
+		Position        int    `json:"position"`
+		Prompt          string `json:"prompt"`
+		SenderSessionID string `json:"sender_session_id"`
 	},
 	session *models.TaskSession,
 ) (*ws.Message, error) {
@@ -161,11 +164,12 @@ func (h *Handlers) deferMoveTask(
 		}
 	}
 	h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
-		TaskID:         req.TaskID,
-		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: req.WorkflowStepID,
-		Position:       req.Position,
-		Actor:          string(wfmodels.StepTransitionActorAgent),
+		TaskID:          req.TaskID,
+		WorkflowID:      req.WorkflowID,
+		WorkflowStepID:  req.WorkflowStepID,
+		Position:        req.Position,
+		Actor:           string(wfmodels.StepTransitionActorAgent),
+		SenderSessionID: req.SenderSessionID,
 	})
 	return ws.NewResponse(msg.ID, msg.Action,
 		h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position))
@@ -179,11 +183,12 @@ func (h *Handlers) applyMoveTaskImmediate(
 	ctx context.Context,
 	msg *ws.Message,
 	req struct {
-		TaskID         string `json:"task_id"`
-		WorkflowID     string `json:"workflow_id"`
-		WorkflowStepID string `json:"workflow_step_id"`
-		Position       int    `json:"position"`
-		Prompt         string `json:"prompt"`
+		TaskID          string `json:"task_id"`
+		WorkflowID      string `json:"workflow_id"`
+		WorkflowStepID  string `json:"workflow_step_id"`
+		Position        int    `json:"position"`
+		Prompt          string `json:"prompt"`
+		SenderSessionID string `json:"sender_session_id"`
 	},
 	session *models.TaskSession,
 ) (*ws.Message, error) {
@@ -199,7 +204,21 @@ func (h *Handlers) applyMoveTaskImmediate(
 		queuedSessionID = session.ID
 	}
 
-	result, err := h.taskSvc.MoveTaskWithOptions(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position,
+	// Attribution uses the CALLING session (req.SenderSessionID, injected
+	// server-side by the MCP server from its own bound session — see
+	// moveTaskHandler), never the target task's session captured above:
+	// move_task_kandev routinely moves a task the caller doesn't run a
+	// session on, so the target's session is not who caused this move.
+	// SenderSessionID is empty for a config-mode/admin MCP server with no
+	// bound session, which correctly falls back to ActorSystem.
+	attribution := steptelemetry.Attribution{Trigger: steptelemetry.TriggerMCPMove, ActorKind: steptelemetry.ActorSystem}
+	if req.SenderSessionID != "" {
+		attribution.ActorKind = steptelemetry.ActorAgent
+		attribution.ActorID = req.SenderSessionID
+		attribution.SessionID = req.SenderSessionID
+	}
+	moveCtx := steptelemetry.WithAttribution(ctx, attribution)
+	result, err := h.taskSvc.MoveTaskWithOptions(moveCtx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position,
 		service.MoveTaskOptions{StepHistoryActor: wfmodels.StepTransitionActorAgent})
 	if err != nil {
 		// Roll back the queued prompt — without this, the next turn would

@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -93,11 +94,13 @@ func (f *fakeWatcherSource) SelfHeal(_ context.Context, _ any, _ string) error {
 type fakeTaskCreator struct {
 	createErr error
 	gotReq    *IssueTaskRequest
+	gotAttrib steptelemetry.Attribution
 	returned  *models.Task
 }
 
-func (f *fakeTaskCreator) CreateIssueTask(_ context.Context, req *IssueTaskRequest) (*models.Task, error) {
+func (f *fakeTaskCreator) CreateIssueTask(ctx context.Context, req *IssueTaskRequest) (*models.Task, error) {
 	f.gotReq = req
+	f.gotAttrib = steptelemetry.FromContext(ctx)
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
@@ -182,6 +185,38 @@ func TestCoordinator_Dispatch_HappyPath(t *testing.T) {
 	}
 	if starter.gotPrompt != "persisted body" {
 		t.Fatalf("auto-start prompt must come from created task.Description, got %q", starter.gotPrompt)
+	}
+}
+
+// TestCoordinator_Dispatch_AttributesIntegrationWatcherActor closes the
+// tautological-test gap Review round 3 found at spec.md:593-594: the
+// production site that sets ActorIntegration (watcher_dispatch.go:377) had
+// no test driving Dispatch and observing what actually reaches the task
+// creator's ctx — the only existing coverage
+// (TestGenesisRowIntegrationActorRecordsWatchID) manually presets
+// ActorIntegration on ctx itself, so it can't catch a regression here.
+func TestCoordinator_Dispatch_AttributesIntegrationWatcherActor(t *testing.T) {
+	src := &fakeWatcherSource{
+		name:      "linear",
+		reserveOK: true,
+		buildReq: &IssueTaskRequest{
+			WorkspaceID:    "ws-1",
+			WorkflowID:     "wf-1",
+			WorkflowStepID: "step-1",
+			Title:          "[ENG-1] Hello",
+		},
+		watchID: "linear-watch-42",
+	}
+	tc := &fakeTaskCreator{returned: &models.Task{ID: "task-1"}}
+	c := newTestCoordinator(t, tc, false, &fakeTaskStarter{})
+
+	c.Dispatch(context.Background(), src, "evt")
+
+	if tc.gotAttrib.ActorKind != steptelemetry.ActorIntegration {
+		t.Fatalf("actor_kind = %q, want %q", tc.gotAttrib.ActorKind, steptelemetry.ActorIntegration)
+	}
+	if tc.gotAttrib.ActorID != "linear-watch-42" {
+		t.Fatalf("actor_id = %q, want linear-watch-42", tc.gotAttrib.ActorID)
 	}
 }
 

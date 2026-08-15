@@ -495,7 +495,8 @@ export type RoutingErrorCode =
   | "agent_runtime_error"
   | "task_error"
   | "repo_error"
-  | "permission_denied_by_user";
+  | "permission_denied_by_user"
+  | "agent_transport_lost";
 
 export type TierMap = {
   frontier?: string;

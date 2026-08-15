@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import type { JSX } from "react";
 
 const mocks = vi.hoisted(() => ({
   routerPush: vi.fn(),
@@ -21,10 +22,13 @@ function renderItem(collapsed: boolean) {
   );
 }
 
+const WORKSPACE_ID = "ws-1";
+const WORKSPACE_NAME = "Default Workspace";
+
 const state = {
   workspaces: {
-    activeId: "ws-1" as string | null,
-    items: [{ id: "ws-1", name: "Default Workspace" }],
+    activeId: WORKSPACE_ID as string | null,
+    items: [{ id: WORKSPACE_ID, name: WORKSPACE_NAME }],
   },
   appSidebar: { improveDialogOpen: false },
   kanban: {
@@ -39,6 +43,22 @@ const QUICK_TERMINAL_TEST_ID = "sidebar-quick-terminal-shortcut";
 const QUICK_CHAT_TEST_ID = "sidebar-quick-chat-shortcut";
 let officeEnabled = false;
 let pathname = "/";
+
+// sidebar-workspace-actions plugin slot registrations (A1-A5). Empty by
+// default so the existing dialog-routing/row-action tests above are
+// unaffected; individual tests below set this before rendering.
+let workspaceActionsRegistrations: Array<{
+  registrationId: string;
+  pluginId: string;
+  Component: (props: { slotProps?: unknown }) => JSX.Element;
+}> = [];
+
+vi.mock("@/lib/plugins/registry", () => ({
+  usePluginRegistry: () => ({
+    getSlotRegistrations: (name: string) =>
+      name === "sidebar-workspace-actions" ? workspaceActionsRegistrations : [],
+  }),
+}));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
@@ -95,14 +115,14 @@ const REGULAR_DIALOG_TESTID = "regular-task-create-dialog";
 function setImproveWorkspaceActive() {
   state.workspaces.activeId = "ws-improve";
   state.workspaces.items = [
-    { id: "ws-1", name: "Default Workspace" },
+    { id: WORKSPACE_ID, name: WORKSPACE_NAME },
     { id: "ws-improve", name: "Improve Kandev" },
   ];
 }
 
 function resetTestState() {
-  state.workspaces.activeId = "ws-1";
-  state.workspaces.items = [{ id: "ws-1", name: "Default Workspace" }];
+  state.workspaces.activeId = WORKSPACE_ID;
+  state.workspaces.items = [{ id: WORKSPACE_ID, name: WORKSPACE_NAME }];
   state.appSidebar.improveDialogOpen = false;
   state.kanban.workflowId = "wf-1";
   state.kanban.steps = [{ id: "s1", title: "Todo" }];
@@ -116,6 +136,7 @@ function resetTestState() {
   mocks.dialogWillNavigate = false;
   officeEnabled = false;
   pathname = "/";
+  workspaceActionsRegistrations = [];
 }
 
 beforeEach(resetTestState);
@@ -252,6 +273,103 @@ describe("AppSidebarNewTaskItem row actions", () => {
     renderItem(false);
     expect(screen.queryByTestId(QUICK_CHAT_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(QUICK_TERMINAL_TEST_ID)).toBeNull();
+  });
+});
+
+describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
+  const PLUGIN_TEST_ID = "plugin-workspace-action";
+  const INSET_TEST_ID = "create-task-button";
+
+  function registerPlugin(Component: (props: { slotProps?: unknown }) => JSX.Element) {
+    workspaceActionsRegistrations = [{ registrationId: "reg-1", pluginId: "plugin-1", Component }];
+  }
+
+  function registerPlugins(components: Array<(props: { slotProps?: unknown }) => JSX.Element>) {
+    workspaceActionsRegistrations = components.map((Component, index) => ({
+      registrationId: `reg-${index + 1}`,
+      pluginId: `plugin-${index + 1}`,
+      Component,
+    }));
+  }
+
+  it("A1: renders a registered component after Quick Terminal and Quick Chat", () => {
+    registerPlugin(() => <button type="button" data-testid={PLUGIN_TEST_ID} />);
+    renderItem(false);
+
+    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
+    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
+    const plugin = screen.getByTestId(PLUGIN_TEST_ID);
+    const pluginSlot = plugin.parentElement;
+    expect(pluginSlot?.getAttribute("data-plugin-slot")).toBe("sidebar-workspace-actions");
+    expect(terminal.nextElementSibling).toBe(quickChat);
+    expect(quickChat.nextElementSibling).toBe(pluginSlot);
+  });
+
+  it("A2: forwards the active workspace id and label as slotProps", () => {
+    let captured: unknown;
+    registerPlugin(({ slotProps }) => {
+      captured = slotProps;
+      return <button type="button" data-testid={PLUGIN_TEST_ID} />;
+    });
+    renderItem(false);
+
+    expect(captured).toEqual({
+      workspaceId: WORKSPACE_ID,
+      workspaceLabel: WORKSPACE_NAME,
+      presentation: "desktop",
+    });
+  });
+
+  it("A3: keeps the label and action cluster in one flow layout", () => {
+    renderItem(false);
+    const createTask = screen.getByTestId(INSET_TEST_ID);
+    expect(createTask.className).toContain("flex-1");
+    expect(createTask.parentElement?.className).toContain("items-center");
+  });
+
+  it("A3: keeps multiple plugin actions from overlapping the task label", () => {
+    registerPlugins([
+      () => <button type="button" data-testid={`${PLUGIN_TEST_ID}-one`} />,
+      () => <button type="button" data-testid={`${PLUGIN_TEST_ID}-two`} />,
+    ]);
+    renderItem(false);
+
+    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
+    const firstPlugin = screen.getByTestId(`${PLUGIN_TEST_ID}-one`);
+    const secondPlugin = screen.getByTestId(`${PLUGIN_TEST_ID}-two`);
+    const pluginSlot = firstPlugin.parentElement;
+    expect(pluginSlot).toBe(secondPlugin.parentElement);
+    expect(quickChat.nextElementSibling).toBe(pluginSlot);
+    expect(firstPlugin.nextElementSibling).toBe(secondPlugin);
+  });
+
+  it("A4: renders no plugin markup when the sidebar is collapsed or no workspace is active", () => {
+    registerPlugin(() => <button type="button" data-testid={PLUGIN_TEST_ID} />);
+
+    renderItem(true);
+    expect(screen.queryByTestId(PLUGIN_TEST_ID)).toBeNull();
+    cleanup();
+
+    state.workspaces.activeId = null;
+    renderItem(false);
+    expect(screen.queryByTestId(PLUGIN_TEST_ID)).toBeNull();
+  });
+
+  it("A5: a throwing plugin component leaves Quick Terminal and Quick Chat functional", () => {
+    registerPlugin(() => {
+      throw new Error("boom");
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderItem(false);
+
+    expect(screen.queryByTestId(PLUGIN_TEST_ID)).toBeNull();
+    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
+    terminal.click();
+    expect(mocks.openQuickTerminal).toHaveBeenCalledOnce();
+    screen.getByTestId(QUICK_CHAT_TEST_ID).click();
+    expect(mocks.openQuickChat).toHaveBeenCalledOnce();
+
+    consoleError.mockRestore();
   });
 });
 

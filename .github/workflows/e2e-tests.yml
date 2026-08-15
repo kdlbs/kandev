@@ -78,6 +78,21 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
 
+      # Same reasoning as the pnpm store above: the image sets GOPATH=/root/go
+      # and leaves GOCACHE at its default, and $HOME is /root, so these are the
+      # same two paths backend-tests.yml caches. Without this the backend build
+      # below starts from a cold module *and* build cache on every run.
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-e2e-build-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          restore-keys: |
+            go-e2e-build-${{ runner.os }}-
+            go-${{ runner.os }}-
+
       - name: Install dependencies
         working-directory: apps
         run: pnpm install --frozen-lockfile

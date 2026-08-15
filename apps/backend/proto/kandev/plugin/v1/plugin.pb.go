@@ -4316,6 +4316,17 @@ type SessionCodeStats struct {
 	LinesDeletedCommitted   int64                  `protobuf:"varint,3,opt,name=lines_deleted_committed,json=linesDeletedCommitted,proto3" json:"lines_deleted_committed,omitempty"`   // SUM of commit deletions
 	LinesAddedPeakPending   int64                  `protobuf:"varint,4,opt,name=lines_added_peak_pending,json=linesAddedPeakPending,proto3" json:"lines_added_peak_pending,omitempty"` // peak uncommitted diff additions across snapshots
 	LinesDeletedPeakPending int64                  `protobuf:"varint,5,opt,name=lines_deleted_peak_pending,json=linesDeletedPeakPending,proto3" json:"lines_deleted_peak_pending,omitempty"`
+	// False (with lines_added_committed/lines_deleted_committed reading 0) for
+	// a session that predates commit-capture activation and has no observed
+	// commits — capture wasn't running yet, so a plugin must not treat that
+	// zero as "zero lines changed". Kept as a separate additive field, rather
+	// than making the existing fields 2/3 `optional`, because fields 2/3 are
+	// an already-shipped part of this DTO's public contract (see ADR 0043:
+	// "DTO fields are additive-only thereafter") — plugin authors read them as
+	// plain int64 in the generated Go SDK, and switching that Go field type to
+	// *int64 is a source-level break for anyone rebuilding against a new SDK,
+	// even though the wire-level `optional` change itself is protobuf-safe.
+	CommittedLinesAvailable bool `protobuf:"varint,6,opt,name=committed_lines_available,json=committedLinesAvailable,proto3" json:"committed_lines_available,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -4383,6 +4394,13 @@ func (x *SessionCodeStats) GetLinesDeletedPeakPending() int64 {
 		return x.LinesDeletedPeakPending
 	}
 	return 0
+}
+
+func (x *SessionCodeStats) GetCommittedLinesAvailable() bool {
+	if x != nil {
+		return x.CommittedLinesAvailable
+	}
+	return false
 }
 
 type ListSessionCodeStatsRequest struct {
@@ -6117,14 +6135,15 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x04page\x18\x02 \x01(\v2\x16.kandev.plugin.v1.PageR\x04page\"\x86\x01\n" +
 	"\x14ListSessionsResponse\x125\n" +
 	"\bsessions\x18\x01 \x03(\v2\x19.kandev.plugin.v1.SessionR\bsessions\x127\n" +
-	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\x93\x02\n" +
+	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\xcf\x02\n" +
 	"\x10SessionCodeStats\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x122\n" +
 	"\x15lines_added_committed\x18\x02 \x01(\x03R\x13linesAddedCommitted\x126\n" +
 	"\x17lines_deleted_committed\x18\x03 \x01(\x03R\x15linesDeletedCommitted\x127\n" +
 	"\x18lines_added_peak_pending\x18\x04 \x01(\x03R\x15linesAddedPeakPending\x12;\n" +
-	"\x1alines_deleted_peak_pending\x18\x05 \x01(\x03R\x17linesDeletedPeakPending\"\x82\x01\n" +
+	"\x1alines_deleted_peak_pending\x18\x05 \x01(\x03R\x17linesDeletedPeakPending\x12:\n" +
+	"\x19committed_lines_available\x18\x06 \x01(\bR\x17committedLinesAvailable\"\x82\x01\n" +
 	"\x1bListSessionCodeStatsRequest\x127\n" +
 	"\x06filter\x18\x01 \x01(\v2\x1f.kandev.plugin.v1.SessionFilterR\x06filter\x12*\n" +
 	"\x04page\x18\x02 \x01(\v2\x16.kandev.plugin.v1.PageR\x04page\"\x91\x01\n" +

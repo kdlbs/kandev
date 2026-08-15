@@ -99,6 +99,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			Reviews:           repos.Task,
 			ResourceCleanups:  repos.Task,
 			StatusSummaries:   repos.Task,
+			SubagentContexts:  repos.Task,
 		},
 		eventBus,
 		log,
@@ -149,7 +150,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
 		githubSvc.SetPromptResolver(promptSvc)
 	}
-	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
+	gitlabSvc, gitlabCleanup := initGitLabService(dbPool, eventBus, repos.Secrets, log)
 	if gitlabSvc != nil {
 		gitlabSvc.SetPromptResolver(promptSvc)
 	}
@@ -230,6 +231,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Workflow:                 workflowSvc,
 		GitHub:                   githubSvc,
 		GitLab:                   gitlabSvc,
+		GitLabCleanup:            gitlabCleanup,
 		AzureDevOps:              azureDevOpsSvc,
 		Jira:                     jiraSvc,
 		Linear:                   linearSvc,
@@ -603,14 +605,14 @@ func (s *gitlabHostStore) SetHost(ctx context.Context, host string) error {
 
 // initGitLabService wires up the GitLab integration. Failures are non-fatal:
 // the rest of the backend still boots without GitLab configured.
-func initGitLabService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *gitlab.Service {
+func initGitLabService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) (*gitlab.Service, func() error) {
 	adapter := &gitlabSecretAdapter{store: secretsStore}
 	hostStore, hostStoreErr := newGitLabHostStore(dbPool)
 	if hostStoreErr != nil {
 		log.Warn("GitLab host store unavailable (non-fatal)", zap.Error(hostStoreErr))
-		return nil
+		return nil, nil
 	}
-	svc, _, err := gitlab.Provide(context.Background(), adapter, hostStore, log)
+	svc, cleanup, err := gitlab.Provide(context.Background(), adapter, hostStore, log)
 	if err != nil {
 		log.Warn("GitLab service initialization failed (non-fatal)", zap.Error(err))
 	}
@@ -629,7 +631,7 @@ func initGitLabService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 			log.Warn("GitLab task-mr store unavailable (non-fatal)", zap.Error(storeErr))
 		}
 	}
-	return svc
+	return svc, cleanup
 }
 
 // initJiraService wires up the Jira integration. Failures are non-fatal.

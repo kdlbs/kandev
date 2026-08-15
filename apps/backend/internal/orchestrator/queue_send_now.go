@@ -122,7 +122,11 @@ func (s *Service) sendQueuedNowAfterCapture(
 }
 
 func (s *Service) restorePendingQueuedDispatchForSendNow(ctx context.Context, sessionID string) error {
-	if !s.isQueuedDispatchInFlight(sessionID) {
+	// A live Send Now successor is intentionally replaceable after the
+	// cancellation coordinator has settled it. Only a pending FIFO handoff
+	// needs to be restored here; an accepted FIFO handoff is rejected by the
+	// caller and a live successor must pass through cancellation below.
+	if s.pendingQueuedDispatch(sessionID) == nil {
 		return nil
 	}
 	reservation, err := s.pendingQueuedDispatchForSendNow(sessionID)
@@ -294,6 +298,9 @@ func (s *Service) claimAndDispatchSendNow(ctx context.Context, sessionID, scope 
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 	reservation := s.markQueuedDispatchInFlightWithSourceLocked(sessionID, claim.Dispatch.ID, nil)
+	if reservation != nil {
+		reservation.liveEligible.Store(true)
+	}
 	if !s.launchSendNowClaim(claim, reservation) {
 		if restoreErr := s.restoreSendNowClaimWithRetry(context.Background(), claim); restoreErr != nil {
 			s.logger.Error("failed to restore send-now claim after service shutdown",
@@ -409,7 +416,6 @@ func (s *Service) executeSendNowClaimWithContext(
 		restore()
 		return
 	}
-
 	if err := s.promptSendNowClaim(ctx, claim); err != nil {
 		s.logger.Warn("send-now replacement prompt failed; restoring queue claim",
 			zap.String("session_id", sessionID), zap.Error(err))

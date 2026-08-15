@@ -37,6 +37,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -109,6 +110,17 @@ type MessageCreator interface {
 	// InvalidateModelCache clears any cached model for a session, forcing the next
 	// message to re-read the model from the DB. Called after model switches.
 	InvalidateModelCache(sessionID string)
+}
+
+// SubagentContextRecorder persists a durable relational record of a subagent
+// (Task tool) invocation observed on a tool-call frame. It returns nothing —
+// a repository failure never fails the enclosing message write, turn, or
+// agent stream (AC-27 in
+// docs/specs/subagent-context-persistence/spec.md). Implemented by
+// taskservice.Service via an adapter; optional, so an installation that
+// never wires it behaves exactly as before.
+type SubagentContextRecorder interface {
+	RecordSubagentContext(ctx context.Context, req taskservice.RecordSubagentContextRequest)
 }
 
 // TurnService is an interface for managing session turns
@@ -291,7 +303,7 @@ type sessionExecutorStore interface {
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	DeleteLiveMonitorSnapshots(ctx context.Context, sessionID string) error
 	UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
-	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
+	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error)
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error
 	// Session listing + delete
@@ -360,6 +372,11 @@ type Service struct {
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
+
+	// subagentContexts optionally persists a relational record of subagent
+	// (Task tool) invocations recognized on the tool-call frame paths. Nil is
+	// safe: both call sites guard on it. See SetSubagentContextRecorder.
+	subagentContexts SubagentContextRecorder
 
 	// Turn service for managing session turns
 	turnService TurnService
@@ -928,6 +945,13 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetSubagentContextRecorder wires the optional subagent-context writer.
+// If not set, subagent tool-call frames are recognized and rendered exactly
+// as before; only the durable relational record is skipped.
+func (s *Service) SetSubagentContextRecorder(r SubagentContextRecorder) {
+	s.subagentContexts = r
+}
+
 // SetAttachmentReader wires the backend attachment store into passthrough
 // prompt delivery so claimed descriptors can be streamed into the workspace.
 func (s *Service) SetAttachmentReader(reader AttachmentReader) {
@@ -1408,12 +1432,14 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 
 	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
 		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
+			s.bindAcceptedDispatchTurn(sessionID, turnID)
 			return turnID, false, nil, nil
 		}
 	}
 
 	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); turn != nil {
 		s.activeTurns.Store(sessionID, turn.ID)
+		s.bindAcceptedDispatchTurn(sessionID, turn.ID)
 		return turn.ID, false, nil, nil
 	} else if err != nil {
 		return "", false, nil, fmt.Errorf("look up active turn: %w", err)
@@ -1436,6 +1462,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 	if reserve {
 		return turn.ID, true, turn, nil
 	}
+	s.bindAcceptedDispatchTurn(sessionID, turn.ID)
 	return turn.ID, true, nil, nil
 }
 
@@ -1451,10 +1478,34 @@ func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) 
 }
 
 func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
-	// Stream-only completion paths call this helper directly rather than the
-	// session wrapper. Clear the accepted queued-dispatch ownership here too,
-	// otherwise a completed Send Now/FIFO successor can permanently block the
-	// next queue action.
+	s.completeTurnForTaskSessionWithSuccessorPolicy(ctx, taskID, sessionID, true)
+}
+
+// completeTurnForTaskSessionWithSuccessorPolicy reconciles active turns while
+// optionally preserving an accepted replacement. Only a stream event that has
+// been proven to belong to a superseded prompt may preserve that replacement;
+// the current successor's own terminal event must settle it normally.
+func (s *Service) completeTurnForTaskSessionWithSuccessorPolicy(
+	ctx context.Context,
+	taskID, sessionID string,
+	preserveAcceptedSuccessor bool,
+) {
+	// Stream-only completion of a cancelled predecessor must not wipe a
+	// Send Now / FIFO successor that has already claimed prompt ownership.
+	// The ready-path wrapper (completeTurnForSession) still clears the
+	// marker when the successor turn itself settles, so the next queue
+	// action is not blocked forever.
+	if preserveAcceptedSuccessor && s.acceptedDispatchInFlight(sessionID) {
+		if successor := s.acceptedDispatchSuccessorTurn(sessionID); successor != "" {
+			if err := s.completeTurnsExcept(ctx, sessionID, successor); err != nil {
+				s.logger.Warn("failed to reconcile predecessor turn while successor dispatch is accepted",
+					zap.String("session_id", sessionID),
+					zap.String("successor_turn_id", successor),
+					zap.Error(err))
+			}
+		}
+		return
+	}
 	s.clearAcceptedQueuedDispatch(sessionID)
 	if err := s.completeTurnForTaskSessionChecked(ctx, taskID, sessionID); err != nil {
 		s.logger.Warn("failed to reconcile active turn",
@@ -1548,6 +1599,47 @@ func (s *Service) completeExpectedTurn(ctx context.Context, sessionID, expectedT
 		return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, active.ID)
 	}
 	return fmt.Errorf("captured cancelled turn %s remains open", expectedTurnID)
+}
+
+func (s *Service) completeTurnsExcept(ctx context.Context, sessionID, keepTurnID string) error {
+	if s.turnService == nil || keepTurnID == "" {
+		return nil
+	}
+
+	const maxIterations = 16
+	closed := 0
+	for closed < maxIterations {
+		turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+		if err != nil {
+			if isNoActiveTurnError(err) {
+				return nil
+			}
+			return fmt.Errorf("look up active turn: %w", err)
+		}
+		if turn == nil || turn.ID == keepTurnID {
+			s.activeTurns.Store(sessionID, keepTurnID)
+			return nil
+		}
+		if err := s.turnService.CompleteTurn(ctx, turn.ID); err != nil {
+			return fmt.Errorf("complete predecessor turn %s: %w", turn.ID, err)
+		}
+		closed++
+	}
+	active, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		if isNoActiveTurnError(err) {
+			return fmt.Errorf("closed %d predecessor turns but successor %s was not found", closed, keepTurnID)
+		}
+		return fmt.Errorf("verify successor turn %s after closing %d predecessors: %w", keepTurnID, closed, err)
+	}
+	if active == nil {
+		return fmt.Errorf("closed %d predecessor turns but successor %s was not found", closed, keepTurnID)
+	}
+	if active.ID != keepTurnID {
+		return fmt.Errorf("closed %d predecessor turns but active turn is %s, want successor %s", closed, active.ID, keepTurnID)
+	}
+	s.activeTurns.Store(sessionID, keepTurnID)
+	return nil
 }
 
 func (s *Service) completeAllTurns(ctx context.Context, sessionID string) error {

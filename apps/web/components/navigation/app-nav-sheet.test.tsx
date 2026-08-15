@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { JSX } from "react";
 import { AppNavSheet } from "./app-nav-sheet";
 import { AppNavSections, useAppNavDialogs } from "./app-nav-sections";
 
@@ -20,6 +21,11 @@ const state = {
 
 let healthHasIssues = false;
 let statusSeverity: "none" | "unstable" | "lost" = "none";
+let workspaceActionsRegistrations: Array<{
+  registrationId: string;
+  pluginId: string;
+  Component: (props: { slotProps?: unknown }) => JSX.Element;
+}> = [];
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
@@ -35,7 +41,11 @@ vi.mock("@/hooks/use-in-office", () => ({
 }));
 
 vi.mock("@/lib/plugins/registry", () => ({
-  usePluginRegistry: () => ({ getNavRegistrations: () => [] }),
+  usePluginRegistry: () => ({
+    getNavRegistrations: () => [],
+    getSlotRegistrations: (name: string) =>
+      name === "sidebar-workspace-actions" ? workspaceActionsRegistrations : [],
+  }),
 }));
 
 vi.mock("@/hooks/use-nav-availability", () => ({
@@ -107,6 +117,7 @@ describe("AppNavSheet", () => {
   beforeEach(() => {
     healthHasIssues = false;
     resolvedTheme = "light";
+    workspaceActionsRegistrations = [];
     vi.clearAllMocks();
   });
   afterEach(cleanup);
@@ -139,12 +150,33 @@ describe("AppNavSheet", () => {
       "/?home=overview&workspaceId=ws-1",
     );
   });
+
+  it("exposes workspace actions through the shared phone navigation sheet", () => {
+    let captured: unknown;
+    workspaceActionsRegistrations = [
+      {
+        registrationId: "workspace-action",
+        pluginId: "plugin-1",
+        Component: ({ slotProps }) => {
+          captured = slotProps;
+          return <button type="button" data-testid="mobile-workspace-action" />;
+        },
+      },
+    ];
+
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId("app-nav-trigger"));
+
+    expect(screen.getByTestId("mobile-workspace-action")).not.toBeNull();
+    expect(captured).toEqual({ workspaceId: "ws-1", presentation: "mobile" });
+  });
 });
 
 describe("AppNavSections", () => {
   beforeEach(() => {
     healthHasIssues = false;
     statusSeverity = "none";
+    workspaceActionsRegistrations = [];
     vi.clearAllMocks();
   });
   afterEach(cleanup);
@@ -210,6 +242,7 @@ describe("AppNavSections theme toggle", () => {
   beforeEach(() => {
     healthHasIssues = false;
     resolvedTheme = "light";
+    workspaceActionsRegistrations = [];
     vi.clearAllMocks();
   });
   afterEach(cleanup);

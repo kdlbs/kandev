@@ -258,6 +258,9 @@ func (m *mockRepository) DeleteMessage(ctx context.Context, id string) error {
 func (m *mockRepository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 	return nil
 }
+func (m *mockRepository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) GetTurn(ctx context.Context, id string) (*models.Turn, error) {
 	return nil, nil
 }
@@ -536,8 +539,8 @@ func (m *mockRepository) GetGitSnapshotsBySession(ctx context.Context, sessionID
 }
 
 // Session Commit operations
-func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error {
-	return nil
+func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error) {
+	return true, nil
 }
 func (m *mockRepository) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
 	return nil, nil

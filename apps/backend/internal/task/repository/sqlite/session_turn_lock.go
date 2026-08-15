@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
@@ -17,7 +15,7 @@ const sessionTurnLockNamespace = "task-session-turn:"
 // following READ COMMITTED statement observes commits made by the prior owner.
 func lockSessionTurnWrites(
 	ctx context.Context,
-	tx *sqlx.Tx,
+	tx taskSessionExecutor,
 	driverName string,
 	sessionIDs ...string,
 ) error {

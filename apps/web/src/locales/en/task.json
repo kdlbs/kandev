@@ -725,6 +725,7 @@
   "messageCount_one": "{{count}} message",
   "messageCount_other": "{{count}} messages",
   "messageMetadata": "Message metadata",
+  "messageMetadataEntries": "Message metadata entries",
   "messageMetadataTitle": "Message Metadata",
   "messageNotSent": "Message not sent",
   "messageSendStatusUnknown": "Message send status unknown",
