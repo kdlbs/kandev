@@ -179,7 +179,9 @@ describe("selectTaskWithLayout pending selection races", () => {
 });
 
 describe("selectTaskWithLayout pending summary races", () => {
-  it("falls back to task navigation when the pending action changes", async () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("discards selection when the pending action changes", async () => {
     const initialTask = {
       id: PENDING_TASK_ID,
       primarySessionId: PENDING_SESSION_ID,
@@ -226,11 +228,11 @@ describe("selectTaskWithLayout pending summary races", () => {
 
     expect(loadTaskSessionsForTask).toHaveBeenCalledWith(PENDING_TASK_ID, { force: true });
     expect(switchToSession).not.toHaveBeenCalled();
-    expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID);
-    expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(setActiveTask).not.toHaveBeenCalled();
+    expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
   });
 
-  it("falls back when a same-action summary revision can have a new owner", async () => {
+  it("discards selection when a same-action summary revision can have a new owner", async () => {
     const initialTask = {
       id: PENDING_TASK_ID,
       primarySessionId: PENDING_SESSION_ID,
@@ -276,8 +278,8 @@ describe("selectTaskWithLayout pending summary races", () => {
     await flushTaskSelection();
 
     expect(switchToSession).not.toHaveBeenCalled();
-    expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID);
-    expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
+    expect(setActiveTask).not.toHaveBeenCalled();
+    expect(replaceTaskUrl).not.toHaveBeenCalledWith(PENDING_TASK_ID);
   });
 });
 

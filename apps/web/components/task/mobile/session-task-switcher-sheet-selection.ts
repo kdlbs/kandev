@@ -91,7 +91,8 @@ export async function selectPendingTaskFromSheet(
     pendingAction: params.taskPendingAction,
   };
   if (!selectionIsCurrent(params)) return;
-  if (targetSessionId && pendingActionIsCurrent(params, params.taskId, initialSnapshot)) {
+  if (!pendingActionIsCurrent(params, params.taskId, initialSnapshot)) return;
+  if (targetSessionId) {
     params.setActiveSession(params.taskId, targetSessionId);
   } else {
     params.setActiveTask(params.taskId);

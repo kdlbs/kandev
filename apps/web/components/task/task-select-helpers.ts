@@ -374,7 +374,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
       .then((sessions) => {
         if (selectionGuard.wasSuperseded()) return;
         if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) {
-          return openTaskWithoutSession(params, navigateToTask);
+          return;
         }
         const currentOldSessionId = store.getState().tasks.activeSessionId;
         const resolvedSessionId = resolveTaskSessionId({
@@ -399,7 +399,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
     .then(async (sessions) => {
       if (selectionGuard.wasSuperseded()) return;
       if (pendingSelectionOwnerChanged(store, taskId, pendingSnapshot)) {
-        return openTaskWithoutSession(params, navigateToTask);
+        return;
       }
       const currentOldSessionId = store.getState().tasks.activeSessionId;
       const sessionId = resolveTaskSessionId({
