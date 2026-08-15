@@ -188,7 +188,9 @@ func TestPostgresExpireActiveClarificationMessagesPreservesTerminalRows(t *testi
 }
 
 func TestPostgresTurnCreationSerializesWithClarificationDetach(t *testing.T) {
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	// The blocker, detach, turn creation, and lock observer must use separate
+	// physical connections. The regular helper intentionally exposes one.
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 4)
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)
