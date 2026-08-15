@@ -104,6 +104,14 @@ test.describe("Attach local workspace sources", () => {
 
     if (!task.session_id) throw new Error("task creation did not return a session id");
     await waitForWorkspaceReady(apiClient, task.id, task.session_id);
+
+    // The "Add folder" control is gated on the task's primary executor
+    // binding. Poll the backend directly for it rather than relying on the
+    // later "Add folder" click landing after it incidentally.
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).primary_executor_type)
+      .not.toBeNull();
+
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();

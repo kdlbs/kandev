@@ -115,6 +115,23 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.statusSummary).toEqual(snapshot.tasks[0].status_summary);
   });
 
+  it("maps the primary executor binding onto the kanban task", () => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].primary_executor_id = "exec-worktree";
+    snapshot.tasks[0].primary_executor_type = "worktree";
+    snapshot.tasks[0].primary_executor_name = "Worktree";
+    snapshot.tasks[0].is_remote_executor = false;
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]).toMatchObject({
+      primaryExecutorId: "exec-worktree",
+      primaryExecutorType: "worktree",
+      primaryExecutorName: "Worktree",
+      isRemoteExecutor: false,
+    });
+  });
+
   it("preserves workflow step WIP fields", () => {
     const state = snapshotToState({
       workflow: {

@@ -17,6 +17,28 @@ describe("getWorkspaceSourceCapabilities", () => {
     },
   );
 
+  it.each([
+    "local",
+    "local_pc",
+    "worktree",
+    "local_docker",
+    "remote_docker",
+    "ssh",
+    "sprites",
+  ] as const)("marks executor capabilities as known once resolved for %s", (executorType) => {
+    expect(getWorkspaceSourceCapabilities(executorType).executorCapabilitiesKnown).toBe(true);
+  });
+
+  it.each([null, undefined])(
+    "marks executor capabilities as unknown, not unsupported, for %s",
+    (executorType) => {
+      expect(getWorkspaceSourceCapabilities(executorType)).toMatchObject({
+        canAddFolders: false,
+        executorCapabilitiesKnown: false,
+      });
+    },
+  );
+
   it.each(["local", "local_pc"] as const)(
     "uses the live checkout and does not offer a checkout branch for %s",
     (executorType) => {

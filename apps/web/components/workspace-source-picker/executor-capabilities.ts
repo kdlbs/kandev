@@ -15,6 +15,12 @@ export function getWorkspaceSourceCapabilities(
   canAddFolders: boolean;
   canChooseCheckoutBranch: boolean;
   requiresCloneableLocalRepository: boolean;
+  /**
+   * False while the primary executor binding has not resolved yet (`executorType`
+   * is nullish). Callers must not treat that the same as a known executor that
+   * cannot host folders — an unresolved binding means "not yet known," not "no."
+   */
+  executorCapabilitiesKnown: boolean;
 } {
   const usesLiveCheckout = executorType === "local" || executorType === "local_pc";
   const requiresClone =
@@ -26,6 +32,7 @@ export function getWorkspaceSourceCapabilities(
     canAddFolders: usesLiveCheckout || executorType === "worktree",
     canChooseCheckoutBranch: !usesLiveCheckout,
     requiresCloneableLocalRepository: requiresClone,
+    executorCapabilitiesKnown: executorType !== null && executorType !== undefined,
   };
 }
 

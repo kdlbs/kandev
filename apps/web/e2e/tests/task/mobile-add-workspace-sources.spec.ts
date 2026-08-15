@@ -56,6 +56,13 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     },
   );
 
+  // The "Add folder" control is gated on the task's primary executor binding.
+  // Poll the backend directly for it rather than budgeting the later UI
+  // assertion for the async session launch that produces it.
+  await expect
+    .poll(async () => (await apiClient.getTask(task.id)).primary_executor_type)
+    .not.toBeNull();
+
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -147,14 +154,11 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   const addRepository = drawer.getByRole("button", { name: "Add repository" });
   const addFolder = drawer.getByRole("button", { name: "Add folder" });
   const submit = drawer.getByTestId("add-workspace-sources-submit");
-  // The "Add folder" control is gated on activeTask.primaryExecutorType, which
-  // arrives from a follow-up office.task.updated WS event once the primary
-  // session's executor is bound and can lag the drawer mount on a loaded CI
-  // shard. The drawer re-renders reactively when that field hydrates, so wait
-  // for the button with a generous timeout instead of measuring a not-yet-
-  // rendered button (a null box that otherwise stalls until the suite timeout).
+  // The "Add folder" control is gated on activeTask.primaryExecutorType. The
+  // poll before navigation already confirmed the backend has resolved it, so
+  // the drawer renders it on first paint and this needs no extended budget.
   await expect(addRepository).toBeVisible();
-  await expect(addFolder).toBeVisible({ timeout: 30_000 });
+  await expect(addFolder).toBeVisible();
   const [addRepositoryBox, addFolderBox] = await Promise.all([
     addRepository.boundingBox(),
     addFolder.boundingBox(),

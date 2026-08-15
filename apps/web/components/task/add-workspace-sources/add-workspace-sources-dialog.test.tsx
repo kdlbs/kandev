@@ -54,7 +54,7 @@ function Harness({
   executorType = "worktree",
 }: {
   makeTurnActive?: boolean;
-  executorType?: string;
+  executorType?: string | null;
 }) {
   return (
     <StateProvider>
@@ -68,7 +68,7 @@ function HarnessContent({
   executorType,
 }: {
   makeTurnActive: boolean;
-  executorType: string;
+  executorType: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [opener, setOpener] = useState<HTMLElement | null>(null);
@@ -197,6 +197,24 @@ describe("AddWorkspaceSourcesDialog", () => {
     openRepositoryMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Local Git repository" }));
     expect(form.querySelectorAll('[role="alert"]')).toHaveLength(2);
+  });
+
+  it("shows Add folder disabled with a touch-visible reason while the executor is unresolved", async () => {
+    render(<Harness executorType={null} />);
+
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    const addFolder = screen.getByRole("button", { name: /Add folder/ }) as HTMLButtonElement;
+    expect(addFolder.disabled).toBe(true);
+    expect(
+      screen.getByText("Waiting to confirm this task's executor supports folders"),
+    ).toBeTruthy();
+  });
+
+  it("keeps Add folder absent once the executor is known not to support folders", async () => {
+    render(<Harness executorType="local_docker" />);
+
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    expect(screen.queryByRole("button", { name: /Add folder/ })).toBeNull();
   });
 
   it.each([
