@@ -63,6 +63,7 @@ describe("scrollEditorIfMounted", () => {
 
     expect(editor.setPosition).toHaveBeenCalledWith({ lineNumber: 42, column: 3 });
     expect(editor.revealLineInCenter).toHaveBeenCalledWith(42);
+    expect(editor.layout).not.toHaveBeenCalled();
     expect(editor.focus).toHaveBeenCalledTimes(1);
     expect(consumePendingCursorPosition(APP_PATH)).toBeUndefined();
   });

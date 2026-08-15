@@ -69,8 +69,8 @@ export function FileViewerContent({
     const fileChanged =
       previous.path !== path || previous.repo !== repo || previous.sessionId !== sessionId;
     fileIdentityRef.current = { path, repo, sessionId };
-    if (!view) return;
-    if (fileChanged) clearCodeMirrorCursorFlash(view);
+    if (!view || !fileChanged) return;
+    clearCodeMirrorCursorFlash(view);
     revealPendingCodeMirrorCursor(view, path, repo, sessionId);
   }, [path, repo, sessionId]);
 

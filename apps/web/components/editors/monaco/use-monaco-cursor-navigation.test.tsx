@@ -81,6 +81,7 @@ describe("useMonacoCursorNavigation", () => {
     expect(fake.editor.setPosition).not.toHaveBeenCalled();
     act(() => fake.switchToTarget());
 
+    expect(fake.editor.layout).toHaveBeenCalledTimes(1);
     expect(fake.editor.setPosition).toHaveBeenCalledWith({ lineNumber: 180, column: 7 });
     expect(fake.editor.revealLineInCenter).toHaveBeenCalledWith(180);
     expect(fake.decorationCollections[0].initial).toEqual([

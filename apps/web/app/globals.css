@@ -1853,6 +1853,7 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 /* One-shot destination cue for workspace content-search editor reveals. */
 .editor-content-search-flash {
   background-color: color-mix(in oklab, var(--warning) 34%, transparent);
+  /* Keep duration in sync with EDITOR_CONTENT_SEARCH_FLASH_DURATION_MS. */
   animation: editor-content-search-flash 1.2s ease-out forwards;
 }
 @keyframes editor-content-search-flash {

@@ -230,7 +230,7 @@ export function revealMonacoEditor(editor: MountedMonacoEditor, target: CursorPo
   // A fresh Dockview panel can mount Monaco before automaticLayout has measured
   // the newly active container. Centering against that stale zero-size layout
   // updates the cursor but leaves the viewport at the top of the file.
-  editor.layout();
+  if (target.flashLine) editor.layout();
   editor.setPosition({ lineNumber: target.line, column: target.column });
   editor.revealLineInCenter(target.line);
   if (target.flashLine) flashMonacoEditorLine(editor, target.line);

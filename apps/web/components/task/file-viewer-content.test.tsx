@@ -1,8 +1,10 @@
 import { act, render } from "@testing-library/react";
 import type { EditorView } from "@codemirror/view";
-import { describe, expect, it, vi } from "vitest";
+import { useLayoutEffect } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const editorHarness = vi.hoisted(() => ({
+  autoCreateView: null as EditorView | null,
   extensions: [] as unknown[],
   onCreateEditor: null as ((view: EditorView) => void) | null,
 }));
@@ -20,6 +22,9 @@ vi.mock("@uiw/react-codemirror", () => ({
   }) => {
     editorHarness.extensions = extensions;
     editorHarness.onCreateEditor = onCreateEditor;
+    useLayoutEffect(() => {
+      if (editorHarness.autoCreateView) onCreateEditor(editorHarness.autoCreateView);
+    }, [onCreateEditor]);
     return <div data-testid="file-viewer-codemirror" />;
   },
 }));
@@ -44,6 +49,11 @@ vi.mock("@/hooks/use-file-editors", () => ({
 
 import { FileViewerContent } from "./file-viewer-content";
 
+afterEach(() => {
+  editorHarness.autoCreateView = null;
+  vi.clearAllMocks();
+});
+
 describe("FileViewerContent cursor navigation", () => {
   it("uses shared CodeMirror reveal behavior on mount and reused path changes", () => {
     const view = {} as EditorView;
@@ -64,6 +74,7 @@ describe("FileViewerContent cursor navigation", () => {
       "frontend",
       "session-1",
     );
+    expect(revealPendingCodeMirrorCursor).toHaveBeenCalledTimes(1);
 
     rendered.rerender(
       <FileViewerContent
@@ -80,5 +91,21 @@ describe("FileViewerContent cursor navigation", () => {
       "frontend",
       "session-1",
     );
+  });
+
+  it("consumes the initial pending reveal once when CodeMirror creates in a layout effect", () => {
+    const view = {} as EditorView;
+    editorHarness.autoCreateView = view;
+
+    render(
+      <FileViewerContent
+        path="src/first.ts"
+        content="first"
+        repo="frontend"
+        sessionId="session-1"
+      />,
+    );
+
+    expect(revealPendingCodeMirrorCursor).toHaveBeenCalledTimes(1);
   });
 });
