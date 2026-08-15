@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-08-01
-updated: 2026-08-09
+updated: 2026-08-15
 owner: kandev
 ---
 
@@ -86,6 +86,9 @@ remain during migration, but switchers use the summary when present.
 - `active_error` is independent of the primary state icon. It represents the
   newest relevant recoverable agent error and clears after an authoritative
   dismissal or a newer agent response according to the existing error rules.
+- Successful session deletion is an authoritative removal of that session's
+  error. The summary removes the error without a backend restart or another
+  session event.
 - Git totals aggregate the latest observation for every repository in the
   task. A multi-repository update must not expose a partial replacement that
   forgets unchanged repositories.
@@ -230,6 +233,9 @@ intermediate replacement.
 - **GIVEN** a recoverable error is dismissed or followed by a newer agent
   response, **WHEN** the projector processes that occurrence, **THEN** the
   independent error indicator clears on both task switchers.
+- **GIVEN** a stopped session owns the task's `active_error`, **WHEN** the user
+  deletes that session, **THEN** desktop and mobile task switchers remove its
+  error indicator while the task and replacement sessions remain available.
 - **GIVEN** a session's agent requests permission and, before that request is
   answered, the same session emits an unrelated tool call/execute/read message
   that reaches its own terminal status, **WHEN** the projector processes that
@@ -289,3 +295,5 @@ intermediate replacement.
   [`../../plans/session-stream-overload-isolation/plan.md`](../../plans/session-stream-overload-isolation/plan.md)
 - Startup-summary repair:
   [`../../plans/backend-runtime-state-ownership/plan.md`](../../plans/backend-runtime-state-ownership/plan.md)
+- Deleted-session error repair:
+  [`../../plans/deleted-session-error-summary/plan.md`](../../plans/deleted-session-error-summary/plan.md)

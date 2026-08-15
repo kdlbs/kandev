@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/statussummary"
 )
 
 func TestArchiveTaskPublishesQueueStatusWithTaskID(t *testing.T) {
@@ -115,6 +116,67 @@ func TestDeleteSessionCancelsQueuedPromptsAndPublishesStatus(t *testing.T) {
 	}
 }
 
+func TestDeleteSessionClearsProjectedAgentError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	repo := setupTestRepo(t)
+	const taskID = "task-session-error"
+	const sessionID = "session-error"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCompleted)
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	svc.eventBus = eventBus
+	projector := statussummary.NewProjector(statussummary.ProjectorConfig{
+		Store:              repo,
+		EventBus:           eventBus,
+		ResolveWorkspace:   func(context.Context, string) (string, error) { return "ws1", nil },
+		CountQueuedPrompts: svc.messageQueue.CountPendingByTask,
+	})
+	if err := projector.Start(ctx); err != nil {
+		cancel()
+		eventBus.Close()
+		t.Fatalf("start status summary projector: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		projector.Close()
+		eventBus.Close()
+	})
+
+	if err := eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
+		events.TaskSessionErrorChanged,
+		"test",
+		map[string]interface{}{
+			"task_id":     taskID,
+			"session_id":  sessionID,
+			"active":      true,
+			"message":     "agent failed",
+			"occurred_at": "2026-08-15T10:00:00Z",
+			"stamp":       "error-stamp",
+		},
+	)); err != nil {
+		t.Fatalf("publish active error: %v", err)
+	}
+	beforeDelete, err := repo.LoadTaskStatusSummaries(ctx, []string{taskID})
+	if err != nil {
+		t.Fatalf("load summary before delete: %v", err)
+	}
+	if summary := beforeDelete[taskID]; summary == nil || summary.ActiveError == nil {
+		t.Fatalf("summary before delete = %+v, want active error", summary)
+	}
+
+	if err := svc.DeleteSession(ctx, sessionID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	afterDelete, err := repo.LoadTaskStatusSummaries(ctx, []string{taskID})
+	if err != nil {
+		t.Fatalf("load summary after delete: %v", err)
+	}
+	if summary := afterDelete[taskID]; summary == nil || summary.ActiveError != nil {
+		t.Fatalf("summary after delete = %+v, want deleted session error cleared", summary)
+	}
+}
 
 func TestQueueStatusNotifyUsesDetachedContext(t *testing.T) {
 	// Production: ArchiveTask commits then calls notify with the request ctx.

@@ -2796,6 +2796,7 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if err := s.repo.DeleteTaskSession(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
+	s.publishDeletedSessionError(ctx, taskID, sessionID)
 
 	// Drop the in-memory git snapshot throttle entry — the session will
 	// never receive another git event, so its cache slot is dead weight.
@@ -2823,6 +2824,26 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	}
 
 	return nil
+}
+
+func (s *Service) publishDeletedSessionError(ctx context.Context, taskID, sessionID string) {
+	if s.eventBus == nil {
+		return
+	}
+	if err := s.eventBus.Publish(context.WithoutCancel(ctx), events.TaskSessionErrorChanged, bus.NewEvent(
+		events.TaskSessionErrorChanged,
+		"orchestrator",
+		map[string]interface{}{
+			"task_id":    taskID,
+			"session_id": sessionID,
+			"active":     false,
+		},
+	)); err != nil {
+		s.logger.Warn("failed to publish deleted task session error event",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 }
 
 // cancelDeletedSessionQueue removes pending prompts left on a deleted session
