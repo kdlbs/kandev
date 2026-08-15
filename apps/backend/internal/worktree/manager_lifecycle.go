@@ -37,6 +37,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	}
 
 	if wt, handled, err := m.tryReuseExisting(ctx, req); handled {
+		if err == nil && wt != nil {
+			err = m.configureContributionDestination(ctx, req.RepositoryPath, wt.Path, wt.Branch, req.ContributionDestination)
+		}
 		return wt, err
 	}
 
@@ -70,6 +73,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	}
 	wt, err := m.createInTaskDir(ctx, req, baseRef, fallbackWarning, fallbackDetail)
 	if err != nil {
+		return nil, err
+	}
+	if err := m.configureContributionDestination(ctx, req.RepositoryPath, wt.Path, wt.Branch, req.ContributionDestination); err != nil {
 		return nil, err
 	}
 	return wt, nil

@@ -1270,6 +1270,7 @@
   "start2": "Start",
   "startAgent": "Start agent",
   "startAgent2": "Start Agent",
+  "composerStartAgentHint": "Sending a message will auto-start the agent.",
   "startDevServerPreview": "Start dev server preview",
   "startFreshSession": "Start fresh session",
   "startPlanMode": "Start Plan Mode",

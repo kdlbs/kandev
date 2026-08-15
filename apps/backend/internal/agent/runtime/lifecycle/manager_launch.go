@@ -219,6 +219,55 @@ func collectRemoteContributions(req *LaunchRequest) (map[string]models.RemoteCon
 	return bindings, nil
 }
 
+// collectContributionDestinations projects server-authored managed fork
+// destinations using the same workspace-subpath keys as remote contributions.
+func collectContributionDestinations(req *LaunchRequest) (map[string]models.ContributionDestination, error) {
+	if req == nil {
+		return nil, nil
+	}
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		if req.ContributionDestination == nil {
+			return nil, nil
+		}
+		if err := req.ContributionDestination.Validate(); err != nil {
+			return nil, fmt.Errorf("validate contribution destination: %w", err)
+		}
+		return map[string]models.ContributionDestination{"": *req.ContributionDestination}, nil
+	}
+	destinations := make(map[string]models.ContributionDestination)
+	for index, spec := range specs {
+		if spec.ContributionDestination == nil {
+			continue
+		}
+		if err := spec.ContributionDestination.Validate(); err != nil {
+			return nil, fmt.Errorf("validate contribution destination for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(spec)
+		}
+		if existing, ok := destinations[key]; ok {
+			if !sameContributionDestinationTarget(existing, *spec.ContributionDestination) {
+				return nil, fmt.Errorf("multiple contribution destinations target workspace repository %q", key)
+			}
+			continue
+		}
+		destinations[key] = *spec.ContributionDestination
+	}
+	if len(destinations) == 0 {
+		return nil, nil
+	}
+	return destinations, nil
+}
+
+func sameContributionDestinationTarget(left, right models.ContributionDestination) bool {
+	return strings.EqualFold(left.TargetRepository.Host, right.TargetRepository.Host) &&
+		left.TargetRepository.Path == right.TargetRepository.Path &&
+		left.TargetRepository.ProviderID == right.TargetRepository.ProviderID &&
+		left.TargetRepository.RemoteURL == right.TargetRepository.RemoteURL
+}
+
 // collectBaseBranches builds the per-repo {RepositoryName → base_branch}
 // map that agentctl reads to scope diff stats. Single-repo legacy launches
 // are recorded under the empty key "" so single-repo trackers (which have
@@ -715,6 +764,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if len(remoteContributions) > 0 {
 		metadata[MetadataKeyRemoteContributions] = remoteContributions
 	}
+	contributionDestinations, err := collectContributionDestinations(reqWithWorktree)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(contributionDestinations) > 0 {
+		metadata[MetadataKeyContributionDestinations] = contributionDestinations
+	}
 
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -747,6 +803,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		OnProgress:                     onProgress,
 		RemoteContributions:            remoteContributions,
+		ContributionDestinations:       contributionDestinations,
 	}
 
 	launchCtx, launchCancel := withLaunchPhaseTimeout(ctx)
@@ -847,34 +904,35 @@ func (m *Manager) runEnvironmentPreparerWithProgress(
 func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName executor.Name) *EnvPrepareRequest {
 	repoSetupScript, _ := req.Metadata[MetadataKeyRepoSetupScript].(string)
 	prepReq := &EnvPrepareRequest{
-		TaskID:                 req.TaskID,
-		WorkspaceID:            req.WorkspaceID,
-		SessionID:              req.SessionID,
-		TaskTitle:              req.TaskTitle,
-		ExecutorType:           execName,
-		WorkspacePath:          workspacePath,
-		RepositoryPath:         req.RepositoryPath,
-		RepositoryID:           req.RepositoryID,
-		UseWorktree:            req.UseWorktree,
-		WorktreeID:             req.WorktreeID,
-		SetupScript:            req.SetupScript,
-		RepoSetupScript:        repoSetupScript,
-		BaseBranch:             req.BaseBranch,
-		DefaultBranch:          req.DefaultBranch,
-		CheckoutBranch:         req.CheckoutBranch,
-		PRNumber:               req.PRNumber,
-		RemoteContribution:     req.RemoteContribution,
-		WorktreeBranch:         getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
-		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
-		WorktreeBranchTicket:   req.WorktreeBranchTicket,
-		PullBeforeWorktree:     req.PullBeforeWorktree,
-		RemoteSyncHandled:      req.RemoteSyncHandled,
-		TaskDirName:            req.TaskDirName,
-		RepoName:               req.RepoName,
-		BranchSlug:             req.BranchSlug,
-		BranchIdentitySlug:     req.BranchIdentitySlug,
-		Env:                    req.Env,
+		TaskID:                  req.TaskID,
+		WorkspaceID:             req.WorkspaceID,
+		SessionID:               req.SessionID,
+		TaskTitle:               req.TaskTitle,
+		ExecutorType:            execName,
+		WorkspacePath:           workspacePath,
+		RepositoryPath:          req.RepositoryPath,
+		RepositoryID:            req.RepositoryID,
+		UseWorktree:             req.UseWorktree,
+		WorktreeID:              req.WorktreeID,
+		SetupScript:             req.SetupScript,
+		RepoSetupScript:         repoSetupScript,
+		BaseBranch:              req.BaseBranch,
+		DefaultBranch:           req.DefaultBranch,
+		CheckoutBranch:          req.CheckoutBranch,
+		PRNumber:                req.PRNumber,
+		RemoteContribution:      req.RemoteContribution,
+		ContributionDestination: req.ContributionDestination,
+		WorktreeBranch:          getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
+		WorktreeBranchPrefix:    req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate:  req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:    req.WorktreeBranchTicket,
+		PullBeforeWorktree:      req.PullBeforeWorktree,
+		RemoteSyncHandled:       req.RemoteSyncHandled,
+		TaskDirName:             req.TaskDirName,
+		RepoName:                req.RepoName,
+		BranchSlug:              req.BranchSlug,
+		BranchIdentitySlug:      req.BranchIdentitySlug,
+		Env:                     req.Env,
 	}
 	// Multi-repo: forward the repo list when the launch request carries one.
 	// Each per-repo entry inherits the request-level RepoSetupScript when its
@@ -887,23 +945,24 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				setup = repoSetupScript
 			}
 			specs = append(specs, RepoPrepareSpec{
-				RepositoryID:           r.RepositoryID,
-				RepositoryPath:         r.RepositoryPath,
-				RepoName:               r.RepoName,
-				BaseBranch:             r.BaseBranch,
-				DefaultBranch:          r.DefaultBranch,
-				CheckoutBranch:         r.CheckoutBranch,
-				PRNumber:               r.PRNumber,
-				RemoteContribution:     r.RemoteContribution,
-				WorktreeID:             r.WorktreeID,
-				WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
-				WorktreeBranchTemplate: r.WorktreeBranchTemplate,
-				WorktreeBranchTicket:   r.WorktreeBranchTicket,
-				PullBeforeWorktree:     r.PullBeforeWorktree,
-				RemoteSyncHandled:      r.RemoteSyncHandled,
-				RepoSetupScript:        setup,
-				BranchSlug:             r.BranchSlug,
-				BranchIdentitySlug:     r.BranchIdentitySlug,
+				RepositoryID:            r.RepositoryID,
+				RepositoryPath:          r.RepositoryPath,
+				RepoName:                r.RepoName,
+				BaseBranch:              r.BaseBranch,
+				DefaultBranch:           r.DefaultBranch,
+				CheckoutBranch:          r.CheckoutBranch,
+				PRNumber:                r.PRNumber,
+				RemoteContribution:      r.RemoteContribution,
+				WorktreeID:              r.WorktreeID,
+				WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
+				WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
+				WorktreeBranchTicket:    r.WorktreeBranchTicket,
+				PullBeforeWorktree:      r.PullBeforeWorktree,
+				RemoteSyncHandled:       r.RemoteSyncHandled,
+				RepoSetupScript:         setup,
+				BranchSlug:              r.BranchSlug,
+				BranchIdentitySlug:      r.BranchIdentitySlug,
+				ContributionDestination: r.ContributionDestination,
 			})
 		}
 		prepReq.Repositories = specs

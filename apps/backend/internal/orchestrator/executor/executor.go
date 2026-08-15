@@ -392,20 +392,21 @@ type LaunchAgentRequest struct {
 	CopyFiles string
 
 	// Worktree configuration for concurrent agent execution
-	UseWorktree            bool   // Whether to use a Git worktree for isolation
-	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID           string // Repository ID for worktree tracking
-	RepositoryPath         string // Path to the main repository (for worktree creation)
-	BaseBranch             string // Base branch for the worktree (e.g., "main")
-	DefaultBranch          string // Repository's default_branch, used as a fallback when BaseBranch is missing
-	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeBranchPrefix   string // Branch prefix for worktree branches
-	WorktreeBranchTemplate string // Branch name template for worktree branches
-	WorktreeBranchTicket   string // External ticket value for branch templates
-	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
-	RemoteSyncHandled      bool   // Provider-authenticated origin refresh already completed
+	UseWorktree             bool   // Whether to use a Git worktree for isolation
+	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID            string // Repository ID for worktree tracking
+	RepositoryPath          string // Path to the main repository (for worktree creation)
+	BaseBranch              string // Base branch for the worktree (e.g., "main")
+	DefaultBranch           string // Repository's default_branch, used as a fallback when BaseBranch is missing
+	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
+	WorktreeBranchPrefix    string // Branch prefix for worktree branches
+	WorktreeBranchTemplate  string // Branch name template for worktree branches
+	WorktreeBranchTicket    string // External ticket value for branch templates
+	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled       bool   // Provider-authenticated origin refresh already completed
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -436,24 +437,25 @@ type WorkspaceFolderSpec struct{ Name, LocalPath string }
 // the orchestrator package does not need to import lifecycle types into its
 // public API.
 type RepoSpec struct {
-	RepositoryID           string
-	RepositoryPath         string
-	RepositoryURL          string
-	RepoName               string
-	BaseBranch             string
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string
-	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeID             string
-	WorktreeBranchPrefix   string
-	WorktreeBranchTemplate string
-	WorktreeBranchTicket   string
-	PullBeforeWorktree     bool
-	RemoteSyncHandled      bool
-	RepoSetupScript        string
-	RepoCleanupScript      string
-	CopyFiles              string
+	RepositoryID            string
+	RepositoryPath          string
+	RepositoryURL           string
+	RepoName                string
+	BaseBranch              string
+	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch          string
+	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
+	WorktreeID              string
+	WorktreeBranchPrefix    string
+	WorktreeBranchTemplate  string
+	WorktreeBranchTicket    string
+	PullBeforeWorktree      bool
+	RemoteSyncHandled       bool
+	RepoSetupScript         string
+	RepoCleanupScript       string
+	CopyFiles               string
 	// BranchSlug, when non-empty, suffixes the repo dir so the same repo can
 	// host multiple branch worktrees as siblings within one task. Set by the
 	// orchestrator when buildRepoSpecs detects multiple rows sharing a

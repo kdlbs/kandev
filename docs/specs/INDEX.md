@@ -266,6 +266,8 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [mcp-session-observability](mcp-session-observability/spec.md) | approved |
 | [subagent-context-persistence](subagent-context-persistence/spec.md) | draft |
 | [auth](auth/spec.md) | building |
+| [auth — self-actions guard](auth/self-actions-guard.md) | shipped |
+| [auth — trusted proxies](auth/trusted-proxies.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
 | [improve-kandev](improve-kandev/spec.md) | building |

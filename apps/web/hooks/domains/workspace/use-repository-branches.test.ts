@@ -34,6 +34,26 @@ afterEach(() => {
 });
 
 describe("useBranches", () => {
+  it("retries a transient branch-list failure before caching the result", async () => {
+    listBranchesMock
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({ branches: [{ name: "main", type: "remote" }] });
+
+    const source: BranchSource = {
+      kind: "id",
+      workspaceId: WORKSPACE_ID,
+      repositoryId: "repo-retry",
+    };
+    renderHook(() => useBranches(source));
+
+    await waitFor(() =>
+      expect(setRepositoryBranchesMock).toHaveBeenCalledWith("repo-retry", [
+        { name: "main", type: "remote" },
+      ]),
+    );
+    expect(listBranchesMock).toHaveBeenCalledTimes(2);
+  });
+
   it("loads a new repository while the prior repository request is still pending", async () => {
     listBranchesMock
       .mockImplementationOnce(() => new Promise(() => undefined))

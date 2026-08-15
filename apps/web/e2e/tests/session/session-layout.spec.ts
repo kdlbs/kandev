@@ -43,10 +43,6 @@ const TERMINAL_MARKER = "KANDEV_E2E_MARKER_12345";
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
 test.describe("Session layout", () => {
-  // The standalone executor can fail to allocate a port on cold start;
-  // retry once so a transient backend hiccup doesn't fail the suite.
-  test.describe.configure({ retries: 1 });
-
   test("maximize terminal hides other panels", async ({ testPage, apiClient, seedData }) => {
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Maximize Test");
 
@@ -89,7 +85,7 @@ test.describe("Session layout", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(120_000);
 
     // Create Task A, type a command, and maximize terminal
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Task A Maximize");

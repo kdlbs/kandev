@@ -1721,17 +1721,21 @@ func (s *Service) completeAndStopSession(ctx context.Context, taskID string, ses
 	}
 }
 
-// maybySwitchSessionForProfile checks whether the step requires a different agent profile
-// and switches the session if so. Passthrough sessions are returned unchanged.
-// When the step has no explicit step/workflow profile, the current session is
-// preserved so workflow advancement does not reset the user's current agent mode.
-// Returns the effective session (new or original) and whether processing should continue.
-// A false return means the switch failed; the caller should return immediately.
-func (s *Service) maybySwitchSessionForProfile(
+// prepareWorkflowStepSession resolves the session that must execute a workflow
+// step before any on_enter action runs. Passthrough sessions and steps without
+// an effective profile keep the current session. Profile changes delegate to
+// the existing reuse/create lifecycle helpers.
+func (s *Service) prepareWorkflowStepSession(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
-) (*models.TaskSession, bool) {
+) (*models.TaskSession, bool, error) {
+	if session == nil {
+		return nil, false, fmt.Errorf("workflow step session is nil")
+	}
+	if step == nil {
+		return nil, false, fmt.Errorf("workflow step is nil")
+	}
 	if s.agentManager.IsPassthroughSession(ctx, session.ID) {
-		return session, true
+		return session, false, nil
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
@@ -1749,18 +1753,33 @@ func (s *Service) maybySwitchSessionForProfile(
 				session.IsPrimary = true
 			}
 		}
-		return session, true
+		return session, false, nil
 	}
 	newSession, err := s.switchSessionForStep(ctx, taskID, session, effectiveProfile)
+	if err != nil {
+		return nil, false, err
+	}
+	return newSession, true, nil
+}
+
+// maybySwitchSessionForProfile preserves the legacy processOnEnter failure
+// handling while sharing the error-returning step-entry preflight with direct
+// workflow-engine dispatch.
+func (s *Service) maybySwitchSessionForProfile(
+	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
+) (*models.TaskSession, bool) {
+	effective, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step)
 	if err != nil {
 		s.logger.Error("failed to switch session for step agent profile",
 			zap.String("task_id", taskID),
 			zap.String("step_id", step.ID),
 			zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		if session != nil {
+			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		}
 		return nil, false
 	}
-	return newSession, true
+	return effective, true
 }
 
 // processOnEnter processes the on_enter events for a step after transitioning to it.

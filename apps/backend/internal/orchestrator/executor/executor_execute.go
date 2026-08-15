@@ -1458,16 +1458,17 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
-			RepositoryID:           info.RepositoryID,
-			RepositoryPath:         info.RepositoryPath,
-			BaseBranch:             info.BaseBranch,
-			CheckoutBranch:         info.CheckoutBranch,
-			PRNumber:               info.PRNumber,
-			RemoteContribution:     info.RemoteContribution,
-			WorktreeBranchPrefix:   info.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: info.WorktreeBranchTemplate,
-			PullBeforeWorktree:     info.PullBeforeWorktree,
-			RemoteSyncHandled:      info.RemoteSyncHandled,
+			RepositoryID:            info.RepositoryID,
+			RepositoryPath:          info.RepositoryPath,
+			BaseBranch:              info.BaseBranch,
+			CheckoutBranch:          info.CheckoutBranch,
+			PRNumber:                info.PRNumber,
+			RemoteContribution:      info.RemoteContribution,
+			ContributionDestination: info.ContributionDestination,
+			WorktreeBranchPrefix:    info.WorktreeBranchPrefix,
+			WorktreeBranchTemplate:  info.WorktreeBranchTemplate,
+			PullBeforeWorktree:      info.PullBeforeWorktree,
+			RemoteSyncHandled:       info.RemoteSyncHandled,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
@@ -1531,6 +1532,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.PRNumber = repoInfo.PRNumber
 		req.RemoteContribution = repoInfo.RemoteContribution
+		req.ContributionDestination = repoInfo.ContributionDestination
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree

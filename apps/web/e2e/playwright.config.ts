@@ -58,6 +58,9 @@ export default defineConfig({
       // ApiClient). Serial within the file; afterAll restarts to baseline.
       name: "auth",
       testMatch: /auth\/.*\.spec\.ts/,
+      // mobile-users-* specs under tests/auth/ run in the mobile-chrome
+      // project (Pixel 5) instead of here.
+      testIgnore: /mobile-.*\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
     {

@@ -1811,6 +1811,7 @@ func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, 
 // If the session is not running, it will be resumed first. Then a prompt is sent using the
 // step's prompt_prefix, prompt_suffix, and plan_mode settings combined with the task description.
 func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessionID, workflowStepID string) error {
+	ctx = withWorkflowMetaCache(ctx)
 	s.logger.Debug("starting session for workflow step",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -1834,6 +1835,18 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	}
 	if session.TaskID != taskID {
 		return fmt.Errorf("session does not belong to task")
+	}
+	if !s.agentManager.IsPassthroughSession(ctx, session.ID) {
+		effectiveProfile := s.resolveStepAgentProfile(ctx, step)
+		if effectiveProfile != "" && effectiveProfile != session.AgentProfileID {
+			return fmt.Errorf(
+				"workflow step profile mismatch: step %q resolves to profile %q but session %q uses profile %q; route the session before prompting",
+				workflowStepID,
+				effectiveProfile,
+				session.ID,
+				session.AgentProfileID,
+			)
+		}
 	}
 
 	dbTask, err := s.repo.GetTask(ctx, taskID)

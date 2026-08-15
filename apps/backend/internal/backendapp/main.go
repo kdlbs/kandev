@@ -1962,15 +1962,16 @@ func buildHTTPServer(
 ) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	// Do not trust X-Forwarded-For by default: gin trusts all proxies out of
-	// the box, which would let a directly-reachable backend accept a spoofed
-	// client IP and defeat the login rate limiter (keyed on ClientIP). With no
-	// trusted proxies, ClientIP() falls back to the real peer RemoteAddr.
-	// Deployments behind a real proxy should front kandev with one that sets a
-	// trusted hop; revisit if a configurable trusted-proxy CIDR is added.
-	if err := router.SetTrustedProxies(nil); err != nil {
-		log.Warn("failed to clear trusted proxies", zap.Error(err))
-	}
+	// Trusted-proxy configuration for X-Forwarded-For via KANDEV_TRUSTED_PROXIES
+	// (comma-separated IPs/CIDRs). gin trusts all proxies out of the box,
+	// which would let a directly-reachable backend accept a spoofed client IP
+	// and defeat the login rate limiter (keyed on ClientIP). The default is no
+	// trusted proxies: ClientIP() falls back to the real peer RemoteAddr and
+	// forwarded headers are ignored. Deployments behind a real proxy set the
+	// env var to the proxy's IPs/CIDRs; a directly-reachable backend with the
+	// var set can have X-Forwarded-For spoofed, which also defeats the
+	// ClientIP-keyed login rate limiter.
+	configureTrustedProxies(router, log)
 	router.Use(httpmw.RequestLogger(log, kandevName))
 	router.Use(httpmw.OtelTracing(kandevName))
 	router.Use(gin.Recovery())
