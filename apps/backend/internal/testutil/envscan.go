@@ -22,6 +22,9 @@ import (
 // matched on the literal identifier os, so a file that imports os under an
 // alias or through a dot import is not scanned; no file in this repository
 // does either, and a review of one that did would be the place to catch it.
+// Names are likewise resolved against package-level constants with no scope
+// analysis, so a local variable shadowing one of those constants resolves to
+// the constant's value rather than its own.
 //
 // A package that funnels its reads through its own accessor (for example
 // (*GitOperator).environmentValue, which falls back to os.Environ) must name
@@ -30,7 +33,10 @@ import (
 // selector alone, so any receiver counts, as does a plain package-level
 // function of the same name. Only the first argument is read, so an accessor
 // that later grows a second parameter stays covered rather than silently
-// dropping every one of its call sites out of the scan.
+// dropping every one of its call sites out of the scan. For the same reason an
+// extraReader matching no call at all is an error rather than a no-op: the
+// match is by name, so renaming the accessor would otherwise leave the guard
+// compiling, passing, and watching nothing.
 func AssertEnvReadsCovered(t testing.TB, scrubbed, exempt []string, extraReaders ...string) {
 	t.Helper()
 	fileSet := token.NewFileSet()
@@ -67,11 +73,57 @@ func uncoveredEnvReads(fileSet *token.FileSet, files []*ast.File, scrubbed, exem
 	for _, name := range extraReaders {
 		scan.extraReaders[name] = true
 	}
-	var messages []string
+	messages := staleExtraReaders(files, extraReaders)
 	for _, file := range files {
 		messages = append(messages, uncoveredEnvReadsInFile(fileSet, file, scan)...)
 	}
 	return messages
+}
+
+// staleExtraReaders returns one message per caller-declared extra reader that
+// no scanned call in the package targets. Extra readers are matched by name, so
+// the compiler cannot follow a rename of the accessor: the string keeps
+// compiling, nothing fails, and the guard silently stops watching every read
+// that went through it — the blind spot extraReaders exists to close, reopened
+// by an ordinary refactor. A reader that matches nothing is therefore an error.
+func staleExtraReaders(files []*ast.File, extraReaders []string) []string {
+	var messages []string
+	for _, name := range extraReaders {
+		if callsExtraReader(files, name) {
+			continue
+		}
+		messages = append(messages, fmt.Sprintf("extra reader %q passed to AssertEnvReadsCovered matches no call in "+
+			"this package; if the accessor was renamed, rename it here too, because the guard stops watching "+
+			"the reads that went through it", name))
+	}
+	return messages
+}
+
+// callsExtraReader reports whether any call the scan would look at targets
+// name, in either the receiver.method(...) or the bare function(...) spelling.
+// Argument-less calls are ignored to match envReadCalls, so "used" means
+// "actually scanned" rather than merely "mentioned".
+func callsExtraReader(files []*ast.File, name string) bool {
+	found := false
+	for _, file := range files {
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok || len(call.Args) == 0 {
+				return true
+			}
+			switch target := call.Fun.(type) {
+			case *ast.SelectorExpr:
+				found = found || target.Sel.Name == name
+			case *ast.Ident:
+				found = found || target.Name == name
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
 }
 
 func uncoveredEnvReadsInFile(fileSet *token.FileSet, file *ast.File, scan envScan) []string {

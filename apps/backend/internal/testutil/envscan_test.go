@@ -245,6 +245,55 @@ func read() string { return os.Getenv(fooEnv) }
 	}
 }
 
+// TestUncoveredEnvReadsStaleExtraReaderIsReported pins the rename protection.
+// Extra readers are matched by name, so renaming the accessor leaves the string
+// here compiling and matching nothing, and the guard goes back to watching only
+// os.Getenv. Proven against the real package: renaming
+// (*GitOperator).environmentValue to envValue package-wide and adding an
+// uncovered read through it left the process guard reporting ok, which is
+// exactly the blind spot extraReaders was added to close.
+func TestUncoveredEnvReadsStaleExtraReaderIsReported(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+type op struct{}
+
+// Renamed away from environmentValue; the guard's string was not updated.
+func (o *op) envValue(key string) string { return "" }
+
+func read(o *op) string { return o.envValue("FOO") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, []string{"FOO"}, nil, "environmentValue")
+	if len(messages) != 1 {
+		t.Fatalf("expected exactly one stale-extra-reader message, got %v", messages)
+	}
+	if !strings.Contains(messages[0], "environmentValue") {
+		t.Fatalf("message %q does not name the stale reader", messages[0])
+	}
+	if !strings.Contains(messages[0], "matches no call") {
+		t.Fatalf("message %q does not explain that the reader matched nothing", messages[0])
+	}
+}
+
+// TestUncoveredEnvReadsLiveExtraReaderIsNotReportedStale is the other half of
+// the pair: a reader that is genuinely called must not be reported, or the
+// staleness check would fire on every correct call site.
+func TestUncoveredEnvReadsLiveExtraReaderIsNotReportedStale(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package example
+
+type op struct{}
+
+func (o *op) environmentValue(key string) string { return "" }
+
+func read(o *op) string { return o.environmentValue("FOO") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, []string{"FOO"}, nil, "environmentValue")
+	if len(messages) != 0 {
+		t.Fatalf("live extra reader reported: %v", messages)
+	}
+}
+
 func TestUncoveredEnvReadsExemptName(t *testing.T) {
 	fileSet, file := parseSnippet(t, `package example
 
