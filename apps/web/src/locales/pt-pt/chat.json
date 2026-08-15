@@ -129,6 +129,7 @@
   "transientRetryReasonProviderOverloaded": "Fornecedor sobrecarregado",
   "transientRetryReasonProviderUnavailable": "Fornecedor temporariamente indisponível",
   "transientRetryReasonRateLimited": "Limite de pedidos atingido",
+  "transientRetryReasonAgentTransportLost": "Ligação ao agente perdida",
   "transientRetryReasonGeneric": "Erro do fornecedor",
   "transientRetryIn": "A repetir em {{countdown}}",
   "transientRetryNow": "A repetir agora…",
