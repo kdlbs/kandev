@@ -253,7 +253,7 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
         title={t("github:githubIntegration")}
         titleTestId="github-integration-heading"
         description={t("github:chooseTheAutomationAndPersonalIdentities")}
-        action={<GitHubEnabledControl />}
+        action={<GitHubEnabledControl workspaceId={workspaceId} />}
       >
         <GitHubCallbackNotice workspaceId={workspaceId} />
         <SettingsSection

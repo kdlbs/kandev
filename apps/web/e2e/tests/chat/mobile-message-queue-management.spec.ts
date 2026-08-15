@@ -2,9 +2,12 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
+import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
+
+registerSeparateQueueRows(test);
 
 async function expectTouchTarget(locator: Locator): Promise<void> {
   await expect(locator).toBeVisible();
@@ -18,7 +21,7 @@ async function seedBusyQueueTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
-): Promise<SessionPage> {
+): Promise<{ session: SessionPage; taskId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     "Mobile queue Send Now",
@@ -36,8 +39,8 @@ async function seedBusyQueueTask(
   await session.waitForChatIdle({ timeout: 30_000 });
   await session.sendMessageViaButton("/slow 30s");
   await session.agentStatus().waitFor({ state: "visible", timeout: 15_000 });
-  await testPage.waitForTimeout(500);
-  return session;
+  await waitForComposerQueueMode(testPage);
+  return { session, taskId: task.id };
 }
 
 test("mobile full queue stays usable while removing and clearing messages", async ({
@@ -87,7 +90,7 @@ test("mobile Send Now replaces a busy turn without hover or horizontal overflow"
 }) => {
   test.setTimeout(120_000);
 
-  const session = await seedBusyQueueTask(testPage, apiClient, seedData);
+  const { session } = await seedBusyQueueTask(testPage, apiClient, seedData);
   const chat = session.activeChat();
   const editor = chat.locator(".tiptap.ProseMirror:visible").first();
   const submit = testPage.getByTestId("submit-message-button");
@@ -120,4 +123,30 @@ test("mobile Send Now replaces a busy turn without hover or horizontal overflow"
   await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText("mobile first");
   await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText("mobile third");
   await expect(session.chat).not.toContainText("Turn cancelled by user");
+});
+
+test("mobile queue panel hides the desktop-only pin and keeps its controls", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+
+  const { session } = await seedBusyQueueTask(testPage, apiClient, seedData);
+  const chat = session.activeChat();
+  const editor = chat.locator(".tiptap.ProseMirror:visible").first();
+  const submit = testPage.getByTestId("submit-message-button");
+  await typeWhileBusy(testPage, editor, "mobile queued message");
+  await expect(submit).toBeEnabled();
+  await submit.tap();
+
+  await chat.getByTestId("queue-chip").tap();
+  const panel = chat.getByTestId("queued-ghost-list");
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+
+  // The pin is a desktop-only control: it must not render on the mobile
+  // queue panel, while the other header controls stay touch-sized.
+  await expect(panel.getByTestId("queue-pin")).toHaveCount(0);
+  await expectTouchTarget(panel.getByTestId("queue-clear-all"));
+  await expectTouchTarget(panel.getByTestId("queue-close"));
 });

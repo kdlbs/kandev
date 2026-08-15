@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -122,6 +123,36 @@ func TestBuildContainerConfigPreflightsBrokerBeforePrepareClone(t *testing.T) {
 	}
 	if !strings.Contains(script, `exit "$probe_rc"`) {
 		t.Fatalf("unreachable broker must stop bootstrap before clone: %s", script)
+	}
+}
+
+func TestBuildContainerConfigBoundsPrepareScriptBeforeAgentctl(t *testing.T) {
+	cm := newCMTest(t)
+	cfg := ContainerConfig{
+		AgentConfig:   newConfigStubAgent(),
+		InstanceID:    "0123456789abcdef",
+		TaskID:        "task-1",
+		PrepareScript: "sleep 1",
+	}
+
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+	if len(got.Entrypoint) != 3 {
+		t.Fatalf("entrypoint = %#v", got.Entrypoint)
+	}
+
+	script := got.Entrypoint[2]
+	want := fmt.Sprintf(
+		"timeout -s TERM -k 1s %s sh -c",
+		"600s",
+	)
+	if !strings.Contains(script, want) {
+		t.Fatalf("prepare timeout = %q, want bootstrap to contain %q", script, want)
+	}
+	if strings.Index(script, want) >= strings.Index(script, "exec /usr/local/bin/agentctl") {
+		t.Fatalf("prepare timeout must run before agentctl: %s", script)
 	}
 }
 

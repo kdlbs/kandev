@@ -46,10 +46,43 @@ function mergeKanbanTasks(
     } else {
       const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
       const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
+      const idx = draftTasks.findIndex((t) => t.id === incoming.id);
       if (incomingTime >= existingTime) {
-        const idx = draftTasks.findIndex((t) => t.id === incoming.id);
         if (idx >= 0) draftTasks[idx] = incoming;
+      } else if (idx >= 0) {
+        backfillServerDerivedFields(draftTasks[idx], incoming);
       }
+    }
+  }
+}
+
+/**
+ * Fields the server derives per read and lightweight WS events omit.
+ *
+ * A task.updated that arrives before hydration inserts a copy with a newer
+ * `updatedAt` and no dependency projection, so the timestamp rule above would
+ * keep that copy and the boot payload's edges would be lost for the rest of the
+ * session — which is exactly how the dependency chip silently vanished on any
+ * task whose agent had produced activity. Backfilling only fills gaps, so a real
+ * WS-side value (including an explicit "no edges") still wins.
+ */
+const SERVER_DERIVED_TASK_FIELDS = [
+  "blocked",
+  "blockedReason",
+  "dependsOn",
+  "blocks",
+  "startWhenUnblocked",
+] as const;
+
+function backfillServerDerivedFields(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  target: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  source: any,
+): void {
+  for (const field of SERVER_DERIVED_TASK_FIELDS) {
+    if (target[field] === undefined && source[field] !== undefined) {
+      target[field] = source[field];
     }
   }
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -79,25 +80,25 @@ type resumeCredentialStateIssuer struct {
 	afterIssue    func()
 }
 
-func (i *resumeCredentialStateIssuer) IssueGitHubCredentialLease(
+func (i *resumeCredentialStateIssuer) Issue(
 	ctx context.Context,
-	req GitHubCredentialLeaseRequest,
-) (GitHubCredentialLease, error) {
+	req gitcredentials.Scope,
+) (gitcredentials.Lease, error) {
 	session, err := i.repo.GetTaskSession(ctx, req.SessionID)
 	if err != nil {
-		return GitHubCredentialLease{}, err
+		return gitcredentials.Lease{}, err
 	}
 	i.observedState = session.State
 	if i.err != nil {
-		return GitHubCredentialLease{}, i.err
+		return gitcredentials.Lease{}, i.err
 	}
 	if session.State != models.TaskSessionStateStarting {
-		return GitHubCredentialLease{}, fmt.Errorf("GitHub credential scope denied: session is terminal")
+		return gitcredentials.Lease{}, fmt.Errorf("Git credential scope denied: session is terminal")
 	}
 	if i.afterIssue != nil {
 		i.afterIssue()
 	}
-	return GitHubCredentialLease{Token: "opaque-lease"}, nil
+	return gitcredentials.Lease{Token: "opaque-lease"}, nil
 }
 
 func attachManagedGitHubRepositoryForResume(t *testing.T, repo *mockRepository) {

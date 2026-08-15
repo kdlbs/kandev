@@ -155,4 +155,15 @@ describe("toSheetItem queued prompt count", () => {
     );
     expect(item.queuedCount).toBeUndefined();
   });
+
+  it("carries WIP queue status separately from queued prompts", () => {
+    const wipQueue = { position: 1, total: 3, destinationTitle: "Review" };
+    const item = toSheetItem(task(), {
+      ...emptyCtx(),
+      wipQueueByTaskId: new Map([["t1", wipQueue]]),
+    });
+
+    expect(item.wipQueue).toEqual(wipQueue);
+    expect(item.queuedCount).toBeUndefined();
+  });
 });

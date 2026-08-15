@@ -10,11 +10,11 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/scriptengine"
 )
 
 const (
-	sshPrepareTimeout        = 10 * time.Minute
 	sshCleanupTimeout        = 60 * time.Second
 	sshPrepareOutputMaxLines = 20
 )
@@ -47,7 +47,7 @@ func (r *SSHExecutor) resolvePrepareScript(req *ExecutorCreateRequest, workspace
 	}
 	script := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeySetupScript))
 	if script == "" {
-		script = DefaultPrepareScript("ssh")
+		script = DefaultPrepareScript(executorTypeSSH)
 	}
 	if script == "" {
 		return "", nil
@@ -153,7 +153,7 @@ func (r *SSHExecutor) runPrepareScript(ctx context.Context, client *ssh.Client, 
 		return fmt.Errorf("ssh: prepare script environment: %w", err)
 	}
 	r.report(req.OnProgress, "Running prepare script", PrepareStepRunning, "")
-	stepCtx, cancel := context.WithTimeout(ctx, sshPrepareTimeout)
+	stepCtx, cancel := context.WithTimeout(preparationContext(ctx), constants.SetupScriptTimeout)
 	defer cancel()
 	shell := sshShellForRemote(req.Metadata, platform)
 	command := WrapLoginShell(shell, sshScriptWithEnvironment(script))

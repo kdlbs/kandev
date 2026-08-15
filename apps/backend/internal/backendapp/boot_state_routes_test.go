@@ -4,9 +4,32 @@ import (
 	"encoding/json"
 	"testing"
 
+	taskdto "github.com/kandev/kandev/internal/task/dto"
 	userdto "github.com/kandev/kandev/internal/user/dto"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 )
+
+func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
+	step := mapKanbanStepState(taskdto.WorkflowStepDTO{
+		ID:             "step-review",
+		Name:           "Review",
+		WIPLimit:       1,
+		PullFromStepID: "step-backlog",
+	})
+	if step["wip_limit"] != 1 || step["pull_from_step_id"] != "step-backlog" {
+		t.Fatalf("kanban step WIP fields = %#v, want limit 1 and feeder step", step)
+	}
+
+	task := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:              "task-queued",
+		WorkflowStepID:  "step-review",
+		WIPAdmitted:     false,
+		QueuedForStepID: "step-review",
+	})
+	if task["wipAdmitted"] != false || task["queuedForStepId"] != "step-review" {
+		t.Fatalf("kanban task WIP fields = %#v, want queued task metadata", task)
+	}
+}
 
 func TestMapUserSettingsStateIncludesAzureDevOpsBrowsePreferences(t *testing.T) {
 	preferences := json.RawMessage(`{"workspace-1":{"mode":"board","filters":{"projectId":"project-2"},"board":{"teamId":"team-2","boardId":"board-2","focusedColumnId":"done"}}}`)

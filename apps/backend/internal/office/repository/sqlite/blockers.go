@@ -83,6 +83,62 @@ func (r *Repository) ListBlockersForTasks(ctx context.Context, taskIDs []string)
 	return result, nil
 }
 
+// ListDependentsForTasks returns a map of blocker task ID → list of task IDs
+// blocked by it, for a set of blocker task IDs. This is the batched reverse of
+// ListBlockersForTasks and backs the "blocks" direction of the dependency
+// payload; a per-task query would add one round trip per card to a board read.
+func (r *Repository) ListDependentsForTasks(ctx context.Context, blockerTaskIDs []string) (map[string][]string, error) {
+	if len(blockerTaskIDs) == 0 {
+		return map[string][]string{}, nil
+	}
+	query, args, err := sqlx.In(
+		`SELECT task_id, blocker_task_id FROM task_blockers WHERE blocker_task_id IN (?) ORDER BY created_at, task_id`,
+		blockerTaskIDs)
+	if err != nil {
+		return nil, err
+	}
+	query = r.ro.Rebind(query)
+	type row struct {
+		TaskID        string `db:"task_id"`
+		BlockerTaskID string `db:"blocker_task_id"`
+	}
+	var rows []row
+	if err := r.ro.SelectContext(ctx, &rows, query, args...); err != nil {
+		return nil, err
+	}
+	result := make(map[string][]string, len(blockerTaskIDs))
+	for _, rw := range rows {
+		result[rw.BlockerTaskID] = append(result[rw.BlockerTaskID], rw.TaskID)
+	}
+	return result, nil
+}
+
+// ListTasksWithDependencies returns the distinct dependent task IDs that have at
+// least one dependency edge. Used by startup reconciliation to bound its sweep to
+// tasks that could be chain steps rather than scanning the whole board.
+func (r *Repository) ListTasksWithDependencies(ctx context.Context) ([]string, error) {
+	var ids []string
+	err := r.ro.SelectContext(ctx, &ids,
+		`SELECT DISTINCT task_id FROM task_blockers ORDER BY task_id`)
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, nil
+}
+
+// DeleteTaskBlockersForTask removes every dependency edge touching taskID, in
+// both directions. Called when a task is deleted: task_blockers predates the
+// tasks foreign key, so there is no ON DELETE CASCADE to rely on and orphaned
+// edges would keep dependents blocked on a task that no longer exists.
+func (r *Repository) DeleteTaskBlockersForTask(ctx context.Context, taskID string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(
+		`DELETE FROM task_blockers WHERE task_id = ? OR blocker_task_id = ?`), taskID, taskID)
+	return err
+}
+
 func (r *Repository) IsTaskInTerminalStep(ctx context.Context, taskID string) (bool, error) {
 	var state string
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(

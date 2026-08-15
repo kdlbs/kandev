@@ -12,19 +12,44 @@ import {
 import { Button } from "@kandev/ui/button";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import { useRemoteContributionRelation } from "@/hooks/domains/session/use-remote-contribution-relation";
-import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
+import {
+  remoteContributionActionPolicy,
+  remoteContributionActionReasonKey,
+} from "@/hooks/domains/session/remote-contribution-relation";
 import { gitOperationLabel, useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import type { TaskPR } from "@/lib/types/github";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
+import { useAppStore } from "@/components/state-provider";
+import { useNormalizedTaskReviewsState } from "@/components/task/review-panel-provider";
+import type { ReviewItemSummary } from "@/lib/plugins/types";
 import {
   buildRemoteContributionResolutionTarget,
   useRemoteContributionResolution,
   useRemoteContributionResolutionConfirmation,
+  type RemoteContributionResolutionTarget,
 } from "@/components/task/use-remote-contribution-resolution";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import { VcsSplitButtonContent } from "./vcs-split-button-parts";
 import { DEFAULT_BASE_BRANCH } from "./vcs-constants";
+
+export function hasOpenChangeRequest(
+  firstPartyState: string | null | undefined,
+  reviews: readonly ReviewItemSummary[],
+): boolean {
+  const isOpen = (state: string | undefined) =>
+    state ? ["open", "opened", "draft"].includes(state.toLowerCase()) : false;
+  return (
+    isOpen(firstPartyState ?? undefined) ||
+    reviews.some((review) => isOpen(review.taskStatus?.state ?? review.state))
+  );
+}
+
+function useHasOpenChangeRequest(firstPartyState: string | null | undefined): boolean {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const { reviews } = useNormalizedTaskReviewsState(activeTaskId);
+  return hasOpenChangeRequest(firstPartyState, reviews);
+}
 
 export function determinePrimaryAction(
   uncommittedFileCount: number,
@@ -236,6 +261,59 @@ function useVcsContributionState(sessionId: string | null) {
   return { ...contribution, remoteActionPolicy, ...resolutionState };
 }
 
+type VcsResolutionActions = Pick<
+  ReturnType<typeof useVcsContributionState>["resolution"],
+  "requestReplace" | "requestUse"
+>;
+
+export function buildVcsSplitCallbacks({
+  openCommitDialog,
+  openPRDialog,
+  handlePull,
+  handlePush,
+  handleRebase,
+  handleMerge,
+  resolution,
+  resolutionTarget,
+  selectedPR,
+  openExternalLinkFn,
+}: {
+  openCommitDialog: (repo?: string) => void;
+  openPRDialog: (repo?: string) => void;
+  handlePull: (repo?: string) => void;
+  handlePush: (force?: boolean, repo?: string) => void;
+  handleRebase: (repo?: string) => void;
+  handleMerge: (repo?: string) => void;
+  resolution: VcsResolutionActions;
+  resolutionTarget: RemoteContributionResolutionTarget | null;
+  selectedPR: Pick<TaskPR, "pr_url"> | null;
+  openExternalLinkFn?: typeof openExternalLink;
+}) {
+  const openLink = openExternalLinkFn ?? openExternalLink;
+  return {
+    onCommit: (repo?: string) => openCommitDialog(repo),
+    onPR: (repo?: string) => openPRDialog(repo),
+    onPull: handlePull,
+    onPush: handlePush,
+    onRebase: handleRebase,
+    onMerge: handleMerge,
+    onReplaceContribution: (repo?: string) => {
+      if (resolutionTarget && resolutionTarget.repo === repo) {
+        resolution.requestReplace(resolutionTarget);
+      }
+    },
+    onUseContribution: (repo?: string) => {
+      if (resolutionTarget && resolutionTarget.repo === repo) {
+        resolution.requestUse(resolutionTarget);
+      }
+    },
+    onViewContribution: (repo?: string) => {
+      if (resolutionTarget?.repo !== repo || !selectedPR?.pr_url) return;
+      void openLink(selectedPR.pr_url).catch(() => undefined);
+    },
+  };
+}
+
 const VcsSplitButton = memo(function VcsSplitButton({
   sessionId,
   baseBranch,
@@ -254,6 +332,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
     confirmResolution,
     resolutionTarget,
   } = useVcsContributionState(sessionId);
+  const hasOpenPR = useHasOpenChangeRequest(selectedPR?.state);
   const { handlePull, handlePush, handleRebase, handleMerge } = useGitActions(git, baseBranch);
   const repoDisplayName = useRepoDisplayName(sessionId);
 
@@ -264,13 +343,14 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const behindCount = git.behind;
   const pullCount = git.pullBehind;
   const isDisabled = git.isLoading || !sessionId;
-  const isGitLoading = git.isLoading;
   const showContributionResolution = relation.action === "diverged_replace";
+  const pushDisabledReasonKey = remoteContributionActionReasonKey(relation, "push");
+  const pullDisabledReasonKey = remoteContributionActionReasonKey(relation, "pull");
   const primaryAction = determinePrimaryAction(
     uncommittedFileCount,
     aheadCount,
     behindCount,
-    selectedPR?.state === "open",
+    hasOpenPR,
   );
   const primaryButtonConfig = buildPrimaryButtonConfig({
     t,
@@ -285,6 +365,17 @@ const VcsSplitButton = memo(function VcsSplitButton({
     handleRebase,
   });
   const showDivergencePills = primaryAction !== "commit";
+  const callbacks = buildVcsSplitCallbacks({
+    openCommitDialog,
+    openPRDialog,
+    handlePull,
+    handlePush,
+    handleRebase,
+    handleMerge,
+    resolution,
+    resolutionTarget,
+    selectedPR,
+  });
 
   return (
     <VcsSplitButtonContent
@@ -292,13 +383,15 @@ const VcsSplitButton = memo(function VcsSplitButton({
       primaryButtonConfig={primaryButtonConfig}
       primaryAction={primaryAction}
       isDisabled={isDisabled}
-      isGitLoading={isGitLoading}
+      isGitLoading={git.isLoading}
       baseBranch={baseBranch}
       hasUpstream={hasUpstream}
       behindCount={pullCount}
       aheadCount={aheadCount}
       pushDisabled={remoteActionPolicy.pushDisabled}
       pullDisabled={remoteActionPolicy.pullDisabled}
+      pushDisabledReason={pushDisabledReasonKey ? t(pushDisabledReasonKey) : undefined}
+      pullDisabledReason={pullDisabledReasonKey ? t(pullDisabledReasonKey) : undefined}
       showContributionResolution={showContributionResolution}
       replaceDisabled={remoteActionPolicy.replaceDisabled}
       useDisabled={remoteActionPolicy.useDisabled}
@@ -309,28 +402,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
       buttonSize={buttonSize}
       className={className}
       showDivergencePills={showDivergencePills}
-      callbacks={{
-        onCommit: (repo) => openCommitDialog(repo),
-        onPR: (repo) => openPRDialog(repo),
-        onPull: handlePull,
-        onPush: handlePush,
-        onRebase: handleRebase,
-        onMerge: handleMerge,
-        onReplaceContribution: (repo) => {
-          if (resolutionTarget && resolutionTarget.repo === repo) {
-            resolution.requestReplace(resolutionTarget);
-          }
-        },
-        onUseContribution: (repo) => {
-          if (resolutionTarget && resolutionTarget.repo === repo) {
-            resolution.requestUse(resolutionTarget);
-          }
-        },
-        onViewContribution: (repo) => {
-          if (resolutionTarget?.repo !== repo || !selectedPR?.pr_url) return;
-          void openExternalLink(selectedPR.pr_url).catch(() => undefined);
-        },
-      }}
+      callbacks={callbacks}
       resolution={resolution}
       resolutionTarget={resolutionTarget}
       confirmResolution={confirmResolution}

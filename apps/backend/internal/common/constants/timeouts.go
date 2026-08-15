@@ -1,16 +1,17 @@
 // Package constants provides application-wide constants and timeouts.
 package constants
 
-import "time"
+import (
+	"math"
+	"os"
+	"time"
+)
 
 // Timeouts for various operations.
 const (
-	// AgentLaunchTimeout is the maximum time to wait for agent launch,
-	// including worktree creation and setup script execution.
-	AgentLaunchTimeout = 6 * time.Minute
-
-	// SetupScriptTimeout is the maximum time to wait for a setup script to complete.
-	SetupScriptTimeout = 5 * time.Minute
+	defaultSetupScriptTimeout = 10 * time.Minute
+	setupLaunchAllowance      = 5 * time.Minute
+	maxSetupScriptTimeout     = time.Duration(math.MaxInt64) - setupLaunchAllowance
 
 	// CleanupScriptTimeout is the maximum time to wait for a cleanup script to complete.
 	CleanupScriptTimeout = 5 * time.Minute
@@ -34,3 +35,24 @@ const (
 	// transition that already committed.
 	StepHistoryWriteTimeout = 5 * time.Second
 )
+
+var (
+	// SetupScriptTimeout is the maximum time to wait for a setup script to complete.
+	SetupScriptTimeout = resolveSetupScriptTimeout(os.Getenv("KANDEV_TASK_PREPARATION_TIMEOUT"))
+
+	// AgentLaunchTimeout is the maximum time to wait for agent launch,
+	// including worktree creation and setup script execution.
+	AgentLaunchTimeout = SetupScriptTimeout + setupLaunchAllowance
+)
+
+func resolveSetupScriptTimeout(value string) time.Duration {
+	if value == "" {
+		return defaultSetupScriptTimeout
+	}
+
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout <= 0 || timeout > maxSetupScriptTimeout {
+		return defaultSetupScriptTimeout
+	}
+	return timeout
+}

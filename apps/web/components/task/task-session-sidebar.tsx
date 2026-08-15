@@ -67,6 +67,7 @@ function useSidebarData(workspaceId: string | null) {
     allTasks,
     allSteps,
     stepsByWorkflowId,
+    wipQueueByTaskId,
     workflows,
     isLoading: isLoadingWorkflow,
     archivedError,
@@ -86,6 +87,7 @@ function useSidebarData(workspaceId: string | null) {
       titleById,
       workflowNameById,
       stepTitleById,
+      wipQueueByTaskId,
       acknowledgedAgentErrors,
       dismissedAgentErrors,
     };
@@ -105,6 +107,7 @@ function useSidebarData(workspaceId: string | null) {
     workflows,
     workspaceId,
     archivedState,
+    wipQueueByTaskId,
     acknowledgedAgentErrors,
     dismissedAgentErrors,
   ]);

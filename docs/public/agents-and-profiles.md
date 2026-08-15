@@ -37,17 +37,24 @@ The update icon is available on managed Claude, Codex, OpenCode, Copilot, and
 Gemini agent cards. It updates the runtime on the Kandev host.
 
 1. Select the update icon.
-2. Review the current version, target version, and command.
-3. Select **Approve update**. If the update fails, select **Retry update**.
-4. Wait for the capability refresh to finish.
+2. Review the current version, active version, available stable versions, and command.
+3. Keep the latest version selected for a normal update, or select an older stable version to roll back.
+4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
+5. Wait for the exact version to prepare and pass its ACP capability probe.
 
-Kandev disables approval when the versions already match or the version check
-is incomplete. A successful refresh updates the advertised models, modes,
+Kandev enables the action only after the backend validates the selected version
+against the trusted package catalogue. It does not accept package names, npm
+tags, prereleases, registry URLs, or command text. When the active version,
+observed version, and target version match, the action is disabled as **Up to
+date**. A successful activation updates the advertised models, modes,
 configuration options, commands, and runtime version without a page reload.
 
-- Active sessions keep running; later probes and launches use the refreshed runtime.
+- The active exact version survives Kandev and browser restarts.
+- Later host-local probes, utility calls, and standalone sessions use the active exact version.
+- Active sessions keep running. They are not restarted or hot-swapped.
 - Passthrough agents, authentication helpers, remote executors, and running containers are unchanged.
-- If the update or refresh fails, Kandev keeps the previous capability catalogue and shows the error. Authenticate the host agent, then retry.
+- If preparation, ACP validation, authentication, or persistence fails, Kandev keeps the previous active version and capability catalogue. Select another stable version or retry the same target.
+- Kandev may prepare the exact version again if npm removes its cache entry. Kandev does not own an offline package inventory, and global npm cache cleanup is not required.
 
 <details>
 <summary>Add a custom terminal agent</summary>
@@ -152,6 +159,8 @@ Kandev has two secret scopes:
 - **Workspace** secrets belong to one workspace and can be selected by that workspace's repositories. They are not available to shared agent or executor profiles.
 
 The General page manages Global secrets. Manage Workspace secrets from **Settings > Workspaces > _workspace_ > Secrets**. Agent and executor profile selectors intentionally show Global secrets only; a Workspace reference saved through an older or direct API path is rejected when the profile is saved or launched.
+
+Copy or move a secret between scopes from the **Copy/Move** action on any secret row. The dialog picks Copy or Move, chooses a destination (Global or another workspace), and lets you edit the target name; it is pre-filled as `<name> (from Global)` or `<name> (from <workspace name>)` so copied secrets keep their origin visible. Moving removes the original after the copy is safely in place, and the value is transferred server-side between encrypted rows. It is never shown or copied through the browser. A target name that already exists in the destination blocks the action until you rename it.
 
 Kandev encrypts secret values at rest with AES-256-GCM. The encryption key is `<KANDEV_HOME_DIR>/data/master.key` (by default `~/.kandev/data/master.key`) and is created with owner-only file permissions. `KANDEV_DATABASE_PATH` does not relocate this key. Protect and back it up with the Kandev database; losing it makes stored values unreadable. Anyone with access to the Secrets settings can reveal the plaintext.
 

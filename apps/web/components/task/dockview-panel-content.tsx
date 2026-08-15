@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect } from "react";
-import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
+import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
@@ -79,6 +79,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     <TaskChatPanel
       sessionId={sessionId}
       taskId={sessionId ? taskId : null}
+      statusTaskId={taskId}
       onOpenFile={openFile}
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
@@ -218,6 +219,9 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
   "pr-detail": (panelId, params) => (
+    <ReviewDetailPanelComponent panelId={panelId} params={params} />
+  ),
+  "review-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),
   "mr-detail": (panelId, params) => (

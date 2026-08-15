@@ -14,6 +14,11 @@ vi.mock("@/hooks/domains/session/use-queue", () => ({
   useQueue: (sessionId: string | null) => useQueueMock(sessionId),
 }));
 
+// The queue pin is desktop-only; these tests exercise the desktop path.
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isMobile: false }),
+}));
+
 vi.mock("@kandev/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,

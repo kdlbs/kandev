@@ -36,3 +36,26 @@ func TestCompareVersions(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeReleaseVersion(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want string
+		ok   bool
+	}{
+		{raw: "1.2.3", want: "1.2.3", ok: true},
+		{raw: "v1.2.3", want: "1.2.3", ok: true},
+		{raw: " V1.2 ", want: "1.2", ok: true},
+		{raw: "dev", ok: false},
+		{raw: "v1.2.3-4-gabcdef", ok: false},
+		{raw: "1.2.3.4", ok: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			got, ok := NormalizeReleaseVersion(tt.raw)
+			if got != tt.want || ok != tt.ok {
+				t.Fatalf("NormalizeReleaseVersion(%q) = %q, %t; want %q, %t", tt.raw, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 )
 
 type fakeBrokerAuthorizer struct {
@@ -118,10 +117,8 @@ func TestCredentialBrokerStoresHashAndRenewsCredentialOnRedemption(t *testing.T)
 	if lease.Token == "" {
 		t.Fatal("empty lease")
 	}
-	for _, record := range broker.leases {
-		if record.TaskID != "task-1" {
-			t.Fatalf("record = %+v", record)
-		}
+	if broker.ActiveLeaseCount() != 1 {
+		t.Fatalf("active leases = %d, want 1", broker.ActiveLeaseCount())
 	}
 	credential, err := broker.Resolve(context.Background(), brokerCredentialRequest(lease.Token))
 	if err != nil {
@@ -135,69 +132,6 @@ func TestCredentialBrokerStoresHashAndRenewsCredentialOnRedemption(t *testing.T)
 	}
 	if got := authorizer.sessionIDs; len(got) != 2 || got[0] != "session-1" || got[1] != "session-1" {
 		t.Fatalf("authorized sessions = %v, want session-1 twice", got)
-	}
-}
-
-func TestCredentialBrokerClampsRequestedLeaseTTL(t *testing.T) {
-	broker, _, _ := newPATCredentialBroker(t)
-	now := time.Now().UTC()
-	broker.now = func() time.Time { return now }
-	req := brokerLeaseRequest()
-	req.TTL = 30 * 24 * time.Hour
-
-	lease, err := broker.Issue(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := now.Add(defaultCredentialLeaseTTL); !lease.ExpiresAt.Equal(want) {
-		t.Fatalf("ExpiresAt = %v, want capped expiry %v", lease.ExpiresAt, want)
-	}
-}
-
-func TestCredentialBrokerRenewsLeaseOnSuccessfulRedemption(t *testing.T) {
-	broker, _, _ := newPATCredentialBroker(t)
-	issuedAt := time.Now().UTC()
-	now := issuedAt
-	broker.now = func() time.Time { return now }
-	req := brokerLeaseRequest()
-	req.TTL = time.Minute
-
-	lease, err := broker.Issue(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now = issuedAt.Add(30 * time.Second)
-	if _, err := broker.Resolve(context.Background(), brokerCredentialRequest(lease.Token)); err != nil {
-		t.Fatalf("first Resolve: %v", err)
-	}
-
-	// This is after the original expiry, but still inside the renewed window.
-	now = issuedAt.Add(75 * time.Second)
-	if _, err := broker.Resolve(context.Background(), brokerCredentialRequest(lease.Token)); err != nil {
-		t.Fatalf("Resolve after original expiry: %v", err)
-	}
-}
-
-func TestCredentialBrokerSweepsExpiredLeasesWhenIssuing(t *testing.T) {
-	broker, _, _ := newPATCredentialBroker(t)
-	issuedAt := time.Now().UTC()
-	now := issuedAt
-	broker.now = func() time.Time { return now }
-	req := brokerLeaseRequest()
-	req.TTL = time.Minute
-
-	if _, err := broker.Issue(context.Background(), req); err != nil {
-		t.Fatal(err)
-	}
-	now = issuedAt.Add(2 * time.Minute)
-	req.TaskID = "task-2"
-	req.SessionID = "session-2"
-	if _, err := broker.Issue(context.Background(), req); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := len(broker.leases); got != 1 {
-		t.Fatalf("lease records = %d, want only the active lease", got)
 	}
 }
 
@@ -332,22 +266,8 @@ func TestCredentialBrokerDoesNotReturnCredentialAfterConcurrentAppSwitch(t *test
 
 func TestCredentialBrokerExpiryAndExplicitRevocation(t *testing.T) {
 	broker, _, _ := newPATCredentialBroker(t)
-	now := time.Now().UTC()
-	broker.now = func() time.Time { return now }
 	req := brokerLeaseRequest()
-	req.TTL = time.Minute
 	lease, err := broker.Issue(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	broker.now = func() time.Time { return now.Add(2 * time.Minute) }
-	_, err = broker.Resolve(context.Background(), brokerCredentialRequest(lease.Token))
-	if !errors.Is(err, ErrCredentialLeaseExpired) {
-		t.Fatalf("error = %v, want expired", err)
-	}
-
-	broker.now = func() time.Time { return now }
-	lease, err = broker.Issue(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}

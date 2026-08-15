@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
@@ -24,7 +26,17 @@ const (
 	// writeProbeWebhookKey triggers the Host data API write round-trip
 	// (CreateTask + CreateComment). Gated on this key so unrelated webhook
 	// deliveries don't attempt writes.
-	writeProbeWebhookKey = "write"
+	writeProbeWebhookKey   = "write"
+	fixtureReferenceSource = "fixture-pull-requests"
+	fixturePullRequestID   = "pull-request-42"
+	revokedPullRequestID   = "pull-request-revoked"
+	fixtureProviderID      = "fixture-source-control"
+	fixtureCredentialHost  = "bitbucket.example.test"
+	fixtureCredentialPath  = "/scm/TEAM/fixture"
+	connectionStatusAction = "connection-status"
+	searchPurpose          = "search"
+	submissionPurpose      = "submission"
+	fixtureTaskIDKey       = "task_id"
 )
 
 // deliveryRecord is one recorded OnEvent delivery, appended as a JSON line
@@ -51,8 +63,9 @@ type fixturePlugin struct {
 
 	dataDir string
 
-	mu            sync.Mutex
-	sawFirstEvent bool
+	mu                   sync.Mutex
+	sawFirstEvent        bool
+	revokedByWorkspaceID map[string]bool
 }
 
 var _ pluginsdk.Plugin = (*fixturePlugin)(nil)
@@ -64,7 +77,7 @@ func (p *fixturePlugin) InvokeAgentTool(_ context.Context, req *pluginsdk.AgentT
 	return &pluginsdk.AgentToolResult{
 		Text: fmt.Sprintf("fixture echo: %s", value),
 		StructuredContent: map[string]any{
-			"value": value, "task_id": req.Context.TaskID, "surface": req.Context.Surface,
+			"value": value, fixtureTaskIDKey: req.Context.TaskID, "surface": req.Context.Surface,
 		},
 	}, nil
 }
@@ -148,6 +161,154 @@ func (p *fixturePlugin) HandleWebhook(ctx context.Context, req *pluginsdk.Webhoo
 		p.snapshotWriteProbeBestEffort(ctx)
 	}
 	return &pluginsdk.WebhookResponse{Status: 200, Body: []byte("ok")}, nil
+}
+
+// HandleAction provides fixture-only authenticated actions. The response is
+// deliberately free of operator credentials: a browser can prove its action
+// was authorized without learning the plugin's config or secret values.
+func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+	if req == nil {
+		return nil, fmt.Errorf("plugin-fixture: missing action request")
+	}
+	response := map[string]any{"connected": true, "workspace_id": req.Context.WorkspaceID}
+	switch req.ActionKey {
+	case connectionStatusAction:
+		if requestedRevocation(req.Body) {
+			p.setCredentialRevoked(req.Context.WorkspaceID)
+			response["connected"] = false
+			response["error"] = "connection unavailable"
+		}
+	case "link-pull-request":
+		response["linked"] = true
+		response[fixtureTaskIDKey] = req.Context.TaskID
+		response["pull_request_id"] = fixturePullRequestID
+	case "watch-create-task":
+		return p.createWatchTask(ctx, req.Context.WorkspaceID)
+	default:
+		return nil, fmt.Errorf("plugin-fixture: unknown action %q", req.ActionKey)
+	}
+	body, err := json.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: marshaling action response: %w", err)
+	}
+	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+func (p *fixturePlugin) createWatchTask(ctx context.Context, workspaceID string) (*pluginsdk.PluginActionResponse, error) {
+	host := p.Host()
+	if host == nil {
+		return nil, fmt.Errorf("plugin-fixture: host unavailable")
+	}
+	task, err := host.Tasks().Create(ctx, pluginsdk.CreateTaskInput{
+		WorkspaceID: workspaceID,
+		Title:       "Bitbucket watch task",
+		Description: "created by the provider-neutral fixture watch",
+		Metadata:    map[string]any{"watch": "fixture"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: creating watch task: %w", err)
+	}
+	body, err := json.Marshal(map[string]any{"watch_created": true, fixtureTaskIDKey: task.ID})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: marshaling watch response: %w", err)
+	}
+	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+func requestedRevocation(body []byte) bool {
+	var request struct {
+		Revoke bool `json:"revoke"`
+	}
+	return json.Unmarshal(body, &request) == nil && request.Revoke
+}
+
+func (p *fixturePlugin) setCredentialRevoked(workspaceID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.revokedByWorkspaceID == nil {
+		p.revokedByWorkspaceID = make(map[string]bool)
+	}
+	p.revokedByWorkspaceID[workspaceID] = true
+}
+
+func (p *fixturePlugin) isCredentialRevoked(workspaceID string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.revokedByWorkspaceID[workspaceID]
+}
+
+// SearchEntityReferences returns a deterministic, Bitbucket-shaped pull
+// request. The source descriptor in the manifest supplies the provider and
+// kind; this backend returns only untrusted candidate data.
+func (*fixturePlugin) SearchEntityReferences(_ context.Context, req *pluginsdk.SearchEntityReferencesRequest) (*pluginsdk.SearchEntityReferencesResponse, error) {
+	if req == nil || req.Source != fixtureReferenceSource {
+		return &pluginsdk.SearchEntityReferencesResponse{}, nil
+	}
+	if strings.Contains(strings.ToLower(req.Query), "revoked") {
+		return &pluginsdk.SearchEntityReferencesResponse{Candidates: []pluginsdk.EntityReferenceCandidate{{
+			ProviderLocalID: revokedPullRequestID,
+			Title:           "Pull request #99: Revoked before submission",
+			URL:             "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/99",
+		}}}, nil
+	}
+	return &pluginsdk.SearchEntityReferencesResponse{Candidates: []pluginsdk.EntityReferenceCandidate{{
+		ProviderLocalID: fixturePullRequestID,
+		Title:           "Pull request #42: Provider-neutral contract",
+		URL:             "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/42",
+		Attributes:      map[string]any{"repository": "TEAM/fixture"},
+	}}}, nil
+}
+
+// AuthorizeEntityReference models a reference that disappears between search
+// and send. This lets browser E2E prove the host checks a live plugin at
+// submission time instead of trusting the previously selected suggestion.
+func (*fixturePlugin) AuthorizeEntityReference(_ context.Context, req *pluginsdk.AuthorizeEntityReferenceRequest) (*pluginsdk.AuthorizeEntityReferenceResponse, error) {
+	if req == nil || req.Source != fixtureReferenceSource {
+		return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false, Reason: "reference source unavailable"}, nil
+	}
+	// Search authorization determines whether a candidate may be shown; the
+	// fixture must allow the candidate at that point so the host can exercise
+	// the separate, submit-time reauthorization boundary.
+	id, _ := req.Reference["id"].(string)
+	if id != fixturePullRequestID && id != revokedPullRequestID {
+		return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false, Reason: "pull request is not owned by this source"}, nil
+	}
+	if req.Purpose != searchPurpose && req.Purpose != submissionPurpose {
+		return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false, Reason: "reference purpose is unsupported"}, nil
+	}
+	if id == revokedPullRequestID && req.Purpose == submissionPurpose {
+		return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false, Reason: "pull request is no longer available"}, nil
+	}
+	return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: true}, nil
+}
+
+// ResolveGitCredential supplies deterministic transient material only for the
+// fixture provider's exact host/path. Production plugins must resolve their
+// own short-lived credential without exposing it through browser actions.
+func (p *fixturePlugin) ResolveGitCredential(_ context.Context, req *pluginsdk.ResolveGitCredentialRequest) (*pluginsdk.ResolveGitCredentialResponse, error) {
+	if !isFixtureCredentialScope(req) || p.isCredentialRevoked(req.WorkspaceID) {
+		return nil, fmt.Errorf("plugin-fixture: connection unavailable")
+	}
+	return &pluginsdk.ResolveGitCredentialResponse{
+		Username: "fixture-user", Secret: "fixture-credential-secret", ExpiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
+	}, nil
+}
+
+// GetGitCredentialBinding returns a non-secret revision for the exact fixture
+// connection. An empty binding is the documented revocation signal.
+func (p *fixturePlugin) GetGitCredentialBinding(_ context.Context, req *pluginsdk.GitCredentialBindingRequest) (*pluginsdk.GitCredentialBindingResponse, error) {
+	if !isFixtureBindingScope(req) || p.isCredentialRevoked(req.WorkspaceID) {
+		return &pluginsdk.GitCredentialBindingResponse{}, nil
+	}
+	return &pluginsdk.GitCredentialBindingResponse{Binding: "fixture-connection-v1"}, nil
+}
+
+func isFixtureCredentialScope(req *pluginsdk.ResolveGitCredentialRequest) bool {
+	return req != nil && req.ProviderID == fixtureProviderID && req.Host == fixtureCredentialHost && req.Path == fixtureCredentialPath
+}
+
+func isFixtureBindingScope(req *pluginsdk.GitCredentialBindingRequest) bool {
+	return req != nil && req.ProviderID == fixtureProviderID && req.Host == fixtureCredentialHost && req.Path == fixtureCredentialPath
 }
 
 // writeProbeRecord captures the outcome of the Host data API write round-trip

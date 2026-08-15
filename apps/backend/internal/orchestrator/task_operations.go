@@ -2190,10 +2190,8 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 
 // waitForSessionReady polls the session state until the agent is ready for prompts.
 func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) error {
-	const (
-		pollInterval = 500 * time.Millisecond
-		maxWait      = constants.AgentLaunchTimeout
-	)
+	const pollInterval = 500 * time.Millisecond
+	maxWait := constants.AgentLaunchTimeout
 	// Derive a bounded context so the overall wait AND each GetTaskSession query
 	// inside the loop honor maxWait. Callers pass context.WithoutCancel(ctx) so
 	// the wait survives the caller's request timeout during resume/launch — but
@@ -2813,12 +2811,33 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	// through a stale activity pointer.
 	s.clearTurnActivity(sessionID)
 
+	// Pending queue rows are keyed by session_id but counted for the sidebar
+	// badge by task_id. Cancel them after the session row is gone and publish
+	// queue-status so the status-summary projector drops the orphaned count.
+	// Best-effort: the session delete already committed.
+	s.cancelDeletedSessionQueue(ctx, taskID, sessionID)
+
 	// Auto-promote another session if we deleted the primary
 	if wasPrimary {
 		s.promoteNextPrimaryAfterRemoval(ctx, taskID, sessionID)
 	}
 
 	return nil
+}
+
+// cancelDeletedSessionQueue removes pending prompts left on a deleted session
+// and publishes a task-scoped queue status event for the live badge path.
+func (s *Service) cancelDeletedSessionQueue(ctx context.Context, taskID, sessionID string) {
+	if s.messageQueue == nil {
+		return
+	}
+	if _, err := s.messageQueue.CancelAll(ctx, sessionID); err != nil {
+		s.logger.Warn("failed to cancel queued prompts after session delete",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+	s.publishTaskQueueStatusEvent(ctx, taskID, sessionID)
 }
 
 // quiesceSessionExecutionBeforeDeletion stops the in-memory lifecycle

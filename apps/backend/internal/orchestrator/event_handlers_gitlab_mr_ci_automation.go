@@ -24,9 +24,13 @@ import (
 // ci_automation_dispatch.go (C5) so the two providers' vocabularies stay
 // visually distinct in a diff even where the shapes are parallel.
 const (
-	mrAutoFixKind          = "mr_auto_fix"
-	mrAutoFixFeedbackToken = "{{mr.feedback}}"
-	mrAutoFixMention       = "@mr-auto-fix"
+	mrAutoFixKind             = "mr_auto_fix"
+	mrAutoFixFeedbackToken    = "{{mr.feedback}}"
+	mrAutoFixMention          = "@mr-auto-fix"
+	mrDetailedStatusMergeable = "mergeable"
+	mrLegacyStatusCanBeMerged = "can_be_merged"
+	mrPipelineStatusCanceled  = "canceled"
+	mrPipelineStatusSkipped   = "skipped"
 )
 
 var mrAutoFixSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " ", "<", "", ">", "")
@@ -91,9 +95,9 @@ func mrAutomationReadyToMerge(snapshot *gitlab.MRAutomationSnapshot) bool {
 // merge_status on hosts too old to report it (AC15).
 func mrMergeStatusReady(mr *gitlab.MR) bool {
 	if mr.DetailedMergeStatus != "" {
-		return mr.DetailedMergeStatus == "mergeable"
+		return mr.DetailedMergeStatus == mrDetailedStatusMergeable
 	}
-	return mr.MergeStatus == "can_be_merged"
+	return mr.MergeStatus == mrLegacyStatusCanBeMerged
 }
 
 // handleTaskMRCIAutomation runs auto-fix then, unless auto-fix just
@@ -296,7 +300,7 @@ func mrAutoFixChecksSettled(snapshot *gitlab.MRAutomationSnapshot) bool {
 		return true
 	}
 	switch snapshot.PipelineStatus {
-	case "", ciAutomationCheckSuccess, "failed", "canceled", "skipped":
+	case "", ciAutomationCheckSuccess, agentEventFailed, mrPipelineStatusCanceled, mrPipelineStatusSkipped:
 		return true
 	default: // running, pending, created, manual, scheduled, ...
 		return false
@@ -461,7 +465,7 @@ func mrAutoFixRenderSnapshot(mr *gitlab.TaskMR, delta mrAutoFixCheckpoint) strin
 	if len(delta.FailedJobs) > 0 {
 		b.WriteString("\n\nNew or changed failing pipeline jobs:")
 		for _, job := range delta.FailedJobs {
-			b.WriteString(fmt.Sprintf("\n- %s: %s", mrAutoFixSanitizeSnapshotField(job.Name), mrAutoFixSanitizeSnapshotField(job.Status)))
+			_, _ = fmt.Fprintf(&b, "\n- %s: %s", mrAutoFixSanitizeSnapshotField(job.Name), mrAutoFixSanitizeSnapshotField(job.Status))
 			if job.WebURL != "" {
 				b.WriteString(" (")
 				b.WriteString(mrAutoFixSanitizeSnapshotField(job.WebURL))
@@ -472,8 +476,8 @@ func mrAutoFixRenderSnapshot(mr *gitlab.TaskMR, delta mrAutoFixCheckpoint) strin
 	if len(delta.Notes) > 0 {
 		b.WriteString("\n\nNew or changed unresolved discussion comments:")
 		for _, note := range delta.Notes {
-			b.WriteString(fmt.Sprintf("\n- %s:%d %s",
-				mrAutoFixSanitizeSnapshotField(note.Path), note.Line, mrAutoFixSanitizeSnapshotField(strings.TrimSpace(note.Body))))
+			_, _ = fmt.Fprintf(&b, "\n- %s:%d %s",
+				mrAutoFixSanitizeSnapshotField(note.Path), note.Line, mrAutoFixSanitizeSnapshotField(strings.TrimSpace(note.Body)))
 		}
 	}
 	return b.String()

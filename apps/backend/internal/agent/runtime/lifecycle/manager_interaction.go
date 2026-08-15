@@ -1739,6 +1739,10 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 	if err != nil {
 		return agentCommands{}, err
 	}
+	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(ctx, execution.RuntimeName, agentConfig)
+	if err != nil {
+		return agentCommands{}, err
+	}
 
 	opts := agents.CommandOptions{
 		Model:               model,
@@ -1750,7 +1754,8 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 		// Runtime is "standalone" / "docker" / "sprites" — MockAgent
 		// reads this to pick a bare name (container PATH lookup) vs.
 		// an absolute host path.
-		Runtime: execution.RuntimeName,
+		Runtime:               execution.RuntimeName,
+		ManagedRuntimeVersion: managedRuntimeVersion,
 	}
 	args := m.commandBuilder.BuildCommandArgs(agentConfig, opts)
 	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, opts)

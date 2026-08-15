@@ -18,7 +18,8 @@ import (
 // pair with a real GRPCBroker, matching production transport behavior).
 type fakeAuthorPlugin struct {
 	UnimplementedPlugin
-	events []*Event
+	events  []*Event
+	actions []*PluginActionRequest
 }
 
 func (p *fakeAuthorPlugin) OnEvent(_ context.Context, e *Event) error {
@@ -28,6 +29,27 @@ func (p *fakeAuthorPlugin) OnEvent(_ context.Context, e *Event) error {
 
 func (p *fakeAuthorPlugin) HandleWebhook(_ context.Context, req *WebhookRequest) (*WebhookResponse, error) {
 	return &WebhookResponse{Status: 200, Body: append([]byte("got:"), req.Body...)}, nil
+}
+
+func (p *fakeAuthorPlugin) HandleAction(_ context.Context, req *PluginActionRequest) (*PluginActionResponse, error) {
+	p.actions = append(p.actions, req)
+	return &PluginActionResponse{Body: append([]byte(req.Context.ActorID+":"), req.Body...), Headers: map[string]string{"Content-Type": "application/json"}}, nil
+}
+
+func (*fakeAuthorPlugin) SearchEntityReferences(_ context.Context, req *SearchEntityReferencesRequest) (*SearchEntityReferencesResponse, error) {
+	return &SearchEntityReferencesResponse{Candidates: []EntityReferenceCandidate{{ProviderLocalID: req.Source + "-1", Title: "PR 1", Attributes: map[string]any{"query": req.Query}}}}, nil
+}
+
+func (*fakeAuthorPlugin) AuthorizeEntityReference(_ context.Context, req *AuthorizeEntityReferenceRequest) (*AuthorizeEntityReferenceResponse, error) {
+	return &AuthorizeEntityReferenceResponse{Allowed: req.Purpose == "submission"}, nil
+}
+
+func (*fakeAuthorPlugin) ResolveGitCredential(_ context.Context, req *ResolveGitCredentialRequest) (*ResolveGitCredentialResponse, error) {
+	return &ResolveGitCredentialResponse{Username: req.ProviderID, Secret: "transient", ExpiresAt: "2026-07-31T12:00:00Z"}, nil
+}
+
+func (*fakeAuthorPlugin) GetGitCredentialBinding(_ context.Context, _ *GitCredentialBindingRequest) (*GitCredentialBindingResponse, error) {
+	return &GitCredentialBindingResponse{Binding: "connection:7"}, nil
 }
 
 func (p *fakeAuthorPlugin) InvokeAgentTool(_ context.Context, req *AgentToolRequest) (*AgentToolResult, error) {
@@ -105,6 +127,38 @@ func TestServe_EndToEnd(t *testing.T) {
 		require.Equal(t, []byte("got:hi"), resp.Body)
 	})
 
+	t.Run("OptionalPluginExtensions", func(t *testing.T) {
+		action, err := remote.HandleAction(context.Background(), &PluginActionRequest{
+			ActionKey: "connection.get",
+			Context: VerifiedActionContext{
+				ActorID: "user-1", WorkspaceID: "ws-1", TaskID: "task-1",
+				RepositoryID: "repository-1", SessionID: "session-1", HeadBranch: "feature/native-create",
+			},
+			Body: []byte(`{"connected":true}`),
+		})
+		require.NoError(t, err)
+		require.Equal(t, []byte(`user-1:{"connected":true}`), action.Body)
+		require.Equal(t, "application/json", action.Headers["Content-Type"])
+		require.Equal(t, "session-1", author.actions[0].Context.SessionID)
+		require.Equal(t, "feature/native-create", author.actions[0].Context.HeadBranch)
+
+		search, err := remote.SearchEntityReferences(context.Background(), &SearchEntityReferencesRequest{Source: "bitbucket", WorkspaceID: "ws-1", Query: "build", Limit: 5})
+		require.NoError(t, err)
+		require.Equal(t, []EntityReferenceCandidate{{ProviderLocalID: "bitbucket-1", Title: "PR 1", Attributes: map[string]any{"query": "build"}}}, search.Candidates)
+
+		authorized, err := remote.AuthorizeEntityReference(context.Background(), &AuthorizeEntityReferenceRequest{Source: "bitbucket", WorkspaceID: "ws-1", Purpose: "submission", Reference: map[string]any{"id": "1"}})
+		require.NoError(t, err)
+		require.True(t, authorized.Allowed)
+
+		credential, err := remote.ResolveGitCredential(context.Background(), &ResolveGitCredentialRequest{ProviderID: "bitbucket", WorkspaceID: "ws-1", Host: "bitbucket.org", Path: "/team/repo.git"})
+		require.NoError(t, err)
+		require.Equal(t, &ResolveGitCredentialResponse{Username: "bitbucket", Secret: "transient", ExpiresAt: "2026-07-31T12:00:00Z"}, credential)
+
+		binding, err := remote.GetGitCredentialBinding(context.Background(), &GitCredentialBindingRequest{ProviderID: "bitbucket", WorkspaceID: "ws-1", Host: "bitbucket.org", Path: "/team/repo.git"})
+		require.NoError(t, err)
+		require.Equal(t, "connection:7", binding.Binding)
+	})
+
 	t.Run("InvokeAgentTool", func(t *testing.T) {
 		resp, err := remote.InvokeAgentTool(context.Background(), &AgentToolRequest{
 			InvocationID: "inv-1", Name: "echo", Arguments: map[string]any{"value": "ok"},
@@ -129,4 +183,42 @@ func TestServe_EndToEnd(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, found)
 	})
+}
+
+// TestServe_LegacyPluginGetsClearUnsupportedExtensionErrors confirms that
+// adding optional RPCs does not force existing Plugin implementations to add
+// methods. Calls to an extension they did not opt into fail explicitly rather
+// than looking like transport failure or a successful empty response.
+func TestServe_LegacyPluginGetsClearUnsupportedExtensionErrors(t *testing.T) {
+	gp := &GRPCPlugin{Impl: &UnimplementedPlugin{}}
+	client, server := hcplugin.TestPluginGRPCConn(t, false, map[string]hcplugin.Plugin{
+		PluginMapKey: gp,
+	})
+	defer func() { _ = client.Close() }()
+	defer server.Stop()
+
+	raw, err := client.Dispense(PluginMapKey)
+	require.NoError(t, err)
+	remote, ok := raw.(*RemotePlugin)
+	require.True(t, ok)
+
+	_, err = remote.HandleAction(context.Background(), &PluginActionRequest{})
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+	require.Contains(t, err.Error(), "plugin does not implement action handler")
+
+	_, err = remote.SearchEntityReferences(context.Background(), &SearchEntityReferencesRequest{})
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+	require.Contains(t, err.Error(), "plugin does not implement entity reference searcher")
+
+	_, err = remote.AuthorizeEntityReference(context.Background(), &AuthorizeEntityReferenceRequest{})
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+	require.Contains(t, err.Error(), "plugin does not implement entity reference authorizer")
+
+	_, err = remote.ResolveGitCredential(context.Background(), &ResolveGitCredentialRequest{})
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+	require.Contains(t, err.Error(), "plugin does not implement git credential resolver")
+
+	_, err = remote.GetGitCredentialBinding(context.Background(), &GitCredentialBindingRequest{})
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+	require.Contains(t, err.Error(), "plugin does not implement git credential binder")
 }

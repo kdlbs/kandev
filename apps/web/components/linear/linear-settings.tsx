@@ -439,7 +439,7 @@ export function LinearConnectionSection({ workspaceId }: { workspaceId: string }
       icon={<IconHexagon className="h-5 w-5" />}
       title={t("linear:linearIntegration")}
       description={t("linear:linearIntegrationDescription")}
-      action={<LinearEnabledControl />}
+      action={<LinearEnabledControl workspaceId={workspaceId} />}
     >
       <SettingsCard isDirty={dirty}>
         <CardContent className="space-y-4 pt-6">

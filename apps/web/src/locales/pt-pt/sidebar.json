@@ -68,6 +68,7 @@
   "projects": "Projetos",
   "queuedPromptCount_one": "{{count}} prompt em fila",
   "queuedPromptCount_other": "{{count}} prompts em fila",
+  "wipQueuePosition": "Posição {{position}} de {{total}} na fila de {{step}}",
   "quickChat": "Chat rápido",
   "quickTerminal": "Terminal rápido",
   "quickChatTerminals": "Terminais",
@@ -104,5 +105,7 @@
   "viewLabel": "Vista: {{name}}",
   "whatsNew": "Novidades",
   "work": "Trabalho",
-  "workspaceFallback": "Área de trabalho"
+  "workspaceFallback": "Área de trabalho",
+  "taskPreferences": "Preferências de tarefas da barra lateral",
+  "views": "Vistas da barra lateral"
 }

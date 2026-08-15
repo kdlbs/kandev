@@ -334,6 +334,8 @@ test.describe("Plugins — task panel / kanban Edit submenu / card indicator", (
       await expect(notesEditor).toHaveValue("second note", { timeout: 10_000 });
 
       // Now let the stale mount reads land — neither may revert the panel.
+      // Awaiting the handlers themselves (rather than a fixed dwell) is the
+      // real causal signal that the stale responses have been processed.
       releaseInitialReads();
       await Promise.all(initialRequestHandlers);
       await expect(notesEditor).toHaveValue("second note");

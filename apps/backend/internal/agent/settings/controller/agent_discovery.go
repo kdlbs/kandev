@@ -93,7 +93,6 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 
 	modelConfig := c.buildModelConfigFromHostUtility(ag.ID())
-	_ = ctx
 
 	capabilities := dto.AgentCapabilitiesDTO{
 		SupportsSessionResume: availability.Capabilities.SupportsSessionResume,
@@ -133,7 +132,7 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 
 	loginCommand := buildLoginCommandDTO(ag)
-	runtimeUpdate := c.buildRuntimeUpdateDTO(ag, availability.Available)
+	runtimeUpdate := c.buildRuntimeUpdateDTO(ctx, ag, availability.Available)
 
 	return dto.AvailableAgentDTO{
 		Name:               ag.ID(),
@@ -155,7 +154,7 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 }
 
-func (c *Controller) buildRuntimeUpdateDTO(ag agents.Agent, available bool) *dto.RuntimeUpdateDTO {
+func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent, available bool) *dto.RuntimeUpdateDTO {
 	if !available {
 		return nil
 	}
@@ -168,6 +167,11 @@ func (c *Controller) buildRuntimeUpdateDTO(ag agents.Agent, available bool) *dto
 		return nil
 	}
 	item := &dto.RuntimeUpdateDTO{Supported: true, Package: spec.Package}
+	if c.managedRuntimeSelections != nil {
+		if selection, found, err := c.managedRuntimeSelections.Get(ctx, ag.ID(), spec.Package); err == nil && found {
+			item.ActiveVersion = selection.Version
+		}
+	}
 	if c.runtimeUpdater != nil {
 		if caps, found := c.runtimeUpdater.CurrentCapabilities(ag.ID()); found {
 			item.CurrentVersion = caps.AgentVersion

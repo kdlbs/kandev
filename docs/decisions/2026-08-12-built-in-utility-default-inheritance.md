@@ -1,6 +1,6 @@
 # ADR-2026-08-12-built-in-utility-default-inheritance: Built-in Utility Actions Inherit the Global Profile by Default
 
-**Status:** accepted
+**Status:** superseded by 2026-08-12-empty-utility-bindings-inherit-default
 **Date:** 2026-08-12
 **Area:** backend, frontend
 

@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-07-14
-updated: 2026-08-08
+updated: 2026-08-12
 owner: cfl
 ---
 
@@ -204,6 +204,14 @@ Retention override:
   owned cache into Kandev trash and recreates an empty cache when its size is greater than the
   configured maximum. The limit is a cleanup trigger, not a hard quota; the cache can temporarily
   grow beyond it while tasks are active.
+- Only one restorable Go-cache generation can remain active for an original path. If the replacement
+  cache exceeds its maximum before that generation becomes terminal, cleanup reports a successful
+  no-op with `skipped: true` and `reason: "active_quarantine"`. It does not create another intent,
+  change either cache path, or fail the complete maintenance run.
+- Permanent deletion treats an absent Go-cache quarantine payload as already removed after all
+  confirmation, retention, ownership, containment, and state checks succeed. It marks the durable
+  entry `deleted`, does not change a populated replacement cache, and reports zero deleted bytes for
+  the absent payload. Restore continues to fail closed when the payload is absent.
 - Disabling managed Go cache stops injecting `GOCACHE` into new executions. It does not delete the
   previously managed cache. Scheduled cleanup and a global manual run with no resource selection
   leave it untouched; only a manual run whose non-empty selection includes `go_cache` may rotate it.
@@ -600,6 +608,10 @@ distinct `DELETE ALL NOW` confirmation because it removes the configured restore
   warning, and does not run destructive maintenance.
 - A managed Go-cache cleanup failure leaves either the original cache or its quarantined rename
   intact; it never recursively deletes outside the configured owned path.
+- An active Go-cache quarantine generation defers another rotation without failing maintenance.
+  The active entry remains available for restore or permanent deletion.
+- An absent Go-cache quarantine payload cannot be restored. Permanent deletion can close its durable
+  entry without deleting or replacing data at the original cache path.
 - A temporary-artifact registry read, marker read, lease/heartbeat check, or ownership/path
   validation failure keeps that root in place and records a skipped warning. There is no fallback to
   prefix, mtime, or process-name classification.
@@ -639,6 +651,8 @@ distinct `DELETE ALL NOW` confirmation because it removes the configured restore
   cleanup and permanent quarantine deletion do not cascade-delete that history.
 - Quarantined data remains restorable until permanent deletion succeeds. A failed permanent delete
   remains visible and retryable.
+- A retained Go-cache generation keeps its unique active-path slot until restore or permanent
+  deletion makes the entry terminal. A deferred cleanup does not change that entry or its deadline.
 - Temporary-artifact ownership rows and matching markers survive backend restarts. A producer's
   normal close remains idempotent; an interrupted active row is reconciled and can become eligible
   only after the stale interval.
@@ -736,6 +750,14 @@ distinct `DELETE ALL NOW` confirmation because it removes the configured restore
 - **GIVEN** managed Go cache is enabled and is 20 GiB with a 15 GiB threshold, **WHEN** an idle
   cleanup runs, **THEN** Kandev rotates the owned cache to trash, recreates an empty cache, and
   reports the reclaimed bytes.
+- **GIVEN** an active Go-cache quarantine entry and a replacement cache above its threshold,
+  **WHEN** cleanup runs, **THEN** the Go-cache result reports `skipped: true` with
+  `reason: "active_quarantine"`, reclaims zero bytes, and the maintenance run does not fail.
+- **GIVEN** an active Go-cache entry whose quarantine payload is absent and whose original path
+  contains a replacement cache, **WHEN** eligible or forced permanent deletion runs, **THEN** the
+  entry becomes `deleted`, the replacement cache remains unchanged, and deleted bytes are zero.
+- **GIVEN** an active Go-cache entry whose quarantine payload is absent, **WHEN** restore runs,
+  **THEN** restore fails closed and the entry remains active.
 - **GIVEN** `/root/.cache/go-build` was not explicitly adopted, **WHEN** storage cleanup runs,
   **THEN** Kandev does not modify it.
 - **GIVEN** an external Go cache was adopted successfully, **WHEN** the Storage page rerenders or is
@@ -819,3 +841,4 @@ distinct `DELETE ALL NOW` confirmation because it removes the configured restore
 - [Storage overview cache and settings follow-up](../../plans/storage-overview-cache/plan.md)
 - [Quarantine lifecycle follow-up](../../plans/quarantine-lifecycle/plan.md)
 - [Progressive Storage loading and totals](../../plans/storage-progressive-loading/plan.md)
+- [Go-cache quarantine lifecycle repair](../../plans/go-cache-quarantine-lifecycle/plan.md)

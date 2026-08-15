@@ -70,6 +70,7 @@
   "projects": "Projects",
   "queuedPromptCount_one": "{{count}} queued prompt",
   "queuedPromptCount_other": "{{count}} queued prompts",
+  "wipQueuePosition": "Position {{position}} of {{total}} in {{step}} queue",
   "quickChat": "Quick Chat",
   "quickTerminal": "Quick terminal",
   "quickChatTerminals": "Terminals",
@@ -106,5 +107,7 @@
   "viewLabel": "View: {{name}}",
   "whatsNew": "What's new",
   "work": "Work",
-  "workspaceFallback": "Workspace"
+  "workspaceFallback": "Workspace",
+  "taskPreferences": "Sidebar task preferences",
+  "views": "Sidebar views"
 }

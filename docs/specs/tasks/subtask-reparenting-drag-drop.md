@@ -21,6 +21,8 @@ Users can detach a subtask or nest a task under another via context-menu actions
 - No confirmation dialog is shown on drop (unlike the detach menu action): the gesture is explicit, the operation is non-destructive (workspace membership is retained) and reversible via the menu or another drag.
 - Successful re-parenting is reflected across sidebar, board, and task-detail views without a reload, via the existing optimistic snapshot update and the `task.updated` WebSocket event.
 - The mobile task switcher sheet offers the same touch drag-and-drop re-parenting.
+- A drag starts only from a row's body. Interacting with a row's context menu (including the Color submenu and every item inside it) never starts a drag and never activates the row: pointer-start and click events inside the menu are contained within the menu and do not reach the row's drag sensor listeners or its click handler.
+- On touch, the long-press that opens the context menu cancels any touch-drag the hold started: the menu opens without the row moving, no nest drop zones remain while the menu is open, and continuing to drag inside the open menu does not move or reorder the row. (The drag sensor arms after a 250ms hold, before the ≈700ms long-press opens the menu, so the menu cancels the in-flight drag instead of dropping it.)
 
 ## Data model
 
@@ -58,6 +60,9 @@ No new endpoint. Reuses and extends existing contracts:
 - **GIVEN** a drop that lands outside every nest zone, **WHEN** the drop completes, **THEN** the task keeps its original parent and no request is sent (a plain no-op); a request-error toast appears only when a valid-zone drop's request is rejected by the backend.
 - **GIVEN** a re-parented task, **WHEN** its `task.updated` event arrives over WebSocket, **THEN** cached parent relationships in sidebar, board, and task-detail views are updated.
 - **GIVEN** the mobile task switcher sheet, **WHEN** a user touch-drags a subtask onto a root's nest zone, **THEN** the same re-parenting occurs.
+- **GIVEN** a task row whose context menu is open, **WHEN** the user presses and moves inside the menu (for example on the Color submenu trigger or one of its swatches), **THEN** no drag starts: no nest drop zones appear, the row neither dims nor moves, and the menu item still works.
+- **GIVEN** a task row whose context menu is open, **WHEN** the user clicks a menu item, **THEN** the row is not activated or selected as a side effect of the click.
+- **GIVEN** a touch long-press on a task row, **WHEN** the context menu opens, **THEN** the touch-drag started by the hold is cancelled: no nest drop zones remain and the row is not dimmed while the menu is open, and dragging inside the open menu does not move or reorder the row.
 
 ## Out of scope
 

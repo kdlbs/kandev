@@ -203,6 +203,60 @@ test.describe("Fresh-branch flow", () => {
 
   type ApiClientType = import("../../helpers/api-client").ApiClient;
 
+  async function waitForBackendAgentProfile(apiClient: ApiClientType): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          const { agents } = await apiClient.listAgents();
+          return agents.some((agent) => (agent.profiles ?? []).length > 0);
+        },
+        { timeout: 30_000, message: "seeded agent profile available from the backend" },
+      )
+      .toBe(true);
+  }
+
+  async function waitForCreateDialogAgent(
+    testPage: import("@playwright/test").Page,
+    kanban: KanbanPage,
+    apiClient: ApiClientType,
+  ): Promise<void> {
+    const selector = testPage.getByTestId("agent-profile-selector");
+    const emptyState = testPage.getByTestId("agent-profile-empty-state");
+    const status = async () => {
+      if (await selector.isVisible().catch(() => false)) return "selector";
+      if (await emptyState.isVisible().catch(() => false)) return "empty";
+      return "loading";
+    };
+
+    // The browser can finish its first settings request before the seeded
+    // mock agent is visible during backend startup. Reopen the dialog after
+    // the API confirms the profile exists so the empty state is not terminal.
+    await waitForBackendAgentProfile(apiClient);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let currentStatus = "loading";
+      try {
+        await expect.poll(status, { timeout: 20_000 }).toMatch(/selector|empty/);
+        currentStatus = await status();
+      } catch {
+        // Reload below to re-drive the settings fetch.
+      }
+      if (currentStatus === "selector") {
+        await expect(selector).toBeEnabled({ timeout: 30_000 });
+        return;
+      }
+      if (attempt < 2) {
+        await waitForBackendAgentProfile(apiClient);
+        await testPage.reload();
+        await kanban.goto();
+        await kanban.createTaskButton.first().click();
+        await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+      }
+    }
+
+    await expect(selector).toBeVisible({ timeout: 30_000 });
+    await expect(selector).toBeEnabled({ timeout: 30_000 });
+  }
+
   async function setupLocalRepo(
     apiClient: ApiClientType,
     backendTmpDir: string,
@@ -232,11 +286,13 @@ test.describe("Fresh-branch flow", () => {
     testPage: import("@playwright/test").Page,
     profileName: string,
     repoName: string,
+    apiClient: ApiClientType,
   ) {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+    await waitForCreateDialogAgent(testPage, kanban, apiClient);
     await testPage.getByTestId("task-title-input").fill("Fresh Branch Test");
     await testPage.getByTestId("task-description-input").fill("testing fresh branch");
     await testPage.getByTestId("repo-chip-trigger").first().click();
@@ -267,7 +323,7 @@ test.describe("Fresh-branch flow", () => {
       return;
     }
     try {
-      await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
+      await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName, apiClient);
       const toggle = testPage.getByTestId("fresh-branch-toggle");
       await expect(toggle).toBeVisible();
       await expect(toggle).toHaveAttribute("aria-pressed", "false");
@@ -285,22 +341,29 @@ test.describe("Fresh-branch flow", () => {
     backend,
     seedData,
   }) => {
+    test.setTimeout(120_000);
     const setup = await setupLocalRepo(apiClient, backend.tmpDir, seedData.workspaceId, "clean");
     if (!setup) {
       test.skip(true, "No local executor available");
       return;
     }
     try {
-      await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
+      await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName, apiClient);
       await testPage.getByTestId("fresh-branch-toggle").click();
       const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
-      await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
+      await expect(branchSelector).toBeEnabled({ timeout: 30_000 });
       // Pick the develop base branch so the new branch will fork from it.
       await branchSelector.click();
-      await testPage
-        .getByRole("option", { name: /develop/ })
-        .first()
-        .click();
+      const developOption = testPage.getByRole("option", { name: /develop/ }).first();
+      await expect(developOption).toBeVisible({ timeout: 30_000 });
+      await developOption.click();
+
+      // Selecting a branch updates the form asynchronously. Clicking while
+      // the profile/branch compatibility state is still settling is a
+      // no-op, which made this test time out waiting for a create request.
+      await expect(testPage.getByTestId("submit-start-agent")).toBeEnabled({
+        timeout: 30_000,
+      });
 
       // Submit and assert the discard modal never appears (clean tree).
       // Wait for the create-task request to fire so we know the submit path
@@ -331,7 +394,7 @@ test.describe("Fresh-branch flow", () => {
       // Add an untracked file so `git status` reports it as dirty.
       fs.writeFileSync(path.join(setup.repoDir, "WIP.txt"), "draft");
 
-      await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
+      await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName, apiClient);
       await testPage.locator("html").evaluate((root) => {
         root.setAttribute("data-rendering-engine", "webkit");
       });
@@ -378,7 +441,7 @@ test.describe("Fresh-branch flow", () => {
       const wipPath = path.join(setup.repoDir, "WIP-confirm.txt");
       fs.writeFileSync(wipPath, "draft");
 
-      await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
+      await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName, apiClient);
       await testPage.getByTestId("fresh-branch-toggle").click();
       await testPage.getByTestId("submit-start-agent").click();
 
@@ -411,7 +474,7 @@ test.describe("Fresh-branch flow", () => {
       for (let i = 0; i < 25; i++) {
         fs.writeFileSync(path.join(setup.repoDir, `f${i}.txt`), "x");
       }
-      await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
+      await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName, apiClient);
       await testPage.getByTestId("fresh-branch-toggle").click();
       await testPage.getByTestId("submit-start-agent").click();
 

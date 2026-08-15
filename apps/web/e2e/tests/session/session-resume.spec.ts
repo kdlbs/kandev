@@ -155,10 +155,16 @@ test.describe("Task status during resume", () => {
       message: "Initial session did not settle before the Turn Finished assertion",
       timeout: 30_000,
     });
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).state, {
+        timeout: 30_000,
+        message: "Initial task did not advance to REVIEW before the Turn Finished assertion",
+      })
+      .toBe("REVIEW");
 
     // 3. Confirm the task moved to the "Turn Finished" section after the turn completed
     await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
-      timeout: 15_000,
+      timeout: 30_000,
     });
 
     // 4. Restart the backend
@@ -170,6 +176,12 @@ test.describe("Task status during resume", () => {
 
     // 6. Immediately after reload, the task must still be in "Turn Finished" — not
     //    regressed to "Backlog" or "Running" due to resume lifecycle.
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).state, {
+        timeout: 30_000,
+        message: "Task state regressed while reloading before auto-resume",
+      })
+      .toBe("REVIEW");
     await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
       timeout: 30_000,
     });
@@ -196,8 +208,14 @@ test.describe("Task status during resume", () => {
     });
 
     // 8. After resume completes, the task must still be in "Turn Finished"
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).state, {
+        timeout: 30_000,
+        message: "Task state regressed after auto-resume",
+      })
+      .toBe("REVIEW");
     await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
-      timeout: 15_000,
+      timeout: 30_000,
     });
   });
 });

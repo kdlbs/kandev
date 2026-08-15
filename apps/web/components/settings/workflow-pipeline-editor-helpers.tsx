@@ -1,6 +1,7 @@
 "use client";
 
 import { IconInfoCircle } from "@tabler/icons-react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { WorkflowStep } from "@/lib/types/http";
@@ -28,7 +29,7 @@ export function HelpTip({
   testId,
   ariaLabel,
 }: {
-  text: string;
+  text: ReactNode;
   testId?: string;
   ariaLabel?: string;
 }) {
