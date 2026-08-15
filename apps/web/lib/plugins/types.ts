@@ -9,7 +9,12 @@ import type { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint"
 import type { AppState } from "@/lib/state/store";
 import type * as PluginSDK from "@kandev/plugin-sdk";
 import type { PluginUIApi } from "@kandev/plugin-sdk";
-export type { PluginContextApi, PluginHostRepository, PluginUIApi } from "@kandev/plugin-sdk";
+export type {
+  PluginContextApi,
+  PluginHostRepository,
+  PluginNavSection,
+  PluginUIApi,
+} from "@kandev/plugin-sdk";
 export type { PluginIcon } from "@kandev/plugin-sdk";
 
 /** Entry in the boot payload's `plugins` array (backend `ActivePlugin`). */
@@ -21,9 +26,6 @@ export interface ActivePlugin {
   /** Manifest-owned repository provider IDs, supplied by newer boot payloads. */
   repositoryProviderIds?: string[];
 }
-
-/** Accepted `NavItem.section` values — the plugin's own vocabulary, not the host's. */
-export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
 
 /** Sidebar/main nav entry registered by a plugin. */
 export interface NavItem {
@@ -41,7 +43,7 @@ export interface NavItem {
    * item is reached through the footer's overflow menu instead), "settings"
    * accepted but rendered on no surface.
    */
-  section?: PluginNavSection;
+  section?: PluginSDK.PluginNavSection;
 }
 
 /**
