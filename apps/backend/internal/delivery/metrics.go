@@ -25,6 +25,8 @@ var (
 	sessionsUnattributedGauge   = expvar.NewInt("delivery_ledger_sessions_unattributed_total")
 	lastEvaluatedUnixVar        = expvar.NewInt("delivery_ledger_last_evaluated_unix")
 	stallSecondsVar             = expvar.NewInt("delivery_ledger_stall_seconds")
+
+	defaultBranchPersistErrorsTotal = expvar.NewInt("delivery_ledger_default_branch_persist_errors_total")
 )
 
 func recordEvaluation(outcome Outcome) { evaluationsTotal.Add(string(outcome), 1) }
@@ -35,6 +37,16 @@ func recordAncestryError()             { ancestryErrorsTotal.Add(1) }
 func recordAncestrySkipped()           { ancestrySkippedTotal.Add(1) }
 func recordWriteError()                { writeErrorsTotal.Add(1) }
 func recordDegradedOutcomeChanged()    { degradedOutcomeChangedTotal.Add(1) }
+
+// RecordDefaultBranchPersistError increments
+// delivery_ledger_default_branch_persist_errors_total. Exported for call
+// sites outside this package (backendapp's review base-branch resolution)
+// that fail to write a detected repositories.default_branch value: per spec
+// "Degraded evaluation", that repository's pairs keep reading as
+// default_branch_unknown until some future write succeeds, and Review round
+// 3 finding #4 was exactly that this could happen silently, with no signal
+// anywhere that it was happening.
+func RecordDefaultBranchPersistError() { defaultBranchPersistErrorsTotal.Add(1) }
 
 func setPairsMissingRepositoryGauge(n int) { pairsMissingRepositoryGauge.Set(int64(n)) }
 func setPairsMissingTaskGauge(n int)       { pairsMissingTaskGauge.Set(int64(n)) }

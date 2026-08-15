@@ -163,3 +163,102 @@ func TestApplyRepositoryUpdates_DefaultBranchAcceptsValidValue(t *testing.T) {
 		t.Errorf("DefaultBranch = %q, want %q", repo.DefaultBranch, "develop")
 	}
 }
+
+// TestService_FindOrCreateRepositoryRejectsInvalidDefaultBranchBackfill
+// covers Review round 3, finding #1: createRepository and
+// applyRepositoryUpdates validate default_branch, but FindOrCreateRepository's
+// own backfill block (the third write site) did not, leaving a path to the
+// same git argv (internal/delivery ancestry check, and independently the
+// worktree fetch/pull FallbackBaseBranch path, which ancestry.Check does not
+// cover at all) unvalidated. Unlike the LocalPath backfill above, an invalid
+// default_branch must not fail the whole find-or-create call — it is a
+// best-effort backfill — so this asserts the call still succeeds, the field
+// is simply left unset, and nothing invalid reaches the repository row.
+func TestService_FindOrCreateRepositoryRejectsInvalidDefaultBranchBackfill(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Name:          "owner/repo",
+		SourceType:    sourceTypeProvider,
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if created.DefaultBranch != "" {
+		t.Fatalf("precondition failed: DefaultBranch = %q, want empty", created.DefaultBranch)
+	}
+
+	resolved, wasCreated, err := svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+		DefaultBranch: "-x",
+	})
+	if err != nil {
+		t.Fatalf("FindOrCreateRepository: %v", err)
+	}
+	if wasCreated || resolved.ID != created.ID {
+		t.Fatalf("resolved repository = %q (created=%t), want existing %q", resolved.ID, wasCreated, created.ID)
+	}
+	if resolved.DefaultBranch != "" {
+		t.Fatalf("resolved.DefaultBranch = %q, want empty (backfill skipped)", resolved.DefaultBranch)
+	}
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.DefaultBranch != "" {
+		t.Fatalf("invalid DefaultBranch backfill persisted as %q", stored.DefaultBranch)
+	}
+}
+
+// TestService_FindOrCreateRepositoryBackfillsValidDefaultBranch is the
+// positive control for the test above: a legitimate default_branch value
+// still backfills onto a previously-empty row.
+func TestService_FindOrCreateRepositoryBackfillsValidDefaultBranch(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Name:          "owner/repo",
+		SourceType:    sourceTypeProvider,
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	resolved, _, err := svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Provider:      "github",
+		ProviderOwner: "owner",
+		ProviderName:  "repo",
+		DefaultBranch: "main",
+	})
+	if err != nil {
+		t.Fatalf("FindOrCreateRepository: %v", err)
+	}
+	if resolved.DefaultBranch != "main" {
+		t.Fatalf("resolved.DefaultBranch = %q, want %q", resolved.DefaultBranch, "main")
+	}
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.DefaultBranch != "main" {
+		t.Fatalf("stored.DefaultBranch = %q, want %q", stored.DefaultBranch, "main")
+	}
+}

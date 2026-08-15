@@ -14,13 +14,21 @@ import (
 )
 
 // fakeCheckoutResolver satisfies delivery.CheckoutResolver for tests
-// without pulling in task/service.
+// without pulling in task/service. calls, when non-nil, records how many
+// times ResolveRepositoryLocalPath was invoked, so a test can assert a
+// rejection happened before the checkout was even resolved rather than
+// merely that Check ended up Errored (which a later, unrelated failure could
+// also produce).
 type fakeCheckoutResolver struct {
-	path string
-	err  error
+	path  string
+	err   error
+	calls *int
 }
 
 func (f fakeCheckoutResolver) ResolveRepositoryLocalPath(_ context.Context, _ string) (string, error) {
+	if f.calls != nil {
+		*f.calls++
+	}
 	return f.path, f.err
 }
 
@@ -171,15 +179,83 @@ func TestAncestryChecker_FlagLikeCommitIsRejectedBeforeReachingGit(t *testing.T)
 // take a `--` separator (it would turn the argument into a pathspec), so
 // the fix must be validation before the call, mirroring looksLikeCommitSHA's
 // treatment of commit.
+//
+// Review round 3, finding #3: this test originally only asserted
+// Errored=true, which is phantom-green — "-x" already produces Errored=true
+// via the pre-existing "neither ref resolves" path (refExists's rev-parse
+// calls both exit non-zero for an unrecognized flag), identically on
+// pre-fix code, so the assertion could not tell "rejected before reaching
+// git" apart from "reached git and git errored anyway". Asserting the
+// checkout was never even resolved makes the test actually discriminate:
+// pre-fix, Check calls a.Checkout.ResolveRepositoryLocalPath unconditionally
+// before ever touching defaultBranch.
 func TestAncestryChecker_FlagLikeDefaultBranchIsRejectedBeforeReachingGit(t *testing.T) {
 	work, _ := newAncestryTestRepo(t)
 	head := runGit(t, work, "rev-parse", "HEAD")
 
-	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work}}
+	calls := 0
+	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work, calls: &calls}}
 	out := checker.Check(context.Background(), "repo-1", "-x", head)
 
 	if !out.Errored || out.Positive {
 		t.Fatalf("out = %+v, want Errored=true (a flag-like default branch must never reach the git subprocess)", out)
+	}
+	if calls != 0 {
+		t.Fatalf("ResolveRepositoryLocalPath was called %d time(s), want 0 "+
+			"(the guard must reject defaultBranch before resolving the checkout at all)", calls)
+	}
+}
+
+// TestAncestryChecker_CommitSHALikeDefaultBranchIsRejectedBeforeReachingGit
+// covers Review round 3, finding #2: IsValidBranchName's allowlist regex
+// admits a bare commit SHA (pure hex, no leading dash, no "~"/"^"), which is
+// not a real branch name but resolves via refExists's local-fallback
+// rev-parse to whatever commit that SHA names — the silent wrong-commit
+// failure mode the guard exists to close, not merely a rejection based on
+// "no such ref".
+func TestAncestryChecker_CommitSHALikeDefaultBranchIsRejectedBeforeReachingGit(t *testing.T) {
+	work, _ := newAncestryTestRepo(t)
+	head := runGit(t, work, "rev-parse", "HEAD")
+
+	calls := 0
+	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work, calls: &calls}}
+	// head is a real, resolvable commit SHA in this checkout — if it were
+	// treated as a branch name instead of rejected, resolveDefaultBranchRef
+	// would resolve it successfully rather than failing "does not exist".
+	out := checker.Check(context.Background(), "repo-1", head, head)
+
+	if !out.Errored || out.Positive {
+		t.Fatalf("out = %+v, want Errored=true (a commit-SHA-shaped default branch must never reach the git subprocess)", out)
+	}
+	if calls != 0 {
+		t.Fatalf("ResolveRepositoryLocalPath was called %d time(s), want 0", calls)
+	}
+}
+
+// TestAncestryChecker_SymbolicRefDefaultBranchIsRejectedBeforeReachingGit
+// covers the second half of Review round 3, finding #2: git's well-known
+// symbolic refs (HEAD, ORIG_HEAD, FETCH_HEAD, MERGE_HEAD) are also pure
+// alnum/underscore and pass IsValidBranchName, but none is a real branch
+// name — HEAD in particular always resolves in a non-empty checkout, to
+// whatever commit is currently checked out, independent of the caller's
+// intended default branch.
+func TestAncestryChecker_SymbolicRefDefaultBranchIsRejectedBeforeReachingGit(t *testing.T) {
+	work, _ := newAncestryTestRepo(t)
+	head := runGit(t, work, "rev-parse", "HEAD")
+
+	for _, ref := range []string{"HEAD", "ORIG_HEAD", "FETCH_HEAD", "MERGE_HEAD"} {
+		t.Run(ref, func(t *testing.T) {
+			calls := 0
+			checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{path: work, calls: &calls}}
+			out := checker.Check(context.Background(), "repo-1", ref, head)
+
+			if !out.Errored || out.Positive {
+				t.Fatalf("out = %+v, want Errored=true (%q must never reach the git subprocess as a default branch)", out, ref)
+			}
+			if calls != 0 {
+				t.Fatalf("ResolveRepositoryLocalPath was called %d time(s), want 0", calls)
+			}
+		})
 	}
 }
 
