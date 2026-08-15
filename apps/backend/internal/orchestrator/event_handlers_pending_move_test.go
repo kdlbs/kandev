@@ -130,6 +130,12 @@ func TestPendingMove_OutOfTerminalStepReopensCompletedTask(t *testing.T) {
 	if last.trigger != string(steptelemetry.TriggerMCPDeferredMove) {
 		t.Fatalf("trigger = %q, want %q", last.trigger, steptelemetry.TriggerMCPDeferredMove)
 	}
+	if last.actorKind != string(steptelemetry.ActorSystem) {
+		t.Fatalf("actor_kind = %q, want %q when sender session is absent", last.actorKind, steptelemetry.ActorSystem)
+	}
+	if last.actorID != nil || last.sessionID != nil {
+		t.Fatalf("actor/session IDs = %v/%v, want NULL/NULL when sender session is absent", last.actorID, last.sessionID)
+	}
 }
 
 func TestPendingMove_DropsForeignWorkflowStepWithoutMovingTask(t *testing.T) {

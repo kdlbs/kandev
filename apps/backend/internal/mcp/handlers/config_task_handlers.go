@@ -164,11 +164,12 @@ func (h *Handlers) deferMoveTask(
 		}
 	}
 	h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
-		TaskID:         req.TaskID,
-		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: req.WorkflowStepID,
-		Position:       req.Position,
-		Actor:          string(wfmodels.StepTransitionActorAgent),
+		TaskID:          req.TaskID,
+		WorkflowID:      req.WorkflowID,
+		WorkflowStepID:  req.WorkflowStepID,
+		Position:        req.Position,
+		Actor:           string(wfmodels.StepTransitionActorAgent),
+		SenderSessionID: req.SenderSessionID,
 	})
 	return ws.NewResponse(msg.ID, msg.Action,
 		h.synthesizeMovedTaskDTO(ctx, req.TaskID, req.WorkflowID, req.WorkflowStepID, req.Position))

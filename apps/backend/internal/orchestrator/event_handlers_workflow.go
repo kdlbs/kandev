@@ -2008,10 +2008,19 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// otherwise see RUNNING and skip the on_enter processing.
 	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 
-	deferredMoveCtx := steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
-		Trigger: steptelemetry.TriggerMCPDeferredMove, ActorKind: steptelemetry.ActorAgent,
-		ActorID: sessionID, SessionID: sessionID,
-	})
+	// sessionID is the target task's queue/execution session. It is not
+	// necessarily the agent that called move_task_kandev (cross-task hand-offs
+	// are supported), so use the sender persisted with the pending move.
+	deferredMoveAttribution := steptelemetry.Attribution{
+		Trigger:   steptelemetry.TriggerMCPDeferredMove,
+		ActorKind: steptelemetry.ActorSystem,
+	}
+	if move.SenderSessionID != "" {
+		deferredMoveAttribution.ActorKind = steptelemetry.ActorAgent
+		deferredMoveAttribution.ActorID = move.SenderSessionID
+		deferredMoveAttribution.SessionID = move.SenderSessionID
+	}
+	deferredMoveCtx := steptelemetry.WithAttribution(ctx, deferredMoveAttribution)
 	if err := s.workflowStore.ApplyTransition(deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, engine.TriggerOnEnter); err != nil {
 		s.logger.Error("failed to apply pending move transition",
 			zap.String("task_id", taskID),
