@@ -69,6 +69,27 @@ function cachedSessionsHaveEnvIds(sessions: TaskSession[]): boolean {
   return sessions.length === 0 || sessions.every((session) => !!session.task_environment_id);
 }
 
+function commitTaskSessionLoad(
+  store: StoreApi<AppState>,
+  taskId: string,
+  generation: number,
+  sessions: TaskSession[],
+  force: boolean,
+): TaskSession[] {
+  if (taskSessionLoadIsCurrent(store, taskId, generation)) {
+    store.getState().setTaskSessionsForTask(taskId, sessions);
+    return sessions;
+  }
+  // Forced callers use this result to choose a pending-action owner. Never
+  // let a superseded response escape even though its cache write was gated.
+  if (force) {
+    const error = new Error("Task session load was superseded");
+    error.name = "AbortError";
+    throw error;
+  }
+  return store.getState().taskSessionsByTask.itemsByTaskId[taskId] ?? [];
+}
+
 async function loadTaskSessionsForTaskFromStore(
   store: StoreApi<AppState>,
   taskId: string,
@@ -87,10 +108,7 @@ async function loadTaskSessionsForTaskFromStore(
   try {
     const response = await listTaskSessions(taskId, { cache: "no-store" });
     const sessions = response.sessions ?? [];
-    if (taskSessionLoadIsCurrent(store, taskId, loadGeneration)) {
-      store.getState().setTaskSessionsForTask(taskId, sessions);
-    }
-    return sessions;
+    return commitTaskSessionLoad(store, taskId, loadGeneration, sessions, !!options?.force);
   } catch (error) {
     console.error("Failed to load task sessions:", error);
     if (options?.force) throw error;

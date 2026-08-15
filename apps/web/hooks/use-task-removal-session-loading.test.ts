@@ -69,7 +69,7 @@ describe("useTaskRemoval session loading", () => {
     );
   });
 
-  it("does not let an older forced response overwrite a newer snapshot", async () => {
+  it("rejects an older forced response after a newer snapshot wins", async () => {
     type SessionResponse = { sessions: TaskSession[] };
     let resolveOlder: (response: SessionResponse) => void = () => {};
     let resolveNewer: (response: SessionResponse) => void = () => {};
@@ -87,9 +87,9 @@ describe("useTaskRemoval session loading", () => {
     const newerLoad = result.current.loadTaskSessionsForTask(TASK_ID, { force: true });
     const newerSession = makeSession("newer-session");
     resolveNewer({ sessions: [newerSession] });
-    await newerLoad;
+    await expect(newerLoad).resolves.toEqual([newerSession]);
     resolveOlder({ sessions: [makeSession("older-session")] });
-    await olderLoad;
+    await expect(olderLoad).rejects.toMatchObject({ name: "AbortError" });
 
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledTimes(1);
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [newerSession]);
