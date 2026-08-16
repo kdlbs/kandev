@@ -28,7 +28,7 @@
     "e2e:waits": "node scripts/report-e2e-waits.mjs",
     "licenses:gen": "tsx scripts/generate-licenses.ts",
     "i18n:pseudo": "node scripts/generate-pseudo-locale.mjs",
-    "i18n:check": "node scripts/check-i18n-keys.mjs && node scripts/check-trans-indices.mjs && node scripts/check-inline-plurals.mjs && node scripts/check-module-scope-t.mjs && node scripts/check-no-em-dash-ui.mjs",
+    "i18n:check": "node scripts/check-i18n-keys.mjs && node scripts/check-trans-indices.mjs && node scripts/check-inline-plurals.mjs && node scripts/check-module-scope-t.mjs && node scripts/check-no-em-dash-ui.mjs && node scripts/check-nonjsx-copy.mjs",
     "i18n:ratchet": "node scripts/run-i18n-ratchet.mjs",
     "i18n:removed": "node scripts/check-removed-literals.mjs",
     "i18n:sweep": "node scripts/i18n-sweep.mjs",

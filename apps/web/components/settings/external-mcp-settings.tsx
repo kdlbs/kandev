@@ -171,6 +171,7 @@ function ToolsPreview() {
  * locale — the surrounding sentence is the only copy, and it interpolates them
  * so the pseudo-locale cannot turn them into dead pointers.
  */
+// i18n-exempt: third-party product names.
 const SNIPPET_CARDS: Array<{
   title: string;
   build: (streamableUrl: string) => string;
@@ -189,6 +190,7 @@ const SNIPPET_CARDS: Array<{
     build: buildClaudeCodeConfig,
     buildCli: buildClaudeCodeCliCommand,
     cliTarget: "~/.claude.json",
+    // i18n-exempt: third-party product names.
   },
   { title: "Cursor", path: "~/.cursor/mcp.json", build: buildCursorConfig },
   {
@@ -198,6 +200,7 @@ const SNIPPET_CARDS: Array<{
     buildCli: buildCodexCliCommand,
     cliTarget: "~/.codex/config.toml",
   },
+  // i18n-exempt: third-party product names.
   {
     title: "Auggie CLI",
     path: "~/.augment/settings.json",
@@ -213,6 +216,7 @@ const SNIPPET_CARDS: Array<{
       globalPath: "~/.config/opencode/opencode.json",
     },
     build: buildOpenCodeConfig,
+    // i18n-exempt: third-party product names.
   },
   { title: "GitHub Copilot CLI", path: "~/.copilot/mcp-config.json", build: buildCopilotCliConfig },
 ];

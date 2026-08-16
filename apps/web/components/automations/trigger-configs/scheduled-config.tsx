@@ -21,6 +21,7 @@ const PRESETS = [
 
 // Shown inside the help text as an example; interpolated so the pseudo-locale
 // cannot accent it into syntax that no longer parses.
+// i18n-exempt: cron shortcut syntax shown as an example. See the comment above.
 const CRON_SHORTCUT_EXAMPLES = "@hourly, @daily, @weekly, @every 5m";
 
 export function ScheduledConfig({ config, onUpdate }: ScheduledConfigProps) {

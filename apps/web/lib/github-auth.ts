@@ -29,6 +29,7 @@ export function getGitHubMutationActor(status: GitHubStatus | null) {
   const effective = status?.effective_manual_mutation_actor;
   if (!effective) return null;
   if (effective.kind === "app") {
+    // i18n-exempt: GitHub's own product term for an app-authenticated actor.
     return effective.login ? `${effective.login} GitHub App` : "GitHub App";
   }
   return effective.login ?? null;

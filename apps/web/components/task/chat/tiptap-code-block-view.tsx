@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 // `value` is the highlight.js language id and the language names are proper
 // nouns, so both stay untranslated. Only the "no language" option is copy, and
 // it travels as a catalog key because this table is built at module load.
+// i18n-exempt: programming language names are not translated.
 const CODE_LANGUAGES: Array<{ value: string; label?: string; labelKey?: string }> = [
   { value: "", labelKey: "task:codeLanguagePlain" },
   { value: "javascript", label: "JavaScript" },

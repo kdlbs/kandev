@@ -7,22 +7,23 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 export function formatTimeAgo(dateStr: string): string {
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return "";
   const diff = Date.now() - date.getTime();
-  if (diff < 0) return "just now";
+  if (diff < 0) return t("github:timeAgoJustNow");
   const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 1) return t("github:timeAgoJustNow");
+  if (minutes < 60) return t("github:timeAgoMinutes", { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return t("github:timeAgoHours", { count: hours });
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  if (days < 30) return `${Math.floor(days / 7)}w ago`;
-  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
-  return `${Math.floor(days / 365)}y ago`;
+  if (days < 7) return t("github:timeAgoDays", { count: days });
+  if (days < 30) return t("github:timeAgoWeeks", { count: Math.floor(days / 7) });
+  if (days < 365) return t("github:timeAgoMonths", { count: Math.floor(days / 30) });
+  return t("github:timeAgoYears", { count: Math.floor(days / 365) });
 }
 
 function formatMs(ms: number): string {

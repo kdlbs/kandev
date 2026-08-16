@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { useAutoUpdateSettings } from "@/hooks/domains/plugins/use-auto-update-settings";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
+import { usePluginSetupStatus } from "@/hooks/domains/plugins/use-plugin-setup-status";
 import { usePluginUpdates } from "@/hooks/domains/plugins/use-plugin-updates";
 import type { MarketplaceEntry } from "@/lib/types/plugins";
 import { InstallPluginDialog } from "./install-plugin-dialog";
@@ -225,6 +226,7 @@ function PluginList({
 }: PluginListProps) {
   const { t } = useTranslation();
   const { items, loaded, loading, error } = list;
+  const needsSetup = usePluginSetupStatus(items);
 
   if (error) {
     return (
@@ -260,6 +262,7 @@ function PluginList({
           update={updates.get(plugin.id)}
           autoUpdateDefault={autoUpdateDefault}
           autoUpdateBusy={actions.autoUpdateBusyId === plugin.id}
+          needsSetup={needsSetup.has(plugin.id)}
           onEnable={actions.handleEnable}
           onDisable={actions.handleDisable}
           onUninstall={actions.openUninstall}

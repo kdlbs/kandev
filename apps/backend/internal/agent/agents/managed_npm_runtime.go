@@ -1,8 +1,7 @@
 package agents
 
 import (
-	"crypto/sha512"
-	"encoding/hex"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
 // ManagedNPMRuntimeSpec defines a built-in npm-distributed ACP runtime.
@@ -26,14 +25,24 @@ func (s ManagedNPMRuntimeSpec) PackageSpec(version string) string {
 // SHA-512 and the first 16 lowercase hexadecimal characters. The optional
 // argument preserves the unversioned legacy key when omitted.
 func (s ManagedNPMRuntimeSpec) ExecutionCacheKey(versions ...string) string {
-	digest := sha512.Sum512([]byte(s.PackageSpec(firstVersion(versions))))
-	return hex.EncodeToString(digest[:])[:16]
+	return managedruntime.NpxExecutionCacheKey(s.PackageSpec(firstVersion(versions)))
 }
 
 // ACPCommand returns the normal launch command for the exact version when one
 // is supplied. An empty version keeps the legacy unversioned behavior.
 func (s ManagedNPMRuntimeSpec) ACPCommand(version string) Command {
-	args := []string{"npx", "--yes", "--prefer-offline", s.PackageSpec(version)}
+	return s.ACPCommandWithNpmPreference(version, false)
+}
+
+// ACPCommandWithNpmPreference builds a managed runtime launch command. The
+// package spec and ACP arguments remain trusted agent metadata; recovery only
+// changes npm's metadata freshness preference.
+func (s ManagedNPMRuntimeSpec) ACPCommandWithNpmPreference(version string, preferOnline bool) Command {
+	preference := "--prefer-offline"
+	if preferOnline {
+		preference = "--prefer-online"
+	}
+	args := []string{"npx", "--yes", preference, s.PackageSpec(version)}
 	args = append(args, s.ACPArgs...)
 	return NewCommand(args...)
 }

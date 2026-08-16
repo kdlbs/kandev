@@ -276,7 +276,9 @@ type ProjectsState = ReturnType<typeof useAzureDevOpsProjects>;
 // Azure DevOps names these two PAT scope groups in its own token UI. They are
 // pointers into that screen, not copy, so they are interpolated as values — the
 // pseudo-locale must not transliterate a label the user has to find verbatim.
+// i18n-exempt: Azure DevOps' own PAT scope names; the user picks these exact entries in Azure's UI.
 const PAT_SCOPE_WORK_ITEMS = "Work Items";
+// i18n-exempt: Azure DevOps' own PAT scope names; the user picks these exact entries in Azure's UI.
 const PAT_SCOPE_CODE = "Code";
 
 function PATSetupHelp({ organizationUrl }: { organizationUrl: string }) {

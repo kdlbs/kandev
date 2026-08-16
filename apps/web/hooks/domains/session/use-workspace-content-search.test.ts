@@ -82,6 +82,31 @@ describe("useWorkspaceContentSearch request lifecycle", () => {
     expect(result.current.isSearching).toBe(true);
   });
 
+  it("publishes the first available results while later repositories are still retrying", async () => {
+    const primaryResult = {
+      repository_name: "primary",
+      path: "src/primary.ts",
+      line: 1,
+      column: 1,
+      preview: "primary needle",
+      match_ranges: [],
+    };
+    mockSearchWorkspaceContent.mockResolvedValue({ results: [primaryResult] });
+    const { result } = renderHook(() =>
+      useWorkspaceContentSearch({
+        enabled: true,
+        query: "needle",
+        sessionId: "session-1",
+      }),
+    );
+
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+
+    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(1);
+    expect(result.current.results).toEqual([primaryResult]);
+    expect(result.current.isSearching).toBe(true);
+  });
+
   it("clears results without sending when search is disabled", async () => {
     mockSearchWorkspaceContent.mockResolvedValue({ results: [] });
     const { result, rerender } = renderHook(

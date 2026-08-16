@@ -461,6 +461,8 @@ type LastAgentError struct {
 	OccurredAt       time.Time  `json:"occurred_at"`
 	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
 	RemediationURL   string     `json:"remediation_url,omitempty"`
+	Code             string     `json:"code,omitempty"`
+	Details          string     `json:"details,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 

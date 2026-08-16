@@ -23,6 +23,7 @@ import { formatShortcut } from "@/lib/keyboard/utils";
 import { cn } from "@/lib/utils";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type SubmitButtonProps = {
   isAgentBusy: boolean;
@@ -51,8 +52,8 @@ function submitTooltipDescription(
   submitDisabledReason?: string,
 ) {
   if (submitDisabledReason) return submitDisabledReason;
-  if (isAgentBusy) return "Queue message";
-  if (planModeEnabled) return "Request plan changes";
+  if (isAgentBusy) return t("task:submitTooltipQueueMessage");
+  if (planModeEnabled) return t("task:submitTooltipRequestPlanChanges");
   return undefined;
 }
 

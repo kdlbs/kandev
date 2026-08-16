@@ -1,6 +1,7 @@
 ---
 status: draft
 created: 2026-05-16
+updated: 2026-08-16
 owner: cfl
 issue: https://github.com/kdlbs/kandev/issues/906
 needs-upgrade: true
@@ -21,6 +22,21 @@ Kandev already supports a per-profile **CLI Passthrough** mode that launches the
 This spec brings CLI-passthrough mode up to feature parity with ACP for the **kanban** task-execution surface. Office (autonomous) mode is explicitly deferred.
 
 ## What
+
+### ACP and passthrough commands remain distinct
+
+A built-in agent that uses a separate ACP adapter and interactive CLI keeps
+those execution surfaces separate. Structured chat and one-shot inference use
+the ACP adapter. CLI passthrough launches the interactive CLI directly under
+the PTY; managed ACP runtime resolution does not replace that passthrough
+command.
+
+For Pi, structured chat and inference use `npx -y pi-acp`, while CLI
+passthrough launches the globally installed `pi` executable. Kandev's Pi
+install action runs
+`npm install -g --ignore-scripts @earendil-works/pi-coding-agent`, and agent
+discovery treats a `pi` executable on the Kandev process `PATH` that passes its
+non-interactive `--version` check as the installation signal.
 
 ### Prompt allowed at task creation in CLI mode
 
@@ -57,6 +73,25 @@ The orchestrator's `CancelAgent` handler branches on `IsPassthroughSession(sessi
 Users can still press Ctrl-C directly inside the xterm terminal. A dedicated toolbar button that calls the same cancel route remains a follow-up.
 
 ## Scenarios
+
+### Pi uses its interactive CLI in passthrough mode
+- GIVEN a Pi profile with `cli_passthrough: true` and a `pi` executable on the
+  Kandev process `PATH` that passes `pi --version`
+- WHEN Kandev starts its passthrough PTY
+- THEN the command starts with `pi`
+- AND Kandev does not launch `pi-acp` or `npx` as the passthrough process
+
+### Pi keeps its ACP adapter for structured execution
+- GIVEN a Pi profile with `cli_passthrough: false`
+- WHEN Kandev starts structured chat or one-shot inference
+- THEN the command remains `npx -y pi-acp`
+
+### Pi installation provisions the passthrough executable
+- GIVEN Pi is unavailable on the Kandev host
+- WHEN the operator runs the Pi install action and rescans agents
+- THEN Kandev runs
+  `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`
+- AND discovery finds the installed `pi` executable after its version check
 
 ### CLI-mode task can have a prompt
 - GIVEN a Claude profile with `cli_passthrough: true`
@@ -161,6 +196,7 @@ Pressing Ctrl-C inside the passthrough terminal writes `\x03` to PTY stdin. A fu
 - Parsing PTY output into `task_messages` (transcriber). The terminal panel shows live output; the chat transcript only shows user-sent text in CLI mode.
 - Billing-type / subscription-quota badge or DTO surface. That belongs to `subscription-usage.md`.
 - Adding passthrough support to agents that don't have it (`Supported: false`).
+- Adding `pi-acp` to the managed runtime update catalogue.
 - Migrating away from the current ACP bridge.
 - Headless `-p` mode for Claude (drains API credit; we deliberately do not use it).
 

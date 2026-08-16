@@ -170,6 +170,7 @@ function useSubtaskDialogState(parentTaskId: string, parentSessions: TaskSession
 }
 
 function useSessionOptions(taskId: string) {
+  const { t } = useTranslation();
   const { sessions, loadSessions } = useTaskSessions(taskId);
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   useEffect(() => {
@@ -183,10 +184,10 @@ function useSessionOptions(taskId: string) {
     return sorted.map((s, idx) => {
       const profile = agentProfiles.find((p: { id: string }) => p.id === s.agent_profile_id);
       const parts = profile?.label.split(" \u2022 ");
-      const name = parts?.[1] || parts?.[0] || "Agent";
+      const name = parts?.[1] || parts?.[0] || t("task:panelAgent");
       return { id: s.id, label: name, index: idx + 1, agentName: profile?.agent_name };
     });
-  }, [sessions, agentProfiles]);
+  }, [sessions, agentProfiles, t]);
 }
 
 function useExecutorProfiles(

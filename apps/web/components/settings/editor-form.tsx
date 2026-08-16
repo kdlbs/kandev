@@ -41,10 +41,12 @@ const CUSTOM_KIND_OPTIONS: Array<{ value: CustomKind; labelKey: string }> = [
 /** Placeholder tokens the launcher substitutes — identifiers, not copy. */
 const PLACEHOLDER_HINT = "{cwd} {file} {rel} {line} {column}";
 /** Example shell command shown in the field; a value the user types verbatim. */
+// i18n-exempt: shell command example the user copies verbatim.
 const COMMAND_EXAMPLE = "code --goto {file}:{line}";
 /** Example of the URL this kind builds — a URL, not translatable copy. */
 const REMOTE_SSH_EXAMPLE = "vscode://vscode-remote/ssh-remote+user@host:/path/file:line";
 /** Accepted URL schemes. The user types one of these verbatim into the field. */
+// i18n-exempt: editor URL scheme identifiers, not prose.
 const EDITOR_SCHEME_EXAMPLES = "vscode, cursor";
 
 export function getCustomKindLabel(t: TranslateKey, kind: string) {

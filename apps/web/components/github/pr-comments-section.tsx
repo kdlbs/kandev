@@ -4,6 +4,7 @@ import type { PRComment } from "@/lib/types/github";
 import { CollapsibleSection, AddToContextButton, FeedbackItemRow } from "./pr-shared";
 import { useTranslation } from "react-i18next";
 
+// i18n-exempt: builds the message body sent to the agent, not UI copy.
 function buildCommentMessage(comment: PRComment, prUrl: string): string {
   const location = comment.path
     ? `\`${comment.path}${comment.line > 0 ? `:${comment.line}` : ""}\``

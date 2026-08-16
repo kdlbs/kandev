@@ -350,5 +350,6 @@
   "mrChipDrawerClose": "Ćĺōśē ḿēŕĝē ŕēqũēśţ śţàţũś",
   "gitlabRejectedAssociation": "ĜĩţĹàƀ ŕēĵēćţēď ţĥē àśśōćĩàţĩōń.",
   "taskCreatedMrNotLinked": "Ţàśķ ćŕēàţēď, ƀũţ ḿēŕĝē ŕēqũēśţ ŵàś ńōţ ĺĩńķēď",
-  "taskCreatedMrNotLinkedDescription": "Ōƥēń ţĥē ţàśķ àńď ũśē Ĺĩńķ ĜĩţĹàƀ ḿēŕĝē ŕēqũēśţ ţō ŕēţŕŷ. {{error}}"
+  "taskCreatedMrNotLinkedDescription": "Ōƥēń ţĥē ţàśķ àńď ũśē Ĺĩńķ ĜĩţĹàƀ ḿēŕĝē ŕēqũēśţ ţō ŕēţŕŷ. {{error}}",
+  "memberSearchFailed": "Ḿēḿƀēŕ śēàŕćĥ ƒàĩĺēď"
 }
