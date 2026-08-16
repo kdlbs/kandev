@@ -3249,8 +3249,13 @@ func TestService_ClarificationMessageEventsCarryPendingActionProjection(t *testi
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if got := singlePublishedEventData(t, eventBus)["pending_action"]; got != "clarification" {
+	addedData := singlePublishedEventData(t, eventBus)
+	if got := addedData["pending_action"]; got != "clarification" {
 		t.Fatalf("message.added pending_action = %#v, want clarification", got)
+	}
+	addedRevision, ok := addedData["pending_action_revision"].(models.PendingActionRevision)
+	if !ok || addedRevision.Epoch == "" || addedRevision.Sequence == 0 {
+		t.Fatalf("message.added pending_action_revision = %#v", addedData["pending_action_revision"])
 	}
 
 	eventBus.ClearEvents()
@@ -3261,6 +3266,10 @@ func TestService_ClarificationMessageEventsCarryPendingActionProjection(t *testi
 	data := singlePublishedEventData(t, eventBus)
 	if got, ok := data["pending_action"]; !ok || got != nil {
 		t.Fatalf("message.updated pending_action = %#v, want explicit nil", got)
+	}
+	updatedRevision, ok := data["pending_action_revision"].(models.PendingActionRevision)
+	if !ok || updatedRevision.Epoch != addedRevision.Epoch || updatedRevision.Sequence <= addedRevision.Sequence {
+		t.Fatalf("message.updated pending_action_revision = %#v, want after %#v", updatedRevision, addedRevision)
 	}
 }
 

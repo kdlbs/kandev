@@ -132,6 +132,56 @@ func TestReconcileUnpublishedPromptTurnsContinuesAfterMalformedReservation(t *te
 	}
 }
 
+func TestReconcileUnpublishedPromptTurnsRunsDeliveryRecoveryAfterReservationError(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 16, 20, 40, 0, 0, time.UTC)
+	seedSessionForTurns(t, repo, "task-malformed-delivery", "session-malformed-delivery")
+	createRecoveryTurn(
+		t, repo, "task-malformed-delivery", "session-malformed-delivery",
+		"turn-malformed-delivery", base,
+		map[string]interface{}{
+			models.TurnMetaKeyPromptDispatchPending:                 true,
+			models.TurnMetaKeyPromptDispatchClarificationMessageIDs: []interface{}{"message", float64(7)},
+		},
+	)
+
+	seedPendingActionSession(t, repo, "task-independent-delivery", "session-independent-delivery")
+	createPendingActionTurn(
+		t, repo, "task-independent-delivery", "session-independent-delivery",
+		"turn-independent-delivery", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-independent-delivery", "task-independent-delivery",
+		"session-independent-delivery", "turn-independent-delivery",
+		"pending-independent-delivery", "q1", base,
+	)
+	_, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-independent-delivery",
+		clarificationStatusAnswered,
+		map[string]interface{}{"q1": map[string]interface{}{"question_id": "q1", "custom_text": "continue"}},
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim independent delivery = %v, %v; want true, nil", claimed, err)
+	}
+
+	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
+	if err == nil || reconciled != 1 {
+		t.Fatalf("ReconcileUnpublishedPromptTurns = %d, %v; want 1 and reservation error", reconciled, err)
+	}
+	if !strings.Contains(err.Error(), "turn-malformed-delivery") {
+		t.Fatalf("reservation error missing turn identity: %v", err)
+	}
+	message, err := repo.GetMessage(ctx, "message-independent-delivery")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if message.Metadata["status"] != clarificationStatusPending || message.Metadata["response"] != nil {
+		t.Fatalf("independent delivery metadata = %#v, want recovered pending", message.Metadata)
+	}
+}
+
 func TestReconcileUnpublishedPromptTurnsAcceptsMessageBackedReservation(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -228,6 +278,42 @@ func TestReconcileUnpublishedPromptTurnsPreservesAmbiguousEmptyReservation(t *te
 	}
 	if claimed.Metadata["status"] != "answered" {
 		t.Fatalf("accepted claim status = %v, want answered", claimed.Metadata["status"])
+	}
+}
+
+func TestReconcileUnpublishedPromptTurnsRejectsPartialResponseDeliveryIntent(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-partial-delivery"
+	const sessionID = "session-partial-delivery"
+	const pendingID = "pending-partial-delivery"
+	base := time.Date(2026, time.August, 16, 20, 20, 0, 0, time.UTC)
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	createRecoveryTurn(t, repo, taskID, sessionID, "turn-clarification", base, nil)
+	for index, messageID := range []string{"message-a", "message-b"} {
+		createRecoveryClarification(
+			t, repo, messageID, taskID, sessionID, "turn-clarification", pendingID,
+			base.Add(time.Duration(index)*time.Second),
+		)
+	}
+	markRecoveryClarificationDeliveryPending(t, repo, "message-a")
+	createRecoveryTurn(t, repo, taskID, sessionID, "turn-unpublished", base.Add(time.Minute), map[string]interface{}{
+		models.TurnMetaKeyPromptDispatchPending:                 true,
+		models.TurnMetaKeyPromptDispatchAttempted:               true,
+		models.TurnMetaKeyPromptDispatchClarificationPendingID:  pendingID,
+		models.TurnMetaKeyPromptDispatchClarificationTurnID:     "turn-clarification",
+		models.TurnMetaKeyPromptDispatchClarificationMessageIDs: []string{"message-a", "message-b"},
+	})
+
+	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
+	if err == nil || reconciled != 0 {
+		t.Fatalf("ReconcileUnpublishedPromptTurns = %d, %v; want 0 and partial intent error", reconciled, err)
+	}
+	if !strings.Contains(err.Error(), "expected 2 messages, found 1") {
+		t.Fatalf("partial response delivery error = %v", err)
+	}
+	if _, err := repo.GetTurn(ctx, "turn-unpublished"); err != nil {
+		t.Fatalf("partial response delivery reservation changed: %v", err)
 	}
 }
 

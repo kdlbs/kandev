@@ -5,8 +5,45 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+type unusedClarificationTurnService struct{ TurnService }
+
+func TestClarificationTurnAuthorityDistinguishesMissingDependencyFromMissingIdentity(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	observedLogger, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observed logger: %v", err)
+	}
+	svc := &Service{logger: observedLogger}
+	data := clarificationAnsweredData{SessionID: "session-1", PendingID: "pending-1"}
+
+	data.ClarificationTurnID = "turn-1"
+	if svc.clarificationTurnStillCurrent(context.Background(), data) {
+		t.Fatal("missing turn service accepted clarification fallback")
+	}
+	warnings := logs.FilterMessage("skipping clarification fallback: turn service unavailable").All()
+	if len(warnings) != 1 || warnings[0].Level != zapcore.WarnLevel {
+		t.Fatalf("missing turn service logs = %#v, want one warning", warnings)
+	}
+	logs.TakeAll()
+
+	svc.turnService = unusedClarificationTurnService{}
+	data.ClarificationTurnID = ""
+	if svc.clarificationTurnStillCurrent(context.Background(), data) {
+		t.Fatal("missing clarification turn ID accepted fallback")
+	}
+	debugEntries := logs.FilterMessage("skipping clarification fallback: event carries no turn ID").All()
+	if len(debugEntries) != 1 || debugEntries[0].Level != zapcore.DebugLevel {
+		t.Fatalf("missing turn ID logs = %#v, want one debug entry", debugEntries)
+	}
+}
 
 func TestClarificationWatchdogDoesNotDispatchAfterTurnIsSuperseded(t *testing.T) {
 	svc, agentMgr := setupSupersededClarificationTurn(t)

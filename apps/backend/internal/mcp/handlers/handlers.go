@@ -3939,46 +3939,16 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 	}
 
 	if h.inputPauser != nil {
-		cancelled, err := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID)
+		cancelled, paused, err := h.pauseOrDetachForClarificationTimeout(
+			context.WithoutCancel(ctx),
+			req.SessionID,
+		)
 		if err != nil {
-			h.logger.Warn("failed to pause session after clarification timeout",
-				zap.String("session_id", req.SessionID),
-				zap.Error(err))
-			// Retry the complete idempotent pause before falling back to waiter
-			// detachment. The orchestrator pauser gives each attempt a fresh
-			// bounded context, so a transient read failure cannot leave the turn
-			// running after its clarification waiter is detached.
-			cancelled, err = h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID)
-			if err == nil {
-				h.logger.Info("paused session after retrying clarification timeout",
-					zap.String("session_id", req.SessionID),
-					zap.Int("count", cancelled))
-				return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, cancelledField: cancelled, pausedField: true})
-			}
-			h.logger.Warn("failed to pause session after retrying clarification timeout",
-				zap.String("session_id", req.SessionID),
-				zap.Error(err))
-			if h.sessionCanceller == nil {
-				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-					"failed to pause session for clarification input", nil)
-			}
-			cancelled, err = h.sessionCanceller.DetachSessionAndNotify(context.WithoutCancel(ctx), req.SessionID)
-			if err != nil {
-				h.logger.Warn("failed to detach clarification after pause failure",
-					zap.String("session_id", req.SessionID),
-					zap.Error(err))
-				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-					"failed to detach clarification after pause failure", nil)
-			}
-			h.logger.Info("detached clarification waiters after pause failure",
-				zap.String("session_id", req.SessionID),
-				zap.Int("count", cancelled))
-			return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, cancelledField: cancelled, pausedField: false})
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		h.logger.Info("paused session after agent MCP clarification timeout",
-			zap.String("session_id", req.SessionID),
-			zap.Int("count", cancelled))
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, cancelledField: cancelled, pausedField: true})
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"ok": true, cancelledField: cancelled, pausedField: paused,
+		})
 	}
 
 	if h.sessionCanceller == nil {
@@ -3997,4 +3967,41 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 		zap.Int("count", cancelled))
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, cancelledField: cancelled})
+}
+
+func (h *Handlers) pauseOrDetachForClarificationTimeout(
+	ctx context.Context,
+	sessionID string,
+) (int, bool, error) {
+	cancelled, err := h.inputPauser.PauseForClarificationInput(ctx, sessionID)
+	if err == nil {
+		h.logger.Info("paused session after agent MCP clarification timeout",
+			zap.String("session_id", sessionID), zap.Int("count", cancelled))
+		return cancelled, true, nil
+	}
+	h.logger.Warn("failed to pause session after clarification timeout",
+		zap.String("session_id", sessionID), zap.Error(err))
+
+	// Retry the complete idempotent pause before falling back to waiter
+	// detachment. Each pauser attempt owns a fresh bounded context.
+	cancelled, err = h.inputPauser.PauseForClarificationInput(ctx, sessionID)
+	if err == nil {
+		h.logger.Info("paused session after retrying clarification timeout",
+			zap.String("session_id", sessionID), zap.Int("count", cancelled))
+		return cancelled, true, nil
+	}
+	h.logger.Warn("failed to pause session after retrying clarification timeout",
+		zap.String("session_id", sessionID), zap.Error(err))
+	if h.sessionCanceller == nil {
+		return 0, false, errors.New("failed to pause session for clarification input")
+	}
+	cancelled, err = h.sessionCanceller.DetachSessionAndNotify(ctx, sessionID)
+	if err != nil {
+		h.logger.Warn("failed to detach clarification after pause failure",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return 0, false, errors.New("failed to detach clarification after pause failure")
+	}
+	h.logger.Info("detached clarification waiters after pause failure",
+		zap.String("session_id", sessionID), zap.Int("count", cancelled))
+	return cancelled, false, nil
 }

@@ -45,11 +45,11 @@ func (r *Repository) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, 
 			reconciled++
 		}
 	}
-	if err := errors.Join(reconcileErrs...); err != nil {
-		return reconciled, err
+	deliveries, deliveryErr := r.reconcilePendingClarificationResponseDeliveries(ctx)
+	if deliveryErr != nil {
+		reconcileErrs = append(reconcileErrs, deliveryErr)
 	}
-	deliveries, err := r.reconcilePendingClarificationResponseDeliveries(ctx)
-	return reconciled + deliveries, err
+	return reconciled + deliveries, errors.Join(reconcileErrs...)
 }
 
 func (r *Repository) listUnpublishedPromptTurns(ctx context.Context) ([]unpublishedPromptTurn, error) {
@@ -151,6 +151,14 @@ func (r *Repository) finalizeReservedClarificationDelivery(
 	)
 	if err != nil {
 		return err
+	}
+	if len(messages) > 0 && len(messages) != len(claimedIDs) {
+		return fmt.Errorf(
+			"response delivery intent expected %d messages, found %d for pending_id %s",
+			len(claimedIDs),
+			len(messages),
+			pendingID,
+		)
 	}
 	for _, message := range messages {
 		if _, claimed := claimedIDs[message.ID]; !claimed {

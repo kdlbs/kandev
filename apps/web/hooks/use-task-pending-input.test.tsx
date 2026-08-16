@@ -187,7 +187,34 @@ describe("useTaskPendingInput", () => {
   });
 });
 
-describe("useTaskPendingInput current-turn clarification authority", () => {
+describe("useTaskPendingInput pending clarification turn authority", () => {
+  it("preserves pending clarification while session state authority is still loading", () => {
+    const olderTurn = turn("turn-older", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
+    const newestTurn = turn("turn-newest", PRIMARY_SESSION_ID, "2026-05-02T00:01:00Z");
+    const { result } = renderHook(
+      () => useTaskPendingInput(PRIMARY_SESSION_ID, { taskId: "task-1" }),
+      {
+        wrapper: wrapper(
+          {
+            [PRIMARY_SESSION_ID]: [
+              message({
+                id: "question-before-session-hydration",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: olderTurn.id,
+                type: "clarification_request",
+                metadata: { status: "pending" },
+              }),
+            ],
+          },
+          [],
+          { [PRIMARY_SESSION_ID]: [olderTurn, newestTurn] },
+        ),
+      },
+    );
+
+    expect(result.current).toEqual({ clarification: true, permission: false });
+  });
+
   it("ignores a detached pending clarification from an older durable turn", () => {
     const oldTurn = turn("turn-old", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
     const currentTurn = turn("turn-current", PRIMARY_SESSION_ID, "2026-05-02T00:01:00Z");
@@ -219,7 +246,9 @@ describe("useTaskPendingInput current-turn clarification authority", () => {
 
     expect(result.current).toEqual({ clarification: false, permission: false });
   });
+});
 
+describe("useTaskPendingInput clean clarification turn authority", () => {
   it("suppresses a visible predecessor when the session projection is explicitly clean", () => {
     const visiblePredecessor = turn("turn-visible-predecessor", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
     const cleanSession = Object.assign(session(PRIMARY_SESSION_ID, "RUNNING"), {

@@ -277,11 +277,13 @@ func (s *Store) respond(
 	if confirmationDone == nil {
 		return nil
 	}
+	waitCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
 
 	select {
 	case <-confirmationDone:
 		return clarificationDeliveryConfirmationResult(pending)
-	case <-ctx.Done():
+	case <-waitCtx.Done():
 		pending.mu.Lock()
 		if pending.deliveryConfirmationComplete {
 			confirmationErr := pending.deliveryConfirmationErr
@@ -296,7 +298,7 @@ func (s *Store) respond(
 		pending.deliveryAbandoned = true
 		pending.mu.Unlock()
 		s.deletePendingIfCurrent(pendingID, pending)
-		return fmt.Errorf("wait for clarification delivery confirmation: %w", ctx.Err())
+		return fmt.Errorf("wait for clarification delivery confirmation: %w", waitCtx.Err())
 	}
 }
 

@@ -888,7 +888,10 @@ func (s *Service) addMessagePendingAction(
 		message.TaskSessionID == "" {
 		return
 	}
-	actions, err := s.GetPendingActionsForSessions(ctx, []string{message.TaskSessionID})
+	actions, revisions, err := s.GetPendingActionProjectionsForSessions(
+		ctx,
+		[]string{message.TaskSessionID},
+	)
 	if err != nil {
 		s.logger.Warn("failed to project pending action for message event",
 			zap.String("event_type", eventType),
@@ -905,6 +908,7 @@ func (s *Service) addMessagePendingAction(
 	} else {
 		data["pending_action"] = nil
 	}
+	data["pending_action_revision"] = revisions[message.TaskSessionID]
 }
 
 func messageEventChangesPendingAction(eventType string, message *models.Message) bool {

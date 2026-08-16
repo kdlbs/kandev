@@ -416,19 +416,33 @@ func pendingActionPtr(
 	return &value
 }
 
+func pendingActionRevisionPtr(
+	sessionID string,
+	revisionsBySession map[string]models.PendingActionRevision,
+) *models.PendingActionRevision {
+	revision, ok := revisionsBySession[sessionID]
+	if !ok {
+		return nil
+	}
+	return &revision
+}
+
 func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskSession) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
-	if !isInputCapableSession(session) {
-		return result
-	}
-	actions, err := h.service.GetPendingActionsForSessions(ctx, []string{session.ID})
+	actions, revisions, err := h.service.GetPendingActionProjectionsForSessions(
+		ctx,
+		[]string{session.ID},
+	)
 	if err != nil {
 		h.logger.Warn("get task session pending action failed",
 			zap.String("session_id", session.ID), zap.Error(err))
 		return result
 	}
-	result.PendingAction = pendingActionPtr(&session.ID, actions)
+	if isInputCapableSession(session) {
+		result.PendingAction = pendingActionPtr(&session.ID, actions)
+	}
+	result.PendingActionRevision = pendingActionRevisionPtr(session.ID, revisions)
 	return result
 }
 
@@ -458,25 +472,30 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return
 	}
-	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(
-		ctx,
-		h.service,
-		map[string][]*models.TaskSession{c.Param("id"): sessions},
-	)
+	ids := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		ids = append(ids, session.ID)
+	}
+	pendingActionsBySession, pendingRevisionsBySession, pendingErr :=
+		h.service.GetPendingActionProjectionsForSessions(ctx, ids)
 	if pendingErr != nil {
 		h.logger.Error("get task session pending actions failed", zap.Error(pendingErr))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load task session pending actions"})
 		return
 	}
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
-	ids := make([]string, 0, len(sessions))
 	for _, session := range sessions {
 		summary := dto.FromTaskSessionSummary(session)
 		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
 		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
-		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
+		if isInputCapableSession(session) {
+			summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
+		}
+		summary.PendingActionRevision = pendingActionRevisionPtr(
+			session.ID,
+			pendingRevisionsBySession,
+		)
 		sessionDTOs = append(sessionDTOs, summary)
-		ids = append(ids, session.ID)
 	}
 	// Resolve the per-session tool_call counts so the frontend can render
 	// the "ran N commands" segment without fetching every session's full

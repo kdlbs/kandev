@@ -41,6 +41,22 @@ async function waitForSessionWaitingForInput(
     .toBe("WAITING_FOR_INPUT");
 }
 
+async function waitForSessionTurnsComplete(
+  apiClient: ApiClient,
+  sessionId: string,
+  message: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { turns } = await apiClient.listSessionTurns(sessionId);
+        return turns.length > 0 && turns.every((turn) => Boolean(turn.completed_at));
+      },
+      { message, timeout: 60_000 },
+    )
+    .toBe(true);
+}
+
 test.describe("Sidebar pending-question indicator without opening the task", () => {
   test("older detached clarification stays superseded after a newer bundle is skipped", async ({
     apiClient,
@@ -62,25 +78,53 @@ test.describe("Sidebar pending-question indicator without opening the task", () 
     );
     if (!task.session_id) throw new Error("supersession setup has no session");
 
+    let olderPendingID: string | null = null;
+    await expect
+      .poll(
+        async () => {
+          const messages = await clarificationMessages(apiClient, task.session_id!);
+          const detached = messages.find(
+            (message) =>
+              pendingID(message) &&
+              message.metadata?.status === "pending" &&
+              message.metadata?.agent_disconnected === true,
+          );
+          olderPendingID = detached ? pendingID(detached) : null;
+          return olderPendingID;
+        },
+        {
+          message: "timed-out clarification should become detached",
+          timeout: 60_000,
+        },
+      )
+      .not.toBeNull();
+    await expect
+      .poll(
+        async () => {
+          const messages = await clarificationMessages(apiClient, task.session_id!);
+          return messages.some((message) => message.content?.includes("Question timed out"));
+        },
+        {
+          message: "timed-out agent turn should persist its final response",
+          timeout: 60_000,
+        },
+      )
+      .toBe(true);
+    await waitForSessionTurnsComplete(
+      apiClient,
+      task.session_id,
+      "timed-out agent turn should finish before the next prompt",
+    );
+    await waitForSessionWaitingForInput(
+      apiClient,
+      task.id,
+      "completed timeout turn should leave the session waiting for input",
+    );
+
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.clarificationDeferredNotice()).toBeVisible({ timeout: 30_000 });
-
-    let olderPendingID: string | null = null;
-    await expect
-      .poll(async () => {
-        const messages = await clarificationMessages(apiClient, task.session_id!);
-        const detached = messages.find(
-          (message) =>
-            pendingID(message) &&
-            message.metadata?.status === "pending" &&
-            message.metadata?.agent_disconnected === true,
-        );
-        olderPendingID = detached ? pendingID(detached) : null;
-        return olderPendingID;
-      })
-      .not.toBeNull();
 
     await apiClient.addUserMessage(task.id, task.session_id, "/e2e:clarification");
     await waitForSessionState(apiClient, {
@@ -113,6 +157,11 @@ test.describe("Sidebar pending-question indicator without opening the task", () 
         return newer?.metadata?.status;
       })
       .toBe("rejected");
+    await waitForSessionTurnsComplete(
+      apiClient,
+      task.session_id,
+      "skipped clarification turn should finish before the next prompt",
+    );
 
     await apiClient.addUserMessage(
       task.id,
@@ -135,9 +184,17 @@ test.describe("Sidebar pending-question indicator without opening the task", () 
 
     await testPage.reload();
     await session.waitForLoad();
-    await expect(session.clarificationOverlay()).toHaveCount(0);
+    await expect(
+      session.activeChat().getByText("post-skip turn completed", { exact: true }),
+    ).toBeVisible();
     const row = session.sidebarTaskItem(title);
     await expect(row).toBeVisible();
+    await expect(
+      row.locator(
+        '[data-testid="task-state-turn-finished"], [data-testid="task-state-workflow-complete"]',
+      ),
+    ).toBeVisible();
+    await expect(session.clarificationOverlay()).toHaveCount(0);
     await expect(row.getByTestId("task-state-waiting-for-input")).toHaveCount(0);
   });
 

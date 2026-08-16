@@ -52,6 +52,13 @@ type rejectingStatusSummaryRepository struct {
 	rejected  bool
 }
 
+type cancelingRejectStatusSummaryRepository struct {
+	repository.TaskStatusSummaryRepository
+	summary      *statussummary.TaskStatusSummary
+	cancel       context.CancelFunc
+	compareCalls int
+}
+
 type vanishingStatusSummaryRepository struct {
 	repository.TaskStatusSummaryRepository
 	compareCalls int
@@ -131,6 +138,24 @@ func (r *rejectingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
 		return false, nil
 	}
 	return r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, stored)
+}
+
+func (r *cancelingRejectStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
+	context.Context,
+	*statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	r.compareCalls++
+	if r.compareCalls == 1 {
+		r.cancel()
+	}
+	return false, nil
+}
+
+func (r *cancelingRejectStatusSummaryRepository) LoadTaskStatusSummaries(
+	context.Context,
+	[]string,
+) (map[string]*statussummary.TaskStatusSummary, error) {
+	return map[string]*statussummary.TaskStatusSummary{"task-1": r.summary}, nil
 }
 
 func (c statusSummaryQueuedPromptCounter) CountPendingByTaskIDs(_ context.Context, taskIDs []string) (map[string]int, error) {
@@ -500,6 +525,44 @@ func TestReconcileTaskStatusSummariesReReadsPendingAfterCASRejection(t *testing.
 	}
 	if sessionRepo.calls != 1 {
 		t.Fatalf("authoritative session reads = %d, want 1", sessionRepo.calls)
+	}
+}
+
+func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	stored := &statussummary.TaskStatusSummary{
+		Revision:      4,
+		PendingAction: string(models.TaskPendingActionClarification),
+	}
+	rejecting := &cancelingRejectStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		summary: &statussummary.TaskStatusSummary{
+			Revision:      5,
+			PendingAction: string(models.TaskPendingActionClarification),
+		},
+		cancel: cancel,
+	}
+	svc.statusSummaries = rejecting
+	svc.sessions = &statusSummarySessionRepository{
+		SessionRepository: repo,
+		sessions: []*models.TaskSession{{
+			ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateCompleted,
+		}},
+	}
+	svc.messages = &authoritativePendingMessageRepository{MessageRepository: repo}
+
+	_, err := svc.reconcileExistingSummary(
+		ctx,
+		&models.Task{ID: "task-1", WorkspaceID: "ws-1"},
+		stored,
+		"",
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("reconcileExistingSummary error = %v, want context canceled", err)
+	}
+	if rejecting.compareCalls != 1 {
+		t.Fatalf("compare calls after cancellation = %d, want 1", rejecting.compareCalls)
 	}
 }
 

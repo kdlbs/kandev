@@ -61,7 +61,13 @@ function isOlderThanCurrentSnapshot(store: StoreApi<AppState>, payload: MessageP
 
 function applyPendingActionProjection(store: StoreApi<AppState>, payload: MessagePayload): void {
   if (!("pending_action" in payload)) return;
-  store.getState().setTaskSessionPendingAction(payload.session_id, payload.pending_action ?? null);
+  store
+    .getState()
+    .setTaskSessionPendingAction(
+      payload.session_id,
+      payload.pending_action ?? null,
+      payload.pending_action_revision,
+    );
 }
 
 function defaultSchedule(callback: () => void): number {

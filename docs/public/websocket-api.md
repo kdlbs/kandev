@@ -110,28 +110,28 @@ Send one JSON object in each WebSocket text frame. The server writes each respon
 }
 ```
 
-| Field | Type | Current contract |
-|-------|------|------------------|
-| `id` | string | Required for a useful request. Generate a unique value and correlate the response or error with it. Notifications omit it. |
-| `type` | string | Send `request`. Server output uses `response`, `notification`, or `error`. The current dispatcher does not reject an inbound frame solely because `type` is missing or wrong, so do not treat it as an authorization control. |
-| `action` | string | Exact registered action name; names are case-sensitive. |
-| `payload` | JSON | Action-specific data. Most handlers expect an object and validate required fields themselves. |
-| `timestamp` | RFC 3339 string | Included by the server. Optional and ignored on client requests. |
-| `metadata` | object | Optional string-to-string metadata used by selected internal flows. It is not a general request-header mechanism. |
+| Field       | Type            | Current contract                                                                                                                                                                                                              |
+| ----------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`        | string          | Required for a useful request. Generate a unique value and correlate the response or error with it. Notifications omit it.                                                                                                    |
+| `type`      | string          | Send `request`. Server output uses `response`, `notification`, or `error`. The current dispatcher does not reject an inbound frame solely because `type` is missing or wrong, so do not treat it as an authorization control. |
+| `action`    | string          | Exact registered action name; names are case-sensitive.                                                                                                                                                                       |
+| `payload`   | JSON            | Action-specific data. Most handlers expect an object and validate required fields themselves.                                                                                                                                 |
+| `timestamp` | RFC 3339 string | Included by the server. Optional and ignored on client requests.                                                                                                                                                              |
+| `metadata`  | object          | Optional string-to-string metadata used by selected internal flows. It is not a general request-header mechanism.                                                                                                             |
 
 Malformed JSON produces a `BAD_REQUEST` error with empty `id` and `action`, because correlation fields could not be parsed. An unregistered action produces `UNKNOWN_ACTION`. Standard codes are `BAD_REQUEST`, `NOT_FOUND`, `INTERNAL_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `VALIDATION_ERROR`, `CONFLICT`, and `UNKNOWN_ACTION`; individual handlers may add codes or return an ordinary response with `success:false` instead. Always inspect both envelope type and response payload.
 
 ## Transport, concurrency, and loss behavior
 
-| Behavior | Current value | Client consequence |
-|----------|---------------|--------------------|
-| Maximum inbound message | 32 MiB | A larger request closes/fails the connection. Current file-backed attachments use HTTP staging and send only descriptors over this socket; legacy inline base64 data still consumes the limit. |
-| Write deadline | 10 seconds | A peer that cannot accept a frame in time is disconnected. |
-| Pong deadline | 60 seconds | The connection closes if the peer stops answering pings. |
-| Server ping interval | 54 seconds | WebSocket libraries must process ping/pong control frames. Browsers do this automatically. |
-| Per-client outbound queue | 256 frames | When full, the new frame is dropped and the connection stays open. Responses and notifications can therefore be lost under backpressure. |
-| Hub-wide broadcast queue | 256 messages | Global publishers block when this internal queue is saturated; delivery to each client can still drop at that client's queue. |
-| Request dispatch | One goroutine per inbound message | Handlers execute concurrently and responses can arrive out of request order. Correlate only by `id`. |
+| Behavior                  | Current value                     | Client consequence                                                                                                                                                                             |
+| ------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Maximum inbound message   | 32 MiB                            | A larger request closes/fails the connection. Current file-backed attachments use HTTP staging and send only descriptors over this socket; legacy inline base64 data still consumes the limit. |
+| Write deadline            | 10 seconds                        | A peer that cannot accept a frame in time is disconnected.                                                                                                                                     |
+| Pong deadline             | 60 seconds                        | The connection closes if the peer stops answering pings.                                                                                                                                       |
+| Server ping interval      | 54 seconds                        | WebSocket libraries must process ping/pong control frames. Browsers do this automatically.                                                                                                     |
+| Per-client outbound queue | 256 frames                        | When full, the new frame is dropped and the connection stays open. Responses and notifications can therefore be lost under backpressure.                                                       |
+| Hub-wide broadcast queue  | 256 messages                      | Global publishers block when this internal queue is saturated; delivery to each client can still drop at that client's queue.                                                                  |
+| Request dispatch          | One goroutine per inbound message | Handlers execute concurrently and responses can arrive out of request order. Correlate only by `id`.                                                                                           |
 
 There is no sequence number, durable replay, acknowledgement, or exactly-once guarantee. Notifications are invalidation hints: after a reconnect, gap, or dropped frame, refetch authoritative state through the appropriate list/get request or HTTP route.
 
@@ -155,14 +155,14 @@ Request handlers use the server hub's lifetime context, not the socket's lifetim
 
 Subscription actions are handled by the gateway before the normal dispatcher:
 
-| Action | Payload | Result |
-|--------|---------|--------|
-| `task.subscribe` / `task.unsubscribe` | `{"task_id":"..."}` | Records or removes task interest. Current ordinary task/workflow lifecycle broadcasters are global, so this subscription is not a filter for `task.updated`. |
-| `session.subscribe` / `session.unsubscribe` | `{"session_id":"..."}` | Routes session-scoped traffic. Subscribe also pushes currently available initial session data, such as Git status. |
-| `session.focus` / `session.unfocus` | `{"session_id":"..."}` | Marks an actively viewed session, changes its backend polling tier, and on focus pushes fresh session data. Focused clients receive session-scoped traffic even during a transient subscribe handoff. |
-| `user.subscribe` / `user.unsubscribe` | `{}` or `{"user_id":"default-user"}` | Empty uses Kandev's default user. Any other user is rejected with `FORBIDDEN`. |
-| `run.subscribe` / `run.unsubscribe` | `{"run_id":"..."}` | Routes future `run.event.appended` messages for one Office run. No snapshot is replayed. |
-| `system.metrics.subscribe` / `system.metrics.unsubscribe` | `{}` | Starts/stops delivery of live `system.metrics.updated` snapshots and contributes to metrics collection interest. |
+| Action                                                    | Payload                              | Result                                                                                                                                                                                                |
+| --------------------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task.subscribe` / `task.unsubscribe`                     | `{"task_id":"..."}`                  | Records or removes task interest. Current ordinary task/workflow lifecycle broadcasters are global, so this subscription is not a filter for `task.updated`.                                          |
+| `session.subscribe` / `session.unsubscribe`               | `{"session_id":"..."}`               | Routes session-scoped traffic. Subscribe also pushes currently available initial session data, such as Git status.                                                                                    |
+| `session.focus` / `session.unfocus`                       | `{"session_id":"..."}`               | Marks an actively viewed session, changes its backend polling tier, and on focus pushes fresh session data. Focused clients receive session-scoped traffic even during a transient subscribe handoff. |
+| `user.subscribe` / `user.unsubscribe`                     | `{}` or `{"user_id":"default-user"}` | Empty uses Kandev's default user. Any other user is rejected with `FORBIDDEN`.                                                                                                                        |
+| `run.subscribe` / `run.unsubscribe`                       | `{"run_id":"..."}`                   | Routes future `run.event.appended` messages for one Office run. No snapshot is replayed.                                                                                                              |
+| `system.metrics.subscribe` / `system.metrics.unsubscribe` | `{}`                                 | Starts/stops delivery of live `system.metrics.updated` snapshots and contributes to metrics collection interest.                                                                                      |
 
 All subscriptions are connection-local and are removed on disconnect. `session.subscribe` and `session.focus` can send an initial live snapshot, but other subscriptions do not replay missed notifications. For an Office run, fetch the REST snapshot before subscribing and reconcile again after a gap.
 
@@ -266,7 +266,7 @@ websocat ws://127.0.0.1:38429/ws
 ```
 
 ```json
-{"id":"health-1","type":"request","action":"health.check","payload":{}}
+{ "id": "health-1", "type": "request", "action": "health.check", "payload": {} }
 ```
 
 `websocat` is a third-party diagnostic dependency, not bundled with Kandev. Remember that an originless tool is accepted only because the current endpoint trusts its network boundary.
@@ -798,23 +798,26 @@ session.prompt_usage
 Semantic `session.message.added`, `session.message.updated`, and
 `session.message.deleted` notifications can include `pending_action` with
 `"clarification"`, `"permission"`, or explicit `null`. When present, it is the
-authoritative per-session input projection after that message mutation. When
-absent, clients preserve their current projection and reconcile through normal
-session refetch after a gap.
+authoritative per-session input projection after that message mutation and is
+paired with `pending_action_revision` (`epoch` plus `sequence`). REST task-session
+snapshots carry the same logical clock. Clients compare epoch first and sequence
+second, retaining the newer projection when HTTP and WebSocket delivery overlap.
+When both fields are absent, clients preserve their current projection and
+reconcile through normal session refetch after a gap.
 
 File changes are batched for up to 100 ms and flushed immediately at 50 entries. `session.shell.output` also represents shell exit events through its payload. Treat all stream messages as lossy and refresh session/Git status after a gap.
 
 ### User-, run-, and metrics-scoped broadcasts
 
-| Routing key | Action | Notes |
-|-------------|--------|-------|
-| subscribed user | `user.settings.updated` | Requires `user.subscribe`. |
-| subscribed user | `session.turn_finished` | Local user notification for a completed agent turn, with task/session/occurrence/title/body fields; the turn ID is sent as both the envelope `id` and payload `occurrence_id`. It is not delivered by `session.subscribe`. |
-| subscribed user | `session.clarification_requested` | Local user notification for a structured agent question that needs an answer, with task/session/occurrence/title/body fields; the clarification pending ID is sent as both the envelope `id` and payload `occurrence_id`. It is not delivered by `session.subscribe`. |
-| subscribed user | `system.update_available` | Local user notification for a newer Kandev release. Its payload is `{ "version", "url"?, "title", "body", "occurrence_id" }`; `occurrence_id` is the normalized release version/tag and is also the envelope `id`. Subscribe with `user.subscribe`, not `session.subscribe`. |
-| subscribed user | `office.inbox_item` | Local notification for a selected Office inbox event, with title/body fields. |
-| subscribed run | `run.event.appended` | Future events only; there is no replay cursor. |
-| metrics subscribers | `system.metrics.updated` | Live resource snapshot; collection interest follows subscribers. |
+| Routing key         | Action                            | Notes                                                                                                                                                                                                                                                                        |
+| ------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| subscribed user     | `user.settings.updated`           | Requires `user.subscribe`.                                                                                                                                                                                                                                                   |
+| subscribed user     | `session.turn_finished`           | Local user notification for a completed agent turn, with task/session/occurrence/title/body fields; the turn ID is sent as both the envelope `id` and payload `occurrence_id`. It is not delivered by `session.subscribe`.                                                   |
+| subscribed user     | `session.clarification_requested` | Local user notification for a structured agent question that needs an answer, with task/session/occurrence/title/body fields; the clarification pending ID is sent as both the envelope `id` and payload `occurrence_id`. It is not delivered by `session.subscribe`.        |
+| subscribed user     | `system.update_available`         | Local user notification for a newer Kandev release. Its payload is `{ "version", "url"?, "title", "body", "occurrence_id" }`; `occurrence_id` is the normalized release version/tag and is also the envelope `id`. Subscribe with `user.subscribe`, not `session.subscribe`. |
+| subscribed user     | `office.inbox_item`               | Local notification for a selected Office inbox event, with title/body fields.                                                                                                                                                                                                |
+| subscribed run      | `run.event.appended`              | Future events only; there is no replay cursor.                                                                                                                                                                                                                               |
+| metrics subscribers | `system.metrics.updated`          | Live resource snapshot; collection interest follows subscribers.                                                                                                                                                                                                             |
 
 Routing is an efficiency mechanism, not an access-control boundary. The server does not authenticate resource ownership, global messages can contain IDs for other workspaces, and a client can request arbitrary subscription IDs.
 

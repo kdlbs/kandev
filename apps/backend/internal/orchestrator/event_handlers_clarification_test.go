@@ -1045,6 +1045,9 @@ func TestPauseForClarificationInput_DoesNotCancelSuccessorCreatedDuringDetach(t 
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
 	}
+	var releaseOnce sync.Once
+	releaseDetach := func() { releaseOnce.Do(func() { close(canceller.release) }) }
+	t.Cleanup(releaseDetach)
 	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
 	svc.SetClarificationCanceller(canceller)
 	svc.turnService = &repoBackedTurnService{repo: repo}
@@ -1062,7 +1065,7 @@ func TestPauseForClarificationInput_DoesNotCancelSuccessorCreatedDuringDetach(t 
 	if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
 		t.Fatalf("start successor turn: %v", err)
 	}
-	close(canceller.release)
+	releaseDetach()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -1087,6 +1090,9 @@ func TestPauseForClarificationInput_DoesNotCancelFirstTurnCreatedDuringDetach(t 
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
 	}
+	var releaseOnce sync.Once
+	releaseDetach := func() { releaseOnce.Do(func() { close(canceller.release) }) }
+	t.Cleanup(releaseDetach)
 	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
 	svc.SetClarificationCanceller(canceller)
 	svc.turnService = &repoBackedTurnService{repo: repo}
@@ -1104,7 +1110,7 @@ func TestPauseForClarificationInput_DoesNotCancelFirstTurnCreatedDuringDetach(t 
 	if _, err := svc.turnService.StartTurn(ctx, "s1"); err != nil {
 		t.Fatalf("start first turn during detach: %v", err)
 	}
-	close(canceller.release)
+	releaseDetach()
 	select {
 	case err := <-done:
 		if err != nil {

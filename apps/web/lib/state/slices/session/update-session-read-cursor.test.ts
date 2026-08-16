@@ -23,6 +23,11 @@ function makeStore() {
 const TASK_ID = toTaskId("task-1");
 const SESSION_ID = toSessionId("session-1");
 const TS = "2026-04-20T00:00:00Z";
+const REVISION_EPOCH = "20260816T201500.000000000Z-test";
+
+function pendingRevision(sequence: number) {
+  return { epoch: REVISION_EPOCH, sequence };
+}
 
 function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
   return {
@@ -98,17 +103,21 @@ describe("updateSessionReadCursor", () => {
 describe("setTaskSessionPendingAction", () => {
   it("updates the by-id and per-task projections without replacing session state", () => {
     const store = makeStore();
-    const session = makeSession({ pending_action: null });
+    const session = makeSession({
+      pending_action: null,
+      pending_action_revision: pendingRevision(1),
+    });
     store.setState((draft) => {
       draft.taskSessions.items[SESSION_ID] = session;
       draft.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session];
     });
 
-    store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification");
+    store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification", pendingRevision(2));
 
     expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
       state: "RUNNING",
       pending_action: "clarification",
+      pending_action_revision: pendingRevision(2),
     });
     expect(store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID]?.[0].pending_action).toBe(
       "clarification",
@@ -121,5 +130,62 @@ describe("setTaskSessionPendingAction", () => {
     store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification");
 
     expect(store.getState().taskSessions.items[SESSION_ID]).toBeUndefined();
+  });
+
+  it("preserves a newer WebSocket projection when a deferred list response resolves", () => {
+    const store = makeStore();
+    const staleListSession = makeSession({
+      pending_action: null,
+      pending_action_revision: pendingRevision(1),
+    });
+    store.getState().setTaskSessionsForTask(TASK_ID, [staleListSession]);
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification", pendingRevision(2));
+    store.getState().setTaskSessionsForTask(TASK_ID, [{ ...staleListSession, state: "COMPLETED" }]);
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      state: "COMPLETED",
+      pending_action: "clarification",
+      pending_action_revision: pendingRevision(2),
+    });
+  });
+
+  it("rejects a delayed WebSocket projection older than the HTTP snapshot", () => {
+    const store = makeStore();
+    store.getState().setTaskSessionsForTask(TASK_ID, [
+      makeSession({
+        pending_action: "clarification",
+        pending_action_revision: pendingRevision(2),
+      }),
+    ]);
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, null, pendingRevision(1));
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      pending_action: "clarification",
+      pending_action_revision: pendingRevision(2),
+    });
+  });
+
+  it("accepts a newer backend epoch and rejects delayed frames from the old epoch", () => {
+    const store = makeStore();
+    const oldRevision = { epoch: "20260816T201400.000000000Z-old", sequence: 99 };
+    const newRevision = { epoch: REVISION_EPOCH, sequence: 1 };
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [
+        makeSession({ pending_action: "clarification", pending_action_revision: oldRevision }),
+      ]);
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, null, newRevision);
+    store.getState().setTaskSessionPendingAction(SESSION_ID, "permission", {
+      ...oldRevision,
+      sequence: 100,
+    });
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      pending_action: null,
+      pending_action_revision: newRevision,
+    });
   });
 });

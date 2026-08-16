@@ -46,7 +46,10 @@ function loadedSessionFlags(
   sessionState: string | null | undefined,
   pendingAction?: TaskPendingAction | null,
 ): PendingInput {
-  const currentTurnId = clarificationTurnIdForSession(sessionState, turnsBySession[sessionId]);
+  const currentTurnId =
+    sessionState == null
+      ? undefined
+      : clarificationTurnIdForSession(sessionState, turnsBySession[sessionId]);
   // With both authority signals unavailable, preserve the legacy full-message
   // scan. Once either loads, explicit turn/action scoping applies.
   const clarificationScope: PendingClarificationScope | undefined =

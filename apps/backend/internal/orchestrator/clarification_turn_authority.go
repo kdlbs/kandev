@@ -7,8 +7,14 @@ import (
 )
 
 func (s *Service) clarificationTurnStillCurrent(ctx context.Context, data clarificationAnsweredData) bool {
-	if data.ClarificationTurnID == "" || s.turnService == nil {
-		s.logger.Warn("skipping clarification fallback without durable turn authority",
+	if s.turnService == nil {
+		s.logger.Warn("skipping clarification fallback: turn service unavailable",
+			zap.String("session_id", data.SessionID),
+			zap.String("pending_id", data.PendingID))
+		return false
+	}
+	if data.ClarificationTurnID == "" {
+		s.logger.Debug("skipping clarification fallback: event carries no turn ID",
 			zap.String("session_id", data.SessionID),
 			zap.String("pending_id", data.PendingID))
 		return false

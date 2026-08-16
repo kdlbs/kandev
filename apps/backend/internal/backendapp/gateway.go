@@ -502,6 +502,9 @@ func loadTaskPendingActions(
 		}
 		sessionIDs = append(sessionIDs, session.ID)
 	}
+	if len(sessionIDs) == 0 {
+		return map[string]string{}, nil
+	}
 	actions, err := taskRepo.GetPendingActionsBySessionIDs(ctx, sessionIDs)
 	if err != nil {
 		return nil, err

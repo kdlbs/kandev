@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -110,6 +111,42 @@ func TestRespondWithDeliveryConfirmationAbandonsUnconsumedResponse(t *testing.T)
 	if _, err := s.WaitForResponse(context.Background(), id); err == nil {
 		t.Fatal("abandoned response remained consumable")
 	}
+}
+
+func TestRespondWithDeliveryConfirmationUsesStoreTimeoutWithoutWaiter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := NewStore(time.Second)
+		id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+		respondDone := make(chan error, 1)
+		go func() {
+			respondDone <- s.RespondWithDeliveryConfirmation(
+				context.Background(),
+				id,
+				&Response{},
+				func() error { return nil },
+			)
+		}()
+
+		synctest.Wait()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		select {
+		case err := <-respondDone:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("RespondWithDeliveryConfirmation error = %v, want store deadline", err)
+			}
+		default:
+			waitDone := make(chan error, 1)
+			go func() {
+				_, err := s.WaitForResponse(context.Background(), id)
+				waitDone <- err
+			}()
+			synctest.Wait()
+			<-respondDone
+			<-waitDone
+			t.Fatal("RespondWithDeliveryConfirmation ignored the store timeout")
+		}
+	})
 }
 
 func TestRespondWithDeliveryConfirmationReturnsNotFoundWhenCancellationWinsAfterLookup(t *testing.T) {

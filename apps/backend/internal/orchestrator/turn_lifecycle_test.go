@@ -348,7 +348,7 @@ func TestReservedTurnCannotBeAdoptedBeforePublication(t *testing.T) {
 	svc, repo := newTurnLifecycleTestService(t)
 	ctx := context.Background()
 
-	turnID, created, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	turnID, created, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
 	if err != nil || !created || reserved == nil || turnID == "" {
 		t.Fatalf("reserve turn: id=%q created=%v reserved=%v err=%v", turnID, created, reserved, err)
 	}
@@ -356,7 +356,7 @@ func TestReservedTurnCannotBeAdoptedBeforePublication(t *testing.T) {
 		t.Fatalf("unpublished reserved turn entered active cache: %v", cached)
 	}
 
-	adoptedID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false)
+	adoptedID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false, nil)
 	if !errors.Is(err, ErrAgentPromptInProgress) || adoptedID != "" {
 		t.Fatalf("second prompt adopted unpublished turn: id=%q err=%v", adoptedID, err)
 	}
@@ -511,7 +511,7 @@ func TestAgentReadyWaitsForReservedPromptGeneration(t *testing.T) {
 	agentMgr.currentPromptExecutionID = "exec1"
 	agentMgr.currentPromptGeneration.Store(1)
 
-	turnID, _, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	turnID, _, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
 	if err != nil {
 		t.Fatalf("reserve successor turn: %v", err)
 	}
@@ -562,7 +562,7 @@ func TestAgentReadyRevalidatesAfterReservedPromptRollback(t *testing.T) {
 	agentMgr.currentPromptExecutionID = "exec1"
 	agentMgr.currentPromptGeneration.Store(1)
 
-	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
 	if err != nil {
 		t.Fatalf("reserve successor turn: %v", err)
 	}
@@ -603,7 +603,7 @@ func TestAgentReadyDetachesDeliveryCancellationAfterReservedPromptRollback(t *te
 	agentMgr.currentPromptExecutionID = "exec1"
 	agentMgr.currentPromptGeneration.Store(1)
 
-	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(context.Background(), "session1", true)
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(context.Background(), "session1", true, nil)
 	if err != nil {
 		t.Fatalf("reserve successor turn: %v", err)
 	}
@@ -648,7 +648,7 @@ func TestAgentReadyReconcilesWhenReservedPromptRollbackFinishesAfterWaitTimeout(
 	agentMgr.currentPromptExecutionID = "exec1"
 	agentMgr.currentPromptGeneration.Store(1)
 
-	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
 	if err != nil {
 		t.Fatalf("reserve successor turn: %v", err)
 	}
@@ -693,7 +693,7 @@ func TestAgentReadyWaitsForReservedTurnThenDropsGenerationlessEventOnRollback(t 
 	agentMgr := svc.agentManager.(*mockAgentManager)
 	agentMgr.currentPromptExecutionID = "exec1"
 
-	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
 	if err != nil {
 		t.Fatalf("reserve successor turn: %v", err)
 	}
@@ -760,7 +760,7 @@ func TestStartFailsClosedWithoutTurnService(t *testing.T) {
 func TestPublishedReservedTurnCannotBeRolledBack(t *testing.T) {
 	svc, repo := newTurnLifecycleTestService(t)
 	ctx := context.Background()
-	turnID, _, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	turnID, _, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
 	if err != nil {
 		t.Fatalf("reserve turn: %v", err)
 	}
@@ -781,7 +781,7 @@ func TestRejectedReservedTurnClearsPrivateCache(t *testing.T) {
 	svc, repo := newTurnLifecycleTestService(t)
 	ctx := context.Background()
 
-	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
 	if err != nil {
 		t.Fatalf("reserve turn: %v", err)
 	}
@@ -796,7 +796,7 @@ func TestRejectedReservedTurnClearsPrivateCache(t *testing.T) {
 		t.Fatalf("open turns after rollback = %d, want 0", open)
 	}
 
-	successorID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false)
+	successorID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false, nil)
 	if err != nil || successorID == "" || successorID == turnID {
 		t.Fatalf("successor after rollback: id=%q rejected=%q err=%v", successorID, turnID, err)
 	}
@@ -805,7 +805,7 @@ func TestRejectedReservedTurnClearsPrivateCache(t *testing.T) {
 func TestFailedReservedTurnRollbackKeepsSessionQuarantined(t *testing.T) {
 	svc, _ := newTurnLifecycleTestService(t)
 	ctx := context.Background()
-	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true)
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
 	if err != nil {
 		t.Fatalf("reserve turn: %v", err)
 	}
@@ -822,7 +822,7 @@ func TestFailedReservedTurnRollbackKeepsSessionQuarantined(t *testing.T) {
 		t.Fatal("failed rollback resolved the reservation waiter")
 	default:
 	}
-	if _, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false); !errors.Is(err, ErrAgentPromptInProgress) {
+	if _, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false, nil); !errors.Is(err, ErrAgentPromptInProgress) {
 		t.Fatalf("new prompt after failed rollback error = %v, want %v", err, ErrAgentPromptInProgress)
 	}
 }

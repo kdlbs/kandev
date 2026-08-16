@@ -3936,7 +3936,7 @@ func (s *Service) claimLifecyclePromptDispatch(
 		return nil, promptClaimRollback{}, err
 	}
 	rollback.turnID, rollback.createdTurn, _, err = s.startTurnForSessionWithOwnershipChecked(
-		ctx, sessionID, false,
+		ctx, sessionID, false, nil,
 	)
 	if err != nil {
 		s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)

@@ -351,6 +351,20 @@ All locally available task gates passed; environment-gated parity also passed in
   for a session-list refresh. Event-arrival ordering stays authoritative across batched message updates.
   The 73 focused web tests, full task-service suite, targeted race suite (10 repetitions), web typecheck,
   zero-warning focused lint, i18n ratchet, backend changed-lines lint, and public-doc validators passed.
+- A second Codex pass orders REST and WebSocket pending-action snapshots with a shared process-epoch
+  logical revision reserved before each authoritative read. Store merges now reject older projections,
+  including a deferred task-session list response that resolves after a newer message event.
+- Follow-up Claude review separates degraded turn-service warnings from graceful missing-identity debug
+  logs, rejects partial clarification response-delivery intents, and adds context-aware 1 ms / 2 ms
+  backoff between startup summary compare-and-set retries.
+- Follow-up CodeRabbit review keeps the independent response-delivery recovery pass running after a
+  malformed reservation while excluding delivery IDs still owned by unresolved prompt reservations.
+  Detached-bundle recovery coverage also confirms the disconnect marker survives restoration.
+- This remediation batch passed all affected backend package suites (backend app, clarification,
+  MCP handlers, orchestrator, task handlers, SQLite repository, and task service), focused race
+  tests with three final repetitions, 37 focused web tests, the superseded-clarification E2E
+  regression, web typecheck, zero-warning frontend and Go changed-lines lint, format and i18n
+  checks, and both public-doc validators.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

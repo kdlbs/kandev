@@ -207,8 +207,8 @@ func (s *Service) reconcileExistingSummary(
 		if current.PendingAction == pendingAction {
 			return current, nil
 		}
-		if current.Revision == ^uint64(0) {
-			return nil, errors.New("revision overflow")
+		if err := prepareSummaryReconcileAttempt(ctx, attempt, current.Revision); err != nil {
+			return nil, err
 		}
 		next := *current
 		next.PendingAction = pendingAction
@@ -254,6 +254,32 @@ func (s *Service) reconcileExistingSummary(
 		return current, nil
 	}
 	return nil, errors.New("exhausted compare-and-set retries")
+}
+
+const summaryReconcileInitialRetryDelay = time.Millisecond
+
+func prepareSummaryReconcileAttempt(ctx context.Context, attempt int, revision uint64) error {
+	if revision == ^uint64(0) {
+		return errors.New("revision overflow")
+	}
+	if err := waitForSummaryReconcileRetry(ctx, attempt); err != nil {
+		return fmt.Errorf("wait before compare-and-set retry: %w", err)
+	}
+	return nil
+}
+
+func waitForSummaryReconcileRetry(ctx context.Context, attempt int) error {
+	if attempt <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(summaryReconcileInitialRetryDelay << (attempt - 1))
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func advancedSummaryTime(previous, now time.Time) time.Time {

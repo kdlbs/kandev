@@ -36,11 +36,12 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
 	}
-	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(
-		ctx,
-		h.service,
-		map[string][]*models.TaskSession{taskID: sessions},
-	)
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		sessionIDs = append(sessionIDs, session.ID)
+	}
+	pendingActionsBySession, pendingRevisionsBySession, pendingErr :=
+		h.service.GetPendingActionProjectionsForSessions(ctx, sessionIDs)
 	if pendingErr != nil {
 		h.logger.Error("get task session pending actions failed", zap.Error(pendingErr))
 		return ws.NewError(
@@ -56,7 +57,13 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 		summary := dto.FromTaskSessionSummary(session)
 		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
 		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
-		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
+		if isInputCapableSession(session) {
+			summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
+		}
+		summary.PendingActionRevision = pendingActionRevisionPtr(
+			session.ID,
+			pendingRevisionsBySession,
+		)
 		sessionDTOs = append(sessionDTOs, summary)
 	}
 	resp := dto.ListTaskSessionSummariesResponse{

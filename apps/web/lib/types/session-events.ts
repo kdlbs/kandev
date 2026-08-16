@@ -2,7 +2,7 @@ import type { BackendMessage } from "./backend-message";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type { ForegroundActivity } from "./activity";
-import type { TaskPendingAction } from "./http";
+import type { TaskPendingAction, TaskPendingActionRevision } from "./http";
 import type {
   AgentCapabilitiesPayload,
   SessionInfoPayload,
@@ -28,6 +28,8 @@ export type MessageAddedPayload = {
   updated_at?: string;
   /** Authoritative per-session input projection after this semantic message mutation. */
   pending_action?: TaskPendingAction | null;
+  /** Logical clock shared with REST session snapshots. */
+  pending_action_revision?: TaskPendingActionRevision;
 };
 
 export type TaskSessionStateChangedPayload = {

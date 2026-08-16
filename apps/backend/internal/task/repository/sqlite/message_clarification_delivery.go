@@ -89,13 +89,30 @@ func (r *Repository) reconcilePendingClarificationResponseDeliveries(ctx context
 func (r *Repository) listPendingClarificationResponseDeliveries(ctx context.Context) ([]string, error) {
 	drv := r.ro.DriverName()
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
+	reservedPendingIDExpr := dialect.JSONExtract(
+		drv,
+		"turn_row.metadata",
+		models.TurnMetaKeyPromptDispatchClarificationPendingID,
+	)
 	query := fmt.Sprintf(`
 		SELECT DISTINCT %s
 		FROM task_session_messages m
 		WHERE m.type = 'clarification_request'
 		  AND %s
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM task_session_turns turn_row
+		    WHERE %s
+		      AND %s = %s
+		  )
 		ORDER BY %s
-	`, pendingIDExpr, clarificationResponseDeliveryPendingPredicate(drv, "m"), pendingIDExpr)
+	`, pendingIDExpr,
+		clarificationResponseDeliveryPendingPredicate(drv, "m"),
+		turnDispatchPendingPredicate(drv, "turn_row"),
+		reservedPendingIDExpr,
+		pendingIDExpr,
+		pendingIDExpr,
+	)
 	var pendingIDs []string
 	if err := r.ro.SelectContext(ctx, &pendingIDs, r.ro.Rebind(query)); err != nil {
 		return nil, fmt.Errorf("list pending clarification response deliveries: %w", err)

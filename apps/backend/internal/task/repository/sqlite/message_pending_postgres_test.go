@@ -47,6 +47,55 @@ func TestPostgresActiveClarificationUsesNewestDurableTurn(t *testing.T) {
 	assertNoActivePostgresClarification(t, ctx, repo)
 }
 
+func TestPostgresPendingActionsExcludeTerminalSessionsAndPreferClarification(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 16, 21, 0, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-precedence-pg", "session-precedence-pg")
+	createPendingActionTurn(
+		t, repo, "task-precedence-pg", "session-precedence-pg", "turn-precedence-pg", base, base,
+	)
+	createPendingActionMessage(
+		t, repo, "permission-precedence-pg", "task-precedence-pg", "session-precedence-pg",
+		"turn-precedence-pg", models.MessageTypePermissionRequest, "pending", base,
+	)
+	createPendingActionMessage(
+		t, repo, "clarification-precedence-pg", "task-precedence-pg", "session-precedence-pg",
+		"turn-precedence-pg", models.MessageTypeClarificationRequest, "pending", base.Add(time.Second),
+	)
+	seedPendingActionSession(t, repo, "task-terminal-action-pg", "session-terminal-action-pg")
+	createPendingActionTurn(
+		t, repo, "task-terminal-action-pg", "session-terminal-action-pg", "turn-terminal-action-pg", base, base,
+	)
+	createPendingActionMessage(
+		t, repo, "clarification-terminal-action-pg", "task-terminal-action-pg", "session-terminal-action-pg",
+		"turn-terminal-action-pg", models.MessageTypeClarificationRequest, "pending", base,
+	)
+	if err := repo.UpdateTaskSessionState(
+		ctx, "session-terminal-action-pg", models.TaskSessionStateCancelled, "cancelled",
+	); err != nil {
+		t.Fatalf("cancel terminal session: %v", err)
+	}
+
+	actions, err := repo.GetPendingActionsBySessionIDs(
+		ctx,
+		[]string{"session-precedence-pg", "session-terminal-action-pg"},
+	)
+	if err != nil {
+		t.Fatalf("GetPendingActionsBySessionIDs: %v", err)
+	}
+	if actions["session-precedence-pg"] != models.TaskPendingActionClarification {
+		t.Fatalf("postgres precedence action = %#v, want clarification", actions)
+	}
+	if _, ok := actions["session-terminal-action-pg"]; ok {
+		t.Fatalf("postgres terminal session retained pending action: %#v", actions)
+	}
+}
+
 func TestPostgresCompleteActiveClarificationBundleClaimsOnce(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

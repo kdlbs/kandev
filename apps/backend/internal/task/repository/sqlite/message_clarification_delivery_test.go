@@ -96,6 +96,52 @@ func TestFinalizeClarificationResponseDeliveryPreventsRecovery(t *testing.T) {
 	}
 }
 
+func TestClarificationDeliveryRecoveryRestoresDetachedBundle(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 16, 17, 0, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-detached-recovery", "session-detached-recovery")
+	createPendingActionTurn(
+		t, repo, "task-detached-recovery", "session-detached-recovery",
+		"turn-detached-recovery", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-detached-recovery", "task-detached-recovery",
+		"session-detached-recovery", "turn-detached-recovery",
+		"pending-detached-recovery", "q1", base,
+	)
+	setClarificationMessageMetadata(t, repo, "message-detached-recovery", func(metadata map[string]interface{}) {
+		metadata["agent_disconnected"] = true
+	})
+	_, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-detached-recovery",
+		clarificationStatusRejected,
+		nil,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim = %v, %v; want true, nil", claimed, err)
+	}
+
+	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
+	if err != nil || reconciled != 1 {
+		t.Fatalf("ReconcileUnpublishedPromptTurns = %d, %v; want 1, nil", reconciled, err)
+	}
+	message, err := repo.GetMessage(ctx, "message-detached-recovery")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if message.Metadata["status"] != clarificationStatusPending {
+		t.Fatalf("recovered status = %v, want pending", message.Metadata["status"])
+	}
+	if disconnected, _ := message.Metadata["agent_disconnected"].(bool); !disconnected {
+		t.Fatalf("agent_disconnected = %v, want true after restore", message.Metadata["agent_disconnected"])
+	}
+	if _, ok := message.Metadata[clarificationResponseDeliveryPendingKey]; ok {
+		t.Fatal("delivery marker present after restore")
+	}
+}
+
 func TestClarificationDeliveryRecoveryDoesNotReactivateSupersededTurn(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

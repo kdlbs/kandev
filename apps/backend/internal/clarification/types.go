@@ -54,12 +54,16 @@ type Response struct {
 
 // PendingClarification represents a clarification request waiting for a response.
 type PendingClarification struct {
-	Request                      *Request
-	done                         chan struct{} // Closed when a response is submitted (broadcast to all waiters)
-	resp                         *Response
-	mu                           sync.Mutex
-	resolved                     bool
-	cancelled                    bool
+	Request   *Request
+	done      chan struct{} // Closed when a response is submitted (broadcast to all waiters)
+	resp      *Response
+	mu        sync.Mutex
+	resolved  bool
+	cancelled bool
+	// mu guards the deliveryConfirmation* and deliveryAbandoned fields except
+	// deliveryConfirmationOnce. deliveryConfirmationDone exists only when a
+	// callback was supplied; started and complete distinguish an in-flight
+	// callback from its result.
 	deliveryConfirmation         func() error
 	deliveryConfirmationOnce     sync.Once
 	deliveryConfirmationErr      error

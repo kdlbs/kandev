@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
@@ -71,6 +71,7 @@ describe("useTaskRemoval session loading", () => {
 
   it("rejects an older forced response after a newer snapshot wins", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    onTestFinished(() => consoleError.mockRestore());
     type SessionResponse = { sessions: TaskSession[] };
     let resolveOlder: (response: SessionResponse) => void = () => {};
     let resolveNewer: (response: SessionResponse) => void = () => {};
@@ -92,7 +93,6 @@ describe("useTaskRemoval session loading", () => {
     resolveOlder({ sessions: [makeSession("older-session")] });
     await expect(olderLoad).rejects.toMatchObject({ name: "AbortError" });
     expect(consoleError).not.toHaveBeenCalled();
-    consoleError.mockRestore();
 
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledTimes(1);
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [newerSession]);

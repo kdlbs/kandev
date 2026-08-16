@@ -102,6 +102,8 @@ func TestHTTPGetTaskSession_StampsCancellationPending(t *testing.T) {
 
 	resp := doGetTaskSession(t, h, "sess-cancel")
 	require.True(t, resp.Session.CancellationPending)
+	require.NotNil(t, resp.Session.PendingActionRevision)
+	require.NotEmpty(t, resp.Session.PendingActionRevision.Epoch)
 }
 
 func TestHTTPListTaskSessions_StampsCancellationPending(t *testing.T) {
@@ -134,6 +136,8 @@ func TestHTTPListTaskSessions_StampsCancellationPending(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
 	require.Len(t, response.Sessions, 1)
 	require.True(t, response.Sessions[0].CancellationPending)
+	require.NotNil(t, response.Sessions[0].PendingActionRevision)
+	require.NotEmpty(t, response.Sessions[0].PendingActionRevision.Epoch)
 }
 
 func TestListTaskSessionsFailsWhenPendingProjectionFails(t *testing.T) {
@@ -200,6 +204,8 @@ func TestWSListTaskSessions_StampsCancellationPending(t *testing.T) {
 	require.NoError(t, response.ParsePayload(&body))
 	require.Len(t, body.Sessions, 1)
 	require.True(t, body.Sessions[0].CancellationPending)
+	require.NotNil(t, body.Sessions[0].PendingActionRevision)
+	require.NotEmpty(t, body.Sessions[0].PendingActionRevision.Epoch)
 }
 
 func newMessageCancellationService(t *testing.T, repo *messageAddSwitchRepo) *service.Service {

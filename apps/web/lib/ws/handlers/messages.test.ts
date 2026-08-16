@@ -6,6 +6,11 @@ import { createMessagesHandlerRegistration, createMessageUpdateScheduler } from 
 
 type UpdatedMessage = BackendMessageMap["session.message.updated"];
 const TEST_TIMESTAMP = "2026-08-02T00:00:00.000Z";
+const PROJECTION_EPOCH = "20260816T201500.000000000Z-test";
+
+function pendingRevision(sequence: number) {
+  return { epoch: PROJECTION_EPOCH, sequence };
+}
 
 function makePayload(sessionId: string, messageId: string, content: string) {
   return {
@@ -194,11 +199,16 @@ describe("session message pending-action projection", () => {
         ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
         type: "clarification_request",
         pending_action: "clarification",
+        pending_action_revision: pendingRevision(1),
       },
       timestamp: TEST_TIMESTAMP,
     });
 
-    expect(setTaskSessionPendingAction).toHaveBeenCalledWith(SESSION_ID, "clarification");
+    expect(setTaskSessionPendingAction).toHaveBeenCalledWith(
+      SESSION_ID,
+      "clarification",
+      pendingRevision(1),
+    );
 
     registration.handlers["session.message.updated"]!({
       ...makeUpdated(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
@@ -206,11 +216,16 @@ describe("session message pending-action projection", () => {
         ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
         type: "clarification_request",
         pending_action: null,
+        pending_action_revision: pendingRevision(2),
       },
     });
     registration.scheduler.flush();
 
-    expect(setTaskSessionPendingAction).toHaveBeenLastCalledWith(SESSION_ID, null);
+    expect(setTaskSessionPendingAction).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      null,
+      pendingRevision(2),
+    );
     registration.dispose();
   });
 
@@ -218,6 +233,7 @@ describe("session message pending-action projection", () => {
     const { store, setTaskSessionPendingAction } = makeStore();
     const registration = createMessagesHandlerRegistration(store);
     const handler = registration.handlers["session.message.updated"]!;
+    let sequence = 0;
     const update = (messageId: string, pendingAction: "clarification" | "permission" | null) => {
       handler({
         ...makeUpdated(SESSION_ID, messageId, QUESTION_CONTENT),
@@ -225,6 +241,7 @@ describe("session message pending-action projection", () => {
           ...makePayload(SESSION_ID, messageId, QUESTION_CONTENT),
           type: "clarification_request",
           pending_action: pendingAction,
+          pending_action_revision: pendingRevision(++sequence),
         },
       });
     };
@@ -234,7 +251,11 @@ describe("session message pending-action projection", () => {
     update("question-a", "permission");
     registration.scheduler.flush();
 
-    expect(setTaskSessionPendingAction).toHaveBeenLastCalledWith(SESSION_ID, "permission");
+    expect(setTaskSessionPendingAction).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "permission",
+      pendingRevision(3),
+    );
     registration.dispose();
   });
 
@@ -250,6 +271,7 @@ describe("session message pending-action projection", () => {
         ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
         type: "clarification_request",
         pending_action: "clarification",
+        pending_action_revision: pendingRevision(1),
       },
     });
     registration.scheduler.flush();

@@ -379,6 +379,12 @@ type Service struct {
 	// within this backend process only — this backend is single-process per
 	// SQLite database, so that is the complete threat model today.
 	repoResolveMu sync.Mutex
+	// pendingActionProjectionMu guards the process-epoch logical clock shared
+	// by REST snapshots and semantic message events. Revisions are reserved
+	// before each repository read so delayed cross-channel results stay ordered.
+	pendingActionProjectionMu       sync.Mutex
+	pendingActionProjectionEpoch    string
+	pendingActionProjectionSequence uint64
 }
 
 // SetAttachmentService wires the file-backed prompt attachment owner into the

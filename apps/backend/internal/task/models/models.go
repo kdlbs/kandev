@@ -1080,6 +1080,14 @@ const (
 // on user input.
 type TaskPendingAction string
 
+// PendingActionRevision is a process-epoch logical clock shared by REST and
+// WebSocket pending-action projections. Epoch changes order backend restarts;
+// Sequence orders snapshots within one process.
+type PendingActionRevision struct {
+	Epoch    string `json:"epoch"`
+	Sequence uint64 `json:"sequence"`
+}
+
 const (
 	TaskPendingActionClarification TaskPendingAction = "clarification"
 	TaskPendingActionPermission    TaskPendingAction = "permission"

@@ -145,14 +145,17 @@ No schema change.
 
 ## API surface
 
-No new route or HTTP response field.
+No new route. Task-session responses add `pending_action_revision` beside the existing
+`pending_action` projection.
 
 - `GET /api/v1/tasks/:taskId/task-sessions` continues to expose each session's current derived
   `pending_action`; task navigation uses this existing field.
 - Semantic `session.message.added`, `session.message.updated`, and `session.message.deleted`
   notifications include the authoritative per-session `pending_action` after mutations that can
   change it. The field is explicit null when clean and omitted when projection fails or the event is
-  a replaceable content-only update; clients preserve the prior value when it is omitted.
+  a replaceable content-only update; clients preserve the prior value when it is omitted. Each
+  projection includes a process-epoch `pending_action_revision`, shared with REST task-session
+  snapshots, so clients reject a delayed result from either delivery channel.
 - `GET /api/v1/task-sessions/:sessionId/turns` continues to expose durable turn history;
   unpublished reservations stay hidden until publication or durable message evidence, including while
   an attempt marker makes them internal current-turn authority. Attempted reservations are preserved
@@ -170,6 +173,8 @@ No new route or HTTP response field.
     non-retryable server error and keeps the bundle terminal.
   - `superseded_history` or `terminal`: answer or rejection returns conflict, performs no write, and
     initiates no agent resume.
+  - `delivery_claimed`: a concurrent second response returns conflict, performs no write, and
+    initiates no agent resume because the first response already claimed every pending row.
 - `POST /api/v1/clarification/:pendingId/cancel` remains the low-level cancellation path for a request
   still owned by the in-memory clarification store. The chat Skip control uses `/respond` with
   `rejected=true`, including for detached requests.
@@ -313,6 +318,9 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** a browser cached an explicit clean session projection, **WHEN** a new current-turn
   clarification message arrives, **THEN** the same event advances the session projection to
   `clarification` before pending discovery so the question remains visible and answerable.
+- **GIVEN** a task-session list request is in flight, **WHEN** a newer semantic message event updates
+  the same session before the HTTP response resolves, **THEN** the response's older projection
+  revision cannot replace the WebSocket projection (and the reverse delivery order is equally safe).
 - **GIVEN** an old detached question and a newer clarification bundle, **WHEN** the user skips the
   newer bundle and reloads, **THEN** neither bundle reappears, the task question icon is absent, and
   later turn completion cannot re-arm the old bundle.

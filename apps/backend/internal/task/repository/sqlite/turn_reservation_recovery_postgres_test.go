@@ -145,6 +145,72 @@ func TestPostgresReconcileUnpublishedPromptTurns(t *testing.T) {
 	}
 }
 
+func TestPostgresDeliveryRecoverySkipsBundleOwnedByFailedReservation(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 16, 21, 20, 0, 0, time.UTC)
+	seedSessionForTurns(t, repo, "task-owned-pg", "session-owned-pg")
+	createRecoveryTurn(t, repo, "task-owned-pg", "session-owned-pg", "turn-owned-pg", base, nil)
+	for index, messageID := range []string{"message-owned-a-pg", "message-owned-b-pg"} {
+		createRecoveryClarification(
+			t, repo, messageID, "task-owned-pg", "session-owned-pg", "turn-owned-pg",
+			"pending-owned-pg", base.Add(time.Duration(index)*time.Second),
+		)
+	}
+	markRecoveryClarificationDeliveryPending(t, repo, "message-owned-a-pg")
+	createRecoveryTurn(
+		t, repo, "task-owned-pg", "session-owned-pg", "turn-reserved-owned-pg", base.Add(time.Minute),
+		map[string]interface{}{
+			models.TurnMetaKeyPromptDispatchPending:                 true,
+			models.TurnMetaKeyPromptDispatchAttempted:               true,
+			models.TurnMetaKeyPromptDispatchClarificationPendingID:  "pending-owned-pg",
+			models.TurnMetaKeyPromptDispatchClarificationTurnID:     "turn-owned-pg",
+			models.TurnMetaKeyPromptDispatchClarificationMessageIDs: []string{"message-owned-a-pg", "message-owned-b-pg"},
+		},
+	)
+
+	seedPendingActionSession(t, repo, "task-independent-pg", "session-independent-pg")
+	createPendingActionTurn(
+		t, repo, "task-independent-pg", "session-independent-pg", "turn-independent-pg", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-independent-pg", "task-independent-pg", "session-independent-pg",
+		"turn-independent-pg", "pending-independent-pg", "q1", base,
+	)
+	_, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-independent-pg",
+		clarificationStatusAnswered,
+		map[string]interface{}{"q1": map[string]interface{}{"question_id": "q1"}},
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim independent delivery = %v, %v; want true, nil", claimed, err)
+	}
+
+	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
+	if err == nil || reconciled != 1 {
+		t.Fatalf("ReconcileUnpublishedPromptTurns = %d, %v; want 1 and reservation error", reconciled, err)
+	}
+	owned, err := repo.GetMessage(ctx, "message-owned-a-pg")
+	if err != nil {
+		t.Fatalf("GetMessage(owned): %v", err)
+	}
+	if owned.Metadata[clarificationResponseDeliveryPendingKey] != true {
+		t.Fatalf("owned delivery marker changed: %#v", owned.Metadata)
+	}
+	independent, err := repo.GetMessage(ctx, "message-independent-pg")
+	if err != nil {
+		t.Fatalf("GetMessage(independent): %v", err)
+	}
+	if independent.Metadata["status"] != clarificationStatusPending {
+		t.Fatalf("independent delivery status = %v, want pending", independent.Metadata["status"])
+	}
+}
+
 func TestPostgresReconcileAmbiguousEmptyPromptTurn(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

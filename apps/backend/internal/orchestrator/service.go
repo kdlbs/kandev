@@ -1562,7 +1562,7 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 // active turn. Callers that must compensate a failed dispatch may only close a
 // turn they created; an adopted turn belongs to an earlier dispatch.
 func (s *Service) startTurnForSessionWithOwnership(ctx context.Context, sessionID string) (string, bool) {
-	turnID, created, _, err := s.startTurnForSessionWithOwnershipChecked(ctx, sessionID, false)
+	turnID, created, _, err := s.startTurnForSessionWithOwnershipChecked(ctx, sessionID, false, nil)
 	if err != nil {
 		s.logger.Warn("failed to start turn",
 			zap.String("session_id", sessionID),
@@ -1579,7 +1579,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 	ctx context.Context,
 	sessionID string,
 	reserve bool,
-	recovery ...*models.PromptDispatchRecovery,
+	recovery *models.PromptDispatchRecovery,
 ) (string, bool, *models.Turn, error) {
 	if s.turnService == nil {
 		return "", false, nil, nil
@@ -1613,11 +1613,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 		err  error
 	)
 	if reserve {
-		var recoveryDetails *models.PromptDispatchRecovery
-		if len(recovery) > 0 {
-			recoveryDetails = recovery[0]
-		}
-		turn, err = s.turnService.ReserveTurn(ctx, sessionID, recoveryDetails)
+		turn, err = s.turnService.ReserveTurn(ctx, sessionID, recovery)
 	} else {
 		turn, err = s.turnService.StartTurn(ctx, sessionID)
 	}
