@@ -966,6 +966,8 @@ func (s *Server) registerKanbanTools() {
 		mcp.NewTool("message_task_kandev",
 			mcp.WithDescription(`Send a follow-up prompt (message) to an existing task's primary session, or to a specific session via session_id.
 
+This tool coordinates already-created Kandev tasks and sessions. It is not a substitute for your host agent's native subagent messaging or coordination. For ordinary coding, research, review, or parallel work, use the host's native subagent mechanism.
+
 Use this to communicate with a sibling task, a parent task, or any task you know the ID of — for example to ask a delegated subtask for clarification, hand it new context, or nudge a paused task forward. Pass session_id to target a specific session — including a sibling session on your OWN task (e.g. one you spawned with spawn_session_kandev).
 
 Choose the control by intent:
@@ -1084,13 +1086,17 @@ func (s *Server) registerMRAutomationTools() {
 // guidance differ by mode: in external mode there is no current task, so the
 // 'self' shorthand is omitted.
 func (s *Server) registerCreateTaskTool() {
-	toolDesc := `Create a new task or subtask and auto-start an agent on it.
+	toolDesc := `Create a new persistent Kandev task or subtask and auto-start a task agent on it.
+
+DELEGATION POLICY:
+- For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool). Do NOT use Kandev task or session tools as a generic worker mechanism.
+- Use this tool only when the user explicitly wants a persistent Kandev task or subtask, workflow tracking, or Kandev task lifecycle. If no native subagent tool is available, continue in this session or ask the user; do not silently create a Kandev task.
 
 WHEN TO USE parent_id='self':
-- Breaking down your current task into phases/steps → use parent_id='self'
-- Creating tasks from a plan → use parent_id='self' (inherits repo, task workspace, workflow, and materialized workspace by default)
-- Delegating work to another agent → use parent_id='self'
-- Delegating work that lives in a sibling repo → use parent_id='self' AND pass repository_url / repository_id / local_path to point the subtask at that repo
+- Breaking down your current task into persistent Kandev workflow phases/steps → use parent_id='self'
+- Creating tasks from a user-requested Kandev plan → use parent_id='self' (inherits repo, task workspace, workflow, and materialized workspace by default)
+- Creating a persistent Kandev subtask explicitly requested by the user → use parent_id='self'
+- Creating persistent Kandev work that lives in a sibling repo → use parent_id='self' AND pass repository_url / repository_id / local_path to point the subtask at that repo
 
 WHEN TO OMIT parent_id (top-level task):
 - Creating an unrelated, standalone task
@@ -1108,7 +1114,7 @@ IMPORTANT:
   - Different repo (you passed repository_url / repository_id / local_path): subtask defaults to that repo's default_branch
   - Pass base_branch explicitly to override either default. Use list_repositories_kandev to see each repo's default_branch.
 - Top-level tasks need a repository via repository_url, repository_id, or local_path
-- 'prompt' is the sub-agent's initial prompt — be specific and detailed
+- 'prompt' is the task agent's initial prompt — be specific and detailed
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work), and still pass agent_profile_id unless it can be inherited. When in doubt, leave it true.
 - Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)
 
@@ -1120,7 +1126,11 @@ IDEMPOTENCY (external_id):
 	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call, then falls back to the current/source or parent profile without verified session context. workspace_default skips those task profiles and the creating session, then uses workflow profiles before the target workspace default. Explicit profiles do not copy creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start."
 
 	if s.mode == ModeExternal {
-		toolDesc = `Create a new top-level task and auto-start an agent on it.
+		toolDesc = `Create a new persistent top-level Kandev task and auto-start a task agent on it.
+
+DELEGATION POLICY:
+- For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool). Do NOT use Kandev task or session tools as a generic worker mechanism.
+- Use this tool only when the user explicitly wants a persistent Kandev task, workflow tracking, or Kandev task lifecycle. If no native subagent tool is available, continue in this session or ask the user; do not silently create a Kandev task.
 
 IMPORTANT:
 - Provide a repository via repository_url, repository_id, or local_path
@@ -1128,7 +1138,7 @@ IMPORTANT:
 - A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task uses the parent task profile because external mode has no creating session or current/source task context, then checks workflow and target-workspace defaults. workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no creating session, so it never copies creator-session runtime values.
 - Executor and executor-profile inheritance from a parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
-- 'prompt' is the agent's initial prompt — be specific and detailed
+- 'prompt' is the task agent's initial prompt — be specific and detailed
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later), and still pass agent_profile_id unless a default exists. When in doubt, leave it true.
 - Use parent_id only when delegating to a known existing task by its ID
 
@@ -1149,7 +1159,7 @@ IDEMPOTENCY (external_id):
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
 			mcp.WithString("workspace_mode", mcp.Description("Subtask materialized-workspace mode: inherit_parent reuses the parent's worktree/materialized workspace (default for subtasks); new_workspace launches the subtask in its own workspace/worktree.")),
 			mcp.WithString("title", mcp.Required(), mcp.MaxLength(service.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
-			mcp.WithString("prompt", mcp.Description("The initial prompt for the sub-agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the sub-agent without task-specific context.")),
+			mcp.WithString("prompt", mcp.Description("The initial prompt for the task agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the task agent without task-specific context.")),
 			mcp.WithBoolean("autopilot", mcp.Description("Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.")),
 			mcp.WithString("agent_profile_id", mcp.Description(agentProfileDesc)),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
@@ -1222,14 +1232,16 @@ func (s *Server) registerSpawnSessionTool() {
 		mcp.NewTool("spawn_session_kandev",
 			mcp.WithDescription(`Spawn an ADDITIONAL agent session on an existing task (defaults to your current task) and start it with the given prompt.
 
-Unlike create_task_kandev this does NOT create a new task — the new session runs alongside the task's existing sessions in the same workspace, as a separate session tab. Use it to bring in another agent (or another instance of yourself) on the work you're already doing: a reviewer, a pair of hands for a parallelizable piece, or a different agent profile better suited to a subproblem.
+IMPORTANT DELEGATION RULE: This creates an additional Kandev platform session, not a native subagent. For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism and do NOT call this tool. Use this only when the user explicitly asks for another Kandev session/tab on an existing task or the workflow explicitly requires persistent Kandev session coordination. If native subagents are unavailable, continue in this session or ask the user; do not use this tool as a fallback.
+
+Unlike create_task_kandev this does NOT create a new task. The new session runs alongside the task's existing sessions in the same workspace, as a separate session tab.
 
 The spawned session knows it was spawned by you and can reply via message_task_kandev using your task_id + session_id. You can message it the same way using the session_id returned by this tool.
 
 The returned agent_profile_id is the effective agent profile used by the new session. On a workflow step, the step's launch profile wins: a pinned step profile outranks the requested agent_profile_id, and an unpinned step uses the workflow default. Without a workflow launch profile, an explicit agent_profile_id wins; when omitted, the existing inheritance rules apply.
 
 Returns {task_id, session_id, state, agent_profile_id}.`),
-			mcp.WithString("prompt", mcp.Required(), mcp.Description("The spawned session's initial prompt. This is the ONLY context the new agent receives — be specific and detailed.")),
+			mcp.WithString("prompt", mcp.Required(), mcp.Description("The Kandev session's initial prompt. This is the ONLY context the new agent receives — be specific and detailed.")),
 			mcp.WithString("agent_profile_id", mcp.Description("Requested agent profile for the new session. Omit to inherit your session's profile; a workflow launch profile may override it.")),
 			mcp.WithString("name", mcp.Description("Optional session name shown on the session tab (e.g. 'reviewer'). Helps the user tell concurrent sessions apart.")),
 			mcp.WithString("task_id", mcp.Description("Task to spawn the session on. Omit to use your current task.")),

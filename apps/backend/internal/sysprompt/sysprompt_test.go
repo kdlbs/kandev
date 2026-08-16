@@ -117,6 +117,16 @@ func TestFormatKandevContext_OmitsStepCompleteToolByDefault(t *testing.T) {
 	assert.NotContains(t, result, "{step_complete_section}")
 }
 
+func TestKandevContext_PrefersNativeSubagentsForOrdinaryDelegation(t *testing.T) {
+	context := FormatKandevContext("task-abc", "session-xyz", false)
+
+	assert.Contains(t, context, "DELEGATION POLICY")
+	assert.Contains(t, context, "native subagent mechanism")
+	assert.Contains(t, context, "user explicitly wants a persistent Kandev task or subtask")
+	assert.Contains(t, context, "user explicitly wants another Kandev session/tab")
+	assert.Contains(t, context, "do not silently create a Kandev task or session")
+}
+
 func TestFormatKandevContext_TitleToolFollowsCapability(t *testing.T) {
 	withoutTitle := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{})
 	assert.NotContains(t, withoutTitle, "set_task_title_kandev")

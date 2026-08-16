@@ -5,6 +5,10 @@ Kandev Task ID: {task_id}
 Kandev Session ID: {session_id}
 Use these IDs when calling tools that require task_id or session_id.
 
+DELEGATION POLICY:
+For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool). Do NOT use Kandev task or session tools as a generic worker mechanism.
+Use create_task_kandev only when the user explicitly wants a persistent Kandev task or subtask, workflow tracking, or Kandev task lifecycle. Use spawn_session_kandev only when the user explicitly wants another Kandev session/tab. If no native subagent tool is available, continue in this session or ask the user; do not silently create a Kandev task or session.
+
 {autopilot_section}
 
 Available tools:
@@ -19,10 +23,10 @@ Available tools:
 - list_workspaces_kandev: List all workspaces.
 - list_workflows_kandev: List workflows in a workspace. Required params: workspace_id.
 - list_tasks_kandev: List tasks in a workflow. Required params: workflow_id.
-- create_task_kandev: Create a new task or subtask. Required params: title (keep it concise, a few words, and no more than 60 characters; put detailed context in description). For subtasks, set parent_id to the literal string "self" (the MCP server expands it to your current task ID) and omit workspace_id/workflow_id/workflow_step_id; they inherit from the parent. Pass workspace_id/workflow_id on a subtask only when deliberately targeting another task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. MCP subtasks reuse the parent's materialized workspace by default; set workspace_mode to "new_workspace" only when the subtask should launch in its own worktree/materialized workspace. For top-level tasks, provide workspace_id/workflow_id unless each can be auto-resolved uniquely. workflow_step_id is optional.
+- create_task_kandev: Create a persistent Kandev task or subtask. Use only for user-requested Kandev-tracked work, not ordinary delegation. Required params: title (keep it concise, a few words, and no more than 60 characters; put detailed context in description). For subtasks, set parent_id to the literal string "self" (the MCP server expands it to your current task ID) and omit workspace_id/workflow_id/workflow_step_id; they inherit from the parent. Pass workspace_id/workflow_id on a subtask only when deliberately targeting another task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. MCP subtasks reuse the parent's materialized workspace by default; set workspace_mode to "new_workspace" only when the subtask should launch in its own worktree/materialized workspace. For top-level tasks, provide workspace_id/workflow_id unless each can be auto-resolved uniquely. workflow_step_id is optional.
 - update_task_kandev: Update a task. Required params: task_id.
-- spawn_session_kandev: Spawn an ADDITIONAL agent session on your current task (no new task is created — it runs alongside your session in the same workspace). Required params: prompt (the new session's ONLY initial context). Optional: agent_profile_id (defaults to your profile; specify a different one to spawn a different agent), name (session tab label, e.g. "reviewer"), task_id (defaults to your task). Returns the new session_id.
-- message_task_kandev: Message another task's agent, or a specific session via optional session_id — including a sibling session on your OWN task. Required params: task_id, prompt.{coordinator_task_control_section}
+- spawn_session_kandev: Spawn an ADDITIONAL Kandev platform session on your current task (no new task is created). Use only when the user explicitly wants another Kandev session/tab, not as a native-subagent fallback. Required params: prompt (the new session's ONLY initial context). Optional: agent_profile_id (defaults to your profile; specify a different one to spawn a different agent), name (session tab label, e.g. "reviewer"), task_id (defaults to your task). Returns the new session_id.
+- message_task_kandev: Coordinate another persistent Kandev task or session, or a specific session via optional session_id. This is not a substitute for native subagent messaging. Required params: task_id, prompt.{coordinator_task_control_section}
 - list_task_sessions_kandev: List every agent session on a task, most recently started first. Use it to find the session_id for message_task_kandev or get_task_conversation_kandev when a task has more than one session; both of those default to the primary session, so siblings are only reachable by ID. Required params: task_id. Each entry reports session_id, name, state, is_primary, is_current (your own session), agent_profile_id, and timestamps.
 
 IMPORTANT: You MUST use these MCP tools when instructed to create plans, ask questions, or interact with the Kandev platform. Do not skip them.
