@@ -1,9 +1,9 @@
 import { useAppStore } from "@/components/state-provider";
 import type { Message, TaskPendingAction, TaskSession, Turn } from "@/lib/types/http";
 import {
+  clarificationTurnIdForSession,
   hasPendingClarificationForSession,
   hasPendingPermissionForSession,
-  newestDurableTurnId,
   type PendingClarificationScope,
 } from "@/lib/utils/pending-clarification";
 import { aggregateTaskPendingInput } from "@/lib/utils/task-pending-input";
@@ -22,6 +22,7 @@ export type PendingInputFallback = {
 type PrimarySessionProjection = {
   id: string | null | undefined;
   pendingAction: TaskPendingAction | null | undefined;
+  state: string | null | undefined;
 };
 
 function fallbackFlag(
@@ -42,9 +43,10 @@ function loadedSessionFlags(
   messagesBySession: Record<string, Message[] | undefined>,
   turnsBySession: Record<string, readonly Turn[] | undefined>,
   sessionId: string,
+  sessionState: string | null | undefined,
   pendingAction?: TaskPendingAction | null,
 ): PendingInput {
-  const currentTurnId = newestDurableTurnId(turnsBySession[sessionId]);
+  const currentTurnId = clarificationTurnIdForSession(sessionState, turnsBySession[sessionId]);
   // With both authority signals unavailable, preserve the legacy full-message
   // scan. Once either loads, explicit turn/action scoping applies.
   const clarificationScope: PendingClarificationScope | undefined =
@@ -83,6 +85,7 @@ export function useTaskPendingInput(
         fallback?.taskId ? state.taskSessionsByTask.itemsByTaskId[fallback.taskId] : undefined,
         {
           id: primarySessionId,
+          state: primarySessionId ? state.taskSessions.items[primarySessionId]?.state : undefined,
           pendingAction: primarySessionId
             ? state.taskSessions.items[primarySessionId]?.pending_action
             : undefined,
@@ -112,6 +115,7 @@ function selectFlagsFromLoadedTaskSessions(
         messagesBySession,
         turnsBySession,
         session.id,
+        session.state,
         session.pending_action,
       );
     },
@@ -129,20 +133,20 @@ function selectFlagsFromLoadedTaskSessions(
 function selectFlagsFromPrimarySession(
   messagesBySession: Record<string, Message[] | undefined>,
   turnsBySession: Record<string, readonly Turn[] | undefined>,
-  primarySessionId: string | null | undefined,
-  primarySessionPendingAction: TaskPendingAction | null | undefined,
+  primarySession: PrimarySessionProjection,
   fallback: PendingInputFallback | undefined,
 ): PendingInput {
   const taskSnapshot = actionFlags(fallback?.taskPendingAction);
   if (taskSnapshot.clarification || taskSnapshot.permission) return taskSnapshot;
-  if (!primarySessionId) return NONE;
-  if (messagesBySession[primarySessionId] !== undefined) {
+  if (!primarySession.id) return NONE;
+  if (messagesBySession[primarySession.id] !== undefined) {
     return loadedSessionFlags(
       messagesBySession,
       turnsBySession,
-      primarySessionId,
-      primarySessionPendingAction !== undefined
-        ? primarySessionPendingAction
+      primarySession.id,
+      primarySession.state ?? fallback?.primarySessionState,
+      primarySession.pendingAction !== undefined
+        ? primarySession.pendingAction
         : fallback?.primarySessionPendingAction,
     );
   }
@@ -167,13 +171,7 @@ function selectTaskPendingFlags(
       fallback,
     );
   }
-  return selectFlagsFromPrimarySession(
-    messagesBySession,
-    turnsBySession,
-    primarySession.id,
-    primarySession.pendingAction,
-    fallback,
-  );
+  return selectFlagsFromPrimarySession(messagesBySession, turnsBySession, primarySession, fallback);
 }
 
 /**
@@ -190,6 +188,7 @@ export function useSessionPendingInput(sessionId: string | null | undefined): Pe
           state.messages.bySession,
           state.turns.bySession,
           sessionId,
+          state.taskSessions?.items?.[sessionId]?.state,
           state.taskSessions?.items?.[sessionId]?.pending_action,
         ),
       );

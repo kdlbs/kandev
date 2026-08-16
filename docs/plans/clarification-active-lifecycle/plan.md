@@ -331,6 +331,10 @@ All locally available task gates passed; environment-gated parity also passed in
   detached clarification delivery share one claimed-bundle turn-identity rule.
 - Late CodeRabbit review restores the planned deterministic tie-breaks to ascending turn-history reads
   and adds same-timestamp batch-list coverage.
+- Latest CodeRabbit review passes terminal session state through every loaded-message pending-input
+  selector, so stale current-turn clarification rows cannot re-arm task or session UI after completion
+  or cancellation. The 55 focused web tests, typecheck, zero-warning focused lint, and i18n ratchet
+  passed.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

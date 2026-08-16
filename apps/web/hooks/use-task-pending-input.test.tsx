@@ -219,6 +219,36 @@ describe("useTaskPendingInput current-turn clarification authority", () => {
 
     expect(result.current).toEqual({ clarification: false, permission: false });
   });
+
+  it("quarantines pending clarification history for a terminal primary session", () => {
+    const completedTurn = turn("turn-completed", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
+    const { result } = renderHook(
+      () =>
+        useTaskPendingInput(PRIMARY_SESSION_ID, {
+          primarySessionState: "COMPLETED",
+          primarySessionPendingAction: "clarification",
+        }),
+      {
+        wrapper: wrapper(
+          {
+            [PRIMARY_SESSION_ID]: [
+              message({
+                id: "stale-completed-question",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: completedTurn.id,
+                type: "clarification_request",
+                metadata: { status: "pending" },
+              }),
+            ],
+          },
+          [],
+          { [PRIMARY_SESSION_ID]: [completedTurn] },
+        ),
+      },
+    );
+
+    expect(result.current).toEqual({ clarification: false, permission: false });
+  });
 });
 
 describe("useSessionPendingInput", () => {
@@ -249,6 +279,33 @@ describe("useSessionPendingInput", () => {
         sessionWithPendingAction(SECONDARY_SESSION_ID, "permission"),
       ]),
     });
+    expect(result.current).toEqual({ clarification: false, permission: false });
+  });
+
+  it("quarantines pending clarification history for a cancelled session", () => {
+    const cancelledTurn = turn("turn-cancelled", SECONDARY_SESSION_ID, BASE_TIMESTAMP);
+    const { result } = renderHook(() => useSessionPendingInput(SECONDARY_SESSION_ID), {
+      wrapper: wrapper(
+        {
+          [SECONDARY_SESSION_ID]: [
+            message({
+              id: "stale-cancelled-question",
+              session_id: toSessionId(SECONDARY_SESSION_ID),
+              turn_id: cancelledTurn.id,
+              type: "clarification_request",
+              metadata: { status: "pending" },
+            }),
+          ],
+        },
+        [
+          Object.assign(session(SECONDARY_SESSION_ID, "CANCELLED"), {
+            pending_action: "clarification" as const,
+          }),
+        ],
+        { [SECONDARY_SESSION_ID]: [cancelledTurn] },
+      ),
+    });
+
     expect(result.current).toEqual({ clarification: false, permission: false });
   });
 });
