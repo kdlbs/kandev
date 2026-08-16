@@ -163,6 +163,9 @@ type Manager struct {
 	// managedRuntimeSelections supplies exact versions for host-local managed
 	// npm runtimes. Remote/container runtimes intentionally do not consult it.
 	managedRuntimeSelections managedruntime.SelectionReader
+	// managedRuntimeCacheInvalidator removes one trusted npm execution tree
+	// during bounded host-local startup recovery.
+	managedRuntimeCacheInvalidator ManagedRuntimeCacheInvalidator
 
 	activityCoordinator *activity.Coordinator
 	activityMu          sync.Mutex
@@ -178,6 +181,13 @@ type ManagedGoCacheEnvironmentProvider interface {
 	ExecutionEnvironment(ctx context.Context) (map[string]string, error)
 }
 
+// ManagedRuntimeCacheInvalidator owns the host npm cache boundary. Lifecycle
+// recovery never discovers or deletes cache paths directly.
+type ManagedRuntimeCacheInvalidator interface {
+	InvalidateExecutionCache(context.Context, string) error
+	InvalidateExecutionCacheVersion(context.Context, string, string) error
+}
+
 // SetManagedGoCacheEnvironmentProvider wires install-wide managed cache settings.
 func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEnvironmentProvider) {
 	m.managedGoCache = provider
@@ -187,6 +197,12 @@ func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEn
 // resolver used by standalone managed-agent launches.
 func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
 	m.managedRuntimeSelections = store
+}
+
+// SetManagedRuntimeCacheInvalidator wires the settings-owned exact cache
+// deletion boundary. It is optional for embedded/test managers.
+func (m *Manager) SetManagedRuntimeCacheInvalidator(invalidator ManagedRuntimeCacheInvalidator) {
+	m.managedRuntimeCacheInvalidator = invalidator
 }
 
 // SetActivityCoordinator wires the install-wide host-resource activity gate.
@@ -286,17 +302,19 @@ func NewManager(
 	// mcpHandler will be set later via SetMCPHandler.
 	// stopCh is shared with the manager so workspace-stream backoff drains on Stop.
 	mgr.streamManager = NewStreamManager(log, StreamCallbacks{
-		OnAgentEvent:       mgr.handleAgentEvent,
-		OnStreamDisconnect: mgr.handleStreamDisconnect,
-		OnGitStatus:        mgr.handleGitStatusUpdate,
-		OnGitCommit:        mgr.handleGitCommitCreated,
-		OnGitReset:         mgr.handleGitResetDetected,
-		OnBranchSwitch:     mgr.handleBranchSwitch,
-		OnFileChange:       mgr.handleFileChangeNotification,
-		OnShellOutput:      mgr.handleShellOutput,
-		OnShellExit:        mgr.handleShellExit,
-		OnProcessOutput:    mgr.handleProcessOutput,
-		OnProcessStatus:    mgr.handleProcessStatus,
+		OnAgentEvent:                     mgr.handleAgentEvent,
+		OnStreamDisconnect:               mgr.handleStreamDisconnect,
+		OnAgentEventWithGeneration:       mgr.handleAgentEventWithStartupGeneration,
+		OnStreamDisconnectWithGeneration: mgr.handleStreamDisconnectWithStartupGeneration,
+		OnGitStatus:                      mgr.handleGitStatusUpdate,
+		OnGitCommit:                      mgr.handleGitCommitCreated,
+		OnGitReset:                       mgr.handleGitResetDetected,
+		OnBranchSwitch:                   mgr.handleBranchSwitch,
+		OnFileChange:                     mgr.handleFileChangeNotification,
+		OnShellOutput:                    mgr.handleShellOutput,
+		OnShellExit:                      mgr.handleShellExit,
+		OnProcessOutput:                  mgr.handleProcessOutput,
+		OnProcessStatus:                  mgr.handleProcessStatus,
 	}, nil, stopCh)
 
 	// Set session manager dependencies for full orchestration

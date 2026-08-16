@@ -85,7 +85,7 @@ func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error)
 }
 
 func (a *OpenCodeACP) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
+	return a.ManagedNPMRuntime().ACPCommandWithNpmPreference(opts.ManagedRuntimeVersion, opts.ManagedRuntimePreferOnline)
 }
 
 func (a *OpenCodeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {

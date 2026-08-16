@@ -418,7 +418,12 @@ func (c *Client) readUpdatesStream(
 		<-workerDone
 
 		c.mu.Lock()
-		c.agentStreamConn = nil
+		// A startup retry can install a replacement connection before the
+		// first reader's deferred cleanup runs. Only the reader that owns the
+		// current connection may clear the shared handle.
+		if c.agentStreamConn == conn {
+			c.agentStreamConn = nil
+		}
 		c.mu.Unlock()
 		if err := conn.Close(); err != nil {
 			c.logger.Debug("failed to close updates websocket", zap.Error(err))

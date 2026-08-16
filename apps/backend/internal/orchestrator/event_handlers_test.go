@@ -2503,6 +2503,39 @@ func TestHandleRecoverableFailure(t *testing.T) {
 		}
 	})
 
+	t.Run("persists structured managed runtime failure fields safely", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		taskRepo := newMockTaskRepo()
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+			ErrorMessage:     "managed npm runtime failed to prepare",
+			FailureCode:      "managed_runtime_npm_resolution",
+			FailureDetails:   "npm error code ETARGET\nsecret=super-secret-value",
+		})
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		lastErr, ok := models.LoadLastAgentError(session.Metadata)
+		if !ok {
+			t.Fatalf("expected last agent error metadata, got %#v", session.Metadata)
+		}
+		if lastErr.Code != "managed_runtime_npm_resolution" {
+			t.Fatalf("failure code = %q, want managed runtime code", lastErr.Code)
+		}
+		if !strings.Contains(lastErr.Details, "secret: ***") || strings.Contains(lastErr.Details, "super-secret-value") {
+			t.Fatalf("failure details were not sanitized: %q", lastErr.Details)
+		}
+	})
+
 	t.Run("sets session to WAITING_FOR_INPUT with error message", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")

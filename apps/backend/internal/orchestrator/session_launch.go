@@ -369,6 +369,13 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	if err := s.authorizeTask(ctx, taskID); err != nil {
 		return nil, err
 	}
+	if action == "runtime_retry" {
+		if s.wasResumeAttempt(ctx, sessionID) {
+			action = "resume"
+		} else {
+			action = "fresh_start"
+		}
+	}
 	switch action {
 	case "fresh_start":
 		s.clearResumeToken(ctx, sessionID)

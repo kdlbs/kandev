@@ -7,9 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -186,6 +184,29 @@ type ExactRuntimeCacheInvalidator interface {
 	InvalidateExecutionCacheVersion(context.Context, string, string) error
 }
 
+// InvalidateExecutionCache delegates the exact managed-runtime cache cleanup
+// to the configured host updater. Lifecycle startup recovery uses this
+// boundary instead of discovering npm paths itself.
+func (c *Controller) InvalidateExecutionCache(ctx context.Context, packageName string) error {
+	if c.runtimeUpdater == nil {
+		return ErrRuntimeUpdaterUnavailable
+	}
+	return c.runtimeUpdater.InvalidateExecutionCache(ctx, packageName)
+}
+
+// InvalidateExecutionCacheVersion delegates version-specific cleanup when the
+// host updater supports the exact-tree contract.
+func (c *Controller) InvalidateExecutionCacheVersion(ctx context.Context, packageName, version string) error {
+	if c.runtimeUpdater == nil {
+		return ErrRuntimeUpdaterUnavailable
+	}
+	invalidator, ok := c.runtimeUpdater.(ExactRuntimeCacheInvalidator)
+	if !ok {
+		return ErrRuntimeUpdateUnsupported
+	}
+	return invalidator.InvalidateExecutionCacheVersion(ctx, packageName, version)
+}
+
 type hostRuntimeUpdater struct {
 	host     *hostutility.Manager
 	executor directCommandExecutor
@@ -290,33 +311,7 @@ func (u *hostRuntimeUpdater) npxCacheRoot(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve npm cache root: %w", err)
 	}
-	cacheRoot := strings.TrimSpace(output)
-	if !filepath.IsAbs(cacheRoot) {
-		return "", fmt.Errorf("npm cache root is not absolute: %q", cacheRoot)
-	}
-	cacheRoot = filepath.Clean(cacheRoot)
-	if cacheRoot == string(filepath.Separator) {
-		return "", errors.New("refusing to invalidate execution cache under filesystem root")
-	}
-	npxRoot := filepath.Join(cacheRoot, "_npx")
-	if info, statErr := os.Lstat(npxRoot); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("refusing to invalidate execution cache through symlink: %s", npxRoot)
-	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return "", fmt.Errorf("inspect npm execution cache: %w", statErr)
-	}
-	return npxRoot, nil
-}
-
-func removeNpmExecutionCacheKey(npxRoot, key string) error {
-	target := filepath.Join(npxRoot, key)
-	rel, err := filepath.Rel(npxRoot, target)
-	if err != nil || rel != key {
-		return fmt.Errorf("invalid npm execution cache target: %s", target)
-	}
-	if err := os.RemoveAll(target); err != nil {
-		return fmt.Errorf("remove npm execution cache %s: %w", target, err)
-	}
-	return nil
+	return strings.TrimSpace(output), nil
 }
 
 func (u *hostRuntimeUpdater) InvalidateExecutionCache(ctx context.Context, packageName string) error {
@@ -324,12 +319,11 @@ func (u *hostRuntimeUpdater) InvalidateExecutionCache(ctx context.Context, packa
 	if packageName == "" {
 		return errors.New("managed runtime package is empty")
 	}
-	npxRoot, err := u.npxCacheRoot(ctx)
+	cacheRoot, err := u.npxCacheRoot(ctx)
 	if err != nil {
 		return err
 	}
-	key := (agents.ManagedNPMRuntimeSpec{Package: packageName}).ExecutionCacheKey()
-	return removeNpmExecutionCacheKey(npxRoot, key)
+	return managedruntime.RemoveNpxExecutionTree(cacheRoot, packageName)
 }
 
 func (u *hostRuntimeUpdater) InvalidateExecutionCacheVersion(
@@ -345,12 +339,12 @@ func (u *hostRuntimeUpdater) InvalidateExecutionCacheVersion(
 	if _, err := managedruntime.ParseStableVersion(version); err != nil {
 		return err
 	}
-	npxRoot, err := u.npxCacheRoot(ctx)
+	cacheRoot, err := u.npxCacheRoot(ctx)
 	if err != nil {
 		return err
 	}
 	spec := agents.ManagedNPMRuntimeSpec{Package: packageName}
-	return removeNpmExecutionCacheKey(npxRoot, spec.ExecutionCacheKey(version))
+	return managedruntime.RemoveNpxExecutionTree(cacheRoot, spec.PackageSpec(version))
 }
 
 func (u *hostRuntimeUpdater) Refresh(

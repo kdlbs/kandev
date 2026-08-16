@@ -202,6 +202,9 @@ type CommandOptions struct {
 	// ManagedRuntimeVersion is an internal exact version override for trusted
 	// managed npm ACP runtimes. Empty preserves the legacy unversioned command.
 	ManagedRuntimeVersion string
+	// ManagedRuntimePreferOnline refreshes npm package metadata for one
+	// recovery launch. It does not alter the trusted package or ACP arguments.
+	ManagedRuntimePreferOnline bool
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.

@@ -56,6 +56,28 @@ configuration options, commands, and runtime version without a page reload.
 - If preparation, ACP validation, authentication, or persistence fails, Kandev keeps the previous active version and capability catalogue. Select another stable version or retry the same target.
 - Kandev may prepare the exact version again if npm removes its cache entry. Kandev does not own an offline package inventory, and global npm cache cleanup is not required.
 
+#### Recover a stale npm runtime lookup
+
+Host-local managed runtimes normally start with npm's offline-preferred lookup.
+If npm has stale package metadata and cannot resolve the selected
+`package@version`, the first ACP startup can fail even though the configured
+registry contains that exact version. Kandev recognizes this specific npm
+resolution error, removes only the deterministic `_npx` execution tree for the
+selected package and version, then retries the same command once with an
+online-preferred metadata lookup.
+
+The retry keeps the selected package, exact version, command prefix, model,
+permissions, and session identity. It does not change the npm registry or
+silently select another version. When the retry succeeds, no recovery card is
+shown. When it fails again, Kanban and Office show one **Retry runtime** action
+with collapsed technical details.
+
+Do not use `npm cache clean --force` as the normal recovery step. It removes
+unrelated npm data and does not target the stale execution tree. If the
+specialized retry cannot resolve the runtime, check that the Kandev service
+uses the expected npm installation and configured registry, then use the
+runtime update controls to select and prepare another trusted stable version.
+
 <details>
 <summary>Add a custom terminal agent</summary>
 
@@ -237,6 +259,7 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Login required:** use the agent card's login terminal or sign in under Kandev's operating-system user; signing in as another user does not help the service.
 - **Model, mode, or command probe fails:** authenticate first, refresh discovery, and choose a value advertised by the installed version.
 - **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes.
+- **Managed npm runtime cannot resolve its selected version:** Kandev checks the configured registry and retries the same version once after refreshing its exact `_npx` execution tree. If the retry fails, verify the service user's npm configuration and registry, then use **Settings > Agents** to prepare another trusted stable version. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP server is absent:** confirm agent MCP support, valid JSON, transport mode, executor policy, and the session warning logs.
 - **MCP tools are missing from one agent session:** open the neutral plug button in that session's chat toolbar. **Delivered** means Kandev included the server in the agent launch but cannot yet observe a connection; **Connected** means the built-in server saw MCP initialize; **Active** means it served `tools/list`. A gray filtered/unavailable row explains an intentional omission, while red is reserved for an explicit sanitized error. Third-party profile servers normally remain Delivered because they connect directly to the agent and Kandev cannot inspect them. The report is scoped to that session and its current execution, so compare the affected agent's own toolbar rather than another agent on the task.
