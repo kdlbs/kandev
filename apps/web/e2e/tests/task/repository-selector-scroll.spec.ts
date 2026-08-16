@@ -131,7 +131,10 @@ test.describe("create task selector scroll", () => {
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
     await testPage.getByTestId("repo-chip-trigger").first().click();
-    await testPage.getByRole("option", { name: /E2E Repo/ }).click();
+    // Other tests may leave repositories whose names start with "E2E Repo".
+    // The seeded repository's accessible name continues with its path, so
+    // anchor the match at the repository name and path separator.
+    await testPage.getByRole("option", { name: /^E2E Repo \// }).click();
 
     const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
     await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
