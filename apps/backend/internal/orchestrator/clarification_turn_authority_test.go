@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -54,13 +55,9 @@ func TestClarificationWatchdogDoesNotDispatchAfterTurnIsSuperseded(t *testing.T)
 		PendingID: "pending-watchdog-authority", ClarificationTurnID: "turn-clarification",
 		AnswerText: "Continue",
 	})
-	deadline := time.Now().Add(time.Second)
-	for countClarificationWatchdogs(svc) != 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if got := countClarificationWatchdogs(svc); got != 0 {
-		t.Fatalf("stale watchdog entries = %d, want 0", got)
-	}
+	require.Eventually(t, func() bool {
+		return countClarificationWatchdogs(svc) == 0
+	}, time.Second, time.Millisecond, "watchdog goroutine should exit after turn is superseded")
 
 	agentMgr.mu.Lock()
 	defer agentMgr.mu.Unlock()

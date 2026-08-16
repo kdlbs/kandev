@@ -187,6 +187,10 @@ func (s *Service) ResumeDetachedClarification(
 }
 
 func (s *Service) resumeDetachedClarification(ctx context.Context, data clarificationAnsweredData) error {
+	// Legacy bus events do not carry a claimed turn ID. Their active-bundle
+	// producer is gated by FindActiveClarificationMessagesBySessionID and its
+	// turnAuthorityPredicate, so this path intentionally leaves
+	// expectedCurrentTurnID unset. Keep that SQL authority boundary intact.
 	return s.resumeDetachedClarificationWithPrompt(ctx, data, false, promptTaskOptions{})
 }
 

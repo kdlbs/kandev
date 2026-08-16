@@ -390,6 +390,9 @@ All locally available task gates passed; environment-gated parity also passed in
   keeps aborted sessionless mobile selection inert, guarantees blocked test cleanup, and covers deleted
   message pending-action projections. All affected backend packages, 81 focused web tests, typecheck,
   zero-warning frontend lint, and changed-code Go lint pass.
+- Exact-head Claude review replaces a watchdog test's hot polling loop with a bounded eventual assertion
+  and documents why the legacy event path intentionally relies on the repository's current-turn SQL
+  authority guard. Both focused orchestrator regressions pass.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---
