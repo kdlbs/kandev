@@ -350,7 +350,7 @@ func LoadEffectiveSessionRuntimeConfig(session *TaskSession) (SessionRuntimeConf
 	if overrides, ok := LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
 		mergeSessionRuntimeConfig(&effective, overrides)
 	}
-	effective.ConfigOptions = cleanRuntimeConfigOptions(effective.ConfigOptions)
+	effective.ConfigOptions = cleanRuntimeConfigOptions(effective.ConfigOptions, session)
 	return effective, !effective.IsZero()
 }
 
@@ -387,17 +387,33 @@ func mergeSessionRuntimeConfig(target *SessionRuntimeConfig, source SessionRunti
 	}
 }
 
-func cleanRuntimeConfigOptions(options map[string]string) map[string]string {
+func cleanRuntimeConfigOptions(options map[string]string, session *TaskSession) map[string]string {
 	if len(options) == 0 {
 		return nil
 	}
 	cleaned := maps.Clone(options)
+	// Model and mode are carried as top-level fields. Other keys are provider-defined.
 	delete(cleaned, "model")
 	delete(cleaned, "mode")
+	if isLegacyAgentIdentity(session, cleaned["agent"]) {
+		delete(cleaned, "agent")
+	}
 	if len(cleaned) == 0 {
 		return nil
 	}
 	return cleaned
+}
+
+func isLegacyAgentIdentity(session *TaskSession, value string) bool {
+	if session == nil || value == "" || session.AgentProfileSnapshot == nil {
+		return false
+	}
+	for _, key := range []string{"agent_id", "agent_name"} {
+		if StringFromAny(session.AgentProfileSnapshot[key]) == value {
+			return true
+		}
+	}
+	return false
 }
 
 // SessionOriginalEffectiveConfiguration is the immutable configuration a task
@@ -498,6 +514,8 @@ type LastAgentError struct {
 	OccurredAt       time.Time  `json:"occurred_at"`
 	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
 	RemediationURL   string     `json:"remediation_url,omitempty"`
+	Code             string     `json:"code,omitempty"`
+	Details          string     `json:"details,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 

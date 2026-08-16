@@ -61,6 +61,7 @@ export function reviewWatchPlaceholders(t: TFunction): ScriptPlaceholder[] {
  * Deliberately NOT translated: it is agent instructions and stored data, so
  * translating it would write locale-dependent text into a user's saved watch.
  */
+// i18n-exempt: default watch prompt, persisted and sent verbatim to the agent.
 export const DEFAULT_REVIEW_WATCH_PROMPT = `Review Pull Request #{{pr.number}}: {{pr.title}}
 Repository: {{pr.repo}}
 PR: {{pr.link}}

@@ -85,18 +85,19 @@ test.describe("GitHub workspace settings on mobile", () => {
     expect(drawerBox).not.toBeNull();
     await expect
       .poll(
-        async () => {
-          const [currentScrollBox, currentFadeBox] = await Promise.all([
-            scrollBody.boundingBox(),
-            scrollFade.boundingBox(),
-          ]);
-          if (!currentScrollBox || !currentFadeBox) return Number.POSITIVE_INFINITY;
-          return Math.abs(
-            currentFadeBox.y +
-              currentFadeBox.height -
-              (currentScrollBox.y + currentScrollBox.height),
-          );
-        },
+        () =>
+          testPage.evaluate(() => {
+            const scrollElement = document.querySelector<HTMLElement>(
+              '[data-testid="github-connection-scroll"]',
+            );
+            const fadeElement = document.querySelector<HTMLElement>(
+              '[data-testid="github-connection-scroll-fade"]',
+            );
+            if (!scrollElement || !fadeElement) return Number.POSITIVE_INFINITY;
+            const scrollBox = scrollElement.getBoundingClientRect();
+            const fadeBox = fadeElement.getBoundingClientRect();
+            return Math.abs(fadeBox.bottom - scrollBox.bottom);
+          }),
         { timeout: 10_000 },
       )
       .toBeLessThanOrEqual(2);
@@ -110,9 +111,6 @@ test.describe("GitHub workspace settings on mobile", () => {
     expect(fadeBox).not.toBeNull();
     expect(footerBox).not.toBeNull();
     expect(initialSaveBox).not.toBeNull();
-    expect(
-      Math.abs(fadeBox!.y + fadeBox!.height - (scrollBox!.y + scrollBox!.height)),
-    ).toBeLessThanOrEqual(2);
     expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(drawerBox!.y + drawerBox!.height);
     const methodGroup = drawer.getByRole("radiogroup", { name: "Connection method" });
     await expect(methodGroup.getByRole("radio").first()).toHaveAttribute("id", "github-method-cli");

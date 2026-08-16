@@ -234,5 +234,9 @@
   "duplicateProfileNamed": "Duplicate {{name}}",
   "duplicateProfileSuccess": "Profile duplicated",
   "duplicateSaveBlocked": "Settings are still saving. Try again in a moment.",
-  "failedToDuplicateProfile": "Failed to duplicate profile"
+  "failedToDuplicateProfile": "Failed to duplicate profile",
+  "saveProfile": "Save profile",
+  "createProfile": "Create profile",
+  "savingProfile": "Saving...",
+  "creatingProfile": "Creating..."
 }

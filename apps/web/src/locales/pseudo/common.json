@@ -475,5 +475,12 @@
   "demoShowingMessages_one": "Śĥōŵĩńĝ {{count}} ōƒ {{total}} ḿēśśàĝē",
   "demoShowingMessages_other": "Śĥōŵĩńĝ {{count}} ōƒ {{total}} ḿēśśàĝēś",
   "demoTestFixtures": "Ţēśţ Ƒĩxţũŕēś",
-  "demoToolType": "Ţōōĺ ţŷƥē:"
+  "demoToolType": "Ţōōĺ ţŷƥē:",
+  "weekdaySunday": "Śũńďàŷ",
+  "weekdayMonday": "Ḿōńďàŷ",
+  "weekdayTuesday": "Ţũēśďàŷ",
+  "weekdayWednesday": "Ŵēďńēśďàŷ",
+  "weekdayThursday": "Ţĥũŕśďàŷ",
+  "weekdayFriday": "Ƒŕĩďàŷ",
+  "weekdaySaturday": "Śàţũŕďàŷ"
 }

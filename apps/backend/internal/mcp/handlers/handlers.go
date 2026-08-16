@@ -1630,16 +1630,26 @@ func metadataString(metadata map[string]interface{}, key string) string {
 func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	// Use local struct with JSON tags since dto.UpdateTaskRequest lacks them
 	var req struct {
-		TaskID      string  `json:"task_id"`
-		Title       *string `json:"title"`
-		Description *string `json:"description"`
-		State       *string `json:"state"`
+		TaskID               string  `json:"task_id"`
+		Title                *string `json:"title"`
+		Description          *string `json:"description"`
+		State                *string `json:"state"`
+		DeferredLaunchPrompt *string `json:"deferred_launch_prompt"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+
+	// Applied before the ordinary field update so a rejected prompt edit does
+	// not half-apply the call: a caller correcting a stale brief needs to know
+	// the prompt did not change, and a partially applied update hides that.
+	if req.DeferredLaunchPrompt != nil {
+		if errResp := h.applyDeferredLaunchPromptUpdate(ctx, msg, req.TaskID, *req.DeferredLaunchPrompt); errResp != nil {
+			return errResp, nil
+		}
 	}
 
 	var state *v1.TaskState
@@ -2284,7 +2294,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		})
 	}
 
-	session, errResp := h.resolveMessageTargetSession(ctx, msg, req.TaskID, req.SessionID)
+	session, pinnedTarget, errResp := h.resolveMessageTargetSession(ctx, msg, req.TaskID, req.SessionID)
 	if errResp != nil {
 		return errResp, nil
 	}
@@ -2338,7 +2348,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			SessionID: req.SenderSessionID,
 		})
 	}
-	result, err := h.dispatchTaskMessage(dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, req.SessionID != "")
+	// pinnedTarget, not `req.SessionID != ""`: a fallback chosen because the
+	// primary is terminal is pinned too, or the idle dispatch path re-resolves
+	// it straight back to that terminal primary.
+	result, err := h.dispatchTaskMessage(dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, pinnedTarget)
 	if err != nil {
 		if parentReply != nil {
 			if restoreErr := h.restoreParentQuestionPending(ctx, parentReply.message); restoreErr != nil {
@@ -2374,44 +2387,6 @@ func (h *Handlers) lookupSenderSessionName(ctx context.Context, senderTaskID, se
 		return ""
 	}
 	return session.Name
-}
-
-// resolveMessageTargetSession picks the session a message_task call targets:
-// the explicit session_id (validated to belong to taskID) or the task's
-// primary session. Returns a ready-to-send WS error message on failure.
-func (h *Handlers) resolveMessageTargetSession(ctx context.Context, msg *ws.Message, taskID, sessionID string) (*models.TaskSession, *ws.Message) {
-	if sessionID != "" {
-		return h.resolveExplicitTargetSession(ctx, msg, taskID, sessionID)
-	}
-	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
-	if err != nil {
-		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
-			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target task exists but has no active session")
-		}
-		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to get session for task: "+err.Error())
-	}
-	return session, nil
-}
-
-// resolveExplicitTargetSession loads and validates a caller-named target
-// session for message_task. Only genuine no-row lookups are NotFound;
-// transient DB errors surface as internal so callers keep retrying instead of
-// treating a live session as gone.
-func (h *Handlers) resolveExplicitTargetSession(ctx context.Context, msg *ws.Message, taskID, sessionID string) (*models.TaskSession, *ws.Message) {
-	session, err := h.taskSvc.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		if errors.Is(err, models.ErrTaskSessionNotFound) {
-			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target session not found: "+sessionID)
-		}
-		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to look up target session: "+err.Error())
-	}
-	if session == nil {
-		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target session not found: "+sessionID)
-	}
-	if session.TaskID != taskID {
-		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id does not belong to task_id")
-	}
-	return session, nil
 }
 
 // appendPromptReferenceExpansionContext expands "@name" saved-prompt
@@ -2869,7 +2844,7 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 
 	switch session.State {
 	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
-		return taskMessageDispatchResult{}, fmt.Errorf("session is %s — cannot send message", session.State)
+		return taskMessageDispatchResult{}, terminalSessionDispatchError(session)
 
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		if interruptIfBusy {
@@ -2924,7 +2899,7 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
 	switch session.State {
 	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
-		return taskMessageDispatchResult{}, fmt.Errorf("session is %s — cannot send message", session.State)
+		return taskMessageDispatchResult{}, terminalSessionDispatchError(session)
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 	default:

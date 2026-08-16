@@ -7,6 +7,7 @@ import type {
   AgentCapabilitiesPayload,
   SessionInfoPayload,
   SessionModelsPayload,
+  SessionModelSelectionWarningPayload,
   SessionMCPStatusPayload,
   SessionPromptUsagePayload,
   SessionTodosPayload,
@@ -241,6 +242,10 @@ export type SessionBackendMessageMap = {
       fallback_model: string;
       timestamp: string;
     }
+  >;
+  "session.model_selection_warning": BackendMessage<
+    "session.model_selection_warning",
+    SessionModelSelectionWarningPayload
   >;
   "session.mcp_status_updated": BackendMessage<
     "session.mcp_status_updated",

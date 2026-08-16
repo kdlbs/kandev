@@ -30,6 +30,7 @@ async function searchWorkspaceContentWithRetries(
   sessionId: string,
   query: string,
   isCancelled: () => boolean,
+  onResults: (results: WorkspaceContentSearchResult[]) => void,
 ): Promise<WorkspaceContentSearchResult[]> {
   const client = getWebSocketClient();
   if (!client) throw new Error("websocket transport unavailable");
@@ -52,6 +53,7 @@ async function searchWorkspaceContentWithRetries(
       for (const result of response.results ?? []) {
         results.set(contentSearchResultKey(result), result);
       }
+      if (!isCancelled()) onResults([...results.values()]);
     } catch (error) {
       lastError = error;
     }
@@ -107,6 +109,12 @@ export function useWorkspaceContentSearch({
           sessionId,
           normalizedQuery,
           () => cancelled,
+          (partialResults) => {
+            if (!cancelled) {
+              setResults(partialResults);
+              setError(null);
+            }
+          },
         );
         if (!cancelled) {
           setResults(nextResults);

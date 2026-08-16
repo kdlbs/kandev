@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 const (
@@ -30,7 +32,10 @@ var (
 )
 
 // Scope is the host-verified identity a lease may redeem for. Path is the
-// exact HTTPS remote path supplied to a provider resolver.
+// exact HTTPS remote path supplied to a provider resolver: plugin providers
+// compare it verbatim, so it is never rewritten. Redemption matching instead
+// compares githubauth.CanonicalCredentialPath of both sides, so a ".git"
+// suffix does not decide whether a lease matches.
 type Scope struct {
 	ProviderID         string
 	WorkspaceID        string
@@ -406,7 +411,7 @@ func matchesRedemption(scope Scope, request Redemption) bool {
 		scope.SessionID == strings.TrimSpace(request.SessionID) &&
 		scope.RepositoryID == strings.TrimSpace(request.RepositoryID) &&
 		strings.EqualFold(scope.Host, strings.TrimSpace(request.Host)) &&
-		scope.Path == path &&
+		githubauth.CanonicalCredentialPath(scope.Path) == githubauth.CanonicalCredentialPath(path) &&
 		scope.IdentityProviderID == strings.TrimSpace(request.IdentityProviderID) &&
 		scope.ParentProviderID == strings.TrimSpace(request.ParentProviderID)
 }

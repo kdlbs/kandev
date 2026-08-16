@@ -50,6 +50,24 @@ export type SessionModelsPayload = {
   timestamp: string;
 };
 
+export type SessionModelSelectionWarningPayload = {
+  task_id: string;
+  session_id: string;
+  agent_id: string;
+  warning: {
+    kind: string;
+    decision_id: string;
+    reason: string;
+    requested_model?: string;
+    effective_model?: string;
+    fallback_model?: string;
+    agent_id: string;
+    executor_type: string;
+    executor_profile_id: string;
+  };
+  timestamp: string;
+};
+
 export type MCPAttachmentServerPayload = {
   name: string;
   source?: "kandev" | "profile";

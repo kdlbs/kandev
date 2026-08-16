@@ -77,7 +77,10 @@ describe("resolveDestinations", () => {
     const href = home?.href;
 
     expect(typeof href).toBe("function");
-    expect(typeof href === "function" ? href(OFFICE) : null).toBe("/office");
+    // Carries the workspace id so this is byte-identical to `workspaceHomeHref`,
+    // which the sidebar's brand link uses. Both render in the same header, and
+    // two "home" affordances pointing at different URLs was the original defect.
+    expect(typeof href === "function" ? href(OFFICE) : null).toBe("/office?workspaceId=ws-office");
     expect(typeof href === "function" ? href(KANBAN) : null).toBe(
       "/?home=overview&workspaceId=ws-1",
     );

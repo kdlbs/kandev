@@ -24,6 +24,7 @@ import {
   setPendingCursorPosition,
   useOpenFileAtLine,
 } from "./use-file-editors";
+import { EDITOR_CONTENT_SEARCH_FLASH_DURATION_MS } from "./file-editor-cursor";
 
 function createEditor(modelPath: string | null, modelUri?: string) {
   return {
@@ -37,20 +38,22 @@ function createEditor(modelPath: string | null, modelUri?: string) {
           }
         : null,
     ),
+    layout: vi.fn(),
     setPosition: vi.fn(),
     revealLineInCenter: vi.fn(),
     focus: vi.fn(),
   };
 }
 
-describe("scrollEditorIfMounted", () => {
-  afterEach(() => {
-    getMonacoInstance.mockReset();
-    consumePendingCursorPosition(APP_PATH);
-    consumePendingCursorPosition(APP_PATH, REPO);
-    consumePendingCursorPosition(MISSING_PATH);
-  });
+afterEach(() => {
+  getMonacoInstance.mockReset();
+  consumePendingCursorPosition(APP_PATH);
+  consumePendingCursorPosition(APP_PATH, REPO);
+  consumePendingCursorPosition(MISSING_PATH);
+  vi.useRealTimers();
+});
 
+describe("scrollEditorIfMounted", () => {
   it("scrolls the mounted Monaco editor that matches the worktree path", () => {
     const editor = createEditor(WORKTREE_APP_PATH);
     getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });
@@ -60,10 +63,65 @@ describe("scrollEditorIfMounted", () => {
 
     expect(editor.setPosition).toHaveBeenCalledWith({ lineNumber: 42, column: 3 });
     expect(editor.revealLineInCenter).toHaveBeenCalledWith(42);
+    expect(editor.layout).not.toHaveBeenCalled();
     expect(editor.focus).toHaveBeenCalledTimes(1);
     expect(consumePendingCursorPosition(APP_PATH)).toBeUndefined();
   });
+});
 
+describe("scrollEditorIfMounted flashes", () => {
+  it("adds a one-shot whole-line decoration for a flashed reveal", () => {
+    const editor = {
+      ...createEditor(WORKTREE_APP_PATH),
+      createDecorationsCollection: vi.fn(() => ({ set: vi.fn() })),
+    };
+    getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });
+    setPendingCursorPosition(APP_PATH, 42, 3);
+
+    expect(
+      scrollEditorIfMounted(APP_PATH, WORKTREE_PATH, 42, 3, {
+        flashLine: true,
+      }),
+    ).toBe(true);
+
+    expect(editor.createDecorationsCollection).toHaveBeenCalledWith([
+      expect.objectContaining({
+        range: expect.objectContaining({ startLineNumber: 42, endLineNumber: 42 }),
+        options: expect.objectContaining({
+          isWholeLine: true,
+          className: "editor-content-search-flash",
+        }),
+      }),
+    ]);
+  });
+
+  it("keeps a restarted Monaco flash until the latest request expires", () => {
+    vi.useFakeTimers();
+    const collections = [vi.fn(), vi.fn()];
+    const editor = {
+      ...createEditor(WORKTREE_APP_PATH),
+      createDecorationsCollection: vi
+        .fn()
+        .mockImplementationOnce(() => ({ set: collections[0] }))
+        .mockImplementationOnce(() => ({ set: collections[1] })),
+    };
+    getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });
+
+    scrollEditorIfMounted(APP_PATH, WORKTREE_PATH, 42, 3, { flashLine: true });
+    vi.advanceTimersByTime(EDITOR_CONTENT_SEARCH_FLASH_DURATION_MS / 2);
+    scrollEditorIfMounted(APP_PATH, WORKTREE_PATH, 43, 1, { flashLine: true });
+    vi.advanceTimersByTime(EDITOR_CONTENT_SEARCH_FLASH_DURATION_MS / 2);
+
+    expect(editor.createDecorationsCollection).toHaveBeenCalledTimes(2);
+    expect(collections[0]).toHaveBeenLastCalledWith([]);
+    expect(collections[1]).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(EDITOR_CONTENT_SEARCH_FLASH_DURATION_MS / 2);
+    expect(collections[1]).toHaveBeenLastCalledWith([]);
+  });
+});
+
+describe("scrollEditorIfMounted matching", () => {
   it("falls back to a path-segment suffix match when the worktree path is unknown", () => {
     const editor = createEditor(WORKTREE_APP_PATH);
     getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });

@@ -5,6 +5,7 @@ import {
   openSeededQuickChatReply,
   SELECTED_REPLY_TEXT,
   selectAgentReplyText,
+  waitForAgentSessionInput,
 } from "./agent-message-comments-helpers";
 
 async function expectTouchTarget(locator: Locator) {
@@ -46,9 +47,9 @@ test.describe("Agent message comments on mobile", () => {
       "Mobile Agent Message Comments",
     );
 
-    // Commenting only needs the seeded agent message. Do not wait for the
-    // composer to become editable because the mock reply may be visible while
-    // the session is still reporting a running status on mobile.
+    // Run sends directly only when the session is ready for input. The seeded
+    // reply can be visible before the backend reports that state on mobile.
+    await waitForAgentSessionInput(apiClient, task.id, task.session_id!);
     await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
     const commentTrigger = testPage.getByTestId("agent-message-comment-trigger");
     await expect(commentTrigger).toBeVisible();

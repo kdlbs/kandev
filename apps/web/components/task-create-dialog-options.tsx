@@ -142,45 +142,21 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
       const profileLabel = parts[1] ?? "";
       const isPassthrough = profile.cli_passthrough === true;
       const warning = getCapabilityWarning(profile.capability_status, profile.capability_error);
-      // No-silent-model-fallback: a profile whose start model is no longer
-      // advertised ("gone") is blocked from selection unless it opted into
-      // an explicit fallback model (shown as a warning) or the legacy
-      // auto-fallback toggle.
-      //
-      // The advertised list is the host-utility probe cache. While it has
-      // not loaded yet (empty list) gone-ness is unknown and deliberately
-      // NOT assumed: nothing is blocked and no warning is shown. The backend
-      // rejects the launch if the model is genuinely unavailable, so this
-      // startup window is cosmetic. A fallback model that is itself gone
-      // does not make the profile selectable — it would promise a switch
-      // SetModel cannot apply, so the profile is blocked like strict mode.
+      // The host-utility probe is an editing hint only. The selected
+      // executor owns the launch-time model catalog, so a host-only mismatch
+      // must never remove a profile from the task selector.
       const advertised = advertisedModelIDs(availableAgents, profile.agent_name);
       const startModelGone = Boolean(
         profile.model && advertised.length > 0 && !advertised.includes(profile.model),
       );
-      const fallbackGone = Boolean(
-        profile.fallback_model &&
-        advertised.length > 0 &&
-        !advertised.includes(profile.fallback_model),
-      );
-      const autoFallbackOn = profile.auto_fallback === true;
-      const fallbackUsable = Boolean(profile.fallback_model) && !fallbackGone;
-      const blocked = startModelGone && !autoFallbackOn && !fallbackUsable;
-      const fallbackWarning = startModelGone && !autoFallbackOn && fallbackUsable;
-      const disabledReason = blocked
-        ? t("settings:profileStartModelUnavailable", { model: profile.model })
-        : undefined;
-      const fallbackNote = fallbackWarning
-        ? t("settings:profileFallbackWillBeUsed", {
-            model: profile.model,
-            fallback: profile.fallback_model,
-          })
+      const modelProbeNote = startModelGone
+        ? t("settings:profileStartModelNotAdvertisedOnHost", { model: profile.model })
         : undefined;
       return {
         value: profile.id,
         label: profile.label,
-        disabled: blocked || undefined,
-        disabledReason,
+        disabled: undefined,
+        disabledReason: undefined,
         renderLabel: () => (
           <span className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="flex shrink-0 items-center justify-between gap-2">
@@ -190,10 +166,10 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
                 {warning && (
                   <warning.Icon className={`size-3.5 ${warning.color}`} title={warning.title} />
                 )}
-                {fallbackNote && (
+                {modelProbeNote && (
                   <IconAlertTriangle
                     className="size-3.5 shrink-0 text-amber-500"
-                    title={fallbackNote}
+                    title={modelProbeNote}
                   />
                 )}
               </span>
@@ -211,10 +187,10 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
                 ) : null}
               </span>
             </span>
-            {fallbackNote && (
+            {modelProbeNote && (
               <span className="flex items-center gap-1.5 pl-1 text-xs text-amber-600">
                 <IconAlertTriangle className="size-3 shrink-0" aria-hidden />
-                {fallbackNote}
+                {modelProbeNote}
               </span>
             )}
           </span>

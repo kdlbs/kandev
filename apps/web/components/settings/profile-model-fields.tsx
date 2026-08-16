@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { ModeCombobox } from "@/components/settings/mode-combobox";
 import {
@@ -24,6 +23,10 @@ import {
 import type { ModelConfig, ModeEntry, ModelEntry } from "@/lib/types/http";
 import type { PermissionKey } from "@/lib/agent-permissions";
 import type { CLIFlag } from "@/lib/types/http";
+import {
+  SettingsFieldDescription,
+  SettingsFieldLabel,
+} from "@/components/settings/settings-typography";
 
 export type ProfileFormData = {
   name: string;
@@ -192,7 +195,9 @@ function FallbackModelPicker({
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-1">
-          <Label className={labelCls}>{t("settings:agentFallback")}</Label>
+          <SettingsFieldLabel className={labelCls}>
+            {t("settings:agentFallback")}
+          </SettingsFieldLabel>
           <FallbackOptionHelp kind="explicit" />
         </div>
         <Switch
@@ -229,9 +234,9 @@ function FallbackModelPicker({
           />
         </div>
       )}
-      <p className="text-xs text-muted-foreground">
+      <SettingsFieldDescription>
         {disabled ? t("settings:agentFallbackDisabledHelper") : t("settings:agentFallbackHelper")}
-      </p>
+      </SettingsFieldDescription>
     </div>
   );
 }
@@ -279,7 +284,9 @@ export function ModelFallbackSection({
         >
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-1">
-              <Label className={labelCls}>{t("settings:autoFallback")}</Label>
+              <SettingsFieldLabel className={labelCls}>
+                {t("settings:autoFallback")}
+              </SettingsFieldLabel>
               <FallbackOptionHelp kind="automatic" />
             </div>
             <Switch
@@ -288,7 +295,7 @@ export function ModelFallbackSection({
               aria-label={t("settings:autoFallback")}
             />
           </div>
-          <p className="text-xs text-muted-foreground">{t("settings:autoFallbackHelper")}</p>
+          <SettingsFieldDescription>{t("settings:autoFallbackHelper")}</SettingsFieldDescription>
         </div>
       }
       explicitOption={

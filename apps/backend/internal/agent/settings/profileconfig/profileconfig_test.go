@@ -26,6 +26,11 @@ func TestSanitizeConfigOptions(t *testing.T) {
 			want: map[string]string{"effort": "low"},
 		},
 		{
+			name: "provider agent key preserved",
+			in:   map[string]string{"agent": "build", "effort": "high"},
+			want: map[string]string{"agent": "build", "effort": "high"},
+		},
+		{
 			name: "blank value dropped",
 			in:   map[string]string{"effort": "", "level": "high"},
 			want: map[string]string{"level": "high"},

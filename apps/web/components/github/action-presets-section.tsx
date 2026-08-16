@@ -52,6 +52,7 @@ function actionPromptPlaceholders(t: TFunction): ScriptPlaceholder[] {
 // preset seeded in one locale and saved unedited would keep that locale's text
 // forever. Same contract as DEFAULT_PR_PRESETS in my-github/action-presets.ts.
 function newPreset(): GitHubActionPreset {
+  // i18n-exempt: persisted, editable preset label. See the comment above.
   return {
     id: `preset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     label: "New action",

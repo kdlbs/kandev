@@ -58,6 +58,7 @@ function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string):
 }
 
 type SidePanelOpts = { groupId?: string; quiet?: boolean; inCenter?: boolean };
+export type ReviewPanelOptions = { groupId?: string };
 
 /**
  * Shared placement logic for a single-instance "side" panel (Plan, a plugin
@@ -531,11 +532,11 @@ export function removeSessionPanel(api: DockviewApi, sessionId: string): void {
 function buildReviewPanelActions(get: StoreGet) {
   return {
     /**
-     * Focus an existing PR tab in place, or add a keyed tab beside the
-     * layout-owned canonical PR Details panel. Fall back to the center group
-     * when the current layout intentionally omits PR Details.
+     * Focus an existing PR tab in place, or add a keyed tab in the explicitly
+     * requested group. Callers without a group use the layout-owned canonical
+     * PR Details panel, then the center fallback.
      */
-    addPRPanel: (prKey?: string) => {
+    addPRPanel: (prKey?: string, opts?: ReviewPanelOptions) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       // Multi-repo: each TaskPR opens in its own panel keyed by
@@ -550,7 +551,7 @@ function buildReviewPanelActions(get: StoreGet) {
         return;
       }
       if (prKey && focusMatchingLegacyPanel(api, id, "pr-detail", "prKey", prKey)) return;
-      const targetGroupId = api.getPanel("pr-detail")?.group.id ?? centerGroupId;
+      const targetGroupId = opts?.groupId ?? api.getPanel("pr-detail")?.group.id ?? centerGroupId;
       focusOrAddPanel(api, {
         id,
         component: "pr-detail",
@@ -559,7 +560,7 @@ function buildReviewPanelActions(get: StoreGet) {
         params: prKey ? { prKey } : undefined,
       });
     },
-    addMRPanel: (mrKey: string) => {
+    addMRPanel: (mrKey: string, opts?: ReviewPanelOptions) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       const id = `mr-detail|${mrKey}`;
@@ -578,11 +579,11 @@ function buildReviewPanelActions(get: StoreGet) {
         id,
         component: "mr-detail",
         title: panelTitle("mr-detail"),
-        position: { referenceGroup: canonical?.group.id ?? centerGroupId },
+        position: { referenceGroup: opts?.groupId ?? canonical?.group.id ?? centerGroupId },
         params: { mrKey },
       });
     },
-    addReviewPanel: (review: ReviewPanelTarget) => {
+    addReviewPanel: (review: ReviewPanelTarget, opts?: ReviewPanelOptions) => {
       const { api, centerGroupId } = get();
       if (!api) return;
       const canonical = api.getPanel("pr-detail");
@@ -605,7 +606,7 @@ function buildReviewPanelActions(get: StoreGet) {
         id,
         component: "review-detail",
         title: review.title,
-        position: { referenceGroup: canonical?.group.id ?? centerGroupId },
+        position: { referenceGroup: opts?.groupId ?? canonical?.group.id ?? centerGroupId },
         params: {
           providerId: review.providerId,
           reviewKey: review.reviewKey,

@@ -84,6 +84,7 @@ async function seedLocalSession(
   // See seedRemoteSession: waitForChatIdle handles the WS-subscribe race that
   // makes a raw idleInput wait flake when the auto-started agent finishes early.
   await session.waitForChatIdle({ timeout: 30_000 });
+  await waitForSessionAgentctlReady(testPage, task.session_id);
 
   return { session, sessionId: task.session_id };
 }

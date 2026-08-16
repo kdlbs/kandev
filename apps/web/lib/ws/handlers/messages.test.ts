@@ -12,7 +12,12 @@ function pendingRevision(sequence: number) {
   return { epoch: PROJECTION_EPOCH, sequence };
 }
 
-function makePayload(sessionId: string, messageId: string, content: string) {
+function makePayload(
+  sessionId: string,
+  messageId: string,
+  content: string,
+  overrides: Record<string, unknown> = {},
+) {
   return {
     task_id: "task-1",
     session_id: sessionId,
@@ -24,6 +29,7 @@ function makePayload(sessionId: string, messageId: string, content: string) {
     type: "message",
     created_at: TEST_TIMESTAMP,
     updated_at: "2026-08-02T00:00:01.000Z",
+    ...overrides,
   };
 }
 
@@ -37,7 +43,7 @@ function makeUpdated(sessionId: string, messageId: string, content: string): Upd
   };
 }
 
-function makeStore(currentMessages: Record<string, unknown[]> = {}) {
+function makeStore(currentMessages: Record<string, unknown[]> = {}, completedTurn = false) {
   const updateMessage = vi.fn();
   const addMessage = vi.fn();
   const removeMessage = vi.fn();
@@ -48,6 +54,13 @@ function makeStore(currentMessages: Record<string, unknown[]> = {}) {
     removeMessage,
     setTaskSessionPendingAction,
     messages: { bySession: currentMessages },
+    turns: {
+      bySession: completedTurn
+        ? {
+            "session-1": [{ id: "turn-1", completed_at: TEST_TIMESTAMP }],
+          }
+        : {},
+    },
   };
   return {
     store: { getState: () => state } as unknown as StoreApi<AppState>,
@@ -300,6 +313,58 @@ describe("session message snapshot ordering", () => {
     frame.runFrame();
 
     expect(updateMessage).not.toHaveBeenCalled();
+    registration.dispose();
+  });
+});
+
+describe("late tool messages", () => {
+  it("settles a tool message added after its turn completed", () => {
+    const { store, addMessage } = makeStore({}, true);
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers["session.message.added"]!({
+      id: "add-tool",
+      type: "notification",
+      action: "session.message.added",
+      payload: makePayload("session-1", "tool-1", "Terminal", {
+        type: "tool_call",
+        metadata: { tool_call_id: "call-1", status: "running" },
+      }),
+      timestamp: TEST_TIMESTAMP,
+    } as never);
+
+    expect(addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { tool_call_id: "call-1", status: "complete" },
+      }),
+    );
+    registration.dispose();
+  });
+
+  it("does not let a late running update reintroduce a spinner", () => {
+    const { store, updateMessage } = makeStore({}, true);
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers["session.message.updated"]!(
+      makeUpdated("session-1", "tool-1", "Terminal") as never,
+    );
+    registration.handlers["session.message.updated"]!({
+      id: "updated-tool",
+      type: "notification",
+      action: "session.message.updated",
+      payload: makePayload("session-1", "tool-1", "Terminal", {
+        type: "tool_call",
+        metadata: { tool_call_id: "call-1", status: "running" },
+      }),
+      timestamp: TEST_TIMESTAMP,
+    } as never);
+    registration.scheduler.flush();
+
+    expect(updateMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: { tool_call_id: "call-1", status: "complete" },
+      }),
+    );
     registration.dispose();
   });
 });

@@ -153,27 +153,31 @@ async function openTaskAndWait(
   return session;
 }
 
-async function selectPRFromAddPanel(
+async function selectOnlyMissingPRFromAddPanel(
   testPage: import("@playwright/test").Page,
   session: SessionPage,
   itemTestId: string,
+  openItemTestId: string,
 ) {
   const item = testPage.getByTestId(itemTestId);
   await expect(async () => {
     if ((await session.prDetailTab().count()) >= 2) return;
 
-    // Radix submenu content can be replaced by a PR refresh between the
+    // Linked-review refreshes can replace Radix menu content between the
     // visibility check and the click. Reopen the short-lived menu for each
-    // bounded attempt and force the click once the exact row is visible.
+    // bounded attempt and force the click once the missing row is visible.
     await testPage.keyboard.press("Escape").catch(() => undefined);
     await session.addPanelButton().click({ force: true });
-    const submenu = testPage.getByTestId("add-panel-pr-submenu");
-    await expect(submenu).toBeVisible({ timeout: 2_000 });
-    await submenu.click({ force: true });
+    await expect(testPage.getByTestId("add-panel-pr-submenu")).toHaveCount(0);
+    await expect(testPage.getByTestId(openItemTestId)).toHaveCount(0);
     await expect(item).toBeVisible({ timeout: 2_000 });
     await item.click({ force: true });
-    await expect(session.prDetailTab()).toHaveCount(2, { timeout: 2_000 });
-  }).toPass({ timeout: 15_000, intervals: [100, 250, 500] });
+    // Dockview adds the keyed panel asynchronously after the menu closes. On
+    // a loaded CI shard that can take longer than the menu interaction itself.
+    // Keep the bounded menu retry, but give the panel its full readiness window
+    // before retrying the click.
+    await expect(session.prDetailTab()).toHaveCount(2, { timeout: 10_000 });
+  }).toPass({ timeout: 30_000, intervals: [100, 250, 500] });
 }
 
 test.describe("Multi-PR CI popover", () => {
@@ -371,12 +375,19 @@ test.describe("Multi-PR CI popover", () => {
     // The layout-owned canonical panel follows the primary/first-associated PR (web#42).
     await expect(session.prDetailTab()).toHaveCount(1, { timeout: 15_000 });
 
-    // Regression: with multiple linked PRs the "+" add-panel menu collapses
-    // the PR rows behind a "Pull requests" submenu. Selecting the OTHER PR
-    // from inside it must open a second, distinct tab instead of repurposing
-    // the layout-owned canonical one. (Dedup when re-selecting the same PR is
-    // covered by the runAutoPRPanelEffect / addPRPanel unit tests.)
-    await selectPRFromAddPanel(testPage, session, `add-panel-pr-item-${OWNER}-api-77`);
+    // The canonical web PR is already open, so the picker hides it and renders
+    // the sole missing API PR inline. Selecting that row opens a second tab.
+    await selectOnlyMissingPRFromAddPanel(
+      testPage,
+      session,
+      `add-panel-pr-item-${OWNER}-api-77`,
+      `add-panel-pr-item-${OWNER}-web-42`,
+    );
     await expect(session.prDetailTab()).toHaveCount(2, { timeout: 15_000 });
+
+    // Both linked PRs now have exact panels, leaving no PR entry to add again.
+    await session.addPanelButton().click();
+    await expect(testPage.getByTestId(/^add-panel-pr-item-/)).toHaveCount(0);
+    await expect(testPage.getByTestId("add-panel-pr-submenu")).toHaveCount(0);
   });
 });

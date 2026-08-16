@@ -42,6 +42,7 @@ import {
 } from "./changes-panel-helpers";
 import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
+import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
 import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
 import {
@@ -56,6 +57,7 @@ import { useRemoteContributionResolution } from "./use-remote-contribution-resol
 import { useTranslation } from "react-i18next";
 
 function useChangesPanelStoreData() {
+  const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useEnvironmentSessionId();
   const taskTitle = useAppStore((state) => {
@@ -68,9 +70,12 @@ function useChangesPanelStoreData() {
   const activeSessionMetadata = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.metadata : undefined,
   );
+  // `t` is a dependency even though the helper resolves through the module-level
+  // translator: without it the memo returns the labels built under the previous
+  // locale and the panel never restates them.
   const gitCredentialDisplay = useMemo(
     () => getGitCredentialDisplay(activeSessionMetadata),
-    [activeSessionMetadata],
+    [activeSessionMetadata, t],
   );
   return {
     activeTaskId,
@@ -155,18 +160,19 @@ function usePerRepoCallbacks(
   vcsDialogs: ReturnType<typeof useVcsDialogs>,
   gitHandlers: ReturnType<typeof useChangesGitHandlers>,
 ) {
+  const { t } = useTranslation();
   return useMemo(
     () => ({
       onRepoStageAll: (repo: string) => {
         gitHandlers.handleGitOperation(
           () => git.stage(undefined, repo),
-          repo ? `Stage all (${repo})` : "Stage all",
+          gitOperationLabel(t, "task:stageAll", repo),
         );
       },
       onRepoUnstageAll: (repo: string) => {
         gitHandlers.handleGitOperation(
           () => git.unstage(undefined, repo),
-          repo ? `Unstage all (${repo})` : "Unstage all",
+          gitOperationLabel(t, "task:unstageAll", repo),
         );
       },
       onRepoCommit: (repo: string) => vcsDialogs.openCommitDialog(repo),

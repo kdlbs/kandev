@@ -7,6 +7,26 @@ import type { ApiClient } from "../../helpers/api-client";
 export const AGENT_REPLY = "The settled answer contains a useful detail.";
 export const SELECTED_REPLY_TEXT = "settled answer";
 
+export async function waitForAgentSessionInput(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+) {
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(taskId);
+        const state = sessions.find((session) => session.id === sessionId)?.state;
+        return state === "IDLE" || state === "WAITING_FOR_INPUT";
+      },
+      {
+        timeout: 45_000,
+        message: `agent session ${sessionId} never became ready for direct input`,
+      },
+    )
+    .toBe(true);
+}
+
 export async function expectAgentMessageHighlight(body: Locator, expectedCount: number) {
   const highlightName = await body.getAttribute("data-agent-message-highlight-name");
   if (!highlightName) throw new Error("Expected an agent message highlight name");

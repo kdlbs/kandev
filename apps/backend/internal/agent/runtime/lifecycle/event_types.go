@@ -21,6 +21,8 @@ type AgentEventPayload struct {
 	StartedAt          time.Time              `json:"started_at"`
 	FinishedAt         *time.Time             `json:"finished_at,omitempty"`
 	ErrorMessage       string                 `json:"error_message,omitempty"`
+	FailureCode        string                 `json:"failure_code,omitempty"`
+	FailureDetails     string                 `json:"failure_details,omitempty"`
 	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
 	ExitCode           *int                   `json:"exit_code,omitempty"`
 	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
@@ -49,6 +51,8 @@ type AgentctlEventPayload struct {
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
 	AgentExecutionID  string `json:"agent_execution_id"`
 	ErrorMessage      string `json:"error_message,omitempty"`
+	FailureCode       string `json:"failure_code,omitempty"`
+	FailureDetails    string `json:"failure_details,omitempty"`
 	WorktreeID        string `json:"worktree_id,omitempty"`
 	WorktreePath      string `json:"worktree_path,omitempty"`
 	WorktreeBranch    string `json:"worktree_branch,omitempty"`
@@ -197,6 +201,10 @@ type AgentStreamEventData struct {
 	// fallback model the session started on because the configured start
 	// model was unavailable.
 	FallbackModel string `json:"fallback_model,omitempty"`
+
+	// ModelSelectionWarning explains an executor-authoritative default or
+	// explicit fallback decision.
+	ModelSelectionWarning *streams.ModelSelectionWarning `json:"model_selection_warning,omitempty"`
 
 	// Session info (from "session_info" event)
 	SessionTitle     string         `json:"session_title,omitempty"`
@@ -559,6 +567,21 @@ type SessionModelFallbackEventPayload struct {
 // Without it the gateway's extractSessionID cannot route the notification to
 // the session's subscribers.
 func (p SessionModelFallbackEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// SessionModelSelectionWarningEventPayload is the provider-neutral live
+// payload for an executor-authoritative model decision.
+type SessionModelSelectionWarningEventPayload struct {
+	TaskID    string                        `json:"task_id"`
+	SessionID string                        `json:"session_id"`
+	AgentID   string                        `json:"agent_id"`
+	Warning   streams.ModelSelectionWarning `json:"warning"`
+	Timestamp string                        `json:"timestamp"`
+}
+
+// GetSessionID returns the task-session ID used by the gateway for routing.
+func (p SessionModelSelectionWarningEventPayload) GetSessionID() string {
 	return p.SessionID
 }
 

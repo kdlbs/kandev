@@ -2,8 +2,10 @@
 
 import { useTranslation } from "react-i18next";
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Label } from "@kandev/ui/label";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -459,7 +461,7 @@ function WorkflowFields({
         ]}
       />
       {workflowsFailed && (
-        <p className="text-[10px] text-destructive" data-testid="workflow-load-error">
+        <p className="text-xs/relaxed text-destructive" data-testid="workflow-load-error">
           {t("automations:workflowLoadError")}{" "}
           <button
             type="button"
@@ -515,11 +517,11 @@ function SelectField({
   const helpId = testId && helpText ? `${testId}-help` : undefined;
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">{label}</Label>
+      <SettingsFieldLabel>{label}</SettingsFieldLabel>
       <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger
           data-testid={testId}
-          className="cursor-pointer"
+          className={settingsControlClassName("cursor-pointer")}
           aria-describedby={helpId}
           data-settings-dirty={isDirty}
         >
@@ -539,7 +541,7 @@ function SelectField({
         </SelectContent>
       </Select>
       {helpText && (
-        <p id={helpId} className="text-[10px] text-muted-foreground">
+        <p id={helpId} className="text-xs/relaxed text-muted-foreground">
           {helpText}
         </p>
       )}

@@ -47,7 +47,7 @@ func writeFile(t *testing.T, root, rel string, contents []byte) {
 }
 
 // TestSeedAgentSessionDir_OnlyCopiesAuthFiles is the load-bearing check for
-// the codex bug: the seeder must copy auth.json/config.toml from the host
+// the codex boundary: the seeder must copy auth.json from the host
 // home into the per-container session dir but must NOT bring along state.db,
 // sessions/, or other host-state caches that contain absolute host paths.
 func TestSeedAgentSessionDir_OnlyCopiesAuthFiles(t *testing.T) {
@@ -69,18 +69,42 @@ func TestSeedAgentSessionDir_OnlyCopiesAuthFiles(t *testing.T) {
 
 	dotdir := filepath.Join(instanceRoot, ".codex")
 
-	mustExist := []string{"auth.json", "config.toml"}
+	mustExist := []string{"auth.json"}
 	for _, name := range mustExist {
 		if _, err := os.Stat(filepath.Join(dotdir, name)); err != nil {
 			t.Fatalf("expected %s in session dir: %v", name, err)
 		}
 	}
 
-	mustNotExist := []string{"state.db", "state.db-wal", "junk.txt", "sessions"}
+	mustNotExist := []string{"config.toml", "state.db", "state.db-wal", "junk.txt", "sessions"}
 	for _, name := range mustNotExist {
 		if _, err := os.Stat(filepath.Join(dotdir, name)); !os.IsNotExist(err) {
 			t.Fatalf("unexpected %s leaked into session dir (err=%v)", name, err)
 		}
+	}
+}
+
+func TestSeedAgentSessionDir_CopiesSelectedPortableConfig(t *testing.T) {
+	hostHome := seedTestHostHome(t)
+	writeFile(t, hostHome, ".codex/auth.json", []byte(`{"token":"abc"}`))
+	writeFile(t, hostHome, ".codex/config.toml", []byte(`model = "gpt"`))
+
+	kandevHome := t.TempDir()
+	instanceRoot := InstanceSessionRoot(kandevHome, "selected-config")
+	if err := SeedAgentSessionDir(
+		context.Background(), agents.NewCodexACP(), instanceRoot, newSeederTestLogger(t), []string{"codex.config"},
+	); err != nil {
+		t.Fatalf("SeedAgentSessionDir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(instanceRoot, ".codex", "config.toml")); err != nil {
+		t.Fatalf("selected config missing: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(instanceRoot, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("selected config mode = %o, want 600", info.Mode().Perm())
 	}
 }
 
@@ -240,6 +264,7 @@ func TestDockerStopInstance_PreservesSessionDirOnPlainStop(t *testing.T) {
 		{reason: "stopped via API", expectExists: true},
 		{reason: "agent crashed", expectExists: true},
 		{reason: "user requested", expectExists: true},
+		{reason: stopReasonStaleExecutionCleanup, expectExists: true},
 		{reason: "task archived", expectExists: false},
 		{reason: "task deleted", expectExists: false},
 		{reason: "session archived", expectExists: false},

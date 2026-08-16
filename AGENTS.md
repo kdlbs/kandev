@@ -65,7 +65,7 @@ The commitlint hook caps the header at **100 characters** (`type(scope): descrip
 
 ### Release & Versioning
 
-Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts.
+Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, Scoop, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. A Stable release is complete only after the GitHub Release, npm, Homebrew, and Scoop publications succeed and are verified. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts.
 
 ### Code Quality
 
@@ -104,11 +104,15 @@ never call `t()` at module scope (it freezes at the boot locale and the
 pseudo-locale cannot detect it); never pass an English plural ending as a value —
 use `count` with `_one`/`_other`. `pnpm run i18n:check` enforces the last two.
 
-A clean lint is not proof a file is done. The rule only sees literals in JSX, and
-it **skips anything assigned to a SCREAMING_CASE identifier** — so a
-`const ROWS = [{ label: "Disk usage" }]` config table passes silently. Review
-those by eye. The pseudo-locale (Settings → General → Appearance, dev/e2e builds)
-is the completeness check. Full guide: [`docs/i18n.md`](docs/i18n.md).
+A clean lint is not proof a file is done: the rule only sees literals in JSX. The
+positions it cannot inspect — SCREAMING_CASE config tables, plain `.ts` helpers,
+parameter defaults, toast and setter arguments — are gated by
+`scripts/check-nonjsx-copy.mjs`, which runs inside `pnpm run i18n:check` and the
+new-code ratchet. Mark a genuine non-string (a persisted value, an agent-facing
+prompt, a `===` token) with `// i18n-exempt: <reason>`; an unexplained marker
+fails. The pseudo-locale (Settings → General → Appearance, dev/e2e builds) is
+still the completeness check for copy no literal scan can see. Full guide:
+[`docs/i18n.md`](docs/i18n.md).
 
 UI punctuation is plain and intentional: do not use the Unicode em dash (U+2014)
 in user-facing copy or locale values. Use a period, colon, comma, semicolon, or
