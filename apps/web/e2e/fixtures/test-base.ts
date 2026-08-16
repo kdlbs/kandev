@@ -63,7 +63,14 @@ async function waitForSeedAgentProfile(
       // profile because mock-agent is disabled there. When the E2E profile is
       // restored, create a fresh disposable profile instead of waiting for a
       // user-deleted row that the backend correctly will not resurrect.
-      const agent = agents.find((candidate) => candidate.name === "mock-agent") ?? agents[0];
+      // Virtual families such as Dynamic are settings containers, not
+      // launchable profile owners. They may be the first API row after the
+      // registry keeps them visible with routing disabled, so never use one
+      // as the replacement-profile target. Use the stable ID because the
+      // display name is localized and capitalized.
+      const agent =
+        agents.find((candidate) => candidate.name === "mock-agent") ??
+        agents.find((candidate) => candidate.id !== "dynamic");
       if (agent) {
         const replacement = await apiClient.createAgentProfile(agent.id, "mock-fast", {
           model: "mock-fast",
@@ -203,7 +210,9 @@ export const test = backendFixture.extend<
         // Virtual families (for example Dynamic) sort before concrete
         // providers but do not own executable profiles. Search all returned
         // families instead of assuming the first row is launchable.
-        agentProfileId = agents.flatMap((agent) => agent.profiles ?? [])[0]?.id;
+        agentProfileId = agents
+          .filter((agent) => agent.id !== "dynamic")
+          .flatMap((agent) => agent.profiles ?? [])[0]?.id;
         if (agentProfileId) break;
         await dwell(
           250,
