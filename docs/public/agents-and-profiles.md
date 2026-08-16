@@ -24,6 +24,19 @@ The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, 
 
 Hermes launches with `hermes acp`. Install the required `hermes` executable from its **Settings > Agents** card, which runs the official Hermes installer. Hermes currently supports task and workspace sessions. Office-assigned skill injection is not yet supported.
 
+### Pi command surfaces
+
+Pi uses separate executables for its two Kandev modes:
+
+- Structured ACP sessions and one-shot inference use `npx -y pi-acp`.
+- CLI Passthrough starts the globally installed `pi` executable.
+- The Pi install action runs `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
+
+After installation, select **Rescan**. Kandev detects Pi when `pi` is on the
+`PATH` of the backend process. The `pi-acp` adapter is not the interactive
+terminal CLI, and managed ACP runtime selection does not replace the
+passthrough command.
+
 1. Select **Rescan** after installing or updating a CLI.
 2. If the card offers an install action, review the command before running it. Installation runs on the Kandev host.
 3. If the card reports that login is required, open its login terminal or authenticate the CLI as the same operating-system user that runs Kandev.

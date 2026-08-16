@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-07-26
-updated: 2026-08-12
+updated: 2026-08-16
 owner: Kandev
 ---
 
@@ -40,6 +40,10 @@ broken release again.
   metadata. A caller can submit only a version returned by the trusted
   package's npm metadata. Tags, prereleases, package specs, registry URLs, and
   shell text are rejected.
+- Managed runtime resolution changes only the structured ACP command surfaces.
+  When an agent's interactive passthrough CLI is distributed separately from
+  its ACP adapter, passthrough keeps its own package, executable, and install
+  recipe.
 - Jobs for one agent are idempotent while queued or running. Installation and
   version management for the same agent cannot run concurrently.
 
@@ -197,6 +201,8 @@ version while its current probe is unknown produces a repair job.
   sessionless utility prompts use the same active-version resolver.
 - Native-binary preference continues to win when an agent deliberately selects
   its supported native binary path.
+- Passthrough command construction does not receive or apply the active managed
+  ACP version. It continues to use the agent's declared interactive CLI.
 - SSH and container command builders receive no host version override.
 - A saved selection read error fails the new host command with an actionable
   error. It does not fall back to an unversioned package.
@@ -271,6 +277,10 @@ version while its current probe is unknown produces a repair job.
   and does not run a second candidate concurrently.
 - **GIVEN** an SSH or container session, **WHEN** the host active version
   changes, **THEN** that executor's command remains unchanged.
+- **GIVEN** an agent whose interactive passthrough CLI is separate from its
+  managed ACP adapter, **WHEN** the host active ACP version changes, **THEN**
+  later passthrough sessions still launch the declared interactive CLI and do
+  not launch the ACP package under a PTY.
 - **GIVEN** a phone viewport and a long version catalogue or process log,
   **WHEN** the operator selects and activates a version, **THEN** the drawer
   remains contained and the primary action remains touch-reachable.

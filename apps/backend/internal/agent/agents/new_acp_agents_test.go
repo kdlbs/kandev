@@ -21,8 +21,8 @@ type acpAgentSpec struct {
 	// detectBinaries lists every binary name IsInstalled accepts via
 	// WithCommand. Used by TestNewACPAgents_DetectionRequiresGlobalBinary
 	// to skip the test whenever ANY of these is on PATH — otherwise an
-	// agent with multiple WithCommand fallbacks (e.g. Pi accepts both
-	// `pi-acp` and `pi`) flakes when the secondary binary is present.
+	// agent with multiple WithCommand fallbacks flakes when a secondary binary
+	// is present.
 	detectBinaries  []string
 	expectedArgv    []string // BuildCommand and Runtime.Cmd
 	inferenceArgv   []string // InferenceConfig.Command
@@ -76,11 +76,12 @@ var newACPAgentSpecs = []struct {
 		sessionDirTemplate: "{home}/.kilocode",
 	}},
 	{func() Agent { return NewPiACP() }, acpAgentSpec{
-		id: "pi-acp", displayName: "Pi", detectBinaries: []string{"pi-acp", "pi"},
+		id: "pi-acp", displayName: "Pi", detectBinaries: []string{"pi"},
 		expectedArgv:       []string{"npx", "-y", "pi-acp"},
 		inferenceArgv:      []string{"npx", "-y", "pi-acp"},
-		passthroughArgv:    []string{"npx", "-y", "pi-acp"},
+		passthroughArgv:    []string{"pi"},
 		installViaNpm:      true,
+		installScript:      "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
 		sessionDirTemplate: "{home}/.pi",
 	}},
 	{func() Agent { return NewCursorACP() }, acpAgentSpec{
@@ -287,7 +288,7 @@ func TestNewACPAgents_InstallScript(t *testing.T) {
 // to use. detectBinaries comes from the spec table so npx-launched agents
 // (whose argv[0] is "npx") are still verified against their real detection
 // targets (qwen, iflow, droid, …), and agents with multiple WithCommand
-// fallbacks (e.g. Pi accepts both `pi-acp` and `pi`) skip the test
+// fallbacks skip the test
 // whenever ANY of those is on PATH so the test doesn't flake on CI hosts
 // that happen to have a generic `pi` (Raspberry Pi tooling) installed.
 func TestNewACPAgents_DetectionRequiresGlobalBinary(t *testing.T) {

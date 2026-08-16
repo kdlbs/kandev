@@ -16,7 +16,11 @@ var piACPLogoLight []byte
 //go:embed logos/pi_acp_dark.svg
 var piACPLogoDark []byte
 
-const piACPPkg = "pi-acp"
+const (
+	piACPPkg = "pi-acp"
+	piCLIBin = "pi"
+	piCLIPkg = "@earendil-works/pi-coding-agent"
+)
 
 var (
 	_ Agent            = (*PiACP)(nil)
@@ -37,7 +41,7 @@ func NewPiACP() *PiACP {
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("npx", "-y", piACPPkg),
+				PassthroughCmd: NewCommand(piCLIBin),
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
@@ -64,13 +68,7 @@ func (a *PiACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *PiACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	// "pi" is short and could in theory collide with unrelated tooling, but
-	// the pi-mono coding agent (https://github.com/badlogic/pi-mono) ships
-	// its CLI as `pi`, and a kandev user with `pi` on PATH is overwhelmingly
-	// likely to be the pi coding-agent installation we're targeting.
-	// Checking `pi-acp` first lets a dedicated wrapper take precedence
-	// when both are present.
-	result, err := Detect(ctx, WithCommand("pi-acp"), WithCommand("pi"))
+	result, err := Detect(ctx, WithCommand(piCLIBin))
 	if err != nil {
 		return result, err
 	}
@@ -111,7 +109,7 @@ func (a *PiACP) Runtime() *RuntimeConfig {
 func (a *PiACP) RemoteAuth() *RemoteAuth { return nil }
 
 func (a *PiACP) InstallScript() string {
-	return "npm install -g " + piACPPkg
+	return "npm install -g --ignore-scripts " + piCLIPkg
 }
 
 func (a *PiACP) PermissionSettings() map[string]PermissionSetting {
