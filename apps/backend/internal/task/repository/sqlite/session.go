@@ -324,7 +324,7 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
 		FROM task_session_turns turn_row
 		WHERE turn_row.task_session_id = ? AND %s
-		ORDER BY turn_row.started_at ASC
+		ORDER BY turn_row.started_at ASC, turn_row.created_at ASC, turn_row.id ASC
 	`, turnHistoryPredicate(r.ro.DriverName(), "turn_row"))
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID)
 	if err != nil {

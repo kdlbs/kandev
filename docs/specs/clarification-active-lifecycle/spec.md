@@ -152,7 +152,8 @@ No new route or response field.
 - `GET /api/v1/task-sessions/:sessionId/turns` continues to expose durable turn history;
   unpublished reservations stay hidden until publication or durable message evidence, including while
   an attempt marker makes them internal current-turn authority. Attempted reservations are preserved
-  across restart because their dispatch outcome is ambiguous.
+  across restart because their dispatch outcome is ambiguous. Visible history is ordered ascending by
+  `started_at`, `created_at`, then `id`, matching the reverse ordering used to select the current turn.
 - Task list, workflow snapshot, and boot payloads continue to expose task-level `pending_action` in
   the status summary and legacy fallback fields.
 - `POST /api/v1/clarification/:pendingId/respond` uses one state-based contract:

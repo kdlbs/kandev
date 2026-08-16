@@ -2077,6 +2077,20 @@ func TestGetActiveTurnBySessionIDUsesDeterministicTieBreak(t *testing.T) {
 	if active.ID != "turn-tie-z" {
 		t.Fatalf("GetActiveTurnBySessionID = %q, want turn-tie-z", active.ID)
 	}
+
+	listed, err := repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	wantOrder := []string{"turn-tie-a", "turn-tie-z"}
+	if len(listed) != len(wantOrder) {
+		t.Fatalf("ListTurnsBySession returned %d turns, want %d", len(listed), len(wantOrder))
+	}
+	for index, wantID := range wantOrder {
+		if listed[index].ID != wantID {
+			t.Fatalf("ListTurnsBySession[%d] = %q, want %q", index, listed[index].ID, wantID)
+		}
+	}
 }
 
 func TestTurnReadsHideEmptyUnpublishedReservationUntilMessageEvidence(t *testing.T) {

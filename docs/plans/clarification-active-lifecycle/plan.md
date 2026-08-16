@@ -329,6 +329,8 @@ All locally available task gates passed; environment-gated parity also passed in
   orchestrator regressions passed; PostgreSQL parity remains environment-gated in CI.
 - Follow-up review adds scheduled positive and superseded watchdog coverage and makes primary and
   detached clarification delivery share one claimed-bundle turn-identity rule.
+- Late CodeRabbit review restores the planned deterministic tie-breaks to ascending turn-history reads
+  and adds same-timestamp batch-list coverage.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---
