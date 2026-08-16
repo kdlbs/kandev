@@ -235,6 +235,8 @@
   "duplicateSaveBlocked": "设置仍在保存，请稍后重试。",
   "failedToDuplicateProfile": "复制智能体配置失败",
   "noProfilesYetShort": "暂无配置",
+  "dynamicAgents": "动态代理",
+  "dynamicAgentsDescription": "通过有序的具体代理配置列表路由一个逻辑配置。",
   "dynamicProfileDisabled": "动态代理路由已禁用。",
   "dynamicProfileDescription": "选择按顺序执行的具体配置，以便在失败时切换。",
   "dynamicProfileSettings": "动态配置设置",

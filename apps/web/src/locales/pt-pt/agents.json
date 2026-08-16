@@ -222,6 +222,8 @@
   "collapseAgentProfiles": "Recolher perfis de {{name}}",
   "expandAgentProfiles": "Expandir perfis de {{name}}",
   "noProfilesYetShort": "Sem perfis ainda",
+  "dynamicAgents": "Agentes dinâmicos",
+  "dynamicAgentsDescription": "Encaminhe um perfil lógico através de uma lista ordenada de perfis de agentes concretos.",
   "dynamicProfileDisabled": "O encaminhamento dinâmico de agentes está desativado.",
   "dynamicProfileDescription": "Escolha uma lista ordenada de perfis concretos para execução alternativa.",
   "dynamicProfileSettings": "Definições do perfil dinâmico",

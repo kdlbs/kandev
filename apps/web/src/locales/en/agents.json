@@ -235,6 +235,8 @@
   "duplicateProfileSuccess": "Profile duplicated",
   "duplicateSaveBlocked": "Settings are still saving. Try again in a moment.",
   "failedToDuplicateProfile": "Failed to duplicate profile",
+  "dynamicAgents": "Dynamic agents",
+  "dynamicAgentsDescription": "Route one logical profile through an ordered list of concrete agent profiles.",
   "dynamicProfileDisabled": "Dynamic agent routing is disabled.",
   "dynamicProfileDescription": "Choose an ordered list of concrete profiles for fallback execution.",
   "dynamicProfileSettings": "Dynamic profile settings",

@@ -222,6 +222,8 @@
   "watcherKindGithubReview": "GitHub PR 審查",
   "watcherKindJira": "Jira",
   "watcherKindLinear": "Linear",
+  "dynamicAgents": "動態代理",
+  "dynamicAgentsDescription": "透過有序的具體代理設定檔清單路由一個邏輯設定檔。",
   "dynamicProfileDisabled": "動態代理程式路由已停用。",
   "dynamicProfileDescription": "選擇按順序執行的具體設定檔，以便在失敗時切換。",
   "dynamicProfileSettings": "動態設定檔設定",

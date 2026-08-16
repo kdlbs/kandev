@@ -30,9 +30,11 @@ import { AgentProfilesSubList } from "@/components/settings/agents/agent-profile
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import { CustomTUIMcpCard } from "@/components/settings/custom-tui-mcp-card";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
+import { DynamicAgentsCard } from "@/components/settings/dynamic-agents-card";
 import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import {
   detectedAgents,
+  DYNAMIC_AGENT_NAME,
   orderAgentsForDisplay,
   orphanedAgents,
   type DiscoveredAgent,
@@ -136,18 +138,20 @@ function agentCards(
     agent,
     detected: true,
   }));
-  const orphans: AgentCard[] = orphanedAgents(installedAgents, savedAgents).map((agent) => ({
-    key: agent.id,
-    agent: {
-      name: agent.name,
-      supports_mcp: agent.supports_mcp,
-      mcp_config_path: agent.mcp_config_path ?? null,
-      installation_paths: [],
-      available: false,
-      matched_path: null,
-    },
-    detected: false,
-  }));
+  const orphans: AgentCard[] = orphanedAgents(installedAgents, savedAgents)
+    .filter((agent) => agent.name !== DYNAMIC_AGENT_NAME)
+    .map((agent) => ({
+      key: agent.id,
+      agent: {
+        name: agent.name,
+        supports_mcp: agent.supports_mcp,
+        mcp_config_path: agent.mcp_config_path ?? null,
+        installation_paths: [],
+        available: false,
+        matched_path: null,
+      },
+      detected: false,
+    }));
   // Rank by name against the same list the menu ranks against, so the two
   // surfaces cannot order the same agents differently.
   const ordered = orderAgentsForDisplay(
@@ -184,6 +188,7 @@ function InstalledAgentsSection({
   // synthetic discovery record, so their profiles never vanish; they just keep
   // their rank. The settings menu ranks the same way — see `agent-display-order`.
   const cards = agentCards(installedAgents, savedAgents, discoveryOrder);
+  const dynamicAgent = savedAgentsByName.get(DYNAMIC_AGENT_NAME);
 
   return (
     <div className="space-y-4">
@@ -202,6 +207,8 @@ function InstalledAgentsSection({
           void handleRescan();
         }}
       />
+
+      <DynamicAgentsCard agent={dynamicAgent} />
 
       {cards.length === 0 && (
         <Card>

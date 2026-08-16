@@ -38,6 +38,14 @@ describe("orphanedAgents", () => {
 
     expect(orphanedAgents(detectedAgents(DISCOVERY), saved)).toEqual([]);
   });
+
+  it("keeps the empty virtual Dynamic family visible for profile creation", () => {
+    const saved = [{ name: "dynamic", profiles: [] }];
+
+    expect(orphanedAgents(detectedAgents(DISCOVERY), saved).map((agent) => agent.name)).toEqual([
+      "dynamic",
+    ]);
+  });
 });
 
 describe("orderAgentsForDisplay", () => {
