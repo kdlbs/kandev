@@ -800,8 +800,10 @@ Semantic `session.message.added`, `session.message.updated`, and
 `"clarification"`, `"permission"`, or explicit `null`. When present, it is the
 authoritative per-session input projection after that message mutation and is
 paired with `pending_action_revision` (`epoch` plus `sequence`). REST task-session
-snapshots carry the same logical clock. Clients compare epoch first and sequence
-second, retaining the newer projection when HTTP and WebSocket delivery overlap.
+snapshots carry the same logical clock. Epoch is an opaque backend-generation ID;
+clients accept an unseen changed epoch, remember the superseded epoch, and compare
+sequence within one epoch. This keeps delayed snapshots from an earlier generation
+from replacing current state when HTTP and WebSocket delivery overlap.
 When both fields are absent, clients preserve their current projection and
 reconcile through normal session refetch after a gap.
 

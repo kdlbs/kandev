@@ -155,7 +155,8 @@ No new route. Task-session responses add `pending_action_revision` beside the ex
   change it. The field is explicit null when clean and omitted when projection fails or the event is
   a replaceable content-only update; clients preserve the prior value when it is omitted. Each
   projection includes a process-epoch `pending_action_revision`, shared with REST task-session
-  snapshots, so clients reject a delayed result from either delivery channel.
+  snapshots. Epochs are opaque backend-generation IDs; clients accept an unseen generation,
+  remember superseded generations, and reject a delayed result from either delivery channel.
 - `GET /api/v1/task-sessions/:sessionId/turns` continues to expose durable turn history;
   unpublished reservations stay hidden until publication or durable message evidence, including while
   an attempt marker makes them internal current-turn authority. Attempted reservations are preserved

@@ -1081,7 +1081,7 @@ const (
 type TaskPendingAction string
 
 // PendingActionRevision is a process-epoch logical clock shared by REST and
-// WebSocket pending-action projections. Epoch changes order backend restarts;
+// WebSocket pending-action projections. Epoch identifies a backend generation;
 // Sequence orders snapshots within one process.
 type PendingActionRevision struct {
 	Epoch    string `json:"epoch"`

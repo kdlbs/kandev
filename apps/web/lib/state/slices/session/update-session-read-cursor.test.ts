@@ -167,10 +167,10 @@ describe("setTaskSessionPendingAction", () => {
     });
   });
 
-  it("accepts a newer backend epoch and rejects delayed frames from the old epoch", () => {
+  it("accepts a changed backend epoch and rejects delayed frames from the old epoch", () => {
     const store = makeStore();
-    const oldRevision = { epoch: "20260816T201400.000000000Z-old", sequence: 99 };
-    const newRevision = { epoch: REVISION_EPOCH, sequence: 1 };
+    const oldRevision = { epoch: "zz-old-generation", sequence: 99 };
+    const newRevision = { epoch: "aa-new-generation", sequence: 1 };
     store
       .getState()
       .setTaskSessionsForTask(TASK_ID, [

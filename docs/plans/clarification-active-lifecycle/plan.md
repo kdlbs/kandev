@@ -360,6 +360,9 @@ All locally available task gates passed; environment-gated parity also passed in
 - Follow-up CodeRabbit review keeps the independent response-delivery recovery pass running after a
   malformed reservation while excluding delivery IDs still owned by unresolved prompt reservations.
   Detached-bundle recovery coverage also confirms the disconnect marker survives restoration.
+- Exact-head Codex review makes process epochs opaque UUID generations instead of lexically ordered
+  timestamps. The frontend accepts an unseen changed generation, retains a bounded set of superseded
+  epochs, and rejects their delayed frames even when the new epoch sorts lower.
 - This remediation batch passed all affected backend package suites (backend app, clarification,
   MCP handlers, orchestrator, task handlers, SQLite repository, and task service), focused race
   tests with three final repetitions, 37 focused web tests, the superseded-clarification E2E

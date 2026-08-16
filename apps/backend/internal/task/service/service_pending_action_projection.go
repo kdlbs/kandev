@@ -2,14 +2,11 @@ package service
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
-
-const pendingActionProjectionEpochLayout = "20060102T150405.000000000Z"
 
 // GetPendingActionProjectionsForSessions returns the authoritative action and
 // a cross-channel revision for every requested session. The logical revision
@@ -37,7 +34,7 @@ func (s *Service) reservePendingActionProjectionRevisions(
 	s.pendingActionProjectionMu.Lock()
 	defer s.pendingActionProjectionMu.Unlock()
 	if s.pendingActionProjectionEpoch == "" {
-		s.pendingActionProjectionEpoch = time.Now().UTC().Format(pendingActionProjectionEpochLayout) + "-" + uuid.NewString()
+		s.pendingActionProjectionEpoch = uuid.NewString()
 	}
 	revisions := make(map[string]models.PendingActionRevision, len(sessionIDs))
 	for _, sessionID := range sessionIDs {
