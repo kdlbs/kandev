@@ -48,7 +48,7 @@ test.describe("model mismatch warning on mobile", () => {
         session.activeChat().getByText("The executor could not use the saved model selection."),
       ).toBeVisible({ timeout: 15_000 });
       await expect(session.activeChat()).toContainText(UNADVERTISED_MODEL);
-      await expect(session.activeChat()).toContainText("Agent default");
+      await expect(session.activeChat()).toContainText("Mock Fast");
       await assertNoDocumentHorizontalOverflow(testPage, "mobile model mismatch warning");
 
       await testPage.reload();

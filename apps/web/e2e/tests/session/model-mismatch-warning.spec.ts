@@ -45,11 +45,11 @@ test.describe("model mismatch warning", () => {
       expect(warnings[0]?.content).toContain("saved model selection");
       expect(warnings[0]?.metadata).toMatchObject({
         kind: "model_selection_warning",
-        reason: "catalog_empty",
+        reason: "requested_not_advertised",
         requested_model: UNADVERTISED_MODEL,
         agent_id: "mock-agent",
       });
-      expect(warnings[0]?.metadata?.effective_model).toBe("");
+      expect(warnings[0]?.metadata?.effective_model).toBe("mock-fast");
       expect((await apiClient.getAgentProfile(profile.id)).model).toBe(UNADVERTISED_MODEL);
 
       await testPage.goto(`/t/${task.id}`);
@@ -65,7 +65,7 @@ test.describe("model mismatch warning", () => {
       await expect(
         session.activeChat().getByText("The executor could not use the saved model selection."),
       ).toBeVisible({ timeout: 15_000 });
-      await expect(session.activeChat()).toContainText("Agent default");
+      await expect(session.activeChat()).toContainText("Mock Fast");
       await expect
         .poll(() => readModelSelectionWarnings(apiClient, task.session_id!))
         .toHaveLength(1);
