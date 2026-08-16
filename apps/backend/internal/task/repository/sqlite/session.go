@@ -216,7 +216,8 @@ func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID str
 		WHERE turn_row.task_session_id = ?
 		  AND turn_row.completed_at IS NULL
 		  AND %s
-		ORDER BY turn_row.started_at DESC LIMIT 1
+		ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+		LIMIT 1
 	`, turnAuthorityPredicate(r.ro.DriverName(), "turn_row"))
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID)
 	return scanTurnRow(row)

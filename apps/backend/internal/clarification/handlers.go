@@ -423,6 +423,8 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 	if errors.Is(deliveryErr, ErrAlreadyResponded) {
 		// Defensive only: the durable claim above is exclusive. Retain this as a
 		// safety net if the in-memory waiter ever diverges from durable state.
+		// Re-publishing these already-terminal rows is idempotent for connected
+		// clients and converges any client that missed the winner's publication.
 		h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
 		h.logger.Warn("duplicate response attempt", zap.String("pending_id", pendingID))
 		return http.StatusConflict, "response already submitted"
@@ -553,6 +555,10 @@ func (h *Handlers) restoreFailedClarificationClaim(
 }
 
 func clarificationPersistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	// Each durability phase gets an independent bounded window so caller
+	// cancellation cannot interrupt an accepted write or its compensation. A
+	// failed detached response can sequence claim, resume, and restore phases,
+	// so its worst-case response latency may span three of these windows.
 	return context.WithTimeout(context.WithoutCancel(ctx), clarificationPersistenceTimeout)
 }
 

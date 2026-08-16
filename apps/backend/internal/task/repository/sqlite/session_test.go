@@ -2052,6 +2052,33 @@ func TestGetActiveTurnBySessionIDPicksNewestOpenTurn(t *testing.T) {
 	}
 }
 
+func TestGetActiveTurnBySessionIDUsesDeterministicTieBreak(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-turn-tie"
+	const sessionID = "session-turn-tie"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+
+	startedAt := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	createdAt := startedAt.Add(time.Minute)
+	for _, id := range []string{"turn-tie-z", "turn-tie-a"} {
+		if err := repo.CreateTurn(ctx, &models.Turn{
+			ID: id, TaskSessionID: sessionID, TaskID: taskID,
+			StartedAt: startedAt, CreatedAt: createdAt,
+		}); err != nil {
+			t.Fatalf("CreateTurn(%s): %v", id, err)
+		}
+	}
+
+	active, err := repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID: %v", err)
+	}
+	if active.ID != "turn-tie-z" {
+		t.Fatalf("GetActiveTurnBySessionID = %q, want turn-tie-z", active.ID)
+	}
+}
+
 func TestTurnReadsHideEmptyUnpublishedReservationUntilMessageEvidence(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

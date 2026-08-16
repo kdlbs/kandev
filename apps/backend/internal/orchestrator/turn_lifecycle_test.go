@@ -48,6 +48,12 @@ type failingReservedTurnRollback struct {
 	err error
 }
 
+type failingActiveTurnLookup struct {
+	TurnService
+	err        error
+	startCalls int
+}
+
 func (s failingReservedTurnPublisher) PublishReservedTurn(context.Context, *models.Turn) error {
 	return s.err
 }
@@ -73,6 +79,15 @@ func (s failingPromptTurnReconciler) ReconcileUnpublishedPromptTurns(context.Con
 
 func (s failingReservedTurnRollback) RollbackReservedTurn(context.Context, string, string) (bool, error) {
 	return false, s.err
+}
+
+func (s *failingActiveTurnLookup) GetActiveTurn(context.Context, string) (*models.Turn, error) {
+	return nil, s.err
+}
+
+func (s *failingActiveTurnLookup) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	s.startCalls++
+	return s.TurnService.StartTurn(ctx, sessionID)
 }
 
 func (failingReservedTurnPublisher) GetActiveTurn(context.Context, string) (*models.Turn, error) {
@@ -174,6 +189,28 @@ func newTurnLifecycleTestService(t *testing.T) (*Service, *sqliterepo.Repository
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.turnService = &repoTurnService{repo: repo}
 	return svc, repo
+}
+
+func TestStartTurnDropsPromptAfterActiveTurnLookupFailure(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	lookupErr := errors.New("active turn read failed")
+	failing := &failingActiveTurnLookup{TurnService: svc.turnService, err: lookupErr}
+	svc.turnService = failing
+
+	turnID, created := svc.startTurnForSessionWithOwnership(context.Background(), "session1")
+	if turnID != "" || created {
+		t.Fatalf("start after lookup failure = (%q, %v), want empty drop", turnID, created)
+	}
+	if failing.startCalls != 0 {
+		t.Fatalf("StartTurn calls = %d, want 0 after lookup failure", failing.startCalls)
+	}
+	turns, err := repo.ListTurnsBySession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	if len(turns) != 0 {
+		t.Fatalf("turns after lookup failure = %#v, want none", turns)
+	}
 }
 
 // TestStartTurnAdoptsExistingDBTurn covers the dual-creation leak that left

@@ -122,3 +122,45 @@ func TestLifecyclePromptRollsBackClaimAfterTurnCallCancelsContext(t *testing.T) 
 		t.Fatalf("task state after turn failure = %q, want review", task.State)
 	}
 }
+
+func TestOrdinaryPromptRollsBackClaimAfterTurnCallCancelsContext(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-ordinary-turn-cancel"
+	const sessionID = "session-ordinary-turn-cancel"
+	seedSession(t, repo, taskID, sessionID, "step-1")
+	if err := repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	requestCtx, cancel := context.WithCancel(ctx)
+	persistenceErr := errors.New("persist ordinary turn")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = cancelingStartTurnService{
+		TurnService: &repoBackedTurnService{repo: repo},
+		cancel:      cancel,
+		err:         persistenceErr,
+	}
+
+	_, _, err := svc.claimPromptDispatch(
+		requestCtx,
+		taskID,
+		sessionID,
+		"",
+		false,
+		false,
+		nil,
+		nil,
+		nil,
+	)
+	if !errors.Is(err, persistenceErr) {
+		t.Fatalf("claim error = %v, want %v", err, persistenceErr)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("load session after turn failure: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after turn failure = %q, want waiting", session.State)
+	}
+}

@@ -57,7 +57,11 @@ function deferredSessionLoad() {
         rejectLoad = reject;
       }),
   );
-  return { loadTaskSessionsForTask, resolveLoad, rejectLoad };
+  return {
+    loadTaskSessionsForTask,
+    resolveLoad: (sessions: TaskSession[]) => resolveLoad(sessions),
+    rejectLoad: (error: Error) => rejectLoad(error),
+  };
 }
 
 async function flushSelection() {

@@ -4254,7 +4254,9 @@ func (s *Service) claimSessionRunningForPrompt(
 		ctx, sessionID, reserveTurnUntilDispatch, promptDispatchRecovery,
 	)
 	if err != nil {
-		s.restoreLifecycleClaim(ctx, taskID, sessionID, previousState)
+		s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, promptClaimRollback{
+			previousSessionState: previousState,
+		})
 		return nil, "", "", false, nil, fmt.Errorf("persist prompt turn: %w", err)
 	}
 	if reservedTurn != nil && s.turnService != nil {
