@@ -47,6 +47,38 @@ func TestMCPAttachmentObserverEmitsSafeConnectionEvidence(t *testing.T) {
 	}
 }
 
+func TestMCPAttachmentObserverPublishesToolSummaries(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	events := make(chan streams.MCPAttachmentEvidence, 4)
+	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
+	s.SetAttachmentAttempt(streams.MCPAttachmentAttempt{AttemptID: "attempt-1"})
+
+	s.registerMCPConnection("connection-1")
+	<-events
+	s.observeMCPToolsList("connection-1", []mcplib.Tool{
+		{
+			Name:           "create_task_kandev",
+			Description:    "Create a task",
+			RawInputSchema: []byte(`{"type":"object","properties":{"secret":{"type":"string"}}}`),
+			Meta:           &mcplib.Meta{AdditionalFields: map[string]any{"secret": "must not persist"}},
+		},
+	})
+
+	evidence := <-events
+	if evidence.Kind != streams.MCPAttachmentEvidenceToolsListObserved || evidence.ToolCount != 1 {
+		t.Fatalf("evidence = %+v, want tools-list count", evidence)
+	}
+	if len(evidence.Tools) != 1 || evidence.Tools[0].Name != "create_task_kandev" || evidence.Tools[0].Description != "Create a task" {
+		t.Fatalf("tool summaries = %+v, want name and description", evidence.Tools)
+	}
+	encoded, err := json.Marshal(evidence)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "secret")
+}
+
 func TestMCPAttachmentObserverKeepsConnectionAttemptAcrossRollover(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)

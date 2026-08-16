@@ -235,7 +235,7 @@ func newServerWithProfile(backend BackendClient, sessionID, taskID string, log *
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
 	})
 	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
-		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolsListObserved, len(result.Tools), "")
+		s.observeMCPToolsList(mcpConnectionID(ctx), result.Tools)
 	})
 	hooks.AddBeforeListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest) {
 		s.syncPluginTools(ctx)
@@ -291,6 +291,25 @@ func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
 }
 
 func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
+	s.observeMCPConnectionWithTools(connectionID, kind, toolCount, summary, nil)
+}
+
+func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
+	summaries := make([]streams.MCPToolSummary, 0, len(tools))
+	for _, tool := range tools {
+		summaries = append(summaries, streams.MCPToolSummary{Name: tool.Name, Description: tool.Description})
+	}
+	normalized, _ := streams.NormalizeMCPToolCatalog(summaries, len(tools))
+	s.observeMCPConnectionWithTools(connectionID, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", normalized)
+}
+
+func (s *Server) observeMCPConnectionWithTools(
+	connectionID string,
+	kind streams.MCPAttachmentEvidenceKind,
+	toolCount int,
+	summary string,
+	tools []streams.MCPToolSummary,
+) {
 	s.attachmentMu.RLock()
 	attempt, ok := s.attachmentAttempts[connectionID]
 	reporter := s.attachmentReporter
@@ -298,7 +317,7 @@ func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttac
 	if !ok || reporter == nil || attempt.AttemptID == "" {
 		return
 	}
-	s.reportMCPConnection(reporter, attempt, connectionID, kind, toolCount, summary)
+	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, tools)
 }
 
 func (s *Server) registerMCPConnection(connectionID string) {
@@ -335,6 +354,18 @@ func (s *Server) reportMCPConnection(
 	toolCount int,
 	summary string,
 ) {
+	s.reportMCPConnectionWithTools(reporter, attempt, connectionID, kind, toolCount, summary, nil)
+}
+
+func (s *Server) reportMCPConnectionWithTools(
+	reporter func(streams.MCPAttachmentEvidence),
+	attempt streams.MCPAttachmentAttempt,
+	connectionID string,
+	kind streams.MCPAttachmentEvidenceKind,
+	toolCount int,
+	summary string,
+	tools []streams.MCPToolSummary,
+) {
 	reporter(streams.MCPAttachmentEvidence{
 		AttemptID:    attempt.AttemptID,
 		ServerName:   "kandev",
@@ -343,6 +374,7 @@ func (s *Server) reportMCPConnection(
 		Source:       streams.MCPServerSourceKandev,
 		ConnectionID: opaqueMCPConnectionID(connectionID),
 		ToolCount:    toolCount,
+		Tools:        tools,
 		Summary:      streams.SanitizeMCPErrorSummary(summary),
 	})
 }

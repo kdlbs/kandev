@@ -60,6 +60,12 @@ export type MCPAttachmentServerPayload = {
   summary?: string;
   connection_id?: string;
   tool_count?: number;
+  tools_listed_at?: string;
+  tools?: Array<{
+    name: string;
+    description?: string;
+  }>;
+  tool_catalog_truncated?: boolean;
 };
 
 export type MCPAttachmentAttemptPayload = {

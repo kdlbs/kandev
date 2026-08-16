@@ -5,8 +5,10 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
@@ -47,6 +49,12 @@ const (
 	// MaxMCPAttachmentErrorSummaryBytes caps persisted error summaries after
 	// redaction so an agent error cannot inflate session metadata.
 	MaxMCPAttachmentErrorSummaryBytes = 256
+
+	// MaxMCPAttachmentTools bounds the current Kandev tool catalog.
+	MaxMCPAttachmentTools = 128
+
+	// MaxMCPToolDescriptionBytes bounds one stored tool description.
+	MaxMCPToolDescriptionBytes = 1024
 )
 
 // MCPAttachmentStatus is the strongest user-visible attachment evidence for a
@@ -88,6 +96,13 @@ const (
 	MCPServerSourceProfile MCPServerSource = "profile"
 )
 
+// MCPToolSummary is the safe catalog projection sent to the frontend.
+// Schemas, annotations, arguments, and results are intentionally excluded.
+type MCPToolSummary struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
 // MCPAttachmentTestResult records a user-requested endpoint reachability test.
 // It intentionally remains separate from agent attachment evidence.
 type MCPAttachmentTestResult struct {
@@ -101,23 +116,25 @@ type MCPAttachmentTestResult struct {
 // It deliberately has no headers, environment, command arguments, tool input,
 // tool result, or full endpoint URL fields.
 type MCPServerAttachment struct {
-	Name           string                   `json:"name"`
-	Source         MCPServerSource          `json:"source,omitempty"`
-	Transport      string                   `json:"transport,omitempty"`
-	Target         string                   `json:"target,omitempty"`
-	Status         MCPAttachmentStatus      `json:"status"`
-	ReasonCode     string                   `json:"reason_code,omitempty"`
-	Summary        string                   `json:"summary,omitempty"`
-	ConnectionID   string                   `json:"connection_id,omitempty"`
-	ToolCount      int                      `json:"tool_count,omitempty"`
-	ConfiguredAt   *time.Time               `json:"configured_at,omitempty"`
-	DeliveredAt    *time.Time               `json:"delivered_at,omitempty"`
-	ConnectedAt    *time.Time               `json:"connected_at,omitempty"`
-	ToolsListedAt  *time.Time               `json:"tools_listed_at,omitempty"`
-	UsedAt         *time.Time               `json:"used_at,omitempty"`
-	FailedAt       *time.Time               `json:"failed_at,omitempty"`
-	DisconnectedAt *time.Time               `json:"disconnected_at,omitempty"`
-	EndpointTest   *MCPAttachmentTestResult `json:"endpoint_test,omitempty"`
+	Name                 string                   `json:"name"`
+	Source               MCPServerSource          `json:"source,omitempty"`
+	Transport            string                   `json:"transport,omitempty"`
+	Target               string                   `json:"target,omitempty"`
+	Status               MCPAttachmentStatus      `json:"status"`
+	ReasonCode           string                   `json:"reason_code,omitempty"`
+	Summary              string                   `json:"summary,omitempty"`
+	ConnectionID         string                   `json:"connection_id,omitempty"`
+	ToolCount            int                      `json:"tool_count,omitempty"`
+	ConfiguredAt         *time.Time               `json:"configured_at,omitempty"`
+	DeliveredAt          *time.Time               `json:"delivered_at,omitempty"`
+	ConnectedAt          *time.Time               `json:"connected_at,omitempty"`
+	ToolsListedAt        *time.Time               `json:"tools_listed_at,omitempty"`
+	UsedAt               *time.Time               `json:"used_at,omitempty"`
+	FailedAt             *time.Time               `json:"failed_at,omitempty"`
+	DisconnectedAt       *time.Time               `json:"disconnected_at,omitempty"`
+	EndpointTest         *MCPAttachmentTestResult `json:"endpoint_test,omitempty"`
+	Tools                []MCPToolSummary         `json:"tools,omitempty"`
+	ToolCatalogTruncated bool                     `json:"tool_catalog_truncated,omitempty"`
 }
 
 // MCPAttachmentEvidence is a safe normalized event. The producer may supply a
@@ -133,6 +150,7 @@ type MCPAttachmentEvidence struct {
 	Target       string                    `json:"target,omitempty"`
 	ConnectionID string                    `json:"connection_id,omitempty"`
 	ToolCount    int                       `json:"tool_count,omitempty"`
+	Tools        []MCPToolSummary          `json:"tools,omitempty"`
 	ReasonCode   string                    `json:"reason_code,omitempty"`
 	Summary      string                    `json:"summary,omitempty"`
 }
@@ -175,7 +193,7 @@ func (h *MCPAttachmentHistory) StartAttempt(attempt MCPAttachmentAttempt) {
 	attempt.UpdatedAt = now
 	h.Version = MCPAttachmentSchemaVersion
 	if h.Current.AttemptID != "" && h.Current.AttemptID != attempt.AttemptID {
-		superseded := h.Current
+		superseded := historicalMCPAttachmentAttempt(h.Current)
 		superseded.SupersededAt = &now
 		superseded.UpdatedAt = now
 		h.Previous = append([]MCPAttachmentAttempt{superseded}, h.Previous...)
@@ -249,6 +267,7 @@ func (s *MCPServerAttachment) applyEvidenceDetails(evidence MCPAttachmentEvidenc
 	}
 	if evidence.Kind == MCPAttachmentEvidenceToolsListObserved {
 		s.ToolCount = evidence.ToolCount
+		s.Tools, s.ToolCatalogTruncated = NormalizeMCPToolCatalog(evidence.Tools, evidence.ToolCount)
 	}
 	if evidence.ReasonCode != "" {
 		s.ReasonCode = evidence.ReasonCode
@@ -257,6 +276,53 @@ func (s *MCPServerAttachment) applyEvidenceDetails(evidence MCPAttachmentEvidenc
 		s.Summary = evidence.Summary
 	}
 
+}
+
+// NormalizeMCPToolCatalog removes unusable entries, bounds descriptions and
+// sorts the safe summaries that Kandev publishes for the current attempt.
+func NormalizeMCPToolCatalog(tools []MCPToolSummary, totalToolCount int) ([]MCPToolSummary, bool) {
+	normalized := make([]MCPToolSummary, 0, min(len(tools), MaxMCPAttachmentTools))
+	for _, tool := range tools {
+		if tool.Name == "" {
+			continue
+		}
+		tool.Description = truncateMCPToolDescription(tool.Description)
+		normalized = append(normalized, tool)
+		if len(normalized) == MaxMCPAttachmentTools {
+			break
+		}
+	}
+	sort.Slice(normalized, func(i, j int) bool { return normalized[i].Name < normalized[j].Name })
+	return normalized, totalToolCount > len(normalized)
+}
+
+func truncateMCPToolDescription(description string) string {
+	description = strings.ToValidUTF8(description, "")
+	if len(description) <= MaxMCPToolDescriptionBytes {
+		return description
+	}
+	end := MaxMCPToolDescriptionBytes
+	for end > 0 && !utf8.ValidString(description[:end]) {
+		end--
+	}
+	return description[:end]
+}
+
+func historicalMCPAttachmentAttempt(attempt MCPAttachmentAttempt) MCPAttachmentAttempt {
+	if len(attempt.Servers) > 0 {
+		attempt.Servers = append([]MCPServerAttachment(nil), attempt.Servers...)
+		for index := range attempt.Servers {
+			attempt.Servers[index].Tools = nil
+			attempt.Servers[index].ToolCatalogTruncated = false
+		}
+	}
+	if len(attempt.Evidence) > 0 {
+		attempt.Evidence = append([]MCPAttachmentEvidence(nil), attempt.Evidence...)
+		for index := range attempt.Evidence {
+			attempt.Evidence[index].Tools = nil
+		}
+	}
+	return attempt
 }
 
 func (s *MCPServerAttachment) applyEvidenceStatus(evidence MCPAttachmentEvidence) {
@@ -332,6 +398,9 @@ func sanitizeMCPAttachmentEvidence(evidence MCPAttachmentEvidence) MCPAttachment
 		evidence.Target = SanitizeMCPStdioTarget(evidence.Target)
 	} else if evidence.Target != "" {
 		evidence.Target = SanitizeMCPNetworkTarget(evidence.Target)
+	}
+	if evidence.Kind == MCPAttachmentEvidenceToolsListObserved {
+		evidence.Tools, _ = NormalizeMCPToolCatalog(evidence.Tools, evidence.ToolCount)
 	}
 	evidence.Summary = SanitizeMCPErrorSummary(evidence.Summary)
 	return evidence

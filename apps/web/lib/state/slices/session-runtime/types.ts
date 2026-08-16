@@ -271,6 +271,11 @@ export type MCPAttachmentStatus =
   | "filtered"
   | "unavailable";
 
+export type MCPToolSummary = {
+  name: string;
+  description?: string;
+};
+
 export type MCPAttachmentServer = {
   name: string;
   source?: "kandev" | "profile";
@@ -281,6 +286,9 @@ export type MCPAttachmentServer = {
   summary?: string;
   connection_id?: string;
   tool_count?: number;
+  tools_listed_at?: string;
+  tools?: MCPToolSummary[];
+  tool_catalog_truncated?: boolean;
 };
 
 export type MCPAttachmentHistory = {

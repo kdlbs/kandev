@@ -1,6 +1,7 @@
 ---
 status: approved
 created: 2026-07-30
+updated: 2026-08-16
 owner: Kandev
 ---
 
@@ -8,6 +9,14 @@ owner: Kandev
 
 Decision:
 [ADR-2026-07-30-session-owned-mcp-observability](../../decisions/2026-07-30-session-owned-mcp-observability.md)
+
+Tool catalog decision:
+[ADR-2026-08-16-session-mcp-tool-catalog](../../decisions/2026-08-16-session-mcp-tool-catalog.md)
+
+Implementation plans:
+
+- [Session MCP attachment observability](../../plans/mcp-session-observability/plan.md)
+- [MCP server explorer](../../plans/mcp-server-explorer/plan.md)
 
 ## Why
 
@@ -97,6 +106,30 @@ stable reason code plus a bounded sanitized summary.
 Raw ACP JSONL logging remains a development-only diagnostic and is not enabled
 by this feature.
 
+## Kandev tool catalog
+
+After Kandev serves `tools/list`, the current attachment report includes a
+safe catalog for the built-in `kandev` server. Each entry contains only the
+tool name and description that Kandev sent to the agent.
+
+The catalog has these limits:
+
+- it contains at most 128 tools, sorted by name.
+- each description contains at most 1,024 UTF-8 bytes.
+- `tool_count` remains the total count from `tools/list`.
+- a truncation marker tells the UI when the total count exceeds the stored
+  catalog.
+- superseded attempts keep the total count but do not keep catalog entries.
+
+The catalog excludes input and output schemas, annotations, arguments,
+results, prompts, credentials, and endpoint configuration. Descriptions render
+as plain text.
+
+Kandev does not collect a catalog for a third-party profile server. Those
+servers connect directly to the agent, so Kandev cannot observe their
+`tools/list` result. The UI explains this limit and continues to show the safe
+status metadata that Kandev owns.
+
 ## User experience
 
 The MCP toolbar icon remains neutral by default. It does not become a row of
@@ -104,17 +137,30 @@ colored indicators.
 
 On precise-pointer desktop:
 
-- hover or keyboard focus opens a compact MCP status popover;
-- clicking the trigger pins the popover so diagnostic actions can be used;
-- each server row shows its own status color and plain-language label.
+- hover or keyboard focus shows a short label for the MCP trigger.
+- clicking the trigger opens a wide MCP server dialog.
+- the left pane lists servers for the active Kandev session.
+- the right pane shows the selected server's status and details.
+- selecting `kandev` shows its enabled tool names and descriptions after
+  `tools/list` succeeds.
+- selecting a third-party server explains why its tool catalog is unavailable.
 
 On touch and coarse-pointer devices:
 
-- tapping a minimum 44px toolbar target opens an inset, safe-area-aware bottom
-  drawer;
-- the drawer uses the same server rows, evidence checklist, and actions as the
-  desktop popover;
+- tapping a minimum 44px toolbar target opens a safe-area-aware drawer.
+- phones use a full-height drawer with one internal scroll area.
+- tablets use a bounded drawer with the same server and tool data.
+- the first view lists servers, and a server tap opens its focused detail view.
+- a visible Back control returns to the server list.
 - no capability is hidden behind hover.
+
+The dialog and drawer select `kandev` first when it is present. Otherwise, they
+select the first server. If live status removes the selected server, the
+surface selects the same deterministic fallback.
+
+Before Kandev observes `tools/list`, its detail view explains that the catalog
+is not loaded. If the stored catalog is truncated, the detail view states how
+many tools are shown and the total tool count.
 
 The list uses these display states:
 
@@ -203,11 +249,23 @@ capabilities are not treated as connection evidence.
   Test endpoint and copy diagnostics, **THEN** the test runs from the session's
   executor, its result is distinguished from agent attachment, and the copied
   report contains no secrets or raw agent output.
-- **GIVEN** a precise-pointer user, **WHEN** they hover or focus the neutral MCP
-  trigger, **THEN** a compact status list appears and can be pinned by click.
-- **GIVEN** a phone or coarse-pointer user, **WHEN** they tap the MCP trigger,
-  **THEN** the same status and diagnostic actions appear in a bottom drawer
-  without horizontal overflow.
+- **GIVEN** a precise-pointer user, **WHEN** they click the neutral MCP trigger,
+  **THEN** a wide dialog lists the active session's MCP servers.
+- **GIVEN** Kandev served `tools/list` for the current attempt, **WHEN** the user
+  selects `kandev`, **THEN** the detail pane lists the enabled tool names and
+  descriptions from that response.
+- **GIVEN** Kandev has not served `tools/list` for the current attempt, **WHEN**
+  the user selects `kandev`, **THEN** the detail pane says that the tool catalog
+  is not loaded.
+- **GIVEN** a third-party server is present, **WHEN** the user selects it,
+  **THEN** the detail pane shows safe status metadata and explains that tool
+  details are unavailable.
+- **GIVEN** a catalog exceeds the storage limit, **WHEN** the user opens the
+  Kandev detail pane, **THEN** the UI shows the stored entries and the full tool
+  count with a truncation notice.
+- **GIVEN** a phone user, **WHEN** they tap the MCP trigger and select a server,
+  **THEN** a full-height drawer shows one focused detail view with a Back
+  control and no horizontal overflow.
 - **GIVEN** Auggie or another ACP agent is under investigation, **WHEN** a
   developer runs the sentinel MCP probe, **THEN** the JSONL and summary
   distinguish advertised capability, configuration delivery, initialize,
@@ -219,6 +277,11 @@ capabilities are not treated as connection evidence.
   server status.
 - Claiming automatic connection status for direct third-party MCP servers that
   Kandev cannot observe.
+- Connecting to or proxying third-party MCP servers to collect their tool
+  catalogs.
+- Persisting third-party tool names or descriptions.
+- Showing MCP input schemas, output schemas, tool arguments, or tool results in
+  the explorer.
 - Enabling raw ACP frame logs or persistent raw stderr in release mode.
 - Persisting prompts, tool arguments, credentials, header values, environment
   values, or full endpoint URLs in attachment diagnostics.

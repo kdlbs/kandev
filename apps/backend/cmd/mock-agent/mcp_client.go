@@ -51,6 +51,10 @@ func getMCPClient(serverName string) (*mcpclient.Client, error) {
 		_ = c.Close()
 		return nil, fmt.Errorf("initialize MCP client %s: %w", serverName, err)
 	}
+	if _, err := c.ListTools(ctx, mcp.ListToolsRequest{}); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("list MCP tools %s: %w", serverName, err)
+	}
 
 	mcpClients[serverName] = c
 	return c, nil

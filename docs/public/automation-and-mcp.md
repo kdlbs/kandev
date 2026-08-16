@@ -428,11 +428,28 @@ An agent profile can add `stdio`, `http`, `sse`, or `streamable_http` servers wh
 
 Stdio normally starts per session and cannot be shared. Network servers can be shared or per-session. The executor's MCP policy can deny transports/server names, rewrite URLs, or inject environment. See [Agents and profiles](agents-and-profiles.md) for configuration, secret handling, and failure behavior.
 
-### Diagnose one running session
+### Inspect one running session
 
-Use the neutral plug button beside the chat composer to inspect the current session's MCP attachment report. It distinguishes configuration delivered to the agent from a connection observed by Kandev: the built-in task server becomes **Connected** after MCP initialize and **Active** after it serves `tools/list`. A third-party profile server usually remains **Delivered · connection unverified** because it connects directly to the agent rather than through Kandev. Missing observation is not a failure; red appears only for an explicit sanitized error.
+Open the **MCP servers** explorer with the button beside the chat composer. The
+explorer shows attachment status for the current session and execution. On
+desktop, it opens a wide dialog. On touch devices, it opens a full-height
+drawer.
 
-On desktop, hover or focus the button for the compact status list. On touch devices, tap its 44px target to open the same list in a bottom drawer. The report is per Kandev session and execution, so simultaneous agents in one task never share a status row. It stores only bounded, sanitized attachment facts: no MCP headers, environment values, tool arguments/results, raw ACP frames, or agent output.
+Select `kandev` to view its tool catalog after Kandev serves `tools/list`. Each
+entry shows only a tool name and description. The catalog is bounded and sorted
+by tool name. A truncation notice appears when the full catalog is larger than
+the stored catalog.
+
+A profile server can show **Delivered, connection unverified**. That server
+connects directly to the agent, so Kandev cannot inspect its `tools/list`
+result. The explorer still shows safe status metadata. The built-in Kandev
+server becomes **Connected** after MCP initialize and **Active** after it serves
+`tools/list`. Missing observation is not a failure. Red appears only for an
+explicit sanitized error.
+
+The report is per Kandev session and execution. It stores only bounded,
+sanitized attachment facts. It does not store MCP headers, environment values,
+tool arguments or results, raw ACP frames, or agent output.
 
 </details>
 
