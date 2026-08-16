@@ -35,15 +35,20 @@ type MockEventBus struct {
 }
 
 type recordingTaskClarificationCanceller struct {
-	sessions []string
-	err      error
+	sessions    []string
+	hasDeadline []bool
+	contextErrs []error
+	err         error
 }
 
 func (c *recordingTaskClarificationCanceller) ExpireSessionAndNotify(
-	_ context.Context,
+	ctx context.Context,
 	sessionID string,
 ) (int, error) {
 	c.sessions = append(c.sessions, sessionID)
+	_, hasDeadline := ctx.Deadline()
+	c.hasDeadline = append(c.hasDeadline, hasDeadline)
+	c.contextErrs = append(c.contextErrs, ctx.Err())
 	return 1, c.err
 }
 
@@ -2029,6 +2034,12 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 	}
 	if len(clarifications.sessions) != 1 || clarifications.sessions[0] != "session-running" {
 		t.Fatalf("expired clarification sessions = %v, want [session-running]", clarifications.sessions)
+	}
+	if len(clarifications.hasDeadline) != 1 || !clarifications.hasDeadline[0] {
+		t.Fatalf("clarification expiry deadlines = %v, want one bounded context", clarifications.hasDeadline)
+	}
+	if len(clarifications.contextErrs) != 1 || clarifications.contextErrs[0] != nil {
+		t.Fatalf("clarification expiry context errors = %v, want active context", clarifications.contextErrs)
 	}
 }
 

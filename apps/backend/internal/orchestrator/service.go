@@ -364,14 +364,19 @@ type reservedPromptTurn struct {
 	mu           sync.Mutex
 	resolved     bool
 	accepted     bool
-	afterResolve []func()
+	afterResolve []reservedPromptCallback
+}
+
+type reservedPromptCallback struct {
+	owner *reservedPromptCallbackOwner
+	run   func(context.Context)
 }
 
 func newReservedPromptTurn(id string) *reservedPromptTurn {
 	return &reservedPromptTurn{id: id, done: make(chan struct{})}
 }
 
-func (r *reservedPromptTurn) resolve(accepted bool) []func() {
+func (r *reservedPromptTurn) resolve(accepted bool) []reservedPromptCallback {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.resolved {
@@ -397,7 +402,7 @@ func (r *reservedPromptTurn) wait(ctx context.Context) (bool, error) {
 	}
 }
 
-func (r *reservedPromptTurn) deferUntilResolved(callback func()) bool {
+func (r *reservedPromptTurn) deferUntilResolved(callback reservedPromptCallback) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.resolved {
@@ -405,6 +410,54 @@ func (r *reservedPromptTurn) deferUntilResolved(callback func()) bool {
 	}
 	r.afterResolve = append(r.afterResolve, callback)
 	return true
+}
+
+// reservedPromptCallbackOwner gives deferred reservation reconciliation one
+// lifecycle owner. Stop prevents new launches, cancels the shared context, and
+// waits until every callback has observed cancellation and returned.
+type reservedPromptCallbackOwner struct {
+	mu      sync.Mutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	stopped bool
+	workers sync.WaitGroup
+}
+
+func newReservedPromptCallbackOwner() *reservedPromptCallbackOwner {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &reservedPromptCallbackOwner{ctx: ctx, cancel: cancel}
+}
+
+func (o *reservedPromptCallbackOwner) launch(callback func(context.Context)) bool {
+	if o == nil || callback == nil {
+		return false
+	}
+	o.mu.Lock()
+	if o.stopped {
+		o.mu.Unlock()
+		return false
+	}
+	ctx := o.ctx
+	o.workers.Add(1)
+	o.mu.Unlock()
+	go func() {
+		defer o.workers.Done()
+		callback(ctx)
+	}()
+	return true
+}
+
+func (o *reservedPromptCallbackOwner) stop() {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	if !o.stopped {
+		o.stopped = true
+		o.cancel()
+	}
+	o.mu.Unlock()
+	o.workers.Wait()
 }
 
 // Service is the main orchestrator service
@@ -658,6 +711,11 @@ type Service struct {
 	// back result so a concurrent ready event can wait, then revalidate prompt
 	// generation before touching turn or workflow state.
 	reservedPromptTurns sync.Map
+	// reservedPromptCallbacks owns the reconciliation callbacks released when
+	// a prompt reservation settles. The owner is replaced on Start and drained
+	// before scheduler/watcher teardown on Stop.
+	reservedPromptCallbacksMu sync.Mutex
+	reservedPromptCallbacks   *reservedPromptCallbackOwner
 
 	// dispatchingQueued tracks the pre-acceptance reservation for the exact
 	// queued message handed to an async worker. acceptedQueuedDispatch keeps
@@ -927,6 +985,7 @@ func NewService(
 		messageQueue:                 msgQueue,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
+		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
 	}
@@ -1600,9 +1659,44 @@ func (s *Service) resolveReservedPromptTurn(sessionID, turnID string, accepted b
 	s.reservedPromptTurns.CompareAndDelete(sessionID, reservation)
 	callbacks := reservation.resolve(accepted)
 	for _, callback := range callbacks {
-		go callback()
+		if callback.owner != nil {
+			callback.owner.launch(callback.run)
+		}
 	}
 	return true
+}
+
+func (s *Service) deferReservedPromptCallback(
+	reservation *reservedPromptTurn,
+	callback func(context.Context),
+) bool {
+	if reservation == nil || callback == nil {
+		return false
+	}
+	s.reservedPromptCallbacksMu.Lock()
+	owner := s.reservedPromptCallbacks
+	if owner == nil {
+		owner = newReservedPromptCallbackOwner()
+		s.reservedPromptCallbacks = owner
+	}
+	s.reservedPromptCallbacksMu.Unlock()
+	return reservation.deferUntilResolved(reservedPromptCallback{owner: owner, run: callback})
+}
+
+func (s *Service) resetReservedPromptCallbacks() {
+	next := newReservedPromptCallbackOwner()
+	s.reservedPromptCallbacksMu.Lock()
+	previous := s.reservedPromptCallbacks
+	s.reservedPromptCallbacks = next
+	s.reservedPromptCallbacksMu.Unlock()
+	previous.stop()
+}
+
+func (s *Service) stopReservedPromptCallbacks() {
+	s.reservedPromptCallbacksMu.Lock()
+	owner := s.reservedPromptCallbacks
+	s.reservedPromptCallbacksMu.Unlock()
+	owner.stop()
 }
 
 // completeTurnForSession closes any open turn for the session.
@@ -1937,6 +2031,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	s.logger.Info("starting orchestrator service")
+	s.resetReservedPromptCallbacks()
 	s.resetSendNowWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
@@ -2039,6 +2134,7 @@ func (s *Service) Stop() error {
 
 	// Stop components in reverse order
 	var errs []error
+	s.stopReservedPromptCallbacks()
 
 	if err := s.scheduler.Stop(); err != nil {
 		s.logger.Error("failed to stop scheduler", zap.Error(err))

@@ -20,6 +20,30 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+type reservedPromptCallbackContextKey struct{}
+
+// agentReadyDetachedContext ignores transient event-delivery cancellation but
+// preserves shutdown cancellation for service-owned deferred callbacks.
+func agentReadyDetachedContext(ctx context.Context) context.Context {
+	if owned, _ := ctx.Value(reservedPromptCallbackContextKey{}).(bool); owned {
+		return ctx
+	}
+	return context.WithoutCancel(ctx)
+}
+
+func reservedPromptCallbackContext(
+	ownerCtx context.Context,
+	retryCtx context.Context,
+) (context.Context, context.CancelFunc) {
+	callbackCtx, cancel := context.WithCancel(retryCtx)
+	stopOwnerCancellation := context.AfterFunc(ownerCtx, cancel)
+	callbackCtx = context.WithValue(callbackCtx, reservedPromptCallbackContextKey{}, true)
+	return callbackCtx, func() {
+		stopOwnerCancellation()
+		cancel()
+	}
+}
+
 // handleAgentRunning handles agent running events (user sent input in passthrough mode)
 // This is called when the user sends input to the agent, indicating a new turn started.
 func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEventData) {
@@ -462,7 +486,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			// the unchanged turn and drain its queue.
 			lock.Unlock()
 			guardLocked = false
-			if err := s.waitForCancelInFlight(context.WithoutCancel(ctx), data.SessionID); err != nil {
+			if err := s.waitForCancelInFlight(agentReadyDetachedContext(ctx), data.SessionID); err != nil {
 				// A cancellation error does not make this ready event stale. The
 				// owner may have failed before mutating session/turn state; once the
 				// operation is gone, re-read both below and let this event settle its
@@ -488,7 +512,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		if waitTimeout <= 0 {
 			waitTimeout = detachedClarificationDispatchTimeout + promptFailureCleanupTimeout
 		}
-		waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), waitTimeout)
+		waitCtx, cancel := context.WithTimeout(agentReadyDetachedContext(ctx), waitTimeout)
 		accepted, waitErr := reservation.wait(waitCtx)
 		cancel()
 		lock.Lock()
@@ -502,9 +526,13 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 					zap.Error(waitErr))
 				return
 			}
+			// A later reservation may outlive this callback invocation. Preserve
+			// request values, then attach the lifecycle owner again when it runs.
 			retryCtx := context.WithoutCancel(ctx)
-			deferred := reservation.deferUntilResolved(func() {
-				s.handleAgentReady(retryCtx, data)
+			deferred := s.deferReservedPromptCallback(reservation, func(ownerCtx context.Context) {
+				callbackCtx, cancelCallback := reservedPromptCallbackContext(ownerCtx, retryCtx)
+				defer cancelCallback()
+				s.handleAgentReady(callbackCtx, data)
 			})
 			if !deferred {
 				continue

@@ -213,6 +213,82 @@ func TestStartTurnDropsPromptAfterActiveTurnLookupFailure(t *testing.T) {
 	}
 }
 
+func TestReservedPromptCallbackOwnerCancelsAndDrains(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	svc.resetReservedPromptCallbacks()
+	t.Cleanup(svc.stopReservedPromptCallbacks)
+	reservation := newReservedPromptTurn("turn-callback-owner")
+	entered := make(chan struct{})
+	finished := make(chan struct{})
+	if !svc.deferReservedPromptCallback(reservation, func(ctx context.Context) {
+		close(entered)
+		<-ctx.Done()
+		close(finished)
+	}) {
+		t.Fatal("failed to defer reservation callback")
+	}
+	svc.reservedPromptTurns.Store("session1", reservation)
+	if !svc.resolveReservedPromptTurn("session1", reservation.id, true) {
+		t.Fatal("failed to resolve reservation")
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("reserved callback did not start")
+	}
+
+	stopDone := make(chan struct{})
+	go func() {
+		svc.stopReservedPromptCallbacks()
+		close(stopDone)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("reserved callback did not observe owner cancellation")
+	}
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("reserved callback owner did not drain before returning")
+	}
+}
+
+func TestAgentReadyDetachedContextPreservesReservedCallbackShutdown(t *testing.T) {
+	ownerCtx, cancelOwner := context.WithCancel(context.Background())
+	callbackCtx, cancelCallback := reservedPromptCallbackContext(ownerCtx, context.Background())
+	t.Cleanup(cancelCallback)
+	detached := agentReadyDetachedContext(callbackCtx)
+	cancelOwner()
+	select {
+	case <-detached.Done():
+	case <-time.After(time.Second):
+		t.Fatal("agent-ready detached context discarded callback-owner cancellation")
+	}
+}
+
+func TestReservedPromptCallbackContextCanBeReattachedAfterRetry(t *testing.T) {
+	ownerCtx, cancelOwner := context.WithCancel(context.Background())
+	firstCtx, cancelFirst := reservedPromptCallbackContext(ownerCtx, context.Background())
+	retryCtx := context.WithoutCancel(firstCtx)
+	cancelFirst()
+
+	secondCtx, cancelSecond := reservedPromptCallbackContext(ownerCtx, retryCtx)
+	t.Cleanup(cancelSecond)
+	select {
+	case <-secondCtx.Done():
+		t.Fatal("reattached callback inherited the prior invocation's cancellation")
+	default:
+	}
+
+	cancelOwner()
+	select {
+	case <-secondCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("reattached callback did not preserve owner cancellation")
+	}
+}
+
 // TestStartTurnAdoptsExistingDBTurn covers the dual-creation leak that left
 // zombie turns whenever service.CreateMessage lazily started a turn for an
 // inbound user message and the orchestrator's PromptTask then started another.
