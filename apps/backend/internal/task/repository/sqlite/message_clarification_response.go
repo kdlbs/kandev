@@ -449,6 +449,11 @@ func (r *Repository) claimActiveClarificationBundle(
 	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
 	// A pending ID spanning message types, sessions, or turns is malformed. The
 	// NOT EXISTS guard intentionally makes the whole bundle ineligible to claim.
+	// Detached rows are intentionally eligible: agent_disconnected means the
+	// live waiter is gone, not that the current-turn question was resolved.
+	// The responding marker cannot be stranded by a later terminal transition;
+	// it is replaced with the requested terminal status before this transaction
+	// commits or is rolled back with the transaction.
 	claimAt := r.nowUTC()
 	claimQuery := fmt.Sprintf(`
 		UPDATE task_session_messages
@@ -456,7 +461,6 @@ func (r *Repository) claimActiveClarificationBundle(
 		WHERE %s = ?
 		  AND type = 'clarification_request'
 		  AND COALESCE(%s, '') IN ('', 'pending')
-		  AND %s
 		  AND %s
 		  AND turn_id = (
 			SELECT turn_row.id
@@ -478,7 +482,6 @@ func (r *Repository) claimActiveClarificationBundle(
 		  )
 	`, dialect.JSONSet(drv, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr,
 		nonTerminalSessionPredicate("task_session_messages"),
-		clarificationNotDetachedPredicate(drv),
 		turnAuthorityPredicate(drv, "turn_row"), bundlePendingIDExpr)
 	result, err := tx.ExecContext(ctx, r.db.Rebind(claimQuery), claimAt, pendingID, pendingID)
 	if err != nil {
