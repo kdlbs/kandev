@@ -141,7 +141,52 @@ describe("WorkspaceContentSearch", () => {
     fireEvent.click(resultRows[1]);
     expect(onSelect).toHaveBeenCalledWith(results[1]);
   });
+});
 
+describe("WorkspaceContentSearch in-progress state", () => {
+  it("keeps the searching state visible next to partial results", () => {
+    // Results arrive incrementally, so a populated list can still be growing.
+    render(
+      <WorkspaceContentSearch
+        results={results}
+        isSearching={true}
+        error={null}
+        search="needle"
+        sessionId="session-1"
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByTestId("content-search-result").length).toBeGreaterThan(0);
+    const indicator = screen.getByTestId("content-search-in-progress");
+    expect(indicator).toBeTruthy();
+
+    // CommandList scrolls (max-h-72 overflow-y-auto), so existing in the DOM is
+    // not enough: appended below the groups it drops out of view the moment the
+    // early matches fill the palette. It has to lead the list and stick.
+    const groups = screen.getAllByTestId("content-search-repo-group");
+    expect(indicator.compareDocumentPosition(groups[0])).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(indicator.className).toContain("sticky");
+    expect(indicator.className).toContain("top-0");
+  });
+
+  it("drops the searching state once the search finishes", () => {
+    render(
+      <WorkspaceContentSearch
+        results={results}
+        isSearching={false}
+        error={null}
+        search="needle"
+        sessionId="session-1"
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("content-search-in-progress")).toBeNull();
+  });
+});
+
+describe("WorkspaceContentSearch labels", () => {
   it("uses a non-empty label for a single repository with an empty transport key", () => {
     render(
       <WorkspaceContentSearch

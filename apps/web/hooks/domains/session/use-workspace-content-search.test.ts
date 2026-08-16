@@ -348,5 +348,48 @@ describe("useWorkspaceContentSearch incremental publishing", () => {
     await act(async () => vi.advanceTimersByTimeAsync(500));
     expect(result.current.results).toEqual([primary, extra]);
     expect(result.current.isSearching).toBe(true);
+  it("drops a partial result published by a superseded query", async () => {
+    const staleResult = {
+      repository_name: "",
+      path: "stale.ts",
+      line: 1,
+      column: 1,
+      preview: "stale",
+      match_ranges: [],
+    };
+    const liveResult = {
+      repository_name: "",
+      path: "live.ts",
+      line: 1,
+      column: 1,
+      preview: "live",
+      match_ranges: [],
+    };
+    let resolveStale: ((value: { results: (typeof staleResult)[] }) => void) | undefined;
+    mockSearchWorkspaceContent
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ results: (typeof staleResult)[] }>((resolve) => {
+            resolveStale = resolve;
+          }),
+      )
+      .mockResolvedValue({ results: [liveResult] });
+    const { result, rerender } = renderHook(
+      ({ query }) => useWorkspaceContentSearch({ enabled: true, query, sessionId: "session-1" }),
+      { initialProps: { query: "stale" } },
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+
+    rerender({ query: "live" });
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(result.current.results).toEqual([liveResult]);
+
+    // The superseded query's first attempt lands late. Only promises are
+    // flushed here, so the live query's next attempt cannot mask an overwrite.
+    await act(async () => {
+      resolveStale?.({ results: [staleResult] });
+    });
+
+    expect(result.current.results).toEqual([liveResult]);
   });
 });
