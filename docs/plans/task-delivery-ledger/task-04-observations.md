@@ -125,7 +125,40 @@ a dialect-specific row number will make the idempotency test flap.
 
 ## Results
 
-Pending. Before marking this task done, replace this with every exact command
-actually run and its outcome/count, generated artifact paths, and cleanup or
+**Files changed:** `internal/delivery/observe.go`, `internal/delivery/observe_test.go`,
+`internal/delivery/provider_seed_test.go` (seed helpers reused by later
+tasks' tests), `internal/delivery/models.go` (`Observation`, shared with
+task 03).
+
+**Commands run:**
+- `cd apps/backend && go test -run 'TestCandidates|TestSnapshotsForPair|TestProvidersForPair|TestGitHubPRs|TestGitLabMRs|TestAzureDevOpsPRs' ./internal/delivery/...`
+  → `ok`, 9 subtests pass, 0 fail:
+  `TestCandidates_ExcludesMissingRepositoryAndTask`,
+  `TestCandidates_ExcludesMissingTask`,
+  `TestCandidates_TaskWithNoRepositoryProducesNoRow`,
+  `TestSnapshotsForPair_JoinsThroughSessions`,
+  `TestSnapshotsForPair_NullHeadCommitNormalizesToEmpty`,
+  `TestProvidersForPair_MissingTablesTolerated`,
+  `TestGitHubPRs_MergedAndDetachedFromColumns`,
+  `TestGitLabMRs_MergedFromColumnAndScopeIsProjectPath`,
+  `TestAzureDevOpsPRs_StatusCaseInsensitiveAndUnrecognisedIsNotMerged`.
+- `cd apps/backend && go test ./internal/delivery/...` → `ok`, 99 subtests
+  pass, 0 fail (full-package run, confirms no interaction with tasks 02/03/05/06).
+- `make lint` — clean.
+
+**Acceptance verification:** #1 (candidate discovery, missing-repository
+exclusion, no row for a task with no repository) is covered by the three
+`TestCandidates_*` cases above. #2 (merged GitLab MR found, detached GitHub
+PR not, absent provider table yields zero rows) is covered by
+`TestGitHubPRs_MergedAndDetachedFromColumns`,
+`TestGitLabMRs_MergedFromColumnAndScopeIsProjectPath`, and
+`TestProvidersForPair_MissingTablesTolerated`. #3 (`delivery_ref` tiebreaks)
+lives in `evaluator.go`'s `selectProviderRef`, not `observe.go`, and is
+covered by the `TestClassify*` table cases (task 03's verification run).
+
+**Security/trust and external side-effects:** None — read-only queries
+against existing provider tables; `db.IsMissingTableError` (task 01)
+classifies a missing table as zero rows rather than surfacing a raw driver
+error.
 teardown evidence. Record security/trust and external side-effect boundaries when
 applicable, or explicitly state `None`.

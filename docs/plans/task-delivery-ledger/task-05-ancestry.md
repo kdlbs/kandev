@@ -86,8 +86,43 @@ Skip the probe entirely when `repositories.local_path` is empty or
 
 ## Results
 
-Pending. Before marking this task done, replace this with every exact command
-actually run and its outcome/count, generated artifact paths, and cleanup or
-teardown evidence (including removal of any temporary git fixture). Record
-security/trust and external side-effect boundaries when applicable, or explicitly
-state `None`.
+**Files changed:** `internal/delivery/ancestry.go`, `internal/delivery/ancestry_test.go`.
+(`TestAncestryChecker_CheckoutResolverErrorIsAnAncestryError` was rewritten
+during this feature's Review round 2 to use a valid-looking commit SHA
+instead of the literal string `"HEAD"`, which short-circuited
+`looksLikeCommitSHA` before ever reaching the checkout-resolver call the
+test claimed to cover — the fix also asserts the fake resolver's call count
+to prove invocation.)
+
+**Commands run:**
+- `cd apps/backend && go test ./internal/delivery/... -run TestAncestry -v`
+  → `ok`, 12 subtests pass, 0 fail across the 10 `TestAncestryChecker_*`
+  functions listed in `ancestry_test.go` (some carry sub-cases via `t.Run`).
+  `TestAncestryChecker_PositiveResult` and
+  `TestAncestryChecker_LocalBranchFallbackWhenRemoteTrackingRefMissing` use a
+  real `git init` fixture under `t.TempDir()`; both clean up automatically
+  via `t.TempDir()`'s own teardown, no manual removal needed.
+- `cd apps/backend && go test ./internal/delivery/...` → `ok`, 99 subtests,
+  0 fail (full package).
+- `make lint` — clean.
+
+**Acceptance verification:** #1 (positive ancestor result,
+`ancestor_of_default` basis) — `TestAncestryChecker_PositiveResult`. #2
+(commit not on default branch → no evidence, outcome unchanged) —
+`TestAncestryChecker_NegativeResultIsNotAnError`. #3 (missing checkout /
+absent object / timeout increments the error counter, leaves
+`reached_default_at` NULL, does not fail the evaluation) —
+`TestAncestryChecker_NeitherRefResolvesIsAnError` and
+`TestAncestryChecker_CheckoutResolverErrorIsAnAncestryError`. #4 (git
+command via `subproc.NewGitCommand` under `background` class, no raw
+`exec.Command("git", ...)`) — confirmed directly in `ancestry.go`: both git
+invocations go through `subproc.RunGitAfterAcquire(ctx, subproc.GitBackground,
+...)` wrapping `subproc.NewGitCommand`; `grep -n "exec.Command" ancestry.go`
+returns no matches.
+
+**Security/trust and external side-effects:** None beyond the git
+subprocess itself, which is read-only (`rev-parse`, `merge-base
+--is-ancestor`) and admission-classified per
+`docs/decisions/2026-08-02-class-aware-git-subprocess-admission.md`. Test
+fixtures are ordinary `t.TempDir()` git repos, cleaned up by the Go test
+runner.

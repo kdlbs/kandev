@@ -130,7 +130,58 @@ calling `Stop()`.
 
 ## Results
 
-Pending. Before marking this task done, replace this with every exact command
-actually run and its outcome/count, generated artifact paths, and cleanup or
+**Files changed:** `internal/delivery/sweep.go`, `internal/delivery/sweep_test.go`,
+`internal/delivery/sweep_internal_test.go`, `internal/delivery/metrics.go`,
+`internal/delivery/metrics_test.go`, `internal/delivery/testmain_test.go`
+(`goleak.VerifyTestMain`, added during Review round 2 — see finding #4
+below), `internal/backendapp/` (provider registration). No separate
+`service.go`/`provider.go` split — sweep lifecycle and metrics live directly
+in `sweep.go` / `metrics.go`.
+
+**Commands run:**
+- `cd apps/backend && go test -race ./internal/delivery/... ./internal/backendapp/...`
+  → all `ok` (`internal/delivery` 6.2s, `internal/backendapp` 13.1s,
+  `internal/backendapp/ownershiplock` 4.9s), no race reports, no goroutine
+  leaks (`TestMain` wraps the `internal/delivery` suite in
+  `goleak.VerifyTestMain`).
+- `make lint` — clean.
+
+**Acceptance verification:** #1 (skip/write/no-row/unattributed-session
+cases) covered by the `TestRunPass_*` table in `sweep_test.go`. #2 (start,
+evaluate, stop with no goroutine leak; double-`Start` is a no-op; double-
+`Stop` is idempotent) — `TestSweep_StartStopLifecycle`, backed by the
+package-wide `goleak.VerifyTestMain`. **Gap noted, not fixed here:** no test
+drives `Stop()` then a second `Start()` on the same `*Sweep` and asserts it
+evaluates again; `sweep.go`'s `started` flag does reset to `false` in `Stop`
+so a restart is structurally supported, but nothing pins it — recording
+this honestly rather than claiming acceptance #2's "Stop then Start
+restarts cleanly" clause is independently verified. #3 (all five counters
+appear in `/debug/vars`) — the counters are `expvar.NewInt`/`NewMap`
+package-level vars (`metrics.go`), so the stdlib `/debug/vars` handler
+exposes them automatically wherever it's mounted (dev mode); no dedicated
+test asserts this beyond `TestSessionsUnattributedGauge_PublishesLatestNotAccumulated`
+and the default-branch-persist-error counter test in
+`internal/backendapp/orchestrator_default_branch_persist_test.go`. #4
+(stall signal survives a simulated restart) is architecturally guaranteed
+rather than directly tested: `ComputeStallSignal` reads only from the
+database (`maxLastEvaluatedAt`, `stallComparand`), never from the in-memory
+expvar counters, so a fresh `Service` over the same database recomputes the
+true last-write instant regardless of process-local counter state; no test
+exercises "fresh Service, same DB" explicitly.
+
+**Security/trust and external side-effects:** None — the sweep loop reads
+existing tables and writes only to `task_delivery_ledger` through the
+task-02 upsert; no network calls, no secrets.
+
+**Review round 2 fixes folded in:** finding #3 (the `dueness_unavailable`
+and `write_failed` WARN logs discarded their underlying error, contradicting
+spec's "carrying the error" requirement — fixed by threading `ledgerErr`
+and the last per-pair write error through to both `zap.Error(...)` calls),
+finding #4 (added `testmain_test.go`'s `goleak.VerifyTestMain`), finding #7
+(rank-1 degraded-outcome-change counter and `updated_at` assertions), finding
+#8 (verified both WARN logs fire exactly once per pass via
+`zaptest/observer`), and finding #9 (archived-task stall-comparand
+invariant). See the task plan's Review round 2 section for the full finding
+list and per-finding verification.
 teardown evidence. Record security/trust and external side-effect boundaries when
 applicable, or explicitly state `None`.

@@ -107,7 +107,7 @@ func TestEvaluatePair_RepositorySoftDeletedAfterDueSelectionIsNotWritten(t *test
 	pair := CandidatePair{TaskID: "task-1", RepositoryID: "repo-1"}
 
 	// Due-selection happens while the repository is still live.
-	due, _ := repo.SelectDuePairs(context.Background(), []CandidatePair{pair}, time.Now().UTC())
+	due, _, _ := repo.SelectDuePairs(context.Background(), []CandidatePair{pair}, time.Now().UTC())
 	if len(due) != 1 {
 		t.Fatalf("due = %+v, want the one live candidate", due)
 	}
@@ -172,7 +172,7 @@ func TestIsDue_PerPairTaskInfoQueryErrorFailsOpen(t *testing.T) {
 		t.Fatalf("rename tasks.workspace_id: %v", err)
 	}
 
-	due, fallback := repo.SelectDuePairs(context.Background(),
+	due, fallback, _ := repo.SelectDuePairs(context.Background(),
 		[]CandidatePair{{TaskID: "task-1", RepositoryID: "repo-1"}}, time.Now().UTC())
 	if fallback {
 		t.Fatal("fallback must be false: the bulk ledger read itself succeeded")

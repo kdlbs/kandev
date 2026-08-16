@@ -147,6 +147,65 @@ the fix landing, not a regression: those runs were never successes.
 
 ## Results
 
+**Files changed:** `internal/office/repository/sqlite/base_migrations.go`
+(`outcome` column, nullable, no default), `internal/office/repository/sqlite/run_outcome_migration_test.go`,
+`internal/office/repository/sqlite/agent_summary.go` + `agent_summary_test.go`,
+`internal/office/models/models.go` (`Run.Outcome *string`),
+`internal/office/service/run.go` (the 8-value `RunOutcome*` vocabulary),
+`internal/office/service/scheduler_runs.go` (`FinishRun`/`FailRun`/
+`transitionRunTerminal`), `internal/office/service/scheduler_integration.go`
+(the six non-subscriber `FinishRun` call sites), `internal/office/service/event_subscribers.go`
+(the two `processed` call sites), `internal/office/dashboard/agent_summary.go`
++ `agent_summary_test.go`.
+
+**Commands run:**
+- `cd apps/backend && go test ./internal/office/...` → all 23 test-bearing
+  packages `ok`, 0 fail (`internal/office/repository/sqlite`,
+  `internal/office/service`, `internal/office/dashboard`,
+  `internal/office/scheduler`, and 19 others; 4 sub-packages report
+  `[no test files]` and are not part of this task's scope).
+- `make lint` — clean.
+
+**Acceptance verification:** #1 (each `FinishRun` path writes its
+documented outcome, `runs.status` stays `finished`) — confirmed by reading
+every call site directly: `scheduler_integration.go` covers
+`agent_inactive`, `idle_skipped`, `task_tree_held`, `checkout_error`,
+`checkout_unavailable`, `budget_blocked`, `no_agent_launched` (7 of the 8
+values), `event_subscribers.go` covers `processed` (the 8th, written by the
+agent-completed subscriber). Review round 2's `TestFailRun_WritesFailedStatusAndNullOutcome`
+(added this Build round, finding #1) additionally pins the failed path
+(`status='failed'`, `outcome IS NULL`) at the service level, since
+`TestFinishAndFailRun` had never actually called `FailRun`. #2 (migration
+applies to a pre-existing DB, `outcome` reads NULL on every pre-existing
+row, replays cleanly) — `TestRunOutcomeMigration_AddsNullableColumn`. #3
+(one processed + one budget-blocked + one failed + one pre-activation NULL
+run → `succeeded=1, skipped=1, failed=1, unclassified=1`) —
+`TestRunCountsByDayForAgent_BucketsStatuses` and
+`TestGetAgentSummary_RunActivityBuckets_SkippedAndUnclassified`. #4
+(`Total` sums all five buckets in both DTO builders) — read
+`internal/office/dashboard/agent_summary.go` and
+`internal/office/repository/sqlite/agent_summary.go` directly: both compute
+`Total = Succeeded + Skipped + Unclassified + Failed + Other`.
+
+**Expected success-rate drop:** confirmed in the task's own framing — agents
+whose runs were previously miscounted (budget-blocked, checkout-unavailable,
+etc. silently landing in `succeeded`) will show a lower `AgentSuccessRateDay`
+after this lands. This is the fix taking effect, not a regression: those
+runs were never real successes.
+
+**Security/trust and external side-effects:** None — new nullable column
+and read-only aggregation queries; no secrets, no network calls.
+
+**Lower-priority item folded in (TEST-002, Review round 2):**
+`TestTransitionRunTerminal_LastWriterWinsOnStatusAndOutcome`
+(`internal/office/service/scheduler_runs_test.go`) drives both orderings of
+two terminal callers (`FinishRun` then `FailRun`, and the reverse) on the
+same run row and asserts the row always reflects the later call's status
+and outcome together — pinning spec:2130-2132's "set in one statement, can
+never disagree" contract, which `transitionRunTerminal`'s single
+`UPDATE ... SET status = ?, outcome = ?, finished_at = ?` already
+guarantees but nothing previously tested directly.
+
 Pending. Before marking this task done, replace this with every exact command
 actually run and its outcome/count, generated artifact paths, and cleanup or
 teardown evidence. Record security/trust and external side-effect boundaries when

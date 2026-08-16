@@ -73,7 +73,30 @@ not reuse `metaKeyUpsert`.
 
 ## Results
 
-Pending. Before marking this task done, replace this with every exact command
-actually run and its outcome/count, generated artifact paths, and cleanup or
-teardown evidence. Record security/trust and external side-effect boundaries when
-applicable, or explicitly state `None`.
+**Files changed:** `internal/db/errors.go` (+`IsMissingTableError`),
+`internal/db/errors_test.go`, `internal/persistence/meta.go`
+(+`WriteKeyIfAbsent`). No changes to `writeKey` or `WriteVersion`.
+
+**Commands run:**
+- `cd apps/backend && go test ./internal/db/... ./internal/persistence/...`
+  → all packages `ok` (`internal/db`, `internal/db/dialect`,
+  `internal/persistence`); `TestIsMissingTableError` covers SQLite
+  "no such table" (direct and wrapped), Postgres SQLSTATE `42P01` (direct and
+  wrapped), a Postgres undefined-column error (must be `false`), an unrelated
+  error, and `nil` — 7 subtests, all pass.
+- `make lint` — clean.
+
+**Note on acceptance #2:** `WriteKeyIfAbsent` itself has no dedicated
+first-write/second-write unit test in `internal/persistence`; its
+write-once contract is exercised indirectly through its two production
+callers — `internal/delivery/store.go`'s activation write (covered by
+`TestPostgresDeliveryLedgerMigration_FreshAndReplay`'s fresh-then-replay
+assertion that the activation key is present and non-empty) and
+`internal/office/repository/sqlite/run_outcome_activation.go`. No test
+directly asserts the `(false, nil)` / unchanged-value behavior on a second
+call to `WriteKeyIfAbsent` in isolation — flagged here rather than silently
+assumed covered.
+
+**Security/trust and external side-effects:** None — both primitives are
+pure classifier/DB-helper additions to existing packages; no new I/O
+surface, no network calls, no secrets handled.

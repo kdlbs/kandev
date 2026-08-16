@@ -257,6 +257,7 @@ func TestUpsert_EqualRankOneOutcomeChangeTracksInputsNotSilent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("first upsert (degraded pr_merge): %v", err)
 	}
+	before := readLedgerRow(t, db, taskID, repoID)
 
 	// Detached, ahead=0 everywhere, still degraded: re-evaluates to
 	// no_delivery_observed at the same rank 1.
@@ -281,6 +282,14 @@ func TestUpsert_EqualRankOneOutcomeChangeTracksInputsNotSilent(t *testing.T) {
 	row := readLedgerRow(t, db, taskID, repoID)
 	if row.Outcome.String != string(delivery.OutcomeNoDeliveryObserved) || row.Rank != 1 {
 		t.Fatalf("row = %+v, want no_delivery_observed at rank 1", row)
+	}
+	// Review round 2, finding #7: the original version of this test never
+	// checked updated_at, so a regression that left it frozen (the same
+	// bug updatedAtExpr's IS DISTINCT FROM comparison exists to prevent)
+	// would have gone unnoticed for exactly the scenario its own comment
+	// calls out — an outcome change with no rank change.
+	if !row.UpdatedAt.After(before.UpdatedAt) {
+		t.Fatalf("updated_at = %v, want after %v (an outcome change at unchanged rank must still advance it)", row.UpdatedAt, before.UpdatedAt)
 	}
 }
 
