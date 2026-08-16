@@ -51,13 +51,17 @@ function mergeFetchedTask(
   fetchStart: KanbanTask | undefined,
   statusSummaryInvalidated: boolean,
 ): KanbanTask {
+  // Production snapshot payloads can be surfaced through read-only objects.
+  // Merge into a fresh task copy before applying any live-field backfills.
+  const merged = { ...mapped };
+
   if (hasNewerLivePlacement(existing, fetchStart)) {
     // A live task.updated/task.moved event arrived after this request
     // started. Keep the newer placement instead of moving the card
     // back to the location captured by the older snapshot response.
-    mapped.workflowId = existing.workflowId;
-    mapped.workflowStepId = existing.workflowStepId;
-    mapped.position = existing.position;
+    merged.workflowId = existing.workflowId;
+    merged.workflowStepId = existing.workflowStepId;
+    merged.position = existing.position;
   }
 
   // Multiple mounted surfaces can refresh the same workflow at once.
@@ -65,31 +69,31 @@ function mergeFetchedTask(
   // afterwards, so do not let an older snapshot roll the status
   // projection back to a lower revision.
   if (statusSummaryInvalidated && !hasNewerLiveStatusSummary(existing, fetchStart)) {
-    mapped.statusSummary = undefined;
+    merged.statusSummary = undefined;
   } else {
     const existingRevision = existing.statusSummary?.revision;
-    const mappedRevision = mapped.statusSummary?.revision;
+    const mappedRevision = merged.statusSummary?.revision;
     if (existingRevision !== undefined && existingRevision > (mappedRevision ?? -1)) {
-      mapped.statusSummary = existing.statusSummary;
+      merged.statusSummary = existing.statusSummary;
     }
     // An equal revision can still carry a newer queued-prompt count. Preserve
     // the freshest status projection while keeping the revision guard above.
-    mapped.statusSummary = pickFreshestStatusSummary(mapped.statusSummary, existing.statusSummary);
+    merged.statusSummary = pickFreshestStatusSummary(merged.statusSummary, existing.statusSummary);
   }
-  mapped.primarySessionId = mapped.primarySessionId || existing.primarySessionId;
-  mapped.primarySessionState = mapped.primarySessionState || existing.primarySessionState;
+  merged.primarySessionId = merged.primarySessionId || existing.primarySessionId;
+  merged.primarySessionState = merged.primarySessionState || existing.primarySessionState;
   // Autopilot is immutable after creation. Keep the cached value when
   // an older or partial snapshot does not include the field.
-  mapped.autopilot = mapped.autopilot ?? existing.autopilot;
+  merged.autopilot = merged.autopilot ?? existing.autopilot;
   // A task.updated event can set or clear this marker while the snapshot is
   // in flight. Preserve that newer live value instead of rolling it back.
-  if (mapped.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
-    mapped.autoStartFailed = existing.autoStartFailed;
+  if (merged.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
+    merged.autoStartFailed = existing.autoStartFailed;
   }
   // Executor fields are omitted from lightweight task payloads. Preserve the
   // cached executor projection when this snapshot does not include it.
-  preserveOmittedExecutorFields(mapped, existing);
-  return mapped;
+  preserveOmittedExecutorFields(merged, existing);
+  return merged;
 }
 
 function mergeSnapshotTasks(
