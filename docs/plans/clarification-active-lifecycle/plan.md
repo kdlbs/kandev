@@ -382,6 +382,9 @@ All locally available task gates passed; environment-gated parity also passed in
   turn. A second suggestion was already covered by `clearPendingLocked`; explicit restart coverage now
   proves stale dismissal clears and persists an aggregate-only restored pending action. The three
   affected web suites (110 tests) and full status-summary package pass.
+- Exact-head Codex review makes that sidebar fallback use durable message creation order rather than
+  WebSocket arrival order. A delayed predecessor-turn frame can no longer hide the active current-turn
+  clarification; the five affected web suites (127 tests), typecheck, and zero-warning focused lint pass.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

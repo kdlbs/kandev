@@ -74,18 +74,35 @@ function clarificationMessagesInScope(
   return messages.filter((message) => message.turn_id === scope.currentTurnId);
 }
 
+function newestMessageTurnId(messages: readonly Message[]): string | undefined {
+  let newest: Message | undefined;
+  for (const message of messages) {
+    if (!message.turn_id) continue;
+    if (!newest) {
+      newest = message;
+      continue;
+    }
+    const createdAt = durableTurnTimestampKey(message.created_at);
+    const newestCreatedAt = durableTurnTimestampKey(newest.created_at);
+    if (createdAt > newestCreatedAt || (createdAt === newestCreatedAt && message.id > newest.id)) {
+      newest = message;
+    }
+  }
+  return newest?.turn_id;
+}
+
 export function findPendingClarification(
   messages?: readonly Message[] | null,
   scope?: PendingClarificationScope,
 ): Message | null {
   if (!messages?.length) return null;
   const scoped = clarificationMessagesInScope(messages, scope);
-  // Sidebar callers do not have durable turn history. The newest message's
-  // turn still provides a safe boundary so detached requests from older turns
-  // cannot re-arm the task indicator.
-  const latestTurnId = scoped[scoped.length - 1]?.turn_id;
+  // Sidebar callers do not have durable turn history. Use persisted message
+  // order instead of WebSocket arrival order so a delayed predecessor event
+  // cannot hide the current request or re-arm an older one.
+  const latestTurnId = newestMessageTurnId(scoped);
   for (let i = scoped.length - 1; i >= 0; i--) {
-    if (latestTurnId && scoped[i].turn_id !== latestTurnId) break;
+    if (latestTurnId && scoped[i].turn_id !== latestTurnId) continue;
     if (scoped[i].type !== "clarification_request") continue;
     if (isPendingClarificationMessage(scoped[i])) return scoped[i];
   }

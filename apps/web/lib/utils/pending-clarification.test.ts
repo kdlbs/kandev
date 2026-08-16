@@ -100,7 +100,12 @@ describe("hasPendingClarification turn scoping", () => {
           type: "clarification_request",
           metadata: { status: "pending", agent_disconnected: true },
         }),
-        message({ id: "current", turn_id: "t2", type: "message" }),
+        message({
+          id: "current",
+          turn_id: "t2",
+          type: "message",
+          created_at: "2026-05-02T00:00:01Z",
+        }),
       ]),
     ).toBe(false);
   });
@@ -119,6 +124,7 @@ describe("hasPendingClarification turn scoping", () => {
           turn_id: "t2",
           type: "clarification_request",
           metadata: { status: "pending" },
+          created_at: "2026-05-02T00:00:01Z",
         }),
       ]),
     ).toBe(true);
