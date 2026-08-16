@@ -393,6 +393,9 @@ All locally available task gates passed; environment-gated parity also passed in
 - Exact-head Claude review replaces a watchdog test's hot polling loop with a bounded eventual assertion
   and documents why the legacy event path intentionally relies on the repository's current-turn SQL
   authority guard. Both focused orchestrator regressions pass.
+- The next Claude and CodeRabbit pass keeps a stale-dismiss event from clearing a different pending
+  identity in event-only projector mode and makes an active-turn lookup error outrank any partial turn
+  returned alongside it. Both review regressions pass.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

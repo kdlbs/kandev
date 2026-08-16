@@ -21,11 +21,23 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 	case events.MessageAdded, events.MessageUpdated, events.MessageDeleted:
 		return p.applyMessageEventLocked(state, eventType, data)
 	case events.ClarificationAnswered, events.ClarificationPrimaryAnswered,
-		events.ClarificationCancelled, events.ClarificationStaleDismissed:
+		events.ClarificationCancelled:
 		if p.loadPendingActions != nil {
 			return false
 		}
 		return p.clearPendingLocked(state, stringField(data, "session_id"))
+	case events.ClarificationStaleDismissed:
+		if p.loadPendingActions != nil {
+			return false
+		}
+		sessionID := stringField(data, "session_id")
+		dismissedID := stringField(data, "pending_id")
+		if dismissedID != "" {
+			if current, ok := state.pendingRequests[sessionID]; ok && current.pendingID != dismissedID {
+				return false
+			}
+		}
+		return p.clearPendingLocked(state, sessionID)
 	case events.PermissionRequestReceived:
 		if p.loadPendingActions != nil {
 			return false

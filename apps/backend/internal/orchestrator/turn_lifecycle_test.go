@@ -52,6 +52,7 @@ type failingReservedTurnRollback struct {
 type failingActiveTurnLookup struct {
 	TurnService
 	err        error
+	turn       *models.Turn
 	startCalls int
 }
 
@@ -83,7 +84,7 @@ func (s failingReservedTurnRollback) RollbackReservedTurn(context.Context, strin
 }
 
 func (s *failingActiveTurnLookup) GetActiveTurn(context.Context, string) (*models.Turn, error) {
-	return nil, s.err
+	return s.turn, s.err
 }
 
 func (s *failingActiveTurnLookup) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
@@ -195,7 +196,11 @@ func newTurnLifecycleTestService(t *testing.T) (*Service, *sqliterepo.Repository
 func TestStartTurnDropsPromptAfterActiveTurnLookupFailure(t *testing.T) {
 	svc, repo := newTurnLifecycleTestService(t)
 	lookupErr := errors.New("active turn read failed")
-	failing := &failingActiveTurnLookup{TurnService: svc.turnService, err: lookupErr}
+	failing := &failingActiveTurnLookup{
+		TurnService: svc.turnService,
+		err:         lookupErr,
+		turn:        &models.Turn{ID: "partial-active-turn"},
+	}
 	svc.turnService = failing
 
 	turnID, created := svc.startTurnForSessionWithOwnership(context.Background(), "session1")

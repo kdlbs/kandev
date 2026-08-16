@@ -641,6 +641,36 @@ func TestProjectorStaleDismissedClearsRestoredPendingAction(t *testing.T) {
 	}
 }
 
+func TestProjectorStaleDismissedKeepsDifferentPendingClarification(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-stale-dismiss-current"
+	const sessionID = "session-stale-dismiss-current"
+
+	publishSessionState(t, eventBus, taskID, sessionID, nil)
+	publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+		"task_id":        taskID,
+		"workspace_id":   "workspace-1",
+		"session_id":     sessionID,
+		"type":           messageTypeClarificationRequest,
+		"requests_input": true,
+		"metadata": map[string]interface{}{
+			"status":     statusPending,
+			"pending_id": "pending-current",
+		},
+	})
+	publishProjectorEvent(t, eventBus, events.ClarificationStaleDismissed, events.ClarificationStaleDismissed, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"session_id":   sessionID,
+		"pending_id":   "pending-older",
+	})
+
+	got := store.summary(taskID)
+	if got == nil || got.PendingAction != pendingClarification {
+		t.Fatalf("pending action after different stale dismissal = %+v, want clarification", got)
+	}
+}
+
 func TestProjectorKeepsPRsWithTheSameRepositoryDistinct(t *testing.T) {
 	_, store, eventBus, _, _ := newProjectorTest(t)
 	const taskID = "task-pr-identity"

@@ -1600,18 +1600,16 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 		}
 	}
 
-	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); turn != nil {
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		return "", false, nil, fmt.Errorf("look up active turn: %w", err)
+	}
+	if turn != nil {
 		s.activeTurns.Store(sessionID, turn.ID)
 		s.bindAcceptedDispatchTurn(sessionID, turn.ID)
 		return turn.ID, false, nil, nil
-	} else if err != nil {
-		return "", false, nil, fmt.Errorf("look up active turn: %w", err)
 	}
 
-	var (
-		turn *models.Turn
-		err  error
-	)
 	if reserve {
 		turn, err = s.turnService.ReserveTurn(ctx, sessionID, recovery)
 	} else {
