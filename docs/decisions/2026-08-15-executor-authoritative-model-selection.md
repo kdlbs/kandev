@@ -116,4 +116,3 @@ That policy can select another configured execution profile after a runtime erro
 4. **Rewrite the saved profile model.** Rejected because one executor observation must not change the user choice for all executors.
 5. **Rely on configuration copying only.** Rejected because copied files cannot guarantee provider authorization or equal runtime state.
 6. **Show only an ephemeral toast.** Rejected because the explanation must survive reload and remain in the task history.
-
