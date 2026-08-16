@@ -36,14 +36,9 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
 	}
-	sessionIDs := make([]string, 0, len(sessions))
-	for _, session := range sessions {
-		sessionIDs = append(sessionIDs, session.ID)
-	}
-	pendingActionsBySession, pendingRevisionsBySession, pendingErr :=
-		h.service.GetPendingActionProjectionsForSessions(ctx, sessionIDs)
-	if pendingErr != nil {
-		h.logger.Error("get task session pending actions failed", zap.Error(pendingErr))
+	sessionDTOs, projectionErr := h.taskSessionSummariesWithPendingActions(ctx, sessions)
+	if projectionErr != nil {
+		h.logger.Error("get task session pending actions failed", zap.Error(projectionErr))
 		return ws.NewError(
 			msg.ID,
 			msg.Action,
@@ -51,20 +46,6 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 			"Failed to load task session pending actions",
 			nil,
 		)
-	}
-	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
-	for _, session := range sessions {
-		summary := dto.FromTaskSessionSummary(session)
-		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
-		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
-		if isInputCapableSession(session) {
-			summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
-		}
-		summary.PendingActionRevision = pendingActionRevisionPtr(
-			session.ID,
-			pendingRevisionsBySession,
-		)
-		sessionDTOs = append(sessionDTOs, summary)
 	}
 	resp := dto.ListTaskSessionSummariesResponse{
 		Sessions: sessionDTOs,

@@ -292,13 +292,27 @@ func (s *Store) respond(
 		}
 		if pending.deliveryConfirmationStarted {
 			pending.mu.Unlock()
-			<-confirmationDone
-			return clarificationDeliveryConfirmationResult(pending)
+			return s.waitForStartedDeliveryConfirmation(ctx, pending, confirmationDone)
 		}
 		pending.deliveryAbandoned = true
 		pending.mu.Unlock()
 		s.deletePendingIfCurrent(pendingID, pending)
 		return fmt.Errorf("wait for clarification delivery confirmation: %w", waitCtx.Err())
+	}
+}
+
+func (s *Store) waitForStartedDeliveryConfirmation(
+	ctx context.Context,
+	pending *PendingClarification,
+	confirmationDone <-chan struct{},
+) error {
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.timeout)
+	defer cancel()
+	select {
+	case <-confirmationDone:
+		return clarificationDeliveryConfirmationResult(pending)
+	case <-finishCtx.Done():
+		return fmt.Errorf("wait for started clarification delivery confirmation: %w", finishCtx.Err())
 	}
 }
 

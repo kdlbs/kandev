@@ -3,6 +3,7 @@ package clarification
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -225,4 +226,61 @@ func TestRespondWithDeliveryConfirmationFinishesStartedConfirmationAfterDeadline
 	if err := <-waitDone; err != nil {
 		t.Fatalf("WaitForResponse: %v", err)
 	}
+}
+
+func TestRespondWithDeliveryConfirmationBoundsStartedConfirmationAfterDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := NewStore(time.Second)
+		id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		confirmationStarted := make(chan struct{})
+		releaseConfirmation := make(chan struct{})
+		var releaseOnce sync.Once
+		release := func() { releaseOnce.Do(func() { close(releaseConfirmation) }) }
+		defer release()
+		waitDone := make(chan error, 1)
+		respondDone := make(chan error, 1)
+		go func() {
+			_, err := s.WaitForResponse(context.Background(), id)
+			waitDone <- err
+		}()
+		go func() {
+			respondDone <- s.RespondWithDeliveryConfirmation(ctx, id, &Response{}, func() error {
+				close(confirmationStarted)
+				<-releaseConfirmation
+				return nil
+			})
+		}()
+
+		synctest.Wait()
+		select {
+		case <-confirmationStarted:
+		default:
+			t.Fatal("waiter did not start delivery confirmation")
+		}
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		select {
+		case err := <-respondDone:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("RespondWithDeliveryConfirmation error = %v, want store deadline", err)
+			}
+		default:
+			t.Fatal("RespondWithDeliveryConfirmation blocked after its finish timeout")
+		}
+		select {
+		case err := <-waitDone:
+			t.Fatalf("WaitForResponse returned before confirmation finished: %v", err)
+		default:
+		}
+
+		release()
+		synctest.Wait()
+		if err := <-waitDone; err != nil {
+			t.Fatalf("WaitForResponse: %v", err)
+		}
+	})
 }

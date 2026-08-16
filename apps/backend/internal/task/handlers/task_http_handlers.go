@@ -472,30 +472,15 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return
 	}
-	ids := make([]string, 0, len(sessions))
-	for _, session := range sessions {
-		ids = append(ids, session.ID)
-	}
-	pendingActionsBySession, pendingRevisionsBySession, pendingErr :=
-		h.service.GetPendingActionProjectionsForSessions(ctx, ids)
-	if pendingErr != nil {
-		h.logger.Error("get task session pending actions failed", zap.Error(pendingErr))
+	sessionDTOs, projectionErr := h.taskSessionSummariesWithPendingActions(ctx, sessions)
+	if projectionErr != nil {
+		h.logger.Error("get task session pending actions failed", zap.Error(projectionErr))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load task session pending actions"})
 		return
 	}
-	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
-	for _, session := range sessions {
-		summary := dto.FromTaskSessionSummary(session)
-		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
-		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
-		if isInputCapableSession(session) {
-			summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
-		}
-		summary.PendingActionRevision = pendingActionRevisionPtr(
-			session.ID,
-			pendingRevisionsBySession,
-		)
-		sessionDTOs = append(sessionDTOs, summary)
+	ids := make([]string, 0, len(sessionDTOs))
+	for _, summary := range sessionDTOs {
+		ids = append(ids, summary.ID)
 	}
 	// Resolve the per-session tool_call counts so the frontend can render
 	// the "ran N commands" segment without fetching every session's full

@@ -39,6 +39,7 @@ type messageOrchestratorWithCancellation struct {
 type cancellationListRepo struct {
 	mockRepository
 	sessionsByTask []*models.TaskSession
+	pendingActions map[string]models.TaskPendingAction
 	pendingErr     error
 }
 
@@ -54,7 +55,7 @@ func (r *cancellationListRepo) GetPendingActionsBySessionIDs(
 	context.Context,
 	[]string,
 ) (map[string]models.TaskPendingAction, error) {
-	return map[string]models.TaskPendingAction{}, r.pendingErr
+	return r.pendingActions, r.pendingErr
 }
 
 func (o *orchestratorWithCancellation) CancellationPending(string) bool {
@@ -176,6 +177,41 @@ func TestListTaskSessionsFailsWhenPendingProjectionFails(t *testing.T) {
 		require.NoError(t, response.ParsePayload(&body))
 		require.Equal(t, string(ws.ErrorCodeInternalError), body.Code)
 	})
+}
+
+func TestTaskSessionSummariesWithPendingActionsCentralizesInputGating(t *testing.T) {
+	sessions := []*models.TaskSession{
+		{ID: "waiting", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput},
+		{ID: "running", TaskID: "task-1", State: models.TaskSessionStateRunning},
+		{ID: "completed", TaskID: "task-1", State: models.TaskSessionStateCompleted},
+	}
+	repo := &cancellationListRepo{
+		mockRepository: mockRepository{sessions: map[string]*models.TaskSession{}},
+		sessionsByTask: sessions,
+		pendingActions: map[string]models.TaskPendingAction{
+			"waiting":   models.TaskPendingActionClarification,
+			"running":   models.TaskPendingActionPermission,
+			"completed": models.TaskPendingActionClarification,
+		},
+	}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo,
+		Messages: repo, Turns: repo, Sessions: repo, GitSnapshots: repo,
+		RepoEntities: repo, Executors: repo, Environments: repo,
+		TaskEnvironments: repo, Reviews: repo,
+	}, nil, newTestLogger(t), service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: newTestLogger(t)}
+
+	summaries, err := h.taskSessionSummariesWithPendingActions(context.Background(), sessions)
+	require.NoError(t, err)
+	require.Len(t, summaries, 3)
+	require.Equal(t, string(models.TaskPendingActionClarification), *summaries[0].PendingAction)
+	require.Equal(t, string(models.TaskPendingActionPermission), *summaries[1].PendingAction)
+	require.Nil(t, summaries[2].PendingAction)
+	for _, summary := range summaries {
+		require.NotNil(t, summary.PendingActionRevision)
+		require.NotEmpty(t, summary.PendingActionRevision.Epoch)
+	}
 }
 
 func TestWSListTaskSessions_StampsCancellationPending(t *testing.T) {

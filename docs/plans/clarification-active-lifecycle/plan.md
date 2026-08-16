@@ -363,9 +363,12 @@ All locally available task gates passed; environment-gated parity also passed in
 - Exact-head Codex review makes process epochs opaque UUID generations instead of lexically ordered
   timestamps. The frontend accepts an unseen changed generation, retains a bounded set of superseded
   epochs, and rejects their delayed frames even when the new epoch sorts lower.
+- Exact-head CodeRabbit review bounds a responder waiting for an already-started durable confirmation
+  while leaving the waiter to retain its eventual result, and consolidates HTTP and WebSocket session
+  summary projections behind one helper.
 - This remediation batch passed all affected backend package suites (backend app, clarification,
   MCP handlers, orchestrator, task handlers, SQLite repository, and task service), focused race
-  tests with three final repetitions, 37 focused web tests, the superseded-clarification E2E
+  tests with three final repetitions, 39 focused web tests, the superseded-clarification E2E
   regression, web typecheck, zero-warning frontend and Go changed-lines lint, format and i18n
   checks, and both public-doc validators.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
@@ -420,7 +423,7 @@ share projection semantics; task 05 spans all layers. Waves do not authorize sub
 ## Out of scope
 
 - Direct cleanup/backfill of the main instance database.
-- Schema or task-summary wire-shape changes.
+- Schema changes or unrelated task-summary wire-shape changes.
 - Clarification UI redesign or new user-facing copy.
 - Historical notification retraction.
 - Permission lifecycle changes beyond shared pending-owner navigation.
