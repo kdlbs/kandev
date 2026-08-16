@@ -2,12 +2,24 @@ package clarification
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
+
+func (h *Handlers) confirmLiveClarificationResponseDelivery(
+	ctx context.Context,
+	pendingID string,
+	claim *clarificationResponseClaim,
+) error {
+	if !h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
+		return errors.New("clarification delivery confirmation failed")
+	}
+	return nil
+}
 
 func (h *Handlers) finalizeClarificationResponseDelivery(
 	ctx context.Context,

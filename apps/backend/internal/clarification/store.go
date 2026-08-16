@@ -120,11 +120,7 @@ func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Respons
 
 	select {
 	case <-pending.done:
-		// Clean up after receiving response
-		s.mu.Lock()
-		delete(s.pending, pendingID)
-		s.mu.Unlock()
-		return pending.resp, nil
+		return s.consumeResponse(pendingID, pending)
 	case <-pending.CancelCh:
 		// Agent's turn completed — cancel the blocking wait
 		s.mu.Lock()
@@ -145,9 +141,91 @@ func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Respons
 	}
 }
 
+func (s *Store) consumeResponse(
+	pendingID string,
+	pending *PendingClarification,
+) (*Response, error) {
+	pending.mu.Lock()
+	confirm := pending.deliveryConfirmation
+	abandoned := pending.deliveryAbandoned
+	pending.mu.Unlock()
+	if abandoned {
+		s.deletePendingIfCurrent(pendingID, pending)
+		return nil, errors.New("clarification response delivery was abandoned")
+	}
+	if confirm != nil {
+		pending.deliveryConfirmationOnce.Do(func() {
+			pending.mu.Lock()
+			if pending.deliveryAbandoned {
+				pending.deliveryConfirmationErr = errors.New("clarification response delivery was abandoned")
+				pending.deliveryConfirmationComplete = true
+				confirmationDone := pending.deliveryConfirmationDone
+				pending.mu.Unlock()
+				close(confirmationDone)
+				return
+			}
+			pending.deliveryConfirmationStarted = true
+			pending.mu.Unlock()
+			err := confirm()
+			pending.mu.Lock()
+			pending.deliveryConfirmationErr = err
+			pending.deliveryConfirmationComplete = true
+			confirmationDone := pending.deliveryConfirmationDone
+			pending.mu.Unlock()
+			close(confirmationDone)
+		})
+		pending.mu.Lock()
+		confirmationErr := pending.deliveryConfirmationErr
+		pending.mu.Unlock()
+		if confirmationErr != nil {
+			s.deletePendingIfCurrent(pendingID, pending)
+			return nil, fmt.Errorf("confirm clarification response delivery: %w", confirmationErr)
+		}
+	}
+	pending.mu.Lock()
+	resp := pending.resp
+	pending.mu.Unlock()
+	s.deletePendingIfCurrent(pendingID, pending)
+	return resp, nil
+}
+
+func (s *Store) deletePendingIfCurrent(pendingID string, pending *PendingClarification) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pending[pendingID] == pending {
+		delete(s.pending, pendingID)
+	}
+}
+
 // Respond submits a response to a pending clarification request.
 // Returns an error if the request is not found.
 func (s *Store) Respond(pendingID string, resp *Response) error {
+	return s.respond(context.Background(), pendingID, resp, nil)
+}
+
+// RespondWithDeliveryConfirmation submits a response and waits for its live
+// waiter to durably confirm delivery before either side returns success.
+func (s *Store) RespondWithDeliveryConfirmation(
+	ctx context.Context,
+	pendingID string,
+	resp *Response,
+	confirm func() error,
+) error {
+	if ctx == nil {
+		return errors.New("clarification delivery confirmation context is required")
+	}
+	if confirm == nil {
+		return errors.New("clarification delivery confirmation is required")
+	}
+	return s.respond(ctx, pendingID, resp, confirm)
+}
+
+func (s *Store) respond(
+	ctx context.Context,
+	pendingID string,
+	resp *Response,
+	confirm func() error,
+) error {
 	s.mu.RLock()
 	pending, ok := s.pending[pendingID]
 	s.mu.RUnlock()
@@ -157,18 +235,53 @@ func (s *Store) Respond(pendingID string, resp *Response) error {
 	}
 
 	pending.mu.Lock()
-	defer pending.mu.Unlock()
 
 	if pending.resolved {
+		pending.mu.Unlock()
 		return fmt.Errorf("%w: %s", ErrAlreadyResponded, pendingID)
 	}
 
 	resp.PendingID = pendingID
 	resp.RespondedAt = time.Now()
 	pending.resp = resp
+	pending.deliveryConfirmation = confirm
+	if confirm != nil {
+		pending.deliveryConfirmationDone = make(chan struct{})
+	}
 	pending.resolved = true
 	close(pending.done)
-	return nil
+	confirmationDone := pending.deliveryConfirmationDone
+	pending.mu.Unlock()
+	if confirmationDone == nil {
+		return nil
+	}
+
+	select {
+	case <-confirmationDone:
+		return clarificationDeliveryConfirmationResult(pending)
+	case <-ctx.Done():
+		pending.mu.Lock()
+		if pending.deliveryConfirmationComplete {
+			confirmationErr := pending.deliveryConfirmationErr
+			pending.mu.Unlock()
+			return confirmationErr
+		}
+		if pending.deliveryConfirmationStarted {
+			pending.mu.Unlock()
+			<-confirmationDone
+			return clarificationDeliveryConfirmationResult(pending)
+		}
+		pending.deliveryAbandoned = true
+		pending.mu.Unlock()
+		s.deletePendingIfCurrent(pendingID, pending)
+		return fmt.Errorf("wait for clarification delivery confirmation: %w", ctx.Err())
+	}
+}
+
+func clarificationDeliveryConfirmationResult(pending *PendingClarification) error {
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
+	return pending.deliveryConfirmationErr
 }
 
 // CancelRequest cancels a single pending clarification by id, unblocking any

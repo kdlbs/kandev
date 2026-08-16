@@ -51,7 +51,7 @@ type clarificationStore interface {
 	CreateRequest(req *Request) (string, bool)
 	GetRequest(pendingID string) (*Request, bool)
 	WaitForResponse(ctx context.Context, pendingID string) (*Response, error)
-	Respond(pendingID string, response *Response) error
+	RespondWithDeliveryConfirmation(ctx context.Context, pendingID string, response *Response, confirm func() error) error
 	CancelRequest(pendingID string) bool
 }
 
@@ -421,12 +421,20 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 	// Durable current-turn ownership is claimed before touching the live waiter.
 	// This closes the window where a newer turn exists but its canceller has not
 	// yet drained the superseded in-memory request.
-	deliveryErr := h.store.Respond(pendingID, claim.response)
+	deliveryCtx, cancelDelivery := context.WithTimeout(
+		context.WithoutCancel(ctx),
+		clarificationPersistenceTimeout+5*time.Second,
+	)
+	defer cancelDelivery()
+	deliveryErr := h.store.RespondWithDeliveryConfirmation(
+		deliveryCtx,
+		pendingID,
+		claim.response,
+		func() error {
+			return h.confirmLiveClarificationResponseDelivery(ctx, pendingID, claim)
+		},
+	)
 	if deliveryErr == nil {
-		if !h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
-			return http.StatusInternalServerError,
-				"clarification response was delivered, but delivery state could not be finalized"
-		}
 		h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
 		h.publishPrimaryAnsweredEvent(
 			ctx,

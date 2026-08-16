@@ -1,6 +1,7 @@
 package clarification
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -15,7 +16,7 @@ type failingRespondStore struct {
 	err error
 }
 
-func (s *failingRespondStore) Respond(string, *Response) error {
+func (s *failingRespondStore) RespondWithDeliveryConfirmation(context.Context, string, *Response, func() error) error {
 	return s.err
 }
 

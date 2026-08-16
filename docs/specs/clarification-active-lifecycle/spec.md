@@ -76,8 +76,9 @@ hiding the action the icon represents.
   production turn repository must provide this recovery capability through its compile-time contract.
   A rejection persists terminal status without resuming the agent.
 - Every response atomically claims current-turn ownership and persists a response-delivery recovery
-  intent before it can reach a live waiter or request a detached resume. The intent is retired only
-  after the live waiter or durable detached-resume boundary accepts the response. Startup first
+  intent before it can reach a live waiter or request a detached resume. A live waiter runs durable
+  delivery confirmation before returning the response to the agent; enqueue alone does not retire the
+  intent. The detached path retires it only at its durable resume boundary. Startup first
   reconciles prompt reservations, then restores an unhanded current-turn claim to pending; a terminal
   session or newer authoritative turn instead retires the stale intent without reactivating history.
   Terminal message updates are published only after delivery succeeds. If detached
@@ -181,7 +182,8 @@ Transitions:
 - Request creation enters `active_live`.
 - Wait timeout, disconnect, or turn teardown moves `active_live -> active_detached` once.
 - A response first moves either active state to `delivery_claimed`. Successful answer delivery or Skip
-  then moves that exact `pending_id` to `terminal`. A backend restart before any handoff restores a
+  then moves that exact `pending_id` to `terminal`. For a live response, the waiter must durably confirm
+  consumption before returning it to the agent. A backend restart before any handoff restores a
   still-current `delivery_claimed` bundle to its prior active state; if a newer turn or terminal session
   already superseded it, recovery retires the intent and preserves terminal history. Cancel, expiry,
   or deletion moves an active state directly to `terminal`. A failed detached resume acceptance returns to
@@ -340,6 +342,8 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** the backend stops after claiming a current-turn response but before either a live waiter or
   detached resumer receives it, **WHEN** it starts again, **THEN** startup restores the exact claimed
   rows to pending and the same answer can be submitted again.
+- **GIVEN** a response is enqueued to a live waiter, **WHEN** durable confirmation has not completed,
+  **THEN** the waiter does not return the response and restart recovery may safely restore the claim.
 - **GIVEN** a primary-answer watchdog survives until another turn supersedes its clarification turn,
   **WHEN** its fallback timer expires, **THEN** both the preflight and serialized prompt-admission checks
   reject the stale answer without prompting or cancelling the successor.

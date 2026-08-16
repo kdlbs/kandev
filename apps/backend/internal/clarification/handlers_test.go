@@ -945,10 +945,7 @@ func TestHttpRespond_AllAnswers_PrimaryPath_Success(t *testing.T) {
 		},
 	}
 
-	// Drain the response channel so Respond does not block indefinitely.
-	go func() {
-		_, _ = h.store.WaitForResponse(context.Background(), pendingID)
-	}()
+	waitDone := startTestClarificationWaiter(t, h, pendingID)
 
 	body := RespondBody{
 		Answers: []Answer{
@@ -959,6 +956,9 @@ func TestHttpRespond_AllAnswers_PrimaryPath_Success(t *testing.T) {
 	rec := runRespond(t, h, pendingID, body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if err := <-waitDone; err != nil {
+		t.Fatalf("live clarification waiter: %v", err)
 	}
 
 	if len(msgCreator.updates) != 2 {
