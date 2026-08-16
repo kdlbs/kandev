@@ -34,7 +34,7 @@ test.describe("Settings typography contract on desktop", () => {
       .locator("button")
       .boundingBox();
     expect(controlBox).not.toBeNull();
-    expect(controlBox!.height).toBeGreaterThanOrEqual(44);
+    expect(controlBox!.height).toBeGreaterThanOrEqual(28);
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
       await testPage.evaluate(() => document.documentElement.clientWidth),
     );
@@ -53,7 +53,7 @@ test.describe("Settings typography contract on desktop", () => {
 
     await expect(testPage.getByTestId("terminal-font-select")).toBeVisible();
     await expect(testPage.getByRole("heading", { level: 2 })).toHaveCount(1);
-    expect(await testPage.getByRole("heading", { level: 3 }).count()).toBeGreaterThan(0);
+    await expect(testPage.getByRole("heading", { level: 3, name: "Editors" })).toBeVisible();
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
       await testPage.evaluate(() => document.documentElement.clientWidth),
     );

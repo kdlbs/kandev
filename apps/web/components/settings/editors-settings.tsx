@@ -40,6 +40,7 @@ import { LspLanguageCards } from "./lsp-language-cards";
 import { LSP_LANGUAGE_OPTIONS } from "./lsp-language-options";
 import { Trans, useTranslation } from "react-i18next";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 
 /**
  * Code identifiers rendered inside `<Trans>` copy. They are passed as
@@ -306,6 +307,7 @@ function CustomEditorsList({
 }
 
 type EditorsSectionProps = {
+  embedded: boolean;
   defaultOptions: ComboboxOption[];
   defaultEditorId: string;
   baselineDefaultId: string;
@@ -323,6 +325,7 @@ type EditorsSectionProps = {
 };
 
 function EditorsSection({
+  embedded,
   defaultOptions,
   defaultEditorId,
   baselineDefaultId,
@@ -341,9 +344,13 @@ function EditorsSection({
   const { t } = useTranslation();
   return (
     <div className="space-y-6">
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {t("settings:editors")}
-      </div>
+      {embedded ? (
+        <h3 className={SETTINGS_TYPOGRAPHY.sectionTitle}>{t("settings:editors")}</h3>
+      ) : (
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {t("settings:editors")}
+        </div>
+      )}
       <div className="space-y-2">
         <div className="text-sm font-medium text-foreground">{t("settings:default")}</div>
         <div
@@ -484,6 +491,7 @@ export function EditorsSettings({ embedded = false }: { embedded?: boolean }) {
         </SettingsTarget>
         <Separator />
         <EditorsSection
+          embedded={embedded}
           defaultOptions={defaultOptions}
           defaultEditorId={state.defaultEditorId}
           baselineDefaultId={state.baselineDefaultId}
