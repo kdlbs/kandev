@@ -59,6 +59,11 @@ function isOlderThanCurrentSnapshot(store: StoreApi<AppState>, payload: MessageP
   return !payload.updated_at || current.updated_at > payload.updated_at;
 }
 
+function applyPendingActionProjection(store: StoreApi<AppState>, payload: MessagePayload): void {
+  if (!("pending_action" in payload)) return;
+  store.getState().setTaskSessionPendingAction(payload.session_id, payload.pending_action ?? null);
+}
+
 function defaultSchedule(callback: () => void): number {
   if (typeof requestAnimationFrame === "function") {
     return requestAnimationFrame(() => callback());
@@ -136,9 +141,15 @@ export function createMessagesHandlerRegistration(
       if (!payload.session_id) return;
       scheduler.flush();
       store.getState().addMessage(toMessage(payload));
+      applyPendingActionProjection(store, payload);
     },
     "session.message.updated": (message) => {
-      scheduler.enqueue(message.payload);
+      const payload = message.payload;
+      if (!payload.session_id || !payload.message_id) return;
+      if (!isOlderThanCurrentSnapshot(store, payload)) {
+        applyPendingActionProjection(store, payload);
+      }
+      scheduler.enqueue(payload);
     },
     "session.message.deleted": (message) => {
       const payload = message.payload;
@@ -148,6 +159,7 @@ export function createMessagesHandlerRegistration(
       // the deleted row.
       scheduler.flush();
       store.getState().removeMessage(sessionId(payload.session_id), payload.message_id);
+      applyPendingActionProjection(store, payload);
     },
   };
   return { handlers, scheduler, dispose: scheduler.dispose };

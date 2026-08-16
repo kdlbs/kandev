@@ -1,5 +1,6 @@
 import type {
   Message,
+  TaskPendingAction,
   TaskSession,
   Turn,
   TaskPlan,
@@ -224,6 +225,7 @@ export type SessionSliceActions = {
    * the session isn't in the store (never creates a bare session record).
    */
   updateSessionReadCursor: (sessionId: string, lastReadMessageId: string) => void;
+  setTaskSessionPendingAction: (sessionId: string, pendingAction: TaskPendingAction | null) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;

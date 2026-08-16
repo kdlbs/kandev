@@ -3,6 +3,7 @@ import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
 import { buildTurnActions } from "./turn-actions";
+import { buildTaskSessionProjectionActions } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
 import {
   migrateEnvKeyedData,
@@ -607,6 +608,7 @@ export const createSessionSlice: StateCreator<
   ...buildMessageActions(set),
   ...buildTurnActions(set),
   ...buildTaskSessionActions(set),
+  ...buildTaskSessionProjectionActions(set),
   setSessionAgentctlStatus: (sessionId, status) =>
     set((draft) => {
       draft.sessionAgentctl.itemsBySessionId[sessionId] = status;

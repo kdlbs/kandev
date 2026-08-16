@@ -345,6 +345,12 @@ All locally available task gates passed; environment-gated parity also passed in
   turn history. This keeps a predecessor clarification inert while an authoritative attempted successor
   is intentionally unpublished from client history, across both chat discovery and pending indicators.
   The 108 focused web tests, typecheck, zero-warning focused lint, and i18n ratchet passed.
+- Follow-up Codex review adds authoritative per-session `pending_action` to semantic message events and
+  narrowly mirrors it into loaded by-ID and per-task session projections. A newly streamed question now
+  advances a cached clean projection, while terminal and successor mutations clear it without waiting
+  for a session-list refresh. Event-arrival ordering stays authoritative across batched message updates.
+  The 73 focused web tests, full task-service suite, targeted race suite (10 repetitions), web typecheck,
+  zero-warning focused lint, i18n ratchet, backend changed-lines lint, and public-doc validators passed.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

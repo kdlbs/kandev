@@ -795,6 +795,13 @@ session.todos_updated
 session.prompt_usage
 ```
 
+Semantic `session.message.added`, `session.message.updated`, and
+`session.message.deleted` notifications can include `pending_action` with
+`"clarification"`, `"permission"`, or explicit `null`. When present, it is the
+authoritative per-session input projection after that message mutation. When
+absent, clients preserve their current projection and reconcile through normal
+session refetch after a gap.
+
 File changes are batched for up to 100 ms and flushed immediately at 50 entries. `session.shell.output` also represents shell exit events through its payload. Treat all stream messages as lossy and refresh session/Git status after a gap.
 
 ### User-, run-, and metrics-scoped broadcasts

@@ -3221,6 +3221,49 @@ func TestService_CreateMessage(t *testing.T) {
 	}
 }
 
+func TestService_ClarificationMessageEventsCarryPendingActionProjection(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-clarification")
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		sessionID,
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	message, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        turnID,
+		Content:       "Choose",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeClarificationRequest),
+		Metadata:      map[string]interface{}{"pending_id": "pending-1", "status": "pending"},
+	})
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if got := singlePublishedEventData(t, eventBus)["pending_action"]; got != "clarification" {
+		t.Fatalf("message.added pending_action = %#v, want clarification", got)
+	}
+
+	eventBus.ClearEvents()
+	message.Metadata["status"] = "answered"
+	if err := svc.UpdateMessage(ctx, message); err != nil {
+		t.Fatalf("UpdateMessage: %v", err)
+	}
+	data := singlePublishedEventData(t, eventBus)
+	if got, ok := data["pending_action"]; !ok || got != nil {
+		t.Fatalf("message.updated pending_action = %#v, want explicit nil", got)
+	}
+}
+
 func TestService_CreateMessageIdempotentReturnsCommittedMessage(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

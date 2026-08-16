@@ -36,10 +36,12 @@ function makeStore(currentMessages: Record<string, unknown[]> = {}) {
   const updateMessage = vi.fn();
   const addMessage = vi.fn();
   const removeMessage = vi.fn();
+  const setTaskSessionPendingAction = vi.fn();
   const state = {
     updateMessage,
     addMessage,
     removeMessage,
+    setTaskSessionPendingAction,
     messages: { bySession: currentMessages },
   };
   return {
@@ -47,6 +49,7 @@ function makeStore(currentMessages: Record<string, unknown[]> = {}) {
     updateMessage,
     addMessage,
     removeMessage,
+    setTaskSessionPendingAction,
   };
 }
 
@@ -171,6 +174,88 @@ describe("session message frame scheduler", () => {
     expect(updateMessage).toHaveBeenCalledTimes(1);
     expect(updateMessage).toHaveBeenLastCalledWith(expect.objectContaining({ content: "settled" }));
     scheduler.dispose();
+  });
+});
+
+describe("session message pending-action projection", () => {
+  const SESSION_ID = "session-1";
+  const QUESTION_ID = "question-1";
+  const QUESTION_CONTENT = "Choose";
+
+  it("applies the authoritative projection carried by a message event", () => {
+    const { store, setTaskSessionPendingAction } = makeStore();
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers["session.message.added"]!({
+      id: "add-clarification",
+      type: "notification",
+      action: "session.message.added",
+      payload: {
+        ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+        type: "clarification_request",
+        pending_action: "clarification",
+      },
+      timestamp: TEST_TIMESTAMP,
+    });
+
+    expect(setTaskSessionPendingAction).toHaveBeenCalledWith(SESSION_ID, "clarification");
+
+    registration.handlers["session.message.updated"]!({
+      ...makeUpdated(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+      payload: {
+        ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+        type: "clarification_request",
+        pending_action: null,
+      },
+    });
+    registration.scheduler.flush();
+
+    expect(setTaskSessionPendingAction).toHaveBeenLastCalledWith(SESSION_ID, null);
+    registration.dispose();
+  });
+
+  it("preserves event order when batched updates revisit a message", () => {
+    const { store, setTaskSessionPendingAction } = makeStore();
+    const registration = createMessagesHandlerRegistration(store);
+    const handler = registration.handlers["session.message.updated"]!;
+    const update = (messageId: string, pendingAction: "clarification" | "permission" | null) => {
+      handler({
+        ...makeUpdated(SESSION_ID, messageId, QUESTION_CONTENT),
+        payload: {
+          ...makePayload(SESSION_ID, messageId, QUESTION_CONTENT),
+          type: "clarification_request",
+          pending_action: pendingAction,
+        },
+      });
+    };
+
+    update("question-a", "clarification");
+    update("question-b", null);
+    update("question-a", "permission");
+    registration.scheduler.flush();
+
+    expect(setTaskSessionPendingAction).toHaveBeenLastCalledWith(SESSION_ID, "permission");
+    registration.dispose();
+  });
+
+  it("ignores a projection from an update older than the current message", () => {
+    const { store, setTaskSessionPendingAction } = makeStore({
+      [SESSION_ID]: [{ id: QUESTION_ID, updated_at: "2026-08-02T00:00:02.000Z" }],
+    });
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers["session.message.updated"]!({
+      ...makeUpdated(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+      payload: {
+        ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+        type: "clarification_request",
+        pending_action: "clarification",
+      },
+    });
+    registration.scheduler.flush();
+
+    expect(setTaskSessionPendingAction).not.toHaveBeenCalled();
+    registration.dispose();
   });
 });
 

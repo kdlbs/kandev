@@ -6,6 +6,7 @@ import type {
   Branch,
   RepositoryScript,
   Message,
+  TaskPendingAction,
   Turn,
   TaskSession,
   TaskWalkthrough,
@@ -402,6 +403,7 @@ export type AppState = KanbanSlice & {
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   setTaskSession: (session: TaskSession) => void;
   updateSessionReadCursor: (sessionId: string, lastReadMessageId: string) => void;
+  setTaskSessionPendingAction: (sessionId: string, pendingAction: TaskPendingAction | null) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;

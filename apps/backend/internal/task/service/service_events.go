@@ -866,6 +866,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		return errors.New("event bus is unavailable")
 	}
 	event := newMessageEvent(eventType, message)
+	s.addMessagePendingAction(ctx, eventType, message, event)
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
 		s.logger.Error("failed to publish message event",
 			zap.String("event_type", eventType),
@@ -874,6 +875,48 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		return err
 	}
 	return nil
+}
+
+func (s *Service) addMessagePendingAction(
+	ctx context.Context,
+	eventType string,
+	message *models.Message,
+	event *bus.Event,
+) {
+	if s.messages == nil ||
+		!messageEventChangesPendingAction(eventType, message) ||
+		message.TaskSessionID == "" {
+		return
+	}
+	actions, err := s.GetPendingActionsForSessions(ctx, []string{message.TaskSessionID})
+	if err != nil {
+		s.logger.Warn("failed to project pending action for message event",
+			zap.String("event_type", eventType),
+			zap.String("message_id", message.ID),
+			zap.Error(err))
+		return
+	}
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		return
+	}
+	if action, ok := actions[message.TaskSessionID]; ok {
+		data["pending_action"] = string(action)
+	} else {
+		data["pending_action"] = nil
+	}
+}
+
+func messageEventChangesPendingAction(eventType string, message *models.Message) bool {
+	switch eventType {
+	case events.MessageAdded, events.MessageDeleted:
+		return true
+	case events.MessageUpdated:
+		return message.Type == models.MessageTypeClarificationRequest ||
+			message.Type == models.MessageTypePermissionRequest
+	default:
+		return false
+	}
 }
 
 func newMessageEvent(eventType string, message *models.Message) *bus.Event {

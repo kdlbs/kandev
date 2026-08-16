@@ -94,3 +94,32 @@ describe("updateSessionReadCursor", () => {
     expect(listed?.last_read_message_id).toBe("m2");
   });
 });
+
+describe("setTaskSessionPendingAction", () => {
+  it("updates the by-id and per-task projections without replacing session state", () => {
+    const store = makeStore();
+    const session = makeSession({ pending_action: null });
+    store.setState((draft) => {
+      draft.taskSessions.items[SESSION_ID] = session;
+      draft.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session];
+    });
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification");
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      state: "RUNNING",
+      pending_action: "clarification",
+    });
+    expect(store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID]?.[0].pending_action).toBe(
+      "clarification",
+    );
+  });
+
+  it("does not create a bare session when the projection is not loaded", () => {
+    const store = makeStore();
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification");
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toBeUndefined();
+  });
+});
