@@ -20,7 +20,7 @@ export function ManagedRuntimeNpmRunError({
 }) {
   const { t } = useTranslation();
   const [showDetails, setShowDetails] = useState(false);
-  const technicalDetails = error.failureDetails || error.rawPayload;
+  const technicalDetails = error.failureDetails;
 
   return (
     <div

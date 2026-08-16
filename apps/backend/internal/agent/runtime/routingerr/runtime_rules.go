@@ -17,8 +17,9 @@ var runtimeEnvironmentRules = []runtimeRule{
 		// both the ETARGET code and the matching package@version diagnostic in
 		// one bounded sample so generic disconnects and registry errors do not
 		// trigger managed-runtime recovery.
-		id:      "npm.etarget.managed_runtime.v1",
-		pattern: managedRuntimeNpmResolutionRe,
+		id:            "npm.etarget.managed_runtime.v1",
+		pattern:       managedRuntimeNpmResolutionRe,
+		sanitizedOnly: true,
 		build: func(string) *Error {
 			return &Error{
 				Code:       CodeManagedRuntimeNpmResolution,
@@ -166,9 +167,10 @@ func IsResumeCorrupted(message string) bool {
 }
 
 type runtimeRule struct {
-	id      string
-	pattern *regexp.Regexp
-	build   func(text string) *Error
+	id            string
+	pattern       *regexp.Regexp
+	build         func(text string) *Error
+	sanitizedOnly bool
 }
 
 // npxCachePathRe captures the cache root, e.g.
@@ -189,18 +191,21 @@ func extractNpxCachePath(text string) string {
 }
 
 func matchRuntimeEnvironmentRules(text string) (*Error, bool) {
-	return matchRuntimeRules(text, 0)
+	return matchRuntimeRules(text, false)
 }
 
 func matchLegacyRuntimeEnvironmentRules(text string) (*Error, bool) {
-	return matchRuntimeRules(text, 1)
+	return matchRuntimeRules(text, true)
 }
 
-func matchRuntimeRules(text string, start int) (*Error, bool) {
+func matchRuntimeRules(text string, legacyOnly bool) (*Error, bool) {
 	if text == "" {
 		return nil, false
 	}
-	for _, r := range runtimeEnvironmentRules[start:] {
+	for _, r := range runtimeEnvironmentRules {
+		if legacyOnly && r.sanitizedOnly {
+			continue
+		}
 		if !r.pattern.MatchString(text) {
 			continue
 		}

@@ -636,7 +636,7 @@ func (m *Manager) handleStreamDisconnectWithStartupGeneration(
 	// A startup stream can disconnect before ACP session initialization. The
 	// startup caller owns that failure and may still perform the bounded npm
 	// recovery, so do not publish an intermediate failed state here.
-	if promptGeneration == 0 && !execution.sessionInitialized {
+	if promptGeneration == 0 && !execution.isSessionInitialized() {
 		m.logger.Debug("ignoring startup stream disconnect before ACP initialization",
 			zap.String("execution_id", execution.ID),
 			zap.Uint64("startup_generation", startupGeneration),
@@ -827,7 +827,7 @@ func (m *Manager) handleAgentEventWithStartupGeneration(
 			zap.Uint64("current_startup_generation", execution.startupAttemptSnapshot()))
 		return
 	}
-	if !execution.sessionInitialized && event.PromptGeneration == 0 && event.Type == toolStatusComplete {
+	if !execution.isSessionInitialized() && event.PromptGeneration == 0 && event.Type == toolStatusComplete {
 		m.logger.Debug("ignoring startup completion before ACP initialization",
 			zap.String("execution_id", execution.ID),
 			zap.Uint64("startup_generation", startupGeneration))

@@ -80,8 +80,9 @@ the registry, package, active version, model, permissions, or session identity.
   and retried once. Keep technical details collapsed and show only
   **Retry runtime**.
 - `apps/web/components/task/simple/chat-entries.ts` and
-  `components/run-error-entry.tsx`: carry the same failure code and details to
-  Office chat and render the same meaning and action set.
+  `apps/web/components/task/simple/components/run-error-entry.tsx`: carry the
+  same failure code and details to Office chat and render the same meaning and
+  action set.
 - Add all copy to the existing i18n catalog. Do not mention ACP in user-facing
   text.
 
@@ -122,7 +123,7 @@ copy keys remain shared across viewports.
 
 ## E2E Tests
 
-- **Scenario:** GIVEN a terminal managed npm resolution failure in Kanban chat,
+- **Scenario:** GIVEN a terminal failure during managed npm resolution in Kanban chat,
   WHEN the recovery card renders on desktop, THEN it names npm, keeps details
   collapsed, offers only **Retry runtime**, and sends the expected recovery
   request.

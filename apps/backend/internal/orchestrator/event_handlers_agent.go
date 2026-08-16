@@ -1879,6 +1879,18 @@ func classifyManagedRuntimeNpmStartFailure(err error) *routingerr.Error {
 	if err == nil {
 		return nil
 	}
+	var structured *routingerr.ManagedRuntimeStartupError
+	if errors.As(err, &structured) {
+		if structured.Code != routingerr.CodeManagedRuntimeNpmResolution {
+			return nil
+		}
+		return &routingerr.Error{
+			Code:       structured.Code,
+			Confidence: routingerr.ConfHigh,
+			Phase:      routingerr.PhaseSessionInit,
+			RawExcerpt: structured.Details,
+		}
+	}
 	classified := routingerr.Classify(routingerr.Input{
 		Phase:  routingerr.PhaseSessionInit,
 		Stderr: err.Error(),

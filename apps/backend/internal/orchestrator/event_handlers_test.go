@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -2645,6 +2646,32 @@ func TestIsOfficeSessionUsesCanonicalTaskOwnership(t *testing.T) {
 				t.Fatalf("isOfficeSession = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) {
+	err := fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.CodeManagedRuntimeNpmResolution,
+		Details: "npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
+	})
+
+	classified := classifyManagedRuntimeNpmStartFailure(err)
+	if classified == nil {
+		t.Fatal("expected structured npm startup error to classify")
+	}
+	if classified.Code != routingerr.CodeManagedRuntimeNpmResolution {
+		t.Fatalf("code = %q, want %q", classified.Code, routingerr.CodeManagedRuntimeNpmResolution)
+	}
+	if !strings.Contains(classified.RawExcerpt, "No matching version found") {
+		t.Fatalf("raw excerpt = %q, want structured details", classified.RawExcerpt)
+	}
+
+	generic := fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.CodeAgentRuntime,
+		Details: "sanitized runtime failure",
+	})
+	if classifyManagedRuntimeNpmStartFailure(generic) != nil {
+		t.Fatal("generic structured startup failure must not use the npm recovery card")
 	}
 }
 

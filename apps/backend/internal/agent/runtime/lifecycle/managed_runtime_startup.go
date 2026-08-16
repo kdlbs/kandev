@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -17,6 +16,8 @@ import (
 )
 
 const managedRuntimeStartupStderrTimeout = 2 * time.Second
+
+const managedRuntimeStartupSettleDelay = 500 * time.Millisecond
 
 // managedRuntimeNpmStartupFailure captures only the bounded stderr needed to
 // classify an ACP initialization failure. The command is never built from
@@ -39,8 +40,7 @@ func (m *Manager) managedRuntimeNpmStartupFailure(
 	return routingerr.Classify(routingerr.Input{
 		Phase:      routingerr.PhaseSessionInit,
 		ProviderID: execution.AgentID,
-		Stderr:     evidence,
-		Stdout:     initErr.Error(),
+		Stderr:     strings.TrimSpace(evidence + "\n" + initErr.Error()),
 	})
 }
 
@@ -93,6 +93,26 @@ type managedRuntimeStartupRetry struct {
 	preferOnlineArgs []string
 	packageSpec      string
 	failureDetails   string
+}
+
+func managedRuntimeRetryFailureClassification(
+	initialCode routingerr.Code,
+	initialDetails string,
+	retryErr error,
+	initializationFailed bool,
+	second *routingerr.Error,
+) (routingerr.Code, string) {
+	if retryErr == nil {
+		return initialCode, initialDetails
+	}
+	if !initializationFailed || second == nil {
+		return routingerr.CodeAgentRuntime, routingerr.Sanitize(retryErr.Error())
+	}
+	details := second.RawExcerpt
+	if details == "" {
+		details = routingerr.Sanitize(retryErr.Error())
+	}
+	return second.Code, details
 }
 
 func (m *Manager) prepareManagedRuntimeStartupRetry(
@@ -172,6 +192,19 @@ func (m *Manager) startManagedRuntimeRetry(
 	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
 		return false, err
 	}
+	settleTimer := time.NewTimer(managedRuntimeStartupSettleDelay)
+	defer settleTimer.Stop()
+	select {
+	case <-settleTimer.C:
+	case <-ctx.Done():
+		if cause := context.Cause(ctx); cause != nil {
+			return false, cause
+		}
+		return false, ctx.Err()
+	}
+	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
+		return false, err
+	}
 	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, attachments, mcpServers); err != nil {
 		return true, err
 	}
@@ -186,7 +219,7 @@ func (m *Manager) resetManagedRuntimeExecutionForRetry(execution *AgentExecution
 		current.ErrorMessage = ""
 		current.FailureCode = ""
 		current.FailureDetails = ""
-		current.sessionInitialized = false
+		current.setSessionInitialized(false)
 		m.resetStreamingStateWithHistory(current)
 		select {
 		case <-current.promptDoneCh:
@@ -213,15 +246,21 @@ func (m *Manager) retryManagedRuntimeStartup(
 	if !ok {
 		return false, initErr
 	}
+	failureCode := routingerr.CodeManagedRuntimeNpmResolution
 	failureDetails := retry.failureDetails
+	var failureCause error
 	failAfterRetry := func() error {
 		m.updateExecutionFailure(
 			execution.ID,
 			"managed npm runtime failed to prepare",
-			string(routingerr.CodeManagedRuntimeNpmResolution),
+			string(failureCode),
 			failureDetails,
 		)
-		return fmt.Errorf("%s: %s", routingerr.CodeManagedRuntimeNpmResolution, failureDetails)
+		return &routingerr.ManagedRuntimeStartupError{
+			Code:    failureCode,
+			Details: failureDetails,
+			Cause:   failureCause,
+		}
 	}
 	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
 		return false, err
@@ -264,12 +303,14 @@ func (m *Manager) retryManagedRuntimeStartup(
 		if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
 			return true, aborted
 		}
+		failureCause = retryErr
+		var second *routingerr.Error
 		if initializationFailed {
-			second := m.managedRuntimeNpmStartupFailure(ctx, execution, retryErr)
-			if second != nil && second.RawExcerpt != "" {
-				failureDetails = second.RawExcerpt
-			}
+			second = m.managedRuntimeNpmStartupFailure(ctx, execution, retryErr)
 		}
+		failureCode, failureDetails = managedRuntimeRetryFailureClassification(
+			failureCode, failureDetails, retryErr, initializationFailed, second,
+		)
 		return true, failAfterRetry()
 	}
 	return true, nil

@@ -394,7 +394,7 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	// Only mark the launch initialized once the start-model policy has
 	// succeeded — a strict unavailable model fails here, and a failed launch
 	// must not look initialized.
-	execution.sessionInitialized = true
+	execution.setSessionInitialized(true)
 
 	finalConfigID, profileModelApplied, profileModeApplied, profileConfigOptionsApplied := sm.applyProfileSessionLayers(
 		ctx, execution, result.SessionID, profileModel, profileMode, profileConfigOptions,

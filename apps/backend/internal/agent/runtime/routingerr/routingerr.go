@@ -169,7 +169,9 @@ func Classify(in Input) *Error {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
-		e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+		if e.Code == CodeNpxCacheCorrupted {
+			e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+		}
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}

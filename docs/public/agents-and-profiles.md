@@ -75,8 +75,7 @@ with collapsed technical details.
 Do not use `npm cache clean --force` as the normal recovery step. It removes
 unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
-uses the expected npm installation and configured registry, then use the
-runtime update controls to select and prepare another trusted stable version.
+uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
 
 <details>
 <summary>Add a custom terminal agent</summary>

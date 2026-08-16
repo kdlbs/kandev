@@ -174,7 +174,8 @@ type AgentExecution struct {
 
 	// sessionInitialized is set to true after InitializeAndPrompt completes successfully.
 	// Used to distinguish launch-phase failures from normal prompt failures.
-	sessionInitialized bool
+	sessionInitialized   bool
+	sessionInitializedMu sync.RWMutex
 
 	// Available commands from the agent (for slash command menu)
 	availableCommands   []streams.AvailableCommand
@@ -229,6 +230,18 @@ type AgentExecution struct {
 	startupAttemptGeneration uint64
 	startupRecoveryStarted   bool
 	startupLifecycleMu       sync.Mutex
+}
+
+func (e *AgentExecution) isSessionInitialized() bool {
+	e.sessionInitializedMu.RLock()
+	defer e.sessionInitializedMu.RUnlock()
+	return e.sessionInitialized
+}
+
+func (e *AgentExecution) setSessionInitialized(value bool) {
+	e.sessionInitializedMu.Lock()
+	e.sessionInitialized = value
+	e.sessionInitializedMu.Unlock()
 }
 
 type activeTopLevelTool struct {

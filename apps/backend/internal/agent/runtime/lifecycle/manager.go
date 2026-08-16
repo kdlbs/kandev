@@ -185,7 +185,7 @@ type ManagedGoCacheEnvironmentProvider interface {
 // recovery never discovers or deletes cache paths directly.
 type ManagedRuntimeCacheInvalidator interface {
 	InvalidateExecutionCache(context.Context, string) error
-	InvalidateExecutionCacheVersion(context.Context, string, string) error
+	InvalidateExecutionCacheVersion(ctx context.Context, packageName, version string) error
 }
 
 // SetManagedGoCacheEnvironmentProvider wires install-wide managed cache settings.

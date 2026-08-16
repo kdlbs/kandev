@@ -33,31 +33,8 @@ func RemoveNpxExecutionTree(cacheRoot, packageSpec string) error {
 		return errors.New("managed runtime package spec is invalid")
 	}
 
-	npxRoot := filepath.Join(root, "_npx")
-	if err := rejectSymlinkOrMissingParent(npxRoot, true); err != nil {
-		return err
-	}
-	if _, err := os.Stat(npxRoot); errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("inspect npm execution cache: %w", err)
-	}
-
 	key := NpxExecutionCacheKey(packageSpec)
-	target := filepath.Join(npxRoot, key)
-	if err := rejectSymlinkOrMissingParent(target, false); err != nil {
-		return err
-	}
-	if _, err := os.Lstat(target); errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("inspect npm execution tree: %w", err)
-	}
-
-	if err := os.RemoveAll(target); err != nil {
-		return fmt.Errorf("remove npm execution tree: %w", err)
-	}
-	return nil
+	return removeNpxExecutionTree(root, key)
 }
 
 func validateNpmCacheRoot(cacheRoot string) (string, error) {
@@ -80,28 +57,4 @@ func validateNpmCacheRoot(cacheRoot string) (string, error) {
 		return "", fmt.Errorf("inspect npm cache root: %w", err)
 	}
 	return root, nil
-}
-
-func rejectSymlinkOrMissingParent(path string, allowMissing bool) error {
-	info, err := os.Lstat(path)
-	if err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("refusing to invalidate execution cache through symlink: %s", path)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("npm execution cache is not a directory: %s", path)
-		}
-		return nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect npm execution cache path: %w", err)
-	}
-	if allowMissing {
-		return nil
-	}
-	parent := filepath.Dir(path)
-	if parent == path {
-		return nil
-	}
-	return rejectSymlinkOrMissingParent(parent, true)
 }
