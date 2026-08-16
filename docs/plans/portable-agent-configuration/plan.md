@@ -55,8 +55,9 @@ The frontend will store selected bundle IDs in the existing profile configuratio
 
 ### Frontend
 
-- Add the configuration controls to the existing remote-credentials settings card.
-- Keep each configuration checkbox independent from the authentication radio group.
+- Add the configuration controls to each matching agent row in the existing remote-credentials settings card.
+- Keep each configuration checkbox independent from that agent's authentication radio group.
+- Do not render a separate global agent-configuration section.
 - Use the existing route-level save coordinator and dirty-state markers.
 - Show unavailable host files without removing a saved selection.
 - Add translated copy for all labels, descriptions, warnings, and states.

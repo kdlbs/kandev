@@ -22,5 +22,8 @@ export type ListAgentConfigBundlesResponse = {
 export async function listAgentConfigBundles(
   options?: ApiRequestOptions,
 ): Promise<ListAgentConfigBundlesResponse> {
-  return fetchJson<ListAgentConfigBundlesResponse>("/api/v1/agent-config-bundles", options);
+  return fetchJson<ListAgentConfigBundlesResponse>("/api/v1/agent-config-bundles", {
+    ...options,
+    cache: "no-store",
+  });
 }

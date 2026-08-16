@@ -116,10 +116,11 @@ The agent then uses the configuration that remains in the executor.
 
 ### The user interface shows the risk
 
-The executor profile editor shows a separate **Copy agent configuration** section.
-Each agent row contains independent configuration checkboxes.
+The executor profile editor shows each supported agent as an expandable row.
+Each expanded row contains the agent's authentication controls and independent
+configuration checkboxes. There is no separate global configuration section.
 
-The section shows a warning icon beside its title.
+The configuration controls show a warning icon beside their title.
 The visible description states that Kandev copies selected files without changes.
 
 On a fine pointer, hover or keyboard focus opens the warning tooltip.

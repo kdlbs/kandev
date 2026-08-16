@@ -1,8 +1,11 @@
+import fs from "node:fs";
+import path from "node:path";
 import { expect, test } from "../../fixtures/test-base";
 import {
   expectNoHorizontalOverflow,
   expectTouchTarget,
   PORTABLE_CONFIG_BUNDLE_ID,
+  portableConfigInfo,
   portableConfigSection,
   selectPortableConfigBundle,
 } from "./executor-agent-config-helpers";
@@ -10,8 +13,12 @@ import {
 test.describe("portable agent configuration settings on mobile", () => {
   test("uses a bottom drawer and keeps bundle controls reachable", async ({
     apiClient,
+    backend,
     testPage,
   }) => {
+    const configDir = path.join(backend.tmpDir, ".mock-agent");
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, "settings.json"), '{"source":"settings"}\n');
     const executor = await apiClient.createExecutor("E2E mobile portable config", "local_docker");
     const profile = await apiClient.createExecutorProfile(executor.id, {
       name: "E2E mobile portable config profile",
@@ -23,10 +30,14 @@ test.describe("portable agent configuration settings on mobile", () => {
 
     try {
       await testPage.goto(`/settings/executors/${profile.id}`);
+      const agentTrigger = testPage.getByRole("button", { name: /Mock Not Configured/ });
+      await expect(agentTrigger).toBeVisible();
+      await agentTrigger.tap();
+
       const section = portableConfigSection(testPage);
       await expect(section).toBeVisible();
 
-      const info = testPage.getByTestId("portable-config-info");
+      const info = portableConfigInfo(testPage);
       await expectTouchTarget(info);
       await info.tap();
       const drawer = testPage.getByRole("dialog");
@@ -35,7 +46,7 @@ test.describe("portable agent configuration settings on mobile", () => {
       await testPage.keyboard.press("Escape");
       await expect(drawer).toBeHidden();
 
-      const row = testPage.getByTestId(`portable-config-bundle-${PORTABLE_CONFIG_BUNDLE_ID}`);
+      const row = section.getByTestId(`portable-config-bundle-${PORTABLE_CONFIG_BUNDLE_ID}`);
       await expectTouchTarget(row);
       await selectPortableConfigBundle(testPage);
       await expectNoHorizontalOverflow(testPage);

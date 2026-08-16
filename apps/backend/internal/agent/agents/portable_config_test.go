@@ -51,3 +51,15 @@ func TestCodexRemoteAuthContainsAuthOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestMockPortableConfigUsesUniqueBundleIDsForAliases(t *testing.T) {
+	defaultBundle := NewMockAgent().PortableConfig().Bundles[0]
+	aliasBundle := NewMockAgentWithID("codex-acp", "Mock Codex", "Mock Codex").PortableConfig().Bundles[0]
+
+	if defaultBundle.ID != "mock.settings" {
+		t.Fatalf("default mock bundle ID = %q, want mock.settings", defaultBundle.ID)
+	}
+	if aliasBundle.ID != "codex-acp.settings" {
+		t.Fatalf("aliased mock bundle ID = %q, want codex-acp.settings", aliasBundle.ID)
+	}
+}

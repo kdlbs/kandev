@@ -12,7 +12,7 @@ spec: "../../specs/portable-agent-configuration/spec.md"
 
 ## Acceptance
 
-- Local Docker, SSH, and Sprites profile forms show independent bundle checkboxes and persist `agent_config_bundles` through the shared save action.
+- Local Docker, SSH, and Sprites profile forms show each agent's independent bundle checkboxes inside that agent's expanded row and persist `agent_config_bundles` through the shared save action.
 - Visible copy and a warning icon explain secrets, hooks, commands, paths, target replacement, and the SSH shared-home risk.
 - Fine pointers use a tooltip, coarse pointers use a drawer, and every touch control meets the 44 CSS pixel target.
 
@@ -79,5 +79,7 @@ Report desktop behavior, mobile behavior, accessibility, translations, RED evide
 
 Implemented independent authentication and configuration controls, persistent
 bundle IDs, unavailable-source hints, fine-pointer tooltip/coarse-pointer
-drawer behavior, and translated copy. Focused frontend tests passed with 25
-tests. Web typecheck, lint, i18n check, and i18n ratchet passed.
+drawer behavior, and translated copy. Configuration choices are now rendered
+inside the matching expanded agent row instead of a separate global section.
+Focused frontend tests passed with 25 tests. Web typecheck, lint, i18n check,
+and i18n ratchet passed.

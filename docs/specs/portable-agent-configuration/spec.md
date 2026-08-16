@@ -48,17 +48,20 @@ Kandev copies each OpenCode file that exists.
 
 ## User interface
 
-The executor profile editor contains a **Copy agent configuration** section.
-The section appears for Local Docker, SSH, and Sprites profiles.
+The executor profile editor shows each supported agent as an expandable row.
+The row appears for Local Docker, SSH, and Sprites profiles and contains both
+the agent's authentication choices and its configuration bundle choices.
+Authentication and configuration remain independent selections. There is no
+separate global agent-configuration section.
 
-The section description gives this information:
+The configuration choices give this information:
 
 - Kandev copies the selected files without changes.
 - A copied file can contain secrets, environment values, hooks, or commands.
 - A copied file can change models, permissions, MCP servers, and network endpoints.
 - A copied host path can be invalid in the executor.
 
-A warning icon appears beside the section title.
+A warning icon appears beside the configuration choices.
 The icon has a translated accessible name.
 
 On desktop, hover or keyboard focus opens a tooltip.
@@ -180,7 +183,7 @@ Warnings must not contain file data or secret values.
 
 ## Scenarios
 
-- **GIVEN** a Codex profile that uses `OPENAI_API_KEY`, **WHEN** the user selects the Codex configuration bundle, **THEN** both choices remain selected.
+- **GIVEN** a Codex agent row, **WHEN** the user selects an authentication method and the Codex configuration bundle, **THEN** both choices remain selected independently.
 - **GIVEN** a selected Claude bundle, **WHEN** Kandev creates a fresh Docker environment, **THEN** `.claude/settings.json` exists in the agent home.
 - **GIVEN** a selected OpenCode bundle with JSON configuration, **WHEN** Kandev creates an SSH environment, **THEN** Kandev copies it to the remote user home.
 - **GIVEN** a selected bundle, **WHEN** the task uses a warm resume, **THEN** Kandev does not copy the host file again.

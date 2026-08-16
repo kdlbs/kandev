@@ -205,9 +205,13 @@ func (a *MockAgent) RemoteAuth() *RemoteAuth {
 // agent can exercise the same isolated-home transfer path as a real ACP
 // provider without requiring provider credentials.
 func (a *MockAgent) PortableConfig() *PortableConfig {
+	bundleID := "mock.settings"
+	if a.ID() != mockAgentDefaultID {
+		bundleID = a.ID() + ".settings"
+	}
 	return &PortableConfig{Bundles: []PortableConfigBundle{
 		{
-			ID:    "mock.settings",
+			ID:    bundleID,
 			Label: "Copy mock-agent settings",
 			Files: []PortableConfigFile{
 				{

@@ -19,7 +19,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { AgentConfigBundle } from "@/lib/api/domains/agent-config-api";
 
-type PortableConfigBundlesProps = {
+type AgentConfigOptionsProps = {
+  agentId: string;
   bundles: AgentConfigBundle[];
   selectedIds: string[];
   baselineSelectedIds: string[];
@@ -34,19 +35,23 @@ const PORTABLE_CONFIG_LABEL_KEYS: Record<string, string> = {
   "mock.settings": "executors:portableConfigBundleMockSettings",
 };
 
-export function PortableConfigBundles({
+export function AgentConfigOptions({
+  agentId,
   bundles,
   selectedIds,
   baselineSelectedIds,
   onChange,
   isSSH = false,
-}: PortableConfigBundlesProps) {
+}: AgentConfigOptionsProps) {
   const { t } = useTranslation();
   if (bundles.length === 0) return null;
 
   const selected = new Set(selectedIds);
   const baseline = new Set(baselineSelectedIds);
-  const isDirty = !sameStringSet(selected, baseline);
+  const bundleIds = new Set(bundles.map((bundle) => bundle.id));
+  const isDirty = [...bundleIds].some(
+    (bundleId) => selected.has(bundleId) !== baseline.has(bundleId),
+  );
 
   const toggle = (bundleId: string, checked: boolean) => {
     const next = new Set(selected);
@@ -56,16 +61,19 @@ export function PortableConfigBundles({
   };
 
   return (
-    <section
-      className="space-y-3 rounded-md border border-border/70 p-3"
-      data-testid="portable-config-bundles"
+    <div
+      role="group"
+      aria-label={t("executors:portableConfigTitle")}
+      className="space-y-3 border-t border-border/70 pt-3"
+      data-testid={`agent-config-options-${agentId}`}
+      data-agent-id={agentId}
       data-settings-dirty={isDirty}
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex min-h-7 items-center gap-2">
             <Label className="text-sm font-medium">{t("executors:portableConfigTitle")}</Label>
-            <PortableConfigInfo isSSH={isSSH} />
+            <PortableConfigInfo isSSH={isSSH} testId={`agent-config-info-${agentId}`} />
           </div>
           <p className="text-xs text-muted-foreground">
             {t("executors:portableConfigDescription")}
@@ -121,11 +129,11 @@ export function PortableConfigBundles({
           );
         })}
       </div>
-    </section>
+    </div>
   );
 }
 
-function PortableConfigInfo({ isSSH }: { isSSH: boolean }) {
+function PortableConfigInfo({ isSSH, testId }: { isSSH: boolean; testId: string }) {
   const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
@@ -137,7 +145,7 @@ function PortableConfigInfo({ isSSH }: { isSSH: boolean }) {
       aria-label={t("executors:portableConfigInfoLabel")}
       aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
       aria-expanded={usesTouchDrawer ? open : undefined}
-      data-testid="portable-config-info"
+      data-testid={testId}
       className={usesTouchDrawer ? "h-11 w-11 shrink-0" : "h-7 w-7 shrink-0"}
     >
       <IconAlertTriangle className="size-4 text-amber-500" aria-hidden="true" />
@@ -186,8 +194,4 @@ function PortableConfigInfo({ isSSH }: { isSSH: boolean }) {
       </DrawerContent>
     </Drawer>
   );
-}
-
-function sameStringSet(left: Set<string>, right: Set<string>): boolean {
-  return left.size === right.size && [...left].every((value) => right.has(value));
 }

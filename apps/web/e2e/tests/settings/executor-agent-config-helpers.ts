@@ -1,16 +1,25 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 export const PORTABLE_CONFIG_BUNDLE_ID = "mock.settings";
+export const MOCK_CODEX_CONFIG_BUNDLE_ID = "codex-acp.settings";
+export const DEFAULT_CONFIG_AGENT_ID = "mock-agent";
 
-export function portableConfigSection(page: Page): Locator {
-  return page.getByTestId("portable-config-bundles");
+export function portableConfigSection(page: Page, agentId = DEFAULT_CONFIG_AGENT_ID): Locator {
+  return page.getByTestId(`agent-config-options-${agentId}`);
+}
+
+export function portableConfigInfo(page: Page, agentId = DEFAULT_CONFIG_AGENT_ID): Locator {
+  return page.getByTestId(`agent-config-info-${agentId}`);
 }
 
 export async function selectPortableConfigBundle(
   page: Page,
   bundleId = PORTABLE_CONFIG_BUNDLE_ID,
+  agentId = DEFAULT_CONFIG_AGENT_ID,
 ): Promise<void> {
-  const row = page.getByTestId(`portable-config-bundle-${bundleId}`);
+  const row = portableConfigSection(page, agentId).getByTestId(
+    `portable-config-bundle-${bundleId}`,
+  );
   await expect(row).toBeVisible();
   await row.getByRole("checkbox").check();
 }

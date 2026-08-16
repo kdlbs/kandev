@@ -75,7 +75,8 @@ SSH has an additional forwarding boundary. Remote agent and terminal instances r
 ### Portable agent configuration
 
 Local Docker, SSH, and Sprites profiles can copy selected agent configuration
-bundles. The controls for configuration and authentication are independent.
+bundles. Open an agent row in the remote credentials settings to choose that
+agent's authentication files and configuration bundles independently.
 Kandev owns the allowlist. You cannot enter an arbitrary host path or copy a
 complete agent home.
 

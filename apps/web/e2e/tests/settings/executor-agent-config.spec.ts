@@ -1,5 +1,9 @@
+import fs from "node:fs";
+import path from "node:path";
 import { expect, test } from "../../fixtures/test-base";
 import {
+  MOCK_CODEX_CONFIG_BUNDLE_ID,
+  portableConfigInfo,
   portableConfigSection,
   selectedBundleIds,
   selectPortableConfigBundle,
@@ -15,8 +19,15 @@ test.describe("portable agent configuration settings", () => {
     // alias for this settings-only scenario so the auth radio remains a real,
     // independently selectable control without requiring provider secrets.
     await backend.restart({ KANDEV_MOCK_PROVIDERS: "codex-acp" });
+    const configDir = path.join(backend.tmpDir, ".mock-agent");
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, "settings.json"), '{"source":"settings"}\n');
     const catalog = await apiClient.listAgentConfigBundles();
-    expect(catalog.bundles.some((bundle) => bundle.id === "mock.settings")).toBe(true);
+    expect(
+      catalog.bundles.some(
+        (bundle) => bundle.id === MOCK_CODEX_CONFIG_BUNDLE_ID && bundle.agent_id === "codex-acp",
+      ),
+    ).toBe(true);
 
     const executor = await apiClient.createExecutor("E2E portable config executor", "local_docker");
     const profile = await apiClient.createExecutorProfile(executor.id, {
@@ -30,15 +41,22 @@ test.describe("portable agent configuration settings", () => {
     try {
       await testPage.goto(`/settings/executors/${profile.id}`);
 
-      const section = portableConfigSection(testPage);
+      const agentTrigger = testPage.getByRole("button", { name: /Mock Codex/ });
+      await expect(agentTrigger).toBeVisible();
+      await agentTrigger.click();
+
+      const section = portableConfigSection(testPage, "codex-acp");
       await expect(section).toBeVisible();
-      await expect(testPage.getByTestId("portable-config-info")).toBeVisible();
-      await testPage.getByTestId("portable-config-info").hover();
+      const info = portableConfigInfo(testPage, "codex-acp");
+      await expect(info).toBeVisible();
+      await info.hover();
       await expect(testPage.getByRole("tooltip")).toContainText("without changes");
 
-      await selectPortableConfigBundle(testPage);
+      await selectPortableConfigBundle(testPage, MOCK_CODEX_CONFIG_BUNDLE_ID, "codex-acp");
       await expect(
-        section.getByTestId("portable-config-bundle-mock.settings").getByRole("checkbox"),
+        section
+          .getByTestId(`portable-config-bundle-${MOCK_CODEX_CONFIG_BUNDLE_ID}`)
+          .getByRole("checkbox"),
       ).toBeChecked();
 
       await testPage.getByRole("button", { name: "Mock Codex Not Configured" }).click();
@@ -54,13 +72,16 @@ test.describe("portable agent configuration settings", () => {
       await expect(testPage.getByText("Profile saved")).toBeVisible();
 
       const saved = await apiClient.getExecutorProfile(executor.id, profile.id);
-      expect(selectedBundleIds(saved.config)).toEqual(["mock.settings"]);
+      expect(selectedBundleIds(saved.config)).toEqual([MOCK_CODEX_CONFIG_BUNDLE_ID]);
       expect(JSON.parse(saved.config?.remote_credentials ?? "[]").length).toBeGreaterThan(0);
 
       await testPage.reload();
+      await testPage.getByRole("button", { name: /Mock Codex/ }).click();
       await expect(section).toBeVisible();
       await expect(
-        section.getByTestId("portable-config-bundle-mock.settings").getByRole("checkbox"),
+        section
+          .getByTestId(`portable-config-bundle-${MOCK_CODEX_CONFIG_BUNDLE_ID}`)
+          .getByRole("checkbox"),
       ).toBeChecked();
     } finally {
       await apiClient.deleteExecutor(executor.id).catch(() => {});

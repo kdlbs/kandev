@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RemoteCredentialsCard } from "./remote-credentials-card";
-import { PortableConfigBundles } from "./portable-config-bundles";
+import { AgentConfigOptions } from "./portable-config-bundles";
 import { listRemoteCredentials } from "@/lib/api/domains/settings-api";
 import { listAgentConfigBundles, type AgentConfigBundle } from "@/lib/api/domains/agent-config-api";
 
@@ -16,13 +16,34 @@ vi.mock("@/lib/api/domains/agent-config-api", () => ({
 
 const codexFileMethodId = "agent:codex-acp:files:0";
 const copyAuthFilesLabel = "Copy auth files";
+const codexConfigBundleId = "codex.config";
+const copyCodexConfigLabel = "Copy Codex configuration";
 
-function renderRemoteCredentialsCard(onChange = vi.fn()) {
-  render(<RemoteCredentialsHarness onChange={onChange} />);
+function renderRemoteCredentialsCard(
+  onChange = vi.fn(),
+  onConfigChange = vi.fn(),
+  initialConfigBundleIds: string[] = [],
+) {
+  render(
+    <RemoteCredentialsHarness
+      onChange={onChange}
+      onConfigChange={onConfigChange}
+      initialConfigBundleIds={initialConfigBundleIds}
+    />,
+  );
 }
 
-function RemoteCredentialsHarness({ onChange }: { onChange: (ids: string[]) => void }) {
+function RemoteCredentialsHarness({
+  onChange,
+  onConfigChange,
+  initialConfigBundleIds,
+}: {
+  onChange: (ids: string[]) => void;
+  onConfigChange: (ids: string[]) => void;
+  initialConfigBundleIds: string[];
+}) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [configBundleIds, setConfigBundleIds] = useState(initialConfigBundleIds);
   return (
     <RemoteCredentialsCard
       isRemote={true}
@@ -31,8 +52,11 @@ function RemoteCredentialsHarness({ onChange }: { onChange: (ids: string[]) => v
         setSelectedIds(ids);
         onChange(ids);
       }}
-      configBundleIds={[]}
-      onConfigBundleChange={() => {}}
+      configBundleIds={configBundleIds}
+      onConfigBundleChange={(ids) => {
+        setConfigBundleIds(ids);
+        onConfigChange(ids);
+      }}
       agentEnvVars={{}}
       onAgentEnvVarChange={() => {}}
       secrets={[]}
@@ -152,6 +176,47 @@ describe("RemoteCredentialsCard", () => {
       screen.getByText(".codex/auth.json, .codex/config.toml; files not found on this machine"),
     ).toBeTruthy();
   });
+
+  it("places configuration choices inside the matching agent accordion", async () => {
+    vi.mocked(listAgentConfigBundles).mockResolvedValueOnce({
+      bundles: [PORTABLE_BUNDLES[1]],
+    });
+
+    renderRemoteCredentialsCard();
+
+    await screen.findByText("Codex");
+    await waitFor(() => {
+      expect(screen.queryByRole("checkbox", { name: copyCodexConfigLabel })).toBeNull();
+    });
+
+    fireEvent.click(screen.getByText("Codex"));
+
+    const options = await screen.findByTestId("agent-config-options-codex-acp");
+    expect(options).toBeTruthy();
+    expect(options.contains(screen.getByRole("checkbox", { name: copyCodexConfigLabel }))).toBe(
+      true,
+    );
+  });
+
+  it("keeps authentication and configuration selections independent inside one agent", async () => {
+    vi.mocked(listAgentConfigBundles).mockResolvedValueOnce({
+      bundles: [{ ...PORTABLE_BUNDLES[1], available: true }],
+    });
+    const onAuthChange = vi.fn();
+    const onConfigChange = vi.fn();
+
+    renderRemoteCredentialsCard(onAuthChange, onConfigChange);
+    fireEvent.click(await screen.findByText("Codex"));
+
+    const authOption = screen.getByRole("radio", { name: copyAuthFilesLabel });
+    fireEvent.click(authOption);
+    const configOptions = await screen.findByTestId("agent-config-options-codex-acp");
+    fireEvent.click(within(configOptions).getByRole("checkbox", { name: copyCodexConfigLabel }));
+
+    expect(authOption.getAttribute("aria-checked")).toBe("true");
+    expect(onAuthChange).toHaveBeenCalledWith([codexFileMethodId]);
+    expect(onConfigChange).toHaveBeenCalledWith([codexConfigBundleId]);
+  });
 });
 
 const PORTABLE_BUNDLES: AgentConfigBundle[] = [
@@ -170,7 +235,7 @@ const PORTABLE_BUNDLES: AgentConfigBundle[] = [
     ],
   },
   {
-    id: "codex.config",
+    id: codexConfigBundleId,
     agent_id: "codex-acp",
     display_name: "Codex configuration",
     label: "Codex configuration",
@@ -181,12 +246,13 @@ const PORTABLE_BUNDLES: AgentConfigBundle[] = [
   },
 ];
 
-describe("PortableConfigBundles", () => {
+describe("AgentConfigOptions", () => {
   it("keeps configuration selection independent from authentication", () => {
     const onChange = vi.fn();
 
     const { rerender } = render(
-      <PortableConfigBundles
+      <AgentConfigOptions
+        agentId="codex-acp"
         bundles={PORTABLE_BUNDLES}
         selectedIds={[]}
         baselineSelectedIds={[]}
@@ -196,7 +262,8 @@ describe("PortableConfigBundles", () => {
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Copy Claude settings" }));
     rerender(
-      <PortableConfigBundles
+      <AgentConfigOptions
+        agentId="codex-acp"
         bundles={PORTABLE_BUNDLES}
         selectedIds={["claude.settings"]}
         baselineSelectedIds={[]}
@@ -205,15 +272,16 @@ describe("PortableConfigBundles", () => {
     );
 
     expect(onChange).toHaveBeenCalledWith(["claude.settings"]);
-    expect(screen.getByTestId("portable-config-bundles").getAttribute("data-settings-dirty")).toBe(
-      "true",
-    );
+    expect(
+      screen.getByTestId("agent-config-options-codex-acp").getAttribute("data-settings-dirty"),
+    ).toBe("true");
   });
 
   it("disables new unavailable bundles but keeps saved ones removable", () => {
     const onChange = vi.fn();
     const { rerender } = render(
-      <PortableConfigBundles
+      <AgentConfigOptions
+        agentId="codex-acp"
         bundles={PORTABLE_BUNDLES}
         selectedIds={[]}
         baselineSelectedIds={[]}
@@ -221,25 +289,27 @@ describe("PortableConfigBundles", () => {
       />,
     );
 
-    const checkbox = screen.getByRole("checkbox", { name: "Copy Codex configuration" });
+    const checkbox = screen.getByRole("checkbox", { name: copyCodexConfigLabel });
     expect((checkbox as HTMLInputElement).disabled).toBe(true);
     expect(screen.getByText("Not found")).toBeTruthy();
     expect(screen.getByText(/editing hint/i)).toBeTruthy();
 
     rerender(
-      <PortableConfigBundles
+      <AgentConfigOptions
+        agentId="codex-acp"
         bundles={PORTABLE_BUNDLES}
-        selectedIds={["codex.config"]}
-        baselineSelectedIds={["codex.config"]}
+        selectedIds={[codexConfigBundleId]}
+        baselineSelectedIds={[codexConfigBundleId]}
         onChange={onChange}
       />,
     );
-    const savedCheckbox = screen.getByRole("checkbox", { name: "Copy Codex configuration" });
+    const savedCheckbox = screen.getByRole("checkbox", { name: copyCodexConfigLabel });
     expect((savedCheckbox as HTMLInputElement).disabled).toBe(false);
     fireEvent.click(savedCheckbox);
     expect(onChange).toHaveBeenCalledWith([]);
     rerender(
-      <PortableConfigBundles
+      <AgentConfigOptions
+        agentId="codex-acp"
         bundles={PORTABLE_BUNDLES}
         selectedIds={[]}
         baselineSelectedIds={[]}
