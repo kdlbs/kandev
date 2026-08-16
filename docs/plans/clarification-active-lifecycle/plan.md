@@ -285,6 +285,8 @@ All task gates passed:
   summary CAS retries, and makes atomic clarification bundle operations a compile-time repository
   contract. Focused race checks and all six affected backend package suites passed; the environment-gated
   PostgreSQL predicate case skipped locally and remains enabled in CI.
+- Follow-up review bounds terminal bundle publication with the same fresh persistence context. The
+  cancelled-caller regression, full clarification suite, and focused lint passed.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

@@ -200,8 +200,9 @@ session they can already access. Session selection does not broaden task visibil
 - Reserved-successor rollback fails or has an ambiguous durable outcome: keep the live reservation
   unresolved so ready handling waits and later prompt admission remains blocked until restart recovery
   reconciles the row.
-- Clarification detachment and expiry persistence ignore request cancellation but always use a fresh
-  bounded context, so a database lock cannot hold the per-session pause guard indefinitely.
+- Clarification detachment, expiry persistence, and terminal bundle publication ignore request
+  cancellation but always use a fresh bounded context, so a database lock or synchronous summary
+  refresh cannot hold the per-session pause or HTTP response indefinitely.
 - Agentctl accepts a detached resume but durable successor publication fails: return a non-retryable
   server error, keep the claimed bundle terminal, and make later rollback fail closed so the accepted
   answer cannot be dispatched again in-process.

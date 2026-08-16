@@ -33,6 +33,8 @@ type stubMessageCreator struct {
 	restoreErr         error
 	refuseRestore      bool
 	publishErr         error
+	publishHasDeadline []bool
+	publishContextErrs []error
 	claimHasDeadline   bool
 	claimContextErr    error
 	restoreHasDeadline bool
@@ -167,9 +169,12 @@ func (s *stubMessageCreator) RestoreActiveClarificationBundle(
 }
 
 func (s *stubMessageCreator) PublishClarificationBundleUpdates(
-	_ context.Context,
+	ctx context.Context,
 	messages []*taskmodels.Message,
 ) error {
+	_, hasDeadline := ctx.Deadline()
+	s.publishHasDeadline = append(s.publishHasDeadline, hasDeadline)
+	s.publishContextErrs = append(s.publishContextErrs, ctx.Err())
 	if s.publishErr != nil {
 		return s.publishErr
 	}
@@ -182,6 +187,21 @@ func (s *stubMessageCreator) PublishClarificationBundleUpdates(
 	}
 	s.publishedMessages = append(s.publishedMessages, published)
 	return nil
+}
+
+func TestPublishClarificationBundleUpdatesUsesFreshBoundedContext(t *testing.T) {
+	h, _, _, messageCreator := setupTestHandler(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	h.publishClarificationBundleUpdates(ctx, "pending-bounded-publish", nil)
+
+	if len(messageCreator.publishHasDeadline) != 1 || !messageCreator.publishHasDeadline[0] {
+		t.Fatalf("publication deadlines = %v, want one bounded context", messageCreator.publishHasDeadline)
+	}
+	if len(messageCreator.publishContextErrs) != 1 || messageCreator.publishContextErrs[0] != nil {
+		t.Fatalf("publication context errors = %v, want fresh context", messageCreator.publishContextErrs)
+	}
 }
 
 func setupTestHandler(t *testing.T, msgs map[string][]*taskmodels.Message) (*Handlers, *stubMessageStore, *stubEventBus, *stubMessageCreator) {

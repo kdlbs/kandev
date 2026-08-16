@@ -503,7 +503,9 @@ func (h *Handlers) publishClarificationBundleUpdates(
 	pendingID string,
 	messages []*taskmodels.Message,
 ) {
-	if err := h.messageCreator.PublishClarificationBundleUpdates(ctx, messages); err != nil {
+	publishCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
+	if err := h.messageCreator.PublishClarificationBundleUpdates(publishCtx, messages); err != nil {
 		h.logger.Error("failed to publish clarification bundle updates",
 			zap.String("pending_id", pendingID),
 			zap.Error(err))

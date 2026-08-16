@@ -172,3 +172,5 @@ blockers/risks, and update task/plan status.
   boolean, numeric, and string pending/attempted encodings; focused regressions cover both rollback paths
   and both database dialects. Focused race checks and the six affected backend package suites passed;
   the PostgreSQL case skipped locally without `KANDEV_TEST_POSTGRES_DSN` and remains enabled in CI.
+- Follow-up review bounds every terminal clarification publication with the fresh 30-second persistence
+  context. A cancelled-caller regression and the full clarification suite passed with zero lint issues.
