@@ -147,7 +147,15 @@ type SwimlaneGraphDndOptions = {
   onMoveError?: (error: MoveTaskError) => void;
 };
 
-async function moveTaskAcrossSwimlaneSteps({
+/**
+ * Optimistically moves a task, rolling the snapshot back and reporting a message
+ * when the backend refuses.
+ *
+ * Exported for tests: the localized fallback on the non-`Error` branch is the
+ * kind of copy no rendering test reaches, since it is handed to `onMoveError`
+ * rather than to the DOM.
+ */
+export async function moveTaskAcrossSwimlaneSteps({
   task,
   taskId,
   targetColumnId,
