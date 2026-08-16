@@ -120,6 +120,106 @@ func TestUploadPortableConfigBundlesWarnsAndContinuesForMissingFiles(t *testing.
 	}
 }
 
+func TestReadPortableConfigFileRejectsPathReplacement(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "settings.json")
+	writeFile(t, root, "settings.json", []byte("original"))
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("lstat source: %v", err)
+	}
+	replacement := filepath.Join(root, "replacement.json")
+	writeFile(t, root, "replacement.json", []byte("replacement"))
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove source: %v", err)
+	}
+	if err := os.Symlink(replacement, path); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if _, err := readPortableConfigFile(path, info); err == nil {
+		t.Fatal("expected replaced source path to be rejected")
+	}
+}
+
+func TestUploadPortableConfigBundlesRejectsSymlinkedDestinations(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeFile(t, home, ".agent/settings.json", []byte("settings"))
+
+	for _, tc := range []struct {
+		name       string
+		targetPath string
+		prepare    func(t *testing.T, root, outside string) string
+	}{
+		{
+			name:       "final file",
+			targetPath: ".agent/settings.json",
+			prepare: func(t *testing.T, root, outside string) string {
+				t.Helper()
+				target := filepath.Join(root, ".agent", "settings.json")
+				if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+					t.Fatalf("mkdir target parent: %v", err)
+				}
+				outsideTarget := filepath.Join(outside, "settings.json")
+				writeFile(t, outside, "settings.json", []byte("outside"))
+				if err := os.Symlink(outsideTarget, target); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				return outsideTarget
+			},
+		},
+		{
+			name:       "parent directory",
+			targetPath: ".redirect/settings.json",
+			prepare: func(t *testing.T, root, outside string) string {
+				t.Helper()
+				parent := filepath.Join(root, ".redirect")
+				outsideTarget := filepath.Join(outside, "settings.json")
+				writeFile(t, outside, "settings.json", []byte("outside"))
+				if err := os.Symlink(outside, parent); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				return outsideTarget
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			outside := t.TempDir()
+			outsideTarget := tc.prepare(t, root, outside)
+			ag := portableConfigTestAgent{
+				Agent: agents.NewMockAgent(),
+				config: &agents.PortableConfig{Bundles: []agents.PortableConfigBundle{{
+					ID: "test.config", Label: "Test config", Files: []agents.PortableConfigFile{{
+						SourcePaths: map[string]string{
+							"linux":   ".agent/settings.json",
+							"darwin":  ".agent/settings.json",
+							"windows": ".agent/settings.json",
+						},
+						TargetPath: tc.targetPath,
+					}},
+				}}},
+			}
+
+			warnings := UploadPortableConfigBundles(
+				context.Background(), localFileUploader{root: root}, ag,
+				[]string{"test.config"}, root, newSeederTestLogger(t),
+			)
+			if len(warnings) != 1 || warnings[0].Reason != "target_write_failed" {
+				t.Fatalf("warnings = %+v, want target_write_failed", warnings)
+			}
+			contents, err := os.ReadFile(outsideTarget)
+			if err != nil {
+				t.Fatalf("read outside target: %v", err)
+			}
+			if string(contents) != "outside" {
+				t.Fatalf("outside target = %q, want unchanged content", contents)
+			}
+		})
+	}
+}
+
 func TestReportPortableConfigWarningsPublishesOptionalCopyWarning(t *testing.T) {
 	var got PrepareStep
 	reportPortableConfigWarnings(func(step PrepareStep, _, _ int) {

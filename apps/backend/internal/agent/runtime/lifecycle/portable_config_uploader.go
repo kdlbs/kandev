@@ -181,7 +181,7 @@ func uploadPortableConfigFile(
 		warning.Reason = "launch_size_limit"
 		return warning, false, 0
 	}
-	data, err := readPortableConfigFile(sourcePath, info.Size())
+	data, err := readPortableConfigFile(sourcePath, info)
 	if err != nil {
 		warning.Reason = "source_read_failed"
 		return warning, false, 0
@@ -220,17 +220,21 @@ func portableConfigSourceInfo(root, path string) (os.FileInfo, string) {
 	return info, ""
 }
 
-func readPortableConfigFile(path string, expectedSize int64) ([]byte, error) {
+func readPortableConfigFile(path string, expectedInfo os.FileInfo) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = file.Close() }()
+	actualInfo, err := file.Stat()
+	if err != nil || !actualInfo.Mode().IsRegular() || !os.SameFile(expectedInfo, actualInfo) {
+		return nil, fmt.Errorf("file changed while opening")
+	}
 	data, err := io.ReadAll(io.LimitReader(file, portableConfigMaxFileBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > portableConfigMaxFileBytes || int64(len(data)) != expectedSize {
+	if int64(len(data)) > portableConfigMaxFileBytes || int64(len(data)) != expectedInfo.Size() {
 		return nil, fmt.Errorf("file changed while reading")
 	}
 	return data, nil

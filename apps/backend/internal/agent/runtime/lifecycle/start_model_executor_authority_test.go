@@ -48,6 +48,16 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 			wantWarning:   true,
 		},
 		{
+			name:          "advertised fallback method not supported keeps provider default",
+			state:         modelState("fallback"),
+			policy:        StartModelPolicy{Model: "host-only-model", FallbackModel: "fallback"},
+			applierErrors: []error{methodNotFoundErr()},
+			wantCalls:     []string{"fallback"},
+			wantOutcome:   ModelSelectionOutcomeProviderDefault,
+			wantReason:    ModelSelectionReasonSelectionUnsupported,
+			wantWarning:   true,
+		},
+		{
 			name:        "unadvertised fallback keeps provider default",
 			state:       modelState("executor-default"),
 			policy:      StartModelPolicy{Model: "host-only-model", FallbackModel: "host-fallback"},

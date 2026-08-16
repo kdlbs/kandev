@@ -140,8 +140,10 @@ func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentE
 	}
 	previousMode := execution.GetModeState()
 	previousModel := execution.GetModelState()
+	execution.SetModelState(nil)
 	newSessionID, err := execution.agentctl.NewSession(ctx, execution.WorkspacePath, mcpServers)
 	if err != nil {
+		execution.SetModelState(previousModel)
 		return fmt.Errorf("create ACP session in rebound workspace: %w", err)
 	}
 	execution.ACPSessionID = newSessionID
@@ -168,7 +170,7 @@ func (m *Manager) reapplyReboundSessionConfig(
 	if model != nil && model.CurrentModelID != "" {
 		policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
 		policy.Model = model.CurrentModelID
-		decision, err := applyStartModelPolicy(ctx, m.logger, execution.agentctl, model, policy)
+		decision, err := applyStartModelPolicy(ctx, m.logger, execution.agentctl, execution.GetModelState(), policy)
 		if err != nil {
 			m.logger.Warn("failed to re-apply model after workspace rebind",
 				zap.String("execution_id", execution.ID),

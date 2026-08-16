@@ -81,14 +81,7 @@ type localFileUploader struct {
 }
 
 func (u localFileUploader) WriteFile(_ context.Context, path string, data []byte, mode os.FileMode) error {
-	cleanPath, err := containedPath(u.root, path)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(cleanPath), 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(cleanPath), err)
-	}
-	return os.WriteFile(cleanPath, data, mode)
+	return writeFileWithinRoot(u.root, path, data, mode)
 }
 
 // containedPath returns a cleaned absolute path guaranteed to be inside root,

@@ -194,7 +194,7 @@ describe("PortableConfigBundles", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("checkbox", { name: "Claude settings" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Copy Claude settings" }));
     rerender(
       <PortableConfigBundles
         bundles={PORTABLE_BUNDLES}
@@ -210,19 +210,41 @@ describe("PortableConfigBundles", () => {
     );
   });
 
-  it("keeps unavailable bundles selectable and explains the source state", () => {
-    render(
+  it("disables new unavailable bundles but keeps saved ones removable", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
       <PortableConfigBundles
         bundles={PORTABLE_BUNDLES}
         selectedIds={[]}
         baselineSelectedIds={[]}
-        onChange={vi.fn()}
+        onChange={onChange}
       />,
     );
 
-    const checkbox = screen.getByRole("checkbox", { name: "Codex configuration" });
-    expect((checkbox as HTMLInputElement).disabled).toBe(false);
+    const checkbox = screen.getByRole("checkbox", { name: "Copy Codex configuration" });
+    expect((checkbox as HTMLInputElement).disabled).toBe(true);
     expect(screen.getByText("Not found")).toBeTruthy();
     expect(screen.getByText(/editing hint/i)).toBeTruthy();
+
+    rerender(
+      <PortableConfigBundles
+        bundles={PORTABLE_BUNDLES}
+        selectedIds={["codex.config"]}
+        baselineSelectedIds={["codex.config"]}
+        onChange={onChange}
+      />,
+    );
+    const savedCheckbox = screen.getByRole("checkbox", { name: "Copy Codex configuration" });
+    expect((savedCheckbox as HTMLInputElement).disabled).toBe(false);
+    fireEvent.click(savedCheckbox);
+    expect(onChange).toHaveBeenCalledWith([]);
+    rerender(
+      <PortableConfigBundles
+        bundles={PORTABLE_BUNDLES}
+        selectedIds={[]}
+        baselineSelectedIds={[]}
+        onChange={onChange}
+      />,
+    );
   });
 });

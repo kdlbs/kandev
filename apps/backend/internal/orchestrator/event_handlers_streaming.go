@@ -2948,10 +2948,17 @@ func (s *Service) handleSessionModelSelectionWarningEvent(ctx context.Context, p
 	if !ok {
 		return
 	}
-	if !s.claimModelSelectionWarning(ctx, sessionID, warning.DecisionID) {
-		return
+	var releaseClaim func()
+	if s.messageCreator != nil {
+		var claimed bool
+		releaseClaim, claimed = s.claimModelSelectionWarning(ctx, sessionID, warning.DecisionID)
+		if !claimed {
+			return
+		}
 	}
-	s.persistModelSelectionWarningMessage(ctx, payload.TaskID, sessionID, warning)
+	if err := s.persistModelSelectionWarningMessage(ctx, payload.TaskID, sessionID, warning); err != nil {
+		releaseClaim()
+	}
 	s.publishModelSelectionWarning(ctx, payload.TaskID, sessionID, warning)
 }
 
@@ -2974,23 +2981,67 @@ func (s *Service) modelSelectionWarningEvent(
 	return *payload.Data.ModelSelectionWarning, sessionID, true
 }
 
-func (s *Service) claimModelSelectionWarning(ctx context.Context, sessionID, decisionID string) bool {
+func (s *Service) claimModelSelectionWarning(ctx context.Context, sessionID, decisionID string) (func(), bool) {
 	if s.repo == nil || decisionID == "" {
-		return true
+		return func() {}, true
 	}
 	// A decision ID is created by lifecycle and is stable across event replay.
 	// Use the structured metadata key as an atomic claim so two deliveries cannot
 	// create duplicate status messages after a reconnect or restart.
-	claimed, err := s.repo.SetSessionMetadataKeyIfAbsent(
-		context.WithoutCancel(ctx), sessionID,
-		"model_selection_warning:"+decisionID, true,
-	)
+	claimCtx := context.WithoutCancel(ctx)
+	key := "model_selection_warning:" + decisionID
+	if claimer, ok := s.repo.(failedSessionMetadataClaimer); ok {
+		return s.claimModelSelectionWarningWithState(claimCtx, sessionID, key, claimer)
+	}
+	claimed, err := s.repo.SetSessionMetadataKeyIfAbsent(claimCtx, sessionID, key, true)
 	if err != nil {
 		s.logger.Warn("failed to claim model selection warning persistence",
 			zap.String("session_id", sessionID), zap.Error(err))
-		return false
+		return func() {}, false
 	}
-	return claimed
+	return func() {}, claimed
+}
+
+func (s *Service) claimModelSelectionWarningWithState(
+	ctx context.Context,
+	sessionID, key string,
+	claimer failedSessionMetadataClaimer,
+) (func(), bool) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		s.logger.Warn("failed to load session for model selection warning claim",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return func() {}, false
+	}
+	claimed, err := claimer.SetSessionMetadataKeyIfAbsentIfState(ctx, sessionID, key, true, session.State)
+	if err != nil {
+		s.logger.Warn("failed to claim model selection warning persistence",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return func() {}, false
+	}
+	if !claimed {
+		return func() {}, false
+	}
+	return func() {
+		s.releaseModelSelectionWarningClaim(ctx, sessionID, key, session.State)
+	}, true
+}
+
+func (s *Service) releaseModelSelectionWarningClaim(
+	ctx context.Context,
+	sessionID, key string,
+	expectedState models.TaskSessionState,
+) {
+	releaser, ok := s.repo.(failedSessionMetadataClaimReleaser)
+	if !ok {
+		s.logger.Warn("session repository cannot release model selection warning claim",
+			zap.String("session_id", sessionID))
+		return
+	}
+	if _, err := releaser.RemoveSessionMetadataKeyIfState(ctx, sessionID, key, expectedState); err != nil {
+		s.logger.Warn("failed to release model selection warning claim",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
 }
 
 func modelSelectionWarningMetadata(warning streams.ModelSelectionWarning) map[string]interface{} {
@@ -3016,9 +3067,9 @@ func (s *Service) persistModelSelectionWarningMessage(
 	ctx context.Context,
 	taskID, sessionID string,
 	warning streams.ModelSelectionWarning,
-) {
+) error {
 	if s.messageCreator == nil {
-		return
+		return nil
 	}
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx,
@@ -3033,7 +3084,9 @@ func (s *Service) persistModelSelectionWarningMessage(
 		s.logger.Warn("failed to persist model selection warning",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID), zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 func (s *Service) publishModelSelectionWarning(

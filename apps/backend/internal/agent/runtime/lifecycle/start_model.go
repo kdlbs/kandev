@@ -126,18 +126,7 @@ func applyStartModelPolicy(
 
 	if !containsModel(advertised, policy.Model) {
 		if policy.FallbackModel != "" && containsModel(advertised, policy.FallbackModel) {
-			decision.SetModelCalled = true
-			if err := applier.SetModel(ctx, policy.FallbackModel); err != nil {
-				return decision, fmt.Errorf("failed to set fallback model %q: %w", policy.FallbackModel, err)
-			}
-			decision.EffectiveModel = policy.FallbackModel
-			decision.Outcome = ModelSelectionOutcomeExplicitFallback
-			decision.Reason = ModelSelectionReasonRequestedNotAdvertised
-			decision.Warning = true
-			log.Info("start model unavailable, using advertised fallback model",
-				zap.String("start_model", policy.Model),
-				zap.String("fallback_model", policy.FallbackModel))
-			return decision, nil
+			return applyAdvertisedFallback(ctx, log, applier, state, policy, decision)
 		}
 		reason := ModelSelectionReasonRequestedNotAdvertised
 		if policy.FallbackModel != "" {
@@ -167,5 +156,32 @@ func applyStartModelPolicy(
 
 	decision.EffectiveModel = policy.Model
 	decision.Outcome = ModelSelectionOutcomeApplied
+	return decision, nil
+}
+
+func applyAdvertisedFallback(
+	ctx context.Context,
+	log *logger.Logger,
+	applier modelApplier,
+	state *CachedModelState,
+	policy StartModelPolicy,
+	decision ModelSelectionDecision,
+) (ModelSelectionDecision, error) {
+	decision.SetModelCalled = true
+	if err := applier.SetModel(ctx, policy.FallbackModel); err != nil {
+		if sessionmodel.IsMethodNotFound(err) {
+			decision = providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported)
+			decision.SetModelCalled = true
+			return decision, nil
+		}
+		return decision, fmt.Errorf("failed to set fallback model %q: %w", policy.FallbackModel, err)
+	}
+	decision.EffectiveModel = policy.FallbackModel
+	decision.Outcome = ModelSelectionOutcomeExplicitFallback
+	decision.Reason = ModelSelectionReasonRequestedNotAdvertised
+	decision.Warning = true
+	log.Info("start model unavailable, using advertised fallback model",
+		zap.String("start_model", policy.Model),
+		zap.String("fallback_model", policy.FallbackModel))
 	return decision, nil
 }

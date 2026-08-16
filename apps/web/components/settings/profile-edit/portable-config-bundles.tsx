@@ -27,6 +27,13 @@ type PortableConfigBundlesProps = {
   isSSH?: boolean;
 };
 
+const PORTABLE_CONFIG_LABEL_KEYS: Record<string, string> = {
+  "claude.settings": "executors:portableConfigBundleClaudeSettings",
+  "codex.config": "executors:portableConfigBundleCodexConfig",
+  "opencode.config": "executors:portableConfigBundleOpenCodeConfig",
+  "mock.settings": "executors:portableConfigBundleMockSettings",
+};
+
 export function PortableConfigBundles({
   bundles,
   selectedIds,
@@ -68,7 +75,10 @@ export function PortableConfigBundles({
 
       <div className="grid gap-2">
         {bundles.map((bundle) => {
-          const label = bundle.label || bundle.display_name;
+          const labelKey = PORTABLE_CONFIG_LABEL_KEYS[bundle.id];
+          const label = labelKey
+            ? t(labelKey)
+            : t("executors:portableConfigBundleGeneric", { id: bundle.id });
           return (
             <label
               key={bundle.id}
@@ -77,6 +87,7 @@ export function PortableConfigBundles({
             >
               <Checkbox
                 checked={selected.has(bundle.id)}
+                disabled={!bundle.available && !selected.has(bundle.id)}
                 onCheckedChange={(checked) => toggle(bundle.id, checked === true)}
                 aria-label={label}
                 className="mt-0.5"

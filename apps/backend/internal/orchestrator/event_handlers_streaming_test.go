@@ -3500,6 +3500,42 @@ func TestHandleSessionModelSelectionWarningPersistsIdempotently(t *testing.T) {
 	require.Equal(t, true, updated.Metadata["model_selection_warning:decision-1"])
 }
 
+func TestHandleSessionModelSelectionWarningReleasesClaimAfterPersistenceFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	messages := &mockMessageCreator{sessionMessageErr: errors.New("transient message failure")}
+	svc := &Service{logger: testLogger(), repo: repo, messageCreator: messages}
+	warning := &streams.ModelSelectionWarning{
+		Kind:           "model_selection_warning",
+		DecisionID:     "decision-retry",
+		Reason:         "requested_not_advertised",
+		RequestedModel: "host-only-model",
+		EffectiveModel: "executor-default",
+	}
+	payload := &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:                  streams.EventTypeSessionModelSelectionWarning,
+			ModelSelectionWarning: warning,
+		},
+	}
+
+	svc.handleAgentStreamEvent(ctx, payload)
+	failed, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.NotContains(t, failed.Metadata, "model_selection_warning:decision-retry")
+	require.Empty(t, messages.sessionMessages)
+
+	messages.sessionMessageErr = nil
+	svc.handleAgentStreamEvent(ctx, payload)
+	require.Len(t, messages.sessionMessages, 1)
+	completed, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, true, completed.Metadata["model_selection_warning:decision-retry"])
+}
+
 func TestHandleSessionModelsEventStoresBaselineCandidateAndPublishesLiveState(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
