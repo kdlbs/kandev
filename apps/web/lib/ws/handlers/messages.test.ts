@@ -7,6 +7,9 @@ import { createMessagesHandlerRegistration, createMessageUpdateScheduler } from 
 type UpdatedMessage = BackendMessageMap["session.message.updated"];
 const TEST_TIMESTAMP = "2026-08-02T00:00:00.000Z";
 const PROJECTION_EPOCH = "7";
+const SESSION_ID = "session-1";
+const QUESTION_ID = "question-1";
+const QUESTION_CONTENT = "Choose";
 
 function pendingRevision(sequence: number) {
   return { epoch: PROJECTION_EPOCH, sequence };
@@ -196,10 +199,6 @@ describe("session message frame scheduler", () => {
 });
 
 describe("session message pending-action projection", () => {
-  const SESSION_ID = "session-1";
-  const QUESTION_ID = "question-1";
-  const QUESTION_CONTENT = "Choose";
-
   it("applies the authoritative projection carried by a message event", () => {
     const { store, setTaskSessionPendingAction } = makeStore();
     const registration = createMessagesHandlerRegistration(store);
@@ -271,7 +270,33 @@ describe("session message pending-action projection", () => {
     );
     registration.dispose();
   });
+});
 
+describe("session message deleted pending-action projection", () => {
+  it("applies the cleared projection carried by a deleted message event", () => {
+    const { store, removeMessage, setTaskSessionPendingAction } = makeStore();
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers["session.message.deleted"]!({
+      id: "delete-clarification",
+      type: "notification",
+      action: "session.message.deleted",
+      payload: {
+        ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+        type: "clarification_request",
+        pending_action: null,
+        pending_action_revision: pendingRevision(4),
+      },
+      timestamp: TEST_TIMESTAMP,
+    });
+
+    expect(removeMessage).toHaveBeenCalledWith(SESSION_ID, QUESTION_ID);
+    expect(setTaskSessionPendingAction).toHaveBeenCalledWith(SESSION_ID, null, pendingRevision(4));
+    registration.dispose();
+  });
+});
+
+describe("session message pending-action ordering", () => {
   it("ignores a projection from an update older than the current message", () => {
     const { store, setTaskSessionPendingAction } = makeStore({
       [SESSION_ID]: [{ id: QUESTION_ID, updated_at: "2026-08-02T00:00:02.000Z" }],

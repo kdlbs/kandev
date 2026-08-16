@@ -354,6 +354,7 @@ func (r *Repository) loadRestorableClarificationBundle(
 		WHERE %s = ?
 		  AND m.type = 'clarification_request'
 		  AND %s
+		  AND %s
 		  AND m.turn_id = (
 			SELECT turn_row.id
 			FROM task_session_turns turn_row
@@ -373,7 +374,12 @@ func (r *Repository) loadRestorableClarificationBundle(
 			  )
 		  )
 		ORDER BY m.created_at ASC, m.id ASC
-	`, pendingIDExpr, nonTerminalSessionPredicate("m"), turnAuthorityPredicate(drv, "turn_row"), bundlePendingIDExpr)
+	`, pendingIDExpr,
+		nonTerminalSessionPredicate("m"),
+		clarificationResponseDeliveryPendingPredicate(drv, "m"),
+		turnAuthorityPredicate(drv, "turn_row"),
+		bundlePendingIDExpr,
+	)
 	rows, err := tx.QueryxContext(
 		ctx,
 		r.db.Rebind(query),
@@ -405,6 +411,7 @@ func (r *Repository) restoreClarificationMessages(
 		SET metadata = ?, updated_at = ?
 		WHERE id = ? AND %s = ?
 		  AND %s
+		  AND %s
 		  AND turn_id = (
 			SELECT turn_row.id
 			FROM task_session_turns turn_row
@@ -413,7 +420,12 @@ func (r *Repository) restoreClarificationMessages(
 			ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
 			LIMIT 1
 		  )
-	`, statusExpr, nonTerminalSessionPredicate("task_session_messages"), turnAuthorityPredicate(drv, "turn_row")))
+	`,
+		statusExpr,
+		clarificationResponseDeliveryPendingPredicate(drv, "task_session_messages"),
+		nonTerminalSessionPredicate("task_session_messages"),
+		turnAuthorityPredicate(drv, "turn_row"),
+	))
 	restoredMetadataByMessage := make([]map[string]interface{}, len(messages))
 	for i, message := range messages {
 		restoredMetadata := maps.Clone(message.Metadata)

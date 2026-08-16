@@ -380,6 +380,41 @@ describe("selectTaskFromSheet races", () => {
   });
 });
 
+describe("selectTaskFromSheet aborted loads", () => {
+  it("leaves a sessionless selection inert when its session load is aborted", async () => {
+    const abortError = new Error("task removed");
+    abortError.name = "AbortError";
+    const setActiveSession = vi.fn();
+    const setActiveTask = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+
+    selectTaskFromSheet({
+      selectionController: createTaskSheetSelectionController(),
+      taskId: "task-aborted",
+      task: { primarySessionId: null },
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw abortError;
+      }),
+      setActiveSession,
+      setActiveTask,
+      navigate,
+      onOpenChange,
+    });
+    await flushSelection();
+
+    expect(setActiveSession).not.toHaveBeenCalled();
+    expect(setActiveTask).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+});
+
 describe("selectTaskFromSheet summary races", () => {
   it("opens the task and closes the sheet when the pending action changes", async () => {
     const taskId = "task-summary-race";

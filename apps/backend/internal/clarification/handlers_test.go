@@ -193,6 +193,9 @@ func (s *stubMessageCreator) RestoreActiveClarificationBundle(
 		if storedMessage == nil || stringFromMetadata(storedMessage.Metadata, "status") != terminalStatus {
 			return nil, false, nil
 		}
+		if storedMessage.Metadata["response_delivery_pending"] != true {
+			return nil, false, nil
+		}
 		questionID := stringFromMetadata(storedMessage.Metadata, "question_id")
 		storedMessage.Metadata = maps.Clone(storedMessage.Metadata)
 		storedMessage.Metadata["status"] = "pending"

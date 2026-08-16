@@ -157,6 +157,7 @@ async function selectTaskWithoutPrimarySession(taskId: string, actions: Selectio
       // Fall through to default navigation.
     }
   } catch (error) {
+    if (isAbortError(error)) return;
     console.error("Failed to load sessions for task:", error);
   }
   if (!selectionIsCurrent(actions)) return;

@@ -13,10 +13,21 @@ import (
 
 type failingRespondStore struct {
 	*Store
-	err error
+	err                error
+	confirmBeforeError bool
 }
 
-func (s *failingRespondStore) RespondWithDeliveryConfirmation(context.Context, string, *Response, func() error) error {
+func (s *failingRespondStore) RespondWithDeliveryConfirmation(
+	_ context.Context,
+	_ string,
+	_ *Response,
+	confirm func() error,
+) error {
+	if s.confirmBeforeError {
+		if err := confirm(); err != nil {
+			return err
+		}
+	}
 	return s.err
 }
 
@@ -24,10 +35,12 @@ func TestHttpRespond_PrimaryDeliveryFailureReportsRestoreOutcome(t *testing.T) {
 	for _, test := range []struct {
 		name          string
 		refuseRestore bool
+		finalizeFirst bool
 		wantBody      string
 	}{
 		{name: "restored", wantBody: "response can be retried"},
 		{name: "restore refused", refuseRestore: true, wantBody: "recover pending clarification state"},
+		{name: "finalized delivery is not restored", finalizeFirst: true, wantBody: "recover pending clarification state"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := NewStore(time.Minute)
@@ -48,7 +61,11 @@ func TestHttpRespond_PrimaryDeliveryFailureReportsRestoreOutcome(t *testing.T) {
 			h, _, _, messageCreator := setupTestHandler(t, map[string][]*taskmodels.Message{
 				pendingID: {message},
 			})
-			h.store = &failingRespondStore{Store: store, err: errors.New("delivery failed")}
+			h.store = &failingRespondStore{
+				Store:              store,
+				err:                errors.New("delivery failed"),
+				confirmBeforeError: test.finalizeFirst,
+			}
 			messageCreator.refuseRestore = test.refuseRestore
 
 			recorder := runRespond(t, h, pendingID, RespondBody{

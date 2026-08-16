@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -450,6 +451,9 @@ func TestReservedTurnAttemptMarkingHoldsCancellationGuard(t *testing.T) {
 		entered:     make(chan struct{}),
 		release:     make(chan struct{}),
 	}
+	var releaseOnce sync.Once
+	releaseMarker := func() { releaseOnce.Do(func() { close(marker.release) }) }
+	t.Cleanup(releaseMarker)
 	svc.turnService = marker
 
 	claimDone := make(chan error, 1)
@@ -488,7 +492,7 @@ func TestReservedTurnAttemptMarkingHoldsCancellationGuard(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	close(marker.release)
+	releaseMarker()
 	select {
 	case err := <-claimDone:
 		if err != nil {

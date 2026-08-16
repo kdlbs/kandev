@@ -385,6 +385,11 @@ All locally available task gates passed; environment-gated parity also passed in
 - Exact-head Codex review makes that sidebar fallback use durable message creation order rather than
   WebSocket arrival order. A delayed predecessor-turn frame can no longer hide the active current-turn
   clarification; the five affected web suites (127 tests), typecheck, and zero-warning focused lint pass.
+- Exact-head CodeRabbit review makes clarification restore contingent on the still-live durable delivery
+  marker, so a late successful confirmation cannot be reopened after the responder times out. It also
+  keeps aborted sessionless mobile selection inert, guarantees blocked test cleanup, and covers deleted
+  message pending-action projections. All affected backend packages, 81 focused web tests, typecheck,
+  zero-warning frontend lint, and changed-code Go lint pass.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

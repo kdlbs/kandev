@@ -82,6 +82,15 @@ func TestFinalizeClarificationResponseDeliveryPreventsRecovery(t *testing.T) {
 	if marker := finalizedMessages[0].Metadata[clarificationResponseDeliveryPendingKey]; marker != nil {
 		t.Fatalf("finalized delivery marker = %v, want absent", marker)
 	}
+	_, restored, err := repo.RestoreActiveClarificationBundle(
+		ctx,
+		"pending-delivery-finalize",
+		clarificationStatusAnswered,
+		claimedMessages,
+	)
+	if err != nil || restored {
+		t.Fatalf("RestoreActiveClarificationBundle after finalize = restored %v, %v; want false, nil", restored, err)
+	}
 
 	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
 	if err != nil || reconciled != 0 {
