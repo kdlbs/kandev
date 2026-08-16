@@ -101,6 +101,8 @@ func (s *Service) createTurn(
 // MarkReservedTurnDispatchAttempted establishes an at-most-once boundary
 // immediately before external dispatch. Startup fails closed on this marker
 // because a crash can no longer prove whether agentctl accepted the prompt.
+// On success it refreshes the supplied turn's metadata and update time from
+// the persisted row so PublishReservedTurn can consume the durable marker.
 func (s *Service) MarkReservedTurnDispatchAttempted(ctx context.Context, turn *models.Turn) error {
 	if turn == nil {
 		return errors.New("cannot mark nil reserved turn attempted")

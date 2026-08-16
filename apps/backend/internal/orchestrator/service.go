@@ -1119,8 +1119,9 @@ func (s *Service) SetTaskGitCredentialPolicyResolver(resolver executor.TaskGitCr
 //
 // When to call: During orchestrator initialization, after creating the task service.
 //
-// If not set: Turns won't be tracked (orchestrator continues functioning normally, but
-// no timing data is recorded and turn IDs in messages will be empty).
+// This dependency must be set before Start. Startup reconciliation fails closed
+// without durable turn access because it cannot safely classify unpublished
+// prompt reservations.
 func (s *Service) SetTurnService(turnService TurnService) {
 	s.turnService = turnService
 }
