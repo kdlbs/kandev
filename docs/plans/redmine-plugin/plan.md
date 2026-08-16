@@ -1,7 +1,7 @@
 ---
 spec: "../../specs/redmine-plugin/spec.md"
 created: 2026-08-15
-status: in_progress
+status: completed
 ---
 
 # Implementation Plan: Redmine Connector Plugin
@@ -73,23 +73,23 @@ plugin repo's own test suite, not here.
 ## Implementation waves and task files
 
 Wave 0 (design):
-- [ ] [task 01 — design package](task-01-design-package.md)
+- [x] [task 01 — design package](task-01-design-package.md)
 
 Wave 1 (plugin repository bootstrap, depends on 01):
-- [ ] [task 02 — plugin repository bootstrap](task-02-plugin-repository-bootstrap.md)
+- [x] [task 02 — plugin repository bootstrap](task-02-plugin-repository-bootstrap.md)
 
 Wave 2 (core plugin behavior, depends on 02 — parallelizable within the wave):
-- [ ] [task 03 — connection, secrets, health poll](task-03-connection-secrets-health.md)
-- [ ] [task 04 — projects and field mapping](task-04-projects-field-mapping.md)
-- [ ] [task 05 — issue read/write and attachments](task-05-issue-read-write-attachments.md)
+- [x] [task 03 — connection, secrets, health poll](task-03-connection-secrets-health.md)
+- [x] [task 04 — projects and field mapping](task-04-projects-field-mapping.md)
+- [x] [task 05 — issue read/write and attachments](task-05-issue-read-write-attachments.md)
 
 Wave 3 (sync and native surfaces, depends on wave 2):
-- [ ] [task 06 — task linking and bidirectional sync](task-06-task-linking-bidirectional-sync.md)
-- [ ] [task 07 — issue watchers](task-07-issue-watchers.md)
-- [ ] [task 08 — settings UI and native registrations](task-08-settings-ui-native-registrations.md)
+- [x] [task 06 — task linking and bidirectional sync](task-06-task-linking-bidirectional-sync.md)
+- [x] [task 07 — issue watchers](task-07-issue-watchers.md)
+- [x] [task 08 — settings UI and native registrations](task-08-settings-ui-native-registrations.md)
 
 Wave 4 (release, depends on wave 3):
-- [ ] [task 09 — contract E2E, release, registry pointer](task-09-contract-e2e-release.md)
+- [x] [task 09 — contract E2E, release, registry pointer](task-09-contract-e2e-release.md)
 
 Expect a corrective sub-wave (task 08b, 08c, ...) after live/manual UI evaluation,
 per the Bitbucket plan's precedent — do not assume one settings-UI task is the final
@@ -97,11 +97,10 @@ word on parity with Jira/Linear/Sentry's native settings pages.
 
 ## Current status
 
-2026-08-15: Spec and plan authored following the direct architecture redirection (see
-spec's Why section and this task's plan-history). No plugin-repo code exists yet;
-`yattdev/kandev-plugin-redmine` exists on GitHub but is empty. Proceeding straight
-through to bootstrap + a plugin-repo subtask per the author's explicit instruction,
-without pausing for a separate spec/plan review gate.
+2026-08-16: All tasks are complete. `yattdev/kandev-plugin-redmine` v0.1.0 was
+released with `kandev-plugin-redmine-0.1.0.tar.gz` and `checksums.txt`; the packaged
+artifact passed this repository's two contract E2E tests. The host marketplace pointer
+is present in `plugin-registry/plugins.yaml`.
 
 ## Risks
 

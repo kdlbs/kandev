@@ -166,8 +166,8 @@ already shipped in `kdlbs/kandev` (landed by PR #2117 and used first by
   health state, echo-suppression bookkeeping.
 - `GetSecret` / `SetSecret` / `DeleteSecret` (flat, plugin-ID-scoped) — encrypted API
   key storage, workspace isolation built by the plugin as described above.
-- `OnEvent` — none required for v1; sync and watcher polling run on the plugin's own
-  timers, not host event subscriptions.
+- `OnEvent` for linked-task workflow transitions — triggers opt-in automatic status
+  write-back; Redmine sync and watcher polling otherwise run on the plugin's own timers.
 
 Contracts explicitly **not** used: the provider-neutral Git credential broker and
 native repository-provider extensions (source-control-specific; Redmine is an issue
