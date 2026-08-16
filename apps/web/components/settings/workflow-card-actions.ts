@@ -79,6 +79,7 @@ function openStepDeleteDialog({
 // `name` becomes the step's stored name and `color` its Tailwind class — so
 // neither is translated; translating the name would write a localized string
 // into the database.
+// i18n-exempt: persisted workflow step name, same contract as DEFAULT_CUSTOM_STEPS.
 const NEW_STEP_DEFAULTS = { name: "New Step", color: "bg-slate-500" } as const;
 
 function createDraftStep(workflow: Workflow, position: number): WorkflowStep {

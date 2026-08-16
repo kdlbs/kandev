@@ -6,8 +6,12 @@ import { vscodeDark } from "@uiw/codemirror-theme-vscode";
 import { EditorView } from "@codemirror/view";
 import type { Extension } from "@codemirror/state";
 import { getCodeMirrorExtensionFromPath } from "@/lib/languages";
-import { consumePendingCursorPosition } from "@/hooks/use-file-editors";
 import { useCodeMirrorWalkthroughRange } from "@/components/editors/codemirror/use-codemirror-walkthrough-range";
+import {
+  clearCodeMirrorCursorFlash,
+  codeMirrorCursorFlashExtension,
+  revealPendingCodeMirrorCursor,
+} from "@/components/editors/codemirror/codemirror-cursor-navigation";
 import { cn } from "@/lib/utils";
 
 type FileViewerContentProps = {
@@ -26,12 +30,17 @@ export function FileViewerContent({
   className,
 }: FileViewerContentProps) {
   const langExt = getCodeMirrorExtensionFromPath(path);
-  const extensions: Extension[] = [EditorView.lineWrapping, EditorView.editable.of(false)];
+  const extensions: Extension[] = [
+    EditorView.lineWrapping,
+    EditorView.editable.of(false),
+    codeMirrorCursorFlashExtension,
+  ];
   if (langExt) {
     extensions.push(langExt);
   }
 
   const viewRef = useRef<EditorView | null>(null);
+  const fileIdentityRef = useRef({ path, repo, sessionId });
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   const areaRef = useRef<HTMLDivElement>(null);
   const walkthroughRange = useCodeMirrorWalkthroughRange({
@@ -41,33 +50,13 @@ export function FileViewerContent({
     repo,
   });
 
-  // Consume a pending cursor position (set by chat read/edit file links before
-  // they open the file) and scroll CodeMirror so the target 1-based line is
-  // centered. No pending entry → no scroll, so normal file browsing stays at
-  // the top. Desktop's Monaco consumes the same entry; on mobile there is no
-  // Monaco, so this CodeMirror viewer must consume it instead.
-  const scrollToPendingLine = useCallback(
-    (view: EditorView, filePath: string) => {
-      const pending = consumePendingCursorPosition(filePath, repo, sessionId);
-      if (!pending) return;
-      const totalLines = view.state.doc.lines;
-      const clampedLine = Math.min(Math.max(pending.line, 1), totalLines);
-      const pos = view.state.doc.line(clampedLine).from;
-      view.dispatch({
-        selection: { anchor: pos },
-        effects: EditorView.scrollIntoView(pos, { y: "center" }),
-      });
-    },
-    [repo, sessionId],
-  );
-
   const handleCreateEditor = useCallback(
     (view: EditorView) => {
       viewRef.current = view;
       setEditorView(view);
-      scrollToPendingLine(view, path);
+      revealPendingCodeMirrorCursor(view, path, repo, sessionId);
     },
-    [path, scrollToPendingLine],
+    [path, repo, sessionId],
   );
 
   // The same FileViewerContent instance is reused when switching files (the
@@ -75,10 +64,20 @@ export function FileViewerContent({
   // the editor already mounted. Re-consume + scroll whenever path changes and
   // the EditorView exists, so the second open of a different file still jumps.
   useEffect(() => {
-    if (viewRef.current) {
-      scrollToPendingLine(viewRef.current, path);
-    }
-  }, [path, scrollToPendingLine]);
+    const view = viewRef.current;
+    const previous = fileIdentityRef.current;
+    const fileChanged =
+      previous.path !== path || previous.repo !== repo || previous.sessionId !== sessionId;
+    fileIdentityRef.current = { path, repo, sessionId };
+    if (!view || !fileChanged) return;
+    clearCodeMirrorCursorFlash(view);
+    revealPendingCodeMirrorCursor(view, path, repo, sessionId);
+  }, [path, repo, sessionId]);
+
+  useEffect(() => {
+    if (!editorView) return;
+    return () => clearCodeMirrorCursorFlash(editorView);
+  }, [editorView]);
 
   return (
     <div ref={areaRef} className={cn("relative h-full overflow-hidden", className)}>

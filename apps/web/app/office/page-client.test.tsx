@@ -2,14 +2,16 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DashboardData } from "@/lib/state/slices/office/types";
 
+const WORKSPACE_ID = "workspace-1";
+
 const getDashboardMock = vi.hoisted(() => vi.fn());
 const setDashboardMock = vi.hoisted(() => vi.fn());
 
 const state = {
-  workspaces: { activeId: "workspace-1" },
+  workspaces: { activeId: WORKSPACE_ID },
   office: {
-    dashboard: null as DashboardData | null,
-    agentProfiles: [],
+    dashboardByWorkspaceId: {} as Record<string, DashboardData | null>,
+    agentProfilesByWorkspaceId: {} as Record<string, unknown[]>,
     routing: {
       byWorkspace: {},
       knownProviders: [],
@@ -60,12 +62,12 @@ describe("OfficePageClient boot hydration", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
-    state.workspaces.activeId = "workspace-1";
-    state.office.dashboard = null;
+    state.workspaces.activeId = WORKSPACE_ID;
+    state.office.dashboardByWorkspaceId = {};
   });
 
   it("does not fetch dashboard data when Go boot state already hydrated it", async () => {
-    state.office.dashboard = dashboard();
+    state.office.dashboardByWorkspaceId = { [WORKSPACE_ID]: dashboard() };
 
     render(<OfficePageClient initialDashboard={null} />);
 
@@ -81,15 +83,15 @@ describe("OfficePageClient boot hydration", () => {
     render(<OfficePageClient initialDashboard={null} />);
 
     await waitFor(() => {
-      expect(getDashboardMock).toHaveBeenCalledWith("workspace-1");
+      expect(getDashboardMock).toHaveBeenCalledWith(WORKSPACE_ID);
     });
     await waitFor(() => {
-      expect(setDashboardMock).toHaveBeenCalledWith(data);
+      expect(setDashboardMock).toHaveBeenCalledWith(WORKSPACE_ID, data);
     });
   });
 
   it("refetches dashboard data when the active workspace changes", async () => {
-    state.office.dashboard = dashboard();
+    state.office.dashboardByWorkspaceId = { [WORKSPACE_ID]: dashboard() };
     getDashboardMock.mockResolvedValue({ ...dashboard(), agent_count: 2 });
 
     const { rerender } = render(<OfficePageClient initialDashboard={null} />);

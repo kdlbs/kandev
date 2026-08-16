@@ -40,7 +40,6 @@ const state = {
   userSettings: { appStatusBarEnabled: true },
 };
 
-let officeEnabled = false;
 const DEFAULT_PATHNAME = "/tasks/session-1";
 let pathname = DEFAULT_PATHNAME;
 
@@ -63,7 +62,7 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => officeEnabled,
+  useFeature: () => false,
 }));
 
 // The footer renders its insight buttons from the navigation manifest; the
@@ -174,7 +173,6 @@ function renderFooter(collapsed = false) {
 }
 
 function resetFooterState() {
-  officeEnabled = false;
   blockNavigation = false;
   pathname = DEFAULT_PATHNAME;
   state.workspaces.activeId = "kanban-1";
@@ -187,16 +185,16 @@ function resetFooterState() {
   state.auth = { mode: "disabled", user: null };
   state.connection.issueSeverity = "none";
   state.userSettings.appStatusBarEnabled = true;
-  window.localStorage.clear();
-  document.cookie = "office-active-workspace=; path=/; max-age=0";
   mocks.routerPush.mockClear();
   mocks.toggleSettingsMode.mockClear();
   insightDestinations = [STATS_DESTINATION];
 }
 
-const KANBAN_HOME_HREF = "/?home=overview&workspaceId=kanban-1";
 let blockNavigation = false;
 
+// Where the settings gear lands when it closes settings mode: the active
+// workspace's home (kanban-1 in this suite's default state).
+const KANBAN_HOME_HREF = "/?home=overview&workspaceId=kanban-1";
 const GEAR_TEST_ID = "sidebar-settings-gear";
 
 describe("AppSidebarFooter", () => {
@@ -205,80 +203,31 @@ describe("AppSidebarFooter", () => {
   afterEach(() => cleanup());
 
   it("renders navigation icons as buttons so hover does not expose link URLs", () => {
-    officeEnabled = true;
-
     renderFooter();
 
     const statsButton = screen.getByRole("button", { name: "Stats" });
-    const officeButton = screen.getByRole("button", { name: "Office" });
 
     expect(statsButton).toBeTruthy();
-    expect(officeButton).toBeTruthy();
     expect(statsButton.getAttribute("href")).toBeNull();
-    expect(officeButton.getAttribute("href")).toBeNull();
     expect(screen.queryByRole("link", { name: "Stats" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Office" })).toBeNull();
   });
 
-  it("navigates from the Stats and Office footer buttons when kanban is active", () => {
-    officeEnabled = true;
-
+  it("navigates from the Stats footer button", () => {
     renderFooter();
 
     fireEvent.click(screen.getByRole("button", { name: "Stats" }));
-    fireEvent.click(screen.getByRole("button", { name: "Office" }));
 
-    expect(mocks.routerPush).toHaveBeenNthCalledWith(1, "/stats");
-    expect(mocks.routerPush).toHaveBeenNthCalledWith(2, "/office?workspaceId=office-1");
-    expect(window.localStorage.getItem("kandev.lastKanbanWorkspaceId")).toBe("kanban-1");
+    expect(mocks.routerPush).toHaveBeenCalledWith("/stats");
   });
 
-  it("navigates to the last active office workspace when kanban is active", () => {
-    officeEnabled = true;
-    document.cookie = "office-active-workspace=office-2; path=/";
-
+  it("does not render a mode switch button", () => {
+    // Mode follows the active workspace, and workspaces are switched through
+    // the picker in the sidebar header. The footer used to carry a dedicated
+    // Office↔Kanban button; it is gone, not merely feature-gated off.
     renderFooter();
 
-    fireEvent.click(screen.getByRole("button", { name: "Office" }));
-
-    expect(mocks.routerPush).toHaveBeenCalledWith("/office?workspaceId=office-2");
-  });
-
-  it("navigates to office setup when no office workspace exists", () => {
-    officeEnabled = true;
-    state.workspaces.items = [{ id: "kanban-1", name: "Kanban", office_workflow_id: "" }];
-
-    renderFooter();
-
-    fireEvent.click(screen.getByRole("button", { name: "Office" }));
-
-    expect(mocks.routerPush).toHaveBeenCalledWith("/office/setup?mode=new");
-  });
-
-  it("shows a Kanban button when an office workspace is active", () => {
-    officeEnabled = true;
-    state.workspaces.activeId = "office-1";
-    window.localStorage.setItem("kandev.lastKanbanWorkspaceId", "kanban-1");
-
-    renderFooter();
-
-    expect(screen.queryByRole("button", { name: "Office" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
-
-    expect(mocks.routerPush).toHaveBeenCalledWith(KANBAN_HOME_HREF);
-  });
-
-  it("remembers the current office workspace when toggling back to kanban", () => {
-    officeEnabled = true;
-    state.workspaces.activeId = "office-2";
-    window.localStorage.setItem("kandev.lastKanbanWorkspaceId", "kanban-1");
-
-    renderFooter();
-
-    fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
-
-    expect(document.cookie).toContain("office-active-workspace=office-2");
-    expect(mocks.routerPush).toHaveBeenCalledWith(KANBAN_HOME_HREF);
+    expect(screen.queryByTestId("sidebar-office-button")).toBeNull();
+    expect(screen.queryByTestId("sidebar-kanban-button")).toBeNull();
   });
 });
 
@@ -391,7 +340,6 @@ describe("AppSidebarFooter connection fallback", () => {
 
 describe("AppSidebarFooter current-user chip", () => {
   beforeEach(() => {
-    officeEnabled = false;
     pathname = DEFAULT_PATHNAME;
     state.appSidebar.settingsMode = false;
     state.auth = { mode: "disabled", user: null };

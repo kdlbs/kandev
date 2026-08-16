@@ -498,6 +498,7 @@ export function SecretsSettings({
   workspaceId,
   initialItems,
 }: SecretsSettingsProps) {
+  const { t } = useTranslation();
   const state = useSecretsState(scope, workspaceId, initialItems);
   const actions = useSecretsActions(state);
   const globalAdd = useAppStore((s) => s.addSecret);
@@ -509,7 +510,7 @@ export function SecretsSettings({
       ? (workspaceNames.find((workspace) => workspace.id === secret.workspace_id)?.name ??
         secret.workspace_id ??
         "workspace")
-      : "Global";
+      : t("settings:globalScope");
 
   // Route the transfer result by the RETURNED item's scope, never the page
   // scope: Global targets always land in the Global store (from any page),

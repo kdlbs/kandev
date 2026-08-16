@@ -68,6 +68,7 @@ export function toTaskPreset(stored: GitHubActionPreset): TaskPreset {
 // into a user's saved presets and leave them there after a locale switch.
 // `prompt_template` is additionally sent to the agent verbatim. Localizing these
 // needs a key/persisted-value split, the same open item as PR_PRESETS.
+// i18n-exempt: persisted preset seed. Localizing needs a key/value split in the preset type.
 export const DEFAULT_PR_PRESETS: GitHubActionPreset[] = [
   {
     id: "review",
@@ -95,6 +96,7 @@ export const DEFAULT_PR_PRESETS: GitHubActionPreset[] = [
   },
 ];
 
+// i18n-exempt: persisted preset seed. Localizing needs a key/value split in the preset type.
 export const DEFAULT_ISSUE_PRESETS: GitHubActionPreset[] = [
   {
     id: "implement",

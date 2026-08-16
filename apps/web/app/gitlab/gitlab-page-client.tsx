@@ -213,6 +213,7 @@ function useGitLabPageState(searchEnabled: boolean, workspaceId?: string) {
   // Use committedQuery (not the unflushed draft) so the saved preset always
   // matches what is currently displayed in the list.
   const canSaveCurrent = committedQuery.trim().length > 0 || projectFilter.length > 0;
+  // i18n-exempt: persisted as the saved query's name, so it must not depend on the creating locale.
   const suggestedLabel =
     committedQuery.trim() || (projectFilter ? `In ${projectFilter}` : "Saved query");
   const onOpenSaveDialog = () => {

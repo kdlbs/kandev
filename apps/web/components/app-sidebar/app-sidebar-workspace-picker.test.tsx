@@ -215,10 +215,14 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
   it("navigates to the kanban board when an office user selects a kanban workspace", () => {
     storeState.features.office = true;
     storeState.workspaces.activeId = "w2";
+    // Written when w2 was selected. A workspace is recorded on the way in, not
+    // on the way out, so leaving it must simply not disturb this.
+    cookieWrites = ["office-active-workspace=w2; path=/"];
     render(<AppSidebarWorkspacePicker />);
 
     fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
 
+    expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w1"))).toBe(false);
     expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
     expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w1");
@@ -274,7 +278,10 @@ describe("AppSidebarWorkspacePicker — active workspace display and routing", (
     fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
 
     expect(cookieWrites.some((c) => c.startsWith("kandev-active-workspace=w1"))).toBe(true);
-    expect(storeState.setActiveWorkspace).not.toHaveBeenCalled();
+    // Re-selecting the workspace that is already active goes through the same
+    // one selection path as any other pick; the store action ignores a
+    // no-op change, so there is no reason for this branch to skip it.
+    expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
     expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w1");
   });
 

@@ -16,6 +16,16 @@ export function linkToTaskOverview({
   return `/?${params.toString()}`;
 }
 
+/**
+ * The Office home for a workspace. The one builder for this URL: the sidebar
+ * brand link, the Home row, and the topbar's home crumb render side by side,
+ * so their hrefs must be byte-identical for the same workspace.
+ */
+export function linkToOfficeHome({ workspaceId }: { workspaceId?: string } = {}): string {
+  if (!workspaceId) return "/office";
+  return `/office?${new URLSearchParams({ workspaceId }).toString()}`;
+}
+
 /** Task-detail route prefixes the SPA serves: canonical and compatibility. */
 const TASK_DETAIL_PREFIXES = ["/t/", "/tasks/"];
 

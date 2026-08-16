@@ -43,6 +43,7 @@ const QUICK_TERMINAL_TEST_ID = "sidebar-quick-terminal-shortcut";
 const QUICK_CHAT_TEST_ID = "sidebar-quick-chat-shortcut";
 let officeEnabled = false;
 let pathname = "/";
+let workspaceMode: "office" | "kanban" | "unknown" = "kanban";
 
 // sidebar-workspace-actions plugin slot registrations (A1-A5). Empty by
 // default so the existing dialog-routing/row-action tests above are
@@ -71,6 +72,11 @@ vi.mock("@/hooks/use-quick-terminal-launcher", () => ({
 }));
 vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: () => officeEnabled,
+}));
+// Mode follows the active workspace, not the route: the dialog choice is
+// about which workspace the task will land in.
+vi.mock("@/components/workspace-scope-provider", () => ({
+  useWorkspaceScope: () => ({ mode: workspaceMode, workspaceId: state.workspaces.activeId }),
 }));
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
@@ -121,6 +127,7 @@ function setImproveWorkspaceActive() {
 }
 
 function resetTestState() {
+  workspaceMode = "kanban";
   state.workspaces.activeId = WORKSPACE_ID;
   state.workspaces.items = [{ id: WORKSPACE_ID, name: WORKSPACE_NAME }];
   state.appSidebar.improveDialogOpen = false;
@@ -166,19 +173,22 @@ describe("AppSidebarNewTaskItem dialog routing", () => {
     expect(screen.queryByTestId(OFFICE_DIALOG_TESTID)).toBeNull();
   });
 
-  it("uses the regular dialog when office is enabled but NOT on an office route", () => {
-    // The bug: office-on alone routed to the Office dialog even in Kanban mode.
-    // Gating is now on the actual /office route, so home stays on the Kanban dialog.
+  it("uses the regular dialog on a kanban workspace even with office enabled", () => {
+    // The bug: office-on alone routed to the Office dialog in Kanban mode.
+    // Gating is on the active workspace, so a kanban workspace keeps the
+    // Kanban dialog no matter which route it is reached from.
     officeEnabled = true;
-    pathname = "/";
+    workspaceMode = "kanban";
+    pathname = "/office";
     renderItem(false);
     expect(screen.getByTestId(REGULAR_DIALOG_TESTID)).toBeTruthy();
     expect(screen.queryByTestId(OFFICE_DIALOG_TESTID)).toBeNull();
   });
 
-  it("uses the office new-issue dialog when inside an office route", async () => {
+  it("uses the office new-issue dialog on an office workspace, whatever the route", async () => {
     officeEnabled = true;
-    pathname = "/office";
+    workspaceMode = "office";
+    pathname = "/settings";
     renderItem(false);
     // NewTaskDialog is lazy-loaded by the SPA dynamic adapter, so it resolves asynchronously.
     expect(await screen.findByTestId(OFFICE_DIALOG_TESTID)).toBeTruthy();
