@@ -1363,6 +1363,24 @@ func TestClarificationWatchdog_ExpiresAndClearsEntry(t *testing.T) {
 	}
 }
 
+func TestClarificationWatchdogExpirationPreservesSuccessorEntry(t *testing.T) {
+	svc := &Service{}
+	key := svc.clarificationWatchdogKey("session-1", "pending-1")
+	expired := &clarificationWatchdogEntry{}
+	successor := &clarificationWatchdogEntry{}
+	svc.clarificationWatchdogs.Store(key, successor)
+	t.Cleanup(func() { svc.clarificationWatchdogs.Delete(key) })
+
+	svc.runClarificationWatchdog(
+		context.Background(), key, expired, clarificationAnsweredData{}, 0,
+	)
+
+	current, ok := svc.clarificationWatchdogs.Load(key)
+	if !ok || current != successor {
+		t.Fatalf("successor watchdog = %v, %v; want preserved successor %p", current, ok, successor)
+	}
+}
+
 // TestRetryClarificationAfterCancel_DoesNotStarveUserCancel is the regression
 // test for the production hang where a clarification-timeout recovery left a
 // session permanently unstoppable. retryClarificationAfterCancel used to send

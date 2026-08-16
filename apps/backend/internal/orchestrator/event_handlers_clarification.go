@@ -305,8 +305,7 @@ func (s *Service) runClarificationWatchdog(
 	case <-watchCtx.Done():
 		return
 	case <-timer.C:
-		current, ok := s.clarificationWatchdogs.LoadAndDelete(key)
-		if !ok || current != entry {
+		if !s.clarificationWatchdogs.CompareAndDelete(key, entry) {
 			return
 		}
 		if entry.cancel != nil {

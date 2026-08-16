@@ -3711,7 +3711,7 @@ func (s *Service) finishPromptDispatchFailure(
 	}
 	failureResult, failureErr := s.handlePromptDispatchFailure(
 		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt,
-		attachments, rollback, options.lifecyclePrompt, promptErr,
+		attachments, rollback, options.lifecyclePrompt, dispatchAccepted, promptErr,
 	)
 	return failureResult, wrapAcceptedPromptDispatchFailure(
 		dispatchAccepted,
@@ -4130,9 +4130,10 @@ func (s *Service) handlePromptDispatchFailure(
 	attachments []v1.MessageAttachment,
 	rollback promptClaimRollback,
 	lifecyclePrompt bool,
+	dispatchAccepted bool,
 	promptErr error,
 ) (*PromptResult, error) {
-	if resumedForPrompt && !rollback.reservedTurnAccepted && rollback.reservedTurn == nil &&
+	if resumedForPrompt && !dispatchAccepted && !rollback.reservedTurnAccepted && rollback.reservedTurn == nil &&
 		errors.Is(promptErr, executor.ErrExecutionNotFound) {
 		s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
 			zap.String("task_id", taskID),
