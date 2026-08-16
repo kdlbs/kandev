@@ -9,35 +9,40 @@ function makeAppDraft(): AppState {
   return structuredClone(defaultState) as AppState;
 }
 
-describe("hydrateState — kanban task executor field preservation", () => {
-  const taskId = "task-1";
-  const knownExecutor = {
-    primaryExecutorId: "exec-1",
-    primaryExecutorType: "worktree",
-    primaryExecutorName: "Worktree",
-    isRemoteExecutor: false,
-  };
+const taskId = "task-1";
+const updatedAt = "2026-08-15T00:00:00.000Z";
+const knownExecutor = {
+  primaryExecutorId: "exec-1",
+  primaryExecutorType: "worktree",
+  primaryExecutorName: "Worktree",
+  isRemoteExecutor: false,
+};
 
+function seedKnownExecutorTask(draft: Draft<AppState>): void {
+  hydrateState(draft, {
+    kanban: {
+      tasks: [
+        {
+          id: taskId,
+          updatedAt,
+          ...knownExecutor,
+        },
+      ],
+    },
+  } as unknown as Partial<AppState>);
+}
+
+describe("hydrateState — kanban task executor field preservation", () => {
   it("keeps known executor fields when a same-timestamp merge omits them", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
-      hydrateState(draft, {
-        kanban: {
-          tasks: [
-            {
-              id: taskId,
-              updatedAt: "2026-08-15T00:00:00.000Z",
-              ...knownExecutor,
-            },
-          ],
-        },
-      } as unknown as Partial<AppState>);
+      seedKnownExecutorTask(draft);
 
       hydrateState(draft, {
         kanban: {
           tasks: [
             {
               id: taskId,
-              updatedAt: "2026-08-15T00:00:00.000Z",
+              updatedAt,
               title: "Refreshed title",
             },
           ],
@@ -52,17 +57,7 @@ describe("hydrateState — kanban task executor field preservation", () => {
 
   it("adopts a legitimately different executor value instead of preserving the old one", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
-      hydrateState(draft, {
-        kanban: {
-          tasks: [
-            {
-              id: taskId,
-              updatedAt: "2026-08-15T00:00:00.000Z",
-              ...knownExecutor,
-            },
-          ],
-        },
-      } as unknown as Partial<AppState>);
+      seedKnownExecutorTask(draft);
 
       hydrateState(draft, {
         kanban: {
@@ -86,6 +81,33 @@ describe("hydrateState — kanban task executor field preservation", () => {
       primaryExecutorType: "ssh",
       primaryExecutorName: "Remote box",
       isRemoteExecutor: true,
+    });
+  });
+
+  it("clones a frozen incoming task before preserving omitted executor fields", () => {
+    const incoming = Object.freeze({
+      id: taskId,
+      updatedAt,
+      title: "Frozen snapshot task",
+    });
+
+    const hydrate = () =>
+      produce(makeAppDraft(), (draft: Draft<AppState>) => {
+        seedKnownExecutorTask(draft);
+
+        hydrateState(draft, {
+          kanban: {
+            tasks: [incoming],
+          },
+        } as unknown as Partial<AppState>);
+      });
+
+    expect(hydrate).not.toThrow();
+    const result = hydrate();
+    const merged = result.kanban.tasks.find((t) => t.id === taskId);
+    expect(merged).toMatchObject({
+      title: "Frozen snapshot task",
+      ...knownExecutor,
     });
   });
 });

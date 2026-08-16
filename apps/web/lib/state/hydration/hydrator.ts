@@ -49,16 +49,17 @@ function mergeKanbanTasks(
   for (const incoming of source) {
     const existing = existingById.get(incoming.id);
     if (!existing) {
-      draftTasks.push(incoming);
+      draftTasks.push({ ...incoming });
     } else {
       const existingTime = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
       const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
       const idx = draftTasks.findIndex((t) => t.id === incoming.id);
       if (incomingTime >= existingTime) {
         if (idx >= 0) {
+          const mergedIncoming = { ...incoming };
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          preserveOmittedExecutorFields(incoming, existing as any);
-          draftTasks[idx] = incoming;
+          preserveOmittedExecutorFields(mergedIncoming, existing as any);
+          draftTasks[idx] = mergedIncoming;
         }
       } else if (idx >= 0) {
         backfillServerDerivedFields(draftTasks[idx], incoming);
