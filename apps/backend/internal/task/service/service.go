@@ -379,9 +379,9 @@ type Service struct {
 	// within this backend process only — this backend is single-process per
 	// SQLite database, so that is the complete threat model today.
 	repoResolveMu sync.Mutex
-	// pendingActionProjectionMu guards the process-epoch logical clock shared
-	// by REST snapshots and semantic message events. Revisions are reserved
-	// before each repository read so delayed cross-channel results stay ordered.
+	// pendingActionProjectionMu guards the durable-generation logical clock
+	// shared by REST snapshots and semantic message events. Revisions are
+	// reserved before each repository read so delayed results stay ordered.
 	pendingActionProjectionMu       sync.Mutex
 	pendingActionProjectionEpoch    string
 	pendingActionProjectionSequence uint64
@@ -447,6 +447,9 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		branchFetcher:         newBranchFetcher(log.Zap()),
 		lastTaskActivity:      make(map[string]v1.ForegroundActivity),
 		lastTaskSubagentCount: make(map[string]int),
+		// Focused service tests do not run backend composition. Production
+		// replaces this fallback with a database-allocated generation.
+		pendingActionProjectionEpoch: "1",
 	}
 }
 

@@ -360,17 +360,24 @@ All locally available task gates passed; environment-gated parity also passed in
 - Follow-up CodeRabbit review keeps the independent response-delivery recovery pass running after a
   malformed reservation while excluding delivery IDs still owned by unresolved prompt reservations.
   Detached-bundle recovery coverage also confirms the disconnect marker survives restoration.
-- Exact-head Codex review makes process epochs opaque UUID generations instead of lexically ordered
-  timestamps. The frontend accepts an unseen changed generation, retains a bounded set of superseded
-  epochs, and rejects their delayed frames even when the new epoch sorts lower.
+- An intermediate exact-head Codex review replaced timestamp generations with opaque UUID epochs and
+  a bounded client retirement list. A later review exposed the remaining client-reload hole, so the
+  final design uses a database-backed monotonic generation and numeric client comparison instead.
 - Exact-head CodeRabbit review bounds a responder waiting for an already-started durable confirmation
   while leaving the waiter to retain its eventual result, and consolidates HTTP and WebSocket session
   summary projections behind one helper.
+- Latest exact-head Codex review rejects unseen stale epochs after client state rebuild and routes
+  canceller-originated message updates through the task service's projection-aware publisher. The
+  former uses an atomic `kandev_meta` generation allocated at backend startup; the latter covers both
+  expired bundles and first-observed detachment.
 - This remediation batch passed all affected backend package suites (backend app, clarification,
   MCP handlers, orchestrator, task handlers, SQLite repository, and task service), focused race
   tests with three final repetitions, 39 focused web tests, the superseded-clarification E2E
   regression, web typecheck, zero-warning frontend and Go changed-lines lint, format and i18n
   checks, and both public-doc validators.
+- The final review follow-up passed all affected backend suites again, both projection-focused web
+  suites (21 tests), web typecheck, zero-warning frontend and Go changed-lines lint, i18n checks and
+  ratchet, and the public-doc validator's 61 tests plus 41-page scan.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

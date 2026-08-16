@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
@@ -127,6 +128,7 @@ func (s *stubMessageStore) UpdateMessage(_ context.Context, m *taskmodels.Messag
 
 type stubEventBus struct {
 	events             []*bus.Event
+	publishedBundles   int
 	publishErr         error
 	contextErrs        []error
 	publishHasDeadline []bool
@@ -135,6 +137,27 @@ type stubEventBus struct {
 	resumeContextErrs  []error
 	resumeHasDeadline  []bool
 	beforeResume       func()
+}
+
+func (s *stubEventBus) PublishClarificationBundleUpdates(
+	ctx context.Context,
+	messages []*taskmodels.Message,
+) error {
+	s.publishedBundles++
+	for _, message := range messages {
+		data := map[string]any{
+			"message_id": message.ID,
+			"updated_at": message.UpdatedAt.Format(time.RFC3339Nano),
+		}
+		if err := s.Publish(
+			ctx,
+			events.MessageUpdated,
+			bus.NewEvent(events.MessageUpdated, "clarification-canceller-test", data),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *stubEventBus) Publish(ctx context.Context, _ string, ev *bus.Event) error {
@@ -344,6 +367,9 @@ func TestCanceller_PublishesMessageUpdatedEvent(t *testing.T) {
 
 	if len(eventBus.events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(eventBus.events))
+	}
+	if eventBus.publishedBundles != 1 {
+		t.Fatalf("projection-aware bundle publications = %d, want 1", eventBus.publishedBundles)
 	}
 	data, ok := eventBus.events[0].Data.(map[string]any)
 	if !ok {

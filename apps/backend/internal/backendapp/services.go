@@ -85,6 +85,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		return ok
 	}))
 	workflowSvc := workflowservice.NewService(repos.Workflow, log)
+	pendingActionProjectionEpoch, err := repos.Task.NextPendingActionProjectionEpoch(context.Background())
+	if err != nil {
+		return nil, nil, fmt.Errorf("allocate pending-action projection epoch: %w", err)
+	}
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
 			Workspaces:        repos.Task,
@@ -115,6 +119,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			TaskWorktreeRoots: []string{filepath.Join(cfg.ResolvedHomeDir(), "tasks")},
 		},
 	)
+	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)
 	taskSvc.SetSecretStore(userSecretStore)
 	if deleter, ok := userSecretStore.(taskservice.WorkspaceSecretDeleter); ok {
 		taskSvc.SetWorkspaceSecretDeleter(deleter)

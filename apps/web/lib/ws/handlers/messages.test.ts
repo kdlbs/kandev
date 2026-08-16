@@ -6,7 +6,7 @@ import { createMessagesHandlerRegistration, createMessageUpdateScheduler } from 
 
 type UpdatedMessage = BackendMessageMap["session.message.updated"];
 const TEST_TIMESTAMP = "2026-08-02T00:00:00.000Z";
-const PROJECTION_EPOCH = "20260816T201500.000000000Z-test";
+const PROJECTION_EPOCH = "7";
 
 function pendingRevision(sequence: number) {
   return { epoch: PROJECTION_EPOCH, sequence };

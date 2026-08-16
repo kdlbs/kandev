@@ -473,8 +473,6 @@ export type TaskSession = ActiveSubagentCountFields & {
   pending_action?: TaskPendingAction | null;
   /** Cross-channel logical clock for pending_action snapshots. */
   pending_action_revision?: TaskPendingActionRevision;
-  /** Frontend-only opaque process epochs already superseded for this session. */
-  pending_action_retired_epochs?: string[];
   error_message?: string;
   metadata?: Record<string, unknown> | null;
   agent_profile_snapshot?: Record<string, unknown> | null;

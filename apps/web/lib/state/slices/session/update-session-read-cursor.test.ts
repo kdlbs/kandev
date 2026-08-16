@@ -23,7 +23,7 @@ function makeStore() {
 const TASK_ID = toTaskId("task-1");
 const SESSION_ID = toSessionId("session-1");
 const TS = "2026-04-20T00:00:00Z";
-const REVISION_EPOCH = "20260816T201500.000000000Z-test";
+const REVISION_EPOCH = "7";
 
 function pendingRevision(sequence: number) {
   return { epoch: REVISION_EPOCH, sequence };
@@ -167,10 +167,10 @@ describe("setTaskSessionPendingAction", () => {
     });
   });
 
-  it("accepts a changed backend epoch and rejects delayed frames from the old epoch", () => {
+  it("accepts a newer backend epoch and rejects delayed frames from the old epoch", () => {
     const store = makeStore();
-    const oldRevision = { epoch: "zz-old-generation", sequence: 99 };
-    const newRevision = { epoch: "aa-new-generation", sequence: 1 };
+    const oldRevision = { epoch: "7", sequence: 99 };
+    const newRevision = { epoch: "8", sequence: 1 };
     store
       .getState()
       .setTaskSessionsForTask(TASK_ID, [
@@ -186,6 +186,26 @@ describe("setTaskSessionPendingAction", () => {
     expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
       pending_action: null,
       pending_action_revision: newRevision,
+    });
+  });
+
+  it("rejects an unseen older backend epoch after client state is rebuilt", () => {
+    const store = makeStore();
+    const currentRevision = { epoch: "3", sequence: 1 };
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [
+        makeSession({ pending_action: null, pending_action_revision: currentRevision }),
+      ]);
+
+    store.getState().setTaskSessionPendingAction(SESSION_ID, "clarification", {
+      epoch: "1",
+      sequence: 99,
+    });
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      pending_action: null,
+      pending_action_revision: currentRevision,
     });
   });
 });

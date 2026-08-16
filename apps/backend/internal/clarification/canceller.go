@@ -5,32 +5,38 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/events"
-	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
+
+type clarificationBundlePublisher interface {
+	PublishClarificationBundleUpdates(context.Context, []*taskmodels.Message) error
+}
 
 // Canceller wraps Store with message-update side effects.
 // When the agent's turn completes, it cancels pending clarifications
 // and marks the database messages with agent_disconnected metadata.
 type Canceller struct {
-	store    *Store
-	repo     cancellationMessageStore
-	eventBus EventBus
-	logger   *logger.Logger
+	store     *Store
+	repo      cancellationMessageStore
+	publisher clarificationBundlePublisher
+	logger    *logger.Logger
 }
 
 // NewCanceller creates a Canceller.
-func NewCanceller(store *Store, repo cancellationMessageStore, eventBus EventBus, log *logger.Logger) *Canceller {
+func NewCanceller(
+	store *Store,
+	repo cancellationMessageStore,
+	publisher clarificationBundlePublisher,
+	log *logger.Logger,
+) *Canceller {
 	return &Canceller{
-		store:    store,
-		repo:     repo,
-		eventBus: eventBus,
-		logger:   log.WithFields(zap.String("component", "clarification-canceller")),
+		store:     store,
+		repo:      repo,
+		publisher: publisher,
+		logger:    log.WithFields(zap.String("component", "clarification-canceller")),
 	}
 }
 
@@ -93,9 +99,7 @@ func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) 
 			continue
 		}
 		changedBundles++
-		for _, message := range changed {
-			c.publishMessageUpdated(writeCtx, message)
-		}
+		c.publishBundleUpdates(writeCtx, changed)
 	}
 	return changedBundles, expiryErr
 }
@@ -106,8 +110,8 @@ func (c *Canceller) publishChangedBundles(ctx context.Context, messages []*taskm
 		if pendingID := stringFromMetadata(message.Metadata, "pending_id"); pendingID != "" {
 			bundles[pendingID] = struct{}{}
 		}
-		c.publishMessageUpdated(ctx, message)
 	}
+	c.publishBundleUpdates(ctx, messages)
 	return len(bundles)
 }
 
@@ -124,36 +128,15 @@ func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string
 	return c.expireSessionBundles(ctx, sessionID)
 }
 
-// publishMessageUpdated publishes a message.updated event to the event bus.
-func (c *Canceller) publishMessageUpdated(ctx context.Context, msg *taskmodels.Message) {
-	if c.eventBus == nil {
+// publishBundleUpdates routes committed rows through the task service so every
+// message event carries the authoritative pending-action projection.
+func (c *Canceller) publishBundleUpdates(ctx context.Context, messages []*taskmodels.Message) {
+	if c.publisher == nil || len(messages) == 0 {
 		return
 	}
-
-	msgType := string(msg.Type)
-	if msgType == "" {
-		msgType = "message"
-	}
-
-	data := map[string]any{
-		"message_id":     msg.ID,
-		"session_id":     msg.TaskSessionID,
-		"task_id":        msg.TaskID,
-		"turn_id":        msg.TurnID,
-		"author_type":    string(msg.AuthorType),
-		"author_id":      msg.AuthorID,
-		"content":        msg.Content,
-		"type":           msgType,
-		"requests_input": msg.RequestsInput,
-		"created_at":     msg.CreatedAt.Format(time.RFC3339),
-		"updated_at":     msg.UpdatedAt.Format(time.RFC3339Nano),
-		"metadata":       msg.Metadata,
-	}
-
-	event := bus.NewEvent(events.MessageUpdated, "clarification-canceller", data)
-	if err := c.eventBus.Publish(ctx, events.MessageUpdated, event); err != nil {
-		c.logger.Warn("failed to publish message.updated event",
-			zap.String("message_id", msg.ID),
+	if err := c.publisher.PublishClarificationBundleUpdates(ctx, messages); err != nil {
+		c.logger.Warn("failed to publish clarification bundle updates",
+			zap.Int("message_count", len(messages)),
 			zap.Error(err))
 	}
 }

@@ -2,11 +2,22 @@ package service
 
 import (
 	"context"
-
-	"github.com/google/uuid"
+	"strconv"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// SetPendingActionProjectionEpoch installs the durable generation allocated at
+// backend startup. Callers must set it before serving requests.
+func (s *Service) SetPendingActionProjectionEpoch(epoch uint64) {
+	if epoch == 0 {
+		return
+	}
+	s.pendingActionProjectionMu.Lock()
+	defer s.pendingActionProjectionMu.Unlock()
+	s.pendingActionProjectionEpoch = strconv.FormatUint(epoch, 10)
+	s.pendingActionProjectionSequence = 0
+}
 
 // GetPendingActionProjectionsForSessions returns the authoritative action and
 // a cross-channel revision for every requested session. The logical revision
@@ -33,9 +44,6 @@ func (s *Service) reservePendingActionProjectionRevisions(
 ) map[string]models.PendingActionRevision {
 	s.pendingActionProjectionMu.Lock()
 	defer s.pendingActionProjectionMu.Unlock()
-	if s.pendingActionProjectionEpoch == "" {
-		s.pendingActionProjectionEpoch = uuid.NewString()
-	}
 	revisions := make(map[string]models.PendingActionRevision, len(sessionIDs))
 	for _, sessionID := range sessionIDs {
 		if sessionID == "" {
