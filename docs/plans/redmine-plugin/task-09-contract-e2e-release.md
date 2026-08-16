@@ -1,7 +1,7 @@
 ---
 id: "09-contract-e2e-release"
 title: "Contract E2E, release, registry pointer"
-status: not started
+status: completed
 wave: 4
 depends_on: ["06-task-linking-bidirectional-sync", "07-issue-watchers", "08-settings-ui-native-registrations"]
 plan: "plan.md"

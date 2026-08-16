@@ -1,7 +1,7 @@
 ---
 id: "03-connection-secrets-health"
 title: "Connection lifecycle, workspace-scoped secrets, health poll"
-status: not started
+status: completed
 wave: 2
 depends_on: ["02-plugin-repository-bootstrap"]
 plan: "plan.md"

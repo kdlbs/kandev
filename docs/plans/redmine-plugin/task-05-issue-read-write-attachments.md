@@ -1,7 +1,7 @@
 ---
 id: "05-issue-read-write-attachments"
 title: "Issue read/write and attachments"
-status: not started
+status: completed
 wave: 2
 depends_on: ["02-plugin-repository-bootstrap"]
 plan: "plan.md"
