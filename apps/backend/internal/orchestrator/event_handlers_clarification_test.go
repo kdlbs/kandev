@@ -1336,28 +1336,49 @@ func TestHandleAgentStreamEvent_CancelsClarificationWatchdogs(t *testing.T) {
 	}
 }
 
-func TestClarificationWatchdog_ExpiresAndClearsEntry(t *testing.T) {
+func TestClarificationWatchdog_MatchingTurnDispatchesAndClearsEntry(t *testing.T) {
 	repo := setupTestRepo(t)
-	agentMgr := &mockAgentManager{isAgentRunning: true}
+	promptDone := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptDone:             promptDone,
+	}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.clarificationWatchdogTimeout = 20 * time.Millisecond
 	t.Cleanup(func() { svc.cancelAllClarificationWatchdogs() })
 
-	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateCompleted)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-watchdog-positive")
+	turnService := &repoTurnService{repo: repo}
+	svc.turnService = turnService
+	clarificationTurn, err := turnService.StartTurn(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("start clarification turn: %v", err)
+	}
 
 	event := bus.NewEvent("clarification.primary_answered", "test", map[string]any{
-		"session_id":  "s1",
-		"task_id":     "t1",
-		"pending_id":  "p1",
-		"question":    "Which approach?",
-		"answer_text": "User selected: Option A",
+		"session_id":            "s1",
+		"task_id":               "t1",
+		"pending_id":            "p1",
+		"clarification_turn_id": clarificationTurn.ID,
+		"question":              "Which approach?",
+		"answer_text":           "User selected: Option A",
 	})
 	if err := svc.handleClarificationPrimaryAnswered(context.Background(), event); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-promptDone:
+	case <-time.After(time.Second):
+		t.Fatal("matching clarification watchdog did not dispatch a prompt")
+	}
 
+	deadline := time.Now().Add(time.Second)
+	for countClarificationWatchdogs(svc) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 	if got := countClarificationWatchdogs(svc); got != 0 {
 		t.Fatalf("expected watchdog map to be empty after timeout, got %d", got)
 	}

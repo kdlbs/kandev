@@ -3,6 +3,7 @@ package clarification
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -50,16 +51,36 @@ func (h *Handlers) finalizeClarificationResponseDelivery(
 }
 
 func clarificationClaimTurnID(messages []*taskmodels.Message) string {
-	if len(messages) == 0 || messages[0] == nil {
+	turnID, err := clarificationClaimTurnIdentity(messages)
+	if err != nil {
 		return ""
 	}
-	turnID := messages[0].TurnID
-	for _, message := range messages[1:] {
-		if message == nil || message.TurnID != turnID {
-			return ""
+	return turnID
+}
+
+func clarificationClaimTurnIdentity(messages []*taskmodels.Message) (string, error) {
+	turnID := ""
+	turnMessageID := ""
+	for _, message := range messages {
+		if message == nil || message.ID == "" || message.TurnID == "" {
+			continue
+		}
+		if turnID == "" {
+			turnID = message.TurnID
+			turnMessageID = message.ID
+			continue
+		}
+		if message.TurnID != turnID {
+			return "", fmt.Errorf(
+				"clarification bundle mixes turn %q from message %s with turn %q from message %s",
+				turnID,
+				turnMessageID,
+				message.TurnID,
+				message.ID,
+			)
 		}
 	}
-	return turnID
+	return turnID, nil
 }
 
 func (h *Handlers) publishPrimaryAnsweredEvent(

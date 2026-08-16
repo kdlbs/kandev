@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -337,12 +338,35 @@ func TestDetachedResumeResolutionUsesFreshBoundedContext(t *testing.T) {
 }
 
 func TestClarificationClaimRecoveryRejectsMixedTurns(t *testing.T) {
-	_, _, err := clarificationClaimRecovery([]*taskmodels.Message{
+	messages := []*taskmodels.Message{
 		{ID: "message-one", TurnID: "turn-one"},
 		{ID: "message-two", TurnID: "turn-two"},
-	})
+	}
+	if turnID := clarificationClaimTurnID(messages); turnID != "" {
+		t.Fatalf("clarificationClaimTurnID = %q, want invalid identity", turnID)
+	}
+	_, _, err := clarificationClaimRecovery(messages)
 	if err == nil {
 		t.Fatal("clarificationClaimRecovery accepted messages from different turns")
+	}
+}
+
+func TestClarificationClaimTurnIDUsesNonEmptyBundleIdentity(t *testing.T) {
+	messages := []*taskmodels.Message{
+		{ID: "message-legacy", TurnID: ""},
+		{ID: "message-current", TurnID: "turn-current"},
+	}
+
+	primaryTurnID := clarificationClaimTurnID(messages)
+	recoveryTurnID, messageIDs, err := clarificationClaimRecovery(messages)
+	if err != nil {
+		t.Fatalf("clarificationClaimRecovery: %v", err)
+	}
+	if primaryTurnID != "turn-current" || recoveryTurnID != primaryTurnID {
+		t.Fatalf("turn identities = primary %q recovery %q, want turn-current", primaryTurnID, recoveryTurnID)
+	}
+	if !slices.Equal(messageIDs, []string{"message-legacy", "message-current"}) {
+		t.Fatalf("claimed message IDs = %v", messageIDs)
 	}
 }
 

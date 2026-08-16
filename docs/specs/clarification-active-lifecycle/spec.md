@@ -95,7 +95,9 @@ hiding the action the icon represents.
   in-flight recovery work.
 - A current-turn bundle remains answerable while any sibling question is pending. Recovery claims only
   those pending rows, preserves siblings already made terminal by an earlier partial write, and restores
-  only the claimed rows if detached delivery fails.
+  only the claimed rows if detached delivery fails. Primary delivery events and detached recovery derive
+  one turn identity from the same bundle rule: legacy empty turn IDs do not mask a consistent non-empty
+  identity, while conflicting non-empty IDs invalidate the identity.
 - Any response to a superseded or terminal bundle returns conflict, performs no message mutation, and
   initiates no agent resume. Current clients close their obsolete local overlay through the existing
   conflict handling.

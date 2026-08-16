@@ -780,24 +780,14 @@ func (h *Handlers) resumeDetachedClarification(
 }
 
 func clarificationClaimRecovery(messages []*taskmodels.Message) (string, []string, error) {
+	turnID, err := clarificationClaimTurnIdentity(messages)
+	if err != nil {
+		return "", nil, err
+	}
 	messageIDs := make([]string, 0, len(messages))
-	turnID := ""
-	turnMessageID := ""
 	for _, message := range messages {
 		if message == nil || message.ID == "" {
 			continue
-		}
-		if message.TurnID != "" && turnID == "" {
-			turnID = message.TurnID
-			turnMessageID = message.ID
-		} else if message.TurnID != "" && message.TurnID != turnID {
-			return "", nil, fmt.Errorf(
-				"clarification bundle mixes turn %q from message %s with turn %q from message %s",
-				turnID,
-				turnMessageID,
-				message.TurnID,
-				message.ID,
-			)
 		}
 		messageIDs = append(messageIDs, message.ID)
 	}

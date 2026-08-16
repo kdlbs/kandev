@@ -10,11 +10,20 @@ import (
 
 func TestClarificationWatchdogDoesNotDispatchAfterTurnIsSuperseded(t *testing.T) {
 	svc, agentMgr := setupSupersededClarificationTurn(t)
-	svc.resumeClarificationViaFallback(context.Background(), clarificationAnsweredData{
+	svc.clarificationWatchdogTimeout = time.Millisecond
+	t.Cleanup(func() { svc.cancelAllClarificationWatchdogs() })
+	svc.scheduleClarificationWatchdog(clarificationAnsweredData{
 		TaskID: "task-watchdog-authority", SessionID: "session-watchdog-authority",
 		PendingID: "pending-watchdog-authority", ClarificationTurnID: "turn-clarification",
 		AnswerText: "Continue",
 	})
+	deadline := time.Now().Add(time.Second)
+	for countClarificationWatchdogs(svc) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := countClarificationWatchdogs(svc); got != 0 {
+		t.Fatalf("stale watchdog entries = %d, want 0", got)
+	}
 
 	agentMgr.mu.Lock()
 	defer agentMgr.mu.Unlock()

@@ -327,6 +327,8 @@ All locally available task gates passed; environment-gated parity also passed in
 - Current-head review remediation keeps unpublished attempted reservations out of client turn history
   and propagates watchdog cancellation through fallback database and prompt work. Focused SQLite and
   orchestrator regressions passed; PostgreSQL parity remains environment-gated in CI.
+- Follow-up review adds scheduled positive and superseded watchdog coverage and makes primary and
+  detached clarification delivery share one claimed-bundle turn-identity rule.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---
