@@ -750,11 +750,16 @@ type taskPRSyncState struct {
 // keep that function's complexity within the repo's lint limits (see the
 // cyclomatic-complexity suppression on SyncTaskPR below).
 //
-//   - is_draft / changed_files / merged_by_login follow
-//     status.OutcomeFieldsPopulated: populated writes the observed values
-//     (nil merged_by_login when upstream reports no merger, never ""),
-//     unpopulated preserves the stored values verbatim, including NULL
-//     (AC-12, AC-13).
+//   - is_draft / changed_files each follow their own presence flag
+//     (status.PR.IsDraftObserved / status.PR.ChangedFilesObserved) rather
+//     than the whole-group status.OutcomeFieldsPopulated: a group marked
+//     populated is not a promise that every field in it arrived, so a
+//     populated sync whose upstream response omitted or nulled one of these
+//     two writes NULL for that column specifically, not the decoder's zero
+//     value (AC-12a). merged_by_login stays keyed off the group flag alone
+//     (nil merged_by_login when upstream reports no merger, never "").
+//     An unpopulated group preserves all three stored values verbatim,
+//     including NULL (AC-13).
 //   - closed_by_login follows status.ClosureAttributionPopulated the same
 //     way (AC-14, AC-15) — only the GraphQL path ever sets it.
 //   - auto_merge_observed_at is a latch: set once, on the first populating
@@ -765,9 +770,16 @@ func resolveTaskPROutcomeFields(tp *TaskPR, status *PRStatus) (
 ) {
 	isDraft, changedFiles, mergedByLogin = tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin
 	if status.OutcomeFieldsPopulated {
-		draft := status.PR.Draft
-		files := status.PR.ChangedFiles
-		isDraft, changedFiles = &draft, &files
+		isDraft = nil
+		if status.PR.IsDraftObserved {
+			draft := status.PR.Draft
+			isDraft = &draft
+		}
+		changedFiles = nil
+		if status.PR.ChangedFilesObserved {
+			files := status.PR.ChangedFiles
+			changedFiles = &files
+		}
 		mergedByLogin = nil
 		if status.PR.MergedByLogin != "" {
 			login := status.PR.MergedByLogin

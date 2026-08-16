@@ -178,10 +178,12 @@ func TestCreateAndReplaceTaskPR_RoundTripOutcomeColumns(t *testing.T) {
 	}
 	status := &PRStatus{
 		PR: &PR{
-			Draft:            isDraft,
-			ChangedFiles:     changedFiles,
-			MergedByLogin:    mergedBy,
-			AutoMergeEnabled: true,
+			Draft:                isDraft,
+			IsDraftObserved:      true,
+			ChangedFiles:         changedFiles,
+			ChangedFilesObserved: true,
+			MergedByLogin:        mergedBy,
+			AutoMergeEnabled:     true,
 		},
 		OutcomeFieldsPopulated:      true,
 		ClosedByLogin:               closedBy,

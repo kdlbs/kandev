@@ -28,7 +28,9 @@ func TestSyncTaskPR_PopulatedSyncWritesOutcomeFields(t *testing.T) {
 	status := &PRStatus{
 		PR: &PR{
 			Number: 1, State: "merged", RepoOwner: "owner", RepoName: "repo",
-			Draft: false, ChangedFiles: 8, MergedByLogin: "carlosflorencio",
+			Draft: false, IsDraftObserved: true,
+			ChangedFiles: 8, ChangedFilesObserved: true,
+			MergedByLogin: "carlosflorencio",
 		},
 		OutcomeFieldsPopulated: true,
 	}
@@ -66,7 +68,9 @@ func TestSyncTaskPR_NoMergerWritesNilNotEmptyString(t *testing.T) {
 	status := &PRStatus{
 		PR: &PR{
 			Number: 1, State: "open", RepoOwner: "owner", RepoName: "repo",
-			Draft: true, ChangedFiles: 0, MergedByLogin: "",
+			Draft: true, IsDraftObserved: true,
+			ChangedFiles: 0, ChangedFilesObserved: true,
+			MergedByLogin: "",
 		},
 		OutcomeFieldsPopulated: true,
 	}
@@ -389,7 +393,9 @@ func TestSyncTaskPR_OutcomeFieldChangePublishesEvent(t *testing.T) {
 	status := &PRStatus{
 		PR: &PR{
 			Number: 1, Title: "Same title", State: "open", RepoOwner: "owner", RepoName: "repo",
-			Draft: false, ChangedFiles: 5, MergedByLogin: "",
+			Draft: false, IsDraftObserved: true,
+			ChangedFiles: 5, ChangedFilesObserved: true,
+			MergedByLogin: "",
 		},
 		MergeableState:         "clean",
 		OutcomeFieldsPopulated: true,

@@ -281,7 +281,8 @@ type PR struct {
 	MergedAt            *time.Time          `json:"merged_at,omitempty"`
 	ClosedAt            *time.Time          `json:"closed_at,omitempty"`
 	// ChangedFiles is the number of files touched by the PR. 0 is a real
-	// observation, distinct from "never observed" upstream of this struct.
+	// observation, distinct from "never observed" — see ChangedFilesObserved,
+	// which is what actually carries that distinction (AC-12a).
 	ChangedFiles int `json:"changed_files,omitempty"`
 	// MergedByLogin is "" when the PR was never merged, or upstream reported
 	// no merger. Callers that persist this must write NULL for "", never "".
@@ -290,6 +291,18 @@ type PR struct {
 	// fetch time. GitHub clears auto_merge once it fires, so this can only
 	// ever mean "armed at this instant" — never "merged by auto-merge".
 	AutoMergeEnabled bool `json:"auto_merge_enabled,omitempty"`
+	// IsDraftObserved reports whether Draft was decoded from an explicit,
+	// non-null upstream isDraft/draft value, as opposed to json.Unmarshal
+	// defaulting an absent or null field to false. Internal bookkeeping only
+	// (json:"-"): AC-12a requires resolveTaskPROutcomeFields to write NULL
+	// for is_draft when this is false, rather than persisting a fabricated
+	// "false".
+	IsDraftObserved bool `json:"-"`
+	// ChangedFilesObserved mirrors IsDraftObserved for ChangedFiles. It is
+	// what actually distinguishes a genuine "0 files changed" observation
+	// from "changedFiles was absent or null" (AC-12a) — ChangedFiles alone
+	// cannot, since both cases decode to the Go zero value.
+	ChangedFilesObserved bool `json:"-"`
 }
 
 // RequestedReviewer represents a pending reviewer request on a PR.

@@ -222,15 +222,59 @@ func TestConvertBatchedPRResult_MergedByAndChangedFiles(t *testing.T) {
 	raw := &batchedPRResult{
 		State:        "MERGED",
 		MergedAt:     "2026-08-12T00:00:00Z",
-		ChangedFiles: 8,
+		ChangedFiles: intPtr(8),
 	}
 	raw.MergedBy.Login = "carlosflorencio"
 	status := convertBatchedPRResult(raw, "kdlbs", "kandev", 2554)
 	if status.PR.ChangedFiles != 8 {
 		t.Errorf("ChangedFiles = %d, want 8", status.PR.ChangedFiles)
 	}
+	if !status.PR.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = false, want true for an explicit changedFiles=8")
+	}
 	if status.PR.MergedByLogin != "carlosflorencio" {
 		t.Errorf("MergedByLogin = %q, want carlosflorencio", status.PR.MergedByLogin)
+	}
+}
+
+// TestConvertBatchedPRResult_MissingIsDraftAndChangedFilesLeavesUnobserved
+// covers AC-12a: a batched GraphQL result that omits isDraft and
+// changedFiles must decode to unobserved (Observed=false), so
+// resolveTaskPROutcomeFields writes NULL for those columns instead of a
+// fabricated false/0 that would masquerade as a real observation.
+// TestConvertBatchedPRResult_SetsOutcomeFieldsPopulatedUnconditionally
+// above proves the *group* flag stays true for this exact input — this test
+// proves the two field-level flags do NOT, which is what AC-12a actually
+// requires ("each field is judged on its own presence").
+func TestConvertBatchedPRResult_MissingIsDraftAndChangedFilesLeavesUnobserved(t *testing.T) {
+	status := convertBatchedPRResult(&batchedPRResult{State: "OPEN"}, "o", "r", 1)
+	if status.PR.IsDraftObserved {
+		t.Error("IsDraftObserved = true, want false when isDraft is absent from the response")
+	}
+	if status.PR.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = true, want false when changedFiles is absent from the response")
+	}
+}
+
+// TestConvertBatchedPRResult_ExplicitFalseAndZeroAreObserved covers AC-12a's
+// other half: a response that genuinely reports isDraft=false and
+// changedFiles=0 must be distinguishable from one that omits them — both
+// mark Observed=true.
+func TestConvertBatchedPRResult_ExplicitFalseAndZeroAreObserved(t *testing.T) {
+	status := convertBatchedPRResult(
+		&batchedPRResult{State: "OPEN", IsDraft: boolPtr(false), ChangedFiles: intPtr(0)}, "o", "r", 1,
+	)
+	if !status.PR.IsDraftObserved {
+		t.Error("IsDraftObserved = false, want true for an explicit isDraft=false")
+	}
+	if status.PR.Draft {
+		t.Error("Draft = true, want false")
+	}
+	if !status.PR.ChangedFilesObserved {
+		t.Error("ChangedFilesObserved = false, want true for an explicit changedFiles=0")
+	}
+	if status.PR.ChangedFiles != 0 {
+		t.Errorf("ChangedFiles = %d, want 0", status.PR.ChangedFiles)
 	}
 }
 

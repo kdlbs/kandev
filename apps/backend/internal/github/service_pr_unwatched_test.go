@@ -432,7 +432,9 @@ func TestTriggerPRSyncAll_UnwatchedReconcileWritesOutcomeAttribution(t *testing.
 		HeadBranch: "feature/first", BaseBranch: "main",
 		RepoOwner: "owner", RepoName: "repo",
 		CreatedAt: mergedAt.Add(-2 * time.Hour), UpdatedAt: mergedAt, MergedAt: &mergedAt,
-		Draft: false, ChangedFiles: 4, MergedByLogin: "carlosflorencio",
+		Draft: false, IsDraftObserved: true,
+		ChangedFiles: 4, ChangedFilesObserved: true,
+		MergedByLogin: "carlosflorencio",
 	})
 
 	if _, err := svc.TriggerPRSyncAll(ctx, "task-1"); err != nil {

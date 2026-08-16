@@ -246,7 +246,9 @@ func TestAssociatePRWithTaskExplicitLinkOnAlreadyMergedDetachedPRPopulatesOutcom
 		Number: 5, RepoOwner: "acme", RepoName: "demo", HTMLURL: "https://github.com/acme/demo/pull/5",
 		Title: "merged while detached", HeadBranch: "old", BaseBranch: "main", AuthorLogin: "bob",
 		State: prStateMerged, MergedAt: &mergedAt,
-		Draft: false, ChangedFiles: 12, MergedByLogin: "carlosflorencio",
+		Draft: false, IsDraftObserved: true,
+		ChangedFiles: 12, ChangedFilesObserved: true,
+		MergedByLogin: "carlosflorencio",
 	}
 	associated, err := svc.associatePRWithTask(ctx, row.WorkspaceID, row.TaskID, row.RepositoryID, mergedPR, true, true)
 	if err != nil {

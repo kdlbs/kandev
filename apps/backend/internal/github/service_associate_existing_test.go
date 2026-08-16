@@ -72,7 +72,9 @@ func TestAssociateExistingPRByURL_LinkingAlreadyMergedPRPopulatesOutcomeFields(t
 		Number: 43, Title: "Already merged", State: prStateMerged,
 		HeadSHA: "abc", HeadBranch: "feat/y", RepoOwner: "org", RepoName: "repo",
 		HTMLURL:  "https://github.com/org/repo/pull/43",
-		MergedAt: &mergedAt, Draft: false, ChangedFiles: 7, MergedByLogin: "carlosflorencio",
+		MergedAt: &mergedAt, Draft: false, IsDraftObserved: true,
+		ChangedFiles: 7, ChangedFilesObserved: true,
+		MergedByLogin: "carlosflorencio",
 	})
 
 	tp, err := svc.AssociateExistingPRByURL(ctx, "task-C", "repo-1", "https://github.com/org/repo/pull/43")

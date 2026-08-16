@@ -177,18 +177,23 @@ type timelineClosedEventNode struct {
 
 // batchedPRResult is the decoded shape of one aliased pullRequest block.
 type batchedPRResult struct {
-	State        string `json:"state"`
-	Title        string `json:"title"`
-	URL          string `json:"url"`
-	IsDraft      bool   `json:"isDraft"`
-	Mergeable    string `json:"mergeable"`
-	MergeStatus  string `json:"mergeStateStatus"`
-	HeadRefName  string `json:"headRefName"`
-	BaseRefName  string `json:"baseRefName"`
-	HeadRefOid   string `json:"headRefOid"`
-	Additions    int    `json:"additions"`
-	Deletions    int    `json:"deletions"`
-	ChangedFiles int    `json:"changedFiles"`
+	State string `json:"state"`
+	Title string `json:"title"`
+	URL   string `json:"url"`
+	// IsDraft is a pointer: AC-12a requires distinguishing an upstream
+	// response that omits or nulls isDraft from one that genuinely reports
+	// false, and a plain bool can't tell the two apart after decode.
+	IsDraft     *bool  `json:"isDraft"`
+	Mergeable   string `json:"mergeable"`
+	MergeStatus string `json:"mergeStateStatus"`
+	HeadRefName string `json:"headRefName"`
+	BaseRefName string `json:"baseRefName"`
+	HeadRefOid  string `json:"headRefOid"`
+	Additions   int    `json:"additions"`
+	Deletions   int    `json:"deletions"`
+	// ChangedFiles is a pointer for the same reason as IsDraft (AC-12a): 0 is
+	// a legitimate observation and must stay distinguishable from absent/null.
+	ChangedFiles *int `json:"changedFiles"`
 	Author       struct {
 		Login string `json:"login"`
 	} `json:"author"`
@@ -438,30 +443,39 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 	if raw.MergedAt != "" {
 		state = prStateMerged
 	}
+	draft, changedFiles := false, 0
+	if raw.IsDraft != nil {
+		draft = *raw.IsDraft
+	}
+	if raw.ChangedFiles != nil {
+		changedFiles = *raw.ChangedFiles
+	}
 	pr := &PR{
-		Number:           number,
-		Title:            raw.Title,
-		URL:              raw.URL,
-		HTMLURL:          raw.URL,
-		State:            state,
-		HeadBranch:       raw.HeadRefName,
-		HeadSHA:          raw.HeadRefOid,
-		BaseBranch:       raw.BaseRefName,
-		AuthorLogin:      raw.Author.Login,
-		RepoOwner:        owner,
-		RepoName:         repo,
-		Draft:            raw.IsDraft,
-		Mergeable:        raw.Mergeable == "MERGEABLE",
-		MergeableState:   strings.ToLower(raw.MergeStatus),
-		Additions:        raw.Additions,
-		Deletions:        raw.Deletions,
-		ChangedFiles:     raw.ChangedFiles,
-		MergedByLogin:    raw.MergedBy.Login,
-		AutoMergeEnabled: raw.AutoMergeRequest != nil,
-		CreatedAt:        raw.CreatedAt,
-		UpdatedAt:        raw.UpdatedAt,
-		MergedAt:         parseTimePtr(raw.MergedAt),
-		ClosedAt:         parseTimePtr(raw.ClosedAt),
+		Number:               number,
+		Title:                raw.Title,
+		URL:                  raw.URL,
+		HTMLURL:              raw.URL,
+		State:                state,
+		HeadBranch:           raw.HeadRefName,
+		HeadSHA:              raw.HeadRefOid,
+		BaseBranch:           raw.BaseRefName,
+		AuthorLogin:          raw.Author.Login,
+		RepoOwner:            owner,
+		RepoName:             repo,
+		Draft:                draft,
+		IsDraftObserved:      raw.IsDraft != nil,
+		Mergeable:            raw.Mergeable == "MERGEABLE",
+		MergeableState:       strings.ToLower(raw.MergeStatus),
+		Additions:            raw.Additions,
+		Deletions:            raw.Deletions,
+		ChangedFiles:         changedFiles,
+		ChangedFilesObserved: raw.ChangedFiles != nil,
+		MergedByLogin:        raw.MergedBy.Login,
+		AutoMergeEnabled:     raw.AutoMergeRequest != nil,
+		CreatedAt:            raw.CreatedAt,
+		UpdatedAt:            raw.UpdatedAt,
+		MergedAt:             parseTimePtr(raw.MergedAt),
+		ClosedAt:             parseTimePtr(raw.ClosedAt),
 	}
 
 	reviewState := summarizeReviewState(raw.Reviews.Nodes)
