@@ -123,8 +123,6 @@ func metadataFlagIsTrue(value interface{}) bool {
 		return typed == metadataTrueString || typed == "1"
 	case float64:
 		return typed == 1
-	case json.Number:
-		return typed.String() == "1"
 	default:
 		return false
 	}
