@@ -28,6 +28,7 @@ const DEFAULT_IMAGE_TAG = "kandev/multi-agent:latest";
 //
 // The kandev backend mounts the agentctl binary into /usr/local/bin/agentctl
 // at container creation time, so users do NOT need to bake it in here.
+// i18n-exempt: Dockerfile contents, not prose.
 const DEFAULT_DOCKERFILE = `FROM node:22-slim
 
 RUN apt-get update \\

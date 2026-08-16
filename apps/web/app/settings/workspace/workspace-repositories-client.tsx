@@ -59,8 +59,10 @@ function buildDraftRepo(
   manualRepoPath: string,
 ): RepositoryItem {
   const path = selectedRepo?.path ?? manualValidation.path ?? manualRepoPath.trim();
+  // i18n-exempt: persisted repository name. See the comment below.
   // "New Repository" is PERSISTED as the repository's name, not rendered copy —
   // a stored name must not depend on the locale it was created in.
+  // i18n-exempt: persisted repository name. See the comment above.
   const name =
     selectedRepo?.name ?? path.split("/").filter(Boolean).slice(-1)[0] ?? "New Repository";
   return {
@@ -108,6 +110,7 @@ async function saveNewRepository(
 ) {
   const created = await createRepositoryAction({
     workspace_id: workspace?.id ?? repo.workspace_id,
+    // i18n-exempt: persisted repository name, same contract as buildDraftRepo above.
     name: repo.name.trim() || "New Repository",
     source_type: repo.source_type || "local",
     local_path: repo.local_path,
@@ -129,6 +132,7 @@ async function saveNewRepository(
   // Like the repository name above, the seeded script name and command are
   // PERSISTED and sent to a shell verbatim, so both stay in English.
   const scripts = await Promise.all(
+    // i18n-exempt: persisted script name, sent to a shell verbatim. See the comment above.
     repo.scripts.map((script, index) =>
       createRepositoryScriptAction({
         repository_id: created.id,
@@ -195,6 +199,7 @@ async function saveExistingRepository({
       if (script.id.startsWith("temp-script-"))
         return createRepositoryScriptAction({
           repository_id: repoId,
+          // i18n-exempt: persisted script name, sent to a shell verbatim.
           name: script.name.trim() || "New Script",
           command: script.command.trim() || 'echo ""',
           position: script.position ?? index,

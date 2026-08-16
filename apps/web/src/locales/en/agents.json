@@ -249,5 +249,8 @@
   "removeDynamicCandidate": "Remove candidate",
   "dynamicCandidatePickerDescription": "Choose a concrete profile that is eligible for dynamic routing.",
   "dynamicProfileSaved": "Dynamic profile saved.",
-  "savingProfile": "Saving..."
+  "savingProfile": "Saving...",
+  "saveProfile": "Save profile",
+  "createProfile": "Create profile",
+  "creatingProfile": "Creating..."
 }

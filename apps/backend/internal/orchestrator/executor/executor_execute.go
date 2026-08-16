@@ -623,16 +623,7 @@ func repositoryCloneURL(repo *models.Repository) string {
 		return strings.TrimSpace(repo.RemoteURL)
 	}
 	if repo.ProviderOwner != "" && repo.ProviderName != "" {
-		if strings.EqualFold(repo.Provider, "gitlab") && strings.TrimSpace(repo.ProviderHost) == "" {
-			return ""
-		}
-		cloneURL, err := repoclone.CloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName, repoclone.ProtocolHTTPS,
-		)
-		if err != nil {
-			return ""
-		}
-		return cloneURL
+		return providerHTTPSCloneURL(repo)
 	}
 	if repo.LocalPath == "" {
 		return ""
@@ -643,6 +634,26 @@ func repositoryCloneURL(repo *models.Repository) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// providerHTTPSCloneURL derives the HTTPS clone URL from the persisted provider
+// identity. Its host is authoritative: it carries the provider's real HTTPS
+// origin, including a non-default port, which a clone URL from another
+// transport cannot supply.
+func providerHTTPSCloneURL(repo *models.Repository) string {
+	if repo.ProviderOwner == "" || repo.ProviderName == "" {
+		return ""
+	}
+	if strings.EqualFold(repo.Provider, "gitlab") && strings.TrimSpace(repo.ProviderHost) == "" {
+		return ""
+	}
+	cloneURL, err := repoclone.CloneURLWithHost(
+		repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName, repoclone.ProtocolHTTPS,
+	)
+	if err != nil {
+		return ""
+	}
+	return cloneURL
 }
 
 // getSessionLock returns a per-session mutex, creating one if it doesn't exist.

@@ -142,10 +142,10 @@ function FailedSessionBanner({
   taskId,
   sessionId,
   workspaceId,
-  message = "This agent has stopped.",
+  message,
   detail,
-  resumeLabel = "Resume",
-  resumingLabel = "Resuming...",
+  resumeLabel,
+  resumingLabel,
 }: {
   showDialog: boolean;
   onShowDialog: (open: boolean) => void;
@@ -158,6 +158,11 @@ function FailedSessionBanner({
   resumingLabel?: string;
 }) {
   const { t } = useTranslation();
+  // Resolved in the body, not as parameter defaults: those are evaluated before
+  // the component body, where `t` does not yet exist (docs/i18n.md).
+  const bannerMessage = message ?? t("task:agentHasStopped");
+  const resumeText = resumeLabel ?? t("task:resume");
+  const resumingText = resumingLabel ?? t("task:resuming");
   const [isResuming, setIsResuming] = useState(false);
   const [isStartingFresh, setIsStartingFresh] = useState(false);
 
@@ -196,7 +201,7 @@ function FailedSessionBanner({
         <div className="flex items-center justify-between gap-3 px-4 py-3">
           <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
             <IconAlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
-            <span className="truncate">{message}</span>
+            <span className="truncate">{bannerMessage}</span>
             {detail && <span className="shrink-0 text-xs text-muted-foreground">({detail})</span>}
           </div>
           <div className="flex items-center gap-2">
@@ -213,7 +218,7 @@ function FailedSessionBanner({
                       disabled={isResuming || !profileExists}
                     >
                       <IconPlayerPlay className="h-3.5 w-3.5" />
-                      {isResuming ? resumingLabel : resumeLabel}
+                      {isResuming ? resumingText : resumeText}
                     </Button>
                   </span>
                 </TooltipTrigger>

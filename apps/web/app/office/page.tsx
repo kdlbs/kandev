@@ -21,5 +21,5 @@ export default async function OfficePage({ searchParams }: { searchParams?: Sear
 
   const dashboard = await getDashboard(workspaceId, { cache: "no-store" }).catch(() => null);
 
-  return <OfficePageClient initialDashboard={dashboard} />;
+  return <OfficePageClient initialDashboard={dashboard} initialWorkspaceId={workspaceId} />;
 }

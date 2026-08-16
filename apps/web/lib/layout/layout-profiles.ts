@@ -52,6 +52,7 @@ export type BuiltInLayoutProfile = BuiltInLayoutProfileDescriptor & {
  *
  * "VS Code" is a product name and so has no `nameKey`.
  */
+// i18n-exempt: canonical English persisted in saved layouts; `descriptionKey` beside it is what renders.
 export const BUILT_IN_LAYOUT_PROFILES: readonly BuiltInLayoutProfileDescriptor[] = [
   {
     id: "default",

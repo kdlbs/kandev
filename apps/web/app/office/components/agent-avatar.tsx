@@ -56,6 +56,7 @@ function tintFor(name: string): string {
  * elements (tabs, dots, badges) when a full avatar is overkill.
  */
 export function agentTint(name: string | null | undefined): string {
+  // i18n-exempt: hash seed for the tint, never rendered.
   return tintFor((name ?? "").trim() || "Agent");
 }
 

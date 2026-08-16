@@ -20,6 +20,7 @@ import { useTranslation } from "react-i18next";
 // seeded in one locale and saved unedited would keep that locale's text forever.
 // Same contract as `newPreset` in components/github/action-presets-section.tsx.
 function newPreset(): GitLabActionPreset {
+  // i18n-exempt: persisted, editable preset label. See the comment above.
   return {
     id: `preset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     label: "New action",

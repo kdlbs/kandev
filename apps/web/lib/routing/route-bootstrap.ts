@@ -42,17 +42,28 @@ type SettingsWorkspaceItem = {
   office_workflow_id?: string | null;
 };
 
+/**
+ * The active workspace for a settings boot: whatever the user last had active,
+ * then their stored preference, then the first workspace that exists.
+ *
+ * Deliberately not filtered to kanban workspaces. It used to prefer them, which
+ * was invisible while Office-vs-kanban chrome came from the pathname — Settings
+ * is not an `/office` route, so it rendered kanban chrome regardless. Now that
+ * the chrome follows the active workspace, that filter would *write* a kanban
+ * workspace into the store on every settings visit, so an Office user opening
+ * Settings would silently have their workspace switched underneath them.
+ *
+ * Settings is shared chrome, reachable from either mode. It has no business
+ * preferring one.
+ */
 export function resolveSettingsActiveWorkspaceId(
   workspaceItems: SettingsWorkspaceItem[],
   activeCookieWorkspaceId: string | null,
   settingsWorkspaceId: string | null,
 ): string | null {
-  const kanbanWorkspaceItems = workspaceItems.filter((workspace) => !workspace.office_workflow_id);
-
   return (
-    kanbanWorkspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
-    kanbanWorkspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
-    kanbanWorkspaceItems[0]?.id ??
+    workspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
+    workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
     workspaceItems[0]?.id ??
     null
   );

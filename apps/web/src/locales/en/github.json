@@ -568,5 +568,18 @@
   "workspaceGithubAccess": "Workspace GitHub access",
   "workspaceGithubConnectionRemoved": "Workspace GitHub connection removed",
   "workspaceGithubIdentity": "Workspace GitHub identity",
-  "yourReviewIsRequested": "Your review is requested"
+  "yourReviewIsRequested": "Your review is requested",
+  "timeAgoJustNow": "just now",
+  "timeAgoMinutes_one": "{{count}}m ago",
+  "timeAgoMinutes_other": "{{count}}m ago",
+  "timeAgoHours_one": "{{count}}h ago",
+  "timeAgoHours_other": "{{count}}h ago",
+  "timeAgoDays_one": "{{count}}d ago",
+  "timeAgoDays_other": "{{count}}d ago",
+  "timeAgoWeeks_one": "{{count}}w ago",
+  "timeAgoWeeks_other": "{{count}}w ago",
+  "timeAgoMonths_one": "{{count}}mo ago",
+  "timeAgoMonths_other": "{{count}}mo ago",
+  "timeAgoYears_one": "{{count}}y ago",
+  "timeAgoYears_other": "{{count}}y ago"
 }

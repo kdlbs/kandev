@@ -13,11 +13,8 @@ import {
   workspaceType,
   type WorkspaceItem,
 } from "@/components/workspaces/workspace-picker-content";
-import {
-  rememberLastOfficeWorkspace,
-  rememberLastKanbanWorkspace,
-  workspaceHomeHref,
-} from "./app-sidebar-workspace-navigation";
+import { workspaceHomeHref } from "./app-sidebar-workspace-navigation";
+import { useSelectWorkspace } from "@/hooks/use-select-workspace";
 
 /**
  * Compact, secondary workspace switcher inlined after the Kandev brand in the
@@ -95,14 +92,6 @@ function useControlledMenuFocus(controlledOpen: boolean | undefined) {
   };
 }
 
-function rememberSelectedWorkspace(workspace: WorkspaceItem) {
-  if (workspaceType(workspace) === "office") {
-    rememberLastOfficeWorkspace(workspace);
-  } else {
-    rememberLastKanbanWorkspace(workspace);
-  }
-}
-
 export function AppSidebarWorkspacePicker({
   triggerClassName,
   contentClassName,
@@ -119,7 +108,7 @@ export function AppSidebarWorkspacePicker({
   const router = useRouter();
   const officeEnabled = useFeature("office");
   const workspaces = useAppStore((s) => s.workspaces);
-  const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
+  const selectWorkspace = useSelectWorkspace();
   const resetKanbanWorkspaceContext = useAppStore((s) => s.resetKanbanWorkspaceContext);
   const { open, setOpen } = useMenuOpenState(controlledOpen, onOpenChange);
 
@@ -133,24 +122,16 @@ export function AppSidebarWorkspacePicker({
       const { id } = workspace;
       if (id === activeId) {
         if (officeEnabled && workspaceType(workspace) === "kanban") {
-          rememberSelectedWorkspace(workspace);
+          selectWorkspace(workspace);
           router.push(workspaceHomeHref(workspace));
         }
         setOpen(false);
         onActionComplete?.();
         return;
       }
-      const type = workspaceType(workspace);
-      if (workspaceType(activeWorkspace) === "office" && type !== "office") {
-        rememberLastOfficeWorkspace(activeWorkspace);
-      }
-      if (type === "office") {
-        rememberLastOfficeWorkspace(workspace);
-      }
-      rememberLastKanbanWorkspace(workspace);
       resetKanbanWorkspaceContext();
-      setActiveWorkspace(id);
-      if (type === "kanban") {
+      selectWorkspace(workspace);
+      if (workspaceType(workspace) === "kanban") {
         router.push(workspaceHomeHref(workspace));
       } else if (officeEnabled) {
         router.push(`/office?workspaceId=${id}`);
@@ -160,9 +141,8 @@ export function AppSidebarWorkspacePicker({
     },
     [
       activeId,
-      activeWorkspace,
       router,
-      setActiveWorkspace,
+      selectWorkspace,
       resetKanbanWorkspaceContext,
       officeEnabled,
       onActionComplete,

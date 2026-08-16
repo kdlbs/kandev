@@ -67,6 +67,7 @@ function useProjectMemberSearch({
   host,
   project,
 }: Pick<Props, "workspaceId" | "host" | "project">) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [members, setMembers] = useState<GitLabProjectMember[]>([]);
   const [searching, setSearching] = useState(false);
@@ -101,7 +102,9 @@ function useProjectMemberSearch({
       if (isActive(generation, requestIdentity)) setMembers(result);
     } catch (searchError) {
       if (isActive(generation, requestIdentity)) {
-        setError(searchError instanceof Error ? searchError.message : "Member search failed");
+        setError(
+          searchError instanceof Error ? searchError.message : t("gitlab:memberSearchFailed"),
+        );
       }
     } finally {
       if (isActive(generation, requestIdentity)) setSearching(false);

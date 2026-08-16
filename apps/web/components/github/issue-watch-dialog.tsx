@@ -76,7 +76,9 @@ type FormState = {
   cleanupPolicy: CleanupPolicy;
 };
 
+// i18n-exempt: GitHub search syntax and label ids, shown as examples.
 const DEFAULT_QUERY = "type:issue state:open";
+// i18n-exempt: GitHub label ids, shown as examples.
 const ISSUE_LABEL_EXAMPLES = "bug, enhancement, priority:high";
 
 function makeDefaultForm(workspaceId: string): FormState {

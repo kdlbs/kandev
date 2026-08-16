@@ -16,7 +16,9 @@ import { useMemo } from "react";
 // than written into the catalog: they contain a literal `{{task_prompt}}` token,
 // which i18next would read as an interpolation and substitute away, and the
 // pseudo-locale would transliterate the URL.
+// i18n-exempt: example prompt text, shown as a sample of what is sent verbatim to the agent.
 const STEP_PROMPT_EXAMPLE = "Analyze the task: {{task_prompt}}";
+// i18n-exempt: example prompt text, shown as a sample of what is sent verbatim to the agent.
 const FINAL_PROMPT_EXAMPLE = "Analyze the task: Pull Request ready for review: https://...";
 
 // Pulled out of review-watch-dialog.tsx to keep that file under the 600-line

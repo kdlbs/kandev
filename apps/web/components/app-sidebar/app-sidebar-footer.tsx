@@ -3,9 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { useRouter, usePathname } from "@/lib/routing/client-router";
 import {
-  IconBuildings,
   IconDots,
-  IconLayoutKanban,
   IconSettings,
   IconSparkles,
   IconStethoscope,
@@ -25,20 +23,12 @@ import {
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 import { ReleaseNotesDialog } from "@/components/release-notes/release-notes-dialog";
 import { useAppStore } from "@/components/state-provider";
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { CurrentUserChip } from "./current-user-chip";
 import { linkToTask } from "@/lib/links";
 import { cn } from "@/lib/utils";
-import {
-  isOfficeWorkspace,
-  rememberLastOfficeWorkspace,
-  rememberLastKanbanWorkspace,
-  resolveLastOfficeWorkspace,
-  resolveLastKanbanWorkspace,
-  workspaceHomeHref,
-} from "./app-sidebar-workspace-navigation";
+import { workspaceHomeHref } from "./app-sidebar-workspace-navigation";
 import { isSettingsRoute } from "./app-sidebar-route";
 import { useConnectionIssueCopy } from "../app-status-bar/connection-status-item";
 import type { ConnectionIssueSeverity } from "@/lib/types/connection";
@@ -364,13 +354,8 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
   const workspaces = useAppStore((s) => s.workspaces);
   const workspaceId = workspaces.activeId;
   const activeWorkspace = workspaces.items.find((workspace) => workspace.id === workspaceId);
-  const activeIsOffice = isOfficeWorkspace(activeWorkspace);
-  const targetWorkspace = activeIsOffice
-    ? resolveLastKanbanWorkspace(workspaces.items)
-    : resolveLastOfficeWorkspace(workspaces.items);
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
   const toggleSettings = useSettingsGearToggle(settingsMode, activeWorkspace, onToggleSettingsMode);
-  const officeEnabled = useFeature("office");
   const appStatusBarEnabled = useAppStore((s) => s.userSettings.appStatusBarEnabled);
   const insightDestinations = useStaticDestinations("sidebar", "insights");
   const releaseNotes = useReleaseNotes();
@@ -415,23 +400,6 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
           onClick={releaseNotes.openDialog}
           badge={releaseNotes.hasUnseen}
           testId="sidebar-release-notes-button"
-        />
-      )}
-      {officeEnabled && (
-        <FooterIconButton
-          icon={activeIsOffice ? IconLayoutKanban : IconBuildings}
-          label={activeIsOffice ? t("sidebar:kanban") : t("sidebar:office")}
-          collapsed={collapsed}
-          onClick={() => {
-            if (!activeIsOffice) rememberLastKanbanWorkspace(activeWorkspace);
-            if (activeIsOffice) rememberLastOfficeWorkspace(activeWorkspace);
-            const href =
-              !activeIsOffice && !targetWorkspace
-                ? "/office/setup?mode=new"
-                : workspaceHomeHref(targetWorkspace ?? undefined);
-            router.push(href);
-          }}
-          testId={activeIsOffice ? "sidebar-kanban-button" : "sidebar-office-button"}
         />
       )}
       <ThemeToggle />
