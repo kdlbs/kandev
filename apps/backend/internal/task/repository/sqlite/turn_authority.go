@@ -19,6 +19,8 @@ import (
 func turnAuthorityPredicate(driverName, turnAlias string) string {
 	pending := turnDispatchPendingPredicate(driverName, turnAlias)
 	attempted := turnDispatchAttemptedPredicate(driverName, turnAlias)
+	// Positive invariant: a turn is authoritative once it is not a pure
+	// reservation, or durable attempt/message evidence proves it was started.
 	return fmt.Sprintf(`(
 		NOT (%s)
 		OR (%s)

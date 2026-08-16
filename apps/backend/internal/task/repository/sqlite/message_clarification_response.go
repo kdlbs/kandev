@@ -457,6 +457,7 @@ func (r *Repository) claimActiveClarificationBundle(
 		  AND type = 'clarification_request'
 		  AND COALESCE(%s, '') IN ('', 'pending')
 		  AND %s
+		  AND %s
 		  AND turn_id = (
 			SELECT turn_row.id
 			FROM task_session_turns turn_row
@@ -477,6 +478,7 @@ func (r *Repository) claimActiveClarificationBundle(
 		  )
 	`, dialect.JSONSet(drv, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr,
 		nonTerminalSessionPredicate("task_session_messages"),
+		clarificationNotDetachedPredicate(drv),
 		turnAuthorityPredicate(drv, "turn_row"), bundlePendingIDExpr)
 	result, err := tx.ExecContext(ctx, r.db.Rebind(claimQuery), claimAt, pendingID, pendingID)
 	if err != nil {

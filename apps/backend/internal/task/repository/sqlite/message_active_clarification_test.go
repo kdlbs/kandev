@@ -384,6 +384,44 @@ func TestCompleteActiveClarificationBundleRejectsTerminalSession(t *testing.T) {
 	}
 }
 
+func TestCompleteActiveClarificationBundleRejectsDetachedPendingMessage(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 13, 40, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-detached-claim", "session-detached-claim")
+	createPendingActionTurn(
+		t, repo, "task-detached-claim", "session-detached-claim", "turn-detached-claim", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-detached-claim", "task-detached-claim", "session-detached-claim",
+		"turn-detached-claim", "pending-detached-claim", "q1", base,
+	)
+	detached, err := repo.DetachActiveClarificationMessagesBySessionID(ctx, "session-detached-claim")
+	if err != nil || len(detached) != 1 {
+		t.Fatalf("DetachActiveClarificationMessagesBySessionID = %d rows, %v; want 1, nil", len(detached), err)
+	}
+
+	_, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-detached-claim",
+		clarificationStatusAnswered,
+		map[string]interface{}{"q1": map[string]interface{}{"question_id": "q1"}},
+	)
+	if err != nil {
+		t.Fatalf("CompleteActiveClarificationBundle: %v", err)
+	}
+	if claimed {
+		t.Fatal("detached clarification bundle was claimed")
+	}
+	message, err := repo.GetMessage(ctx, "message-detached-claim")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if message.Metadata["status"] != clarificationStatusPending || message.Metadata["agent_disconnected"] != true {
+		t.Fatalf("detached message metadata = %#v, want pending quarantine", message.Metadata)
+	}
+}
+
 func TestLoadClaimedClarificationBundleUsesCurrentTurn(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
