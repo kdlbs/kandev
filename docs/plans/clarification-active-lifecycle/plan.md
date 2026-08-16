@@ -293,6 +293,11 @@ All task gates passed:
   unit coverage satisfies mobile parity without another Playwright case.
 - Four focused task-selection suites passed 61 tests; full web lint, typecheck, and the i18n ratchet
   passed.
+- Late Claude review normalizes the detached-message guard across boolean, numeric, and string truthy
+  encodings. Restored clarification rows now publish even when synchronous summary acknowledgement is
+  unavailable or fails, while the acknowledgement error still reaches the caller.
+- Full SQLite repository and task-service suites passed in 49s and 129s; changed-code Go lint reported
+  zero issues.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

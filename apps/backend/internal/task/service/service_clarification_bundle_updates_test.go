@@ -20,7 +20,7 @@ func (s *clarificationSummaryProjectorStub) HandleEvent(_ context.Context, event
 	return s.err
 }
 
-func TestPublishClarificationBundleUpdatesRequiresAcknowledgedProjection(t *testing.T) {
+func TestPublishClarificationBundleUpdatesReportsProjectionErrorAfterPublishing(t *testing.T) {
 	eventBus := NewMockEventBus()
 	svc := NewService(Repos{}, eventBus, logger.Default(), RepositoryDiscoveryConfig{})
 	projector := &clarificationSummaryProjectorStub{err: errors.New("projection unavailable")}
@@ -38,8 +38,26 @@ func TestPublishClarificationBundleUpdatesRequiresAcknowledgedProjection(t *test
 	if len(projector.events) != 1 {
 		t.Fatalf("projected events = %d, want 1", len(projector.events))
 	}
-	if len(eventBus.GetPublishedEvents()) != 0 {
-		t.Fatalf("published events = %d, want none before projection acknowledgement", len(eventBus.GetPublishedEvents()))
+	if len(eventBus.GetPublishedEvents()) != 1 {
+		t.Fatalf("published events = %d, want restored row despite projection error", len(eventBus.GetPublishedEvents()))
+	}
+}
+
+func TestPublishClarificationBundleUpdatesReportsMissingProjectorAfterPublishing(t *testing.T) {
+	eventBus := NewMockEventBus()
+	svc := NewService(Repos{}, eventBus, logger.Default(), RepositoryDiscoveryConfig{})
+	message := &models.Message{
+		ID: "message-restore", TaskID: "task-restore", TaskSessionID: "session-restore",
+		Type: models.MessageTypeClarificationRequest, RequestsInput: true,
+		Metadata: map[string]interface{}{"pending_id": "pending-restore", "status": "pending"},
+	}
+
+	err := svc.PublishClarificationBundleUpdates(context.Background(), []*models.Message{message})
+	if err == nil || err.Error() != "task status summary projector is unavailable" {
+		t.Fatalf("PublishClarificationBundleUpdates error = %v, want missing projector", err)
+	}
+	if len(eventBus.GetPublishedEvents()) != 1 {
+		t.Fatalf("published events = %d, want restored row despite missing projector", len(eventBus.GetPublishedEvents()))
 	}
 }
 

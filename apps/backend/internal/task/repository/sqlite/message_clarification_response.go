@@ -150,10 +150,7 @@ func clarificationExpiredMetadataExpr(driverName string) string {
 
 func clarificationNotDetachedPredicate(driverName string) string {
 	value := dialect.JSONExtract(driverName, "task_session_messages.metadata", "agent_disconnected")
-	if dialect.IsPostgres(driverName) {
-		return fmt.Sprintf("COALESCE(%s, '') NOT IN ('true', '1')", value)
-	}
-	return fmt.Sprintf("COALESCE(%s, 0) != 1", value)
+	return fmt.Sprintf("CAST(COALESCE(%s, '') AS TEXT) NOT IN ('true', '1')", value)
 }
 
 // CompleteActiveClarificationBundle atomically claims a current-turn pending

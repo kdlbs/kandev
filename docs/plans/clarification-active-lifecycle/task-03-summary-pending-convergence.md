@@ -93,3 +93,8 @@ actual files, then update task/plan status.
   acknowledgement. Atomic clarification bundle methods now belong to the compile-time message repository
   contract rather than an optional runtime assertion. The focused CAS race check and full status-summary,
   task-service, and backend-app suites passed.
+- Late Claude review publishes every committed restored clarification row even when synchronous summary
+  acknowledgement is missing or fails, while preserving that error as the caller result. SQLite's
+  detached guard now treats string `"true"` and `"1"` like boolean/numeric truthy metadata.
+- Full SQLite repository and task-service suites passed in 49s and 129s; changed-code Go lint reported
+  zero issues.

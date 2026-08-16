@@ -808,28 +808,29 @@ func (s *Service) RestoreActiveClarificationBundle(
 // PublishClarificationBundleUpdates exposes committed rows to ordinary bus
 // subscribers. A restored pending bundle first drives the live summary
 // projector synchronously, so callers report retryability only after durable
-// summary convergence has succeeded.
+// summary convergence has succeeded. Committed rows are still published when
+// that acknowledgement fails so clients do not retain the terminal snapshot.
 func (s *Service) PublishClarificationBundleUpdates(ctx context.Context, messages []*models.Message) error {
+	var resultErr error
 	if restored := firstRestoredClarification(messages); restored != nil {
 		if s.statusSummaryProjector == nil {
-			return errors.New("task status summary projector is unavailable")
-		}
-		if err := s.statusSummaryProjector.HandleEvent(
+			resultErr = errors.New("task status summary projector is unavailable")
+		} else if err := s.statusSummaryProjector.HandleEvent(
 			ctx,
 			newMessageEvent(events.MessageUpdated, restored),
 		); err != nil {
-			return fmt.Errorf("converge clarification status summary: %w", err)
+			resultErr = fmt.Errorf("converge clarification status summary: %w", err)
 		}
 	}
 	for _, message := range messages {
 		if message == nil {
 			continue
 		}
-		if err := s.publishMessageEvent(ctx, events.MessageUpdated, message); err != nil {
-			return fmt.Errorf("publish clarification message update: %w", err)
+		if err := s.publishMessageEvent(ctx, events.MessageUpdated, message); err != nil && resultErr == nil {
+			resultErr = fmt.Errorf("publish clarification message update: %w", err)
 		}
 	}
-	return nil
+	return resultErr
 }
 
 func firstRestoredClarification(messages []*models.Message) *models.Message {

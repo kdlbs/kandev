@@ -78,6 +78,39 @@ func TestDetachActiveClarificationMessagesClaimsOnlyCurrentPendingRows(t *testin
 	}
 }
 
+func TestDetachActiveClarificationMessagesTreatsTruthyStringsAsDetached(t *testing.T) {
+	for _, flag := range []string{"true", "1"} {
+		t.Run(flag, func(t *testing.T) {
+			repo := newRepoForSessionTests(t)
+			ctx := context.Background()
+			createdAt := time.Date(2026, time.August, 15, 15, 40, 0, 0, time.UTC)
+			seedPendingActionSession(t, repo, "task-string-detach", "session-string-detach")
+			createPendingActionTurn(
+				t, repo, "task-string-detach", "session-string-detach", "turn-string-detach",
+				createdAt, createdAt,
+			)
+			createClarificationBundleMessage(
+				t, repo, "message-string-detach", "task-string-detach", "session-string-detach",
+				"turn-string-detach", "pending-string-detach", "q-string-detach", createdAt,
+			)
+			setClarificationMessageMetadata(t, repo, "message-string-detach", func(metadata map[string]interface{}) {
+				metadata["agent_disconnected"] = flag
+			})
+
+			updated, err := repo.DetachActiveClarificationMessagesBySessionID(
+				ctx,
+				"session-string-detach",
+			)
+			if err != nil {
+				t.Fatalf("DetachActiveClarificationMessagesBySessionID: %v", err)
+			}
+			if len(updated) != 0 {
+				t.Fatalf("detached message IDs = %v, want none", messageIDs(updated))
+			}
+		})
+	}
+}
+
 func TestExpireActiveClarificationMessagesClaimsOnlyCurrentPendingRows(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

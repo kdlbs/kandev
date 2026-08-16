@@ -75,8 +75,10 @@ hiding the action the icon represents.
 - Every response atomically claims current-turn ownership before it can reach a live waiter or request
   a detached resume. Terminal message updates are published only after delivery succeeds. If detached
   resume acceptance fails, the endpoint returns an error and restores the still-current bundle to
-  pending so the same answer can be retried. Once agentctl accepts the prompt, later publication or
-  completion errors cannot roll back the successor turn or reopen the answer.
+  pending so the same answer can be retried. Restored rows publish after commit even when synchronous
+  task-summary acknowledgement fails, preventing clients from retaining the terminal snapshot while the
+  endpoint still returns the acknowledgement error. Once agentctl accepts the prompt, later publication
+  or completion errors cannot roll back the successor turn or reopen the answer.
 - A current-turn bundle remains answerable while any sibling question is pending. Recovery claims only
   those pending rows, preserves siblings already made terminal by an earlier partial write, and restores
   only the claimed rows if detached delivery fails.
@@ -194,7 +196,8 @@ session they can already access. Session selection does not broaden task visibil
   a finite deadline for acceptance and persistence, withhold terminal message events, restore the
   still-current bundle to pending, and return a retryable server error instead of reporting false
   success. Before promising retryability, synchronously refresh and persist the task summary from
-  authoritative pending rows, then publish the restored messages for other clients.
+  authoritative pending rows. Publish the committed restored messages even if that acknowledgement
+  fails, then return the acknowledgement error.
 - Persisting a successor turn or dispatch-attempt marker fails: use a fresh bounded context to roll back
   the session claim and any reserved successor before making an external executor call, restore the
   still-current bundle, and return a retryable server error.
@@ -323,6 +326,9 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** a task-list refresh observes a detached answer's temporary terminal claim, **WHEN** resume
   rejection restores that claim, **THEN** Kandev acknowledges durable summary convergence before
   reporting retryability and publishes the restored pending rows so other clients converge.
+- **GIVEN** synchronous summary acknowledgement fails after restored clarification rows commit,
+  **WHEN** bundle updates are published, **THEN** Kandev publishes every committed restored row before
+  returning the acknowledgement error.
 - **GIVEN** the selected task projection disappears while desktop or mobile session loading is in
   flight, **WHEN** the delayed load settles, **THEN** Kandev leaves task and session selection unchanged.
 - **GIVEN** a newer desktop or mobile forced session load aborts an older load for the same task,
