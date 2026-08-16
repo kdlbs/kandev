@@ -21,13 +21,24 @@ fine here because they are never themselves the required check.
 
 Usage
 -----
-    git diff --name-only "$BASE" HEAD | python3 .github/scripts/changed-paths.py
+    git diff --name-only -z "$BASE" HEAD | python3 .github/scripts/changed-paths.py
 
 Reads the pattern list from `$PATTERNS` (override with `--patterns-env`), one
 pattern per line, in the same syntax and with the same ordering semantics as a
-workflow's `paths:` list. Reads the changed-file list from stdin, one path per
-line. Writes `run=true` or `run=false` to stdout and, when `$GITHUB_OUTPUT` is
-set, appends it there as a step output.
+workflow's `paths:` list. Writes `run=true` or `run=false` to stdout and, when
+`$GITHUB_OUTPUT` is set, appends it there as a step output.
+
+Pass `-z` to the diff. Git quotes any path outside ASCII under its default
+`core.quotePath=true`, so plain `--name-only` reports `apps/web/café.ts` as the
+literal 24-character string `"apps/web/caf\303\251.ts"`. That matches no
+pattern, so a pull request touching only such a file selects nothing, every job
+is skipped, and the gate reports success having tested none of it -- the exact
+silent pass this whole mechanism exists to prevent. `-z` emits raw bytes with a
+NUL after each path and suppresses the quoting.
+
+Stdin is split on NUL when it contains one and on newlines otherwise, so both
+forms work. The detection is not ambiguous: `-z` terminates every path with a
+NUL, so any non-empty `-z` output contains at least one.
 
 Pattern syntax
 --------------
@@ -97,6 +108,15 @@ class Filter:
                 included = False
                 pattern = pattern[1:]
 
+            # A bare `!` compiles to a regex matching only the empty string,
+            # which no real path is. It would append a rule that can never fire
+            # and read like an exclusion that works.
+            if not pattern:
+                raise ValueError(
+                    f"pattern {raw!r} is a bare negation with no path. Use "
+                    "'!path/pattern' to exclude specific files."
+                )
+
             found = [c for c in UNSUPPORTED_METACHARACTERS if c in pattern]
             if found:
                 raise ValueError(
@@ -120,6 +140,21 @@ class Filter:
 
     def matches_any(self, paths: list[str]) -> bool:
         return any(self.includes(path) for path in paths)
+
+
+def read_changed_paths(data: bytes) -> list[str]:
+    """Split a diff's path list, preferring the NUL-delimited form.
+
+    Taken as bytes rather than text because `git diff -z` emits raw filesystem
+    bytes, which need not be valid UTF-8. `surrogateescape` keeps an
+    undecodable name intact and matchable instead of failing the step.
+    """
+    separator = b"\0" if b"\0" in data else b"\n"
+    return [
+        decoded
+        for chunk in data.split(separator)
+        if (decoded := chunk.decode("utf-8", errors="surrogateescape").strip())
+    ]
 
 
 def main(argv: list[str]) -> int:
@@ -146,7 +181,7 @@ def main(argv: list[str]) -> int:
         print(f"::error::{error}", file=sys.stderr)
         return 2
 
-    changed = [line.strip() for line in sys.stdin.read().splitlines() if line.strip()]
+    changed = read_changed_paths(sys.stdin.buffer.read())
     run = path_filter.matches_any(changed)
 
     # The matching subset is the useful half of the log: "no relevant changes"

@@ -94,7 +94,10 @@ jobs:
             exit 0
           fi
 
-          git diff --name-only "${BASE}" HEAD \
+          # `-z`, not plain --name-only: git quotes non-ASCII paths under its
+          # default core.quotePath, and a quoted path matches no pattern, so a
+          # change to one would skip every job and still report success.
+          git diff --name-only -z "${BASE}" HEAD \
             | python3 .github/scripts/changed-paths.py
 
   static_checks:
@@ -422,13 +425,20 @@ jobs:
           # workflow covers was touched. `cancelled` is not: a cancelled job
           # never reached a verdict, and treating that as a pass would let an
           # untested merge group through.
-          for result in \
-            "${STATIC_CHECKS_RESULT}" \
-            "${TEST_SHARDS_RESULT}" \
-            "${TEST_AMBIENT_ENV_RESULT}" \
-            "${POSTGRES_BOOT_RESULT}" \
-            "${TEST_WINDOWS_RESULT}"; do
+          #
+          # This gate is the one check a human opens when a merge is blocked, so
+          # name the job that failed here rather than making them correlate the
+          # list above by eye.
+          for entry in \
+            "static_checks:${STATIC_CHECKS_RESULT}" \
+            "test_shards:${TEST_SHARDS_RESULT}" \
+            "test_ambient_env:${TEST_AMBIENT_ENV_RESULT}" \
+            "postgres-boot:${POSTGRES_BOOT_RESULT}" \
+            "test-windows:${TEST_WINDOWS_RESULT}"; do
+            name="${entry%%:*}"
+            result="${entry#*:}"
             if [[ "${result}" != "success" && "${result}" != "skipped" ]]; then
+              echo "${name} finished with result: ${result}" >&2
               exit 1
             fi
           done

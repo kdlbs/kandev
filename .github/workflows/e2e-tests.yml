@@ -100,7 +100,10 @@ jobs:
             exit 0
           fi
 
-          git diff --name-only "${BASE}" HEAD \
+          # `-z`, not plain --name-only: git quotes non-ASCII paths under its
+          # default core.quotePath, and a quoted path matches no pattern, so a
+          # change to one would skip every job and still report success.
+          git diff --name-only -z "${BASE}" HEAD \
             | python3 .github/scripts/changed-paths.py
 
   build:
@@ -1065,13 +1068,20 @@ jobs:
           # workflow covers was touched. `cancelled` is not: a cancelled job
           # never reached a verdict, and treating that as a pass would let an
           # untested merge group through.
-          for result in \
-            "${BUILD_RESULT}" \
-            "${E2E_RESULT}" \
-            "${E2E_CONTAINERS_RESULT}" \
-            "${DESKTOP_E2E_RESULT}" \
-            "${E2E_REPORT_RESULT}"; do
+          #
+          # This gate is the one check a human opens when a merge is blocked, so
+          # name the job that failed here rather than making them correlate the
+          # list above against twenty shard names.
+          for entry in \
+            "build:${BUILD_RESULT}" \
+            "e2e:${E2E_RESULT}" \
+            "e2e-containers:${E2E_CONTAINERS_RESULT}" \
+            "desktop-e2e:${DESKTOP_E2E_RESULT}" \
+            "e2e-report:${E2E_REPORT_RESULT}"; do
+            name="${entry%%:*}"
+            result="${entry#*:}"
             if [[ "${result}" != "success" && "${result}" != "skipped" ]]; then
+              echo "${name} finished with result: ${result}" >&2
               exit 1
             fi
           done

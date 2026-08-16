@@ -94,7 +94,10 @@ jobs:
             exit 0
           fi
 
-          git diff --name-only "${BASE}" HEAD \
+          # `-z`, not plain --name-only: git quotes non-ASCII paths under its
+          # default core.quotePath, and a quoted path matches no pattern, so a
+          # change to one would skip every job and still report success.
+          git diff --name-only -z "${BASE}" HEAD \
             | python3 .github/scripts/changed-paths.py
 
   frontend:

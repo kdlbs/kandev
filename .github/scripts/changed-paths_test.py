@@ -29,6 +29,16 @@ SCRIPT = Path(__file__).resolve().parent / "changed-paths.py"
 
 # Every workflow that moved its filter into a `changes` job, with one path that
 # must still select it and one that must not.
+# Required checks with no `changes` job: cheap enough to always run, so their
+# filtering was removed outright rather than moved. They still have to keep the
+# merge_group trigger and stay unfiltered, and nothing else asserts it --
+# `lint-action-pinning.yml` is covered by the frontend and release contract
+# tests, but these two had no guard at all.
+ALWAYS_RUN_WORKFLOWS = (
+    "architecture-lint.yml",
+    "lint-harness-files.yml",
+)
+
 GATED_WORKFLOWS = {
     "backend-tests.yml": (
         ["apps/backend/internal/orchestrator/orchestrator.go"],
@@ -115,6 +125,71 @@ class MatcherTest(unittest.TestCase):
     def test_an_empty_pattern_list_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             changed_paths.Filter(["", "# only comments"])
+
+    def test_a_bare_negation_is_rejected(self) -> None:
+        """`!` alone compiles to a rule that can never match anything.
+
+        It reads like an exclusion and silently is not one, so reject it the
+        same way an unsupported metacharacter is rejected.
+        """
+        with self.assertRaises(ValueError):
+            changed_paths.Filter(["apps/web/**", "!"])
+
+
+class ChangedPathParsingTest(unittest.TestCase):
+    """`git diff -z` output, which is where the quoting trap lives."""
+
+    def test_nul_delimited_input_is_split_on_nul(self) -> None:
+        data = "apps/web/a.ts\0apps/web/b.ts\0".encode("utf-8")
+        self.assertEqual(
+            changed_paths.read_changed_paths(data),
+            ["apps/web/a.ts", "apps/web/b.ts"],
+        )
+
+    def test_newline_delimited_input_still_works(self) -> None:
+        data = b"apps/web/a.ts\napps/web/b.ts\n"
+        self.assertEqual(
+            changed_paths.read_changed_paths(data),
+            ["apps/web/a.ts", "apps/web/b.ts"],
+        )
+
+    def test_a_non_ascii_path_survives_and_still_matches(self) -> None:
+        """The regression this parsing exists for.
+
+        Under git's default `core.quotePath=true`, plain `--name-only` reports
+        this file as the literal string `"apps/web/caf\\303\\251.ts"`, quotes
+        and all. That matches no pattern, so a pull request touching only it
+        would skip every job and report a green gate having tested nothing.
+        `-z` emits the raw bytes instead.
+        """
+        raw = "apps/web/café.ts\0".encode("utf-8")
+        parsed = changed_paths.read_changed_paths(raw)
+
+        self.assertEqual(parsed, ["apps/web/café.ts"])
+        self.assertTrue(changed_paths.Filter(["apps/web/**"]).matches_any(parsed))
+
+        quoted = ['"apps/web/caf\\303\\251.ts"']
+        self.assertFalse(
+            changed_paths.Filter(["apps/web/**"]).matches_any(quoted),
+            "The quoted form must not match -- that is the bug, and this "
+            "assertion is what proves the -z form above is doing the work.",
+        )
+
+    def test_a_path_containing_a_newline_survives_nul_splitting(self) -> None:
+        data = "apps/web/we ird\nname.ts\0apps/web/b.ts\0".encode("utf-8")
+        self.assertEqual(
+            changed_paths.read_changed_paths(data),
+            ["apps/web/we ird\nname.ts", "apps/web/b.ts"],
+        )
+
+    def test_undecodable_bytes_do_not_crash_the_step(self) -> None:
+        parsed = changed_paths.read_changed_paths(b"apps/web/\xff\xfe.ts\0")
+        self.assertEqual(len(parsed), 1)
+        self.assertTrue(changed_paths.Filter(["apps/web/**"]).matches_any(parsed))
+
+    def test_an_empty_diff_yields_no_paths(self) -> None:
+        self.assertEqual(changed_paths.read_changed_paths(b""), [])
+        self.assertEqual(changed_paths.read_changed_paths(b"\0"), [])
 
 
 class CommandLineTest(unittest.TestCase):
@@ -227,6 +302,52 @@ class WorkflowPatternsTest(unittest.TestCase):
                     triggers,
                     f"{workflow} must keep its merge_group trigger; without it "
                     "the merge queue waits forever for a check that never runs.",
+                )
+
+    def test_each_changes_job_feeds_the_script_a_nul_delimited_diff(self) -> None:
+        """`-z` is load-bearing and the script cannot enforce it from inside.
+
+        Newline-delimited input still parses, by design, so dropping `-z` from
+        a workflow fails nothing at runtime -- it just quietly restores the
+        quoting bug for non-ASCII paths, where the gate passes without having
+        tested the change. This is the only place that can catch it.
+        """
+        for workflow in GATED_WORKFLOWS:
+            with self.subTest(workflow=workflow):
+                text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+                self.assertIn(
+                    'git diff --name-only -z "${BASE}" HEAD',
+                    text,
+                    f"{workflow}'s `changes` job must pass -z to git diff. "
+                    "Without it git quotes non-ASCII paths, they match no "
+                    "pattern, and every job is skipped on a green gate.",
+                )
+
+    def test_always_run_gates_keep_merge_group_and_stay_unfiltered(self) -> None:
+        """Same two properties, for the gates that have no `changes` job.
+
+        These are required checks too. Adding a `paths:` filter back, or
+        dropping the merge_group trigger, stalls the queue on that check just
+        as surely as it would for the heavy workflows above -- and until now
+        nothing failed when it happened.
+        """
+        for workflow in ALWAYS_RUN_WORKFLOWS:
+            with self.subTest(workflow=workflow):
+                text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+                triggers = text.partition("\nconcurrency:")[0]
+
+                self.assertIn(
+                    "\n  merge_group:\n",
+                    triggers,
+                    f"{workflow} must keep its merge_group trigger; without it "
+                    "the merge queue waits forever for a check that never runs.",
+                )
+                self.assertNotIn(
+                    "\n    paths:",
+                    triggers,
+                    f"{workflow} must not filter its triggers by path. It has "
+                    "no `changes` job to move the filter into, so a filter "
+                    "here means the check simply stops reporting.",
                 )
 
 
