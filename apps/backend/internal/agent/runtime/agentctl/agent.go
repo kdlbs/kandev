@@ -73,9 +73,10 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 
 // NewSessionResponse from agentctl
 type NewSessionResponse struct {
-	Success   bool   `json:"success"`
-	SessionID string `json:"session_id,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Success    bool                       `json:"success"`
+	SessionID  string                     `json:"session_id,omitempty"`
+	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
+	Error      string                     `json:"error,omitempty"`
 }
 
 // createSessionRequest sends a session creation request and parses the response.
@@ -86,6 +87,7 @@ func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, m
 		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
 	}{Cwd: cwd, McpServers: mcpServers}
 
+	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, action, payload)
 	if err != nil {
 		return "", fmt.Errorf("%s request failed: %w", action, err)
@@ -106,6 +108,7 @@ func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, m
 	if !result.Success {
 		return "", fmt.Errorf("%s failed: %s", action, result.Error)
 	}
+	c.setLastSessionModelState(result.ModelState)
 	return result.SessionID, nil
 }
 
@@ -129,6 +132,7 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers [
 		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
 	}{SessionID: sessionID, McpServers: mcpServers}
 
+	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, "agent.session.load", payload)
 	if err != nil {
 		return fmt.Errorf("load session request failed: %w", err)
@@ -143,8 +147,9 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers [
 	}
 
 	var result struct {
-		Success bool   `json:"success"`
-		Error   string `json:"error,omitempty"`
+		Success    bool                       `json:"success"`
+		ModelState *streams.SessionModelState `json:"model_state,omitempty"`
+		Error      string                     `json:"error,omitempty"`
 	}
 	if err := resp.ParsePayload(&result); err != nil {
 		return fmt.Errorf("failed to parse load session response: %w", err)
@@ -152,6 +157,7 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers [
 	if !result.Success {
 		return fmt.Errorf("load session failed: %s", result.Error)
 	}
+	c.setLastSessionModelState(result.ModelState)
 	return nil
 }
 

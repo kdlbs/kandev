@@ -1,6 +1,6 @@
 # Settings typography audit
 
-Status: Active implementation audit  
+Status: Active implementation audit
 Last reviewed: 2026-08-16
 
 This audit covers the first-party settings routes, shared settings components, the settings navigation, workspace and integration settings, system and account settings, and the existing settings E2E coverage.

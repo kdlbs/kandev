@@ -173,15 +173,55 @@ func (a *MockAgent) Runtime() *RuntimeConfig {
 		ProjectSkillDir: DefaultProjectSkillDir,
 		UserSkillDir:    ".mock-agent/skills",
 		SessionConfig: SessionConfig{
-			CanRecover: &canRecover,
+			CanRecover:         &canRecover,
+			SessionDirTemplate: "{home}/.mock-agent",
+			SessionDirTarget:   "/root/.mock-agent",
 		},
 	}
 }
 
-// RemoteAuth returns a non-nil empty spec so the mock agent counts as a
-// remote-capable agent (it's runnable inside Docker for E2E tests) but
-// requires no credentials. The empty methods list signals "no auth needed".
-func (a *MockAgent) RemoteAuth() *RemoteAuth { return &RemoteAuth{} }
+// RemoteAuth returns a Codex-shaped auth spec for the mock Codex alias so the
+// settings E2E can prove auth and configuration remain independent. The base
+// mock agent still requires no credentials.
+func (a *MockAgent) RemoteAuth() *RemoteAuth {
+	if a.ID() != "codex-acp" {
+		return &RemoteAuth{}
+	}
+	return &RemoteAuth{Methods: []RemoteAuthMethod{
+		{
+			Type:  "files",
+			Label: "Copy auth files",
+			SourceFiles: map[string][]string{
+				"darwin": {".codex/auth.json"},
+				"linux":  {".codex/auth.json"},
+			},
+			TargetRelDir: ".codex",
+		},
+		{Type: "env", EnvVar: "OPENAI_API_KEY"},
+	}}
+}
+
+// PortableConfig exposes one disposable settings file so the Docker E2E
+// agent can exercise the same isolated-home transfer path as a real ACP
+// provider without requiring provider credentials.
+func (a *MockAgent) PortableConfig() *PortableConfig {
+	bundleID := "mock.settings"
+	if a.ID() != mockAgentDefaultID {
+		bundleID = a.ID() + ".settings"
+	}
+	return &PortableConfig{Bundles: []PortableConfigBundle{
+		{
+			ID:    bundleID,
+			Label: "Copy mock-agent settings",
+			Files: []PortableConfigFile{
+				{
+					SourcePaths: map[string]string{"": ".mock-agent/settings.json"},
+					TargetPath:  ".mock-agent/settings.json",
+				},
+			},
+		},
+	}}
+}
 
 // InstallScript returns a deterministic short-lived shell script so e2e tests
 // can exercise the install streaming endpoint without depending on npm.

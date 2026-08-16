@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -56,6 +57,7 @@ type capableAgentAdapter struct {
 	resetServers []types.McpServer
 	resetErr     error
 	failWith     error
+	modelState   *streams.SessionModelState
 }
 
 func (a *capableAgentAdapter) SetMode(_ context.Context, modeID string) error {
@@ -71,6 +73,10 @@ func (a *capableAgentAdapter) SetModel(_ context.Context, modelID string) error 
 func (a *capableAgentAdapter) Authenticate(_ context.Context, methodID string) error {
 	a.methodID = methodID
 	return a.failWith
+}
+
+func (a *capableAgentAdapter) GetSessionModelState() *streams.SessionModelState {
+	return a.modelState
 }
 
 func (a *capableAgentAdapter) ResetSession(_ context.Context, servers []types.McpServer) (string, error) {
@@ -275,6 +281,10 @@ func TestHandleWSResetSession_ReturnsNewSessionID(t *testing.T) {
 	s := newTestServer(t)
 	agentAdapter := &capableAgentAdapter{}
 	agentAdapter.sessionID = "session-before-reset"
+	agentAdapter.modelState = &streams.SessionModelState{
+		CurrentModelID: "mock-fast",
+		Models:         []streams.SessionModelInfo{{ModelID: "mock-fast"}, {ModelID: "mock-smart"}},
+	}
 	s.procMgr.SetAdapterForTest(agentAdapter)
 
 	msg, err := ws.NewRequest("req-1", "agent.session.reset", NewSessionRequest{
@@ -293,6 +303,9 @@ func TestHandleWSResetSession_ReturnsNewSessionID(t *testing.T) {
 	}
 	if !payload.Success || payload.SessionID != "session-after-reset" {
 		t.Errorf("payload = %+v, want the adapter's new session id", payload)
+	}
+	if payload.ModelState == nil || payload.ModelState.CurrentModelID != "mock-fast" || len(payload.ModelState.Models) != 2 {
+		t.Errorf("model state = %+v, want the adapter's synchronous catalog", payload.ModelState)
 	}
 	if len(agentAdapter.resetServers) != 1 || agentAdapter.resetServers[0].Name != "external" {
 		t.Errorf("adapter received %+v, want the caller's MCP servers", agentAdapter.resetServers)

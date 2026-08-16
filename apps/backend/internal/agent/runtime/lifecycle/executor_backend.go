@@ -153,6 +153,8 @@ const (
 	MetadataKeyContributionDestinations = "contribution_destinations"
 	MetadataKeyIsRemote                 = "is_remote"
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
+	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
+	MetadataKeyExecutorProfileID        = "executor_profile_id"
 	MetadataKeyGitUserName              = "git_user_name"
 	MetadataKeyGitUserEmail             = "git_user_email"
 	MetadataKeyImageTagOverride         = "image_tag_override"
@@ -230,13 +232,14 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyCleanupScript:            true,
 	MetadataKeyRepoSetupScript:          true,
 	MetadataKeyRemoteAuthHome:           true,
+	MetadataKeyAgentConfigBundles:       true,
 	MetadataKeyGitUserName:              true,
 	MetadataKeyGitUserEmail:             true,
 	"remote_credentials":                true,
 	"remote_auth_secrets":               true,
 	"executor_mcp_policy":               true,
 	"sprites_network_policy_rules":      true,
-	"executor_profile_id":               true,
+	MetadataKeyExecutorProfileID:        true,
 	MetadataKeyImageTagOverride:         true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,

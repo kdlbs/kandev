@@ -461,6 +461,32 @@ type RemoteAuthMethod struct {
 	SetupScript string `json:"setup_script,omitempty"`
 }
 
+// PortableConfigAgent is an optional capability for agents that have a small,
+// explicitly allowlisted set of user configuration files that can be copied
+// into an isolated executor. It is intentionally separate from RemoteAuth.
+type PortableConfigAgent interface {
+	PortableConfig() *PortableConfig
+}
+
+// PortableConfig declares safe configuration bundles for an agent.
+type PortableConfig struct {
+	Bundles []PortableConfigBundle `json:"bundles"`
+}
+
+// PortableConfigBundle is one stable, user-selectable configuration unit.
+type PortableConfigBundle struct {
+	ID    string               `json:"id"`
+	Label string               `json:"label"`
+	Files []PortableConfigFile `json:"files"`
+}
+
+// PortableConfigFile maps an OS-specific host path relative to the host home
+// directory to a relative path below the executor user's home directory.
+type PortableConfigFile struct {
+	SourcePaths map[string]string `json:"source_paths"`
+	TargetPath  string            `json:"target_path"`
+}
+
 // Command is a domain value type representing a CLI command with arguments.
 // Serialize to []string only at system boundaries (process exec, Docker API, JSON DTOs).
 type Command struct {

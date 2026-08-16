@@ -239,14 +239,10 @@ func createTestClient(t *testing.T, serverURL string) *agentctl.Client {
 
 // --- Tests ---
 
-// TestInitializeAndPromptWithLayers_StrictPolicyFailsGoneModel verifies the
-// start-model policy is applied to the EFFECTIVE model (profile start model or
-// persisted runtime override) and a strict profile fails the launch explicitly
-// when that model is unavailable. This is the regression guard for the
-// no-silent model-fallback gate: an unavailable model must never silently
-// continue on the provider default, and a failed launch must not look
-// initialized.
-func TestInitializeAndPromptWithLayers_StrictPolicyFailsGoneModel(t *testing.T) {
+// TestInitializeAndPromptWithLayers_UnadvertisedModelUsesProviderDefault
+// verifies the executor-authoritative policy for both the profile model and a
+// persisted runtime override.
+func TestInitializeAndPromptWithLayers_UnadvertisedModelUsesProviderDefault(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		profileModel string
@@ -266,7 +262,8 @@ func TestInitializeAndPromptWithLayers_StrictPolicyFailsGoneModel(t *testing.T) 
 				OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
 			}, nil, stopCh)
 			cleanupStreamManager(t, stopCh, streamMgr)
-			sm.SetDependencies(NewEventPublisher(&MockEventBusWithTracking{}, log), streamMgr, nil, nil)
+			eventBus := &MockEventBusWithTracking{}
+			sm.SetDependencies(NewEventPublisher(eventBus, log), streamMgr, nil, nil)
 
 			client := createTestClient(t, mock.server.URL)
 			defer client.Close()
@@ -300,14 +297,29 @@ func TestInitializeAndPromptWithLayers_StrictPolicyFailsGoneModel(t *testing.T) 
 				tc.runtimeModel, "", nil,
 				StartModelPolicy{},
 			)
-			if err == nil {
-				t.Fatal("expected InitializeAndPromptWithLayers to fail for an unavailable model")
+			if err != nil {
+				t.Fatalf("unadvertised model should not fail launch: %v", err)
 			}
-			if !strings.Contains(err.Error(), "claude-gone") {
-				t.Errorf("error should name the unavailable model, got %q", err.Error())
+			if !execution.sessionInitialized {
+				t.Error("provider-default continuation must be marked initialized")
 			}
-			if execution.sessionInitialized {
-				t.Error("a failed launch must not be marked initialized")
+			for _, action := range mock.getActionLog() {
+				if action == "agent.session.set_model" {
+					t.Error("unadvertised model must not send a SetModel request")
+				}
+			}
+			var warning *AgentStreamEventPayload
+			for _, event := range eventBus.getStreamEvents() {
+				if event.Data != nil && event.Data.ModelSelectionWarning != nil {
+					warning = &event
+					break
+				}
+			}
+			if warning == nil {
+				t.Fatal("expected a model-selection warning event")
+			}
+			if warning.Data.ModelSelectionWarning.RequestedModel != "claude-gone" {
+				t.Errorf("warning requested model = %q, want claude-gone", warning.Data.ModelSelectionWarning.RequestedModel)
 			}
 		})
 	}
@@ -594,7 +606,6 @@ func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
 
 	actions := mock.getActionLog()
 	for _, want := range []string{
-		"agent.session.set_model",
 		"agent.session.set_mode",
 		"agent.session.set_config_option",
 	} {

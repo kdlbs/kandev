@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 
 test.describe("PR watcher merged cleanup", () => {
@@ -216,7 +217,15 @@ test.describe("PR watcher merged cleanup", () => {
     // on the auto-started session.
     const { sessions } = await apiClient.listTaskSessions(prTask!.id);
     expect(sessions.length).toBeGreaterThan(0);
-    await apiClient.addUserMessage(prTask!.id, sessions[0].id, "thanks, looks good");
+    const session = sessions[0];
+    await waitForSessionDone(
+      apiClient,
+      prTask!.id,
+      session.id,
+      "auto-started review session did not become ready for user input",
+      45_000,
+    );
+    await apiClient.addUserMessage(prTask!.id, session.id, "thanks, looks good");
 
     // Simulate PR merged
     await apiClient.mockGitHubAddPRs([

@@ -52,6 +52,7 @@ func RegisterSessionStreamNotifications(ctx context.Context, eventBus bus.EventB
 	b.subscribe(eventBus, events.BuildAgentCapabilitiesWildcardSubject(), ws.ActionSessionAgentCapabilities)
 	b.subscribe(eventBus, events.BuildSessionModelsWildcardSubject(), ws.ActionSessionModelsUpdated)
 	b.subscribe(eventBus, events.BuildSessionModelFallbackWildcardSubject(), ws.ActionSessionModelFallback)
+	b.subscribe(eventBus, events.BuildSessionModelSelectionWarningWildcardSubject(), ws.ActionSessionModelSelectionWarning)
 	b.subscribe(eventBus, events.BuildSessionMCPStatusWildcardSubject(), ws.ActionSessionMCPStatusUpdated)
 	b.subscribe(eventBus, events.BuildSessionInfoWildcardSubject(), ws.ActionSessionInfoUpdated)
 	b.subscribe(eventBus, events.BuildSessionTodosWildcardSubject(), ws.ActionSessionTodosUpdated)

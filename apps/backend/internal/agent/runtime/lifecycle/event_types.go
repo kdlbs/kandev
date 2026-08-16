@@ -202,6 +202,10 @@ type AgentStreamEventData struct {
 	// model was unavailable.
 	FallbackModel string `json:"fallback_model,omitempty"`
 
+	// ModelSelectionWarning explains an executor-authoritative default or
+	// explicit fallback decision.
+	ModelSelectionWarning *streams.ModelSelectionWarning `json:"model_selection_warning,omitempty"`
+
 	// Session info (from "session_info" event)
 	SessionTitle     string         `json:"session_title,omitempty"`
 	SessionUpdatedAt string         `json:"session_updated_at,omitempty"`
@@ -563,6 +567,21 @@ type SessionModelFallbackEventPayload struct {
 // Without it the gateway's extractSessionID cannot route the notification to
 // the session's subscribers.
 func (p SessionModelFallbackEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// SessionModelSelectionWarningEventPayload is the provider-neutral live
+// payload for an executor-authoritative model decision.
+type SessionModelSelectionWarningEventPayload struct {
+	TaskID    string                        `json:"task_id"`
+	SessionID string                        `json:"session_id"`
+	AgentID   string                        `json:"agent_id"`
+	Warning   streams.ModelSelectionWarning `json:"warning"`
+	Timestamp string                        `json:"timestamp"`
+}
+
+// GetSessionID returns the task-session ID used by the gateway for routing.
+func (p SessionModelSelectionWarningEventPayload) GetSessionID() string {
 	return p.SessionID
 }
 

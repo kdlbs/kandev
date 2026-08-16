@@ -59,9 +59,10 @@ type NewSessionRequest struct {
 
 // NewSessionResponse is the response to a new session call
 type NewSessionResponse struct {
-	Success   bool   `json:"success"`
-	SessionID string `json:"session_id,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Success    bool                       `json:"success"`
+	SessionID  string                     `json:"session_id,omitempty"`
+	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
+	Error      string                     `json:"error,omitempty"`
 }
 
 // LoadSessionRequest is a request to load an existing ACP session
@@ -72,9 +73,10 @@ type LoadSessionRequest struct {
 
 // LoadSessionResponse is the response to a load session call
 type LoadSessionResponse struct {
-	Success   bool   `json:"success"`
-	SessionID string `json:"session_id,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Success    bool                       `json:"success"`
+	SessionID  string                     `json:"session_id,omitempty"`
+	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
+	Error      string                     `json:"error,omitempty"`
 }
 
 // PromptRequest is a request to send a prompt to the agent
@@ -469,8 +471,9 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 	}
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
-		Success:   true,
-		SessionID: sessionID,
+		Success:    true,
+		SessionID:  sessionID,
+		ModelState: sessionModelState(adapter),
 	})
 	return resp
 }
@@ -519,8 +522,9 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, LoadSessionResponse{
-		Success:   true,
-		SessionID: req.SessionID,
+		Success:    true,
+		SessionID:  req.SessionID,
+		ModelState: sessionModelState(adapter),
 	})
 	return resp
 }
@@ -766,10 +770,19 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 	}
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, NewSessionResponse{
-		Success:   true,
-		SessionID: sessionID,
+		Success:    true,
+		SessionID:  sessionID,
+		ModelState: sessionModelState(agentAdapter),
 	})
 	return resp
+}
+
+func sessionModelState(agentAdapter adapter.AgentAdapter) *streams.SessionModelState {
+	provider, ok := agentAdapter.(adapter.SessionModelStateProvider)
+	if !ok {
+		return nil
+	}
+	return provider.GetSessionModelState()
 }
 
 // promptOrSteer routes a prompt to the steering path when the caller asked for it

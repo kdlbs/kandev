@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -366,23 +368,23 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	}
 
 	execution.ACPSessionID = result.SessionID
+	if !cacheFreshSessionModelState(execution) && (profileModel != "" || runtimeModel != "") {
+		waitForFreshSessionModelState(ctx, sm.logger, execution)
+	}
 	providerDefaultConfig := execution.GetModelState()
 
-	// No-silent-model-fallback: decide the effective model up front under the
-	// profile's policy (a gone model fails the launch explicitly unless a
-	// fallback model or the legacy auto-fallback toggle is configured), then
-	// hand the decided model to the layers so it is applied exactly once.
-	// Previously SetModel failures were best-effort — the session continued
-	// on the provider default, which is the implicit switch this feature
-	// eliminates. The gate is the effective model (which includes the
-	// persisted runtime override), not the profile's start model: a profile
-	// with no model and a session with a runtime model must still enforce
-	// strict failure / the configured fallback.
+	// Decide the effective model up front under the executor-authoritative
+	// policy, then hand the decided model to the layers so it is applied once.
+	// The gate is the effective model (which includes the persisted runtime
+	// override), not only the profile's start model.
 	effectiveModel := sm.applyStartModelPolicyToEffectiveModel(
 		ctx, execution, result.SessionID, profileModel, runtimeModel, startModelPolicy,
 	)
 	if effectiveModel.err != nil {
 		return effectiveModel.err
+	}
+	if effectiveModel.decision.Warning {
+		sm.publishModelSelectionWarningEvent(execution, result.SessionID, effectiveModel.decision)
 	}
 	// The layers apply the policy-decided model; the runtime override is
 	// neutralized because the decision already accounted for it. When the
@@ -426,13 +428,8 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 
 // applyStartModelPolicyToEffectiveModel resolves the effective model (profile
 // start model, overridden by the persisted runtime model) and applies the
-// profile's no-silent-model-fallback policy to it: strict profiles fail a gone
-// model explicitly, fallback-model profiles switch to the configured fallback
-// (publishing the fallback event), and auto-fallback keeps legacy behavior.
-// Returns the decided model (fallback when one was applied), the model
-// actually applied by the policy, whether the policy handled model selection,
-// or the policy error. The caller neutralizes the runtime override afterwards
-// because the decision already accounted for it.
+// executor-authoritative policy. The caller neutralizes the runtime override
+// afterwards because the decision already accounted for it.
 func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -443,6 +440,7 @@ func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 	model        string
 	appliedModel string
 	handled      bool
+	decision     ModelSelectionDecision
 	err          error
 }) {
 	effective.model = profileModel
@@ -457,7 +455,7 @@ func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 	// profile layers must not retry an outcome that was already handled.
 	effective.handled = true
 	startModelPolicy.Model = effective.model
-	appliedModel, usingFallback, policyErr := applyStartModelPolicy(
+	decision, policyErr := applyStartModelPolicy(
 		ctx, sm.logger, execution.agentctl,
 		execution.GetModelState(), startModelPolicy,
 	)
@@ -468,10 +466,13 @@ func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 		effective.err = policyErr
 		return effective
 	}
-	effective.appliedModel = appliedModel
-	if usingFallback {
-		sm.publishModelFallbackEvent(execution, acpSessionID, appliedModel)
-		effective.model = appliedModel
+	effective.decision = decision
+	if decision.Outcome == ModelSelectionOutcomeApplied ||
+		decision.Outcome == ModelSelectionOutcomeExplicitFallback {
+		effective.appliedModel = decision.EffectiveModel
+	}
+	if decision.Outcome == ModelSelectionOutcomeExplicitFallback {
+		effective.model = decision.EffectiveModel
 	}
 	return effective
 }
@@ -698,6 +699,48 @@ func (sm *SessionManager) publishModelFallbackEvent(
 		SessionID:     acpSessionID,
 		FallbackModel: fallbackModel,
 	})
+}
+
+// publishModelSelectionWarningEvent emits the provider-neutral decision and
+// keeps the legacy fallback event as a compatibility projection for clients
+// that still listen for session_model_fallback.
+func (sm *SessionManager) publishModelSelectionWarningEvent(
+	execution *AgentExecution,
+	acpSessionID string,
+	decision ModelSelectionDecision,
+) {
+	if sm.eventPublisher == nil || execution == nil || !decision.Warning {
+		return
+	}
+	decisionIDBytes := sha256.Sum256([]byte(strings.Join([]string{
+		execution.ID,
+		acpSessionID,
+		decision.RequestedModel,
+		decision.Reason,
+		decision.EffectiveModel,
+	}, "|")))
+	warning := &streams.ModelSelectionWarning{
+		Kind:              "model_selection_warning",
+		DecisionID:        hex.EncodeToString(decisionIDBytes[:]),
+		Reason:            decision.Reason,
+		RequestedModel:    decision.RequestedModel,
+		EffectiveModel:    decision.EffectiveModel,
+		AgentID:           execution.AgentID,
+		ExecutorType:      string(execution.RuntimeName),
+		ExecutorProfileID: execution.metadataString(MetadataKeyExecutorProfileID),
+	}
+	if decision.Outcome == ModelSelectionOutcomeExplicitFallback {
+		warning.FallbackModel = decision.EffectiveModel
+	}
+	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
+		Type:                  streams.EventTypeSessionModelSelectionWarning,
+		SessionID:             acpSessionID,
+		CurrentModelID:        warning.EffectiveModel,
+		ModelSelectionWarning: warning,
+	})
+	if warning.FallbackModel != "" {
+		sm.publishModelFallbackEvent(execution, acpSessionID, warning.FallbackModel)
+	}
 }
 
 func (sm *SessionManager) publishWorkflowSessionConfigFailures(

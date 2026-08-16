@@ -488,6 +488,7 @@
   "profileForTasksCreatedByAgents": "Profile for Tasks Created by Agents",
   "programming": "Programming",
   "profileFallbackWillBeUsed": "Start model {{model}} is no longer available; fallback {{fallback}} will be used.",
+  "profileStartModelNotAdvertisedOnHost": "The host probe did not advertise {{model}}. The selected executor will decide the model at launch.",
   "profileStartModelUnavailable": "Start model {{model}} is no longer available; change it in the agent profile.",
   "promptAdd": "Add prompt",
   "promptContentPlaceholder": "Prompt content",

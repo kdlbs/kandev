@@ -221,8 +221,9 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 // Hoisted to constants so the table below doesn't duplicate string
 // literals that exist elsewhere in the package.
 const (
-	profileKeyRemoteCredentials = "remote_credentials"
-	profileKeyRemoteAuthSecrets = "remote_auth_secrets"
+	profileKeyRemoteCredentials  = "remote_credentials"
+	profileKeyRemoteAuthSecrets  = "remote_auth_secrets"
+	profileKeyAgentConfigBundles = "agent_config_bundles"
 )
 
 // profileConfigPassthroughKeys are profile.Config keys copied verbatim
@@ -232,6 +233,7 @@ var profileConfigPassthroughKeys = []string{
 	"sprites_network_policy_rules",
 	profileKeyRemoteCredentials,
 	profileKeyRemoteAuthSecrets,
+	profileKeyAgentConfigBundles,
 	"remote_auth_target_home",
 	"git_user_name",
 	"git_user_email",

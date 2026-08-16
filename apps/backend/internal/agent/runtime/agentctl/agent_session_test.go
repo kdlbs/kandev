@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -52,8 +53,12 @@ func okResponse(payload map[string]any) func(ws.Message) *ws.Message {
 }
 
 func TestResetSession_UsesResetActionAndReturnsNewSessionID(t *testing.T) {
+	modelState := &streams.SessionModelState{
+		CurrentModelID: "mock-fast",
+		Models:         []streams.SessionModelInfo{{ModelID: "mock-fast"}, {ModelID: "mock-smart"}},
+	}
 	c, captured := captureStreamRequest(t, okResponse(map[string]any{
-		"success": true, "session_id": "sess-reset-1",
+		"success": true, "session_id": "sess-reset-1", "model_state": modelState,
 	}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -66,6 +71,10 @@ func TestResetSession_UsesResetActionAndReturnsNewSessionID(t *testing.T) {
 	}
 	if sessionID != "sess-reset-1" {
 		t.Errorf("session ID = %q, want sess-reset-1", sessionID)
+	}
+	state := c.GetLastSessionModelState()
+	if state == nil || state.CurrentModelID != "mock-fast" || len(state.Models) != 2 {
+		t.Fatalf("model state = %+v, want the synchronous reset catalog", state)
 	}
 
 	sent := captured()

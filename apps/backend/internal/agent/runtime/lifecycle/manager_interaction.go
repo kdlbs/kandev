@@ -15,9 +15,15 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+const (
+	freshSessionModelStateWait = 2 * time.Second
+	freshSessionModelStatePoll = 10 * time.Millisecond
 )
 
 // WasSessionInitialized reports whether the execution completed ACP session setup.
@@ -441,12 +447,8 @@ func (m *Manager) reapplySessionModeAfterReset(ctx context.Context, execution *A
 		zap.String("mode", mode))
 }
 
-// reapplySessionModelAfterReset re-applies the effective model to a freshly
-// initialized ACP session under the no-silent-model-fallback policy: a model
-// that is gone in the fresh session's advertised list fails the reset
-// explicitly (returning an error) unless the profile opted into a fallback
-// model or the legacy auto-fallback toggle. Previously the re-apply was
-// best-effort, silently leaving the fresh session on the provider default.
+// reapplySessionModelAfterReset applies the executor-authoritative model
+// decision to a freshly initialized ACP session.
 func (m *Manager) reapplySessionModelAfterReset(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -457,7 +459,7 @@ func (m *Manager) reapplySessionModelAfterReset(
 	}
 	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
 	policy.Model = modelID
-	appliedModel, usingFallback, err := applyStartModelPolicy(
+	decision, err := applyStartModelPolicy(
 		ctx, m.logger, execution.agentctl, execution.GetModelState(), policy,
 	)
 	if err != nil {
@@ -467,18 +469,77 @@ func (m *Manager) reapplySessionModelAfterReset(
 			zap.Error(err))
 		return err
 	}
-	if appliedModel != "" {
+	if decision.Warning && m.sessionManager != nil {
+		m.sessionManager.publishModelSelectionWarningEvent(execution, newSessionID, decision)
+	}
+	if decision.EffectiveModel != "" &&
+		(decision.Outcome == ModelSelectionOutcomeApplied || decision.Outcome == ModelSelectionOutcomeExplicitFallback) {
 		m.logger.Info("re-applied session model after context reset",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID),
 			zap.String("new_acp_session_id", newSessionID),
-			zap.String("model", appliedModel),
-			zap.Bool("using_fallback", usingFallback))
-		if usingFallback && m.sessionManager != nil {
-			m.sessionManager.publishModelFallbackEvent(execution, newSessionID, appliedModel)
-		}
+			zap.String("model", decision.EffectiveModel),
+			zap.Bool("using_fallback", decision.Outcome == ModelSelectionOutcomeExplicitFallback))
 	}
 	return nil
+}
+
+func cacheFreshSessionModelState(execution *AgentExecution) bool {
+	if execution == nil || execution.agentctl == nil {
+		return false
+	}
+	state := execution.agentctl.GetLastSessionModelState()
+	if state == nil {
+		return false
+	}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: state.CurrentModelID,
+		Models:         state.Models,
+		ConfigOptions:  state.ConfigOptions,
+	})
+	return true
+}
+
+// waitForFreshSessionModelState gives the agent stream a chance to deliver the
+// new session's model catalog before the reset/restart policy runs. ACP
+// session/new returns before its session_models notification is dispatched to
+// the lifecycle manager. This is the fallback for transports that do not
+// include a synchronous snapshot in their session response. Reading the old
+// nil/empty cache at that boundary would incorrectly treat an advertised model
+// as unavailable and leave the agent on its provider default. A missing
+// notification still follows the executor-authoritative default path after the
+// bounded wait.
+func waitForFreshSessionModelState(ctx context.Context, log *logger.Logger, execution *AgentExecution) bool {
+	if execution == nil {
+		return false
+	}
+	if freshSessionModelCatalogReady(execution.GetModelState()) {
+		return true
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, freshSessionModelStateWait)
+	defer cancel()
+	ticker := time.NewTicker(freshSessionModelStatePoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-waitCtx.Done():
+			if log != nil {
+				log.Debug("fresh session model catalog was not reported before policy evaluation",
+					zap.String("execution_id", execution.ID),
+					zap.Error(waitCtx.Err()))
+			}
+			return false
+		case <-ticker.C:
+			if freshSessionModelCatalogReady(execution.GetModelState()) {
+				return true
+			}
+		}
+	}
+}
+
+func freshSessionModelCatalogReady(state *CachedModelState) bool {
+	return state != nil && len(state.Models) > 0
 }
 
 func (m *Manager) effectiveSessionModelForReset(ctx context.Context, execution *AgentExecution) string {
@@ -518,6 +579,13 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	prevMode := execution.GetModeState()
 	effectiveModel := m.effectiveSessionModelForReset(ctx, execution)
 
+	// Clear the old catalog before creating the fresh session. The new
+	// session_models event is delivered asynchronously and must be the only
+	// catalog consulted by the reset decision.
+	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+		exec.SetModelState(nil)
+	})
+
 	// Resolve agent config and MCP servers for session reset
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
@@ -550,13 +618,6 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 
 		m.resetStreamingStateWithHistory(exec)
 
-		// The cached model state describes the OLD ACP session. The fresh
-		// session has not advertised its models yet, so evaluating the start
-		// model against the stale list could reject a model the new session
-		// accepts (or vice versa). Clear it: reapplySessionModelAfterReset
-		// then relies on the fresh session's own SetModel result.
-		exec.SetModelState(nil)
-
 		// Drain any stale prompt completion signal
 		select {
 		case <-exec.promptDoneCh:
@@ -568,6 +629,9 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	// onto the fresh ACP session. A strict-mode model that is gone in the new
 	// session fails the reset explicitly instead of silently dropping to the
 	// provider default.
+	if !cacheFreshSessionModelState(execution) && effectiveModel != "" {
+		waitForFreshSessionModelState(ctx, m.logger, execution)
+	}
 	if err := m.reapplySessionModelAfterReset(ctx, execution, newSessionID, effectiveModel); err != nil {
 		// The reset already committed the execution as Ready; a model
 		// re-application failure must not leave it there, or later prompts
@@ -791,6 +855,14 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		return fmt.Errorf("failed to initialize ACP session after restart: %w", err)
 	}
 
+	if !cacheFreshSessionModelState(execution) && preparation.previousModel != "" {
+		waitForFreshSessionModelState(ctx, m.logger, execution)
+		if err := m.reapplySessionModelAfterReset(ctx, execution, execution.ACPSessionID, preparation.previousModel); err != nil {
+			m.updateExecutionError(executionID, "failed to restore session model after restart: "+err.Error())
+			return fmt.Errorf("failed to restore session model after restart: %w", err)
+		}
+	}
+
 	// Restore the user's session permission mode onto the fresh ACP session.
 	m.reapplySessionModeAfterReset(ctx, execution, execution.ACPSessionID, preparation.previousMode)
 
@@ -804,9 +876,10 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 }
 
 type agentRestartPreparation struct {
-	agentConfig  agents.Agent
-	commands     agentCommands
-	previousMode *CachedModeState
+	agentConfig   agents.Agent
+	commands      agentCommands
+	previousModel string
+	previousMode  *CachedModeState
 }
 
 // prepareAgentRestart builds and validates the replacement before touching the current process.
@@ -825,9 +898,10 @@ func (m *Manager) prepareAgentRestart(ctx context.Context, execution *AgentExecu
 		return agentRestartPreparation{}, fmt.Errorf("failed to rebuild agent command for restart: %w", err)
 	}
 	return agentRestartPreparation{
-		agentConfig:  agentConfig,
-		commands:     commands,
-		previousMode: execution.GetModeState(),
+		agentConfig:   agentConfig,
+		commands:      commands,
+		previousModel: m.effectiveSessionModelForReset(ctx, execution),
+		previousMode:  execution.GetModeState(),
 	}, nil
 }
 
@@ -839,6 +913,7 @@ func (m *Manager) resetAgentRestartState(executionID string, commands agentComma
 		exec.needsResumeContext = false
 		exec.resumeContextInjected = false
 		exec.setSessionInitialized(false)
+		exec.SetModelState(nil)
 		exec.AgentCommand = commands.initial
 		exec.ContinueCommand = commands.continue_
 		exec.AgentArgs = commands.args

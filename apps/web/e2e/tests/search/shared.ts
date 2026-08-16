@@ -1,6 +1,8 @@
 import { type Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForLatestSessionDone } from "../../helpers/session";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import { multiMessageScript, planScript } from "../../helpers/seed-session-messages";
 
@@ -26,10 +28,19 @@ export async function seedTask(
       repository_ids: [seedData.repositoryId],
     },
   );
+  await waitForLatestSessionDone(
+    apiClient,
+    task.id,
+    1,
+    `wait for seeded search session ${task.id} to finish its initial turn`,
+    60_000,
+  );
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 30_000 });
+  await session.waitForChatIdle({ timeout: 60_000 });
+  if (!task.session_id) throw new Error("seedTask did not return a session_id");
+  await waitForSessionAgentctlReady(page, task.session_id);
   return { session, taskId: task.id, sessionId: task.session_id! };
 }
 

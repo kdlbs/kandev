@@ -116,6 +116,14 @@ type ModelSettableAdapter interface {
 	SetModel(ctx context.Context, modelID string) error
 }
 
+// SessionModelStateProvider exposes the model catalog returned by the most
+// recent session creation or load. The agent stream still emits the same
+// session_models event, but this synchronous snapshot prevents lifecycle
+// decisions from racing that event's downstream dispatch.
+type SessionModelStateProvider interface {
+	GetSessionModelState() *streams.SessionModelState
+}
+
 // AuthenticatableAdapter is an optional interface implemented by adapters that
 // support ACP authentication (session/authenticate).
 type AuthenticatableAdapter interface {

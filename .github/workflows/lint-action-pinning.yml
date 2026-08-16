@@ -71,7 +71,7 @@ jobs:
         run: bash scripts/release/retry-ghcr-command.test.sh
 
       - name: Test npm release helpers
-        run: node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs
+        run: node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs
 
       - name: Verify action refs
         run: python3 .github/scripts/lint-action-pinning.py
