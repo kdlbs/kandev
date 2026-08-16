@@ -57,8 +57,9 @@ type Client struct {
 	streamWriteMu sync.Mutex
 
 	// Pending request/response tracking for agent stream
-	pendingRequests map[string]chan *ws.Message
-	pendingMu       sync.Mutex
+	pendingRequests     map[string]chan *ws.Message
+	pendingRequestConns map[string]*websocket.Conn
+	pendingMu           sync.Mutex
 
 	// lastSessionModelState is populated synchronously by session/new,
 	// session/reset, or session/load responses. Lifecycle policy evaluation can
@@ -171,8 +172,9 @@ func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) 
 		longRunningHTTPClient: &http.Client{
 			Timeout: 5 * time.Minute,
 		},
-		logger:          log.WithFields(zap.String("component", "agentctl-client")),
-		pendingRequests: make(map[string]chan *ws.Message),
+		logger:              log.WithFields(zap.String("component", "agentctl-client")),
+		pendingRequests:     make(map[string]chan *ws.Message),
+		pendingRequestConns: make(map[string]*websocket.Conn),
 	}
 	for _, opt := range opts {
 		opt(c)

@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
-import { useOfficeRefetch } from "@/hooks/use-office-refetch";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { useRoutingPreview } from "@/hooks/domains/office/use-routing-preview";
 import { useWorkspaceRouting } from "@/hooks/domains/office/use-workspace-routing";
-import { listAgentProfiles } from "@/lib/api/domains/office-api";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { AgentCard } from "./components/agent-card";
 import { CreateAgentDialog } from "./components/create-agent-dialog";
@@ -17,11 +16,12 @@ import { useTranslation } from "react-i18next";
 
 type AgentsPageClientProps = {
   initialAgents: AgentProfile[];
+  initialWorkspaceId?: string | null;
 };
 
-export function AgentsPageClient({ initialAgents }: AgentsPageClientProps) {
+export function AgentsPageClient({ initialAgents, initialWorkspaceId }: AgentsPageClientProps) {
   const { t } = useTranslation();
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [showCreate, setShowCreate] = useState(false);
@@ -30,29 +30,22 @@ export function AgentsPageClient({ initialAgents }: AgentsPageClientProps) {
   useWorkspaceRouting(workspaceId);
   useRoutingPreview(workspaceId);
 
+  // Hydrate the SSR payload exactly once: it belongs to the workspace that was
+  // active at SSR time, and re-running on a workspace switch would file it
+  // under the new workspace.
+  const initialHydratedRef = useRef(false);
   useEffect(() => {
-    if (initialAgents.length > 0) {
-      setOfficeAgentProfiles(initialAgents);
+    if (
+      initialHydratedRef.current ||
+      !workspaceId ||
+      (initialWorkspaceId !== undefined && initialWorkspaceId !== workspaceId) ||
+      initialAgents.length === 0
+    ) {
+      return;
     }
-  }, [initialAgents, setOfficeAgentProfiles]);
-
-  const refetchAgents = useCallback(async () => {
-    if (!workspaceId) return;
-    const res = await listAgentProfiles(workspaceId).catch(() => ({
-      agents: [] as AgentProfile[],
-    }));
-    setOfficeAgentProfiles(res.agents ?? []);
-  }, [workspaceId, setOfficeAgentProfiles]);
-
-  // Fire once on mount to recover from stale SSR hydration. The SSR fetch
-  // may have raced ahead of a just-created agent's DB write; this re-hit
-  // ensures the store reflects the current DB state without waiting for a
-  // WS event.
-  useEffect(() => {
-    refetchAgents();
-  }, [refetchAgents]);
-
-  useOfficeRefetch("agents", refetchAgents);
+    initialHydratedRef.current = true;
+    setOfficeAgentProfiles(workspaceId, initialAgents);
+  }, [initialAgents, initialWorkspaceId, setOfficeAgentProfiles, workspaceId]);
 
   return (
     <div className="p-6 space-y-4">

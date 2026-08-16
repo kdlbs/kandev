@@ -35,6 +35,11 @@ vi.mock("@/components/update-available-toast-bridge", () => ({
 }));
 vi.mock("@/components/sidebar-views-sync-bridge", () => ({ SidebarViewsSyncBridge: () => null }));
 vi.mock("@/components/theme-provider", () => ({ ThemeProvider: mocks.passthrough }));
+// Reads the store to derive the workspace's mode; this suite mounts the shell
+// without a StateProvider, and only cares about provider nesting order.
+vi.mock("@/components/workspace-scope-provider", () => ({
+  WorkspaceScopeProvider: mocks.passthrough,
+}));
 vi.mock("@/components/ws-connector", () => ({ WebSocketConnector: () => null }));
 vi.mock("@/lib/commands/command-registry", () => ({
   CommandRegistryProvider: mocks.passthrough,

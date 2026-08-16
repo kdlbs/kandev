@@ -152,7 +152,7 @@ function MobileEventList({
         return (
           <section key={eventType} className="space-y-3 rounded-lg border border-muted p-3">
             <div>
-              <h3 className="font-medium">{meta.title}</h3>
+              <h3 className="text-sm font-medium leading-5">{meta.title}</h3>
               <p className="text-xs text-muted-foreground">{meta.description}</p>
             </div>
             <div className="space-y-2">
@@ -161,7 +161,9 @@ function MobileEventList({
                   key={provider.id}
                   className="flex min-h-11 items-center gap-3 rounded-md border border-muted px-3 py-2"
                 >
-                  <span className="min-w-0 flex-1 break-words font-medium">{provider.name}</span>
+                  <span className="min-w-0 flex-1 break-words text-xs font-medium">
+                    {provider.name}
+                  </span>
                   <TestProviderButton provider={provider} onTestProvider={onTestProvider} mobile />
                   <EventCheckbox
                     provider={provider}
@@ -202,7 +204,7 @@ function DesktopEventTable({
             {tableProviders.map((provider) => (
               <th key={provider.id} className="px-4 py-3 text-center font-medium">
                 <div className="flex items-center justify-center gap-1.5">
-                  <span>{provider.name}</span>
+                  <span className="text-xs">{provider.name}</span>
                   <TestProviderButton provider={provider} onTestProvider={onTestProvider} />
                 </div>
               </th>
@@ -215,7 +217,7 @@ function DesktopEventTable({
             return (
               <tr key={eventType} className="border-t border-muted">
                 <td className="px-4 py-3">
-                  <div className="font-medium">{meta.title}</div>
+                  <div className="text-sm font-medium leading-5">{meta.title}</div>
                   <div className="text-xs text-muted-foreground">{meta.description}</div>
                 </td>
                 {tableProviders.map((provider) => (

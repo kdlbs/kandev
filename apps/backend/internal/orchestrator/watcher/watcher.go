@@ -38,6 +38,8 @@ type AgentEventData struct {
 	ExecutionProfileID string                 `json:"execution_profile_id,omitempty"`
 	ExitCode           *int                   `json:"exit_code,omitempty"`
 	ErrorMessage       string                 `json:"error_message,omitempty"`
+	FailureCode        string                 `json:"failure_code,omitempty"`
+	FailureDetails     string                 `json:"failure_details,omitempty"`
 	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
 	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
 }

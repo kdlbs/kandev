@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import dynamic from "@/lib/routing/client-dynamic";
 import type { BeforeMount, OnMount } from "@monaco-editor/react";
-import { KANDEV_MONACO_DARK } from "@/lib/theme/editor-theme";
+import { EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE, KANDEV_MONACO_DARK } from "@/lib/theme/editor-theme";
 import type { PromptReference } from "@/lib/prompts/expand-prompt-references";
 import {
   createPlaceholderCompletionProvider,
@@ -198,7 +198,8 @@ export function ScriptEditor({
         minimap: { enabled: false },
         lineNumbers,
         wordWrap: "on",
-        fontSize: 13,
+        fontFamily: EDITOR_FONT_FAMILY,
+        fontSize: EDITOR_FONT_SIZE,
         scrollBeyondLastLine: false,
         readOnly,
         bracketPairColorization: { enabled: true },

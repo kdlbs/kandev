@@ -109,8 +109,11 @@ export function useWorkspaceContentSearch({
           sessionId,
           normalizedQuery,
           () => cancelled,
-          (nextResults) => {
-            if (!cancelled) setResults(nextResults);
+          (partialResults) => {
+            if (!cancelled) {
+              setResults(partialResults);
+              setError(null);
+            }
           },
         );
         if (!cancelled) {

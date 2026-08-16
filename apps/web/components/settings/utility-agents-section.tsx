@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconWand } from "@tabler/icons-react";
 import {
   listUtilityAgents,
   updateUtilityAgent,
@@ -10,7 +9,8 @@ import {
   type UtilityAgent,
 } from "@/lib/api/domains/utility-api";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
-import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
+import { Separator } from "@kandev/ui/separator";
 import { UtilityAgentDialog } from "@/components/settings/utility-agent-dialog";
 import { ConfigChatAgentSection } from "@/components/settings/config-chat-agent-section";
 import {
@@ -181,65 +181,64 @@ export function UtilityAgentsSection() {
   };
   if (loading) return null;
   return (
-    <>
-      <SettingsSection
-        icon={<IconWand className="h-5 w-5" />}
+    <div className="space-y-8">
+      <SettingsPageHeader
         title={t("settings:utilityAgents")}
         description={t("settings:utilityAgentsPageDescription")}
-      >
-        <div className="space-y-4">
-          <DefaultModelSection
-            profiles={profiles}
-            profileId={defaultProfileId}
-            onProfileChange={setDefaultProfileId}
-            isDirty={defaultProfileId !== savedDefaultProfileId}
-          />
-          <ConfigChatAgentSection />
-          <PerActionOverridesSection
-            builtins={builtins}
-            profiles={profiles}
-            defaultLabel={
-              defaultProfileId
-                ? profiles.find((profile) => profile.id === defaultProfileId)?.label ||
-                  defaultProfileId
-                : t("settings:default")
+      />
+      <Separator />
+      <div className="space-y-4">
+        <DefaultModelSection
+          profiles={profiles}
+          profileId={defaultProfileId}
+          onProfileChange={setDefaultProfileId}
+          isDirty={defaultProfileId !== savedDefaultProfileId}
+        />
+        <ConfigChatAgentSection />
+        <PerActionOverridesSection
+          builtins={builtins}
+          profiles={profiles}
+          defaultLabel={
+            defaultProfileId
+              ? profiles.find((profile) => profile.id === defaultProfileId)?.label ||
+                defaultProfileId
+              : t("settings:default")
+          }
+          onProfileChange={(agent, value) => updateBuiltinDraft(agent, value, setAgents)}
+          onEdit={(agent) => {
+            setEditingAgent(agent);
+            setDialogOpen(true);
+          }}
+          savedBuiltins={savedAgents.filter((agent) => agent.builtin)}
+        />
+        <CustomAgentsSection
+          agents={customAgents}
+          profiles={profiles}
+          onAdd={() => {
+            setEditingAgent(null);
+            setDialogOpen(true);
+          }}
+          onEdit={(agent) => {
+            setEditingAgent(agent);
+            setDialogOpen(true);
+          }}
+          onDelete={async (agent) => {
+            try {
+              await deleteUtilityAgent(agent.id);
+              setAgents((items) => items.filter((item) => item.id !== agent.id));
+              setSavedAgents((items) => items.filter((item) => item.id !== agent.id));
+            } catch (error) {
+              console.error("Failed to delete utility agent", error);
             }
-            onProfileChange={(agent, value) => updateBuiltinDraft(agent, value, setAgents)}
-            onEdit={(agent) => {
-              setEditingAgent(agent);
-              setDialogOpen(true);
-            }}
-            savedBuiltins={savedAgents.filter((agent) => agent.builtin)}
-          />
-          <CustomAgentsSection
-            agents={customAgents}
-            profiles={profiles}
-            onAdd={() => {
-              setEditingAgent(null);
-              setDialogOpen(true);
-            }}
-            onEdit={(agent) => {
-              setEditingAgent(agent);
-              setDialogOpen(true);
-            }}
-            onDelete={async (agent) => {
-              try {
-                await deleteUtilityAgent(agent.id);
-                setAgents((items) => items.filter((item) => item.id !== agent.id));
-                setSavedAgents((items) => items.filter((item) => item.id !== agent.id));
-              } catch (error) {
-                console.error("Failed to delete utility agent", error);
-              }
-            }}
-          />
-        </div>
-      </SettingsSection>
+          }}
+        />
+      </div>
       <UtilityAgentDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         agent={editingAgent}
         onSuccess={closeDialog}
       />
-    </>
+    </div>
   );
 }

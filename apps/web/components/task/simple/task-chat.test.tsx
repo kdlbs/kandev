@@ -592,6 +592,29 @@ describe("TaskChat run error entries", () => {
     expect(screen.getByTestId("run-error-raw-payload").textContent).toContain("Internal error");
   });
 
+  it("renders the managed npm recovery entry with one touch-safe action", () => {
+    const sessions: TaskSession[] = [
+      failedSession("s-npm", "agent-npm", "2026-05-01T11:30:00Z", "runtime failed"),
+    ];
+    sessions[0].metadata = {
+      last_agent_error: {
+        message: "managed npm runtime failed to prepare",
+        code: "managed_runtime_npm_resolution",
+        details: "npm error code ETARGET",
+      },
+    };
+    render(wrap(<TaskChat taskId="task-1" comments={[]} sessions={sessions} />));
+
+    expect(screen.getByTestId("run-error-managed-runtime-npm-recovery")).toBeTruthy();
+    expect(screen.getByText(/npm could not prepare the runtime/i)).toBeTruthy();
+    expect(screen.getByTestId("run-error-managed-runtime-retry-button")).toBeTruthy();
+    expect(screen.getByTestId("run-error-managed-runtime-retry-button").className).toContain(
+      "min-h-11",
+    );
+    expect(screen.queryByTestId("run-error-resume-button")).toBeNull();
+    expect(screen.queryByTestId("run-error-fresh-button")).toBeNull();
+  });
+
   it("does not render an error entry for non-FAILED sessions", () => {
     const sessions: TaskSession[] = [
       {

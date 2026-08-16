@@ -33,7 +33,7 @@ func (m *Manager) WasSessionInitialized(executionID string) bool {
 	if !exists {
 		return false
 	}
-	return exec.sessionInitialized
+	return exec.isSessionInitialized()
 }
 
 // GetSessionAuthMethods returns auth methods for a session's execution.
@@ -260,15 +260,14 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
 
-	select {
-	case execution.promptDoneCh <- PromptCompletionSignal{
-		IsError:          true,
-		Error:            "cancel escalated: agent did not complete turn within timeout",
-		PromptGeneration: execution.promptGenerationSnapshot(),
-	}:
-	default:
-		// Channel already has a pending signal; SendPrompt will pick that up instead.
-	}
+	execution.signalPromptCompletionForStartupGeneration(
+		execution.startupAttemptSnapshot(),
+		PromptCompletionSignal{
+			IsError:          true,
+			Error:            "cancel escalated: agent did not complete turn within timeout",
+			PromptGeneration: execution.promptGenerationSnapshot(),
+		},
+	)
 
 	select {
 	case <-ch:
@@ -316,7 +315,7 @@ func (m *Manager) SetSessionMode(ctx context.Context, executionID, _ string, mod
 	if execution.agentctl == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
-	if !execution.sessionInitialized || execution.ACPSessionID == "" {
+	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return fmt.Errorf("execution %q ACP session is not ready", executionID)
 	}
 	return execution.agentctl.SetMode(ctx, execution.ACPSessionID, modeID)
@@ -375,7 +374,7 @@ func (m *Manager) SetSessionConfigOption(ctx context.Context, executionID, confi
 	if execution.agentctl == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
-	if !execution.sessionInitialized || execution.ACPSessionID == "" {
+	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return fmt.Errorf("execution %q ACP session is not ready", executionID)
 	}
 	return execution.agentctl.SetConfigOption(ctx, configID, value)
@@ -913,7 +912,7 @@ func (m *Manager) resetAgentRestartState(executionID string, commands agentComma
 		exec.ErrorMessage = ""
 		exec.needsResumeContext = false
 		exec.resumeContextInjected = false
-		exec.sessionInitialized = false
+		exec.setSessionInitialized(false)
 		exec.SetModelState(nil)
 		exec.AgentCommand = commands.initial
 		exec.ContinueCommand = commands.continue_
@@ -1217,7 +1216,7 @@ func (m *Manager) IsAgentReadyForPrompt(ctx context.Context, sessionID string) b
 	if execution.Status != v1.AgentStatusReady || execution.agentctl == nil {
 		return false
 	}
-	if !execution.sessionInitialized || execution.ACPSessionID == "" {
+	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return false
 	}
 
@@ -1235,7 +1234,7 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	// InitializeAndPrompt owns the first updates stream. Starting a recovery
 	// stream before ACP initialization finishes creates competing consumers and
 	// can split one prompt's events across them.
-	if !execution.sessionInitialized || execution.ACPSessionID == "" {
+	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return nil
 	}
 	if execution.agentctl.HasAgentStream() {
@@ -1257,7 +1256,7 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if !execution.agentctl.HasAgentStream() {
 		return fmt.Errorf("agent stream not connected")
 	}
-	if execution.Status == v1.AgentStatusFailed && execution.sessionInitialized && execution.ACPSessionID != "" {
+	if execution.Status == v1.AgentStatusFailed && execution.isSessionInitialized() && execution.ACPSessionID != "" {
 		return m.restoreRecoveredFailedExecution(ctx, execution)
 	}
 	return nil
@@ -1603,7 +1602,7 @@ func (m *Manager) markStoppedDuringShutdown(execution *AgentExecution, exitCode 
 // stub it to avoid touching the real filesystem.
 func (m *Manager) classifyAndMaybeRemediate(execution *AgentExecution, exitCode int, errorMessage string) {
 	phase := routingerr.PhaseSessionInit
-	if execution.sessionInitialized {
+	if execution.isSessionInitialized() {
 		phase = routingerr.PhasePromptSend
 	}
 	var exitPtr *int

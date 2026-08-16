@@ -1,9 +1,14 @@
 import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { AccordionContent, AccordionItem, AccordionTrigger } from "@kandev/ui/accordion";
 import { useTranslation } from "react-i18next";
+import {
+  SETTINGS_TYPOGRAPHY,
+  SettingsFieldDescription,
+  SettingsFieldLabel,
+} from "@/components/settings/settings-typography";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 
 export type GitIdentityMode = "local" | "override";
 export type GitIdentityState = {
@@ -47,7 +52,11 @@ export function GitIdentityAccordionItem(props: GitIdentityFieldsProps) {
           <span className="text-sm font-medium">{t("executors:gitIdentity")}</span>
           <Badge
             variant={isLocal ? "default" : "secondary"}
-            className={isLocal ? "bg-green-600 px-1.5 py-0 text-[10px]" : "px-1.5 py-0 text-[10px]"}
+            className={
+              isLocal
+                ? `bg-green-600 px-1.5 py-0 ${SETTINGS_TYPOGRAPHY.meta}`
+                : `px-1.5 py-0 ${SETTINGS_TYPOGRAPHY.meta}`
+            }
           >
             {badgeLabel}
           </Badge>
@@ -55,9 +64,9 @@ export function GitIdentityAccordionItem(props: GitIdentityFieldsProps) {
       </AccordionTrigger>
       <AccordionContent className="h-auto">
         <div className="space-y-3 text-sm">
-          <p className="text-xs text-muted-foreground">
+          <SettingsFieldDescription>
             {t("executors:usedByRemoteExecutorsForCommit")}
-          </p>
+          </SettingsFieldDescription>
           <RadioGroup
             value={props.mode}
             onValueChange={(value) => props.onModeChange(value as GitIdentityMode)}
@@ -117,7 +126,7 @@ function IdentityModeOption({
       <RadioGroupItem value={value} disabled={disabled} className={RADIO_ITEM} />
       <div className="flex flex-col gap-0.5">
         <span className="text-sm font-medium">{title}</span>
-        <span className="text-xs text-muted-foreground">{description}</span>
+        <span className={SETTINGS_TYPOGRAPHY.fieldDescription}>{description}</span>
       </div>
     </label>
   );
@@ -128,23 +137,29 @@ function OverrideIdentityFields(props: GitIdentityFieldsProps) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="space-y-1.5">
-        <Label htmlFor="remote-git-user-name">{t("executors:gitUserName")}</Label>
+        <SettingsFieldLabel htmlFor="remote-git-user-name">
+          {t("executors:gitUserName")}
+        </SettingsFieldLabel>
         <Input
           id="remote-git-user-name"
           value={props.gitUserName}
           onChange={(event) => props.onGitUserNameChange(event.target.value)}
           placeholder={t("executors:janeDeveloper")}
           data-settings-dirty={props.gitUserName !== props.baselineGitUserName}
+          className={settingsControlClassName()}
         />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="remote-git-user-email">{t("executors:gitUserEmail")}</Label>
+        <SettingsFieldLabel htmlFor="remote-git-user-email">
+          {t("executors:gitUserEmail")}
+        </SettingsFieldLabel>
         <Input
           id="remote-git-user-email"
           value={props.gitUserEmail}
           onChange={(event) => props.onGitUserEmailChange(event.target.value)}
           placeholder="jane@example.com"
           data-settings-dirty={props.gitUserEmail !== props.baselineGitUserEmail}
+          className={settingsControlClassName()}
         />
       </div>
     </div>

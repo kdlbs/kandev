@@ -4,11 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Card, CardContent } from "@kandev/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { IconLoader2 } from "@tabler/icons-react";
 import { listSSHSessions } from "@/lib/api/domains/ssh-api";
 import type { SSHSession } from "@/lib/types/http-ssh";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 export interface SSHSessionsCardProps {
   executorId: string;
@@ -58,25 +60,23 @@ export function SSHSessionsCard({ executorId }: SSHSessionsCardProps) {
 
   return (
     <Card data-testid="ssh-sessions-card">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle>{t("executors:sshActiveSessions")}</CardTitle>
-            <CardDescription>{t("executors:sshActiveSessionsDescription")}</CardDescription>
-          </div>
+      <SettingsCardHeader
+        title={t("executors:sshActiveSessions")}
+        description={t("executors:sshActiveSessionsDescription")}
+        actions={
           <Button
             variant="outline"
             size="sm"
             onClick={refresh}
             disabled={loading}
             data-testid="ssh-sessions-refresh"
-            className="cursor-pointer"
+            className={settingsActionClassName("cursor-pointer")}
           >
             {loading ? <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
             {t("executors:refresh")}
           </Button>
-        </div>
-      </CardHeader>
+        }
+      />
       <CardContent>
         <SSHSessionsBody loading={loading} error={error} sessions={sessions} />
       </CardContent>

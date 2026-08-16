@@ -1,19 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE } from "@/lib/routing/route-bootstrap";
 import {
-  LAST_KANBAN_WORKSPACE_KEY,
-  OFFICE_ACTIVE_WORKSPACE_COOKIE,
-  rememberLastOfficeWorkspace,
-  rememberLastKanbanWorkspace,
-  resolveLastOfficeWorkspace,
-  resolveLastKanbanWorkspace,
+  rememberWorkspaceSelection,
+  rememberWorkspaceSelectionById,
   workspaceHomeHref,
 } from "./app-sidebar-workspace-navigation";
 
 const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 const kanban = { id: "kanban-1", office_workflow_id: "" };
-const kanbanTwo = { id: "kanban-2", office_workflow_id: null };
 const office = { id: "office-1", office_workflow_id: "wf-office" };
-const officeTwo = { id: "office-2", office_workflow_id: "wf-office-2" };
 const officeWithReservedChars = {
   id: "office/2;mode",
   office_workflow_id: "wf-office-reserved",
@@ -21,7 +16,6 @@ const officeWithReservedChars = {
 
 describe("app sidebar workspace navigation", () => {
   beforeEach(() => {
-    window.localStorage.clear();
     document.cookie = "kandev-active-workspace=; path=/; max-age=0";
     document.cookie = "office-active-workspace=; path=/; max-age=0";
   });
@@ -32,70 +26,42 @@ describe("app sidebar workspace navigation", () => {
     expect(workspaceHomeHref(undefined)).toBe("/?home=overview");
   });
 
-  it("remembers and resolves the last kanban workspace", () => {
-    rememberLastKanbanWorkspace(kanbanTwo);
+  it("records the active workspace in one write", () => {
+    rememberWorkspaceSelection(kanban);
+    rememberWorkspaceSelection(office);
 
-    expect(window.localStorage.getItem(LAST_KANBAN_WORKSPACE_KEY)).toBe("kanban-2");
-    expect(document.cookie).toContain(`${ACTIVE_WORKSPACE_COOKIE}=kanban-2`);
-    expect(resolveLastKanbanWorkspace([kanban, office, kanbanTwo])).toBe(kanbanTwo);
+    expect(document.cookie).toContain(`${ACTIVE_WORKSPACE_COOKIE}=office-1`);
+    expect(document.cookie).toContain(`${LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE}=office-1`);
   });
 
-  it("resolves the last kanban workspace from the active workspace cookie", () => {
-    rememberLastKanbanWorkspace(kanban);
-    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=kanban-2; path=/`;
+  it("does not write the legacy office cookie for a kanban selection", () => {
+    rememberWorkspaceSelection(office);
+    rememberWorkspaceSelection(kanban);
 
-    expect(resolveLastKanbanWorkspace([kanban, office, kanbanTwo])).toBe(kanbanTwo);
-  });
-
-  it("does not overwrite the last kanban workspace with office workspaces", () => {
-    rememberLastKanbanWorkspace(kanban);
-    rememberLastKanbanWorkspace(office);
-
-    expect(resolveLastKanbanWorkspace([kanban, office])).toBe(kanban);
+    // The office boot paths read the legacy cookie to pick an office workspace
+    // when the unified cookie names a kanban board, so a kanban selection must
+    // leave it pointing at the office workspace last used.
+    expect(document.cookie).toContain(`${ACTIVE_WORKSPACE_COOKIE}=kanban-1`);
+    expect(document.cookie).toContain(`${LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE}=office-1`);
   });
 
   it("writes active and legacy office workspace cookies with an encoded id", () => {
-    rememberLastOfficeWorkspace(officeWithReservedChars);
+    rememberWorkspaceSelection(officeWithReservedChars);
 
     expect(document.cookie).toContain(
       `${ACTIVE_WORKSPACE_COOKIE}=${encodeURIComponent(officeWithReservedChars.id)}`,
     );
     expect(document.cookie).toContain(
-      `${OFFICE_ACTIVE_WORKSPACE_COOKIE}=${encodeURIComponent(officeWithReservedChars.id)}`,
-    );
-    expect(resolveLastOfficeWorkspace([office, officeWithReservedChars])).toBe(
-      officeWithReservedChars,
+      `${LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE}=${encodeURIComponent(officeWithReservedChars.id)}`,
     );
   });
 
-  it("falls back to the first kanban workspace and first office workspace", () => {
-    expect(resolveLastKanbanWorkspace([office, kanban, kanbanTwo])).toBe(kanban);
-    expect(resolveLastOfficeWorkspace([kanban, office, officeTwo])).toBe(office);
-  });
+  it("records a workspace known only by id and kind", () => {
+    // The setup wizard path: the create response returns an id and nothing
+    // else, so there is no record to pass.
+    rememberWorkspaceSelectionById("office-new", "office");
 
-  it("resolves the last office workspace from the office-active-workspace cookie", () => {
-    document.cookie = "office-active-workspace=office-2; path=/";
-
-    expect(resolveLastOfficeWorkspace([kanban, office, officeTwo])).toBe(officeTwo);
-  });
-
-  it("resolves the last office workspace from the active workspace cookie first", () => {
-    document.cookie = "office-active-workspace=office-1; path=/";
-    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=office-2; path=/`;
-
-    expect(resolveLastOfficeWorkspace([kanban, office, officeTwo])).toBe(officeTwo);
-  });
-
-  it("falls back to the office workspace cookie when the active cookie is kanban", () => {
-    document.cookie = "office-active-workspace=office-2; path=/";
-    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=kanban-1; path=/`;
-
-    expect(resolveLastOfficeWorkspace([kanban, office, officeTwo])).toBe(officeTwo);
-  });
-
-  it("falls back to the first office workspace when the office cookie is stale", () => {
-    document.cookie = "office-active-workspace=kanban-1; path=/";
-
-    expect(resolveLastOfficeWorkspace([kanban, office, officeTwo])).toBe(office);
+    expect(document.cookie).toContain(`${ACTIVE_WORKSPACE_COOKIE}=office-new`);
+    expect(document.cookie).toContain(`${LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE}=office-new`);
   });
 });

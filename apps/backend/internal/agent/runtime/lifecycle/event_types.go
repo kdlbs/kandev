@@ -21,6 +21,8 @@ type AgentEventPayload struct {
 	StartedAt          time.Time              `json:"started_at"`
 	FinishedAt         *time.Time             `json:"finished_at,omitempty"`
 	ErrorMessage       string                 `json:"error_message,omitempty"`
+	FailureCode        string                 `json:"failure_code,omitempty"`
+	FailureDetails     string                 `json:"failure_details,omitempty"`
 	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
 	ExitCode           *int                   `json:"exit_code,omitempty"`
 	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
@@ -49,6 +51,8 @@ type AgentctlEventPayload struct {
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
 	AgentExecutionID  string `json:"agent_execution_id"`
 	ErrorMessage      string `json:"error_message,omitempty"`
+	FailureCode       string `json:"failure_code,omitempty"`
+	FailureDetails    string `json:"failure_details,omitempty"`
 	WorktreeID        string `json:"worktree_id,omitempty"`
 	WorktreePath      string `json:"worktree_path,omitempty"`
 	WorktreeBranch    string `json:"worktree_branch,omitempty"`

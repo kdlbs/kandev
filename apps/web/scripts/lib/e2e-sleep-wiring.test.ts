@@ -58,9 +58,16 @@ describe("sleep ratchet wiring", () => {
     // would move the slice boundary and quietly shrink what is asserted
     // (review finding). This is strictly tighter than the slice was — it pins
     // the invocation, its bare form, and the early exit, in order.
+    //
+    // How the event name is read is deliberately NOT pinned. It was
+    // `"${{ github.event_name }}"` inline until the merge-queue work moved it
+    // to an `EVENT_NAME` env var, which changed nothing about the guarantee
+    // here and broke this assertion anyway. What matters is that the
+    // pull_request branch runs the ratchet bare and returns: the trailing
+    // newline after the script name is what rejects a smuggled `--base`.
     expect(step).toMatch(
       new RegExp(
-        `if \\[\\[ "\\$\\{\\{ github.event_name \\}\\}" == "pull_request" \\]\\];? then\\n` +
+        `== "pull_request" \\]\\];? then\\n` +
           `\\s+node scripts/${RATCHET_SCRIPT}\\n` +
           `\\s+exit 0\\n`,
       ),

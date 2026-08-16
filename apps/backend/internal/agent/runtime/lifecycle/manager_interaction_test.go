@@ -171,6 +171,13 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"success": true,
 				})
+			case "agent.stderr":
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"lines": []string{
+						"npm error code ETARGET",
+						"npm error notarget No matching version found for opencode-ai@1.2.3",
+					},
+				})
 			default:
 				resp, _ = ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "unknown action", nil)
 			}

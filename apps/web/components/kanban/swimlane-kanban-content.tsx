@@ -33,6 +33,7 @@ import {
   useKanbanExternalLinkAvailability,
 } from "@/components/kanban-external-link-availability";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 /**
  * Sentinel step ID used to collect tasks whose workflow_step_id no longer
@@ -139,7 +140,7 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
             .getState()
             .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
         }
-        const message = error instanceof Error ? error.message : "Failed to move task";
+        const message = error instanceof Error ? error.message : t("task:failedToMoveTask");
         onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
       }
     },

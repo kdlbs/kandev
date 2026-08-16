@@ -96,6 +96,7 @@ export function useNextWorkflowStep(taskId: string | null) {
   return { proceedStepName, nextStepIsWorkStep, proceed, isMoving };
 }
 
+// i18n-exempt: system block sent verbatim to the agent.
 const IMPLEMENT_PLAN_SYSTEM_BLOCK = `<kandev-system>
 IMPLEMENT PLAN: The user has approved the plan and wants you to implement it now.
 Read the current plan using the get_task_plan_kandev MCP tool.
@@ -104,6 +105,7 @@ After completing the implementation, provide a summary of what was done.
 </kandev-system>`;
 
 export function buildImplementPlanContent(userText: string): string {
+  // i18n-exempt: becomes the message content sent to the agent and stored in the transcript.
   const visibleText = userText.trim() || "Implement the plan";
   return `${visibleText}\n\n${IMPLEMENT_PLAN_SYSTEM_BLOCK}`;
 }

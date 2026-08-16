@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 // and is editable in the row below, so it must stay locale-neutral — see
 // `newPreset` in action-presets-section.tsx for the same contract.
 function newPreset(): StoredQueryPreset {
+  // i18n-exempt: persisted, editable preset label. See the comment above.
   return {
     value: `q_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     label: "New query",

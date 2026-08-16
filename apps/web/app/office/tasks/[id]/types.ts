@@ -103,6 +103,8 @@ export type RunError = {
   failedAt: string;
   /** Adapter-validated provider remediation URL from last_agent_error metadata. */
   remediationUrl?: string;
+  failureCode?: string;
+  failureDetails?: string;
 };
 
 export type TaskLabelLocal = {

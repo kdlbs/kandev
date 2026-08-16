@@ -9,7 +9,6 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useGutterComments } from "@/hooks/use-gutter-comments";
-import { consumePendingCursorPosition } from "@/hooks/use-file-editors";
 import type { DiffComment } from "@/lib/diff/types";
 import { useTranslation } from "react-i18next";
 
@@ -112,11 +111,6 @@ export function useMonacoEditorComments(opts: UseMonacoEditorStateOpts) {
       setEditorInstance(editor);
       decorationsRef.current = editor.createDecorationsCollection([]);
       diffDecorationsRef.current = editor.createDecorationsCollection([]);
-      const pendingPos = consumePendingCursorPosition(path, repo, sessionId);
-      if (pendingPos) {
-        editor.setPosition({ lineNumber: pendingPos.line, column: pendingPos.column });
-        editor.revealLineInCenter(pendingPos.line);
-      }
       if (enableComments && sessionId) {
         disposablesRef.current.push(
           editor.onDidChangeCursorSelection(() => {

@@ -442,32 +442,33 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertEqual(primary_fingerprints[0], documented_fingerprint.group(1))
 
     def test_release_contract_ci_runs_when_key_or_release_documentation_changes(self) -> None:
-        for trigger in ("push", "pull_request"):
+        """This contract must run on every change, not a listed subset.
+
+        `lint-action-pinning.yml` used to name each subject of this file --
+        the signing key, the release docs, every `scripts/release/` helper --
+        in a hand-maintained `paths:` list, so that changing one brought the
+        job up. That list is gone: the workflow now triggers on every push and
+        every pull request, which covers every subject here and every one added
+        later without anybody remembering to extend a list.
+
+        The change was forced by the merge queue. A workflow skipped by a
+        `paths:` filter reports no conclusion at all, and a required check that
+        never reports blocks a pull request from entering the queue.
+        """
+        for trigger in ("push", "pull_request", "merge_group"):
             trigger_block = re.search(
                 rf"  {trigger}:\n.*?(?=\n  [a-z_]+:|\nconcurrency:)",
                 LINT_WORKFLOW,
                 re.DOTALL,
             )
             self.assertIsNotNone(trigger_block)
-            self.assertIn('".github/release-signing-key.asc"', trigger_block.group(0))
-            self.assertIn('"docs/public/release-process.md"', trigger_block.group(0))
-            self.assertIn('"scripts/release/package-npm-runtime.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/publish-npm.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/publish-npm.test.mjs"', trigger_block.group(0))
-            self.assertIn('"scripts/release/npm-packages.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/npm-view-version.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/npm-view-version.test.mjs"', trigger_block.group(0))
-            self.assertIn('"scripts/release/nightly-version.mjs"', trigger_block.group(0))
-            self.assertIn('"scripts/release/nightly-version.test.mjs"', trigger_block.group(0))
-            self.assertIn('"scripts/release/nightly-release.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/nightly-release.test.mjs"', trigger_block.group(0))
-            self.assertIn('"Makefile"', trigger_block.group(0))
-            self.assertIn('"apps/backend/Makefile"', trigger_block.group(0))
-            self.assertIn('"scripts/release/package-bundle.sh"', trigger_block.group(0))
-            self.assertIn('"scripts/release/runtime-bundle.test.sh"', trigger_block.group(0))
-            self.assertIn(
-                '"scripts/release/validate-darwin-arm64-helper.mjs"',
+            self.assertNotIn(
+                "    paths:",
                 trigger_block.group(0),
+                f"lint-action-pinning.yml's {trigger} trigger must stay "
+                "unfiltered. A `paths:` list there both un-guards every "
+                "subject it omits and makes the check unreportable in a merge "
+                "queue.",
             )
 
         setup_node = (

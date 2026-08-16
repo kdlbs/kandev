@@ -396,7 +396,7 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	// Only mark the launch initialized once the start-model policy has
 	// succeeded — a strict unavailable model fails here, and a failed launch
 	// must not look initialized.
-	execution.sessionInitialized = true
+	execution.setSessionInitialized(true)
 
 	finalConfigID, profileModelApplied, profileModeApplied, profileConfigOptionsApplied := sm.applyProfileSessionLayers(
 		ctx, execution, result.SessionID, profileModel, profileMode, profileConfigOptions,
@@ -956,10 +956,19 @@ func (sm *SessionManager) waitForPromptDone(
 	stallTicker := time.NewTicker(time.Minute)
 	defer stallTicker.Stop()
 	stallReported := false
+	startupGeneration := execution.startupAttemptSnapshot()
 
 	for {
 		select {
 		case signal := <-execution.promptDoneCh:
+			if signal.StartupGeneration != startupGeneration &&
+				(signal.StartupGeneration != 0 || startupGeneration != 0) {
+				sm.logger.Debug("ignoring completion signal for superseded startup generation",
+					zap.String("execution_id", execution.ID),
+					zap.Uint64("signal_startup_generation", signal.StartupGeneration),
+					zap.Uint64("active_startup_generation", startupGeneration))
+				continue
+			}
 			if signal.PromptGeneration != 0 &&
 				promptGeneration != 0 &&
 				signal.PromptGeneration != promptGeneration {

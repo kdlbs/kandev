@@ -448,7 +448,6 @@
   "youCanUseTheNavigationOr": "You can use the navigation or reload to try again.",
   "yourAgentImplementsItInThe": "Your agent implements it in the kandev repository, with tests",
   "youVerifyAndTestTheChange": "You verify and test the change in a second kandev instance",
-  "failedToRenderDiagram": "Failed to render diagram",
   "demoAgentMessagesDescription": "Visual inspection of agent message normalization. Each card shows the rendered output alongside raw JSON.",
   "demoAgentMessagesQa": "Agent Messages QA",
   "demoErrorLoading": "Error loading {{mode}}",
@@ -476,5 +475,12 @@
   "demoShowingMessages_one": "Showing {{count}} of {{total}} message",
   "demoShowingMessages_other": "Showing {{count}} of {{total}} messages",
   "demoTestFixtures": "Test Fixtures",
-  "demoToolType": "Tool type:"
+  "demoToolType": "Tool type:",
+  "weekdaySunday": "Sunday",
+  "weekdayMonday": "Monday",
+  "weekdayTuesday": "Tuesday",
+  "weekdayWednesday": "Wednesday",
+  "weekdayThursday": "Thursday",
+  "weekdayFriday": "Friday",
+  "weekdaySaturday": "Saturday"
 }
