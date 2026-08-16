@@ -317,6 +317,8 @@ All task gates passed:
 - Latest Codex review fails orchestrator startup when its turn service is absent instead of silently
   bypassing reservation recovery, and aligns the remaining stale-summary scenario with task-only phone
   navigation. The focused startup regressions and full orchestrator suite passed.
+- Follow-up Codex review invalidates the phone task-sheet selection controller on unmount so a deferred
+  load cannot mutate or close a replacement tablet sheet. The 48-test focused selection run passed.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

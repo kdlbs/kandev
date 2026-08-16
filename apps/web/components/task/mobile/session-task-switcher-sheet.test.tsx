@@ -1,9 +1,14 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToastProvider } from "@/components/toast-provider";
-import { MobileTaskList } from "@/components/task/mobile/session-task-switcher-sheet";
+import {
+  MobileTaskList,
+  useTaskSheetSelectionController,
+} from "@/components/task/mobile/session-task-switcher-sheet";
+import { selectTaskFromSheet } from "@/components/task/mobile/session-task-switcher-sheet-selection";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
+import type { TaskSession } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
   toggleSidebarGroupCollapsed: vi.fn(),
@@ -157,5 +162,88 @@ describe("MobileTaskList", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
 
     expect(onEditTask).toHaveBeenCalledWith(editableTask);
+  });
+});
+
+describe("SessionTaskSwitcherSheet lifecycle", () => {
+  it("invalidates a deferred selection when responsive remount replaces the sheet", async () => {
+    const phoneTaskId = "task-phone";
+    const tabletTaskId = "task-tablet";
+    let resolveOldLoad: (sessions: TaskSession[]) => void = () => undefined;
+    let resolveNewLoad: (sessions: TaskSession[]) => void = () => undefined;
+    const oldLoad = vi.fn(
+      () =>
+        new Promise<TaskSession[]>((resolve) => {
+          resolveOldLoad = resolve;
+        }),
+    );
+    const newLoad = vi.fn(
+      () =>
+        new Promise<TaskSession[]>((resolve) => {
+          resolveNewLoad = resolve;
+        }),
+    );
+    const setActiveSession = vi.fn();
+    const navigate = vi.fn();
+    const onOpenChange = vi.fn();
+    const state = {
+      lastSessionByTaskId: {},
+      environmentIdBySessionId: {},
+      taskSessionsById: {},
+    };
+    const oldSheet = renderHook(() => useTaskSheetSelectionController());
+
+    selectTaskFromSheet({
+      selectionController: oldSheet.result.current,
+      taskId: phoneTaskId,
+      task: { primarySessionId: "primary-phone", taskPendingAction: "clarification" },
+      state,
+      loadTaskSessionsForTask: oldLoad,
+      setActiveSession,
+      setActiveTask: vi.fn(),
+      navigate,
+      onOpenChange,
+    });
+    oldSheet.unmount();
+
+    const tabletSheet = renderHook(() => useTaskSheetSelectionController());
+    selectTaskFromSheet({
+      selectionController: tabletSheet.result.current,
+      taskId: tabletTaskId,
+      task: { primarySessionId: "primary-tablet", taskPendingAction: "clarification" },
+      state,
+      loadTaskSessionsForTask: newLoad,
+      setActiveSession,
+      setActiveTask: vi.fn(),
+      navigate,
+      onOpenChange,
+    });
+    await act(async () => {
+      resolveNewLoad([
+        {
+          id: "owner-tablet",
+          task_id: tabletTaskId,
+          state: "WAITING_FOR_INPUT",
+          pending_action: "clarification",
+        } as TaskSession,
+      ]);
+    });
+    await act(async () => {
+      resolveOldLoad([
+        {
+          id: "owner-phone",
+          task_id: phoneTaskId,
+          state: "WAITING_FOR_INPUT",
+          pending_action: "clarification",
+        } as TaskSession,
+      ]);
+    });
+
+    expect(setActiveSession).toHaveBeenCalledTimes(1);
+    expect(setActiveSession).toHaveBeenCalledWith(tabletTaskId, "owner-tablet");
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith(tabletTaskId);
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

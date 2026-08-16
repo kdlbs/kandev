@@ -289,6 +289,9 @@ session they can already access. Session selection does not broaden task visibil
   the phone drawer.
 - **GIVEN** two forced session loads overlap for one task, **WHEN** the older response finishes last,
   **THEN** it cannot overwrite the newer session snapshot or revive an obsolete pending owner.
+- **GIVEN** a forced session load is pending in the phone task sheet, **WHEN** a responsive-layout
+  change unmounts it and mounts the tablet sheet before that load finishes, **THEN** the old
+  continuation cannot navigate, change the active selection, or close the replacement sheet.
 - **GIVEN** a pending task has no loaded owner, **WHEN** activation falls back to its task route,
   **THEN** the outgoing session layout is released before the active session is cleared.
 - **GIVEN** a stale browser still displays a superseded question, **WHEN** it submits an answer,

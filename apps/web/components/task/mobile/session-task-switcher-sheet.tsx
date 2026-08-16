@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconMessageCircle, IconNetwork, IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
@@ -46,6 +46,17 @@ type SessionTaskSwitcherSheetProps = {
   workflowId: string | null;
   presentation?: "sheet" | "drawer";
 };
+
+export function useTaskSheetSelectionController() {
+  const [selectionController] = useState(createTaskSheetSelectionController);
+  useEffect(
+    () => () => {
+      selectionController.invalidate();
+    },
+    [selectionController],
+  );
+  return selectionController;
+}
 
 function useMobileTaskLinking(workspaceId: string | null) {
   const store = useAppStoreApi();
@@ -538,7 +549,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [subtaskTarget, setSubtaskTarget] = useState<{ id: string; title: string } | null>(null);
   const data = useSheetData(workspaceId);
-  const [selectionController] = useState(createTaskSheetSelectionController);
+  const selectionController = useTaskSheetSelectionController();
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => handleTaskSheetOpenChange(selectionController, nextOpen, onOpenChange),
     [onOpenChange, selectionController],

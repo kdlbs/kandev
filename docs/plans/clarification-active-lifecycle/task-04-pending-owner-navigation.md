@@ -126,6 +126,9 @@ update task/plan status.
   focused selection run; this remains state-only mobile parity work with no layout or touch change.
 - Latest Codex review corrects the last stale-summary scenario to match the implemented phone behavior:
   discard the obsolete owner, open the selected task-only route, and close the sheet.
+- Follow-up Codex review invalidates each mounted sheet's controller during unmount, preventing a
+  deferred phone load from selecting a task or closing the replacement tablet sheet. The 48-test
+  focused selection run, typecheck, zero-warning full lint, and i18n ratchet passed.
 - `cd apps && pnpm install --frozen-lockfile` passed.
 - The exact three-file Vitest command passed: 3 files, 68 tests.
 - `cd apps/web && pnpm run typecheck` passed.
