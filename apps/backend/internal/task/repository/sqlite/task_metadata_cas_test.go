@@ -14,9 +14,26 @@ import (
 
 const casTaskID = "task-metadata-cas"
 
+// seedMetadataCASTask creates the task the contract runs against, along with
+// the workspace and workflow it references.
+//
+// Those parent rows are not optional scaffolding: PostgreSQL enforces the
+// foreign keys and rejects the task outright without them, while this SQLite
+// path does not. Skipping them made the Postgres test fail in its fixture
+// ("workspace not found") before reaching a single assertion, so the dialect it
+// exists to cover was never actually exercised.
 func seedMetadataCASTask(t *testing.T, repo *Repository, metadata map[string]interface{}) {
 	t.Helper()
-	if err := repo.CreateTask(context.Background(), &models.Task{
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-cas", Name: "CAS"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-cas", WorkspaceID: "ws-cas", Name: "CAS flow",
+	}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
 		ID: casTaskID, WorkspaceID: "ws-cas", WorkflowID: "wf-cas",
 		Title: "CAS", Metadata: metadata,
 	}); err != nil {
