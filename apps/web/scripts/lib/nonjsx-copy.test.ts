@@ -66,6 +66,24 @@ describe("looksLikeCopy", () => {
     expect(looksLikeCopy("Azure DevOps")).toBe(true);
     expect(looksLikeCopy("Azure DevOps", ["(Kandev|GitHub|Azure DevOps)"])).toBe(false);
   });
+
+  it("does not backtrack on a long run of hyphens", () => {
+    // REGRESSION (CodeQL): the class-list test was one regex nesting a
+    // quantifier inside a quantifier over an alphabet containing `-`, so
+    // `"a" + "-".repeat(n)` had exponentially many parses — measured at 1ms for
+    // n=24 and 51ms for n=32, i.e. minutes by n=50. It is now checked token by
+    // token, which is linear. This gate runs over ~1,400 files and in
+    // pre-commit, so a hang here stops commits rather than merely being slow.
+    // The trailing "!" is load-bearing: it is what makes the match FAIL after
+    // the engine has explored every split of the hyphen run. Without it the old
+    // regex matched on the first try and returned in microseconds, so a probe
+    // built from hyphens alone passes against the very pattern it should catch.
+    for (const input of ["a".concat("-".repeat(40), "!"), "a-- a".concat("-".repeat(40), "!")]) {
+      const started = performance.now();
+      looksLikeCopy(input);
+      expect(performance.now() - started).toBeLessThan(50);
+    }
+  });
 });
 
 describe("findNonJsxCopy", () => {
