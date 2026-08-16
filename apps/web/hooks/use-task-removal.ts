@@ -7,6 +7,7 @@ import { linkToTaskOverview, replaceTaskUrl } from "@/lib/links";
 import { fetchTask, listTaskSessions } from "@/lib/api";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import { getRecentTasks } from "@/lib/recent-tasks";
+import { createAbortError, isAbortError } from "@/lib/utils/abort-error";
 
 type TaskRemovalOptions = {
   store: StoreApi<AppState>;
@@ -75,12 +76,6 @@ function taskSessionListRequestOptions(signal?: AbortSignal) {
   return signal ? { cache: "no-store" as const, init: { signal } } : { cache: "no-store" as const };
 }
 
-function isAbortError(error: unknown): boolean {
-  return (
-    typeof error === "object" && error !== null && "name" in error && error.name === "AbortError"
-  );
-}
-
 function commitTaskSessionLoad(
   store: StoreApi<AppState>,
   taskId: string,
@@ -95,9 +90,7 @@ function commitTaskSessionLoad(
   // Forced callers use this result to choose a pending-action owner. Never
   // let a superseded response escape even though its cache write was gated.
   if (force) {
-    const error = new Error("Task session load was superseded");
-    error.name = "AbortError";
-    throw error;
+    throw createAbortError("Task session load was superseded");
   }
   return store.getState().taskSessionsByTask.itemsByTaskId[taskId] ?? [];
 }

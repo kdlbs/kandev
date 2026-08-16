@@ -13,6 +13,7 @@ import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { isInputCapableSessionState } from "@/lib/utils/task-pending-input";
+import { isAbortError } from "@/lib/utils/abort-error";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 
 const debug = createDebugLogger("dockview:task-select");
@@ -42,12 +43,6 @@ export type TaskPendingSelectionSnapshot = {
   revision: number | null;
   pendingAction: TaskPendingAction | null | undefined;
 };
-
-export function isAbortError(error: unknown): boolean {
-  return (
-    typeof error === "object" && error !== null && "name" in error && error.name === "AbortError"
-  );
-}
 
 export function taskPendingSelectionMatches(
   initial: TaskPendingSelectionSnapshot,

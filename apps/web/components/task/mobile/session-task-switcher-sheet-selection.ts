@@ -2,9 +2,9 @@ import { replaceTaskUrl } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
+import { isAbortError } from "@/lib/utils/abort-error";
 import {
   effectiveTaskPendingAction,
-  isAbortError,
   resolvePreferredSessionId,
   resolveTaskSessionId,
   taskPendingSelectionMatches,
