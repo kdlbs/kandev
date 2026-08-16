@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Tests for the in-job `paths:` filter used by the merge-queue gating jobs.
 
-Covers the matcher and the command-line contract the workflow steps rely on: a
-`run=true` / `run=false` step output, and a hard failure rather than a silent
-"nothing changed" when the pattern list is missing.
+Two halves. The first exercises the matcher directly. The second reads the
+`PATTERNS` blocks out of the workflows that actually use it and asserts they
+still select what their trigger-level `paths:` filters used to select -- a
+regex that silently stops matching would hand every merge queue entry a full
+E2E run, or worse, skip one that mattered.
 """
 
 from pathlib import Path
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -20,7 +23,39 @@ from importlib import import_module
 changed_paths = import_module("changed-paths")
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 SCRIPT = Path(__file__).resolve().parent / "changed-paths.py"
+
+# Every workflow that moved its filter into a `changes` job, with one path that
+# must still select it and one that must not.
+GATED_WORKFLOWS = {
+    "backend-tests.yml": (
+        ["apps/backend/internal/orchestrator/orchestrator.go"],
+        ["apps/web/components/App.tsx", "apps/backend/AGENTS.md"],
+    ),
+    "frontend-tests.yml": (
+        ["apps/web/components/App.tsx"],
+        ["apps/backend/internal/orchestrator/orchestrator.go", "apps/web/README.md"],
+    ),
+    "e2e-tests.yml": (
+        ["apps/web/e2e/specs/kanban.spec.ts"],
+        ["docs/public/install.md", "README.md"],
+    ),
+}
+
+
+def patterns_block(workflow: str) -> str:
+    """Return the `PATTERNS:` heredoc-style YAML block of the `changes` job."""
+    text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+    match = re.search(r"(?m)^          PATTERNS: \|\n((?:^            .*\n|^\n)+)", text)
+    if match is None:
+        raise AssertionError(
+            f"{workflow} has no `PATTERNS: |` block in its `changes` job. The "
+            "gating job cannot filter anything without one, so every job it "
+            "guards would run on every event -- or none would."
+        )
+    return match.group(1)
 
 
 class MatcherTest(unittest.TestCase):
@@ -134,6 +169,65 @@ class CommandLineTest(unittest.TestCase):
             "An unset PATTERNS must fail the step. Defaulting to 'run nothing' "
             "would pass a merge queue entry that was never tested.",
         )
+
+
+class WorkflowPatternsTest(unittest.TestCase):
+    """The lists in the workflows must still mean what their filters meant."""
+
+    def test_each_gating_workflow_selects_and_rejects_the_expected_paths(self) -> None:
+        for workflow, (selected, rejected) in GATED_WORKFLOWS.items():
+            with self.subTest(workflow=workflow):
+                path_filter = changed_paths.Filter(patterns_block(workflow).splitlines())
+
+                for path in selected:
+                    self.assertTrue(
+                        path_filter.includes(path),
+                        f"{workflow} must still run for {path}.",
+                    )
+                for path in rejected:
+                    self.assertFalse(
+                        path_filter.includes(path),
+                        f"{workflow} must not be selected by {path} alone.",
+                    )
+
+    def test_every_gating_workflow_filters_on_its_own_definition(self) -> None:
+        """A change to the workflow file must run the jobs it defines.
+
+        This is the trigger-level `paths:` entry each of these workflows
+        carried for itself. Losing it means a PR that rewrites the E2E workflow
+        never runs it.
+        """
+        for workflow in GATED_WORKFLOWS:
+            with self.subTest(workflow=workflow):
+                path_filter = changed_paths.Filter(patterns_block(workflow).splitlines())
+                self.assertTrue(
+                    path_filter.includes(f".github/workflows/{workflow}"),
+                    f"{workflow} must select itself.",
+                )
+
+    def test_gating_workflows_carry_no_trigger_level_path_filter(self) -> None:
+        """The whole point: these workflows must always report a conclusion.
+
+        A `paths:` key back on `pull_request` or `merge_group` reintroduces the
+        pending-forever check that blocks a merge queue.
+        """
+        for workflow in GATED_WORKFLOWS:
+            with self.subTest(workflow=workflow):
+                text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+                triggers = text.partition("\nconcurrency:")[0]
+                self.assertNotIn(
+                    "\n    paths:",
+                    triggers,
+                    f"{workflow} must not filter its triggers by path. The "
+                    "filter belongs in the `changes` job, where a skip still "
+                    "reports a conclusion.",
+                )
+                self.assertIn(
+                    "\n  merge_group:\n",
+                    triggers,
+                    f"{workflow} must keep its merge_group trigger; without it "
+                    "the merge queue waits forever for a check that never runs.",
+                )
 
 
 if __name__ == "__main__":
