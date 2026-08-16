@@ -15,9 +15,15 @@ vi.mock("@/lib/api/domains/agent-config-api", () => ({
 }));
 
 const codexFileMethodId = "agent:codex-acp:files:0";
+const codexAgentName = "Codex";
 const copyAuthFilesLabel = "Copy auth files";
+const provideSecretLabel = "Provide secret";
 const codexConfigBundleId = "codex.config";
 const copyCodexConfigLabel = "Copy Codex configuration";
+const CHECKED_STATE = "checked";
+const UNCHECKED_STATE = "unchecked";
+const TRUE_ATTRIBUTE = "true";
+const DATA_STATE_ATTRIBUTE = "data-state";
 
 function renderRemoteCredentialsCard(
   onChange = vi.fn(),
@@ -77,7 +83,7 @@ beforeEach(() => {
     auth_specs: [
       {
         id: "codex-acp",
-        display_name: "Codex",
+        display_name: codexAgentName,
         methods: [
           {
             method_id: codexFileMethodId,
@@ -123,34 +129,37 @@ describe("RemoteCredentialsCard", () => {
     const onChange = vi.fn();
     renderRemoteCredentialsCard(onChange);
 
-    fireEvent.click(await screen.findByText("Codex"));
-    const fileOption = screen.getByRole("radio", { name: copyAuthFilesLabel });
-    expect(fileOption.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(await screen.findByText(codexAgentName));
+    const fileOption = screen.getByRole("checkbox", { name: copyAuthFilesLabel });
+    expect(fileOption.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(UNCHECKED_STATE);
 
     fireEvent.click(fileOption);
 
     expect(onChange).toHaveBeenCalledWith([codexFileMethodId]);
     await waitFor(() => {
-      const selectedOption = screen.getByRole("radio", { name: copyAuthFilesLabel });
-      expect(selectedOption.getAttribute("aria-checked")).toBe("true");
+      expect(
+        screen
+          .getByRole("checkbox", { name: copyAuthFilesLabel })
+          .getAttribute(DATA_STATE_ATTRIBUTE),
+      ).toBe(CHECKED_STATE);
     });
   });
 
   it("marks the selected credential and owning card dirty", async () => {
     renderRemoteCredentialsCard();
 
-    fireEvent.click(await screen.findByText("Codex"));
-    const fileOption = screen.getByRole("radio", { name: copyAuthFilesLabel });
+    fireEvent.click(await screen.findByText(codexAgentName));
+    const fileOption = screen.getByRole("checkbox", { name: copyAuthFilesLabel });
     fireEvent.click(fileOption);
 
     await waitFor(() => {
-      expect(fileOption.getAttribute("data-settings-dirty")).toBe("true");
+      expect(fileOption.closest("label")?.getAttribute("data-settings-dirty")).toBe(TRUE_ATTRIBUTE);
       expect(
         screen
           .getByText("Remote Credentials")
           .closest("[data-settings-dirty]")
           ?.getAttribute("data-settings-dirty"),
-      ).toBe("true");
+      ).toBe(TRUE_ATTRIBUTE);
     });
   });
 
@@ -160,17 +169,18 @@ describe("RemoteCredentialsCard", () => {
   it("renders the env-var secret hint as one sentence with the variable inline", async () => {
     renderRemoteCredentialsCard();
 
-    fireEvent.click(await screen.findByText("Codex"));
-    const envOption = screen.getByRole("radio", { name: "Provide secret" });
+    fireEvent.click(await screen.findByText(codexAgentName));
+    const envOption = screen.getByRole("checkbox", { name: provideSecretLabel });
 
-    expect(envOption.textContent).toContain("Set OPENAI_API_KEY via a stored secret");
-    expect(envOption.querySelector("code")?.textContent).toBe("OPENAI_API_KEY");
+    const envOptionLabel = envOption.closest("label");
+    expect(envOptionLabel?.textContent).toContain("Set OPENAI_API_KEY via a stored secret");
+    expect(envOptionLabel?.querySelector("code")?.textContent).toBe("OPENAI_API_KEY");
   });
 
   it("appends the not-found note to the auth file list as one string", async () => {
     renderRemoteCredentialsCard();
 
-    fireEvent.click(await screen.findByText("Codex"));
+    fireEvent.click(await screen.findByText(codexAgentName));
 
     expect(
       screen.getByText(".codex/auth.json, .codex/config.toml; files not found on this machine"),
@@ -184,15 +194,16 @@ describe("RemoteCredentialsCard", () => {
 
     renderRemoteCredentialsCard();
 
-    await screen.findByText("Codex");
+    await screen.findByText(codexAgentName);
     await waitFor(() => {
       expect(screen.queryByRole("checkbox", { name: copyCodexConfigLabel })).toBeNull();
     });
 
-    fireEvent.click(screen.getByText("Codex"));
+    fireEvent.click(screen.getByText(codexAgentName));
 
     const options = await screen.findByTestId("agent-config-options-codex-acp");
     expect(options).toBeTruthy();
+    expect(screen.queryByText("Agent configuration")).toBeNull();
     expect(options.contains(screen.getByRole("checkbox", { name: copyCodexConfigLabel }))).toBe(
       true,
     );
@@ -206,16 +217,37 @@ describe("RemoteCredentialsCard", () => {
     const onConfigChange = vi.fn();
 
     renderRemoteCredentialsCard(onAuthChange, onConfigChange);
-    fireEvent.click(await screen.findByText("Codex"));
+    fireEvent.click(await screen.findByText(codexAgentName));
 
-    const authOption = screen.getByRole("radio", { name: copyAuthFilesLabel });
+    const authOption = screen.getByRole("checkbox", { name: copyAuthFilesLabel });
     fireEvent.click(authOption);
     const configOptions = await screen.findByTestId("agent-config-options-codex-acp");
     fireEvent.click(within(configOptions).getByRole("checkbox", { name: copyCodexConfigLabel }));
 
-    expect(authOption.getAttribute("aria-checked")).toBe("true");
+    expect(authOption.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
     expect(onAuthChange).toHaveBeenCalledWith([codexFileMethodId]);
     expect(onConfigChange).toHaveBeenCalledWith([codexConfigBundleId]);
+  });
+});
+
+describe("RemoteCredentialsCard auth selections", () => {
+  it("allows file and secret authentication methods at the same time", async () => {
+    const onAuthChange = vi.fn();
+    renderRemoteCredentialsCard(onAuthChange);
+
+    fireEvent.click(await screen.findByText(codexAgentName));
+    const fileOption = screen.getByRole("checkbox", { name: copyAuthFilesLabel });
+    const secretOption = screen.getByRole("checkbox", { name: provideSecretLabel });
+
+    fireEvent.click(fileOption);
+    fireEvent.click(secretOption);
+
+    expect(fileOption.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
+    expect(secretOption.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
+    expect(onAuthChange).toHaveBeenLastCalledWith([
+      codexFileMethodId,
+      "agent:codex-acp:env:OPENAI_API_KEY",
+    ]);
   });
 });
 
@@ -274,7 +306,7 @@ describe("AgentConfigOptions", () => {
     expect(onChange).toHaveBeenCalledWith(["claude.settings"]);
     expect(
       screen.getByTestId("agent-config-options-codex-acp").getAttribute("data-settings-dirty"),
-    ).toBe("true");
+    ).toBe(TRUE_ATTRIBUTE);
   });
 
   it("disables new unavailable bundles but keeps saved ones removable", () => {

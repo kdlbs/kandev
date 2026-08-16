@@ -16,7 +16,7 @@ test.describe("portable agent configuration settings", () => {
     testPage,
   }) => {
     // The baseline E2E agent has no credentials by design. Add the mock Codex
-    // alias for this settings-only scenario so the auth radio remains a real,
+    // alias for this settings-only scenario so the auth checkbox remains a real,
     // independently selectable control without requiring provider secrets.
     await backend.restart({ KANDEV_MOCK_PROVIDERS: "codex-acp" });
     const configDir = path.join(backend.tmpDir, ".mock-agent");
@@ -60,9 +60,10 @@ test.describe("portable agent configuration settings", () => {
       ).toBeChecked();
 
       await testPage.getByRole("button", { name: "Mock Codex Not Configured" }).click();
-      const authChoice = testPage.getByRole("radio", { name: "Copy auth files" }).first();
+      const authChoice = testPage.getByRole("checkbox", { name: "Copy auth files" }).first();
       await expect(authChoice).toBeVisible();
       await authChoice.click();
+      await expect(authChoice).toBeChecked();
 
       const saveButton = testPage
         .getByTestId("settings-floating-save")

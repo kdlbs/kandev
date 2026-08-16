@@ -14,7 +14,6 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@kandev/ui/drawer";
-import { Label } from "@kandev/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { AgentConfigBundle } from "@/lib/api/domains/agent-config-api";
@@ -64,35 +63,25 @@ export function AgentConfigOptions({
     <div
       role="group"
       aria-label={t("executors:portableConfigTitle")}
-      className="space-y-3 border-t border-border/70 pt-3"
+      className="grid gap-2"
       data-testid={`agent-config-options-${agentId}`}
       data-agent-id={agentId}
       data-settings-dirty={isDirty}
     >
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex min-h-7 items-center gap-2">
-            <Label className="text-sm font-medium">{t("executors:portableConfigTitle")}</Label>
-            <PortableConfigInfo isSSH={isSSH} testId={`agent-config-info-${agentId}`} />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {t("executors:portableConfigDescription")}
-          </p>
-        </div>
-      </div>
-
-      <div className="grid gap-2">
-        {bundles.map((bundle) => {
-          const labelKey = PORTABLE_CONFIG_LABEL_KEYS[bundle.id];
-          const label = labelKey
-            ? t(labelKey)
-            : t("executors:portableConfigBundleGeneric", { id: bundle.id });
-          return (
-            <label
-              key={bundle.id}
-              className="flex min-h-11 cursor-pointer items-start gap-3 rounded-md border border-border p-3 transition-colors hover:bg-muted/40"
-              data-testid={`portable-config-bundle-${bundle.id}`}
-            >
+      {bundles.map((bundle, index) => {
+        const labelKey = PORTABLE_CONFIG_LABEL_KEYS[bundle.id];
+        const label = labelKey
+          ? t(labelKey)
+          : t("executors:portableConfigBundleGeneric", { id: bundle.id });
+        const bundleIsDirty = selected.has(bundle.id) !== baseline.has(bundle.id);
+        return (
+          <div
+            key={bundle.id}
+            className="flex min-h-11 items-start gap-2 rounded-md border border-border p-3 transition-colors hover:bg-muted/40"
+            data-testid={`portable-config-bundle-${bundle.id}`}
+            data-settings-dirty={bundleIsDirty}
+          >
+            <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
               <Checkbox
                 checked={selected.has(bundle.id)}
                 disabled={!bundle.available && !selected.has(bundle.id)}
@@ -126,9 +115,12 @@ export function AgentConfigOptions({
                 )}
               </span>
             </label>
-          );
-        })}
-      </div>
+            {index === 0 && (
+              <PortableConfigInfo isSSH={isSSH} testId={`agent-config-info-${agentId}`} />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { Trans, useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import type { ReactNode } from "react";
 import { Badge } from "@kandev/ui/badge";
+import { Checkbox } from "@kandev/ui/checkbox";
 import { AccordionContent, AccordionItem, AccordionTrigger } from "@kandev/ui/accordion";
 import { AgentLogo } from "@/components/agent-logo";
 import { InlineSecretSelect } from "@/components/settings/profile-edit/inline-secret-select";
@@ -12,35 +13,14 @@ import type { AgentConfigBundle } from "@/lib/api/domains/agent-config-api";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import { AgentConfigOptions } from "./portable-config-bundles";
 
-type AuthChoice = "files" | "env" | "none";
-
-const RADIO_LABEL_BASE =
-  "flex w-full items-start gap-3 rounded-md border p-3 text-left cursor-pointer transition-colors";
+const OPTION_LABEL_BASE =
+  "flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-md border p-3 text-left transition-colors";
 const SELECTED_BORDER = "border-primary bg-primary/5";
 const DEFAULT_BORDER = "border-border";
-const OPTION_DOT_BASE =
-  "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border";
 const AGENT_LOGO_IDS = new Set(["claude_code", "auggie", "codex", "gemini", "copilot", "amp"]);
 
 export function getSpecMethods(spec: RemoteAuthSpec): RemoteAuthMethod[] {
   return Array.isArray(spec.methods) ? spec.methods : [];
-}
-
-type InitialChoiceOpts = {
-  fileMethod: RemoteAuthMethod | undefined;
-  envMethod: RemoteAuthMethod | undefined;
-  selectedIds: Set<string>;
-  envSecretId: string | null;
-};
-
-function initialChoice(opts: InitialChoiceOpts): AuthChoice {
-  if (opts.fileMethod && opts.selectedIds.has(opts.fileMethod.method_id)) return "files";
-  // Keep env selected while the user is choosing a secret. Otherwise the
-  // secret dropdown disappears before the first secret can be selected.
-  if (opts.envMethod && (opts.selectedIds.has(opts.envMethod.method_id) || opts.envSecretId)) {
-    return "env";
-  }
-  return "none";
 }
 
 type AuthSectionProps = {
@@ -77,25 +57,25 @@ export function AuthSection({
   const methods = getSpecMethods(spec);
   const envMethod = methods.find((m) => m.type === "env");
   const fileMethod = methods.find((m) => m.type === "files");
-  const hasOnlyEnv = envMethod && !fileMethod;
-  const choice = initialChoice({ fileMethod, envMethod, selectedIds, envSecretId });
-  const baselineChoice = initialChoice({
-    fileMethod,
-    envMethod,
-    selectedIds: baselineSelectedIds,
-    envSecretId: baselineEnvSecretId,
-  });
-  const isDirty = choice !== baselineChoice || envSecretId !== baselineEnvSecretId;
+  const fileSelected = fileMethod ? selectedIds.has(fileMethod.method_id) : false;
+  const envSelected = Boolean(envMethod && (selectedIds.has(envMethod.method_id) || envSecretId));
+  const baselineFileSelected = fileMethod ? baselineSelectedIds.has(fileMethod.method_id) : false;
+  const baselineEnvSelected = Boolean(
+    envMethod && (baselineSelectedIds.has(envMethod.method_id) || baselineEnvSecretId),
+  );
+  const isDirty =
+    fileSelected !== baselineFileSelected ||
+    envSelected !== baselineEnvSelected ||
+    envSecretId !== baselineEnvSecretId;
   const configIsDirty = configBundles.some(
     (bundle) => configBundleIds.includes(bundle.id) !== baselineConfigBundleIds.includes(bundle.id),
   );
 
-  const handleChoice = (value: AuthChoice) => {
+  const handleMethodToggle = (methodId: string, checked: boolean) => {
     const nextSelectedIds = new Set(selectedIds);
-    if (fileMethod) setMethodSelected(nextSelectedIds, fileMethod.method_id, value === "files");
-    if (envMethod) {
-      setMethodSelected(nextSelectedIds, envMethod.method_id, value === "env");
-      if (value !== "env") onMethodSecretChange(envMethod.method_id, null);
+    setMethodSelected(nextSelectedIds, methodId, checked);
+    if (envMethod?.method_id === methodId && !checked) {
+      onMethodSecretChange(methodId, null);
     }
     onCredentialsChange([...nextSelectedIds]);
   };
@@ -106,34 +86,30 @@ export function AuthSection({
         <div className="flex items-center gap-2 flex-1">
           {AGENT_LOGO_IDS.has(spec.id) && <AgentLogo agentName={spec.id} size={18} />}
           <span className="font-medium text-sm">{spec.display_name}</span>
-          <AuthStatusBadge choice={choice} hasSecret={!!envSecretId} />
+          <AuthStatusBadge
+            fileSelected={fileSelected}
+            envSelected={envSelected}
+            hasSecret={!!envSecretId}
+          />
         </div>
       </AccordionTrigger>
       <AccordionContent className="h-auto">
         <div className="space-y-3 text-sm">
-          {hasOnlyEnv && envMethod ? (
-            <EnvOnlySection
-              envMethod={envMethod}
-              secretId={envSecretId}
-              baselineSecretId={baselineEnvSecretId}
-              onSecretIdChange={(sid) => onMethodSecretChange(envMethod.method_id, sid)}
-              secrets={secrets}
-            />
-          ) : (
-            <AuthChoiceRadio
-              choice={choice}
-              baselineChoice={baselineChoice}
-              onChoiceChange={handleChoice}
-              fileMethod={fileMethod}
-              envMethod={envMethod}
-              secretId={envSecretId}
-              baselineSecretId={baselineEnvSecretId}
-              onSecretIdChange={(sid) => {
-                if (envMethod) onMethodSecretChange(envMethod.method_id, sid);
-              }}
-              secrets={secrets}
-            />
-          )}
+          <AuthOptions
+            fileMethod={fileMethod}
+            envMethod={envMethod}
+            fileSelected={fileSelected}
+            envSelected={envSelected}
+            baselineFileSelected={baselineFileSelected}
+            baselineEnvSelected={baselineEnvSelected}
+            secretId={envSecretId}
+            baselineSecretId={baselineEnvSecretId}
+            onMethodToggle={handleMethodToggle}
+            onSecretIdChange={(sid) => {
+              if (envMethod) onMethodSecretChange(envMethod.method_id, sid);
+            }}
+            secrets={secrets}
+          />
           {configBundles.length > 0 && (
             <AgentConfigOptions
               agentId={spec.id}
@@ -150,36 +126,56 @@ export function AuthSection({
   );
 }
 
-function EnvOnlySection({
+function AuthOptions({
+  fileMethod,
   envMethod,
+  fileSelected,
+  envSelected,
+  baselineFileSelected,
+  baselineEnvSelected,
   secretId,
   baselineSecretId,
+  onMethodToggle,
   onSecretIdChange,
   secrets,
 }: {
-  envMethod: RemoteAuthMethod;
+  fileMethod?: RemoteAuthMethod;
+  envMethod?: RemoteAuthMethod;
+  fileSelected: boolean;
+  envSelected: boolean;
+  baselineFileSelected: boolean;
+  baselineEnvSelected: boolean;
   secretId: string | null;
   baselineSecretId: string | null;
+  onMethodToggle: (methodId: string, checked: boolean) => void;
   onSecretIdChange: (id: string | null) => void;
   secrets: SecretListItem[];
 }) {
   const { t } = useTranslation();
   return (
-    <>
-      {envMethod.setup_hint && (
-        <div className="markdown-body text-xs text-muted-foreground [&_p]:m-0">
-          <ReactMarkdown>{envMethod.setup_hint}</ReactMarkdown>
-        </div>
+    <div role="group" aria-label={t("executors:remoteAuthMethod")} className="grid gap-2">
+      {fileMethod && (
+        <FileOption
+          method={fileMethod}
+          isSelected={fileSelected}
+          isDirty={fileSelected !== baselineFileSelected}
+          filesAvailable={fileMethod.has_local_files ?? false}
+          onCheckedChange={(checked) => onMethodToggle(fileMethod.method_id, checked)}
+        />
       )}
-      <InlineSecretSelect
-        secretId={secretId}
-        onSecretIdChange={onSecretIdChange}
-        secrets={secrets}
-        label={envMethod.env_var}
-        placeholder={t("executors:selectOrCreateASecret")}
-        isDirty={secretId !== baselineSecretId}
-      />
-    </>
+      {envMethod?.env_var && (
+        <EnvOption
+          method={envMethod}
+          isSelected={envSelected}
+          isDirty={envSelected !== baselineEnvSelected || secretId !== baselineSecretId}
+          secretId={secretId}
+          baselineSecretId={baselineSecretId}
+          onSecretIdChange={onSecretIdChange}
+          secrets={secrets}
+          onCheckedChange={(checked) => onMethodToggle(envMethod.method_id, checked)}
+        />
+      )}
+    </div>
   );
 }
 
@@ -188,21 +184,21 @@ function FileOption({
   isSelected,
   isDirty,
   filesAvailable,
-  onSelect,
+  onCheckedChange,
 }: {
   method: RemoteAuthMethod;
   isSelected: boolean;
   isDirty: boolean;
   filesAvailable: boolean;
-  onSelect: () => void;
+  onCheckedChange: (checked: boolean) => void;
 }) {
   const { t } = useTranslation();
   const filesLabel = method.source_files?.join(", ") ?? "";
   return (
-    <AuthOptionButton
+    <AuthOption
       selected={isSelected}
       isDirty={isDirty}
-      onSelect={onSelect}
+      onCheckedChange={onCheckedChange}
       label={method.label ?? t("executors:copyAuthFiles")}
     >
       <div className="flex flex-col gap-0.5">
@@ -213,7 +209,7 @@ function FileOption({
             : t("executors:authFilesNotFoundOnThisMachine", { files: filesLabel })}
         </span>
       </div>
-    </AuthOptionButton>
+    </AuthOption>
   );
 }
 
@@ -225,7 +221,7 @@ function EnvOption({
   baselineSecretId,
   onSecretIdChange,
   secrets,
-  onSelect,
+  onCheckedChange,
 }: {
   method: RemoteAuthMethod;
   isSelected: boolean;
@@ -234,15 +230,15 @@ function EnvOption({
   baselineSecretId: string | null;
   onSecretIdChange: (id: string | null) => void;
   secrets: SecretListItem[];
-  onSelect: () => void;
+  onCheckedChange: (checked: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
     <div>
-      <AuthOptionButton
+      <AuthOption
         selected={isSelected}
         isDirty={isDirty}
-        onSelect={onSelect}
+        onCheckedChange={onCheckedChange}
         label={t("executors:provideSecret")}
       >
         <div className="flex flex-col gap-0.5">
@@ -259,7 +255,7 @@ function EnvOption({
             </div>
           )}
         </div>
-      </AuthOptionButton>
+      </AuthOption>
       {isSelected && (
         <div className="pl-7 pt-2">
           <InlineSecretSelect
@@ -275,86 +271,32 @@ function EnvOption({
   );
 }
 
-function AuthChoiceRadio({
-  choice,
-  baselineChoice,
-  onChoiceChange,
-  fileMethod,
-  envMethod,
-  secretId,
-  baselineSecretId,
-  onSecretIdChange,
-  secrets,
-}: {
-  choice: AuthChoice;
-  baselineChoice: AuthChoice;
-  onChoiceChange: (v: AuthChoice) => void;
-  fileMethod?: RemoteAuthMethod;
-  envMethod?: RemoteAuthMethod;
-  secretId: string | null;
-  baselineSecretId: string | null;
-  onSecretIdChange: (id: string | null) => void;
-  secrets: SecretListItem[];
-}) {
-  const { t } = useTranslation();
-  return (
-    <div role="radiogroup" aria-label={t("executors:remoteAuthMethod")} className="grid gap-0">
-      {fileMethod && (
-        <FileOption
-          method={fileMethod}
-          isSelected={choice === "files"}
-          isDirty={(choice === "files") !== (baselineChoice === "files")}
-          filesAvailable={fileMethod.has_local_files ?? false}
-          onSelect={() => onChoiceChange("files")}
-        />
-      )}
-      {envMethod?.env_var && (
-        <EnvOption
-          method={envMethod}
-          isSelected={choice === "env"}
-          isDirty={(choice === "env") !== (baselineChoice === "env")}
-          secretId={secretId}
-          baselineSecretId={baselineSecretId}
-          onSecretIdChange={onSecretIdChange}
-          secrets={secrets}
-          onSelect={() => onChoiceChange("env")}
-        />
-      )}
-    </div>
-  );
-}
-
-function AuthOptionButton({
+function AuthOption({
   selected,
   isDirty,
-  onSelect,
+  onCheckedChange,
   label,
   children,
 }: {
   selected: boolean;
   isDirty: boolean;
-  onSelect: () => void;
+  onCheckedChange: (checked: boolean) => void;
   label: string;
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      aria-label={label}
-      onClick={onSelect}
+    <label
       data-settings-dirty={isDirty}
-      className={`${RADIO_LABEL_BASE} ${selected ? SELECTED_BORDER : DEFAULT_BORDER}`}
+      className={`${OPTION_LABEL_BASE} ${selected ? SELECTED_BORDER : DEFAULT_BORDER}`}
     >
-      <span
-        aria-hidden="true"
-        className={`${OPTION_DOT_BASE} ${selected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/80"}`}
-      >
-        {selected && <span className="size-2 rounded-full bg-current" />}
-      </span>
+      <Checkbox
+        checked={selected}
+        onCheckedChange={(checked) => onCheckedChange(checked === true)}
+        aria-label={label}
+        className="mt-0.5"
+      />
       {children}
-    </button>
+    </label>
   );
 }
 
@@ -366,16 +308,24 @@ function setMethodSelected(selectedIds: Set<string>, methodId: string, selected:
   selectedIds.delete(methodId);
 }
 
-function AuthStatusBadge({ choice, hasSecret }: { choice: AuthChoice; hasSecret: boolean }) {
+function AuthStatusBadge({
+  fileSelected,
+  envSelected,
+  hasSecret,
+}: {
+  fileSelected: boolean;
+  envSelected: boolean;
+  hasSecret: boolean;
+}) {
   const { t } = useTranslation();
-  if (choice === "env" && hasSecret) {
+  if (envSelected && hasSecret) {
     return (
       <Badge variant="default" className="bg-green-600 text-[10px] px-1.5 py-0">
         {t("executors:configured")}
       </Badge>
     );
   }
-  if (choice === "files") {
+  if (fileSelected) {
     return (
       <Badge variant="default" className="bg-green-600 text-[10px] px-1.5 py-0">
         {t("executors:filesSelected")}
