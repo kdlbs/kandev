@@ -399,19 +399,16 @@ func scenarioDiffExpansionSetup(e *emitter) {
 	}
 
 	runGitCmd := makeGitRunner(wd)
-	_ = runGitCmd("rm", "--force", filePath)
-	_ = runGitCmd("commit", "-m", "cleanup expansion_test.go")
-
-	if err := os.WriteFile(filePath, []byte(original), 0o644); err != nil {
-		e.text("diff-expansion-setup: re-write failed: " + err.Error())
-		return
-	}
-
+	// Add the canonical content directly. `--allow-empty` makes retries
+	// idempotent when a reused worktree already has the same file at HEAD;
+	// overwriting before `git add` also repairs a worktree left with the prior
+	// scenario's modified content. The old rm/cleanup commit sequence could
+	// fail under concurrent git setup and left the real fixture commit absent.
 	if err := runGitCmd("add", filePath); err != nil {
 		e.text("diff-expansion-setup: git add failed")
 		return
 	}
-	if err := runGitCmd("commit", "-m", "add expansion_test.go for e2e diff expansion test"); err != nil {
+	if err := runGitCmd("commit", "--allow-empty", "-m", "add expansion_test.go for e2e diff expansion test"); err != nil {
 		e.text("diff-expansion-setup: git commit failed")
 		return
 	}
@@ -1129,18 +1126,40 @@ func makeGitRunner(wd string) func(args ...string) error {
 		"GIT_COMMITTER_EMAIL=mock@test.local",
 	)
 	return func(args ...string) error {
-		cmd := subproc.NewGitCommand(context.Background(), append([]string{
-			"-c", "commit.gpgsign=false",
-			"-c", "tag.gpgsign=false",
-		}, args...)...)
-		cmd.Dir = wd
-		cmd.Env = gitEnv
-		out, cmdErr := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
-		if cmdErr != nil {
-			_, _ = fmt.Fprintf(logOutput, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
+		for attempt := 0; attempt < 5; attempt++ {
+			cmd := subproc.NewGitCommand(context.Background(), append([]string{
+				"-c", "commit.gpgsign=false",
+				"-c", "tag.gpgsign=false",
+			}, args...)...)
+			cmd.Dir = wd
+			cmd.Env = gitEnv
+			out, cmdErr := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
+			if cmdErr == nil {
+				return nil
+			}
+			if !retryableGitSetupOutput(string(out)) || attempt == 4 {
+				_, _ = fmt.Fprintf(logOutput, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
+				return cmdErr
+			}
+			time.Sleep(time.Duration(50*(1<<attempt)) * time.Millisecond)
 		}
-		return cmdErr
+		return fmt.Errorf("git %v failed after retries", args)
 	}
+}
+
+func retryableGitSetupOutput(output string) bool {
+	lower := strings.ToLower(output)
+	for _, marker := range []string{
+		"index.lock",
+		"could not lock",
+		"another git process",
+		"unable to create",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // contextWithTimeout creates a context with timeout in seconds.

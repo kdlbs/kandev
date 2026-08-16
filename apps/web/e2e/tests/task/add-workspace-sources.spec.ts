@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { waitForHttp } from "../../helpers/causal-waits";
+import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
@@ -59,6 +60,25 @@ function activeFileTab(page: Page, filename: string) {
   return page.locator(".dv-tab.dv-active-tab", { hasText: filename }).first();
 }
 
+async function waitForWorkspaceReady(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(taskId);
+        return sessions.find((session) => session.id === sessionId)?.workspace_path ?? "";
+      },
+      {
+        timeout: 60_000,
+        message: "task workspace should be ready before opening the session",
+      },
+    )
+    .toMatch(/\S/);
+}
+
 test.describe("Attach local workspace sources", () => {
   test("adds a local repository and folder successively, scopes Changes to Git, and persists", async ({
     testPage,
@@ -82,6 +102,8 @@ test.describe("Attach local workspace sources", () => {
       },
     );
 
+    if (!task.session_id) throw new Error("task creation did not return a session id");
+    await waitForWorkspaceReady(apiClient, task.id, task.session_id);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -101,7 +123,6 @@ test.describe("Attach local workspace sources", () => {
     const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
     await expect(addSources).toBeEnabled();
     await expect(openFolder).toBeEnabled();
-    if (!task.session_id) throw new Error("task creation did not return a session id");
     await Promise.all([
       testPage.waitForRequest(
         (request) =>

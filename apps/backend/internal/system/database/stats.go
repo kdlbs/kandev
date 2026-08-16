@@ -61,30 +61,32 @@ type ResetDirs struct {
 // quit and relaunch Kandev. The previous syscall.Exec approach was brittle
 // under desktop launchers and `make dev` watchers.
 type Service struct {
-	pool    *db.Pool
-	dataDir string
-	dbPath  string
-	dirs    ResetDirs
-	jobs    *jobs.Tracker
-	log     *logger.Logger
+	pool         *db.Pool
+	databasePath string
+	dirs         ResetDirs
+	jobs         *jobs.Tracker
+	log          *logger.Logger
 
 	// OrchestratorShutdown stops the orchestrator and active executions before
 	// the factory-reset job runs. Wired by cmd/kandev. Tests pass a no-op.
 	OrchestratorShutdown func()
 }
 
-// NewService constructs a Service. dataDir is the resolved kandev data
-// directory (the SQLite file lives at <dataDir>/kandev.db, backups under
-// <dataDir>/backups). dirs lists the on-disk subtrees factory-reset wipes.
-func NewService(pool *db.Pool, dataDir string, dirs ResetDirs, j *jobs.Tracker, log *logger.Logger) *Service {
+// NewService constructs a Service for the configured SQLite database path.
+// The sibling backups directory is derived from databasePath. dirs lists the
+// on-disk subtrees factory-reset wipes.
+func NewService(pool *db.Pool, databasePath string, dirs ResetDirs, j *jobs.Tracker, log *logger.Logger) *Service {
 	return &Service{
-		pool:    pool,
-		dataDir: dataDir,
-		dbPath:  filepath.Join(dataDir, "kandev.db"),
-		dirs:    dirs,
-		jobs:    j,
-		log:     log,
+		pool:         pool,
+		databasePath: databasePath,
+		dirs:         dirs,
+		jobs:         j,
+		log:          log,
 	}
+}
+
+func (s *Service) backupsDir() string {
+	return filepath.Join(filepath.Dir(s.databasePath), "backups")
 }
 
 // Stats returns the current database stats. SQLite size is computed from
@@ -95,7 +97,7 @@ func (s *Service) Stats() (Stats, error) {
 	driver := s.databaseDriver()
 	out := Stats{Driver: driver}
 	if driver == databaseDriverSQLite {
-		out.Path = s.dbPath
+		out.Path = s.databasePath
 	}
 
 	if s.pool != nil {
@@ -113,11 +115,11 @@ func (s *Service) Stats() (Stats, error) {
 	}
 
 	if driver == databaseDriverSQLite {
-		if wal, err := walSize(s.dbPath); err == nil {
+		if wal, err := walSize(s.databasePath); err == nil {
 			out.WALSizeBytes = wal
 		}
 
-		if last := lastBackupAt(filepath.Join(s.dataDir, "backups")); !last.IsZero() {
+		if last := lastBackupAt(s.backupsDir()); !last.IsZero() {
 			out.LastBackupAt = &last
 		}
 	}

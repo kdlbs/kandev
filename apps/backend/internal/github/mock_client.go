@@ -116,6 +116,7 @@ type MockClient struct {
 	requestedReviews  []requestedReviewers
 	mergedPRs         []mergedPR
 	mergeMethods      map[repoKey]RepoMergeMethods
+	repositoryDetails map[repoKey]*GitHubRepository
 	gists             map[string]mockGist
 	deletedGists      []string
 	nextGistID        int
@@ -162,6 +163,7 @@ func NewMockClient() *MockClient {
 		prCommitsFailures: make(map[prKey]int),
 		commitDetails:     make(map[commitDetailKey]PRCommitDetail),
 		mergeMethods:      make(map[repoKey]RepoMergeMethods),
+		repositoryDetails: make(map[repoKey]*GitHubRepository),
 		gists:             make(map[string]mockGist),
 		repoFiles:         make(map[repoKey][]repoFileEntry),
 	}
@@ -214,6 +216,17 @@ func (m *MockClient) FindPRByBranch(_ context.Context, owner, repo, branch strin
 	}
 	if release != nil {
 		<-release
+	}
+	return pr, nil
+}
+
+func (m *MockClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, headRepo, branch string) (*PR, error) {
+	pr, err := m.FindPRByBranch(ctx, owner, repo, branch)
+	if err != nil || pr == nil {
+		return pr, err
+	}
+	if !sameRepositoryIdentity(pr.HeadRepoOwner, pr.HeadRepoName, headOwner, headRepo) {
+		return nil, nil
 	}
 	return pr, nil
 }
@@ -409,6 +422,73 @@ func (m *MockClient) HasRepositoryAccess(_ context.Context, owner, repo string) 
 		}
 	}
 	return false, nil
+}
+
+// GetRepository returns an explicitly seeded repository identity. The
+// lightweight repo-search fixture remains separate so existing autocomplete
+// tests do not accidentally grant write access.
+func (m *MockClient) GetRepository(_ context.Context, owner, repo string) (*GitHubRepository, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
+	repository, ok := m.repositoryDetails[repoKey{owner, repo}]
+	if !ok {
+		return nil, &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/" + owner + "/" + repo}
+	}
+	copy := *repository
+	return &copy, nil
+}
+
+func (m *MockClient) ListRepositoryForks(_ context.Context, owner, repo string) ([]*GitHubRepository, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
+	parent, ok := m.repositoryDetails[repoKey{owner, repo}]
+	if !ok {
+		return nil, &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/" + owner + "/" + repo}
+	}
+	forks := make([]*GitHubRepository, 0)
+	for _, repository := range m.repositoryDetails {
+		if repository == nil || !repository.Fork || repository.ParentID != parent.ID {
+			continue
+		}
+		forks = append(forks, copyGitHubRepository(repository))
+	}
+	return forks, nil
+}
+
+// CreateFork creates a deterministic in-memory fork for mock Improve Kandev
+// flows. Production clients still use the provider API and bounded polling.
+func (m *MockClient) CreateFork(_ context.Context, owner, repo string) (*GitHubRepository, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reposUnavailable {
+		return nil, ErrNoClient
+	}
+	parent, ok := m.repositoryDetails[repoKey{owner, repo}]
+	if !ok {
+		return nil, &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/" + owner + "/" + repo}
+	}
+	login := m.user
+	fullName := login + "/" + repo
+	fork := &GitHubRepository{
+		ID:             parent.ID + 1,
+		FullName:       fullName,
+		Owner:          login,
+		Name:           repo,
+		CloneURL:       "https://github.com/" + fullName + ".git",
+		Fork:           true,
+		ParentID:       parent.ID,
+		ParentFullName: parent.FullName,
+		PushAccess:     true,
+		AdminAccess:    true,
+	}
+	m.repositoryDetails[repoKey{login, repo}] = fork
+	return copyGitHubRepository(fork), nil
 }
 
 func (m *MockClient) ListPRReviews(_ context.Context, owner, repo string, number int) ([]PRReview, error) {
@@ -811,6 +891,15 @@ func (m *MockClient) AddRepos(org string, repos []GitHubRepo) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.repos[org] = append(m.repos[org], repos...)
+}
+
+// SetRepositoryDetails seeds the provider-authoritative repository response
+// used by managed fork preparation tests.
+func (m *MockClient) SetRepositoryDetails(repository GitHubRepository) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := repositoryKeyFromFullName(repository.FullName)
+	m.repositoryDetails[key] = copyGitHubRepository(&repository)
 }
 
 // AddReviews appends reviews for a PR.

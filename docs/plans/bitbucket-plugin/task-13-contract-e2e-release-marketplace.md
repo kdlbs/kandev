@@ -3,7 +3,23 @@ id: "13-contract-e2e-release-marketplace"
 title: "Cross-repository contract E2E, release, and marketplace"
 status: in_progress
 wave: 4
-depends_on: ["03-protocol-manifest-actions", "04-frontend-plugin-registry", "05-dynamic-composer-reference-sources", "06-plugin-owned-task-lifecycle", "07-provider-neutral-git-credentials", "08-native-repository-provider", "09-native-link-review-surfaces", "10-cloud-dc-domain-auth", "11-plugin-workflows-watches", "12-plugin-ui-native-registrations", "12b-github-parity-page", "12c-exact-code-host-ui-parity", "12d-host-native-task-link-parity", "12h-native-create-unlink-indicators-saved-queries"]
+depends_on:
+  [
+    "03-protocol-manifest-actions",
+    "04-frontend-plugin-registry",
+    "05-dynamic-composer-reference-sources",
+    "06-plugin-owned-task-lifecycle",
+    "07-provider-neutral-git-credentials",
+    "08-native-repository-provider",
+    "09-native-link-review-surfaces",
+    "10-cloud-dc-domain-auth",
+    "11-plugin-workflows-watches",
+    "12-plugin-ui-native-registrations",
+    "12b-github-parity-page",
+    "12c-exact-code-host-ui-parity",
+    "12d-host-native-task-link-parity",
+    "12h-native-create-unlink-indicators-saved-queries",
+  ]
 plan: "plan.md"
 spec: "../../specs/bitbucket-plugin/spec.md"
 ---
@@ -102,15 +118,23 @@ leakage checks as release gates.
   an actual build-status transition from successful to in-progress and back, and the
   disposable marker was restored to successful.
 - Public docs and the marketplace index baseline validate.
-- Container credential specs are present for Docker and SSH, but this workspace lacks
-  `KANDEV_E2E_CREDENTIAL_BROKER_PUBLIC_BASE_URL`; both tests therefore skip rather than
-  claiming real HTTPS clone/push evidence.
-- The release workflow's independent packaged-plugin runner still fails closed without
-  `KANDEV_PLUGIN_E2E_URL`. The manifest intentionally omits `min_kandev_version` until
-  these host contracts ship in a named release and the same package passes against
-  that released host.
+- On 2026-08-14 the exact Docker and SSH container credential specs passed against a
+  temporary public HTTPS broker endpoint. Both paths cloned and pushed through the
+  exact provider lease, exposed no credential in process output or logs, and rejected
+  Git after connection-generation revocation. The run also found and fixed a generic
+  SSH boundary bug: plugin-provider helpers are now rewritten to the uploaded remote
+  `agentctl` path for both checkout preparation and the long-lived instance runtime.
+- Kandev `v0.88.0` is released. The independently published
+  [`kandev-plugin-bitbucket` v0.2.0](https://github.com/kdlbs/kandev-plugin-bitbucket/releases/tag/v0.2.0)
+  declares `min_kandev_version: 0.88.0`; its five platform packages, internal
+  checksums, build/verify jobs, and packaged desktop/mobile contract are green.
+- The final marketplace registry mutation is prepared in the Kandev marketplace PR.
+  Live Data Center remains an explicit post-publication acceptance follow-up because
+  no disposable installation was available; Data Center API, auth, context-path, and
+  capability behavior remains covered by product-specific fixtures and contract tests.
 - Signing is intentionally deferred by
   [ADR-2026-08-01-bitbucket-initial-release-remains-unsigned](../../decisions/2026-08-01-bitbucket-initial-release-remains-unsigned.md).
   The initial package uses mandatory internal checksums, remains visibly unsigned,
   and makes no cryptographic publisher-provenance claim. Signing is no longer a Task
-  13 blocker; the unreleased host version and external live-test gates still are.
+  13 blocker. The released host, package, desktop/mobile, and container gates are now
+  satisfied; merging the marketplace registry PR is the remaining publication step.

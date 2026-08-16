@@ -258,6 +258,10 @@ type GitCredentialSnapshot struct {
 // configuration attributed to one prompt/response turn.
 const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 
+// TurnMetaKeyWorkflowStepIDAtStart records the workflow step the turn's task
+// was in when the turn started. Absent when the task held no step.
+const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
+
 // SessionRuntimeConfig is persisted as provider state or explicit overrides.
 // On resume, explicit values take precedence over the latest provider snapshot
 // so delayed provider events cannot replace user intent.

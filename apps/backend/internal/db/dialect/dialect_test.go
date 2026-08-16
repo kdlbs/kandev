@@ -102,6 +102,28 @@ func TestDateOf(t *testing.T) {
 	}
 }
 
+func TestDateTimeOf(t *testing.T) {
+	got := DateTimeOf(SQLite3, "activation.value")
+	if got != "datetime(activation.value)" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = DateTimeOf(PGX, "activation.value")
+	if got != "(activation.value)::timestamptz" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestNaiveUTCTimestampOf(t *testing.T) {
+	got := NaiveUTCTimestampOf(SQLite3, "ts.started_at")
+	if got != "datetime(ts.started_at)" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = NaiveUTCTimestampOf(PGX, "ts.started_at")
+	if got != "(ts.started_at AT TIME ZONE 'UTC')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestNow(t *testing.T) {
 	if Now(SQLite3) != "datetime('now')" {
 		t.Errorf("sqlite: got %q", Now(SQLite3))

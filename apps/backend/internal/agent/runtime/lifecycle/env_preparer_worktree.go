@@ -121,7 +121,10 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	// isScriptEffectivelyEmpty.
 	scriptReq := *req // shallow copy — Env map is shared (read-only in runSetupScriptStep)
 	scriptReq.RepoSetupScript = ""
-	resolvedScript := resolvePreparerSetupScript(&scriptReq, workspacePath)
+	resolvedScript, err := resolvePreparerSetupScript(&scriptReq, workspacePath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve setup script: %w", err)
+	}
 	if resolvedScript != "" {
 		totalSteps++
 		steps = runSetupScriptStep(ctx, &scriptReq, workspacePath, resolvedScript, stepIdx, totalSteps, onProgress, steps, p.logger)
@@ -266,27 +269,28 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 // manager's CreateRequest. Progress callbacks are wired by the caller.
 func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 	return worktree.CreateRequest{
-		TaskID:                 req.TaskID,
-		WorkspaceID:            req.WorkspaceID,
-		SessionID:              req.SessionID,
-		TaskTitle:              req.TaskTitle,
-		RepositoryID:           req.RepositoryID,
-		RepositoryPath:         req.RepositoryPath,
-		BaseBranch:             req.BaseBranch,
-		FallbackBaseBranch:     req.DefaultBranch,
-		CheckoutBranch:         req.CheckoutBranch,
-		PRNumber:               req.PRNumber,
-		RemoteContribution:     req.RemoteContribution,
-		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
-		WorktreeBranchTicket:   req.WorktreeBranchTicket,
-		PullBeforeWorktree:     req.PullBeforeWorktree,
-		RemoteSyncHandled:      req.RemoteSyncHandled,
-		WorktreeID:             req.WorktreeID,
-		TaskDirName:            req.TaskDirName,
-		RepoName:               req.RepoName,
-		BranchSlug:             req.BranchSlug,
-		BranchIdentitySlug:     req.BranchIdentitySlug,
+		TaskID:                  req.TaskID,
+		WorkspaceID:             req.WorkspaceID,
+		SessionID:               req.SessionID,
+		TaskTitle:               req.TaskTitle,
+		RepositoryID:            req.RepositoryID,
+		RepositoryPath:          req.RepositoryPath,
+		BaseBranch:              req.BaseBranch,
+		FallbackBaseBranch:      req.DefaultBranch,
+		CheckoutBranch:          req.CheckoutBranch,
+		PRNumber:                req.PRNumber,
+		RemoteContribution:      req.RemoteContribution,
+		WorktreeBranchPrefix:    req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate:  req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:    req.WorktreeBranchTicket,
+		PullBeforeWorktree:      req.PullBeforeWorktree,
+		RemoteSyncHandled:       req.RemoteSyncHandled,
+		WorktreeID:              req.WorktreeID,
+		TaskDirName:             req.TaskDirName,
+		RepoName:                req.RepoName,
+		BranchSlug:              req.BranchSlug,
+		BranchIdentitySlug:      req.BranchIdentitySlug,
+		ContributionDestination: req.ContributionDestination,
 		// Export resolved executor-profile env vars into the repository setup
 		// script so tokens (e.g. an npm auth token) are available during
 		// install. Set for both single-repo and multi-repo launches, which both
@@ -488,6 +492,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.CheckoutBranch = spec.CheckoutBranch
 	subReq.PRNumber = spec.PRNumber
 	subReq.RemoteContribution = spec.RemoteContribution
+	subReq.ContributionDestination = spec.ContributionDestination
 	subReq.WorktreeID = spec.WorktreeID
 	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix
 	subReq.WorktreeBranchTemplate = spec.WorktreeBranchTemplate

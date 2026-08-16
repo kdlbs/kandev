@@ -73,6 +73,19 @@ describe("MobilePluginNavSection", () => {
     expect(container.innerHTML).toBe("");
   });
 
+  it("also excludes sidebar-footer items: they belong to the Utilities group, not here", () => {
+    pluginRegistry.forPlugin("plugin-a").registerNavItem({
+      id: "board",
+      label: "Board",
+      path: "/plugins/board",
+      section: "sidebar-footer",
+    });
+
+    const { container } = renderSection();
+
+    expect(container.innerHTML).toBe("");
+  });
+
   it("renders the named curated icon, falling back to the puzzle glyph", () => {
     pluginRegistry
       .forPlugin("plugin-a")

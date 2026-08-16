@@ -22,8 +22,11 @@ import (
 
 // newAPIFixture builds the full production HTTP stack for auth: global
 // middleware + auth API routes on one router. authEnabled maps to the
-// features.auth flag (on ⇒ setup mode until the wizard runs).
-func newAPIFixture(t *testing.T, authEnabled bool) (*gin.Engine, *auth.Service) {
+// features.auth flag (on ⇒ setup mode until the wizard runs). The router
+// mirrors production by default: gin.New() trusts all proxies, so
+// SetTrustedProxies is called with the variadic trusted list (nil clears the
+// insecure default) exactly like buildHTTPServer does.
+func newAPIFixture(t *testing.T, authEnabled bool, trustedProxies ...string) (*gin.Engine, *auth.Service) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	conn, err := sqlx.Open("sqlite3", ":memory:")
@@ -50,6 +53,12 @@ func newAPIFixture(t *testing.T, authEnabled bool) (*gin.Engine, *auth.Service) 
 		t.Fatalf("auth service: %v", err)
 	}
 	router := gin.New()
+	if len(trustedProxies) == 0 {
+		trustedProxies = nil
+	}
+	if err := router.SetTrustedProxies(trustedProxies); err != nil {
+		t.Fatalf("set trusted proxies: %v", err)
+	}
 	router.Use(authhttpmw.Middleware(svc))
 	RegisterRoutes(router, svc, nil)
 	return router, svc
@@ -61,7 +70,7 @@ type apiClient struct {
 	cookie *http.Cookie
 }
 
-func (c *apiClient) do(method, path string, body any) *httptest.ResponseRecorder {
+func (c *apiClient) do(method, path string, body any, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
 	c.t.Helper()
 	var reader *bytes.Reader
 	if body != nil {
@@ -78,6 +87,9 @@ func (c *apiClient) do(method, path string, body any) *httptest.ResponseRecorder
 	if c.cookie != nil {
 		req.AddCookie(c.cookie)
 	}
+	for _, m := range mutate {
+		m(req)
+	}
 	rec := httptest.NewRecorder()
 	c.router.ServeHTTP(rec, req)
 	// Capture session cookie updates (login/setup/logout).
@@ -91,6 +103,110 @@ func (c *apiClient) do(method, path string, body any) *httptest.ResponseRecorder
 		}
 	}
 	return rec
+}
+
+// loginSessionIP bootstraps the admin via setup, performs a login request
+// with the given transport attributes, and returns the stored IP of the
+// current session (the login cookie is current; the setup session stays in
+// the list and is not selected).
+func loginSessionIP(t *testing.T, router *gin.Engine, remoteAddr, forwardedFor, xRealIP string) string {
+	t.Helper()
+	client := &apiClient{t: t, router: router}
+	rec := client.do(http.MethodPost, "/api/v1/auth/setup", map[string]any{
+		"email": "admin@x.dev", "password": "adminpass123", "display_name": "Admin",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("setup: %d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = client.do(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"email": "admin@x.dev", "password": "adminpass123",
+	}, func(req *http.Request) {
+		req.RemoteAddr = remoteAddr
+		if forwardedFor != "" {
+			req.Header.Set("X-Forwarded-For", forwardedFor)
+		}
+		if xRealIP != "" {
+			req.Header.Set("X-Real-IP", xRealIP)
+		}
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login: %d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = client.do(http.MethodGet, "/api/v1/auth/sessions", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sessions: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Sessions []struct {
+			IP      string `json:"ip"`
+			Current bool   `json:"current"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode sessions: %v", err)
+	}
+	for _, s := range out.Sessions {
+		if s.Current {
+			return s.IP
+		}
+	}
+	t.Fatal("no current session in list")
+	return ""
+}
+
+// TestLoginSessionIPNoTrustedProxiesIgnoresForwardedFor locks the secure
+// default: with no trusted proxies, X-Forwarded-For is ignored and the session
+// IP is the TCP peer.
+func TestLoginSessionIPNoTrustedProxiesIgnoresForwardedFor(t *testing.T) {
+	router, _ := newAPIFixture(t, true)
+	if got := loginSessionIP(t, router, "10.0.0.5:1234", "203.0.113.7", ""); got != "10.0.0.5" {
+		t.Fatalf("session IP = %q, want peer 10.0.0.5", got)
+	}
+}
+
+// TestLoginSessionIPTrustedPeerUsesForwardedFor locks the opt-in behavior:
+// when the TCP peer is in the trusted list, X-Forwarded-For is honored.
+func TestLoginSessionIPTrustedPeerUsesForwardedFor(t *testing.T) {
+	router, _ := newAPIFixture(t, true, "10.0.0.0/8")
+	if got := loginSessionIP(t, router, "10.0.0.5:1234", "203.0.113.7", ""); got != "203.0.113.7" {
+		t.Fatalf("session IP = %q, want 203.0.113.7", got)
+	}
+}
+
+// TestLoginSessionIPUntrustedPeerIgnoresForwardedFor locks the boundary: a
+// trusted list that does not contain the peer leaves the header ignored.
+func TestLoginSessionIPUntrustedPeerIgnoresForwardedFor(t *testing.T) {
+	router, _ := newAPIFixture(t, true, "192.168.0.0/16")
+	if got := loginSessionIP(t, router, "10.0.0.5:1234", "203.0.113.7", ""); got != "10.0.0.5" {
+		t.Fatalf("session IP = %q, want peer 10.0.0.5", got)
+	}
+}
+
+// TestLoginSessionIPUsesXRealIP locks the secondary forwarded header: gin
+// reads X-Real-IP when X-Forwarded-For is absent.
+func TestLoginSessionIPUsesXRealIP(t *testing.T) {
+	router, _ := newAPIFixture(t, true, "10.0.0.0/8")
+	if got := loginSessionIP(t, router, "10.0.0.5:1234", "", "203.0.113.7"); got != "203.0.113.7" {
+		t.Fatalf("session IP = %q, want 203.0.113.7", got)
+	}
+}
+
+// TestLoginSessionIPMalformedXFFFallsBackToXRealIP locks gin's fallback: a
+// syntactically invalid X-Forwarded-For is skipped and X-Real-IP is read.
+func TestLoginSessionIPMalformedXFFFallsBackToXRealIP(t *testing.T) {
+	router, _ := newAPIFixture(t, true, "10.0.0.0/8")
+	if got := loginSessionIP(t, router, "10.0.0.5:1234", "not-an-ip", "203.0.113.7"); got != "203.0.113.7" {
+		t.Fatalf("session IP = %q, want 203.0.113.7", got)
+	}
+}
+
+// TestLoginSessionIPNoForwardedHeaderUsesPeer locks the fallback: a trusted
+// peer with no forwarded-IP header still records the TCP peer.
+func TestLoginSessionIPNoForwardedHeaderUsesPeer(t *testing.T) {
+	router, _ := newAPIFixture(t, true, "10.0.0.0/8")
+	if got := loginSessionIP(t, router, "10.0.0.5:1234", "", ""); got != "10.0.0.5" {
+		t.Fatalf("session IP = %q, want peer 10.0.0.5", got)
+	}
 }
 
 func decode(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {

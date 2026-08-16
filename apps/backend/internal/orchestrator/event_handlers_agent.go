@@ -543,6 +543,13 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// later, unrelated provider overload starts its backoff fresh at attempt 1.
 	s.resetTransientRetry(data.SessionID)
 
+	// Snapshot the turn this event is about to close for the office cost
+	// subscriber's benefit: publishPromptUsage's complete-stream frame for
+	// this same completion is published (and processed) after this handler
+	// returns, by which point completeTurnForSession below has already
+	// removed it from activeTurns. See markReadyTurn's doc comment.
+	s.markReadyTurn(data.SessionID, data.AgentExecutionID, data.PromptGeneration, turnAtEventFire)
+
 	// Complete the current turn
 	s.completeTurnForSession(ctx, data.SessionID)
 
@@ -1006,6 +1013,19 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 		return
 	}
 
+	// Reconcile task_session_commits before acquiring the per-session
+	// cancel-in-flight mutex below. This must still run before
+	// handleAgentCompletedLocked's rotated-execution/terminal-state guards
+	// (see captureSessionCommitsSweep's doc for why - GetGitLog is resolved
+	// by session ID, not execution ID, and a session's worktree is shared
+	// across executions), but it does not need this mutex's exclusivity: the
+	// sweep is read-mostly, best-effort, and idempotent on the write side
+	// (ON CONFLICT DO NOTHING). Running it here, before the lock, keeps
+	// Stop/Cancel/Delete on this session from blocking behind up to 10s of
+	// git I/O - the mutex below is needed by ~20 other call sites across
+	// internal/orchestrator/ for exactly those operations.
+	s.captureSessionCommitsSweep(context.WithoutCancel(ctx), data.SessionID)
+
 	// Completion owns workflow advancement only while serialized with every
 	// cancel/interrupt decision for this session. If coordinator stop won while
 	// the event waited, the guarded state reload below observes CANCELLED and
@@ -1048,6 +1068,13 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 		return
 	}
+
+	// task_session_commits reconciliation (captureSessionCommitsSweep) runs in
+	// the caller, handleAgentCompleted, before this function's rotated-
+	// execution/terminal-state guards below are even reached - and, for a
+	// session-scoped event, before the per-session cancel-in-flight mutex is
+	// acquired at all (see the comment at that call site for why the sweep
+	// does not need that mutex's exclusivity).
 
 	// Skip transition logic when this event is the side-effect of a deliberate
 	// stop (e.g. a workflow profile-switch calling completeAndStopSession). Two
@@ -1208,7 +1235,7 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 
 	// Make all agent CLI failures recoverable — let the user choose to resume or start fresh.
 	if data.SessionID != "" {
-		s.handleRecoverableFailure(ctx, data)
+		s.handleRecoverableFailureLocked(ctx, data)
 		return
 	}
 
@@ -1460,6 +1487,35 @@ func (s *Service) clearResumeToken(ctx context.Context, sessionID string) {
 // creates an error message with recovery action buttons so the user can choose to
 // resume the agent session or start fresh.
 func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.AgentEventData) {
+	if data.SessionID == "" {
+		s.handleRecoverableFailureLocked(ctx, data)
+		return
+	}
+
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	if _, err := s.repo.GetTaskSession(ctx, data.SessionID); err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			s.logger.Debug("skipping recoverable failure for deleted session",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID))
+			return
+		}
+		s.logger.Warn("failed to reload session before recoverable failure; continuing",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+	}
+	s.handleRecoverableFailureLocked(ctx, data)
+}
+
+// handleRecoverableFailureLocked performs recovery side effects while the
+// session's cancelInFlight guard is held. Deletion uses the same guard, so an
+// active error event cannot publish after the deleted-session inactive event.
+func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watcher.AgentEventData) {
 	s.logger.Warn("handling recoverable agent failure",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -1771,7 +1827,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 	s.logger.Info("agent start failure is auth error, treating as recoverable",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
-	s.handleRecoverableFailure(ctx, watcher.AgentEventData{
+	s.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{
 		TaskID:           taskID,
 		SessionID:        sessionID,
 		AgentExecutionID: agentExecutionID,

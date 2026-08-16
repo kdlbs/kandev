@@ -130,9 +130,9 @@ async function loadWorkspaceState({
   const [workflowList, repositoriesResponse, quickChatResponse, quickTerminalResponse] =
     await Promise.all([
       listWorkflows(activeWorkspaceId, { cache: "no-store", includeHidden: true }),
-      listRepositories(activeWorkspaceId, undefined, { cache: "no-store" }).catch(() => ({
-        repositories: [],
-      })),
+      listRepositories(activeWorkspaceId, undefined, { cache: "no-store" })
+        .then((response) => ({ ...response, loaded: true }))
+        .catch(() => ({ repositories: [], loaded: false })),
       listQuickChatSessions(activeWorkspaceId, { cache: "no-store" }).catch(() => ({
         sessions: [],
         task_sessions: [],
@@ -168,7 +168,10 @@ async function loadWorkspaceState({
       repositories: {
         itemsByWorkspaceId: { [activeWorkspaceId]: repositoriesResponse.repositories },
         loadingByWorkspaceId: { [activeWorkspaceId]: false },
-        loadedByWorkspaceId: { [activeWorkspaceId]: true },
+        // A failed SSR fetch must remain retryable on the client. Marking an
+        // empty fallback as loaded leaves task creation permanently disabled
+        // because the dialog never gets a repository selection.
+        loadedByWorkspaceId: { [activeWorkspaceId]: repositoriesResponse.loaded },
       },
       quickChat: {
         isOpen: false,

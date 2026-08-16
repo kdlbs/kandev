@@ -165,6 +165,8 @@ into the secret store.
 - `gitlab_task_mrs` remains the durable task-to-MR association. Its unique key
   is `(task_id, repository_id, project_path, mr_iid)`; `task_id` and a non-empty
   `repository_id` must belong to the same workspace as the resolved connection.
+  Associations survive restart and archive/unarchive, but hard task deletion
+  removes them and their refresh watches. Decision: ADR-2026-08-13-hard-delete-task-contribution-links.
 - `gitlab_review_watches` and `gitlab_issue_watches` are workspace-owned durable
   automation definitions. Their workflow, workflow step, repository (when
   present), agent profile, and executor profile must belong to that workspace.
@@ -421,6 +423,8 @@ protocol action name for compatibility.
 
 - Workspace config rows, PAT secrets, watch definitions, dedup reservations,
   task-to-MR associations, and last known MR status survive backend restarts.
+- Archived tasks retain task-to-MR associations for later unarchive; hard task
+  deletion removes task-owned associations and refresh watches.
 - The startup migration moves the legacy global host/token to the active
   workspace, or the earliest-created workspace when no active workspace is
   available. It is idempotent and never duplicates automation watches.

@@ -234,7 +234,7 @@ func TestAuthorizeEntityReference_DeniesUnsupportedPurpose(t *testing.T) {
 func TestGitCredentialBinding_RevokesAfterAuthenticatedConnectionAction(t *testing.T) {
 	p := &fixturePlugin{dataDir: t.TempDir()}
 	bindingRequest := &pluginsdk.GitCredentialBindingRequest{
-		ProviderID: "fixture-source-control", Host: "bitbucket.example.test", Path: "/scm/TEAM/fixture.git",
+		ProviderID: "fixture-source-control", Host: "bitbucket.example.test", Path: "/scm/TEAM/fixture",
 	}
 
 	binding, err := p.GetGitCredentialBinding(context.Background(), bindingRequest)
@@ -277,7 +277,7 @@ func TestResolveGitCredential_ReturnsTransientFixtureSecret(t *testing.T) {
 	p := &fixturePlugin{dataDir: t.TempDir()}
 
 	credential, err := p.ResolveGitCredential(context.Background(), &pluginsdk.ResolveGitCredentialRequest{
-		ProviderID: "fixture-source-control", Host: "bitbucket.example.test", Path: "/scm/TEAM/fixture.git",
+		ProviderID: "fixture-source-control", Host: "bitbucket.example.test", Path: "/scm/TEAM/fixture",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "fixture-user", credential.Username)

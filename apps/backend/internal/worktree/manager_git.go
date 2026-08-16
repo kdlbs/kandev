@@ -160,6 +160,38 @@ func (m *Manager) BranchRecoveryStatus(ctx context.Context, repoPath, branch str
 	return BranchStatusMissing
 }
 
+// refContains reports whether container already includes every commit in
+// contained, i.e. `git merge-base --is-ancestor contained container`.
+//
+// Used to decide whether resolving a worktree start point to one ref can lose
+// commits that only exist on the other. A probe that cannot answer (throttle
+// wait, timeout, missing ref) returns false, and callers must treat that as
+// "cannot rule out loss": being slightly stale is recoverable, silently
+// dropping the user's unpushed commits is not.
+//
+// NOTE: PR #2654 adds an equivalent `isAncestor` helper on the
+// pullCurrentBranchOrFallback path, with the arguments in the opposite order.
+// The two are deliberately named differently so both can land in either order
+// without a duplicate-symbol build failure; whichever merges second should
+// collapse them into one helper.
+func (m *Manager) refContains(ctx context.Context, repoPath, container, contained string) bool {
+	// Same Acquire-then-build-execCtx ordering as branchExists.
+	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
+	if err != nil {
+		m.logger.Warn("refContains bounded by context before throttle acquire",
+			zap.String("repository_path", repoPath),
+			zap.String("container", container),
+			zap.String("contained", contained),
+			zap.Error(err))
+		return false
+	}
+	defer release()
+	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
+	defer cancel()
+	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "merge-base", "--is-ancestor", contained, container)
+	return cmd.Run() == nil
+}
+
 func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
 	// Same Acquire-then-build-execCtx ordering as branchExists.
 	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)

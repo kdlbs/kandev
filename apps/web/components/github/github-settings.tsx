@@ -261,7 +261,7 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
           description={t("github:credentialUsedForRepositorySyncWatches")}
         >
           <Card data-testid="github-workspace-access-card">
-            <CardContent className="pt-6">
+            <CardContent className="pt-0">
               <GitHubAutomationSettings workspaceId={workspaceId} />
             </CardContent>
           </Card>

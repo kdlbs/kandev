@@ -26,22 +26,23 @@ const (
 // carried at the top level. When EnvPrepareRequest.Repositories is non-empty,
 // each entry produces one prepared worktree under the shared TaskDirName.
 type RepoPrepareSpec struct {
-	RepositoryID           string
-	RepositoryPath         string
-	RepoName               string
-	BaseBranch             string
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string
-	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeID             string
-	WorktreeBranch         string
-	WorktreeBranchPrefix   string
-	WorktreeBranchTemplate string
-	WorktreeBranchTicket   string
-	PullBeforeWorktree     bool
-	RemoteSyncHandled      bool
-	RepoSetupScript        string
+	RepositoryID            string
+	RepositoryPath          string
+	RepoName                string
+	BaseBranch              string
+	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch          string
+	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	WorktreeID              string
+	WorktreeBranch          string
+	WorktreeBranchPrefix    string
+	WorktreeBranchTemplate  string
+	WorktreeBranchTicket    string
+	PullBeforeWorktree      bool
+	RemoteSyncHandled       bool
+	RepoSetupScript         string
+	ContributionDestination *models.ContributionDestination
 	// BranchSlug, when set, suffixes the worktree path as
 	// {RepoName}-{BranchSlug} so two specs sharing a RepositoryID don't collide
 	// on disk.
@@ -54,25 +55,26 @@ type RepoPrepareSpec struct {
 
 // EnvPrepareRequest contains the parameters for environment preparation.
 type EnvPrepareRequest struct {
-	TaskID             string
-	WorkspaceID        string
-	SessionID          string
-	TaskTitle          string
-	ExecutionID        string
-	ExecutorType       executor.Name
-	WorkspacePath      string
-	RepositoryPath     string
-	RepositoryID       string
-	UseWorktree        bool
-	SetupScript        string
-	RepoSetupScript    string // Repository-level setup script (e.g. "make install")
-	BaseBranch         string
-	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch     string
-	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution *models.RemoteContribution
-	WorktreeID         string
-	WorktreeBranch     string
+	TaskID                  string
+	WorkspaceID             string
+	SessionID               string
+	TaskTitle               string
+	ExecutionID             string
+	ExecutorType            executor.Name
+	WorkspacePath           string
+	RepositoryPath          string
+	RepositoryID            string
+	UseWorktree             bool
+	SetupScript             string
+	RepoSetupScript         string // Repository-level setup script (e.g. "make install")
+	BaseBranch              string
+	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch          string
+	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
+	WorktreeID              string
+	WorktreeBranch          string
 
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -109,24 +111,25 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		return nil
 	}
 	return []RepoPrepareSpec{{
-		RepositoryID:           r.RepositoryID,
-		RepositoryPath:         r.RepositoryPath,
-		RepoName:               r.RepoName,
-		BaseBranch:             r.BaseBranch,
-		DefaultBranch:          r.DefaultBranch,
-		CheckoutBranch:         r.CheckoutBranch,
-		PRNumber:               r.PRNumber,
-		RemoteContribution:     r.RemoteContribution,
-		WorktreeID:             r.WorktreeID,
-		WorktreeBranch:         r.WorktreeBranch,
-		WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: r.WorktreeBranchTemplate,
-		WorktreeBranchTicket:   r.WorktreeBranchTicket,
-		PullBeforeWorktree:     r.PullBeforeWorktree,
-		RemoteSyncHandled:      r.RemoteSyncHandled,
-		RepoSetupScript:        r.RepoSetupScript,
-		BranchSlug:             r.BranchSlug,
-		BranchIdentitySlug:     r.BranchIdentitySlug,
+		RepositoryID:            r.RepositoryID,
+		RepositoryPath:          r.RepositoryPath,
+		RepoName:                r.RepoName,
+		BaseBranch:              r.BaseBranch,
+		DefaultBranch:           r.DefaultBranch,
+		CheckoutBranch:          r.CheckoutBranch,
+		PRNumber:                r.PRNumber,
+		RemoteContribution:      r.RemoteContribution,
+		WorktreeID:              r.WorktreeID,
+		WorktreeBranch:          r.WorktreeBranch,
+		WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
+		WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
+		WorktreeBranchTicket:    r.WorktreeBranchTicket,
+		PullBeforeWorktree:      r.PullBeforeWorktree,
+		RemoteSyncHandled:       r.RemoteSyncHandled,
+		RepoSetupScript:         r.RepoSetupScript,
+		BranchSlug:              r.BranchSlug,
+		BranchIdentitySlug:      r.BranchIdentitySlug,
+		ContributionDestination: r.ContributionDestination,
 	}}
 }
 

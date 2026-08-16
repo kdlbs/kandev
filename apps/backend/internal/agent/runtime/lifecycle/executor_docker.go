@@ -166,6 +166,9 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
 		return nil, err
 	}
+	if _, err := validateContributionDestinations(req.ContributionDestinations); err != nil {
+		return nil, err
+	}
 	dockerClient, containerMgr, err := r.ensureClient()
 	if err != nil {
 		return nil, fmt.Errorf("docker unavailable: %w", err)
@@ -274,6 +277,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		LocalClonePath:                 localCloneMountPath(req.Metadata),
 		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:            req.RemoteContributions,
+		ContributionDestinations:       req.ContributionDestinations,
 	}, nil
 }
 
@@ -560,20 +564,21 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
-		AutoStart:           false,
-		McpServers:          req.McpServers,
-		McpProviders:        req.McpProviders,
-		McpProfile:          req.McpProfile,
-		SessionID:           req.SessionID,
-		TaskID:              req.TaskID,
-		DisableAskQuestion:  disableAskQuestion,
-		AssumeMcpSse:        assumeMcpSse,
-		AssumeMcpHttp:       assumeMcpHttp,
-		McpMode:             req.McpMode,
-		RequiresProcessKill: requiresProcessKill,
-		StripEnv:            stripEnv,
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions: req.RemoteContributions,
+		AutoStart:                false,
+		McpServers:               req.McpServers,
+		McpProviders:             req.McpProviders,
+		McpProfile:               req.McpProfile,
+		SessionID:                req.SessionID,
+		TaskID:                   req.TaskID,
+		DisableAskQuestion:       disableAskQuestion,
+		AssumeMcpSse:             assumeMcpSse,
+		AssumeMcpHttp:            assumeMcpHttp,
+		McpMode:                  req.McpMode,
+		RequiresProcessKill:      requiresProcessKill,
+		StripEnv:                 stripEnv,
+		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:      req.RemoteContributions,
+		ContributionDestinations: req.ContributionDestinations,
 	}
 }
 
@@ -795,6 +800,13 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (strin
 			return "", err
 		}
 		script += contributionScript
+	}
+	if destination, ok := req.ContributionDestinations[""]; ok {
+		destinationScript, err := scriptengine.ContributionDestinationSetupScript(&destination)
+		if err != nil {
+			return "", err
+		}
+		script += destinationScript
 	}
 
 	resolver := scriptengine.NewResolver().

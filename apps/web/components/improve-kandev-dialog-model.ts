@@ -13,6 +13,13 @@ export const IMPROVE_KANDEV_WORKSPACE_NAME = "Improve Kandev";
 export type ImproveKandevKind = "bug" | "feature" | "issue";
 export type ImproveKandevMode = "intro" | "create";
 
+export type ContributorAccessMessageKey =
+  | "common:improveKandevIssueNoForkAccess"
+  | "common:improveKandevDirectPushAccess"
+  | "common:improveKandevManagedForkPrepared"
+  | "common:improveKandevExistingForkPrepared"
+  | "common:improveKandevExecutorForkAtPr";
+
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const STEP_DESCRIPTIONS: Record<string, string> = {
@@ -29,7 +36,7 @@ const STEP_DESCRIPTIONS: Record<string, string> = {
 export type ImproveKandevReadyState = {
   data: Pick<
     ImproveKandevBootstrapResponse,
-    "workflow_id" | "issue_workflow_id" | "fork_status" | "fork_message"
+    "workflow_id" | "issue_workflow_id" | "fork_status" | "fork_reason_code"
   >;
   steps: WorkflowStep[];
   issueSteps: WorkflowStep[];
@@ -51,12 +58,16 @@ export function getImproveKandevBrowserStorage(): StorageLike | undefined {
   }
 }
 
-export function contributorAccessMessage(kind: ImproveKandevKind, hasWrite: boolean): string {
-  if (kind === "issue") return "Opening an issue does not require a fork or push access.";
-  if (hasWrite) {
-    return "You have write access to kdlbs/kandev, so the agent will push directly to a branch on the upstream repo.";
-  }
-  return "The agent will fork kdlbs/kandev to your account during the PR step and open a pull request from your fork.";
+export function contributorAccessMessage(
+  kind: ImproveKandevKind,
+  hasWrite: boolean,
+  forkStatus?: ImproveKandevBootstrapResponse["fork_status"],
+): ContributorAccessMessageKey {
+  if (kind === "issue") return "common:improveKandevIssueNoForkAccess";
+  if (hasWrite) return "common:improveKandevDirectPushAccess";
+  if (forkStatus === "creatable") return "common:improveKandevManagedForkPrepared";
+  if (forkStatus === "ready") return "common:improveKandevExistingForkPrepared";
+  return "common:improveKandevExecutorForkAtPr";
 }
 
 export function getImproveKandevStepDescription(step: Pick<WorkflowStep, "id" | "name">): string {
@@ -109,8 +120,20 @@ export function resolveImproveKandevWorkflow(
 export function getImproveKandevForkBlockedReason(
   kind: ImproveKandevKind,
   forkStatus: ImproveKandevBootstrapResponse["fork_status"] | undefined,
-  forkMessage: string | null | undefined,
+  forkReasonCode: ImproveKandevBootstrapResponse["fork_reason_code"] | undefined,
 ): string | null {
-  if (kind === "issue" || forkStatus !== "blocked_emu") return null;
-  return forkMessage ?? "This GitHub account cannot fork kdlbs/kandev.";
+  if (kind === "issue" || !isImproveKandevForkBlockedStatus(forkStatus)) return null;
+  if (forkReasonCode === "account_cannot_fork") {
+    return "common:thisGithubAccountCannotForkKdlbs";
+  }
+  if (forkStatus === "blocked_emu" && forkReasonCode === undefined) {
+    return "common:thisGithubAccountCannotForkKdlbs";
+  }
+  return "common:managedGithubForkUnavailable";
+}
+
+export function isImproveKandevForkBlockedStatus(
+  forkStatus: ImproveKandevBootstrapResponse["fork_status"] | undefined,
+): boolean {
+  return forkStatus === "blocked_emu" || forkStatus === "blocked_managed";
 }

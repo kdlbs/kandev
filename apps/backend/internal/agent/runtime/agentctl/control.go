@@ -79,7 +79,8 @@ type CreateInstanceRequest struct {
 	// RemoteContributions maps an agentctl workspace repository subpath to the
 	// server-authored contribution binding for that checkout. The empty key is
 	// the workspace root.
-	RemoteContributions map[string]models.RemoteContribution `json:"remote_contributions,omitempty"`
+	RemoteContributions      map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
+	ContributionDestinations map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
 	// WorkspaceSourceRoots are canonical host roots explicitly attached to the
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.

@@ -30,7 +30,7 @@ var ErrResetNotConfirmed = errors.New("factory reset requires confirm=\"RESET\""
 //
 // The job:
 //  1. Calls s.OrchestratorShutdown (if set) to stop running executions.
-//  2. Snapshots the live DB to <dataDir>/backups/kandev-pre-reset-<unix>.db.
+//  2. Snapshots the live DB to the sibling backups directory.
 //  3. Drops every user table from the SQLite schema (kandev_meta is kept).
 //  4. os.RemoveAll on worktrees/repos/sessions/tasks/quick-chat subdirs.
 //
@@ -86,7 +86,7 @@ func (s *Service) createPreResetSnapshot() (string, error) {
 	if s.pool == nil {
 		return "", fmt.Errorf("no database pool")
 	}
-	backupDir := filepath.Join(s.dataDir, "backups")
+	backupDir := s.backupsDir()
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir backups: %w", err)
 	}

@@ -698,6 +698,33 @@ func (r *memoryRepository) AutoMergeIntoAbove(_ context.Context, sessionID, sour
 	return cloneQueuedMessage(target), true, nil
 }
 
+// AutoMergeCandidateIntoAbove folds a not-yet-admitted candidate into the
+// session's tail entry when compatible, without inserting it. Incompatibility
+// and missing tails are successful skips.
+func (r *memoryRepository) AutoMergeCandidateIntoAbove(_ context.Context, candidate *QueuedMessage) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	list := r.entries[candidate.SessionID]
+	var target *QueuedMessage
+	for _, message := range list {
+		if target == nil || message.Position > target.Position {
+			target = message
+		}
+	}
+	if target == nil {
+		return nil, false, nil
+	}
+	values, compatible := buildAutoMergedEntry(target, candidate)
+	if !compatible {
+		return nil, false, nil
+	}
+	target.Content = values.content
+	target.Attachments = values.attachments
+	target.Metadata = values.metadata
+	return cloneQueuedMessage(target), true, nil
+}
+
 // ReorderEntries rewrites the session's visible pending order to match
 // orderedIDs, mirroring the sqlite repository's semantics: reserved in-flight
 // rows keep their place in the sequence, visible rows appear in the submitted

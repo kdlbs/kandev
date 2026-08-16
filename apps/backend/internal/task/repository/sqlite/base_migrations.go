@@ -215,8 +215,11 @@ func (r *Repository) runMigrations() error {
 		SET provider_host = 'https://github.com'
 		WHERE LOWER(TRIM(provider)) = 'github'
 			AND TRIM(COALESCE(provider_host, '')) = ''`)
-	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}'`)
-	r.migrate.Apply("repositories.worktree_branch_template.backfill", `UPDATE repositories SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'`)
+	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT ''`)
+	r.migrate.Apply("repositories.worktree_branch_template.backfill", `
+		UPDATE repositories
+		SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'
+		WHERE TRIM(COALESCE(worktree_branch_template, '')) = ''`)
 	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)
 	r.migrate.Apply("task_plans.implementation_started_session_id", `ALTER TABLE task_plans ADD COLUMN implementation_started_session_id TEXT`)
 	r.migrate.Apply("task_plans.implementation_started_by", `ALTER TABLE task_plans ADD COLUMN implementation_started_by TEXT`)
@@ -229,6 +232,16 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("task_session_messages.updated_at", `ALTER TABLE task_session_messages ADD COLUMN updated_at TIMESTAMP`)
 	r.migrate.Apply("task_session_messages.updated_at.backfill", `UPDATE task_session_messages SET updated_at = created_at WHERE updated_at IS NULL`)
 	r.migrate.Apply("idx_messages_session_updated", `CREATE INDEX IF NOT EXISTS idx_messages_session_updated ON task_session_messages(task_session_id, updated_at)`)
+
+	// task_session_commits gains a uniqueness constraint before its writer
+	// starts firing from more than just archive capture (CreateSessionCommit
+	// was previously a plain INSERT). Must dedupe existing duplicates first:
+	// CREATE UNIQUE INDEX fails on a duplicate pair, and MigrateLogger.Apply
+	// swallows non-"already exists" errors, so an unhandled duplicate would
+	// silently leave both the index and every future ON CONFLICT missing.
+	if err := r.migrateSessionCommitsDedupeAndActivation(); err != nil {
+		return err
+	}
 
 	// Backfill the per-session cost/token columns. Runs after the gated
 	// task_sessions rebuilds above so it repairs legacy DBs whose schema can no
@@ -342,6 +355,13 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 
+	// The execution-aware task_session_subagents schema is created directly by
+	// initSubagentContextSchema. The predecessor change that introduced the
+	// table is not part of the supported upgrade path, so there is no
+	// intermediate-shape rebuild to run here. Only the historical-message
+	// backfill belongs in the migration phase.
+	r.migrateSubagentContextBackfill()
+
 	return nil
 }
 
@@ -446,6 +466,46 @@ func jsonRemoveKey(postgres bool, column, key string) string {
 		return "(" + base + " - '" + key + "')::text"
 	}
 	return "json_remove(" + base + ", '$." + key + "')"
+}
+
+// jsonKey extracts a text value at a JSON path from a TEXT-typed JSON column.
+// key may itself be dot-separated ("normalized.kind") to reach a field nested
+// several levels deep — jsonInt and jsonBoolToInt build on this by folding
+// their parent/key pair into one such path before extracting.
+func jsonKey(postgres bool, column, key string) string {
+	base := jsonColumn(postgres, column)
+	segments := strings.Join(strings.Split(key, "."), ",")
+	if postgres {
+		return "(" + base + " #>> '{" + segments + "}')"
+	}
+	return "json_extract(" + base + ", '$." + strings.ReplaceAll(segments, ",", ".") + "')"
+}
+
+// jsonInt extracts a nested numeric field and normalizes it the way every
+// unreported-or-invalid metric in this table normalizes: NULL, never a
+// fabricated 0 for "not reported" and never a negative count (AC-7, AC-9,
+// AC-23). Postgres casts to BIGINT, SQLite to INTEGER.
+func jsonInt(postgres bool, column, parent, key string) string {
+	extracted := jsonKey(postgres, column, parent+"."+key)
+	castType := "INTEGER"
+	if postgres {
+		castType = "BIGINT"
+	}
+	cast := "CAST(NULLIF(" + extracted + ", '') AS " + castType + ")"
+	return "(CASE WHEN " + cast + " < 0 THEN NULL ELSE " + cast + " END)"
+}
+
+// jsonBoolToInt normalizes is_async's dialect-inconsistent boolean spelling —
+// Postgres's #>> text extraction yields 'true'/'false', SQLite's json_extract
+// on a JSON boolean yields '1'/'0' — into the single 1/0 the column stores.
+// An absent or false field yields 0, matching the column's own DEFAULT 0.
+func jsonBoolToInt(postgres bool, column, parent, key string) string {
+	extracted := jsonKey(postgres, column, parent+"."+key)
+	// SQLite's json_extract returns a JSON boolean as the storage-class
+	// INTEGER 1/0, not the text '1'/'0' — comparing that INTEGER against a
+	// TEXT literal via IN never matches (SQLite orders INTEGER < TEXT by
+	// storage class), so the extracted value must be cast to TEXT first.
+	return "(CASE WHEN CAST(" + extracted + " AS TEXT) IN ('1', 'true') THEN 1 ELSE 0 END)"
 }
 
 // ensureImproveKandevWorkflowTemplateUniqueness removes the broad index from
@@ -673,6 +733,94 @@ func (r *Repository) backfillExecutorsRunningFromTaskSessions() error {
 		WHERE COALESCE(ts.agent_execution_id, '') != '' AND er.id IS NULL
 	`, now); err != nil {
 		return fmt.Errorf("backfill executors_running: %w", err)
+	}
+	return nil
+}
+
+// commitCaptureActivatedAtMetaKey is the kandev_meta key published by
+// migrateSessionCommitsDedupeAndActivation.
+const commitCaptureActivatedAtMetaKey = "commit_capture_activated_at"
+
+// migrateSessionCommitsDedupeAndActivation enforces uniqueness on
+// task_session_commits(session_id, commit_sha) and publishes the point in
+// time commit capture started firing from more than just archive capture, so
+// downstream readers (the Rill extract, ListSessionCodeStats) can tell
+// "capture wasn't running yet" apart from "session made zero commits" -
+// both previously read as a plain 0.
+//
+// Dedup keeps the earliest-observed row per (session_id, commit_sha), ties
+// broken by id: task_session_commits is an append-only observation ledger
+// (a rebase/squash adds new SHAs, it never retroactively changes which row
+// was first seen), so "earliest seen" is the row future replays preserve.
+//
+// Rebase/squash decision: immutable observation history, not the final
+// branch object set. A rebase that drops a previously-observed commit SHA
+// from reachable history leaves that row in place - it is not deleted or
+// reconciled against the current branch. Same tradeoff the task brief
+// already accepts for summed commit diffstats counting churn and reverts
+// (task_session_git_snapshots deltas are the net-branch-growth answer;
+// commit rows are the observation-history answer, published side by side,
+// not merged into one number). Live capture makes this more visible than
+// the old archive-only design (which only ever ran GetGitLog once, at
+// archive time, so it naturally reflected whatever was reachable from HEAD
+// at that instant) - continuous capture can now persist a commit that a
+// later rebase makes unreachable. Accepted rather than reconciled: pruning
+// on every rebase/force-push would require diffing against live git state
+// on every sweep, and "what got captured" is itself useful observability
+// (e.g. abandoned work), not just noise.
+//
+// Must run before CreateSessionCommit starts firing from more than archive -
+// CREATE UNIQUE INDEX fails on an existing duplicate pair, and
+// MigrateLogger.Apply swallows non-"already exists" errors, so an unhandled
+// duplicate would silently leave both the index and every future
+// ON CONFLICT missing. That is exactly why these two statements, unlike most
+// migrations in this file, do NOT go through r.migrate.Apply: the writer's
+// ON CONFLICT (session_id, commit_sha) target hard-requires this index to
+// exist, so a failure here must abort boot (propagated below) rather than
+// leave every future commit insert failing silently forever.
+func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
+	if _, err := r.db.Exec(`
+		DELETE FROM task_session_commits
+		WHERE id NOT IN (
+			SELECT id FROM (
+				SELECT id,
+					ROW_NUMBER() OVER (
+						PARTITION BY session_id, commit_sha
+						ORDER BY created_at ASC, id ASC
+					) AS rn
+				FROM task_session_commits
+			) ranked
+			WHERE rn = 1
+		)
+	`); err != nil {
+		return fmt.Errorf("dedupe task_session_commits: %w", err)
+	}
+	if _, err := r.db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_commits_session_sha ON task_session_commits(session_id, commit_sha)`,
+	); err != nil {
+		return fmt.Errorf("create uniq_session_commits_session_sha: %w", err)
+	}
+	if r.log != nil {
+		r.log.Info("migration applied", zap.String("name", "task_session_commits.dedupe_and_unique_index"))
+	}
+
+	// kandev_meta already exists by the time repository migrations run in
+	// production (persistence.Provide creates it before opening any
+	// repository), but repo-level tests build a bare DB via NewWithDB where
+	// it does not, so recreate it defensively.
+	if _, err := r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS kandev_meta (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		return fmt.Errorf("ensure kandev_meta: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := r.db.Exec(r.db.Rebind(`
+		INSERT INTO kandev_meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO NOTHING
+	`), commitCaptureActivatedAtMetaKey, now); err != nil {
+		return fmt.Errorf("write %s: %w", commitCaptureActivatedAtMetaKey, err)
 	}
 	return nil
 }

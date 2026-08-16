@@ -207,6 +207,18 @@ type asyncStepHistoryRecorder interface {
 	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
 }
 
+// ContributionDestinationPreparer is an internal creation-time hook for a
+// server-owned publication route. It runs after request/workflow validation
+// and external-ID deduplication, but before the task row is inserted.
+type ContributionDestinationPreparer interface {
+	PrepareContributionDestination(
+		ctx context.Context,
+		req *CreateTaskRequest,
+		workflow *models.Workflow,
+		repositories []*models.Repository,
+	) error
+}
+
 var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
 	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
@@ -260,58 +272,61 @@ type Repos struct {
 	Reviews           repository.ReviewRepository
 	ResourceCleanups  repository.TaskResourceCleanupRepository
 	StatusSummaries   repository.TaskStatusSummaryRepository
+	SubagentContexts  repository.SubagentContextRepository
 }
 
 // Service provides task business logic
 type Service struct {
-	workspaces                  repository.WorkspaceRepository
-	tasks                       repository.TaskRepository
-	taskRepos                   repository.TaskRepoRepository
-	workspaceFolders            repository.TaskWorkspaceFolderRepository
-	workflows                   repository.WorkflowRepository
-	messages                    repository.MessageRepository
-	attachments                 repository.AttachmentRepository
-	turns                       repository.TurnRepository
-	sessions                    repository.SessionRepository
-	gitSnapshots                repository.GitSnapshotRepository
-	repoEntities                repository.RepositoryEntityRepository
-	repositoryCleanup           repository.RepositoryCleanupRepository
-	executors                   repository.ExecutorRepository
-	environments                repository.EnvironmentRepository
-	taskEnvironments            repository.TaskEnvironmentRepository
-	reviews                     repository.ReviewRepository
-	resourceCleanups            repository.TaskResourceCleanupRepository
-	statusSummaries             repository.TaskStatusSummaryRepository
-	attachmentSvc               *AttachmentService
-	statusSummaryPRs            TaskStatusSummaryPRReader
-	queuedPromptCounter         QueuedPromptCounter
-	eventBus                    bus.EventBus
-	logger                      *logger.Logger
-	discoveryConfig             RepositoryDiscoveryConfig
-	worktreeCleanup             WorktreeCleanup
-	executionStopper            TaskExecutionStopper
-	rowLivenessProber           TaskRowLivenessProber
-	contextWindowResetter       func(context.Context, string) error
-	cleanupActivity             TaskResourceCleanupActivityGate
-	branchMaterializer          BranchMaterializer
-	workspaceSourceMaterializer WorkspaceSourceMaterializer
-	workspaceSourceLocksMu      sync.Mutex
-	workspaceSourceLocks        map[string]*sync.Mutex
-	providerProber              ProviderDefaultBranchProber
-	gitArchiveCapture           GitArchiveCapture
-	workflowStepCreator         WorkflowStepCreator
-	workspaceBootstrapper       WorkspaceBootstrapper
-	workflowStepGetter          WorkflowStepGetter
-	startStepResolver           StartStepResolver
-	stepHistoryRecorder         StepHistoryRecorder
-	prTaskResolver              PRTaskResolver
-	quickChatDir                string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
-	branchFetcher               *branchFetcher
-	envDestroyer                EnvironmentDestroyer
-	sessionRunningChecker       SessionRunningChecker
-	remoteBranchLister          RemoteBranchLister
-	repoCloneLocation           RepoCloneLocation
-	blockers                    BlockerRepository
+	workspaces                      repository.WorkspaceRepository
+	tasks                           repository.TaskRepository
+	taskRepos                       repository.TaskRepoRepository
+	workspaceFolders                repository.TaskWorkspaceFolderRepository
+	workflows                       repository.WorkflowRepository
+	messages                        repository.MessageRepository
+	attachments                     repository.AttachmentRepository
+	turns                           repository.TurnRepository
+	sessions                        repository.SessionRepository
+	gitSnapshots                    repository.GitSnapshotRepository
+	repoEntities                    repository.RepositoryEntityRepository
+	repositoryCleanup               repository.RepositoryCleanupRepository
+	executors                       repository.ExecutorRepository
+	environments                    repository.EnvironmentRepository
+	taskEnvironments                repository.TaskEnvironmentRepository
+	reviews                         repository.ReviewRepository
+	resourceCleanups                repository.TaskResourceCleanupRepository
+	statusSummaries                 repository.TaskStatusSummaryRepository
+	subagentContexts                repository.SubagentContextRepository
+	attachmentSvc                   *AttachmentService
+	statusSummaryPRs                TaskStatusSummaryPRReader
+	queuedPromptCounter             QueuedPromptCounter
+	eventBus                        bus.EventBus
+	logger                          *logger.Logger
+	discoveryConfig                 RepositoryDiscoveryConfig
+	worktreeCleanup                 WorktreeCleanup
+	executionStopper                TaskExecutionStopper
+	rowLivenessProber               TaskRowLivenessProber
+	contextWindowResetter           func(context.Context, string) error
+	cleanupActivity                 TaskResourceCleanupActivityGate
+	branchMaterializer              BranchMaterializer
+	workspaceSourceMaterializer     WorkspaceSourceMaterializer
+	workspaceSourceLocksMu          sync.Mutex
+	workspaceSourceLocks            map[string]*sync.Mutex
+	providerProber                  ProviderDefaultBranchProber
+	gitArchiveCapture               GitArchiveCapture
+	workflowStepCreator             WorkflowStepCreator
+	workspaceBootstrapper           WorkspaceBootstrapper
+	workflowStepGetter              WorkflowStepGetter
+	startStepResolver               StartStepResolver
+	stepHistoryRecorder             StepHistoryRecorder
+	contributionDestinationPreparer ContributionDestinationPreparer
+	prTaskResolver                  PRTaskResolver
+	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
+	branchFetcher                   *branchFetcher
+	envDestroyer                    EnvironmentDestroyer
+	sessionRunningChecker           SessionRunningChecker
+	remoteBranchLister              RemoteBranchLister
+	repoCloneLocation               RepoCloneLocation
+	blockers                        BlockerRepository
 	// dependencyEdgeMu serializes validate-then-insert for dependency edges so
 	// two concurrent adds cannot each pass a cycle walk that predates the
 	// other's insert and commit a cycle between them.
@@ -411,6 +426,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		reviews:               repos.Reviews,
 		resourceCleanups:      repos.ResourceCleanups,
 		statusSummaries:       repos.StatusSummaries,
+		subagentContexts:      repos.SubagentContexts,
 		eventBus:              eventBus,
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
@@ -527,6 +543,12 @@ func (s *Service) SetStartStepResolver(resolver StartStepResolver) {
 // step transitions (MoveTaskWithOptions). Optional.
 func (s *Service) SetStepHistoryRecorder(recorder StepHistoryRecorder) {
 	s.stepHistoryRecorder = recorder
+}
+
+// SetContributionDestinationPreparer wires the optional server-side
+// publication-route preparation used by managed Improve Kandev tasks.
+func (s *Service) SetContributionDestinationPreparer(preparer ContributionDestinationPreparer) {
+	s.contributionDestinationPreparer = preparer
 }
 
 // SetPRTaskResolver wires the GitHub PR→task resolver for PR-number search.

@@ -19,9 +19,13 @@ type recordingClarificationInputPauser struct {
 	sessions []string
 	count    int
 	err      error
+	before   func()
 }
 
 func (p *recordingClarificationInputPauser) PauseForClarificationInput(_ context.Context, sessionID string) (int, error) {
+	if p.before != nil {
+		p.before()
+	}
 	p.sessions = append(p.sessions, sessionID)
 	return p.count, p.err
 }

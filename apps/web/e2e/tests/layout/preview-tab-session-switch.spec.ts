@@ -35,9 +35,12 @@ async function waitForWorkspaceFile(
 
 async function openFileInPreview(page: Page, session: SessionPage, filename: string) {
   await session.clickTab("Files");
-  await expect(session.files).toBeVisible({ timeout: 10_000 });
+  await expect(session.files).toBeVisible({ timeout: 20_000 });
   const fileRow = session.files.getByText(filename);
-  await expect(fileRow).toBeVisible({ timeout: 30_000 });
+  // The file browser retries its agentctl tree load for up to 18s while a
+  // freshly prepared workspace becomes reachable. Let that bounded retry
+  // schedule finish before opening the file.
+  await expect(fileRow).toBeVisible({ timeout: 45_000 });
   await fileRow.click();
   // Retry click if preview tab didn't appear (executor may need a moment)
   const previewTab = page.getByTestId("preview-tab-file-editor");
@@ -81,6 +84,19 @@ function tabWrapperByText(page: Page, text: string) {
   return page.locator(".dv-tab", { has: page.locator(".dv-default-tab", { hasText: text }) });
 }
 
+function publishSeedCommit(git: GitHelper, remoteURL: string) {
+  // Task workspaces are created from the repository's configured origin. A
+  // commit that only exists in the fixture's checkout can therefore be
+  // absent from the task file tree under CI load.
+  const remotes = git.exec("git remote").split(/\r?\n/);
+  if (remotes.includes("origin")) {
+    git.exec(`git remote set-url origin "${remoteURL}"`);
+  } else {
+    git.exec(`git remote add origin "${remoteURL}"`);
+  }
+  git.exec("git push origin HEAD:main");
+}
+
 test.describe("Preview tab survives session switch", () => {
   test("preview tab persists after switching tasks and back", async ({
     testPage,
@@ -104,6 +120,7 @@ test.describe("Preview tab survives session switch", () => {
     git.createFile(FILE_A, "// alpha content");
     git.stageAll();
     git.commit("seed alpha");
+    publishSeedCommit(git, seedData.repositoryRemoteURL);
 
     // Create Task A and wait for it to complete
     const taskA = await apiClient.createTaskWithAgent(
@@ -212,6 +229,7 @@ test.describe("Preview tab survives session switch", () => {
     git.createFile(FILE_PROMOTED, "// promoted content");
     git.stageAll();
     git.commit("seed promoted");
+    publishSeedCommit(git, seedData.repositoryRemoteURL);
 
     const taskA = await seedFinishedTask(apiClient, seedData, "Promote Round-Trip A");
     const taskB = await seedFinishedTask(apiClient, seedData, "Promote Round-Trip B");
@@ -266,6 +284,7 @@ test.describe("Preview tab survives session switch", () => {
     git.createFile(FILE_ACTIVE, "// active content");
     git.stageAll();
     git.commit("seed active");
+    publishSeedCommit(git, seedData.repositoryRemoteURL);
 
     const taskA = await seedFinishedTask(apiClient, seedData, "Active Tab Round-Trip A");
     const taskB = await seedFinishedTask(apiClient, seedData, "Active Tab Round-Trip B");
@@ -318,6 +337,7 @@ test.describe("Preview tab survives session switch", () => {
     git.createFile(FILE_REFRESH, "// refresh content");
     git.stageAll();
     git.commit("seed refresh");
+    publishSeedCommit(git, seedData.repositoryRemoteURL);
 
     await seedFinishedTask(apiClient, seedData, "Refresh Active Tab Task");
 

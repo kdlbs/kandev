@@ -59,11 +59,51 @@ var runtimeEnvironmentRules = []runtimeRule{
 			}
 		},
 	},
+	{
+		// The ACP transport pipe died mid-turn: the upstream provider service
+		// dropped the connection before a response arrived. This is
+		// provider-agnostic wire-level transport death, not a model or
+		// availability problem — recoverable by retrying the same provider.
+		// Appended last so the more specific resume-corrupted and
+		// 529-overloaded rules above still win when signatures co-occur.
+		id:      transportLostRuleID,
+		pattern: transportLostRe,
+		build: func(text string) *Error {
+			// A context cancellation or deadline can be reported alongside the
+			// same "connection closed" wording the transport-lost signature
+			// matches on (e.g. "context canceled: connection closed"). Those
+			// envelopes must keep falling through to manual recovery, so
+			// reject them here rather than trust the substring match alone.
+			if cancellationOrDeadlineRe.MatchString(text) {
+				return nil
+			}
+			return &Error{
+				Code:       CodeAgentTransportLost,
+				Confidence: ConfHigh,
+			}
+		},
+	},
 }
+
+// cancellationOrDeadlineRe matches context-cancellation and deadline
+// signatures that can co-occur with the transport-lost wording in the same
+// error string. Kept separate from transportLostRe so the two can be
+// combined without the transport-lost pattern itself growing lookahead
+// complexity.
+var cancellationOrDeadlineRe = regexp.MustCompile(`(?i)\bcontext (?:canceled|deadline exceeded)\b|\bcancel escalated\b`)
 
 const resumeCorruptedRuleID = "anthropic.thinking_blocks.immutable.v1"
 
 const overloadedRuleID = "anthropic.overloaded.529.v1"
+
+const transportLostRuleID = "acp.transport_lost.v1"
+
+// transportLostRe matches the narrow ACP wire-level transport-death
+// signatures: the peer disconnecting before a response, or the underlying
+// connection closing outright. Deliberately narrow (only these two
+// substrings) so it never matches context-cancellation or shutdown-teardown
+// error strings, which must keep falling through to manual recovery.
+var transportLostRe = regexp.MustCompile(`(?i)peer disconnected|connection closed`)
 
 // overloadedRe matches the transient 529 Overloaded signature: either the
 // numeric code adjacent to "overloaded" on a single line (in either order), or
@@ -85,7 +125,7 @@ func IsTransientProviderError(message string) bool {
 		return false
 	}
 	switch e.Code {
-	case CodeProviderOverloaded, CodeModelCapacity, CodeNetworkUnavailable, CodeProviderUnavailable:
+	case CodeProviderOverloaded, CodeModelCapacity, CodeNetworkUnavailable, CodeProviderUnavailable, CodeAgentTransportLost:
 		return true
 	default:
 		return false
