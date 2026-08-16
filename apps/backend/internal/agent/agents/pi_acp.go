@@ -69,8 +69,9 @@ func (a *PiACP) Logo(v LogoVariant) []byte {
 
 func (a *PiACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 	// The Pi package publishes the short `pi` binary used by passthrough. A
-	// non-interactive version check filters unrelated tools with the same name;
-	// it does not prove identity, so the later ACP probe remains authoritative.
+	// non-interactive version check is a best-effort filter for unrelated tools
+	// with the same name; it does not prove package identity. The separate ACP
+	// probe validates the structured `npx -y pi-acp` surface, not this binary.
 	result, err := Detect(ctx, WithCommandCheck(piCLIBin, "--version"))
 	if err != nil {
 		return result, err
