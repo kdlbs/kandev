@@ -47,7 +47,7 @@ func TestTaskPRReads_ToleratesExtraColumn(t *testing.T) {
 		State:       "open",
 		CreatedAt:   time.Now().UTC(),
 	}
-	if err := store.ReplaceTaskPR(ctx, tp); err != nil {
+	if _, err := store.ReplaceTaskPR(ctx, tp, &PRStatus{}); err != nil {
 		t.Fatalf("ReplaceTaskPR: %v", err)
 	}
 
@@ -96,14 +96,13 @@ func TestTaskPRReads_ToleratesExtraColumn(t *testing.T) {
 	}
 }
 
-// taskPROutcomeColumnNames is the AC-07 checklist: every one of the eight
+// taskPROutcomeColumnNames is the AC-07 checklist: every one of the five
 // outcome-attribution columns must appear in taskPRColumns,
 // taskPRColumnsQualified, and the CreateTaskPR/ReplaceTaskPR INSERT column
 // lists, or a read/write path silently regresses to losing the column.
 var taskPROutcomeColumnNames = []string{
 	"is_draft", "changed_files", "merged_by_login", "closed_by_login",
-	"auto_merge_observed_at", "disposition", "disposition_superseded_by_url",
-	"disposition_recorded_at",
+	"auto_merge_observed_at",
 }
 
 // TestTaskPRColumnLists_IncludeAllOutcomeColumns covers AC-07: every outcome
@@ -120,10 +119,14 @@ func TestTaskPRColumnLists_IncludeAllOutcomeColumns(t *testing.T) {
 }
 
 // TestCreateAndReplaceTaskPR_RoundTripOutcomeColumns covers the write half
-// of AC-07: CreateTaskPR and ReplaceTaskPR must persist all eight outcome
+// of AC-07: CreateTaskPR and ReplaceTaskPR must persist all five outcome
 // columns, not just the pre-existing ones, or a linked PR loses any
-// upstream-observed or human-recorded outcome data the moment it is
-// (re)written.
+// upstream-observed outcome data the moment it is (re)written.
+//
+// ReplaceTaskPR resolves the five columns itself from a *PRStatus
+// observation (AC-43), rather than trusting a caller-supplied TaskPR's own
+// field values, so the "replaced" case below drives it with an explicit
+// populating status instead of presetting replaced's outcome fields.
 func TestCreateAndReplaceTaskPR_RoundTripOutcomeColumns(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -136,28 +139,22 @@ func TestCreateAndReplaceTaskPR_RoundTripOutcomeColumns(t *testing.T) {
 	mergedBy := "carlosflorencio"
 	closedBy := "nova28"
 	autoMergeAt := time.Now().UTC().Truncate(time.Second)
-	disposition := TaskPRDispositionExploratory
-	supersededURL := "https://github.com/kdlbs/kandev/pull/4242"
-	recordedAt := autoMergeAt
 
 	created := &TaskPR{
-		WorkspaceID:                "ws-roundtrip",
-		TaskID:                     "task-roundtrip",
-		Owner:                      "kdlbs",
-		Repo:                       "kandev",
-		PRNumber:                   5001,
-		PRURL:                      "https://github.com/kdlbs/kandev/pull/5001",
-		PRTitle:                    "outcome column round trip",
-		State:                      "closed",
-		CreatedAt:                  time.Now().UTC(),
-		IsDraft:                    &isDraft,
-		ChangedFiles:               &changedFiles,
-		MergedByLogin:              &mergedBy,
-		ClosedByLogin:              &closedBy,
-		AutoMergeObservedAt:        &autoMergeAt,
-		Disposition:                &disposition,
-		DispositionSupersededByURL: &supersededURL,
-		DispositionRecordedAt:      &recordedAt,
+		WorkspaceID:         "ws-roundtrip",
+		TaskID:              "task-roundtrip",
+		Owner:               "kdlbs",
+		Repo:                "kandev",
+		PRNumber:            5001,
+		PRURL:               "https://github.com/kdlbs/kandev/pull/5001",
+		PRTitle:             "outcome column round trip",
+		State:               "closed",
+		CreatedAt:           time.Now().UTC(),
+		IsDraft:             &isDraft,
+		ChangedFiles:        &changedFiles,
+		MergedByLogin:       &mergedBy,
+		ClosedByLogin:       &closedBy,
+		AutoMergeObservedAt: &autoMergeAt,
 	}
 	if err := store.CreateTaskPR(ctx, created); err != nil {
 		t.Fatalf("CreateTaskPR: %v", err)
@@ -166,40 +163,46 @@ func TestCreateAndReplaceTaskPR_RoundTripOutcomeColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTaskPRByID after CreateTaskPR: %v", err)
 	}
-	assertOutcomeColumnsRoundTrip(t, "CreateTaskPR", gotCreated, isDraft, changedFiles, mergedBy, closedBy, disposition, supersededURL)
+	assertOutcomeColumnsRoundTrip(t, "CreateTaskPR", gotCreated, isDraft, changedFiles, mergedBy, closedBy)
 
 	replaced := &TaskPR{
-		WorkspaceID:                "ws-roundtrip",
-		TaskID:                     "task-roundtrip",
-		Owner:                      "kdlbs",
-		Repo:                       "kandev",
-		PRNumber:                   5001,
-		PRURL:                      "https://github.com/kdlbs/kandev/pull/5001",
-		PRTitle:                    "outcome column round trip (replaced)",
-		State:                      "closed",
-		CreatedAt:                  time.Now().UTC(),
-		IsDraft:                    &isDraft,
-		ChangedFiles:               &changedFiles,
-		MergedByLogin:              &mergedBy,
-		ClosedByLogin:              &closedBy,
-		AutoMergeObservedAt:        &autoMergeAt,
-		Disposition:                &disposition,
-		DispositionSupersededByURL: &supersededURL,
-		DispositionRecordedAt:      &recordedAt,
+		WorkspaceID: "ws-roundtrip",
+		TaskID:      "task-roundtrip",
+		Owner:       "kdlbs",
+		Repo:        "kandev",
+		PRNumber:    5001,
+		PRURL:       "https://github.com/kdlbs/kandev/pull/5001",
+		PRTitle:     "outcome column round trip (replaced)",
+		State:       "closed",
+		CreatedAt:   time.Now().UTC(),
 	}
-	if err := store.ReplaceTaskPR(ctx, replaced); err != nil {
+	status := &PRStatus{
+		PR: &PR{
+			Draft:            isDraft,
+			ChangedFiles:     changedFiles,
+			MergedByLogin:    mergedBy,
+			AutoMergeEnabled: true,
+		},
+		OutcomeFieldsPopulated:      true,
+		ClosedByLogin:               closedBy,
+		ClosureAttributionPopulated: true,
+	}
+	gotReplaceResult, err := store.ReplaceTaskPR(ctx, replaced, status)
+	if err != nil {
 		t.Fatalf("ReplaceTaskPR: %v", err)
 	}
+	assertOutcomeColumnsRoundTrip(t, "ReplaceTaskPR (return value)", gotReplaceResult, isDraft, changedFiles, mergedBy, closedBy)
+
 	gotReplaced, err := store.GetTaskPRByRepoAndNumber(ctx, "task-roundtrip", "", 5001)
 	if err != nil {
 		t.Fatalf("GetTaskPRByRepoAndNumber after ReplaceTaskPR: %v", err)
 	}
-	assertOutcomeColumnsRoundTrip(t, "ReplaceTaskPR", gotReplaced, isDraft, changedFiles, mergedBy, closedBy, disposition, supersededURL)
+	assertOutcomeColumnsRoundTrip(t, "ReplaceTaskPR", gotReplaced, isDraft, changedFiles, mergedBy, closedBy)
 }
 
 func assertOutcomeColumnsRoundTrip(
 	t *testing.T, writer string, got *TaskPR,
-	wantIsDraft bool, wantChangedFiles int, wantMergedBy, wantClosedBy, wantDisposition, wantSupersededURL string,
+	wantIsDraft bool, wantChangedFiles int, wantMergedBy, wantClosedBy string,
 ) {
 	t.Helper()
 	if got == nil {
@@ -220,13 +223,104 @@ func assertOutcomeColumnsRoundTrip(
 	if got.AutoMergeObservedAt == nil {
 		t.Errorf("%s: AutoMergeObservedAt = nil, want set", writer)
 	}
-	if got.Disposition == nil || *got.Disposition != wantDisposition {
-		t.Errorf("%s: Disposition = %v, want %v", writer, got.Disposition, wantDisposition)
+}
+
+// TestReplaceTaskPR_PreservesAutoMergeLatch covers AC-43: a non-populating
+// observation must not clobber an already-latched auto_merge_observed_at
+// just because ReplaceTaskPR's DELETE+INSERT upsert touches the row.
+func TestReplaceTaskPR_PreservesAutoMergeLatch(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-latch-replace', 'ws-latch')`); err != nil {
+		t.Fatalf("seed task: %v", err)
 	}
-	if got.DispositionSupersededByURL == nil || *got.DispositionSupersededByURL != wantSupersededURL {
-		t.Errorf("%s: DispositionSupersededByURL = %v, want %v", writer, got.DispositionSupersededByURL, wantSupersededURL)
+
+	latchedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	seed := &TaskPR{
+		WorkspaceID:         "ws-latch",
+		TaskID:              "task-latch-replace",
+		Owner:               "kdlbs",
+		Repo:                "kandev",
+		PRNumber:            6001,
+		PRURL:               "https://github.com/kdlbs/kandev/pull/6001",
+		PRTitle:             "latch seed",
+		State:               "open",
+		CreatedAt:           time.Now().UTC(),
+		AutoMergeObservedAt: &latchedAt,
 	}
-	if got.DispositionRecordedAt == nil {
-		t.Errorf("%s: DispositionRecordedAt = nil, want set", writer)
+	if err := store.CreateTaskPR(ctx, seed); err != nil {
+		t.Fatalf("seed CreateTaskPR: %v", err)
+	}
+
+	replace := &TaskPR{
+		WorkspaceID: "ws-latch",
+		TaskID:      "task-latch-replace",
+		Owner:       "kdlbs",
+		Repo:        "kandev",
+		PRNumber:    6001,
+		PRURL:       "https://github.com/kdlbs/kandev/pull/6001",
+		PRTitle:     "latch seed (replaced)",
+		State:       "open",
+		CreatedAt:   time.Now().UTC(),
+	}
+	replaced, err := store.ReplaceTaskPR(ctx, replace, &PRStatus{})
+	if err != nil {
+		t.Fatalf("ReplaceTaskPR: %v", err)
+	}
+	if replaced.AutoMergeObservedAt == nil || !replaced.AutoMergeObservedAt.Equal(latchedAt) {
+		t.Fatalf("ReplaceTaskPR return value: AutoMergeObservedAt = %v, want preserved %v", replaced.AutoMergeObservedAt, latchedAt)
+	}
+
+	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-latch-replace", "", 6001)
+	if err != nil {
+		t.Fatalf("GetTaskPRByRepoAndNumber: %v", err)
+	}
+	if got == nil || got.AutoMergeObservedAt == nil || !got.AutoMergeObservedAt.Equal(latchedAt) {
+		t.Fatalf("stored row: AutoMergeObservedAt = %v, want preserved %v", got, latchedAt)
+	}
+}
+
+// TestRestoreTaskPR_PreservesAutoMergeLatch mirrors
+// TestReplaceTaskPR_PreservesAutoMergeLatch for the relink-after-detach path
+// (AC-43): RestoreTaskPR must carry the deleted row's auto_merge_observed_at
+// forward when the relink's observation doesn't populate outcome fields.
+func TestRestoreTaskPR_PreservesAutoMergeLatch(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-latch-restore', 'ws-latch')`); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	latchedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	seed := &TaskPR{
+		WorkspaceID:         "ws-latch",
+		TaskID:              "task-latch-restore",
+		Owner:               "kdlbs",
+		Repo:                "kandev",
+		PRNumber:            6002,
+		PRURL:               "https://github.com/kdlbs/kandev/pull/6002",
+		PRTitle:             "latch seed",
+		State:               "open",
+		CreatedAt:           time.Now().UTC(),
+		AutoMergeObservedAt: &latchedAt,
+	}
+	if err := store.CreateTaskPR(ctx, seed); err != nil {
+		t.Fatalf("seed CreateTaskPR: %v", err)
+	}
+
+	pr := &PR{
+		Number:    6002,
+		RepoOwner: "kdlbs",
+		RepoName:  "kandev",
+		HTMLURL:   "https://github.com/kdlbs/kandev/pull/6002",
+		Title:     "latch seed (restored)",
+		State:     "open",
+	}
+	restored, err := store.RestoreTaskPR(ctx, "task-latch-restore", "", &PRStatus{PR: pr})
+	if err != nil {
+		t.Fatalf("RestoreTaskPR: %v", err)
+	}
+	if restored == nil || restored.AutoMergeObservedAt == nil || !restored.AutoMergeObservedAt.Equal(latchedAt) {
+		t.Fatalf("RestoreTaskPR: AutoMergeObservedAt = %v, want preserved %v", restored, latchedAt)
 	}
 }

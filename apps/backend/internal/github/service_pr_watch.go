@@ -336,17 +336,14 @@ func (s *Service) associatePRWithTask(
 	}
 	if existing != nil {
 		if existing.DetachedAt != nil && restoreDetached {
-			// Same populated/preserve resolution as the fresh-insert branch
-			// below: a relinked detached PR must not surface merged_at set
-			// with merged_by_login left at whatever it was before detach
-			// (AC-36). existing is the pre-restore row, so its stored
-			// values are exactly what resolveTaskPROutcomeFields should
-			// preserve when this restore isn't from a populating fetch.
-			isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt :=
-				resolveTaskPROutcomeFields(existing, &PRStatus{PR: pr, OutcomeFieldsPopulated: outcomeFieldsPopulated})
+			// RestoreTaskPR resolves the five outcome-attribution columns
+			// itself, inside its own transaction, against the row it is
+			// about to overwrite (AC-43, AC-43a) — this caller must not
+			// pre-resolve them via resolveTaskPROutcomeFields, since a
+			// value resolved here would be stale by the time the store's
+			// statement executes.
 			restored, restoreErr := s.store.RestoreTaskPR(
-				ctx, taskID, repositoryID, pr,
-				isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt,
+				ctx, taskID, repositoryID, &PRStatus{PR: pr, OutcomeFieldsPopulated: outcomeFieldsPopulated},
 			)
 			if restoreErr != nil || restored == nil {
 				return restored, restoreErr
@@ -380,31 +377,21 @@ func (s *Service) associatePRWithTask(
 		MergedAt:     pr.MergedAt,
 		ClosedAt:     pr.ClosedAt,
 	}
-	if outcomeFieldsPopulated {
-		// A freshly-created row has no prior stored value to preserve, so
-		// resolveTaskPROutcomeFields' populated branch always applies here;
-		// reusing it (rather than duplicating its nil-vs-empty-string
-		// handling) keeps this path from drifting out of sync with
-		// SyncTaskPR. Guards a row linked already-terminal — e.g. the
-		// "+Task" URL flow on an already-merged PR — from shipping with
-		// merged_at set but merged_by_login NULL, which AC-36 forbids. Also
-		// captures closed_by_login and auto_merge_observed_at rather than
-		// discarding them: a fresh row linking a PR that already has
-		// auto-merge armed must set the latch immediately (AC-16), not wait
-		// for a later sync to observe the same state again.
-		tp.IsDraft, tp.ChangedFiles, tp.MergedByLogin, tp.ClosedByLogin, tp.AutoMergeObservedAt =
-			resolveTaskPROutcomeFields(tp, &PRStatus{PR: pr, OutcomeFieldsPopulated: true})
-	}
-	// ReplaceTaskPR upserts the row matching (task, repository, pr_number).
-	// Multi-branch tasks may already hold sibling rows for the SAME
-	// (task, repository) on different PR numbers — ReplaceTaskPR no longer
-	// touches them. The early-return above guarantees we only reach this
-	// line when no row for the exact pr_number exists yet, so this is a
-	// straight insert in steady state; the delete-then-insert form is
-	// retained so a retry that races a partial write resolves cleanly.
-	if err := s.store.ReplaceTaskPR(ctx, tp); err != nil {
+	// ReplaceTaskPR upserts the row matching (task, repository, pr_number)
+	// and resolves the five outcome-attribution columns itself, inside its
+	// own transaction, against the row it is about to overwrite (AC-43,
+	// AC-43a) — this caller must not pre-resolve them. Multi-branch tasks
+	// may already hold sibling rows for the SAME (task, repository) on
+	// different PR numbers — ReplaceTaskPR no longer touches them. The
+	// early-return above guarantees we only reach this line when no row for
+	// the exact pr_number exists yet, so this is a straight insert in
+	// steady state; the delete-then-insert form is retained so a retry that
+	// races a partial write resolves cleanly.
+	replaced, err := s.store.ReplaceTaskPR(ctx, tp, &PRStatus{PR: pr, OutcomeFieldsPopulated: outcomeFieldsPopulated})
+	if err != nil {
 		return nil, fmt.Errorf("replace task PR: %w", err)
 	}
+	tp = replaced
 
 	// Publish event for UI
 	if s.eventBus != nil {
@@ -962,10 +949,14 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 // SyncTaskPR to keep that function within the repo's complexity limits and
 // to make the re-read-before-publish behavior directly testable.
 func (s *Service) persistAndPublishTaskPRSync(ctx context.Context, tp *TaskPR, changed, outcomeFieldsPopulated bool) error {
+	// AC-38/AC-18c: the counter fires at the populated-ness decision point,
+	// before the write is attempted, and survives write failure — it
+	// measures what the sync observed, not whether the store call happened
+	// to succeed.
+	incTaskPROutcomeSync(outcomeFieldsPopulated)
 	if err := s.store.UpdateTaskPR(ctx, tp); err != nil {
 		return fmt.Errorf("update task PR: %w", err)
 	}
-	incTaskPROutcomeSync(outcomeFieldsPopulated)
 
 	if changed && s.eventBus != nil {
 		published, err := s.store.GetTaskPRByID(ctx, tp.ID)

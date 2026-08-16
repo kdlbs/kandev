@@ -626,10 +626,15 @@ func (c *MockController) associateTaskPR(ctx *gin.Context) {
 	}
 	now := time.Now().UTC()
 	tp := buildTaskPRFromRequest(&req, now)
-	if err := c.store.ReplaceTaskPR(ctx.Request.Context(), tp); err != nil {
+	// This endpoint never simulates a populating GitHub fetch, so it passes
+	// a zero-value *PRStatus: ReplaceTaskPR resolves the five outcome
+	// columns as "not observed" rather than trusting tp's own fields.
+	replaced, err := c.store.ReplaceTaskPR(ctx.Request.Context(), tp, &PRStatus{})
+	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	tp = replaced
 	c.ensureMockPRForRequest(ctx.Request.Context(), &req, now)
 	// Publish the event so the frontend Zustand store picks up the new PR
 	// without requiring a page reload — mirrors real AssociatePRWithTask.

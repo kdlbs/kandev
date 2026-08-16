@@ -12,7 +12,7 @@ import (
 )
 
 // preOutcomeGithubTaskPRsDDL is a snapshot of the github_task_prs DDL as it
-// existed before the eight outcome-attribution columns were added. Used to
+// existed before the five outcome-attribution columns were added. Used to
 // simulate a pre-migration database.
 const preOutcomeGithubTaskPRsDDL = `
 	CREATE TABLE github_task_prs (
@@ -53,7 +53,7 @@ const preOutcomeGithubTaskPRsDDL = `
 const outcomeMetaKey = "github_task_pr_outcome_activated_at"
 
 // newPreOutcomeMigrationStore opens a fresh SQLite DB seeded with the
-// pre-migration shape of github_task_prs (missing all eight outcome columns)
+// pre-migration shape of github_task_prs (missing all five outcome columns)
 // plus the tasks/workspaces tables NewStore expects, and returns the raw
 // handle for pre-migration seeding before the caller drives schema init via
 // NewStore.
@@ -79,9 +79,9 @@ func newPreOutcomeMigrationStore(t *testing.T) (*sqlx.DB, string) {
 }
 
 // TestTaskPROutcomeMigration_AddsColumnsNoBackfillActivatesOnce covers AC-01
-// through AC-06: an existing database lacking the eight outcome columns gets
+// through AC-06: an existing database lacking the five outcome columns gets
 // them via ADD COLUMN with no NOT NULL/DEFAULT, a pre-existing terminal row
-// stays NULL in all eight after two startups, the activation instant is
+// stays NULL in all five after two startups, the activation instant is
 // written exactly once in RFC 3339 form, and a second startup does not
 // advance it.
 func TestTaskPROutcomeMigration_AddsColumnsNoBackfillActivatesOnce(t *testing.T) {
@@ -142,30 +142,22 @@ func TestTaskPROutcomeMigration_FreshInstallReplaysClean(t *testing.T) {
 
 func assertOutcomeColumnsNull(t *testing.T, db *sqlx.DB, id string) {
 	t.Helper()
-	var (
-		isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt any
-		disposition, dispositionURL, dispositionRecordedAt                       any
-	)
+	var isDraft, changedFiles, mergedByLogin, closedByLogin, autoMergeObservedAt any
 	err := db.QueryRow(db.Rebind(`
-		SELECT is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at,
-			disposition, disposition_superseded_by_url, disposition_recorded_at
+		SELECT is_draft, changed_files, merged_by_login, closed_by_login, auto_merge_observed_at
 		FROM github_task_prs WHERE id = ?
 	`), id).Scan(
 		&isDraft, &changedFiles, &mergedByLogin, &closedByLogin, &autoMergeObservedAt,
-		&disposition, &dispositionURL, &dispositionRecordedAt,
 	)
 	if err != nil {
 		t.Fatalf("scan outcome columns for %q: %v", id, err)
 	}
 	for name, val := range map[string]any{
-		"is_draft":                      isDraft,
-		"changed_files":                 changedFiles,
-		"merged_by_login":               mergedByLogin,
-		"closed_by_login":               closedByLogin,
-		"auto_merge_observed_at":        autoMergeObservedAt,
-		"disposition":                   disposition,
-		"disposition_superseded_by_url": dispositionURL,
-		"disposition_recorded_at":       dispositionRecordedAt,
+		"is_draft":               isDraft,
+		"changed_files":          changedFiles,
+		"merged_by_login":        mergedByLogin,
+		"closed_by_login":        closedByLogin,
+		"auto_merge_observed_at": autoMergeObservedAt,
 	} {
 		if val != nil {
 			t.Errorf("%s on %q = %v, want NULL", name, id, val)

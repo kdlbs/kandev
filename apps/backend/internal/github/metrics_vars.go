@@ -10,10 +10,7 @@ import (
 // durable, snapshot-checkable signals are the writer-health invariants
 // AC-36/AC-37, not these counters. Mirrors the label idiom in
 // internal/office/scheduler/metrics_vars.go.
-var (
-	taskPROutcomeSyncsTotal        = expvar.NewMap("github_task_pr_outcome_syncs_total")
-	taskPROutcomeDispositionsTotal = expvar.NewMap("github_task_pr_outcome_dispositions_total")
-)
+var taskPROutcomeSyncsTotal = expvar.NewMap("github_task_pr_outcome_syncs_total")
 
 // outcomeMetricLabel builds a "k1=v1;k2=v2;..." label string for an expvar
 // map key, matching the idiom in internal/office/scheduler/metrics_vars.go.
@@ -33,12 +30,6 @@ func outcomeMetricLabel(pairs ...string) string {
 // material; AC-36/AC-37 remain the durable signal.
 func incTaskPROutcomeSync(populated bool) {
 	taskPROutcomeSyncsTotal.Add(outcomeMetricLabel("populated", boolLabel(populated)), 1)
-}
-
-// incTaskPROutcomeDisposition records a disposition write, distinguishing a
-// set from a clear (AC-38).
-func incTaskPROutcomeDisposition(action string) {
-	taskPROutcomeDispositionsTotal.Add(outcomeMetricLabel("action", action), 1)
 }
 
 func boolLabel(b bool) string {

@@ -468,7 +468,7 @@ type TaskPR struct {
 	DetachedAt              *time.Time `json:"-" db:"detached_at"`
 	UpdatedAt               time.Time  `json:"updated_at" db:"updated_at"`
 
-	// --- PR outcome attribution (eight nullable columns, never backfilled) ---
+	// --- PR outcome attribution (five nullable columns, never backfilled) ---
 	//
 	// Every field below is NULL on any row that predates this feature's
 	// activation instant (kandev_meta key taskPROutcomeActivatedAtMetaKey)
@@ -519,74 +519,6 @@ type TaskPR struct {
 	// observes auto-merge disarmed or absent. It must not be read, named,
 	// or charted as "merged by auto-merge."
 	AutoMergeObservedAt *time.Time `json:"auto_merge_observed_at" db:"auto_merge_observed_at"`
-	// Disposition is a human-recorded closure reason: upstream has no
-	// usable field for this (a PR's state_reason is always null; Kandev
-	// never closes a PR itself). NULL and "unknown" are deliberately
-	// distinct facts and must never be collapsed by a reader: NULL means
-	// nobody looked, "unknown" means somebody looked and could not
-	// determine why. One of validTaskPRDispositions when non-NULL.
-	Disposition *string `json:"disposition" db:"disposition"`
-	// DispositionSupersededByURL is set only alongside
-	// Disposition == "superseded".
-	DispositionSupersededByURL *string `json:"disposition_superseded_by_url" db:"disposition_superseded_by_url"`
-	// DispositionRecordedAt is set only alongside a non-NULL Disposition. A
-	// sync never clears a disposition: UpdateTaskPR does not name any
-	// disposition* column, so a reopen-then-merge leaves a previously
-	// recorded value intact by construction (AC-29c) even though it was
-	// recorded against a closure that was later undone. Consumers must
-	// scope disposition reporting to state == "closed" && merged_at == nil.
-	DispositionRecordedAt *time.Time `json:"disposition_recorded_at" db:"disposition_recorded_at"`
-}
-
-// The five permitted TaskPR.Disposition values. This set is complete: adding
-// a sixth later is a new contract, not an implementation detail, because a
-// downstream extract's time series would otherwise change meaning
-// mid-series.
-const (
-	TaskPRDispositionUnknown     = "unknown"
-	TaskPRDispositionSuperseded  = "superseded"
-	TaskPRDispositionDuplicate   = "duplicate"
-	TaskPRDispositionExploratory = "exploratory"
-	TaskPRDispositionWithdrawn   = "withdrawn"
-)
-
-// validTaskPRDispositions is the complete set of permitted TaskPR.Disposition
-// values, used by validTaskPRDisposition.
-var validTaskPRDispositions = map[string]struct{}{
-	TaskPRDispositionUnknown:     {},
-	TaskPRDispositionSuperseded:  {},
-	TaskPRDispositionDuplicate:   {},
-	TaskPRDispositionExploratory: {},
-	TaskPRDispositionWithdrawn:   {},
-}
-
-// validTaskPRDisposition reports whether value is one of the five permitted
-// TaskPR.Disposition values.
-func validTaskPRDisposition(value string) bool {
-	_, ok := validTaskPRDispositions[value]
-	return ok
-}
-
-// DispositionPatch is a partial update for a task-PR association's
-// disposition, tracking JSON key presence separately from value so a PATCH
-// can distinguish three states per field: key absent (leave the stored value
-// alone), key present with an explicit `null` (the pointer is nil), and key
-// present with a value. Without this distinction an omitted `disposition`
-// collapses to the same nil as an explicit `null`, so an empty `{}` body
-// would clear a recorded disposition and a URL-only PATCH could never update
-// an already-`superseded` disposition's URL without resending `disposition`.
-type DispositionPatch struct {
-	DispositionSet     bool
-	Disposition        *string
-	SupersededByURLSet bool
-	SupersededByURL    *string
-}
-
-// HasAny reports whether the patch names at least one field, so an empty
-// `{}` body can be treated as a true no-op rather than merged against the
-// stored row.
-func (p DispositionPatch) HasAny() bool {
-	return p.DispositionSet || p.SupersededByURLSet
 }
 
 // TaskCIOptions stores task-level PR automation preferences.

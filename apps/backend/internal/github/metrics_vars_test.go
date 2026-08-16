@@ -77,35 +77,12 @@ func TestIncTaskPROutcomeSyncRecordsOnExpvarMap(t *testing.T) {
 	}
 }
 
-// TestIncTaskPROutcomeDispositionRecordsOnExpvarMap covers AC-38: a
-// disposition write's action ("set" or "clear") is recorded on the
-// dispositions expvar map, distinguishing the two per the doc comment on
-// incTaskPROutcomeDisposition.
-func TestIncTaskPROutcomeDispositionRecordsOnExpvarMap(t *testing.T) {
-	labelSet := outcomeMetricLabel("action", "set")
-	beforeSet := readOutcomeCounter(t, taskPROutcomeDispositionsTotal, labelSet)
-	incTaskPROutcomeDisposition("set")
-	afterSet := readOutcomeCounter(t, taskPROutcomeDispositionsTotal, labelSet)
-	if afterSet-beforeSet != 1 {
-		t.Errorf("action=set counter delta = %d, want 1", afterSet-beforeSet)
-	}
-
-	labelClear := outcomeMetricLabel("action", "clear")
-	beforeClear := readOutcomeCounter(t, taskPROutcomeDispositionsTotal, labelClear)
-	incTaskPROutcomeDisposition("clear")
-	afterClear := readOutcomeCounter(t, taskPROutcomeDispositionsTotal, labelClear)
-	if afterClear-beforeClear != 1 {
-		t.Errorf("action=clear counter delta = %d, want 1", afterClear-beforeClear)
-	}
-}
-
 // TestOutcomeExpvarMapsPublishedAtKnownNames guards the /debug/vars names
 // AC-38 promises: a rename here silently breaks any external dashboard
 // scraping the names directly.
 func TestOutcomeExpvarMapsPublishedAtKnownNames(t *testing.T) {
 	expected := []string{
 		"github_task_pr_outcome_syncs_total",
-		"github_task_pr_outcome_dispositions_total",
 	}
 	for _, name := range expected {
 		if expvar.Get(name) == nil {

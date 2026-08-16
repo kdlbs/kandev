@@ -154,10 +154,12 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
 
+	// AC-38/AC-18c: the counter fires at the populated-ness decision point,
+	// before the write is attempted, and survives write failure.
+	incTaskPROutcomeSync(status.OutcomeFieldsPopulated)
 	if err := s.store.UpdateTaskPR(ctx, tp); err != nil {
 		return fmt.Errorf("update task PR: %w", err)
 	}
-	incTaskPROutcomeSync(status.OutcomeFieldsPopulated)
 	if changed && s.eventBus != nil {
 		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
 		if err := s.eventBus.Publish(ctx, events.GitHubTaskPRUpdated, event); err != nil {

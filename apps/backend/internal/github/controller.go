@@ -72,7 +72,6 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/task-prs", c.httpListTaskPRs)
 	api.POST("/task-prs", c.httpCreateTaskPR)
 	api.DELETE("/task-prs/:associationId", c.httpDeleteTaskPR)
-	api.PATCH("/task-prs/:associationId/disposition", c.httpSetTaskPRDisposition)
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
 	api.GET("/task-issues", c.httpListTaskIssues)
 	api.PUT("/tasks/:taskId/issue", c.httpLinkTaskIssue)
@@ -281,42 +280,6 @@ func (c *Controller) httpDeleteTaskPR(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
-// httpSetTaskPRDisposition records, updates, or clears a human-supplied
-// closure reason for a task-PR association. An explicit `null` on
-// `disposition` clears all three disposition columns; a key absent from the
-// body leaves that field's stored value untouched, so an empty `{}` body is
-// a no-op and a URL-only body can update an already-`superseded`
-// disposition's URL without resending `disposition`.
-func (c *Controller) httpSetTaskPRDisposition(ctx *gin.Context) {
-	workspaceID := ctx.Query("workspace_id")
-	if workspaceID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
-		return
-	}
-	associationID := ctx.Param("associationId")
-	patch, err := parseTaskPRDispositionPatch(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-		return
-	}
-	tp, err := c.service.SetTaskPRDisposition(ctx.Request.Context(), workspaceID, associationID, patch)
-	if err != nil {
-		if errors.Is(err, ErrTaskPRNotFound) || writeWatchWorkspaceError(ctx, "task PR", err) {
-			if !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
-				ctx.JSON(http.StatusNotFound, gin.H{"error": "task PR not found"})
-			}
-			return
-		}
-		if errors.Is(err, ErrInvalidDisposition) || errors.Is(err, ErrInvalidPRURL) {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	ctx.JSON(http.StatusOK, tp)
-}
-
 func (c *Controller) httpGetTaskPR(ctx *gin.Context) {
 	taskID := ctx.Param("taskId")
 	tp, err := c.service.GetTaskPR(ctx.Request.Context(), taskID)
@@ -452,50 +415,6 @@ func (c *Controller) writeTaskCIOptionsError(ctx *gin.Context, err error, operat
 	}
 	c.logger.Error(operation+" task CI options failed", zap.String("task_id", ctx.Param("taskId")), zap.Error(err))
 	ctx.JSON(http.StatusInternalServerError, gin.H{"error": message})
-}
-
-// parseTaskPRDispositionPatch decodes the disposition PATCH body into
-// map[string]json.RawMessage first, rather than binding straight into a
-// struct of pointer fields, so it can tell "the key was absent" apart from
-// "the key was present with an explicit null" for each field (mirrors
-// parseTaskCIOptionsPatch's presence-tracking pattern).
-func parseTaskPRDispositionPatch(ctx *gin.Context) (DispositionPatch, error) {
-	if ctx.Request.Body == nil || ctx.Request.ContentLength == 0 {
-		return DispositionPatch{}, nil
-	}
-	var raw map[string]json.RawMessage
-	if err := json.NewDecoder(ctx.Request.Body).Decode(&raw); err != nil {
-		if errors.Is(err, io.EOF) {
-			return DispositionPatch{}, nil
-		}
-		return DispositionPatch{}, err
-	}
-	var patch DispositionPatch
-	for key, value := range raw {
-		switch key {
-		case "disposition":
-			patch.DispositionSet = true
-			if string(value) == jsonNullLiteral {
-				continue
-			}
-			var disposition string
-			if err := json.Unmarshal(value, &disposition); err != nil {
-				return DispositionPatch{}, err
-			}
-			patch.Disposition = &disposition
-		case "superseded_by_url":
-			patch.SupersededByURLSet = true
-			if string(value) == jsonNullLiteral {
-				continue
-			}
-			var supersededByURL string
-			if err := json.Unmarshal(value, &supersededByURL); err != nil {
-				return DispositionPatch{}, err
-			}
-			patch.SupersededByURL = &supersededByURL
-		}
-	}
-	return patch, nil
 }
 
 func parseTaskCIOptionsPatch(ctx *gin.Context) (TaskCIOptionsPatch, error) {
