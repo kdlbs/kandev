@@ -112,9 +112,10 @@ func (r *taskServiceStateRepository) UpdateTaskStateIfSessionState(
 }
 
 type recordingClarificationCanceller struct {
-	sessions        []string
-	expiredSessions []string
-	expireErr       error
+	sessions              []string
+	expiredSessions       []string
+	expireContextDeadline []bool
+	expireErr             error
 }
 
 func (c *recordingClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) (int, error) {
@@ -122,8 +123,10 @@ func (c *recordingClarificationCanceller) DetachSessionAndNotify(_ context.Conte
 	return 1, nil
 }
 
-func (c *recordingClarificationCanceller) ExpireSessionAndNotify(_ context.Context, sessionID string) (int, error) {
+func (c *recordingClarificationCanceller) ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error) {
 	c.expiredSessions = append(c.expiredSessions, sessionID)
+	_, hasDeadline := ctx.Deadline()
+	c.expireContextDeadline = append(c.expireContextDeadline, hasDeadline)
 	return 1, c.expireErr
 }
 
@@ -373,6 +376,7 @@ func TestUpdateTaskSessionStateExpiresClarificationsOnTerminalTransition(t *test
 			svc.updateTaskSessionState(ctx, "t1", "s1", terminalState, "", false)
 
 			require.Equal(t, []string{"s1"}, canceller.expiredSessions)
+			require.Equal(t, []bool{true}, canceller.expireContextDeadline)
 		})
 	}
 }
@@ -442,6 +446,7 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	require.Len(t, eb.events, 1)
 	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
 	require.Equal(t, []string{"s1"}, canceller.expiredSessions)
+	require.Equal(t, []bool{true}, canceller.expireContextDeadline)
 }
 
 func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {

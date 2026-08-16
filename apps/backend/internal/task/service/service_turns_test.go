@@ -110,6 +110,60 @@ func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testin
 	}
 }
 
+func TestReservedTurnMetadataUpdatesPreserveConcurrentFields(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	turn, err := svc.ReserveTurn(ctx, sessionID, &models.PromptDispatchRecovery{})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	persisted, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(reserved): %v", err)
+	}
+	persisted.Metadata["concurrent_before_attempt"] = "keep"
+	if err := repo.UpdateTurn(ctx, persisted); err != nil {
+		t.Fatalf("add concurrent metadata before attempt: %v", err)
+	}
+
+	if err := svc.MarkReservedTurnDispatchAttempted(ctx, turn); err != nil {
+		t.Fatalf("MarkReservedTurnDispatchAttempted: %v", err)
+	}
+	marked, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(marked): %v", err)
+	}
+	if marked.Metadata["concurrent_before_attempt"] != "keep" {
+		t.Fatalf("attempt update dropped concurrent metadata: %#v", marked.Metadata)
+	}
+	marked.Metadata["concurrent_before_publish"] = "keep"
+	if err := repo.UpdateTurn(ctx, marked); err != nil {
+		t.Fatalf("add concurrent metadata before publish: %v", err)
+	}
+
+	if err := svc.PublishReservedTurn(ctx, turn); err != nil {
+		t.Fatalf("PublishReservedTurn: %v", err)
+	}
+	published, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(published): %v", err)
+	}
+	for _, key := range []string{"concurrent_before_attempt", "concurrent_before_publish"} {
+		if published.Metadata[key] != "keep" {
+			t.Fatalf("publish update dropped %s: %#v", key, published.Metadata)
+		}
+	}
+	if _, pending := published.Metadata[models.TurnMetaKeyPromptDispatchPending]; pending {
+		t.Fatalf("published turn retained dispatch metadata: %#v", published.Metadata)
+	}
+	if _, attempted := published.Metadata[models.TurnMetaKeyPromptDispatchAttempted]; attempted {
+		t.Fatalf("published turn retained dispatch-attempt metadata: %#v", published.Metadata)
+	}
+}
+
 func TestPublishReservedTurnDoesNotReopenCompletedReservation(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

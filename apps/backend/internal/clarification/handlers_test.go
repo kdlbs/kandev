@@ -18,6 +18,9 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type stubMessageCreator struct {
@@ -341,26 +344,37 @@ func TestDetachedResumeResolutionUsesFreshBoundedContext(t *testing.T) {
 }
 
 func TestClarificationClaimRecoveryRejectsMixedTurns(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	observedLogger, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observed logger: %v", err)
+	}
+	h := &Handlers{logger: observedLogger}
 	messages := []*taskmodels.Message{
 		{ID: "message-one", TurnID: "turn-one"},
 		{ID: "message-two", TurnID: "turn-two"},
 	}
-	if turnID := clarificationClaimTurnID(messages); turnID != "" {
+	if turnID := h.clarificationClaimTurnID("pending-mixed", messages); turnID != "" {
 		t.Fatalf("clarificationClaimTurnID = %q, want invalid identity", turnID)
 	}
-	_, _, err := clarificationClaimRecovery(messages)
+	warnings := logs.FilterMessage("clarification bundle has inconsistent turn IDs").All()
+	if len(warnings) != 1 || warnings[0].ContextMap()["pending_id"] != "pending-mixed" {
+		t.Fatalf("mixed-turn warnings = %#v, want pending identity", warnings)
+	}
+	_, _, err = clarificationClaimRecovery(messages)
 	if err == nil {
 		t.Fatal("clarificationClaimRecovery accepted messages from different turns")
 	}
 }
 
 func TestClarificationClaimTurnIDUsesNonEmptyBundleIdentity(t *testing.T) {
+	h, _, _, _ := setupTestHandler(t, nil)
 	messages := []*taskmodels.Message{
 		{ID: "message-legacy", TurnID: ""},
 		{ID: "message-current", TurnID: "turn-current"},
 	}
 
-	primaryTurnID := clarificationClaimTurnID(messages)
+	primaryTurnID := h.clarificationClaimTurnID("pending-current", messages)
 	recoveryTurnID, messageIDs, err := clarificationClaimRecovery(messages)
 	if err != nil {
 		t.Fatalf("clarificationClaimRecovery: %v", err)

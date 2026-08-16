@@ -442,7 +442,7 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 			body.Answers,
 			body.Rejected,
 			body.RejectReason,
-			clarificationClaimTurnID(claim.messages),
+			h.clarificationClaimTurnID(pendingID, claim.messages),
 		)
 		h.logger.Info("clarification answered via primary path (same turn)",
 			zap.String("pending_id", pendingID),

@@ -291,6 +291,7 @@ func TestPostgresActiveTurnMetadataUpdateUsesSessionTurnLock(t *testing.T) {
 				models.TurnMetaKeyPromptDispatchPending:   true,
 				models.TurnMetaKeyPromptDispatchAttempted: true,
 			},
+			nil,
 		)
 		updateDone <- updateResult{updated: updated, err: updateErr}
 	}()

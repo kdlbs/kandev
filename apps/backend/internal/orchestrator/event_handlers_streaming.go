@@ -1010,7 +1010,7 @@ func (s *Service) updateTaskSessionStateWithHook(
 		onChanged()
 	}
 	if isTerminalSessionState(nextState) {
-		if err := s.expireClarificationWaiters(ctx, sessionID); err != nil {
+		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
 			s.logger.Error("failed to expire clarification on terminal session; response claims remain quarantined",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -1159,7 +1159,7 @@ func (s *Service) transitionTaskSessionState(
 		onChanged()
 	}
 	if isTerminalSessionState(nextState) {
-		if err := s.expireClarificationWaiters(ctx, sessionID); err != nil {
+		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
 			s.logger.Error("failed to expire clarification on strict terminal transition; response claims remain quarantined",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -2368,6 +2368,14 @@ func (s *Service) expireClarificationWaiters(ctx context.Context, sessionID stri
 			zap.Int("count", n))
 	}
 	return err
+}
+
+const terminalClarificationExpiryTimeout = 10 * time.Second
+
+func (s *Service) expireTerminalClarificationWaiters(ctx context.Context, sessionID string) error {
+	expireCtx, cancel := context.WithTimeout(ctx, terminalClarificationExpiryTimeout)
+	defer cancel()
+	return s.expireClarificationWaiters(expireCtx, sessionID)
 }
 
 // sessionStateString renders a session's state for logging, returning "" when

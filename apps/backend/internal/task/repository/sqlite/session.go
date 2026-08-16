@@ -241,23 +241,48 @@ func (r *Repository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	return err
 }
 
-// UpdateActiveTurnMetadata replaces metadata without copying a caller's stale
-// completion state over a concurrently completed turn.
+// UpdateActiveTurnMetadata applies a narrow metadata patch without copying a
+// caller's stale snapshot over unrelated fields or a concurrently completed turn.
 func (r *Repository) UpdateActiveTurnMetadata(
 	ctx context.Context,
 	sessionID, turnID string,
-	metadata map[string]interface{},
+	updates map[string]interface{},
+	removeKeys []string,
 ) (bool, time.Time, error) {
-	metadataJSON, err := serializeTurnMetadata(metadata)
-	if err != nil {
-		return false, time.Time{}, err
-	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("begin active turn metadata update: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, time.Time{}, err
+	}
+	var metadataJSON string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT metadata
+		FROM task_session_turns
+		WHERE id = ? AND task_session_id = ? AND completed_at IS NULL
+	`), turnID, sessionID).Scan(&metadataJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, time.Time{}, nil
+	}
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("read active turn metadata: %w", err)
+	}
+	metadata := make(map[string]interface{})
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			return false, time.Time{}, fmt.Errorf("deserialize active turn metadata: %w", err)
+		}
+	}
+	for key, value := range updates {
+		metadata[key] = value
+	}
+	for _, key := range removeKeys {
+		delete(metadata, key)
+	}
+	metadataJSON, err = serializeTurnMetadata(metadata)
+	if err != nil {
 		return false, time.Time{}, err
 	}
 	updatedAt := r.nowUTC()

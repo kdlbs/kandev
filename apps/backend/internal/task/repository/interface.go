@@ -249,13 +249,14 @@ type TurnRepository interface {
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
-	// UpdateActiveTurnMetadata replaces metadata only while the named turn is
-	// active and still belongs to sessionID. Implementations serialize this
-	// authority change with other current-turn decisions for the session.
+	// UpdateActiveTurnMetadata merges updates and removes named keys only while
+	// the turn is active and belongs to sessionID. Implementations serialize
+	// this authority change with other current-turn decisions for the session.
 	UpdateActiveTurnMetadata(
 		ctx context.Context,
 		sessionID, turnID string,
-		metadata map[string]interface{},
+		updates map[string]interface{},
+		removeKeys []string,
 	) (bool, time.Time, error)
 	CompleteTurn(ctx context.Context, id string) error
 	AbandonTurn(ctx context.Context, id string) error

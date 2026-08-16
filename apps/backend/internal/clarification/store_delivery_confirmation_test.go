@@ -14,6 +14,9 @@ func TestWaitForResponseConfirmsDurableDeliveryBeforeReturning(t *testing.T) {
 	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
 	confirmationStarted := make(chan struct{})
 	releaseConfirmation := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseConfirmation) }) }
+	t.Cleanup(release)
 	waitDone := make(chan error, 1)
 	respondDone := make(chan error, 1)
 	go func() {
@@ -45,7 +48,7 @@ func TestWaitForResponseConfirmsDurableDeliveryBeforeReturning(t *testing.T) {
 		t.Fatalf("responder returned before durable confirmation: %v", err)
 	default:
 	}
-	close(releaseConfirmation)
+	release()
 	select {
 	case err := <-waitDone:
 		if err != nil {
@@ -155,11 +158,15 @@ func TestRespondWithDeliveryConfirmationReturnsNotFoundWhenCancellationWinsAfter
 	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
 	respondLoaded := make(chan struct{})
 	releaseRespond := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseRespond) }) }
+	t.Cleanup(release)
 	s.SetOnRespondLoaded(func(string) {
 		close(respondLoaded)
 		<-releaseRespond
 	})
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	respondDone := make(chan error, 1)
 	confirmationCalled := make(chan struct{}, 1)
 	go func() {
@@ -174,7 +181,7 @@ func TestRespondWithDeliveryConfirmationReturnsNotFoundWhenCancellationWinsAfter
 		t.Fatal("CancelRequest returned false for known clarification")
 	}
 	cancel()
-	close(releaseRespond)
+	release()
 
 	select {
 	case err := <-respondDone:
@@ -198,6 +205,9 @@ func TestRespondWithDeliveryConfirmationFinishesStartedConfirmationAfterDeadline
 	defer cancel()
 	confirmationStarted := make(chan struct{})
 	releaseConfirmation := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseConfirmation) }) }
+	t.Cleanup(release)
 	waitDone := make(chan error, 1)
 	respondDone := make(chan error, 1)
 	go func() {
@@ -219,7 +229,7 @@ func TestRespondWithDeliveryConfirmationFinishesStartedConfirmationAfterDeadline
 		t.Fatalf("started confirmation was abandoned at deadline: %v", err)
 	default:
 	}
-	close(releaseConfirmation)
+	release()
 	if err := <-respondDone; err != nil {
 		t.Fatalf("RespondWithDeliveryConfirmation: %v", err)
 	}

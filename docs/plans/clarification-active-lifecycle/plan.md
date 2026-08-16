@@ -396,6 +396,11 @@ All locally available task gates passed; environment-gated parity also passed in
 - The next Claude and CodeRabbit pass keeps a stale-dismiss event from clearing a different pending
   identity in event-only projector mode and makes an active-turn lookup error outrank any partial turn
   returned alongside it. Both review regressions pass.
+- The latest review pass bounds terminal clarification expiry before state publication, patches active
+  turn metadata under session authority, exposes mixed-turn bundle corruption in warning logs, and
+  makes blocking test cleanup failure-safe. PostgreSQL-gated epoch coverage now checks monotonic and
+  corrupt-value behavior. All affected backend suites and changed-code lint pass; the PostgreSQL case
+  is locally skipped when `KANDEV_TEST_POSTGRES_DSN` is unavailable.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

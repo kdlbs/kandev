@@ -50,9 +50,12 @@ func (h *Handlers) finalizeClarificationResponseDelivery(
 	return true
 }
 
-func clarificationClaimTurnID(messages []*taskmodels.Message) string {
+func (h *Handlers) clarificationClaimTurnID(pendingID string, messages []*taskmodels.Message) string {
 	turnID, err := clarificationClaimTurnIdentity(messages)
 	if err != nil {
+		h.logger.Warn("clarification bundle has inconsistent turn IDs",
+			zap.String("pending_id", pendingID),
+			zap.Error(err))
 		return ""
 	}
 	return turnID

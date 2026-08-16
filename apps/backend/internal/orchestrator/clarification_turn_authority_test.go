@@ -14,8 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-type unusedClarificationTurnService struct{ TurnService }
-
 func TestClarificationTurnAuthorityDistinguishesMissingDependencyFromMissingIdentity(t *testing.T) {
 	core, logs := observer.New(zapcore.DebugLevel)
 	observedLogger, err := logger.NewFromZap(zap.New(core))
@@ -35,7 +33,7 @@ func TestClarificationTurnAuthorityDistinguishesMissingDependencyFromMissingIden
 	}
 	logs.TakeAll()
 
-	svc.turnService = unusedClarificationTurnService{}
+	svc.turnService = &repoTurnService{repo: setupTestRepo(t)}
 	data.ClarificationTurnID = ""
 	if svc.clarificationTurnStillCurrent(context.Background(), data) {
 		t.Fatal("missing clarification turn ID accepted fallback")
