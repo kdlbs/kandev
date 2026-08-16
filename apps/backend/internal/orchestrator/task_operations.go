@@ -3912,12 +3912,6 @@ func (s *Service) claimPromptDispatch(
 		createdTurn:          createdTurn,
 		reservedTurn:         reservedTurn,
 	}
-	if reservedTurn != nil && s.turnService != nil {
-		if err := s.turnService.MarkReservedTurnDispatchAttempted(ctx, reservedTurn); err != nil {
-			s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)
-			return nil, promptClaimRollback{}, fmt.Errorf("persist prompt dispatch attempt: %w", err)
-		}
-	}
 	return claimed, rollback, nil
 }
 
@@ -4262,6 +4256,18 @@ func (s *Service) claimSessionRunningForPrompt(
 	if err != nil {
 		s.restoreLifecycleClaim(ctx, taskID, sessionID, previousState)
 		return nil, "", "", false, nil, fmt.Errorf("persist prompt turn: %w", err)
+	}
+	if reservedTurn != nil && s.turnService != nil {
+		if err := s.turnService.MarkReservedTurnDispatchAttempted(ctx, reservedTurn); err != nil {
+			rollback := promptClaimRollback{
+				previousSessionState: previousState,
+				turnID:               turnID,
+				createdTurn:          createdTurn,
+				reservedTurn:         reservedTurn,
+			}
+			s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)
+			return nil, "", "", false, nil, fmt.Errorf("persist prompt dispatch attempt: %w", err)
+		}
 	}
 	reservation := s.queuedDispatchReservationForEntry(sessionID, claimEntryID)
 	if reservation != nil && reservation.liveEligible.Load() {

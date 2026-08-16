@@ -121,8 +121,16 @@ func (s *Service) MarkReservedTurnDispatchAttempted(ctx context.Context, turn *m
 		attempted.Metadata = map[string]interface{}{}
 	}
 	attempted.Metadata[models.TurnMetaKeyPromptDispatchAttempted] = true
-	if err := s.turns.UpdateTurn(ctx, &attempted); err != nil {
+	updater, ok := s.turns.(activeTurnMetadataUpdater)
+	if !ok {
+		return fmt.Errorf("mark reserved turn %s dispatch attempted: active metadata updater is unavailable", turn.ID)
+	}
+	updated, _, err := updater.UpdateActiveTurnMetadata(ctx, turn.ID, attempted.Metadata)
+	if err != nil {
 		return fmt.Errorf("mark reserved turn %s dispatch attempted: %w", turn.ID, err)
+	}
+	if !updated {
+		return fmt.Errorf("mark reserved turn %s dispatch attempted: turn is no longer active", turn.ID)
 	}
 	persisted, err := s.turns.GetTurn(ctx, turn.ID)
 	if err != nil {

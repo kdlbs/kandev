@@ -174,6 +174,31 @@ func TestPublishReservedTurnRejectsMissingReservationWithoutEvent(t *testing.T) 
 	}
 }
 
+func TestMarkReservedTurnDispatchAttemptedRejectsCompletedReservation(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	turn, err := svc.ReserveTurn(ctx, sessionID, &models.PromptDispatchRecovery{})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	if err := repo.CompleteTurn(ctx, turn.ID); err != nil {
+		t.Fatalf("CompleteTurn: %v", err)
+	}
+	if err := svc.MarkReservedTurnDispatchAttempted(ctx, turn); err == nil {
+		t.Fatal("MarkReservedTurnDispatchAttempted(completed) error = nil")
+	}
+	persisted, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if persisted.CompletedAt == nil {
+		t.Fatal("attempt marker reopened completed reservation")
+	}
+}
+
 func TestStartTurnPersistsImmutableEffectiveRuntimeConfigSnapshot(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

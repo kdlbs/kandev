@@ -32,6 +32,12 @@ type completedReservedTurnPublisher struct {
 	TurnService
 }
 
+type blockingReservedTurnMarker struct {
+	TurnService
+	entered chan struct{}
+	release chan struct{}
+}
+
 type failingPromptTurnReconciler struct {
 	TurnService
 	err error
@@ -50,6 +56,15 @@ func (s completedReservedTurnPublisher) PublishReservedTurn(_ context.Context, t
 	completedAt := time.Now().UTC()
 	turn.CompletedAt = &completedAt
 	return nil
+}
+
+func (s blockingReservedTurnMarker) MarkReservedTurnDispatchAttempted(
+	ctx context.Context,
+	turn *models.Turn,
+) error {
+	close(s.entered)
+	<-s.release
+	return s.TurnService.MarkReservedTurnDispatchAttempted(ctx, turn)
 }
 
 func (s failingPromptTurnReconciler) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
@@ -303,6 +318,75 @@ func TestAcceptedReservationDoesNotRestoreTerminalOrMissingCache(t *testing.T) {
 				t.Fatalf("private reservation cache = %q, want cleared", pending)
 			}
 		})
+	}
+}
+
+func TestReservedTurnAttemptMarkingHoldsCancellationGuard(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+	if err := repo.UpdateTaskSessionState(
+		ctx,
+		"session1",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+	marker := blockingReservedTurnMarker{
+		TurnService: svc.turnService,
+		entered:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+	svc.turnService = marker
+
+	claimDone := make(chan error, 1)
+	go func() {
+		_, _, err := svc.claimPromptDispatch(
+			ctx,
+			"task1",
+			"session1",
+			"",
+			false,
+			true,
+			&models.PromptDispatchRecovery{},
+			nil,
+			nil,
+		)
+		claimDone <- err
+	}()
+	select {
+	case <-marker.entered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for reserved-turn attempt marker")
+	}
+
+	guardAcquired := make(chan struct{})
+	go func() {
+		guard, release := svc.acquireCancelInFlightGuard("session1")
+		defer release()
+		guard.Lock()
+		close(guardAcquired)
+		guard.Unlock()
+	}()
+	select {
+	case <-guardAcquired:
+		t.Fatal("cancellation guard was released before attempt marking completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(marker.release)
+	select {
+	case err := <-claimDone:
+		if err != nil {
+			t.Fatalf("claimPromptDispatch: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for prompt claim")
+	}
+	select {
+	case <-guardAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation guard remained blocked after attempt marking")
 	}
 }
 
