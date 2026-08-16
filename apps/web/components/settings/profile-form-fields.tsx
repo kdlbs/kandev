@@ -401,21 +401,47 @@ function NameField({
   const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-4">
-      <div className="flex-1 space-y-2">
-        <Label>{t("agents:profileName")}</Label>
-        <Input
-          data-testid="profile-name-input"
-          value={profile.name}
-          onChange={(event) => onChange({ name: event.target.value })}
-          placeholder={t("agents:defaultProfile")}
-          data-settings-dirty={baselineName !== undefined && profile.name !== baselineName}
-        />
-      </div>
+      <ProfileNameField
+        value={profile.name}
+        onChange={(value) => onChange({ name: value })}
+        dirty={baselineName !== undefined && profile.name !== baselineName}
+      />
       {canRemove && onRemove && (
         <Button size="sm" variant="ghost" className="cursor-pointer" onClick={onRemove}>
           {t("agents:remove")}
         </Button>
       )}
+    </div>
+  );
+}
+
+export type ProfileNameFieldProps = {
+  value: string;
+  onChange: (value: string) => void;
+  dirty?: boolean;
+  id?: string;
+  testId?: string;
+};
+
+export function ProfileNameField({
+  value,
+  onChange,
+  dirty = false,
+  id,
+  testId = "profile-name-input",
+}: ProfileNameFieldProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex-1 space-y-2">
+      <Label htmlFor={id}>{t("agents:profileName")}</Label>
+      <Input
+        id={id}
+        data-testid={testId}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={t("agents:defaultProfile")}
+        data-settings-dirty={dirty}
+      />
     </div>
   );
 }

@@ -22,6 +22,7 @@ test.describe("Dynamic Agents settings card", () => {
 
       await createProfile.click();
       await expect(testPage).toHaveURL(/\/settings\/agents\/dynamic\?mode=create$/);
+      await expect(testPage.getByTestId("dynamic-profile-enabled-toggle")).toHaveCount(0);
     } finally {
       await releaseFeature();
     }
@@ -60,7 +61,10 @@ test.describe("Dynamic Agents settings card", () => {
       await testPage.getByTestId("new-dynamic-profile").click();
       await expect(testPage).toHaveURL(/\/settings\/agents\/dynamic\?mode=create$/);
       await expect(testPage.getByTestId("dynamic-profile-name")).toBeVisible({ timeout: 15_000 });
-      await expect(testPage.getByTestId("dynamic-profile-enabled-toggle")).toBeVisible();
+      await expect(testPage.getByTestId("dynamic-routing-policy-help")).toBeVisible();
+      await expect(testPage.getByTestId("dynamic-routing-policy-help")).toContainText(
+        "authentication or subscription problems, missing credentials or configuration, quota or rate limits",
+      );
 
       const picker = testPage.getByTestId("add-dynamic-candidate");
       await picker.click();

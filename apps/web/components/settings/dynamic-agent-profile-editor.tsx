@@ -6,7 +6,6 @@ import { IconArrowDown, IconArrowUp, IconInfoCircle, IconTrash } from "@tabler/i
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
@@ -15,6 +14,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { AgentProfilePicker } from "@/components/settings/agent-profile-picker";
+import { ProfileNameField } from "@/components/settings/profile-form-fields";
 import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { updateAgentProfileAction } from "@/app/actions/agents";
@@ -99,6 +99,24 @@ function DynamicRouteActionHelp({ action }: { action: string }) {
         {t(descriptionKey)}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function DynamicRoutingPolicyHelp() {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="flex gap-3 rounded-md border bg-muted/30 p-3"
+      data-testid="dynamic-routing-policy-help"
+    >
+      <IconInfoCircle className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="min-w-0 space-y-1 text-xs leading-relaxed text-muted-foreground">
+        <p className="font-medium text-foreground">{t("agents:dynamicRoutingPolicyTitle")}</p>
+        <p>{t("agents:dynamicRoutingPolicySwitchable")}</p>
+        <p>{t("agents:dynamicRoutingPolicyExcluded")}</p>
+        <p>{t("agents:dynamicRoutingPolicyRecovery")}</p>
+      </div>
+    </div>
   );
 }
 
@@ -378,38 +396,17 @@ export function DynamicAgentProfileEditor({
 
   const editorContent = (
     <>
-      {!standalone && (
-        <div className="flex min-h-11 items-center justify-between gap-3 rounded-md border p-3">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">{enabledLabel}</p>
-            <p className="text-xs text-muted-foreground">{t("agents:enabledProfileHelper")}</p>
-          </div>
-          <Switch
-            id={`dynamic-profile-enabled-${profile.id}`}
-            checked={profileEnabled}
-            onCheckedChange={(checked) => {
-              setProfileEnabled(checked);
-              notifyDraft(name, candidates, checked);
-            }}
-            data-testid="dynamic-profile-enabled-toggle"
-            aria-label={enabledLabel}
-          />
-        </div>
-      )}
-      <label className="grid gap-2 text-sm font-medium" htmlFor="dynamic-profile-name">
-        {t("agents:profileName")}
-        <Input
-          id="dynamic-profile-name"
-          value={name}
-          onChange={(event) => {
-            const nextName = event.target.value;
-            setName(nextName);
-            notifyDraft(nextName, candidates);
-          }}
-          className="min-h-11"
-          data-testid="dynamic-profile-name"
-        />
-      </label>
+      <ProfileNameField
+        id="dynamic-profile-name"
+        testId="dynamic-profile-name"
+        value={name}
+        onChange={(nextName) => {
+          setName(nextName);
+          notifyDraft(nextName, candidates);
+        }}
+      />
+
+      <DynamicRoutingPolicyHelp />
 
       <div className="space-y-3" data-testid="dynamic-profile-candidates">
         <div className="flex flex-wrap items-center justify-between gap-2">
