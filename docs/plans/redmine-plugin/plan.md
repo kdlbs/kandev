@@ -100,7 +100,10 @@ word on parity with Jira/Linear/Sentry's native settings pages.
 2026-08-16: All tasks are complete. `yattdev/kandev-plugin-redmine` v0.1.0 was
 released with `kandev-plugin-redmine-0.1.0.tar.gz` and `checksums.txt`; the packaged
 artifact passed this repository's two contract E2E tests. The host marketplace pointer
-is present in `plugin-registry/plugins.yaml`.
+is present in `plugin-registry/plugins.yaml`. The host E2E remains intentionally
+zero-network; Redmine-dependent watcher, sync, and write-back behavior is verified in
+the plugin repository's test suite rather than by this repository's packaged-plugin
+spec without a live Redmine target.
 
 ## Risks
 

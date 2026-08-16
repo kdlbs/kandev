@@ -31,18 +31,21 @@ Tasks 06, 07, 08.
 1. `make package-host` produces an archive containing `manifest.yaml`, the host
    executable, UI assets, and a generated `checksums.txt`.
 2. Installed into a disposable dev Kandev instance (never the developer's primary
-   instance/database/credentials): config validation, permission failures, lifecycle
-   restart, watcher/event delivery, and native UI registration all exercised and
-   passing, including duplicate-event idempotency and a plugin disable/uninstall data
-   lifecycle check (disable preserves state; uninstall removes it and cascades watcher
-   task-tree deletion).
+   instance/database/credentials): package install/enable, native UI registration,
+   and deterministic disable/enable lifecycle checks exercised through the host.
+   Redmine-dependent config validation, watcher delivery, duplicate-event idempotency,
+   and watcher-created-task cascade behavior are verified in the plugin repository's
+   fake-Redmine tests and the generic host plugin contracts; they are not required in
+   this repository's packaged-plugin E2E unless a live Redmine fixture is explicitly
+   provided.
 3. A GitHub Release exists on `yattdev/kandev-plugin-redmine` with the release asset
    named `kandev-plugin-redmine-<version>.tar.gz`, and `min_kandev_version` in the
    manifest is pinned to the Kandev version tested against.
 4. `apps/web/e2e/tests/plugins/redmine-*.spec.ts` covers, at the contract level:
-   install/enable, connection settings round-trip, task linking via the shared Link
-   dialog, and a watcher-created task appearing — mirroring
-   `apps/web/e2e/tests/plugins/bitbucket-*.spec.ts`'s coverage shape.
+   install/enable, safe zero-network action defaults, native settings registration,
+   task linking via the shared Link dialog, and disable/enable lifecycle. It must not
+   require an outbound Redmine call in CI; watcher-created task appearance remains
+   plugin-repository coverage unless a live Redmine fixture is added.
 5. `plugin-registry/plugins.yaml` gains a `redmine` entry with `id` equal to the
    manifest `id`, added only after step 3's release exists.
 
@@ -58,3 +61,16 @@ node scripts/validate-public-docs.mjs   # if this task touches plugins-authoring
 Do not test against a developer's primary Kandev instance or real Redmine credentials.
 The catalog pointer step is release-gated by design (per the create-kandev-plugin
 skill) — do not add it speculatively before a release exists.
+
+## Current status
+
+2026-08-16: Complete. `yattdev/kandev-plugin-redmine` v0.1.0 is published at
+https://github.com/yattdev/kandev-plugin-redmine/releases/tag/v0.1.0 with assets
+`kandev-plugin-redmine-0.1.0.tar.gz` and `checksums.txt`; `min_kandev_version` is
+`0.88.0`. The host contract E2E is
+`apps/web/e2e/tests/plugins/redmine-packaged-plugin.spec.ts` and intentionally stays
+zero-network: it installs the real release artifact, checks safe unconfigured action
+defaults, verifies the native settings and shared Link-dialog contracts, and exercises
+disable/enable registration lifecycle. Redmine-dependent watcher creation, sync, and
+write-back behavior is covered by the plugin repository's tests rather than by a host
+E2E without a live Redmine instance.
