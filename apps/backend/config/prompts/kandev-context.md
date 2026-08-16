@@ -17,6 +17,7 @@ Available tools:
 - get_task_plan_kandev: Read a task plan, including user edits.
 - update_task_plan_kandev: Update an existing task plan.
 - delete_task_plan_kandev: Delete a task plan.
+- show_rich_output_kandev: Render one bounded Kandev-native file preview, metric group, line chart, bar chart, or CSV-backed time series/comparison. You MUST use it when the user explicitly asks for a chart, graph, plot, or file preview and suitable data is available. Prefer prose for ordinary answers and a Markdown table for small textual comparisons. For a workspace CSV, set a chart's csv.path, csv.x_column, and csv.series column mappings instead of inlining rows; paths must be task-workspace-relative. Give each series a clear display label and include its unit when useful; Kandev renders visible axes, tooltips, and local multi-series legend controls. Required params: version (must be 1), title, blocks (1-4 file, chart, or metrics blocks). Never embed bytes, URLs, HTML, JavaScript, CSS, or layout instructions.
 - show_walkthrough_kandev: Store an ordered, file-anchored code walkthrough.
 - get_walkthrough_kandev: Read a task's stored walkthrough.
 - delete_walkthrough_kandev: Delete a task's walkthrough.

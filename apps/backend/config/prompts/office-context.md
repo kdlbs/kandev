@@ -11,6 +11,7 @@ Available tools:
 - get_task_plan_kandev: Retrieve the current task plan, including user edits. Required: task_id.
 - update_task_plan_kandev: Update the current task plan. Required: task_id, content. Optional: title.
 - delete_task_plan_kandev: Delete the current task plan. Required: task_id.
+- show_rich_output_kandev: Render one bounded Kandev-native file preview, metric group, line chart, bar chart, or CSV-backed time series/comparison. You MUST use it when the user explicitly asks for a chart, graph, plot, or file preview and suitable data is available. Prefer prose for ordinary answers and a Markdown table for small textual comparisons. For a workspace CSV, set a chart's csv.path, csv.x_column, and csv.series column mappings instead of inlining rows; paths must be task-workspace-relative. Give each series a clear display label and include its unit when useful; Kandev renders visible axes, tooltips, and local multi-series legend controls. Required: version (must be 1), title, blocks (1-4 file, chart, or metrics blocks). Never embed bytes, URLs, HTML, JavaScript, CSS, or layout instructions.
 - list_related_tasks_kandev: List parent, child, sibling, blocker, and blocked tasks. Optional: task_id (defaults to the current task), verbose (include task descriptions; omitted by default).
 - list_task_documents_kandev: List documents on an accessible related task. Required: task_id.
 - get_task_document_kandev: Read one document on an accessible related task. Required: task_id, document_key.

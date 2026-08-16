@@ -16,6 +16,20 @@
 const NAMESPACE_SEP = /\/|__/;
 const KANDEV_SUFFIX = "_kandev";
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+// ACP stores generic tool arguments below `input.raw_input`; older/direct
+// transports store the arguments at `input`. Normalize both at the renderer
+// boundary so every Kandev tool sees its actual call arguments.
+export function extractKandevArgs(value: unknown): Record<string, unknown> | undefined {
+  const input = asRecord(value);
+  if (!input) return undefined;
+  return asRecord(input.raw_input) ?? input;
+}
+
 export function extractKandevStem(toolName: string | undefined): string | null {
   if (!toolName) return null;
   const tail = toolName.trim().split(NAMESPACE_SEP).pop() ?? "";
@@ -63,9 +77,20 @@ export function extractMcpResult(value: unknown): unknown {
     return unwrapContentBlocks(value);
   }
   if (typeof value === "object") {
-    const obj = value as { content?: unknown; output?: unknown };
+    const obj = value as {
+      content?: unknown;
+      output?: unknown;
+      result?: unknown;
+      structuredContent?: unknown;
+      structured_content?: unknown;
+    };
+    if (obj.structuredContent !== undefined) return obj.structuredContent;
+    if (obj.structured_content !== undefined) return obj.structured_content;
     if (Array.isArray(obj.content)) return unwrapContentBlocks(obj.content);
     if (typeof obj.output === "string") return tryParseJson(obj.output);
+    if (Object.keys(obj).length === 1 && typeof obj.result === "string") {
+      return tryParseJson(obj.result);
+    }
     return value;
   }
   return value;
@@ -90,10 +115,9 @@ export function pickArray<T = unknown>(obj: unknown, key: string): T[] | undefin
 }
 
 export function pickObject(obj: unknown, key: string): Record<string, unknown> | undefined {
-  if (!obj || typeof obj !== "object") return undefined;
-  const v = (obj as Record<string, unknown>)[key];
-  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
-  return v as Record<string, unknown>;
+  const record = asRecord(obj);
+  if (!record) return undefined;
+  return asRecord(record[key]);
 }
 
 // Shorten a UUID-like identifier for inline display (e.g. "abc12345…").

@@ -158,7 +158,7 @@ type MessageRowProps = {
   childrenByParentToolCallId: Map<string, Message[]>;
   taskId?: string;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   isLastGroup: boolean;
   activeTurnId: string | null;
   streamingMessageId: string | null;
@@ -219,7 +219,7 @@ type NativeMessageListBodyProps = {
   messagesLoading: boolean;
   sessionState?: TaskSessionState;
   worktreePath?: string;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   hasMore: boolean;
   isLoadingMore: boolean;
   isInitialLoading: boolean;

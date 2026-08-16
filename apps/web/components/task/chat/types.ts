@@ -1,5 +1,8 @@
 "use client";
 
+import type { Message } from "@/lib/types/http";
+import { extractKandevStem } from "./messages/kandev/parse";
+
 export type SubagentTaskPayload = {
   description?: string;
   prompt?: string;
@@ -157,6 +160,33 @@ export type ToolCallMetadata = {
   result?: string;
   normalized?: NormalizedPayload;
 };
+
+// Tool names are duplicated across transport fields. Keep one scanner so
+// renderer dispatch and transcript grouping cannot disagree.
+export function kandevToolStemOf(message: Message): string | null {
+  const metadata = message.metadata as ToolCallMetadata | undefined;
+  const candidates = [
+    metadata?.tool_name,
+    metadata?.title,
+    message.content || undefined,
+    metadata?.normalized?.generic?.name,
+  ];
+  for (const candidate of candidates) {
+    const stem = extractKandevStem(candidate);
+    if (stem) return stem;
+  }
+  return null;
+}
+
+export function isRichOutputMessage(message: Message): boolean {
+  return message.type === "tool_call" && kandevToolStemOf(message) === "show_rich_output";
+}
+
+/** A subagent is another agent's turn, so it remains standalone in the transcript. */
+export function isSubagentMessage(message: Message): boolean {
+  const metadata = message.metadata as ToolCallMetadata | undefined;
+  return metadata?.normalized?.kind === "subagent_task";
+}
 
 export type StatusMetadata = {
   progress?: number;

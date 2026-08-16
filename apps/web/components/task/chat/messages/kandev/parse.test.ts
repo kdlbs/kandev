@@ -68,6 +68,22 @@ describe("extractMcpResult", () => {
   it("returns plain objects untouched", () => {
     expect(extractMcpResult({ foo: 1 })).toEqual({ foo: 1 });
   });
+
+  it("prefers standard MCP structuredContent over its text fallback", () => {
+    expect(
+      extractMcpResult({
+        content: [{ type: "text", text: "fallback" }],
+        structuredContent: { version: 1, resolved_charts: [] },
+      }),
+    ).toEqual({ version: 1, resolved_charts: [] });
+  });
+
+  it("unwraps the raw result wrapper emitted by ACP clients", () => {
+    expect(extractMcpResult({ result: '{"version":1,"resolved_charts":[]}' })).toEqual({
+      version: 1,
+      resolved_charts: [],
+    });
+  });
 });
 
 describe("shortId", () => {

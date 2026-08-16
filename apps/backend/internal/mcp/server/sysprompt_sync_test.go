@@ -172,6 +172,26 @@ func TestTaskControlDocs_OmittedFromRestrictedModes(t *testing.T) {
 	}
 }
 
+func TestRichOutputDocs_MakeExplicitAndCSVUseDiscoverable(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"task":   sysprompt.KandevContext(),
+		"office": sysprompt.OfficeContext(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, phrase := range []string{
+				"explicitly asks for a chart, graph, plot, or file preview",
+				"workspace CSV",
+				"x_column",
+				"include its unit",
+				"local multi-series legend",
+				"Markdown table",
+			} {
+				assert.Contains(t, prompt, phrase)
+			}
+		})
+	}
+}
+
 // TestSyspromptToolNames_MatchMCPConfigMode verifies that every `<name>_kandev`
 // tool referenced in ConfigContext is registered by an MCP server in ModeConfig.
 func TestSyspromptToolNames_MatchMCPConfigMode(t *testing.T) {

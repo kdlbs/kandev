@@ -61,6 +61,22 @@ function toolExecute(id: string, turnId = "turn-1"): Message {
   };
 }
 
+function richOutputCall(id: string, turnId = "turn-1"): Message {
+  return {
+    ...makeMessage(
+      id,
+      "tool_call",
+      {
+        title: "mcp__kandev__show_rich_output_kandev",
+        status: "complete",
+        normalized: { kind: "generic", generic: { name: "other" } },
+      },
+      "mcp__kandev__show_rich_output_kandev",
+    ),
+    turn_id: turnId,
+  };
+}
+
 function bootStarted(id: string): Message {
   return makeMessage(id, "script_execution", {
     script_type: "agent_boot",
@@ -614,6 +630,25 @@ describe("buildGroupedRenderItems subagent hoisting", () => {
       { canAnchorPrepareProgress: false },
     );
     expect(items.map((i) => i.type)).toEqual(["turn_group", "message", "turn_group"]);
+  });
+});
+
+describe("buildGroupedRenderItems rich-output hoisting", () => {
+  it("keeps a rich presentation standalone and preserves ordinary activity grouping", () => {
+    const items = buildGroupedRenderItems(
+      [
+        toolExecute("t1"),
+        toolExecute("t2"),
+        richOutputCall("rich"),
+        toolExecute("t3"),
+        toolExecute("t4"),
+      ],
+      "s1",
+      { canAnchorPrepareProgress: false },
+    );
+
+    expect(items.map((item) => item.type)).toEqual(["turn_group", "message", "turn_group"]);
+    expect((items[1] as Extract<RenderItem, { type: "message" }>).message.id).toBe("rich");
   });
 });
 
