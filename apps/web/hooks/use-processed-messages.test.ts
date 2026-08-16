@@ -22,6 +22,8 @@ import {
   type RenderItem,
 } from "./use-processed-messages";
 
+const CURRENT_TURN_ID = "turn-current";
+
 function makeMessage(
   id: string,
   type: MessageType,
@@ -103,16 +105,43 @@ describe("filterVisibleMessages clarification history", () => {
     };
     const current = {
       ...makeMessage("current-question", "clarification_request", { status: "pending" }),
-      turn_id: "turn-current",
+      turn_id: CURRENT_TURN_ID,
     };
 
     expect(
       filterVisibleMessages([superseded, current], new Set<string>(), new Set<string>(), {
-        currentTurnId: "turn-current",
+        currentTurnId: CURRENT_TURN_ID,
       }).map((message) => message.id),
     ).toEqual(["old-question"]);
   });
+});
 
+describe("filterVisibleMessages current-turn clarification bundles", () => {
+  it("hides only the newest pending clarification bundle in the current turn", () => {
+    const superseded = {
+      ...makeMessage("same-turn-old-question", "clarification_request", {
+        status: "pending",
+        pending_id: "pending-old",
+      }),
+      turn_id: CURRENT_TURN_ID,
+    };
+    const active = {
+      ...makeMessage("same-turn-active-question", "clarification_request", {
+        status: "pending",
+        pending_id: "pending-active",
+      }),
+      turn_id: CURRENT_TURN_ID,
+    };
+
+    expect(
+      filterVisibleMessages([superseded, active], new Set<string>(), new Set<string>(), {
+        currentTurnId: CURRENT_TURN_ID,
+      }).map((message) => message.id),
+    ).toEqual(["same-turn-old-question"]);
+  });
+});
+
+describe("filterVisibleMessages clarification history without turn authority", () => {
   it("keeps malformed pending history visible when durable turn history is empty", () => {
     const pending = makeMessage("legacy-question", "clarification_request", {
       status: "pending",

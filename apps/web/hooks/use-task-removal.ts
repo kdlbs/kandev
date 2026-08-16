@@ -17,6 +17,8 @@ type TaskRemovalOptions = {
 export type TaskSessionLoadOptions = {
   /** Ignore the local task-session cache and request an authoritative snapshot. */
   force?: boolean;
+  /** Cancel the authoritative request when its task selection is superseded. */
+  signal?: AbortSignal;
 };
 
 type RemoveFromBoardOptions = {
@@ -69,6 +71,16 @@ function cachedSessionsHaveEnvIds(sessions: TaskSession[]): boolean {
   return sessions.length === 0 || sessions.every((session) => !!session.task_environment_id);
 }
 
+function taskSessionListRequestOptions(signal?: AbortSignal) {
+  return signal ? { cache: "no-store" as const, init: { signal } } : { cache: "no-store" as const };
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === "object" && error !== null && "name" in error && error.name === "AbortError"
+  );
+}
+
 function commitTaskSessionLoad(
   store: StoreApi<AppState>,
   taskId: string,
@@ -96,22 +108,24 @@ async function loadTaskSessionsForTaskFromStore(
   options?: TaskSessionLoadOptions,
 ): Promise<TaskSession[]> {
   const state = store.getState();
+  const force = options?.force === true;
+  const signal = options?.signal;
   const cachedSessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
-  if (!options?.force && state.taskSessionsByTask.loadedByTaskId[taskId]) {
+  if (!force && state.taskSessionsByTask.loadedByTaskId[taskId]) {
     if (cachedSessionsHaveEnvIds(cachedSessions)) return cachedSessions;
   }
-  if (!options?.force && state.taskSessionsByTask.loadingByTaskId[taskId]) {
+  if (!force && state.taskSessionsByTask.loadingByTaskId[taskId]) {
     return cachedSessions;
   }
   const loadGeneration = beginTaskSessionLoad(store, taskId);
   store.getState().setTaskSessionsLoading(taskId, true);
   try {
-    const response = await listTaskSessions(taskId, { cache: "no-store" });
+    const response = await listTaskSessions(taskId, taskSessionListRequestOptions(signal));
     const sessions = response.sessions ?? [];
-    return commitTaskSessionLoad(store, taskId, loadGeneration, sessions, !!options?.force);
+    return commitTaskSessionLoad(store, taskId, loadGeneration, sessions, force);
   } catch (error) {
-    console.error("Failed to load task sessions:", error);
-    if (options?.force) throw error;
+    if (!isAbortError(error)) console.error("Failed to load task sessions:", error);
+    if (force) throw error;
     return cachedSessions;
   } finally {
     if (taskSessionLoadIsCurrent(store, taskId, loadGeneration)) {

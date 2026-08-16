@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +86,9 @@ func TestReconcileUnpublishedPromptTurnsRejectsMalformedClaimMessageIDs(t *testi
 	if err == nil || reconciled != 0 {
 		t.Fatalf("ReconcileUnpublishedPromptTurns = %d, %v; want 0 and malformed metadata error", reconciled, err)
 	}
+	if !strings.Contains(err.Error(), "turn-unpublished") || !strings.Contains(err.Error(), sessionID) {
+		t.Fatalf("reconciliation error lacks actionable turn/session identity: %v", err)
+	}
 	if _, err := repo.GetTurn(ctx, "turn-unpublished"); err != nil {
 		t.Fatalf("malformed reservation was deleted: %v", err)
 	}
@@ -94,6 +98,36 @@ func TestReconcileUnpublishedPromptTurnsRejectsMalformedClaimMessageIDs(t *testi
 	}
 	if message.Metadata["status"] != "answered" {
 		t.Fatalf("claimed message status = %v, want answered", message.Metadata["status"])
+	}
+}
+
+func TestReconcileUnpublishedPromptTurnsContinuesAfterMalformedReservation(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 16, 0, 25, 0, 0, time.UTC)
+	seedSessionForTurns(t, repo, "task-malformed-mixed", "session-malformed-mixed")
+	createRecoveryTurn(
+		t, repo, "task-malformed-mixed", "session-malformed-mixed", "turn-malformed-mixed", base,
+		map[string]interface{}{
+			models.TurnMetaKeyPromptDispatchPending:                 true,
+			models.TurnMetaKeyPromptDispatchClarificationMessageIDs: []interface{}{"message", float64(7)},
+		},
+	)
+	seedSessionForTurns(t, repo, "task-healthy-mixed", "session-healthy-mixed")
+	createRecoveryTurn(
+		t, repo, "task-healthy-mixed", "session-healthy-mixed", "turn-healthy-mixed", base.Add(time.Minute),
+		map[string]interface{}{models.TurnMetaKeyPromptDispatchPending: true},
+	)
+
+	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
+	if err == nil || reconciled != 1 {
+		t.Fatalf("ReconcileUnpublishedPromptTurns = %d, %v; want 1 and malformed metadata error", reconciled, err)
+	}
+	if _, err := repo.GetTurn(ctx, "turn-malformed-mixed"); err != nil {
+		t.Fatalf("malformed reservation changed: %v", err)
+	}
+	if _, err := repo.GetTurn(ctx, "turn-healthy-mixed"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("healthy reservation error = %v, want recovered deletion", err)
 	}
 }
 

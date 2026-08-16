@@ -430,3 +430,55 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 		t.Fatalf("error after representative recovery = %+v, want sibling error preserved", got)
 	}
 }
+
+func TestProjectorSourceEventRetriesAfterCASRejectionWithoutPendingLoader(t *testing.T) {
+	const taskID = "task-source-cas"
+	base := newProjectorTestStore()
+	base.rows[taskID] = &StoredTaskStatusSummary{
+		TaskID:      taskID,
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision: 5,
+			Git:      &GitSummary{ChangedFiles: 2},
+		},
+	}
+	store := &rejectingPendingProjectorStore{
+		projectorTestStore: base,
+		competing: StoredTaskStatusSummary{
+			TaskID:      taskID,
+			WorkspaceID: "workspace-1",
+			Summary: TaskStatusSummary{
+				Revision:    6,
+				Git:         &GitSummary{ChangedFiles: 2},
+				PullRequest: &PullRequestSummary{Count: 1, OpenCount: 1, State: prStateOpen},
+			},
+		},
+	}
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		LoadGitObservations: func(context.Context, string) ([]GitObservation, error) {
+			return []GitObservation{{Repository: "repo-b", Summary: GitSummary{ChangedFiles: 2}}}, nil
+		},
+	})
+
+	err := projector.HandleEvent(context.Background(), bus.NewEvent(events.GitEvent, "test", map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"session_id":   "session-current",
+		"type":         "status_update",
+		"status": map[string]interface{}{
+			"repository_name": "repo-a",
+			"changed_files":   3,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Git event after CAS rejection: %v", err)
+	}
+	got := base.summary(taskID)
+	if got == nil || got.Revision != 7 || got.Git == nil || got.Git.ChangedFiles != 5 {
+		t.Fatalf("summary after source replay = %+v, want revision 7 with both Git observations", got)
+	}
+	if got.PullRequest == nil || got.PullRequest.Count != 1 {
+		t.Fatalf("pull request after source replay = %+v, want competing writer preserved", got.PullRequest)
+	}
+}

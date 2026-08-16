@@ -275,14 +275,20 @@ const (
 	TurnMetaKeyPromptDispatchClarificationMessageIDs = "prompt_dispatch_clarification_message_ids"
 )
 
+var promptDispatchMetadataKeys = [...]string{
+	TurnMetaKeyPromptDispatchPending,
+	TurnMetaKeyPromptDispatchAttempted,
+	TurnMetaKeyPromptDispatchClarificationPendingID,
+	TurnMetaKeyPromptDispatchClarificationTurnID,
+	TurnMetaKeyPromptDispatchClarificationMessageIDs,
+}
+
 // ClearPromptDispatchMetadata removes every reservation-only field after
 // publication or conservative startup recovery.
 func ClearPromptDispatchMetadata(metadata map[string]interface{}) {
-	delete(metadata, TurnMetaKeyPromptDispatchPending)
-	delete(metadata, TurnMetaKeyPromptDispatchAttempted)
-	delete(metadata, TurnMetaKeyPromptDispatchClarificationPendingID)
-	delete(metadata, TurnMetaKeyPromptDispatchClarificationTurnID)
-	delete(metadata, TurnMetaKeyPromptDispatchClarificationMessageIDs)
+	for _, key := range promptDispatchMetadataKeys {
+		delete(metadata, key)
+	}
 }
 
 // PromptDispatchRecovery identifies the exact clarification claim that an

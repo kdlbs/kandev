@@ -33,11 +33,12 @@ func (p *recordingClarificationInputPauser) PauseForClarificationInput(_ context
 type recordingSessionCanceller struct {
 	sessions []string
 	count    int
+	err      error
 }
 
-func (c *recordingSessionCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) int {
+func (c *recordingSessionCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) (int, error) {
 	c.sessions = append(c.sessions, sessionID)
-	return c.count
+	return c.count, c.err
 }
 
 type immediateClarificationService struct {

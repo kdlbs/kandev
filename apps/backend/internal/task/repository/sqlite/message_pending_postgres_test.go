@@ -199,9 +199,9 @@ func TestPostgresExpireActiveClarificationMessagesPreservesTerminalRows(t *testi
 }
 
 func TestPostgresTurnCreationSerializesWithClarificationDetach(t *testing.T) {
-	// The blocker, detach, turn creation, and lock observer must use separate
-	// physical connections. The regular helper intentionally exposes one.
-	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 4)
+	// Four concurrent holders peak: blocker, detach, turn creation, and lock
+	// observer. Two spare connections keep repository bookkeeping off that budget.
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 6)
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)
@@ -288,7 +288,8 @@ func TestPostgresTurnCreationSerializesWithClarificationDetach(t *testing.T) {
 }
 
 func TestPostgresMessageCreationSerializesWithTurnRollback(t *testing.T) {
-	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 4)
+	// Four concurrent holders peak; two spare connections preserve lock-test headroom.
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 6)
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)

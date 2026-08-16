@@ -32,6 +32,9 @@ func (r *githubTaskStatusSummaryPRReader) ListTaskStatusSummaryPullRequests(
 				continue
 			}
 			key := taskStatusSummaryPRKey(pr)
+			if key == "" {
+				continue
+			}
 			requiredReviews := 0
 			if pr.RequiredReviews != nil {
 				requiredReviews = *pr.RequiredReviews
@@ -73,5 +76,5 @@ func taskStatusSummaryPRKey(pr *github.TaskPR) string {
 	if pr.PRNumber > 0 {
 		return fmt.Sprintf("#%d", pr.PRNumber)
 	}
-	return pr.ID
+	return ""
 }

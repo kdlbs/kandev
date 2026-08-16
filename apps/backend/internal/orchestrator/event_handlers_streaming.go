@@ -2340,7 +2340,14 @@ func (s *Service) detachClarificationWaiters(ctx context.Context, sessionID stri
 	if s.clarificationCanceller == nil || sessionID == "" {
 		return
 	}
-	if n := s.clarificationCanceller.DetachSessionAndNotify(ctx, sessionID); n > 0 {
+	n, err := s.clarificationCanceller.DetachSessionAndNotify(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to detach pending clarifications on turn complete",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if n > 0 {
 		s.logger.Info("detached pending clarifications on turn complete",
 			zap.String("session_id", sessionID),
 			zap.Int("count", n))

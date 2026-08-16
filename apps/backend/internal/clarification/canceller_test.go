@@ -186,7 +186,10 @@ func TestCanceller_MarksDetachedOnDisconnect(t *testing.T) {
 		},
 	}}
 
-	cancelled := c.DetachSessionAndNotify(context.Background(), "s1")
+	cancelled, err := c.DetachSessionAndNotify(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("detach clarification: %v", err)
+	}
 	if cancelled != 1 {
 		t.Fatalf("expected 1 cancelled, got %d", cancelled)
 	}
@@ -241,7 +244,9 @@ func TestCanceller_PersistenceUsesFreshBoundedContext(t *testing.T) {
 
 	t.Run("detach", func(t *testing.T) {
 		c, repo, _ := newTestCanceller(t, map[string][]*taskmodels.Message{})
-		c.DetachSessionAndNotify(ctx, "s1")
+		if _, err := c.DetachSessionAndNotify(ctx, "s1"); err != nil {
+			t.Fatalf("detach clarification: %v", err)
+		}
 		if !repo.detachHasDeadline || repo.detachContextErr != nil {
 			t.Fatalf("detach context deadline=%v err=%v, want fresh bounded context",
 				repo.detachHasDeadline, repo.detachContextErr)
@@ -291,13 +296,28 @@ func TestCanceller_ExpireSessionAndNotifyReturnsPersistenceError(t *testing.T) {
 	}
 }
 
+func TestCanceller_DetachSessionAndNotifyReturnsPersistenceError(t *testing.T) {
+	c, repo, _ := newTestCanceller(t, map[string][]*taskmodels.Message{})
+	wantErr := errors.New("detach lookup failed")
+	repo.activeErr = wantErr
+
+	count, err := c.DetachSessionAndNotify(context.Background(), "s1")
+
+	if count != 0 {
+		t.Fatalf("detached bundles = %d, want 0", count)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("detach error = %v, want %v", err, wantErr)
+	}
+}
+
 // TestCanceller_NoMessagesToUpdate confirms that a cancel with no pending
 // clarifications returns 0 and does not touch the repo.
 func TestCanceller_NoMessagesToUpdate(t *testing.T) {
 	c, repo, _ := newTestCanceller(t, map[string][]*taskmodels.Message{})
 
-	if got := c.DetachSessionAndNotify(context.Background(), "nonexistent"); got != 0 {
-		t.Errorf("expected 0 cancelled, got %d", got)
+	if got, err := c.DetachSessionAndNotify(context.Background(), "nonexistent"); err != nil || got != 0 {
+		t.Errorf("detach nonexistent = %d, %v; want 0, nil", got, err)
 	}
 	if len(repo.updated) != 0 {
 		t.Errorf("expected no message updates, got %d", len(repo.updated))
@@ -319,7 +339,9 @@ func TestCanceller_PublishesMessageUpdatedEvent(t *testing.T) {
 		UpdatedAt:     updatedAt,
 	}}
 
-	c.DetachSessionAndNotify(context.Background(), "s1")
+	if _, err := c.DetachSessionAndNotify(context.Background(), "s1"); err != nil {
+		t.Fatalf("detach clarification: %v", err)
+	}
 
 	if len(eventBus.events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(eventBus.events))
@@ -346,7 +368,10 @@ func TestCanceller_MultiQuestion_MarksAllMessagesDetached(t *testing.T) {
 		{ID: "m3", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "pending_id": pendingID, "question_id": "q3"}},
 	}
 
-	cancelled := c.DetachSessionAndNotify(context.Background(), "s1")
+	cancelled, err := c.DetachSessionAndNotify(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("detach clarification: %v", err)
+	}
 	if cancelled != 1 {
 		t.Fatalf("expected 1 cancelled bundle, got %d", cancelled)
 	}
@@ -372,7 +397,10 @@ func TestCanceller_MarksDetachedWhenStoreAlreadyDrained(t *testing.T) {
 		},
 	}}
 
-	cancelled := c.DetachSessionAndNotify(context.Background(), "s1")
+	cancelled, err := c.DetachSessionAndNotify(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("detach clarification: %v", err)
+	}
 	if cancelled != 1 {
 		t.Fatalf("expected 1 cancelled bundle from DB fallback, got %d", cancelled)
 	}
@@ -409,8 +437,8 @@ func TestCanceller_SupersededStoreBundleDoesNotCount(t *testing.T) {
 		t.Fatal("expected superseded in-memory request to be created")
 	}
 
-	if got := c.DetachSessionAndNotify(context.Background(), "s1"); got != 0 {
-		t.Fatalf("superseded store bundle count = %d, want 0", got)
+	if got, err := c.DetachSessionAndNotify(context.Background(), "s1"); err != nil || got != 0 {
+		t.Fatalf("superseded store bundle = %d, %v; want 0, nil", got, err)
 	}
 	if _, exists := c.store.GetRequest(pendingID); exists {
 		t.Fatal("superseded in-memory waiter was not drained")
@@ -441,8 +469,8 @@ func TestCanceller_RepeatedDetachIsNoOp(t *testing.T) {
 		t.Fatal("expected in-memory request to be created")
 	}
 
-	if got := c.DetachSessionAndNotify(context.Background(), "s1"); got != 0 {
-		t.Fatalf("repeated detach count = %d, want 0", got)
+	if got, err := c.DetachSessionAndNotify(context.Background(), "s1"); err != nil || got != 0 {
+		t.Fatalf("repeated detach = %d, %v; want 0, nil", got, err)
 	}
 	if len(repo.updated) != 0 {
 		t.Fatalf("repeated detach wrote %d messages", len(repo.updated))
@@ -473,7 +501,7 @@ func TestCanceller_RepeatedExpiryIsNoOp(t *testing.T) {
 	}
 
 	if got, err := c.ExpireSessionAndNotify(context.Background(), "s1"); err != nil || got != 0 {
-		t.Fatalf("repeated expiry count = %d, want 0", got)
+		t.Fatalf("repeated expiry = %d, %v; want 0, nil", got, err)
 	}
 	if len(repo.updated) != 0 {
 		t.Fatalf("repeated expiry wrote %d messages", len(repo.updated))
@@ -495,7 +523,9 @@ func TestCanceller_Idempotent_SkipsAnsweredMessages(t *testing.T) {
 		{ID: "m2", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "pending_id": pendingID}},
 	}
 
-	c.DetachSessionAndNotify(context.Background(), "s1")
+	if _, err := c.DetachSessionAndNotify(context.Background(), "s1"); err != nil {
+		t.Fatalf("detach clarification: %v", err)
+	}
 
 	if len(repo.updated) != 1 {
 		t.Fatalf("expected 1 message update (only the pending one), got %d", len(repo.updated))

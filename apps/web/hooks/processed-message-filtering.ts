@@ -178,30 +178,24 @@ export function collapseTodoSnapshotsPerTurn(messages: Message[]): Message[] {
   });
 }
 
-function findUnhydratedActiveClarification(
+function findActiveClarification(
   messages: Message[],
   scope?: PendingClarificationScope,
 ): Message | undefined {
-  if (scope?.currentTurnId !== undefined) return undefined;
-  if (scope && scope.pendingAction !== "clarification") return undefined;
   return findPendingClarification(messages, scope) ?? undefined;
 }
 
 function isClarificationVisible(
   message: Message,
-  scope: PendingClarificationScope | undefined,
-  unhydratedActive: Message | undefined,
+  activeClarification: Message | undefined,
 ): boolean {
   const metadata = message.metadata as ClarificationRequestMetadata | undefined;
   if (!isPendingClarificationMessage(message)) return true;
-  if (scope?.currentTurnId !== undefined) {
-    return scope.currentTurnId === null || message.turn_id !== scope.currentTurnId;
-  }
-  if (unhydratedActive) {
-    const activeMetadata = unhydratedActive.metadata as ClarificationRequestMetadata | undefined;
+  if (activeClarification) {
+    const activeMetadata = activeClarification.metadata as ClarificationRequestMetadata | undefined;
     return activeMetadata?.pending_id
       ? metadata?.pending_id !== activeMetadata.pending_id
-      : message.id !== unhydratedActive.id;
+      : message.id !== activeClarification.id;
   }
   return true;
 }
@@ -212,11 +206,11 @@ export function filterVisibleMessages(
   subagentChildIds: Set<string>,
   scope?: PendingClarificationScope,
 ): Message[] {
-  const unhydratedActive = findUnhydratedActiveClarification(messages, scope);
+  const activeClarification = findActiveClarification(messages, scope);
   const filtered = messages.filter((message) => {
     if (subagentChildIds.has(message.id) || isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {
-      return isClarificationVisible(message, scope, unhydratedActive);
+      return isClarificationVisible(message, activeClarification);
     }
     if (
       message.type === "status" &&

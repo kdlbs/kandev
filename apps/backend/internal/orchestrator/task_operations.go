@@ -3706,7 +3706,7 @@ func (s *Service) finishPromptDispatchFailure(
 	if dispatchAccepted && rollback.reservedTurn != nil {
 		// Agentctl acceptance made the turn authoritative. A later completion
 		// error may reconcile session state, but must not delete this turn.
-		rollback.reservedTurn = nil
+		rollback.reservedTurnAccepted = true
 	}
 	failureResult, failureErr := s.handlePromptDispatchFailure(
 		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt,
@@ -3877,6 +3877,7 @@ type promptClaimRollback struct {
 	turnID               string
 	createdTurn          bool
 	reservedTurn         *models.Turn
+	reservedTurnAccepted bool
 }
 
 func (s *Service) claimPromptDispatch(
@@ -3986,7 +3987,9 @@ func (s *Service) rollbackPromptClaim(
 	}
 	if rollback.createdTurn {
 		if rollback.reservedTurn != nil {
-			s.rollbackReservedPromptTurn(ctx, sessionID, rollback.turnID)
+			if !rollback.reservedTurnAccepted {
+				s.rollbackReservedPromptTurn(ctx, sessionID, rollback.turnID)
+			}
 		} else {
 			s.completeTurnIfCurrent(ctx, sessionID, rollback.turnID)
 		}
@@ -4130,7 +4133,8 @@ func (s *Service) handlePromptDispatchFailure(
 	lifecyclePrompt bool,
 	promptErr error,
 ) (*PromptResult, error) {
-	if resumedForPrompt && rollback.reservedTurn == nil && errors.Is(promptErr, executor.ErrExecutionNotFound) {
+	if resumedForPrompt && !rollback.reservedTurnAccepted && rollback.reservedTurn == nil &&
+		errors.Is(promptErr, executor.ErrExecutionNotFound) {
 		s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
@@ -4146,7 +4150,7 @@ func (s *Service) handlePromptDispatchFailure(
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
 		return nil, promptErr
 	}
-	if rollback.createdTurn && rollback.reservedTurn != nil {
+	if rollback.createdTurn && rollback.reservedTurn != nil && !rollback.reservedTurnAccepted {
 		s.rollbackReservedPromptTurn(ctx, sessionID, rollback.turnID)
 	}
 	return nil, s.handlePromptError(ctx, taskID, sessionID, rollback.previousSessionState, promptErr)

@@ -33,9 +33,9 @@ func TestTaskStatusSummaryPRKeyMatchesLiveEventIdentity(t *testing.T) {
 			want: "#42",
 		},
 		{
-			name: "association fallback",
+			name: "association without source identity",
 			pr:   &github.TaskPR{ID: "association-5"},
-			want: "association-5",
+			want: "",
 		},
 		{
 			name: "nil pull request",

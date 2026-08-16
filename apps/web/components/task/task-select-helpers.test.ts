@@ -306,7 +306,9 @@ describe("selectTaskWithLayout pending summary authority", () => {
       task: { primarySessionId: PRIMARY },
       store,
       switchToSession,
-      loadTaskSessionsForTask: vi.fn(async () => []),
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw new Error("refresh rejected");
+      }),
       setActiveTask: vi.fn(),
       setPreparingTaskId: vi.fn(),
     });

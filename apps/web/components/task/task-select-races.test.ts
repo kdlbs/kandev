@@ -226,11 +226,9 @@ describe("selectTaskWithLayout pending summary races", () => {
         pending_action: "clarification",
       } as TaskSession,
     ]);
-    await flushTaskSelection();
-
+    await vi.waitFor(() => expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID));
     expect(loadTaskSessionsForTask).toHaveBeenCalledWith(PENDING_TASK_ID, { force: true });
     expect(switchToSession).not.toHaveBeenCalled();
-    expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID);
     expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
   });
 });
@@ -281,10 +279,8 @@ describe("selectTaskWithLayout same-action summary race", () => {
         pending_action: "clarification",
       } as TaskSession,
     ]);
-    await flushTaskSelection();
-
+    await vi.waitFor(() => expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID));
     expect(switchToSession).not.toHaveBeenCalled();
-    expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID);
     expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
   });
 });
@@ -376,10 +372,8 @@ describe("selectTaskWithLayout rejected pending-load races", () => {
         },
       };
       rejectLoad(new Error("load failed"));
-      await flushTaskSelection();
-
+      await vi.waitFor(() => expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID));
       expect(switchToSession).not.toHaveBeenCalled();
-      expect(setActiveTask).toHaveBeenCalledWith(PENDING_TASK_ID);
       expect(replaceTaskUrl).toHaveBeenCalledWith(PENDING_TASK_ID);
     });
   }
@@ -471,6 +465,11 @@ describe("selectTaskWithLayout external active-task changes", () => {
       selectionSignal: selectionController.signal,
     });
 
+    expect(loadTaskSessionsForTask).toHaveBeenCalledWith(PENDING_TASK_ID, {
+      force: true,
+      signal: selectionController.signal,
+    });
+
     selectionController.abort();
     resolveLoad([
       {
@@ -543,9 +542,7 @@ describe("selectTaskWithLayout old-session changes", () => {
 
     state.tasks.activeSessionId = "sess-old-replaced";
     resolveLoad([]);
-    await flushTaskSelection();
-
-    expect(setActiveTask).toHaveBeenCalledWith(sessionlessTaskId);
+    await vi.waitFor(() => expect(setActiveTask).toHaveBeenCalledWith(sessionlessTaskId));
     expect(replaceTaskUrl).toHaveBeenCalledWith(sessionlessTaskId);
   });
 
@@ -569,12 +566,12 @@ describe("selectTaskWithLayout old-session changes", () => {
 
     state.tasks.activeSessionId = replacementSessionId;
     resolveLoad([{ id: PENDING_SESSION_ID, task_id: PENDING_TASK_ID } as TaskSession]);
-    await flushTaskSelection();
-
-    expect(switchToSession).toHaveBeenCalledWith(
-      PENDING_TASK_ID,
-      PENDING_SESSION_ID,
-      replacementSessionId,
+    await vi.waitFor(() =>
+      expect(switchToSession).toHaveBeenCalledWith(
+        PENDING_TASK_ID,
+        PENDING_SESSION_ID,
+        replacementSessionId,
+      ),
     );
   });
 
@@ -598,12 +595,12 @@ describe("selectTaskWithLayout old-session changes", () => {
 
     state.tasks.activeSessionId = replacementSessionId;
     rejectLoad(new Error("load failed"));
-    await flushTaskSelection();
-
-    expect(switchToSession).toHaveBeenCalledWith(
-      PENDING_TASK_ID,
-      PENDING_SESSION_ID,
-      replacementSessionId,
+    await vi.waitFor(() =>
+      expect(switchToSession).toHaveBeenCalledWith(
+        PENDING_TASK_ID,
+        PENDING_SESSION_ID,
+        replacementSessionId,
+      ),
     );
   });
 });

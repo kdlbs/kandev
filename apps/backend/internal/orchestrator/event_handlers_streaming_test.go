@@ -117,9 +117,9 @@ type recordingClarificationCanceller struct {
 	expireErr       error
 }
 
-func (c *recordingClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) int {
+func (c *recordingClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) (int, error) {
 	c.sessions = append(c.sessions, sessionID)
-	return 1
+	return 1, nil
 }
 
 func (c *recordingClarificationCanceller) ExpireSessionAndNotify(_ context.Context, sessionID string) (int, error) {

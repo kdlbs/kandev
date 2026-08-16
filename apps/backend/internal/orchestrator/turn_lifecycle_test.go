@@ -378,7 +378,10 @@ func TestAgentReadyReconcilesWhenReservedPromptRollbackFinishesAfterWaitTimeout(
 	}
 
 	svc.rollbackReservedPromptTurn(ctx, "session1", turnID)
-	deadline := time.Now().Add(time.Second)
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		session, loadErr := repo.GetTaskSession(ctx, "session1")
 		if loadErr != nil {
@@ -387,10 +390,11 @@ func TestAgentReadyReconcilesWhenReservedPromptRollbackFinishesAfterWaitTimeout(
 		if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
 			break
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-deadline.C:
 			t.Fatalf("late rollback stranded predecessor in %q", session.State)
+		case <-ticker.C:
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 

@@ -70,6 +70,7 @@ describe("useTaskRemoval session loading", () => {
   });
 
   it("rejects an older forced response after a newer snapshot wins", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     type SessionResponse = { sessions: TaskSession[] };
     let resolveOlder: (response: SessionResponse) => void = () => {};
     let resolveNewer: (response: SessionResponse) => void = () => {};
@@ -90,6 +91,8 @@ describe("useTaskRemoval session loading", () => {
     await expect(newerLoad).resolves.toEqual([newerSession]);
     resolveOlder({ sessions: [makeSession("older-session")] });
     await expect(olderLoad).rejects.toMatchObject({ name: "AbortError" });
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
 
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledTimes(1);
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [newerSession]);

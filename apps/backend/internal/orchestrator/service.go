@@ -1381,7 +1381,7 @@ func (s *Service) SetPromptReferenceExpander(e PromptReferenceExpander) {
 // ClarificationCanceller updates pending clarification ownership when an agent
 // turn detaches or its session becomes terminal.
 type ClarificationCanceller interface {
-	DetachSessionAndNotify(ctx context.Context, sessionID string) int
+	DetachSessionAndNotify(ctx context.Context, sessionID string) (int, error)
 	ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error)
 }
 

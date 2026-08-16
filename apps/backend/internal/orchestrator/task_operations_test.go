@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -683,6 +684,52 @@ func TestPromptTask_ExecutionNotFoundRevertsStateAndBroadcasts(t *testing.T) {
 	if !sawRevert {
 		t.Fatalf("expected TaskSessionStateChanged RUNNING→WAITING_FOR_INPUT broadcast after prompt failure, got events: %+v", eb.events)
 	}
+}
+
+func TestAcceptedReservedPromptFailureDoesNotStartFreshExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile1"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	var launchCalls atomic.Int32
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalls.Add(1)
+			return nil, errors.New("unexpected fresh launch")
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Task", State: v1.TaskStateInProgress}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	_, err = svc.finishPromptDispatchFailure(
+		ctx,
+		"task1",
+		"session1",
+		"answer",
+		false,
+		true,
+		nil,
+		promptClaimRollback{
+			previousSessionState: models.TaskSessionStateWaitingForInput,
+			turnID:               "turn-reserved",
+			createdTurn:          true,
+			reservedTurn: &models.Turn{
+				ID: "turn-reserved", TaskID: "task1", TaskSessionID: "session1",
+			},
+		},
+		promptTaskOptions{},
+		fmt.Errorf("accepted transport failure: %w", executor.ErrExecutionNotFound),
+		nil,
+		true,
+		nil,
+	)
+	require.ErrorIs(t, err, executor.ErrExecutionNotFound)
+	require.Zero(t, launchCalls.Load(), "accepted prompt must not start duplicate execution")
 }
 
 func TestPromptTask_PlanModeInjectsPrefix(t *testing.T) {

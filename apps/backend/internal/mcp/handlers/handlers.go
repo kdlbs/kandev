@@ -67,7 +67,7 @@ type workspaceSourceJSON struct {
 // SessionCanceller detaches in-memory clarification waiters while keeping DB
 // messages pending. Used by the MCP-timeout handler.
 type SessionCanceller interface {
-	DetachSessionAndNotify(ctx context.Context, sessionID string) int
+	DetachSessionAndNotify(ctx context.Context, sessionID string) (int, error)
 }
 
 // ClarificationInputPauser performs the orchestrator-owned hard pause for
@@ -3945,7 +3945,14 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 					"failed to pause session for clarification input", nil)
 			}
-			cancelled = h.sessionCanceller.DetachSessionAndNotify(context.WithoutCancel(ctx), req.SessionID)
+			cancelled, err = h.sessionCanceller.DetachSessionAndNotify(context.WithoutCancel(ctx), req.SessionID)
+			if err != nil {
+				h.logger.Warn("failed to detach clarification after pause failure",
+					zap.String("session_id", req.SessionID),
+					zap.Error(err))
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+					"failed to detach clarification after pause failure", nil)
+			}
 			h.logger.Info("detached clarification waiters after pause failure",
 				zap.String("session_id", req.SessionID),
 				zap.Int("count", cancelled))
@@ -3960,7 +3967,14 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 	if h.sessionCanceller == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "sessionCanceller is required", nil)
 	}
-	cancelled := h.sessionCanceller.DetachSessionAndNotify(ctx, req.SessionID)
+	cancelled, err := h.sessionCanceller.DetachSessionAndNotify(ctx, req.SessionID)
+	if err != nil {
+		h.logger.Warn("failed to detach clarification after MCP timeout",
+			zap.String("session_id", req.SessionID),
+			zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"failed to detach clarification after MCP timeout", nil)
+	}
 	h.logger.Info("detached pending clarifications on agent MCP timeout",
 		zap.String("session_id", req.SessionID),
 		zap.Int("count", cancelled))

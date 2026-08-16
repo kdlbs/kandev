@@ -13,6 +13,12 @@ type SheetCtx = Parameters<typeof toSheetItem>[1];
 const UPDATED_AT = "2026-07-22T00:00:00Z";
 const ERROR_PREVIEW = "Agent failed";
 
+async function flushSelection(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function emptyCtx(): SheetCtx {
   return {
     repositoryPathsById: new Map(),
@@ -352,7 +358,7 @@ describe("selectTaskFromSheet races", () => {
         updated_at: UPDATED_AT,
       } as TaskSession,
     ]);
-    await Promise.resolve();
+    await flushSelection();
     resolveTaskA([
       {
         id: "owner-a",
@@ -363,7 +369,7 @@ describe("selectTaskFromSheet races", () => {
         updated_at: UPDATED_AT,
       } as TaskSession,
     ]);
-    await Promise.resolve();
+    await flushSelection();
 
     expect(setActiveSession).toHaveBeenCalledTimes(1);
     expect(setActiveSession).toHaveBeenCalledWith("task-b", "owner-b");
@@ -425,7 +431,7 @@ describe("selectTaskFromSheet summary races", () => {
         pending_action: "clarification",
       } as TaskSession,
     ]);
-    await Promise.resolve();
+    await flushSelection();
 
     expect(loadTaskSessionsForTask).toHaveBeenCalledWith(taskId, { force: true });
     expect(setActiveSession).not.toHaveBeenCalled();
@@ -481,7 +487,7 @@ describe("selectTaskFromSheet deleted-task race", () => {
         pending_action: "clarification",
       } as TaskSession,
     ]);
-    await Promise.resolve();
+    await flushSelection();
 
     expect(setActiveSession).not.toHaveBeenCalled();
     expect(setActiveTask).not.toHaveBeenCalled();
@@ -532,7 +538,7 @@ describe("selectTaskFromSheet sheet lifecycle", () => {
         updated_at: UPDATED_AT,
       } as TaskSession,
     ]);
-    await Promise.resolve();
+    await flushSelection();
 
     expect(setActiveSession).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();

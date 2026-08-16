@@ -47,16 +47,59 @@ func TestPostgresTurnAuthorityToleratesStringFlagEncodings(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetActiveTurnBySessionID: %v", err)
 			}
-			wantCurrentID := tt.wantCurrentID
-			if wantCurrentID == "turn-previous" {
+			var wantCurrentID string
+			switch tt.wantCurrentID {
+			case "turn-previous":
 				wantCurrentID = previousID
-			} else {
+			case "turn-reserved":
 				wantCurrentID = reservedID
+			default:
+				t.Fatalf("unknown expected turn %q", tt.wantCurrentID)
 			}
 			if active == nil || active.ID != wantCurrentID {
 				t.Fatalf("active turn = %#v, want %s", active, wantCurrentID)
 			}
 		})
+	}
+}
+
+func TestPostgresListTurnsHidesEmptyReservationUntilMessageEvidence(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	const taskID = "task-turn-list-pg"
+	const sessionID = "session-turn-list-pg"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	base := time.Date(2026, time.August, 16, 9, 0, 0, 0, time.UTC)
+	createRecoveryTurn(t, repo, taskID, sessionID, "turn-accepted-pg", base, nil)
+	createRecoveryTurn(t, repo, taskID, sessionID, "turn-reserved-pg", base.Add(time.Minute), map[string]interface{}{
+		models.TurnMetaKeyPromptDispatchPending: true,
+	})
+
+	listed, err := repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession before output: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "turn-accepted-pg" {
+		t.Fatalf("listed turns before output = %#v, want only accepted predecessor", listed)
+	}
+
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "message-reserved-output-pg", TaskSessionID: sessionID, TaskID: taskID,
+		TurnID: "turn-reserved-pg", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeMessage, Content: "accepted output", CreatedAt: base.Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	listed, err = repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession after output: %v", err)
+	}
+	if len(listed) != 2 || listed[1].ID != "turn-reserved-pg" {
+		t.Fatalf("listed turns after output = %#v, want reservation restored", listed)
 	}
 }
 

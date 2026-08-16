@@ -34,7 +34,7 @@ func NewCanceller(store *Store, repo cancellationMessageStore, eventBus EventBus
 	}
 }
 
-func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) int {
+func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) (int, error) {
 	// Draining live waiters and durable detachment are separate concerns. The
 	// repository owns the atomic current-turn/status claim for persisted rows.
 	c.store.CancelSession(sessionID)
@@ -45,9 +45,9 @@ func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) 
 		c.logger.Error("failed to detach current clarification bundles",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return 0
+		return 0, fmt.Errorf("detach current clarification bundles: %w", err)
 	}
-	return c.publishChangedBundles(writeCtx, messages)
+	return c.publishChangedBundles(writeCtx, messages), nil
 }
 
 func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) (int, error) {
@@ -72,6 +72,10 @@ func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) 
 	}
 	changedBundles := 0
 	var expiryErr error
+	// Bundle expiry is intentionally best effort, not all-or-nothing. A bundle
+	// that commits stays terminal even if a sibling write fails; the joined
+	// error tells the caller to retry, and that retry only sees bundles still
+	// pending under the repository's guarded transition.
 	for pendingID := range pendingIDs {
 		changed, expireErr := c.repo.ExpireActiveClarificationBundle(writeCtx, sessionID, pendingID)
 		if expireErr != nil {
@@ -110,7 +114,7 @@ func (c *Canceller) publishChangedBundles(ctx context.Context, messages []*taskm
 // DetachSessionAndNotify cancels in-memory WaitForResponse waiters for a session
 // and marks DB clarification messages as pending with agent_disconnected=true.
 // The overlay stays interactive; a late answer uses the acknowledged resume fallback path.
-func (c *Canceller) DetachSessionAndNotify(ctx context.Context, sessionID string) int {
+func (c *Canceller) DetachSessionAndNotify(ctx context.Context, sessionID string) (int, error) {
 	return c.detachSessionBundles(ctx, sessionID)
 }
 

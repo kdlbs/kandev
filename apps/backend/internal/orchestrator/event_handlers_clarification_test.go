@@ -23,9 +23,9 @@ type zeroClarificationCanceller struct {
 	sessions []string
 }
 
-func (c *zeroClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) int {
+func (c *zeroClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) (int, error) {
 	c.sessions = append(c.sessions, sessionID)
-	return 0
+	return 0, nil
 }
 
 func (c *zeroClarificationCanceller) ExpireSessionAndNotify(context.Context, string) (int, error) {
@@ -54,10 +54,10 @@ type blockingClarificationCanceller struct {
 	release chan struct{}
 }
 
-func (c *blockingClarificationCanceller) DetachSessionAndNotify(context.Context, string) int {
+func (c *blockingClarificationCanceller) DetachSessionAndNotify(context.Context, string) (int, error) {
 	close(c.entered)
 	<-c.release
-	return 1
+	return 1, nil
 }
 
 func (c *blockingClarificationCanceller) ExpireSessionAndNotify(context.Context, string) (int, error) {

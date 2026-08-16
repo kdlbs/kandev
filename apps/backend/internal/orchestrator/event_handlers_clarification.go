@@ -524,7 +524,10 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	hasPendingClarification := s.sessionHasPendingClarification(writeCtx, sessionID)
 	detached := 0
 	if s.clarificationCanceller != nil {
-		detached = s.clarificationCanceller.DetachSessionAndNotify(writeCtx, sessionID)
+		detached, err = s.clarificationCanceller.DetachSessionAndNotify(writeCtx, sessionID)
+		if err != nil {
+			return 0, fmt.Errorf("detach clarification before pause: %w", err)
+		}
 	}
 	if isTerminalSessionState(session.State) {
 		return detached, nil

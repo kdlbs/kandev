@@ -125,8 +125,9 @@ func TestProjectorQueueEventWithoutTaskIDIsIgnored(t *testing.T) {
 // another writer persisting between the projector's count query and its
 // write), then accepts subsequent writes.
 type competingWriterStore struct {
-	base     *projectorTestStore
-	rejected bool
+	base         *projectorTestStore
+	competingGit *GitSummary
+	rejected     bool
 }
 
 func (s *competingWriterStore) LoadTaskStatusSummaries(
@@ -146,6 +147,7 @@ func (s *competingWriterStore) CompareAndUpdateTaskStatusSummary(
 		if row := rows[stored.TaskID]; row != nil {
 			competing := *row
 			competing.Revision = stored.Summary.Revision + 1 // beat the projector's attempt
+			competing.Git = s.competingGit
 			_, _ = s.base.CompareAndUpdateTaskStatusSummary(ctx, &StoredTaskStatusSummary{
 				TaskID:      stored.TaskID,
 				WorkspaceID: stored.WorkspaceID,
@@ -158,7 +160,10 @@ func (s *competingWriterStore) CompareAndUpdateTaskStatusSummary(
 
 func TestProjectorQueueEventRetriesAfterRejectedWrite(t *testing.T) {
 	const taskID = "task-queued-retry"
-	store := &competingWriterStore{base: newProjectorTestStore()}
+	store := &competingWriterStore{
+		base:         newProjectorTestStore(),
+		competingGit: &GitSummary{ChangedFiles: 9},
+	}
 	store.base.rows[taskID] = &StoredTaskStatusSummary{
 		TaskID:      taskID,
 		WorkspaceID: "workspace-1",
@@ -209,6 +214,9 @@ func TestProjectorQueueEventRetriesAfterRejectedWrite(t *testing.T) {
 	}
 	if got := updates.Load(); got != 1 {
 		t.Fatalf("publishes = %d, want exactly 1 (the retried write)", got)
+	}
+	if summary.Git == nil || summary.Git.ChangedFiles != 9 {
+		t.Fatalf("Git summary = %+v, want competing writer's observation preserved", summary.Git)
 	}
 }
 

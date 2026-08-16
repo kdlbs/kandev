@@ -33,7 +33,12 @@ func (r *Repository) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, 
 	for _, turn := range turns {
 		changed, reconcileErr := r.reconcileUnpublishedPromptTurn(ctx, turn)
 		if reconcileErr != nil {
-			reconcileErrs = append(reconcileErrs, reconcileErr)
+			reconcileErrs = append(reconcileErrs, fmt.Errorf(
+				"reconcile unpublished prompt turn %s for session %s: %w",
+				turn.id,
+				turn.sessionID,
+				reconcileErr,
+			))
 			continue
 		}
 		if changed {

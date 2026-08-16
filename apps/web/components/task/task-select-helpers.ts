@@ -24,7 +24,10 @@ export type SwitchToSessionFn = (
   oldSessionId: string | null | undefined,
 ) => void;
 
-type TaskSessionLoader = (taskId: string, options?: { force?: boolean }) => Promise<TaskSession[]>;
+type TaskSessionLoader = (
+  taskId: string,
+  options?: { force?: boolean; signal?: AbortSignal },
+) => Promise<TaskSession[]>;
 
 type PendingTask = {
   taskPendingAction?: TaskPendingAction | null;
@@ -106,14 +109,6 @@ function pendingOwnerGuard(
   );
   return () =>
     handlePendingSelectionOwnerChange(store, taskId, initial, taskProjectionExisted, onChanged);
-}
-
-function loadTaskSessionsForSelection(
-  loader: TaskSessionLoader,
-  taskId: string,
-  hasPendingAction: boolean,
-): Promise<TaskSession[]> {
-  return hasPendingAction ? loader(taskId, { force: true }) : loader(taskId);
 }
 
 function getTaskSessionIds(state: AppState, taskId: string): string[] {
@@ -325,6 +320,17 @@ type SelectTaskWithLayoutParams = {
   selectionSignal?: AbortSignal;
 };
 
+function loadTaskSessionsForSelection(
+  params: SelectTaskWithLayoutParams,
+  hasPendingAction: boolean,
+): Promise<TaskSession[]> {
+  if (!hasPendingAction && !params.selectionSignal) {
+    return params.loadTaskSessionsForTask(params.taskId);
+  }
+  const options = { force: hasPendingAction || undefined, signal: params.selectionSignal };
+  return params.loadTaskSessionsForTask(params.taskId, options);
+}
+
 function openTaskWithoutSession(
   params: SelectTaskWithLayoutParams,
   navigateToTask: (taskId: string) => void,
@@ -388,7 +394,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
       navigateToTask(taskId);
       return;
     }
-    void loadTaskSessionsForSelection(loadTaskSessionsForTask, taskId, !!taskPendingAction)
+    void loadTaskSessionsForSelection(params, !!taskPendingAction)
       .then((sessions) => {
         if (selectionGuard.wasSuperseded()) return;
         if (pendingOwnerHandled()) return;
@@ -413,7 +419,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
       .finally(selectionGuard.dispose);
     return;
   }
-  void loadTaskSessionsForSelection(loadTaskSessionsForTask, taskId, !!taskPendingAction)
+  void loadTaskSessionsForSelection(params, !!taskPendingAction)
     .then(async (sessions) => {
       if (selectionGuard.wasSuperseded()) return;
       if (pendingOwnerHandled()) return;

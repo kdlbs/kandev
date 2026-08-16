@@ -331,8 +331,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 	if !changed {
 		return nil
 	}
-	_, err = p.persistAndPublishLocked(ctx, taskID, state)
-	return err
+	return p.persistPendingRefreshLocked(ctx, taskID, state, true, event.Type, data)
 }
 
 const maxPendingPersistAttempts = 3
@@ -362,8 +361,10 @@ func (p *Projector) persistPendingRefreshLocked(
 		if err := p.rebaseProjectionStateFromCurrent(ctx, taskID, state); err != nil {
 			return err
 		}
-		if _, err := p.refreshPendingLocked(ctx, taskID, state); err != nil {
-			return err
+		if p.loadPendingActions != nil {
+			if _, err := p.refreshPendingLocked(ctx, taskID, state); err != nil {
+				return err
+			}
 		}
 		if eventType != "" {
 			p.applySourceEventLocked(state, eventType, eventData)
@@ -423,6 +424,12 @@ func (p *Projector) applyQueueStatusEvent(ctx context.Context, state *projection
 		}
 		if accepted {
 			return nil
+		}
+		// A competing writer may have changed any summary domain. Rebuild every
+		// keyed source before recounting so the queue retry cannot overwrite the
+		// winner with stale in-memory observations.
+		if err := p.rebaseProjectionStateFromCurrent(ctx, taskID, state); err != nil {
+			return err
 		}
 	}
 	// The count self-corrects on the next queue event or list load, but a

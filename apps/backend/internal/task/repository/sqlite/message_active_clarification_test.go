@@ -173,7 +173,7 @@ func TestAmbiguousEmptySuccessorSupersedesClarification(t *testing.T) {
 
 	active, err := repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil {
-		t.Fatalf("GetActiveClarificationMessagesBySessionID: %v", err)
+		t.Fatalf("FindActiveClarificationMessagesBySessionID: %v", err)
 	}
 	if len(active) != 0 {
 		t.Fatalf("accepted successor left predecessor active: %v", messageIDs(active))
