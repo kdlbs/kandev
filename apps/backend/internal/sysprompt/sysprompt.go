@@ -155,7 +155,7 @@ This task runs in autopilot mode. Continue independently and make reasonable dec
 // unaffected since the next line in the template already starts the bullet.
 const stepCompleteSection = "- step_complete_kandev: Signal that every requirement for the CURRENT workflow step is satisfied. " +
 	"Call it as the LAST action, never before a question or during partial progress. " +
-	"If it is not visible, use tool search/discovery with the canonical name; some clients display mcp__kandev__step_complete_kandev. " +
+	"If it is not visible, use the client's tool search/discovery with the canonical name; some clients display mcp__kandev__step_complete_kandev. " +
 	"Required param: summary.\n"
 
 // coordinatorTaskControlSection documents task-mode-only parent/child controls.
