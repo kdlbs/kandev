@@ -526,11 +526,9 @@ func TestHttpRespond_DetachedResumeFailureDoesNotPromiseRetryWhenRecoveryFails(t
 		name          string
 		restoreErr    error
 		refuseRestore bool
-		publishErr    error
 	}{
 		{name: "restore error", restoreErr: errors.New("database unavailable")},
 		{name: "claim no longer restorable", refuseRestore: true},
-		{name: "restored state convergence error", publishErr: errors.New("summary unavailable")},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			msg := &taskmodels.Message{
@@ -546,7 +544,6 @@ func TestHttpRespond_DetachedResumeFailureDoesNotPromiseRetryWhenRecoveryFails(t
 			eventBus.resumeErr = errors.New("orchestrator rejected resume")
 			messageCreator.restoreErr = tt.restoreErr
 			messageCreator.refuseRestore = tt.refuseRestore
-			messageCreator.publishErr = tt.publishErr
 
 			rec := runRespond(t, h, "pending-recovery", RespondBody{
 				Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}},
@@ -561,6 +558,35 @@ func TestHttpRespond_DetachedResumeFailureDoesNotPromiseRetryWhenRecoveryFails(t
 				t.Fatalf("failed restore response = %s, want recovery failure", rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestHttpRespond_DetachedResumePublishFailureKeepsRetryableRestore(t *testing.T) {
+	msg := &taskmodels.Message{
+		ID: "message-publish-failure", TaskID: "task-publish-failure",
+		TaskSessionID: "session-publish-failure",
+		Metadata: map[string]any{
+			"status": "pending", "pending_id": "pending-publish-failure", "question_id": "q1",
+			"question": map[string]any{"id": "q1", "prompt": "Continue?"},
+		},
+	}
+	h, _, eventBus, messageCreator := setupTestHandler(t, map[string][]*taskmodels.Message{
+		"pending-publish-failure": {msg},
+	})
+	eventBus.resumeErr = errors.New("orchestrator rejected resume")
+	messageCreator.publishErr = errors.New("summary unavailable")
+
+	recorder := runRespond(t, h, "pending-publish-failure", RespondBody{
+		Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}},
+	})
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("response status = %d, want 500; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "response can be retried") {
+		t.Fatalf("response body = %q, want retryable restored state", recorder.Body.String())
+	}
+	if got := msg.Metadata["status"]; got != "pending" {
+		t.Fatalf("database-backed status = %v, want restored pending", got)
 	}
 }
 

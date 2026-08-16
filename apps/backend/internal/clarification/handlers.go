@@ -545,7 +545,9 @@ func (h *Handlers) restoreFailedClarificationClaim(
 		h.logger.Error("failed to converge restored clarification state",
 			zap.String("pending_id", pendingID),
 			zap.Error(err))
-		return false
+		// The durable bundle is pending again, so retry remains safe even when
+		// its best-effort live projection could not be acknowledged.
+		return true
 	}
 	return true
 }

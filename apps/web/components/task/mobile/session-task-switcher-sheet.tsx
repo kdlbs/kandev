@@ -30,7 +30,10 @@ import {
 } from "../task-session-sidebar-link-actions";
 import { useSidebarTaskLinking } from "../task-session-sidebar-task-linking";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
-import { handleTaskSheetOpenChange } from "./session-task-switcher-sheet-selection";
+import {
+  createTaskSheetSelectionController,
+  handleTaskSheetOpenChange,
+} from "./session-task-switcher-sheet-selection";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
 import { SidebarTaskEditDialog, useSidebarTaskEdit } from "../task-session-sidebar-edit";
@@ -535,11 +538,12 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [subtaskTarget, setSubtaskTarget] = useState<{ id: string; title: string } | null>(null);
   const data = useSheetData(workspaceId);
+  const [selectionController] = useState(createTaskSheetSelectionController);
   const handleOpenChange = useCallback(
-    (nextOpen: boolean) => handleTaskSheetOpenChange(nextOpen, onOpenChange),
-    [onOpenChange],
+    (nextOpen: boolean) => handleTaskSheetOpenChange(selectionController, nextOpen, onOpenChange),
+    [onOpenChange, selectionController],
   );
-  const actions = useSheetActions(workspaceId, handleOpenChange);
+  const actions = useSheetActions(workspaceId, handleOpenChange, selectionController);
   const rename = useMobileTaskRename();
   const edit = useSidebarTaskEdit();
   const linking = useMobileTaskLinking(workspaceId);

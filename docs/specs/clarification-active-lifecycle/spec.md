@@ -78,8 +78,10 @@ hiding the action the icon represents.
   resume acceptance fails, the endpoint returns an error and restores the still-current bundle to
   pending so the same answer can be retried. Restored rows publish after commit even when synchronous
   task-summary acknowledgement fails, preventing clients from retaining the terminal snapshot while the
-  endpoint still returns the acknowledgement error. Once agentctl accepts the prompt, later publication
-  or completion errors cannot roll back the successor turn or reopen the answer.
+  endpoint still returns the acknowledgement error. A publication or summary-convergence error after
+  the database restore does not make that retry unsafe; durable pending state remains authoritative.
+  Once agentctl accepts the prompt, later publication or completion errors cannot roll back the
+  successor turn or reopen the answer.
 - A current-turn bundle remains answerable while any sibling question is pending. Recovery claims only
   those pending rows, preserves siblings already made terminal by an earlier partial write, and restores
   only the claimed rows if detached delivery fails.
@@ -100,7 +102,9 @@ hiding the action the icon represents.
   preference order returns only for a clean task. If the task projection disappears while that
   authoritative load is in flight, desktop and phone leave the selection inert instead of navigating to
   a deleted task, including tasks using the legacy pending-action projection. A forced load aborted by a
-  newer load is also inert; it is not treated as a request failure requiring task-only fallback.
+  newer load is also inert; it is not treated as a request failure requiring task-only fallback. Each
+  mounted phone task sheet owns its selection generation, so simultaneous instances cannot invalidate
+  one another's in-flight task choice.
 
 ## Data model
 
@@ -196,9 +200,9 @@ session they can already access. Session selection does not broaden task visibil
 - Detached resume context resolution or orchestrator acceptance fails: use a non-cancelled context with
   a finite deadline for acceptance and persistence, withhold terminal message events, restore the
   still-current bundle to pending, and return a retryable server error instead of reporting false
-  success. Before promising retryability, synchronously refresh and persist the task summary from
-  authoritative pending rows. Publish the committed restored messages even if that acknowledgement
-  fails, then return the acknowledgement error.
+  success. Attempt to refresh and persist the task summary synchronously from authoritative pending
+  rows, and publish the committed restored messages even if that acknowledgement fails. A later event
+  or read repairs the summary cache; the response still reports that the durable answer can be retried.
 - Persisting a successor turn or dispatch-attempt marker fails: use a fresh bounded context to roll back
   the session claim and any reserved successor before making an external executor call, restore the
   still-current bundle, and return a retryable server error.
@@ -332,14 +336,16 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** a task-list refresh observes a detached answer's temporary terminal claim, **WHEN** resume
   rejection restores that claim, **THEN** Kandev acknowledges durable summary convergence before
   reporting retryability and publishes the restored pending rows so other clients converge.
-- **GIVEN** synchronous summary acknowledgement fails after restored clarification rows commit,
-  **WHEN** bundle updates are published, **THEN** Kandev publishes every committed restored row before
-  returning the acknowledgement error.
+- **GIVEN** live publication or synchronous summary acknowledgement fails after restored clarification
+  rows commit, **WHEN** the detached resume returns, **THEN** Kandev reports the convergence error while
+  still identifying the durably restored answer as safe to retry.
 - **GIVEN** the selected task projection disappears while desktop or mobile session loading is in
   flight, **WHEN** the delayed load settles, **THEN** Kandev leaves task and session selection unchanged.
 - **GIVEN** a newer desktop or mobile forced session load aborts an older load for the same task,
   **WHEN** the older continuation handles `AbortError`, **THEN** it leaves the winning task and session
   selection unchanged.
+- **GIVEN** two phone task sheets are mounted, **WHEN** both have an in-flight task selection, **THEN**
+  closing or selecting within one sheet does not invalidate the other sheet's selection generation.
 - **GIVEN** authoritative pending-action projection fails while listing a task's sessions, **WHEN** the
   HTTP or WebSocket list request completes, **THEN** it returns an internal error rather than a false
   clean-session response.

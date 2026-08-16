@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { toSheetItem } from "./session-task-switcher-sheet-item";
 import {
+  createTaskSheetSelectionController,
   handleTaskSheetOpenChange,
   selectPendingTaskFromSheet,
   selectTaskFromSheet,
@@ -291,6 +292,18 @@ describe("selectPendingTaskFromSheet aborts", () => {
 });
 
 describe("selectTaskFromSheet races", () => {
+  it("keeps simultaneous sheet selection controllers independent", () => {
+    const first = createTaskSheetSelectionController();
+    const second = createTaskSheetSelectionController();
+    const firstToken = first.beginSelection();
+    const secondToken = second.beginSelection();
+
+    second.invalidate();
+
+    expect(first.isCurrent(firstToken)).toBe(true);
+    expect(second.isCurrent(secondToken)).toBe(false);
+  });
+
   it("ignores an older pending selection that resolves after a newer tap", async () => {
     let resolveTaskA: (sessions: TaskSession[]) => void = () => undefined;
     let resolveTaskB: (sessions: TaskSession[]) => void = () => undefined;
@@ -305,6 +318,7 @@ describe("selectTaskFromSheet races", () => {
     const navigate = vi.fn();
     const onOpenChange = vi.fn();
     const shared = {
+      selectionController: createTaskSheetSelectionController(),
       state: {
         lastSessionByTaskId: {},
         environmentIdBySessionId: {},
@@ -380,6 +394,7 @@ describe("selectTaskFromSheet summary races", () => {
     const onOpenChange = vi.fn();
 
     selectTaskFromSheet({
+      selectionController: createTaskSheetSelectionController(),
       taskId,
       task: {
         primarySessionId: "primary",
@@ -436,6 +451,7 @@ describe("selectTaskFromSheet deleted-task race", () => {
     const onOpenChange = vi.fn();
 
     selectTaskFromSheet({
+      selectionController: createTaskSheetSelectionController(),
       taskId,
       task: {
         primarySessionId: "primary",
@@ -486,8 +502,10 @@ describe("selectTaskFromSheet sheet lifecycle", () => {
     const setActiveSession = vi.fn();
     const navigate = vi.fn();
     const onOpenChange = vi.fn();
+    const selectionController = createTaskSheetSelectionController();
 
     selectTaskFromSheet({
+      selectionController,
       taskId: "task-stale",
       task: { primarySessionId: "primary", taskPendingAction: "clarification" },
       state: {
@@ -501,8 +519,8 @@ describe("selectTaskFromSheet sheet lifecycle", () => {
       navigate,
       onOpenChange,
     });
-    handleTaskSheetOpenChange(false, onOpenChange);
-    handleTaskSheetOpenChange(true, onOpenChange);
+    handleTaskSheetOpenChange(selectionController, false, onOpenChange);
+    handleTaskSheetOpenChange(selectionController, true, onOpenChange);
 
     resolveLoad([
       {

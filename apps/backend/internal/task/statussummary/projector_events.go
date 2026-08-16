@@ -214,12 +214,11 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 		return fmt.Errorf("load task status summary %q: %w", taskID, err)
 	}
 	summary := rows[taskID]
-	if summary == nil {
-		return nil
+	if summary != nil {
+		state.current = cloneSummary(summary)
+		state.revision = summary.Revision
+		applySummaryBaseline(state, summary)
 	}
-	state.current = cloneSummary(summary)
-	state.revision = summary.Revision
-	applySummaryBaseline(state, summary)
 	if err := p.restoreSessionObservations(ctx, taskID, state); err != nil {
 		return err
 	}

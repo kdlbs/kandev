@@ -183,3 +183,6 @@ blockers/risks, and update task/plan status.
   `"true"` and `"1"` detached flags alongside the SQLite cases.
 - The focused service regression, full SQLite repository and task-service suites, handler compile, and
   changed-code Go lint passed. The PostgreSQL test remains environment-gated and skipped locally.
+- Final Claude review distinguishes durable restore from live convergence: once the database bundle is
+  pending again, a publication or summary error is logged but the response still identifies the answer
+  as safe to retry. The focused failure cases and full clarification suite passed.

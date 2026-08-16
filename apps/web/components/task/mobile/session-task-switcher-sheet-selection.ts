@@ -42,15 +42,32 @@ type SelectionState = {
   taskSessionsById: Record<string, TaskSession>;
 };
 
-// Module-level because the mobile task sheet is a singleton; this counter gates
-// async selections across its shared instance.
-let taskSelectionSequence = 0;
+export type TaskSheetSelectionController = {
+  beginSelection: () => number;
+  invalidate: () => void;
+  isCurrent: (token: number) => boolean;
+};
+
+export function createTaskSheetSelectionController(): TaskSheetSelectionController {
+  let sequence = 0;
+  return {
+    beginSelection: () => {
+      sequence += 1;
+      return sequence;
+    },
+    invalidate: () => {
+      sequence += 1;
+    },
+    isCurrent: (token) => token === sequence,
+  };
+}
 
 export function handleTaskSheetOpenChange(
+  selectionController: TaskSheetSelectionController,
   open: boolean,
   onOpenChange: (open: boolean) => void,
 ): void {
-  if (!open) taskSelectionSequence += 1;
+  if (!open) selectionController.invalidate();
   onOpenChange(open);
 }
 
@@ -151,14 +168,14 @@ export function selectTaskFromSheet(
     taskId: string;
     task?: SelectableTask;
     state: SelectionState;
+    selectionController: TaskSheetSelectionController;
   } & SelectionActions,
 ): void {
   const { taskId, task, state } = params;
-  taskSelectionSequence += 1;
-  const selectionToken = taskSelectionSequence;
+  const selectionToken = params.selectionController.beginSelection();
   const guardedParams = {
     ...params,
-    isSelectionCurrent: () => selectionToken === taskSelectionSequence,
+    isSelectionCurrent: () => params.selectionController.isCurrent(selectionToken),
   };
   const navigate = params.navigate ?? replaceTaskUrl;
   if (task?.isArchived) {

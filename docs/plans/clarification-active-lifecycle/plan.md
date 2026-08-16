@@ -310,6 +310,10 @@ All task gates passed:
 - The focused regressions and full status-summary, SQLite repository, task-service, and backend-app
   suites passed; changed-code Go lint reported zero issues. The PostgreSQL case skipped locally without
   `KANDEV_TEST_POSTGRES_DSN` and remains enabled in PostgreSQL CI.
+- Final bot-review remediation rehydrates configured source observations before the first summary row,
+  keeps a durably restored clarification retryable when live convergence fails, and replaces mobile's
+  module-global selection sequence with one controller per mounted sheet. Focused Go suites, 42 web
+  selection tests, typecheck, zero-warning focused lint, and the i18n ratchet passed.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

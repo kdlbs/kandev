@@ -121,6 +121,9 @@ update task/plan status.
   passed.
 - Six shared desktop/mobile selection and removal suites passed 75 tests; web typecheck, zero-warning
   full lint, and the i18n ratchet passed.
+- Final Claude review replaces the module-global phone selection sequence with a controller owned by
+  each mounted task sheet. Independent-controller and lifecycle regressions passed in the 42-test
+  focused selection run; this remains state-only mobile parity work with no layout or touch change.
 - `cd apps && pnpm install --frozen-lockfile` passed.
 - The exact three-file Vitest command passed: 3 files, 68 tests.
 - `cd apps/web && pnpm run typecheck` passed.

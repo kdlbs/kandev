@@ -94,6 +94,9 @@ remain during migration, but switchers use the summary when present.
   event order as state. Boot and task-list hydration reconcile the pending field of existing persisted
   summaries as well as creating missing summaries. Repairs preserve unrelated fields and advance the
   monotonic revision only when pending semantics change.
+- When no persisted summary row exists, the first source event rehydrates configured authoritative
+  session, Git, and pull-request observations before deriving the new row. The event therefore updates
+  one keyed observation without discarding unchanged siblings from other keys.
 - `active_error` is independent of the primary state icon. It represents the
   newest relevant recoverable agent error and clears after an authoritative
   dismissal or a newer agent response according to the existing error rules.
@@ -265,6 +268,10 @@ intermediate replacement.
   **WHEN** the projector restarts with a nil persisted Git aggregate and later
   receives one repository event, **THEN** it rehydrates every repository before
   rebuilding totals so unchanged siblings remain included.
+- **GIVEN** authoritative session, Git, or pull-request observations exist but no
+  task summary row has been persisted, **WHEN** the projector receives its first
+  source event, **THEN** it rehydrates every configured source before creating
+  the row so unchanged siblings remain included.
 - **GIVEN** two sessions in one task have recoverable errors, **WHEN** both
   sessions are deleted concurrently while retained-error repair is in flight,
   **THEN** the final task summary contains no error for either deleted session.

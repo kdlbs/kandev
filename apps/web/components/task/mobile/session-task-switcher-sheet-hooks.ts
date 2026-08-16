@@ -16,7 +16,10 @@ import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
 import { mapSnapshotToKanban, sortByUpdatedAtDesc } from "./session-task-switcher-sheet-helpers";
 import { toSheetItem, type SheetItemCtx } from "./session-task-switcher-sheet-item";
-import { selectTaskFromSheet } from "./session-task-switcher-sheet-selection";
+import {
+  selectTaskFromSheet,
+  type TaskSheetSelectionController,
+} from "./session-task-switcher-sheet-selection";
 import { taskPendingSelectionSnapshot } from "../task-select-helpers";
 import { useTranslation } from "react-i18next";
 
@@ -400,7 +403,11 @@ function useSheetNestTask() {
   return useNestTaskByDrag();
 }
 
-export function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolean) => void) {
+export function useSheetActions(
+  workspaceId: string | null,
+  onOpenChange: (open: boolean) => void,
+  selection: TaskSheetSelectionController,
+) {
   const { t } = useTranslation();
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
@@ -410,12 +417,12 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
   const deleteActions = useSheetDeleteActions(store, removeTaskFromBoard);
   const detachActions = useTaskDetachDialog(store);
   const handleNestTask = useSheetNestTask();
-
   const handleSelectTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
       selectTaskFromSheet({
         taskId,
+        selectionController: selection,
         task: findSheetTask(state, taskId),
         state: {
           lastSessionByTaskId: state.tasks.lastSessionByTaskId,
@@ -433,7 +440,7 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
         onOpenChange,
       });
     },
-    [loadTaskSessionsForTask, setActiveSession, setActiveTask, store, onOpenChange],
+    [loadTaskSessionsForTask, setActiveSession, setActiveTask, store, onOpenChange, selection],
   );
 
   const [archivingTask, setArchivingTask] = useState<{

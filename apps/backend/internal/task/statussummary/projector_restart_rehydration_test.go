@@ -101,3 +101,63 @@ func TestProjectorRehydratesPullRequestObservationsAfterRestartWithoutAggregate(
 		t.Fatalf("PR loader calls = %d, want 1", loaderCalls)
 	}
 }
+
+func TestProjectorRehydratesSourceObservationsWithoutPersistedSummary(t *testing.T) {
+	store := newProjectorTestStore()
+	sessionLoaderCalls := 0
+	gitLoaderCalls := 0
+	prLoaderCalls := 0
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		LoadSessionObservations: func(context.Context, string) (SessionObservationSnapshot, error) {
+			sessionLoaderCalls++
+			return SessionObservationSnapshot{Sessions: []RebuildSession{{
+				ID: "session-primary", State: sessionStateRunning, IsPrimary: true,
+			}}}, nil
+		},
+		LoadGitObservations: func(context.Context, string) ([]GitObservation, error) {
+			gitLoaderCalls++
+			return []GitObservation{
+				{Repository: "repo-a", Summary: GitSummary{Additions: 5, ChangedFiles: 2}},
+				{Repository: "repo-b", Summary: GitSummary{Additions: 2, ChangedFiles: 1}},
+			}, nil
+		},
+		LoadPullRequests: func(context.Context, string) ([]PullRequestInput, error) {
+			prLoaderCalls++
+			return []PullRequestInput{
+				{Key: "repo-a#41", State: prStateOpen, Number: 41, URL: "https://example.test/41"},
+				{Key: "repo-b#42", State: prStateOpen, Number: 42, URL: "https://example.test/42"},
+			}, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 8, 16, 1, 0, 0, 0, time.UTC) },
+	})
+
+	err := projector.HandleEvent(context.Background(), bus.NewEvent(events.GitEvent, "test", map[string]interface{}{
+		"task_id":      "task-without-summary",
+		"workspace_id": "workspace-1",
+		"session_id":   "session-primary",
+		"type":         "status_update",
+		"status": map[string]interface{}{
+			"repository_name":  "repo-a",
+			"branch_additions": 6,
+			"changed_files":    2,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("project first source event: %v", err)
+	}
+
+	got := store.summary("task-without-summary")
+	if got == nil || got.PrimarySession == nil || got.PrimarySession.ID != "session-primary" ||
+		got.Git == nil || got.Git.Additions != 8 || got.Git.ChangedFiles != 3 ||
+		got.PullRequest == nil || got.PullRequest.Count != 2 {
+		t.Fatalf("summary after missing-row hydration = %+v, want all keyed source siblings", got)
+	}
+	if sessionLoaderCalls != 1 || gitLoaderCalls != 1 || prLoaderCalls != 1 {
+		t.Fatalf("loader calls = session:%d git:%d pr:%d, want one each",
+			sessionLoaderCalls, gitLoaderCalls, prLoaderCalls)
+	}
+}
