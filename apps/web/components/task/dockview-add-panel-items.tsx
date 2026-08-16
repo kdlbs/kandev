@@ -328,7 +328,7 @@ function ReviewPanelMenuItems({
           data-testid={`add-panel-mr-item-${mr.id}`}
         >
           <IconGitPullRequest className={`${MENU_ICON_CLASS} text-orange-500`} />
-          {state.mrs.length > 1
+          {mrs.length > 1
             ? `MR !${mr.mr_iid} - ${mr.project_path}`
             : t("task:mergeRequest", { mriid: mr.mr_iid })}
         </DropdownMenuItem>

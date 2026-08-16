@@ -344,6 +344,16 @@ describe("AddPanelMenuItems — open review identities", () => {
     expect(screen.getByTestId("add-panel-mr-item-mr-3")).toBeTruthy();
   });
 
+  it("uses the single-MR label when filtering leaves one visible MR", () => {
+    const openMR = makeMR("mr-1", 42, "acme/web");
+    const missingMR = makeMR("mr-2", 77, "acme/api");
+    setOpenPanels({ "pr-detail": { mrKey: mrTaskKey(openMR) } });
+
+    renderMenu({ mrs: [openMR, missingMR] });
+
+    expect(screen.getByTestId("add-panel-mr-item-mr-2").textContent).toContain("Merge Request !77");
+  });
+
   it("hides registered-provider reviews with exact canonical and keyed identities", () => {
     const canonicalReview = makeRegisteredReview(42);
     const keyedReview = makeRegisteredReview(77);
