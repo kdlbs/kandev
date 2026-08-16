@@ -190,6 +190,9 @@ session they can already access. Session selection does not broaden task visibil
 
 - Active-state repository read fails: workflow guarding fails closed, and projections keep the last
   known pending value. A later message event or list/boot read retries convergence.
+- Terminal-session expiry persistence fails: the terminal session state still quarantines pending
+  history from task/session projections and interactive overlays; a stale response claim remains
+  rejected by the terminal-session predicate.
 - A forced task-session list cannot project authoritative pending actions: fail the HTTP or WebSocket
   request instead of returning a successful list with empty pending ownership.
 - Summary compare-and-set loses a race: reload the newer summary, reapply authoritative pending state,

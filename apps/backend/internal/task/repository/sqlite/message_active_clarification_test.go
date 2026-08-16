@@ -375,6 +375,13 @@ func TestCompleteActiveClarificationBundleRejectsTerminalSession(t *testing.T) {
 	if message.Metadata["status"] != "pending" {
 		t.Fatalf("status = %v, want pending quarantine", message.Metadata["status"])
 	}
+	actions, err := repo.GetPendingActionsBySessionIDs(ctx, []string{"session-terminal"})
+	if err != nil {
+		t.Fatalf("GetPendingActionsBySessionIDs: %v", err)
+	}
+	if _, ok := actions["session-terminal"]; ok {
+		t.Fatalf("terminal session retained actionable projection: %#v", actions)
+	}
 }
 
 func TestLoadClaimedClarificationBundleUsesCurrentTurn(t *testing.T) {

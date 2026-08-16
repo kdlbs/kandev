@@ -807,9 +807,10 @@ func (s *Service) RestoreActiveClarificationBundle(
 
 // PublishClarificationBundleUpdates exposes committed rows to ordinary bus
 // subscribers. A restored pending bundle first drives the live summary
-// projector synchronously, so callers report retryability only after durable
-// summary convergence has succeeded. Committed rows are still published when
-// that acknowledgement fails so clients do not retain the terminal snapshot.
+// projector synchronously. Projection failure is returned to the caller, but
+// does not make the durably restored bundle unsafe to retry; later events and
+// reads repair that cache. Committed rows are still published on failure so
+// clients do not retain the terminal snapshot.
 func (s *Service) PublishClarificationBundleUpdates(ctx context.Context, messages []*models.Message) error {
 	var resultErr error
 	if restored := firstRestoredClarification(messages); restored != nil {

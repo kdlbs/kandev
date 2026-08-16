@@ -161,6 +161,8 @@ func (s *Service) ResumeDetachedClarification(
 	ctx context.Context,
 	request clarification.DetachedClarificationResume,
 ) error {
+	// The HTTP boundary already supplies a fresh bounded persistence context.
+	// Preserve its remaining total budget and explicit caller cancellation here.
 	resumeCtx, cancel := context.WithTimeout(ctx, detachedClarificationDispatchTimeout)
 	defer cancel()
 	return s.resumeDetachedClarificationWithPrompt(resumeCtx, clarificationAnsweredData{
@@ -508,6 +510,7 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	defer cancel()
 	guard := s.lockCancelInFlightGuard(sessionID)
 	defer guard.release()
+	guardedPersistenceStartedAt := time.Now()
 	session, err := s.repo.GetTaskSession(writeCtx, sessionID)
 	if err != nil {
 		return 0, fmt.Errorf("load session for clarification pause: %w", err)
@@ -534,6 +537,10 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 			detachErr = fmt.Errorf("detach clarification before pause: %w", detachErr)
 		}
 	}
+	s.logger.Debug("clarification pause persistence completed under cancellation guard",
+		zap.String("task_id", session.TaskID),
+		zap.String("session_id", sessionID),
+		zap.Duration("guard_hold_duration", time.Since(guardedPersistenceStartedAt)))
 	if isTerminalSessionState(session.State) {
 		return detached, detachErr
 	}

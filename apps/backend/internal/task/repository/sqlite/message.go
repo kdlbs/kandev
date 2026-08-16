@@ -547,8 +547,9 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 	permissionOrderExpr := pendingActionMessageOrder(driverName, "m")
 	// Durable turns are authoritative. A message without a matching turn is
 	// malformed under the schema foreign key and must not reactivate old input.
-	// Both message CTEs inherit the requested-session boundary through their
-	// task_session_id and turn_id joins to current_turn.
+	// Terminal sessions quarantine pending history even when best-effort expiry
+	// persistence failed. Both message CTEs inherit the requested-session
+	// boundary through their task_session_id and turn_id joins to current_turn.
 	return fmt.Sprintf(`
 		WITH current_turn AS (
 			SELECT task_session_id, id AS turn_id
@@ -561,6 +562,7 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 				       ) AS rn
 				FROM task_session_turns turn_row
 				WHERE turn_row.task_session_id IN (%s)
+				  AND %s
 				  AND %s
 			) ranked
 			WHERE rn = 1
@@ -593,7 +595,8 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 		SELECT task_session_id, 'permission' AS action
 		FROM latest_permissions
 		WHERE rn = 1 AND status IN ('', 'pending')
-	`, placeholderList, turnAuthorityPredicate(driverName, "turn_row"), statusExpr, statusExpr, permissionOrderExpr)
+	`, placeholderList, turnAuthorityPredicate(driverName, "turn_row"),
+		nonTerminalSessionPredicate("turn_row"), statusExpr, statusExpr, permissionOrderExpr)
 }
 
 func pendingActionMessageOrder(driverName string, qualifier string) string {

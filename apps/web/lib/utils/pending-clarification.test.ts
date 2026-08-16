@@ -6,6 +6,7 @@ import {
   type Turn,
 } from "@/lib/types/http";
 import {
+  clarificationTurnIdForSession,
   findPendingClarification,
   findPendingClarificationGroup,
   hasPendingClarification,
@@ -267,6 +268,19 @@ describe("newestDurableTurnId load states", () => {
         turn("turn-id-one-second-later", "2026-08-14T12:00:01Z"),
       ]),
     ).toBe("turn-id-one-second-later");
+  });
+});
+
+describe("clarificationTurnIdForSession", () => {
+  it("quarantines pending message history for terminal sessions", () => {
+    const turns = [turn(CURRENT_TURN_ID)];
+    expect(clarificationTurnIdForSession("COMPLETED", turns)).toBeNull();
+    expect(clarificationTurnIdForSession("FAILED", turns)).toBeNull();
+    expect(clarificationTurnIdForSession("CANCELLED", turns)).toBeNull();
+  });
+
+  it("keeps current-turn authority for input-capable sessions", () => {
+    expect(clarificationTurnIdForSession("RUNNING", [turn(CURRENT_TURN_ID)])).toBe(CURRENT_TURN_ID);
   });
 });
 

@@ -285,6 +285,16 @@ func TestDetachedResumeResolutionUsesFreshBoundedContext(t *testing.T) {
 	}
 }
 
+func TestClarificationClaimRecoveryRejectsMixedTurns(t *testing.T) {
+	_, _, err := clarificationClaimRecovery([]*taskmodels.Message{
+		{ID: "message-one", TurnID: "turn-one"},
+		{ID: "message-two", TurnID: "turn-two"},
+	})
+	if err == nil {
+		t.Fatal("clarificationClaimRecovery accepted messages from different turns")
+	}
+}
+
 func setupTestHandler(t *testing.T, msgs map[string][]*taskmodels.Message) (*Handlers, *stubMessageStore, *stubEventBus, *stubMessageCreator) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

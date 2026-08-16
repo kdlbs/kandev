@@ -38,7 +38,7 @@ import type {
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
-import { newestDurableTurnId } from "@/lib/utils/pending-clarification";
+import { clarificationTurnIdForSession } from "@/lib/utils/pending-clarification";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -437,7 +437,10 @@ function useSessionData(
   const turns = useAppStore((state) =>
     resolvedSessionId ? state.turns.bySession[resolvedSessionId] : undefined,
   );
-  const currentTurnId = useMemo(() => newestDurableTurnId(turns), [turns]);
+  const currentTurnId = useMemo(
+    () => clarificationTurnIdForSession(session?.state, turns),
+    [session?.state, turns],
+  );
   const lastAgentError = useMemo(() => readLastAgentError(session?.metadata), [session?.metadata]);
   const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription, {
     hasOlderMessages,

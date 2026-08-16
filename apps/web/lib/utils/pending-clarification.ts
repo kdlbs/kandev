@@ -4,6 +4,7 @@ import type {
   TaskPendingAction,
   Turn,
 } from "@/lib/types/http";
+import { isInputCapableSessionState } from "./task-pending-input";
 
 export type PendingClarificationScope = {
   /** Undefined means turn history is unavailable; null means loaded legacy history has no turns. */
@@ -50,6 +51,14 @@ export function newestDurableTurnId(turns?: readonly Turn[]): string | null | un
     }
   }
   return newest.id;
+}
+
+export function clarificationTurnIdForSession(
+  sessionState: string | null | undefined,
+  turns?: readonly Turn[],
+): string | null | undefined {
+  if (sessionState && !isInputCapableSessionState(sessionState)) return null;
+  return newestDurableTurnId(turns);
 }
 
 function clarificationMessagesInScope(

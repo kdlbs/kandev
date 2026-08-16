@@ -704,7 +704,10 @@ func (h *Handlers) resumeDetachedClarification(
 	}
 
 	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
-	clarificationTurnID, claimedMessageIDs := clarificationClaimRecovery(claimedMessages)
+	clarificationTurnID, claimedMessageIDs, err := clarificationClaimRecovery(claimedMessages)
+	if err != nil {
+		return fmt.Errorf("build clarification claim recovery: %w", err)
+	}
 
 	request := DetachedClarificationResume{
 		SessionID:           clarificationCtx.SessionID,
@@ -728,19 +731,29 @@ func (h *Handlers) resumeDetachedClarification(
 	return nil
 }
 
-func clarificationClaimRecovery(messages []*taskmodels.Message) (string, []string) {
+func clarificationClaimRecovery(messages []*taskmodels.Message) (string, []string, error) {
 	messageIDs := make([]string, 0, len(messages))
 	turnID := ""
+	turnMessageID := ""
 	for _, message := range messages {
 		if message == nil || message.ID == "" {
 			continue
 		}
-		if turnID == "" {
+		if message.TurnID != "" && turnID == "" {
 			turnID = message.TurnID
+			turnMessageID = message.ID
+		} else if message.TurnID != "" && message.TurnID != turnID {
+			return "", nil, fmt.Errorf(
+				"clarification bundle mixes turn %q from message %s with turn %q from message %s",
+				turnID,
+				turnMessageID,
+				message.TurnID,
+				message.ID,
+			)
 		}
 		messageIDs = append(messageIDs, message.ID)
 	}
-	return turnID, messageIDs
+	return turnID, messageIDs, nil
 }
 
 func (h *Handlers) publishCancelledEvent(c *gin.Context, pendingID string, req *Request) {
