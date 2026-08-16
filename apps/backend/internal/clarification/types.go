@@ -59,6 +59,7 @@ type PendingClarification struct {
 	resp                         *Response
 	mu                           sync.Mutex
 	resolved                     bool
+	cancelled                    bool
 	deliveryConfirmation         func() error
 	deliveryConfirmationOnce     sync.Once
 	deliveryConfirmationErr      error

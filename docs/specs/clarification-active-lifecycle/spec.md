@@ -350,6 +350,10 @@ session they can already access. Session selection does not broaden task visibil
   rows to pending and the same answer can be submitted again.
 - **GIVEN** a response is enqueued to a live waiter, **WHEN** durable confirmation has not completed,
   **THEN** the waiter does not return the response and restart recovery may safely restore the claim.
+- **GIVEN** cancellation removes a live clarification after a responder loads it but before response
+  delivery is claimed, **WHEN** that responder continues, **THEN** it returns not-found immediately so
+  the caller can use detached recovery instead of waiting for an orphaned delivery confirmation. If
+  response delivery wins first, later cancellation cannot preempt its durable confirmation.
 - **GIVEN** a primary-answer watchdog survives until another turn supersedes its clarification turn,
   **WHEN** its fallback timer expires, **THEN** both the preflight and serialized prompt-admission checks
   reject the stale answer without prompting or cancelling the successor.

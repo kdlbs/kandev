@@ -29,6 +29,9 @@ type Store struct {
 	// coordinate multi-waiter scenarios deterministically; always nil in
 	// production.
 	onWaitEntered func(pendingID string)
+	// onRespondLoaded coordinates cancellation-after-lookup tests. It is always
+	// nil in production.
+	onRespondLoaded func(pendingID string)
 }
 
 // NewStore creates a new clarification store.
@@ -48,6 +51,14 @@ func (s *Store) SetOnWaitEntered(fn func(pendingID string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onWaitEntered = fn
+}
+
+// SetOnRespondLoaded installs a test hook invoked after Respond loads a
+// pending clarification and before it claims the entry.
+func (s *Store) SetOnRespondLoaded(fn func(pendingID string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onRespondLoaded = fn
 }
 
 // CreateRequest creates a new clarification request and returns its pending ID
@@ -123,9 +134,7 @@ func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Respons
 		return s.consumeResponse(pendingID, pending)
 	case <-pending.CancelCh:
 		// Agent's turn completed — cancel the blocking wait
-		s.mu.Lock()
-		delete(s.pending, pendingID)
-		s.mu.Unlock()
+		s.deletePendingIfCurrent(pendingID, pending)
 		return nil, fmt.Errorf("clarification cancelled (agent moved on): %s", pendingID)
 	case <-timeoutCtx.Done():
 		if ctx.Err() != nil {
@@ -133,10 +142,15 @@ func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Respons
 			// because another waiter may still be blocked on it.
 			return nil, ctx.Err()
 		}
-		// Store-level timeout — safe to clean up.
-		s.mu.Lock()
-		delete(s.pending, pendingID)
-		s.mu.Unlock()
+		// Store-level timeout — cancel the shared entry unless a response won
+		// the race and already woke this waiter.
+		if !s.cancelPendingIfCurrent(pendingID, pending) {
+			select {
+			case <-pending.done:
+				return s.consumeResponse(pendingID, pending)
+			default:
+			}
+		}
 		return nil, fmt.Errorf("clarification request timed out: %s", pendingID)
 	}
 }
@@ -228,7 +242,11 @@ func (s *Store) respond(
 ) error {
 	s.mu.RLock()
 	pending, ok := s.pending[pendingID]
+	hook := s.onRespondLoaded
 	s.mu.RUnlock()
+	if hook != nil {
+		hook(pendingID)
+	}
 
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
@@ -236,6 +254,10 @@ func (s *Store) respond(
 
 	pending.mu.Lock()
 
+	if pending.cancelled {
+		pending.mu.Unlock()
+		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
+	}
 	if pending.resolved {
 		pending.mu.Unlock()
 		return fmt.Errorf("%w: %s", ErrAlreadyResponded, pendingID)
@@ -296,9 +318,7 @@ func (s *Store) CancelRequest(pendingID string) bool {
 	if !ok {
 		return false
 	}
-	close(pending.CancelCh)
-	delete(s.pending, pendingID)
-	return true
+	return s.cancelPendingLocked(pendingID, pending)
 }
 
 // ListPending returns a snapshot of all pending clarification requests.
@@ -323,13 +343,39 @@ func (s *Store) CancelSession(sessionID string) []string {
 
 	var cancelled []string
 	for id, pending := range s.pending {
-		if pending.Request.SessionID == sessionID {
-			close(pending.CancelCh)
-			delete(s.pending, id)
+		if pending.Request.SessionID == sessionID && s.cancelPendingLocked(id, pending) {
 			cancelled = append(cancelled, id)
 		}
 	}
 	return cancelled
+}
+
+func (s *Store) cancelPendingIfCurrent(
+	pendingID string,
+	pending *PendingClarification,
+) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pending[pendingID] != pending {
+		return false
+	}
+	return s.cancelPendingLocked(pendingID, pending)
+}
+
+// cancelPendingLocked cancels an unresolved entry while s.mu is write-locked.
+func (s *Store) cancelPendingLocked(
+	pendingID string,
+	pending *PendingClarification,
+) bool {
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
+	if pending.resolved || pending.cancelled {
+		return false
+	}
+	pending.cancelled = true
+	close(pending.CancelCh)
+	delete(s.pending, pendingID)
+	return true
 }
 
 func questionsEqual(a, b []Question) bool {

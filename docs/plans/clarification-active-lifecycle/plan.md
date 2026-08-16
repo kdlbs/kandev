@@ -335,6 +335,12 @@ All locally available task gates passed; environment-gated parity also passed in
   selector, so stale current-turn clarification rows cannot re-arm task or session UI after completion
   or cancellation. The 55 focused web tests, typecheck, zero-warning focused lint, and i18n ratchet
   passed.
+- Fresh Claude review makes cancellation and live response delivery choose one winner under the pending
+  entry lock. A cancellation that wins after response lookup now returns not-found immediately, while
+  an already-resolved response keeps its durable confirmation path. The deleted-task mobile selection
+  comment was rejected because the reviewed spec deliberately keeps that stale continuation inert. The
+  focused races passed ten repetitions, the full clarification race suite passed, and changed-code Go
+  lint reported zero issues.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

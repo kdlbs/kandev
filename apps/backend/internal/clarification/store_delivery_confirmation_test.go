@@ -30,6 +30,9 @@ func TestWaitForResponseConfirmsDurableDeliveryBeforeReturning(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("waiter did not start durable delivery confirmation")
 	}
+	if s.CancelRequest(id) {
+		t.Fatal("resolved clarification was cancelled during delivery confirmation")
+	}
 	select {
 	case err := <-waitDone:
 		t.Fatalf("waiter returned before durable confirmation: %v", err)
@@ -106,6 +109,47 @@ func TestRespondWithDeliveryConfirmationAbandonsUnconsumedResponse(t *testing.T)
 	}
 	if _, err := s.WaitForResponse(context.Background(), id); err == nil {
 		t.Fatal("abandoned response remained consumable")
+	}
+}
+
+func TestRespondWithDeliveryConfirmationReturnsNotFoundWhenCancellationWinsAfterLookup(t *testing.T) {
+	s := NewStore(time.Minute)
+	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	respondLoaded := make(chan struct{})
+	releaseRespond := make(chan struct{})
+	s.SetOnRespondLoaded(func(string) {
+		close(respondLoaded)
+		<-releaseRespond
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	respondDone := make(chan error, 1)
+	confirmationCalled := make(chan struct{}, 1)
+	go func() {
+		respondDone <- s.RespondWithDeliveryConfirmation(ctx, id, &Response{}, func() error {
+			confirmationCalled <- struct{}{}
+			return nil
+		})
+	}()
+
+	<-respondLoaded
+	if !s.CancelRequest(id) {
+		t.Fatal("CancelRequest returned false for known clarification")
+	}
+	cancel()
+	close(releaseRespond)
+
+	select {
+	case err := <-respondDone:
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("RespondWithDeliveryConfirmation error = %v, want %v", err, ErrNotFound)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("RespondWithDeliveryConfirmation blocked on a cancelled clarification")
+	}
+	select {
+	case <-confirmationCalled:
+		t.Fatal("cancelled clarification attempted delivery confirmation")
+	default:
 	}
 }
 
