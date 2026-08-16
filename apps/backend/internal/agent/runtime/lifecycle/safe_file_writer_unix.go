@@ -18,7 +18,7 @@ const safeFileDirectoryFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC
 // O_NOFOLLOW is applied to every directory and the final file so an executor
 // cannot redirect a managed session write through a stale symlink.
 func writeFileWithinRoot(root, path string, data []byte, mode os.FileMode) error {
-	cleanPath, parts, err := safeFilePathParts(root, path)
+	_, parts, err := safeFilePathParts(root, path)
 	if err != nil {
 		return err
 	}
@@ -31,7 +31,7 @@ func writeFileWithinRoot(root, path string, data []byte, mode os.FileMode) error
 			_ = unix.Close(directoryFDs[index])
 		}
 	}()
-	return writeSafeFile(currentFD, cleanPath, path, parts[len(parts)-1], data, mode)
+	return writeSafeFile(currentFD, path, parts[len(parts)-1], data, mode)
 }
 
 func safeFilePathParts(root, path string) (string, []string, error) {
@@ -90,7 +90,7 @@ func openSafeFileDirectory(parentFD int, name string) (int, error) {
 	return nextFD, nil
 }
 
-func writeSafeFile(parentFD int, cleanPath, path, name string, data []byte, mode os.FileMode) error {
+func writeSafeFile(parentFD int, path, name string, data []byte, mode os.FileMode) error {
 	fileFD, err := unix.Openat(
 		parentFD,
 		name,
@@ -100,7 +100,7 @@ func writeSafeFile(parentFD int, cleanPath, path, name string, data []byte, mode
 	if err != nil {
 		return fmt.Errorf("open session file %q: %w", path, err)
 	}
-	file := os.NewFile(uintptr(fileFD), cleanPath)
+	file := os.NewFile(uintptr(fileFD), "")
 	if file == nil {
 		_ = unix.Close(fileFD)
 		return fmt.Errorf("open session file %q: invalid file", path)
