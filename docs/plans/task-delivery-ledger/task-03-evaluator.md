@@ -99,7 +99,26 @@ falls through to rules 3-5; it does not error.
 
 ## Results
 
-Pending. Before marking this task done, replace this with every exact command
-actually run and its outcome/count, generated artifact paths, and cleanup or
-teardown evidence. Record security/trust and external side-effect boundaries when
+**Files changed:** `internal/delivery/evaluator.go`, `internal/delivery/evaluator_test.go`
+(table-driven `TestClassify*` cases), `internal/delivery/models.go`
+(`Observation` / `Classification` types, shared with task 04).
+
+**Commands run:**
+- `cd apps/backend && go test -run TestClassify ./internal/delivery/...` →
+  `ok`, 25 subtests pass, 0 fail — covers the rule-4/rule-5 split, the
+  `default_branch_unknown` fallthrough (rules 3-5 still evaluated), and the
+  squash-merge / negative-evidence scenarios.
+- `make lint` — clean.
+
+**Acceptance verification:** #1 (every spec Classification scenario has a
+table case) and #2 (negative/absent ancestry produces no
+`reached_default_at` and does not change the outcome) are covered by the
+`TestClassify*` table cases above. #3 (`Classify` performs no I/O) verified
+by reading `evaluator.go`'s `Classify` signature directly — it takes an
+`Observation` value and returns a `Classification` value; no
+`context.Context`, `*sqlx.DB`, or `exec.Cmd` appears anywhere in the
+function or its call graph within this file.
+
+**Security/trust and external side-effects:** None — `Classify` is pure
+computation over already-fetched data.
 applicable, or explicitly state `None`.

@@ -288,12 +288,25 @@ func TestAncestryChecker_RevisionSyntaxDefaultBranchIsRejectedBeforeReachingGit(
 	}
 }
 
+// TestAncestryChecker_CheckoutResolverErrorIsAnAncestryError is Review
+// round 2, finding #5: the original version of this test passed commit
+// "HEAD", which looksLikeCommitSHA rejects before Check ever reaches
+// a.Checkout.ResolveRepositoryLocalPath (ancestry.go's very first guard) —
+// so it was phantom-green, passing for the commit-format-validation
+// reason covered elsewhere, never exercising the checkout-resolver error
+// path its name claims. This version uses a real-looking 40-hex commit
+// SHA and a valid branch name so Check's earlier guards let the call
+// through, and asserts via calls that the resolver was actually invoked.
 func TestAncestryChecker_CheckoutResolverErrorIsAnAncestryError(t *testing.T) {
-	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{err: errTestCheckout}}
-	out := checker.Check(context.Background(), "repo-1", "main", "HEAD")
+	calls := 0
+	checker := &delivery.AncestryChecker{Checkout: fakeCheckoutResolver{err: errTestCheckout, calls: &calls}}
+	out := checker.Check(context.Background(), "repo-1", "main", strings.Repeat("a", 40))
 
 	if !out.Errored || out.Positive {
 		t.Fatalf("out = %+v, want Errored=true (no readable local checkout)", out)
+	}
+	if calls != 1 {
+		t.Fatalf("ResolveRepositoryLocalPath calls = %d, want 1 (Check must actually reach the checkout resolver)", calls)
 	}
 }
 

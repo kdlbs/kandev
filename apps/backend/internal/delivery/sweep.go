@@ -112,21 +112,23 @@ func (s *Sweep) RunPass(ctx context.Context) {
 	setPairsMissingRepositoryGauge(candidates.MissingRepository)
 	setPairsMissingTaskGauge(candidates.MissingTask)
 
-	due, fallback := s.repo.SelectDuePairs(ctx, candidates.Pairs, passStart)
+	due, fallback, ledgerErr := s.repo.SelectDuePairs(ctx, candidates.Pairs, passStart)
 	if fallback {
-		s.warn("delivery_ledger.dueness_unavailable", zap.Int("candidates", len(candidates.Pairs)))
+		s.warn("delivery_ledger.dueness_unavailable", zap.Error(ledgerErr), zap.Int("candidates", len(candidates.Pairs)))
 	}
 
 	ordered := s.repo.OrderPairs(ctx, due)
 
 	writeErrors := 0
+	var lastWriteErr error
 	for _, pair := range ordered {
 		if err := s.evaluatePair(ctx, pair); err != nil {
 			writeErrors++
+			lastWriteErr = err
 		}
 	}
 	if writeErrors > 0 {
-		s.warn("delivery_ledger.write_failed", zap.Int("count", writeErrors))
+		s.warn("delivery_ledger.write_failed", zap.Error(lastWriteErr), zap.Int("count", writeErrors))
 	}
 
 	if n, err := s.repo.CountUnattributedSessions(ctx); err == nil {
@@ -255,8 +257,13 @@ func (s *Sweep) runAncestryIfDue(ctx context.Context, repositoryID, defaultBranc
 // SelectDuePairs applies the freeze and the three due conditions (spec
 // "Sweep selection predicate"), including the two-stage dueness fallback
 // under "When the ledger itself cannot be read": if the bulk ledger read
-// fails, every non-frozen candidate is treated as due.
-func (r *Repository) SelectDuePairs(ctx context.Context, candidates []CandidatePair, passStart time.Time) ([]CandidatePair, bool) {
+// fails, every non-frozen candidate is treated as due. The returned error
+// is the underlying ledger-read failure that triggered the fallback (nil
+// when fallback is false), so a caller logging the fallback can carry the
+// actual error rather than just the fact that one occurred (spec "Sweep
+// selection predicate": the dueness_unavailable warning "carries the error
+// and the candidate count").
+func (r *Repository) SelectDuePairs(ctx context.Context, candidates []CandidatePair, passStart time.Time) ([]CandidatePair, bool, error) {
 	ledgerRows, ledgerErr := r.allLedgerRows(ctx)
 	fallback := ledgerErr != nil
 	staleRefreshBoundary := passStart.Add(-StaleRefreshInterval)
@@ -278,7 +285,7 @@ func (r *Repository) SelectDuePairs(ctx context.Context, candidates []CandidateP
 			due = append(due, pair)
 		}
 	}
-	return due, fallback
+	return due, fallback, ledgerErr
 }
 
 func (r *Repository) isDue(

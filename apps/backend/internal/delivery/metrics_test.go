@@ -100,6 +100,47 @@ func TestComputeStallSignal_ExceedsThresholdWithValidComparand(t *testing.T) {
 	}
 }
 
+// TestComputeStallSignal_ArchivedTaskSessionStillDrivesComparand is
+// Review round 2, finding #9 (spec.md:2213-2217): archived tasks are still
+// evaluated, so a stalled writer must still surface as stalled when the
+// only live session belongs to an archived task. Unlike the soft-deleted
+// repository and unattributed-session cases above, task archival must NOT
+// be a comparand exclusion — stallComparand has no join against tasks at
+// all, and this test guards against ever adding one.
+func TestComputeStallSignal_ArchivedTaskSessionStillDrivesComparand(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-archived", "ws-1")
+	if _, err := db.Exec(db.Rebind(`UPDATE tasks SET archived_at = ? WHERE id = ?`), time.Now().UTC(), "task-archived"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+	if _, err := repo.Upsert(context.Background(), delivery.UpsertInput{
+		TaskID: "task-archived", RepositoryID: "repo-1", WorkspaceID: "ws-1",
+		Classification: delivery.Classification{Outcome: delivery.OutcomeUnknown, Basis: delivery.BasisNoObservations, Rank: 2},
+		EvaluatedAt:    time.Now().UTC().Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	// The writer has stopped: this session updated only 20 minutes ago,
+	// well inside the writer's own hour-old last_evaluated_at, but it is
+	// the only thing driving the comparand and must not be excluded for
+	// belonging to an archived task.
+	seedTaskSession(t, db, "sess-archived-task", "task-archived", "repo-1")
+	if _, err := db.Exec(db.Rebind(`UPDATE task_sessions SET updated_at = ? WHERE id = ?`), time.Now().UTC().Add(-20*time.Minute), "sess-archived-task"); err != nil {
+		t.Fatalf("backdate session: %v", err)
+	}
+
+	sig := repo.ComputeStallSignal(context.Background())
+	if sig.LedgerErr != nil || sig.ComparandErr != nil {
+		t.Fatalf("sig = %+v, want no errors", sig)
+	}
+	const stallThresholdSeconds = 900
+	if sig.StallSeconds <= stallThresholdSeconds {
+		t.Fatalf("stall_seconds = %d, want > %d (archived task's session must still drive the comparand)", sig.StallSeconds, stallThresholdSeconds)
+	}
+}
+
 func TestComputeStallSignal_SoftDeletedRepositorySessionExcludedFromComparand(t *testing.T) {
 	repo, db := newTestRepo(t)
 	seedWorkspace(t, db, "ws-1")

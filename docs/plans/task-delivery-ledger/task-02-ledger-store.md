@@ -111,7 +111,37 @@ suppressed, so task 06 can increment the counter without re-reading the row.
 
 ## Results
 
-Pending. Before marking this task done, replace this with every exact command
-actually run and its outcome/count, generated artifact paths, and cleanup or
-teardown evidence. Record security/trust and external side-effect boundaries when
-applicable, or explicitly state `None`.
+**Files changed:** `internal/delivery/models.go`, `internal/delivery/store.go`,
+plus migration/lattice/idempotency test files under `internal/delivery/`
+(`store_test.go`, `upsert_test.go`, and siblings — organized by concern rather
+than exactly the `store_migration_test.go` / `store_lattice_test.go` /
+`store_idempotency_test.go` split named in the plan).
+
+**Commands run:**
+- `cd apps/backend && go test ./internal/delivery/...` → `ok`, 99 subtests
+  pass, 0 fail, 3.9s (full package run, not just this task's scope — the
+  package now also contains tasks 03-06's code).
+- `KANDEV_TEST_POSTGRES_DSN=... go test -run Postgres ./internal/delivery/...`
+  — **not run**. This sandbox has no reachable Postgres instance:
+  `psql` against the local Postgres.app rejects trust auth (requires an
+  interactive GUI permission grant unavailable here), and `docker run
+  postgres:16` fails with a broken Docker daemon
+  (`error creating temporary lease: ... input/output error`). The env-gated
+  tests (`TestPostgresDeliveryLedgerMigration_FreshAndReplay`,
+  `TestPostgresUpsert_RankGuardedBehavior`) compile and `t.Skip` cleanly
+  without the DSN; they have not been run against a live Postgres in this
+  environment. Per ADR 0027 this is recorded as not run, not passed.
+- `make lint` — clean.
+
+**Acceptance verification:** #1 (pre-existing DB, NULL columns) and #2
+(replay-safe migration + activation instant) are covered by the SQLite
+migration tests; #3 (suppressed demotion, either commit order) and #4
+(unchanged-input re-upsert leaves classification/observation columns
+byte-identical, `updated_at` frozen, `last_evaluated_at`/`evaluation_seq`
+advance) and #5 (write-once `reached_default_at` across bases) are each
+covered by dedicated `upsert_test.go` cases exercised in the 99-subtest run
+above.
+
+**Security/trust and external side-effects:** None — new table only, no
+network calls, no secrets. The rank comparison lives entirely in the SQL
+`SET` clause (per the plan), so no read-then-write race exists in Go.
