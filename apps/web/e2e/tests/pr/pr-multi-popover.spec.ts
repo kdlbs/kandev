@@ -172,8 +172,12 @@ async function selectPRFromAddPanel(
     await submenu.click({ force: true });
     await expect(item).toBeVisible({ timeout: 2_000 });
     await item.click({ force: true });
-    await expect(session.prDetailTab()).toHaveCount(2, { timeout: 2_000 });
-  }).toPass({ timeout: 15_000, intervals: [100, 250, 500] });
+    // Dockview adds the keyed panel asynchronously after the menu closes. On
+    // a loaded CI shard that can take longer than the menu interaction itself.
+    // Keep the bounded menu retry, but give the panel its full readiness window
+    // before retrying the click.
+    await expect(session.prDetailTab()).toHaveCount(2, { timeout: 10_000 });
+  }).toPass({ timeout: 30_000, intervals: [100, 250, 500] });
 }
 
 test.describe("Multi-PR CI popover", () => {
