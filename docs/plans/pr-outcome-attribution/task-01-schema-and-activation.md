@@ -10,22 +10,30 @@ spec: "../../specs/pr-outcome-attribution/spec.md"
 
 # Task 01: Outcome columns, activation instant, and column projection
 
-Add the eight nullable columns to `github_task_prs`, stamp the durable
+> **Amended 2026-08-15.** This task was completed against the original
+> eight-column scope. The spec was then narrowed to **five** columns (see its
+> Amendment history); the three disposition columns this task added are removed
+> by [task 07](task-07-narrow-to-upstream-scope.md). The acceptance criteria and
+> file list below are updated to the narrowed contract. The `## Results` section
+> is left as written: it is a record of what was actually done on 2026-08-13,
+> and rewriting it would misrepresent the history a reviewer needs.
+
+Add the five nullable columns to `github_task_prs`, stamp the durable
 activation instant in `kandev_meta`, and extend every read projection and write
 column list so the columns are visible without any backfill.
 
 - **Acceptance:**
-  1. A database lacking any of the eight columns gains them on startup via
+  1. A database lacking any of the five columns gains them on startup via
      `ALTER TABLE ... ADD COLUMN` with no `NOT NULL` and no `DEFAULT`; a second
      startup completes without error and alters no row; a non-duplicate `ADD
      COLUMN` failure aborts startup with the error (AC-01, AC-02, AC-03).
   2. No `UPDATE` or backfill runs against `github_task_prs`; a pre-existing
-     terminal row is `NULL` in all eight columns after two startups (AC-04).
+     terminal row is `NULL` in all five columns after two startups (AC-04).
   3. `kandev_meta` holds `github_task_pr_outcome_activated_at` in RFC 3339 form
      after the first migration that adds a column, and its value is unchanged by
-     every later startup (AC-05, AC-06). All eight columns appear in
-     `taskPRColumns`, `taskPRColumnsQualified`, `CreateTaskPR`, and
-     `ReplaceTaskPR`; `UpdateTaskPR` gains only the five sync-owned ones (AC-07).
+     every later startup (AC-05, AC-06). All five columns appear in
+     `taskPRColumns`, `taskPRColumnsQualified`, `CreateTaskPR`, `ReplaceTaskPR`,
+     and `UpdateTaskPR` (AC-07).
   4. The column group carries doc comments recording the writer-health
      invariants (AC-36, AC-37) and their activation-scoped limit (AC-39), the
      `NULL` versus `'unknown'` rule, the AC-15 `closed_by_login` gap, and the
@@ -47,9 +55,9 @@ column list so the columns are visible without any backfill.
   - `apps/backend/internal/github/store.go` — `createTablesSQL` DDL,
     `addTaskPROutcomeColumns` called from `initSchemaUpgrades`, activation stamp
     in `initSchema`, `taskPRColumns`, `taskPRColumnsQualified`, `CreateTaskPR`,
-    `ReplaceTaskPR`, `UpdateTaskPR`, new `UpdateTaskPRDisposition`.
-  - `apps/backend/internal/github/models.go` — eight `TaskPR` fields, the
-    permitted-value set, `validTaskPRDisposition`, invariant doc comments.
+    `ReplaceTaskPR`, `UpdateTaskPR`.
+  - `apps/backend/internal/github/models.go` — five `TaskPR` fields and the
+    invariant doc comments.
   - `apps/backend/internal/github/store_task_pr_outcome_migration_test.go` (new)
   - `apps/backend/internal/github/store_taskpr_schema_drift_test.go` (extend)
 

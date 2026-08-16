@@ -49,11 +49,8 @@ values (including `NULL`) on every other path.
     `stringPtrEqual` do not already exist beside `intPtrEqual` and `timeEqual`.
 
 - **Dependencies:** tasks 01 and 02.
-- **Parallelism:** parallel-safe with task 04 — disjoint files
-  (`service_pr_watch.go` + `metrics_vars.go` here, versus
-  `service_task_pr_disposition.go` + `controller.go` + `handlers.go` there) and
-  no shared schema change, since task 01 already landed both column sets. Run
-  sequentially unless the user explicitly asks otherwise.
+- **Parallelism:** sequential. (This originally noted parallel-safety with task
+  04, which was withdrawn on 2026-08-15.)
 
 - **Inputs:**
   - Spec: AC-12 through AC-19, AC-38; "Nil, empty, and error"; the
@@ -92,8 +89,8 @@ values (including `NULL`) on every other path.
   `stringPtrEqual` beside the existing `intPtrEqual` / `timeEqual` in
   `service_pr.go`.
 - New `internal/github/metrics_vars.go`: `github_task_pr_outcome_syncs_total`
-  (label `populated=true|false`) and `github_task_pr_outcome_dispositions_total`
-  (label `action=set|clear`, wired up in task 04).
+  (label `populated=true|false`). A sibling dispositions counter was added here
+  too and is removed by task 07, per the 2026-08-15 narrowing.
 
 **Files changed:** `service_pr_watch.go`, `service_pr.go` (ptr-equal
 helpers), `metrics_vars.go` (new), `service_pr_outcome_sync_test.go` (new).

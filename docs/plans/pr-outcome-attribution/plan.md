@@ -1,6 +1,7 @@
 ---
 spec: docs/specs/pr-outcome-attribution/spec.md
 created: 2026-08-13
+amended: 2026-08-15
 status: draft
 ---
 
@@ -8,15 +9,23 @@ status: draft
 
 ## Overview
 
-Eight nullable columns land on `github_task_prs` in one fail-loud migration that
-also stamps a durable activation instant in `kandev_meta`. Five of them are then
+**Amended 2026-08-15 — narrowed to upstream observation only.** The reviewer of
+PR #2614 cut the Kandev-recorded closure reason from core; a plugin owns that
+workflow. See the spec's Amendment history. Tasks 04, 05 and 06 are
+**withdrawn**, and [task 07](task-07-narrow-to-upstream-scope.md) removes the
+code they produced. The sections below describe the surviving design; where they
+described the disposition endpoint, control, or E2E, that text is gone
+deliberately, not lost.
+
+Five nullable columns land on `github_task_prs` in one fail-loud migration that
+also stamps a durable activation instant in `kandev_meta`. All five are then
 sourced from the syncs Kandev already performs (GraphQL batched poll, gh CLI
-single-PR, REST single-PR); three are written only by a new workspace-scoped
-`PATCH .../disposition` endpoint and a control in the CI popover. Order is
-schema first (every read projects an explicit column list, so nothing works
-until the columns exist and the projection is updated), then client field
-acquisition, then the sync writer, then the disposition endpoint, then the UI,
-then E2E. Frontend and E2E follow the API they consume.
+single-PR, REST single-PR), and all five have exactly one writer: the sync
+writer. Order is schema first (every read projects an explicit column list, so
+nothing works until the columns exist and the projection is updated), then
+client field acquisition, then the sync writer. There is no UI and no E2E: the
+feature is a data-layer and API-layer addition with no core screen consuming it
+(spec AC-30b).
 
 ---
 
@@ -46,12 +55,11 @@ ON CONFLICT(key) DO NOTHING` and reports `RowsAffected() > 0`. The
 
 **`apps/backend/internal/github/store.go`**
 
-- `createTablesSQL`, `github_task_prs` DDL (`store.go:107`) — append the eight
+- `createTablesSQL`, `github_task_prs` DDL (`store.go:107`) — append the five
   columns so fresh installs get them without an `ALTER`:
   `is_draft BOOLEAN`, `changed_files INTEGER`, `merged_by_login TEXT`,
-  `closed_by_login TEXT`, `auto_merge_observed_at DATETIME`,
-  `disposition TEXT`, `disposition_superseded_by_url TEXT`,
-  `disposition_recorded_at DATETIME`. No `NOT NULL`, no `DEFAULT` (AC-01).
+  `closed_by_login TEXT`, `auto_merge_observed_at DATETIME`. No `NOT NULL`, no
+  `DEFAULT` (AC-01).
 - New `func (s *Store) addTaskPROutcomeColumns() (bool, error)`, called from
   `initSchemaUpgrades()` (`store.go:487`). It follows the fail-loud idiom of
   `addTaskCIRoundColumns` (`store.go:1008`): `s.tableColumns("github_task_prs")`
@@ -69,33 +77,24 @@ ON CONFLICT(key) DO NOTHING` and reports `RowsAffected() > 0`. The
   spec's failure table). No `UPDATE` against `github_task_prs` anywhere in this
   path (AC-04).
 - `taskPRColumns` (`store.go:1484`) and `taskPRColumnsQualified`
-  (`store.go:1492`) — append all eight, qualified with `gtp.` in the second
+  (`store.go:1492`) — append all five, qualified with `gtp.` in the second
   (AC-07). `store_taskpr_schema_drift_test.go` documents why both lists exist.
 - `CreateTaskPR` (`store.go:1456`) and `ReplaceTaskPR` (`store.go:1738`) —
-  append all eight to the INSERT column list, placeholders, and args (AC-07).
-- `UpdateTaskPR` (`store.go:1782`) — append **only the five sync-owned**
-  columns: `is_draft`, `changed_files`, `merged_by_login`, `closed_by_login`,
-  `auto_merge_observed_at`. It SHALL NOT gain any `disposition*` column; the
-  disjoint-writer guarantee in the spec's Concurrency section depends on it.
-- New `func (s *Store) UpdateTaskPRDisposition(ctx context.Context,
-  associationID string, disposition, supersededByURL *string, recordedAt
-  *time.Time) error` — one statement touching exactly
-  `disposition, disposition_superseded_by_url, disposition_recorded_at,
-  updated_at WHERE id = ?`, and no sync-owned column.
+  append all five to the INSERT column list, placeholders, and args (AC-07).
+- `UpdateTaskPR` (`store.go:1782`) — append all five columns. The sync writer is
+  their only writer (spec Concurrency), so there is no second write path and no
+  disjoint-column guarantee to maintain.
 
 **`apps/backend/internal/github/models.go`** — `TaskPR` (`models.go:413`) gains
-eight pointer fields. No `omitempty`: AC-30 requires the keys to be present, and
+five pointer fields. No `omitempty`: AC-30 requires the keys to be present, and
 `null` versus absent is the distinction the whole feature exists to preserve.
 
 ```go
-IsDraft                    *bool      `json:"is_draft" db:"is_draft"`
-ChangedFiles               *int       `json:"changed_files" db:"changed_files"`
-MergedByLogin              *string    `json:"merged_by_login" db:"merged_by_login"`
-ClosedByLogin              *string    `json:"closed_by_login" db:"closed_by_login"`
-AutoMergeObservedAt        *time.Time `json:"auto_merge_observed_at" db:"auto_merge_observed_at"`
-Disposition                *string    `json:"disposition" db:"disposition"`
-DispositionSupersededByURL *string    `json:"disposition_superseded_by_url" db:"disposition_superseded_by_url"`
-DispositionRecordedAt      *time.Time `json:"disposition_recorded_at" db:"disposition_recorded_at"`
+IsDraft             *bool      `json:"is_draft" db:"is_draft"`
+ChangedFiles        *int       `json:"changed_files" db:"changed_files"`
+MergedByLogin       *string    `json:"merged_by_login" db:"merged_by_login"`
+ClosedByLogin       *string    `json:"closed_by_login" db:"closed_by_login"`
+AutoMergeObservedAt *time.Time `json:"auto_merge_observed_at" db:"auto_merge_observed_at"`
 ```
 
 `ClosedByLogin` carries a doc comment stating the AC-15 gap verbatim: a PR whose
@@ -104,10 +103,9 @@ because terminal rows are excluded from the orphan sweep
 (`service_pr_unwatched.go:52`). `AutoMergeObservedAt` carries a doc comment
 stating it is a latched observation and never a merge cause.
 
-Also in `models.go`: the five permitted disposition values as a package
-constant set plus a `validTaskPRDisposition(string) bool` helper, and the
-writer-health invariants AC-36/AC-37/AC-39 recorded as a doc comment on the
-column group so a downstream extract author reads them next to the fields.
+Also in `models.go`: the writer-health invariants AC-36/AC-37/AC-39 recorded as
+a doc comment on the column group so a downstream extract author reads them next
+to the fields.
 
 ### Upstream field acquisition (task 02)
 
@@ -203,144 +201,58 @@ observed.
 
 ```go
 var (
-	taskPROutcomeSyncsTotal        = expvar.NewMap("github_task_pr_outcome_syncs_total")
-	taskPROutcomeDispositionsTotal = expvar.NewMap("github_task_pr_outcome_dispositions_total")
+	taskPROutcomeSyncsTotal = expvar.NewMap("github_task_pr_outcome_syncs_total")
 )
 ```
 
-with the same `k=v;k=v` label helper: `populated=true|false` for syncs,
-`action=set|clear` for dispositions. Process-local and dev-mode visible only;
+with the same `k=v;k=v` label helper: `populated=true|false`. Process-local and
+dev-mode visible only;
 AC-36 and AC-37 remain the durable signals.
 
-### Disposition endpoint (task 04)
+### Disposition endpoint (task 04) — WITHDRAWN
 
-**New `apps/backend/internal/github/service_task_pr_disposition.go`**, modelled
-on `service_task_pr_detach.go`:
-
-```go
-var ErrInvalidDisposition = errors.New("invalid task PR disposition")
-
-func (s *Service) SetTaskPRDisposition(
-	ctx context.Context, workspaceID, associationID string,
-	disposition, supersededByURL *string,
-) (*TaskPR, error)
-```
-
-Order of operations, chosen so AC-26 has the association's identity available
-and so authorization matches the detach endpoint:
-
-1. Blank workspace or association id → `ErrTaskPRNotFound`.
-2. `store.GetTaskPRByID`; nil, or non-empty `WorkspaceID` that differs → 
-   `ErrTaskPRNotFound` (AC-28 — one error for both cases, no existence leak).
-   A `detached_at` value is **not** checked: a detached association is exactly
-   a PR someone walked away from (AC-27). `state` is not checked either
-   (AC-29b).
-3. `authorizeWorkspaceAccess(ctx, workspaceID)`.
-4. Trim `supersededByURL`; an empty string is treated as absent.
-5. Non-nil `disposition` outside the five permitted values →
-   `ErrInvalidDisposition` (AC-23).
-6. `supersededByURL` present while the resulting disposition is not
-   `superseded` → `ErrInvalidDisposition` (AC-24). This also covers the
-   clear-plus-URL body.
-7. `parsePRURL(supersededByURL)` (`service_pr_watch.go:495`) failure →
-   `fmt.Errorf("%w: %w", ErrInvalidPRURL, err)` (AC-25).
-8. Parsed `(owner, repo, number)` equal to the association's, case-insensitively
-   on owner/repo → `ErrInvalidDisposition` (AC-26).
-9. Compare the desired triple against the stored one. Identical → return `tp`
-   unchanged, write nothing, publish nothing, do not advance
-   `disposition_recorded_at` (AC-29).
-10. Otherwise `store.UpdateTaskPRDisposition` with `recordedAt =
-    time.Now().UTC()` when disposition is non-nil, and all three set to `nil`
-    when it is nil (AC-21, AC-22), then re-read and publish
-    `events.GitHubTaskPRUpdated` with the row (AC-29, AC-30). Bump the
-    disposition expvar counter.
-
-A nil `disposition` — whether the JSON key was absent or explicitly `null` —
-means clear. Distinguishing the two would add a `map[string]json.RawMessage`
-decode for no behavioural gain: the only body where the difference could matter
-(`{"superseded_by_url": "..."}` with no disposition) is already a 400 under
-AC-24. Recorded here because it is a contract, not an accident.
-
-A sync never clears a disposition (AC-29c): `UpdateTaskPR` does not name those
-columns, so reopen-then-merge leaves the recorded value intact by construction.
-
-**`controller.go`** — register beside the existing task-PR routes
-(`controller.go:72`-`75`):
-
-```go
-api.PATCH("/task-prs/:associationId/disposition", c.httpSetTaskPRDisposition)
-```
-
-**`handlers.go`** — `httpSetTaskPRDisposition` reads `workspace_id` from the
-query, binds `{disposition *string, superseded_by_url *string}`, maps
-`ErrTaskPRNotFound` → 404 and `ErrInvalidDisposition` / `ErrInvalidPRURL` → 400
-with the message surfaced to the client (the UI shows it verbatim, AC-32), and
-returns the updated association on success.
+Cut from scope 2026-08-15. The design that lived here described the
+`PATCH .../disposition` endpoint, its service, and its store method. It is
+removed rather than archived because it specifies a contract that no longer
+exists (spec AC-41). See [task 04](task-04-disposition-endpoint.md); the code is
+removed by [task 07](task-07-narrow-to-upstream-scope.md).
 
 ---
 
 ## Frontend
 
-### `lib/types/github.ts` (task 05)
+### `lib/types/github.ts` (was task 05, narrowed by task 07)
 
-`TaskPR` (`lib/types/github.ts:220`) gains the eight fields as
-`T | null` — never optional, matching the backend's no-`omitempty` choice so
-"absent" cannot be confused with "nobody looked":
+`TaskPR` (`lib/types/github.ts:220`) gains the **five** retained fields, each
+declared `field?: T | null` — optional and nullable.
 
-```ts
-export type TaskPRDisposition =
-  | "unknown" | "superseded" | "duplicate" | "exploratory" | "withdrawn";
-```
+Optionality is deliberate and was arrived at the hard way: declaring them
+strictly required broke 24 pre-existing frontend test files that construct
+`TaskPR` literals without every field. The backend never omits the key (spec
+AC-30), so the wire guarantee holds regardless; `?:` only relaxes what a
+hand-written test literal must include. The reasoning is documented inline in
+`github.ts` so a future reader does not "fix" it back to required.
 
-with a comment on `disposition` recording that `null` and `"unknown"` are
-different facts and must never be collapsed, and a comment on
-`closed_by_login` recording the AC-15 gap.
+`closed_by_login` carries a comment recording the AC-15 gap: a PR whose only
+post-closure sync came through REST or gh CLI keeps `null` permanently.
+`auto_merge_observed_at` carries a comment recording that it is a latched
+observation, never a merge cause.
 
-### `lib/api/domains/github-api.ts` (task 05)
-
-`patchTaskPRDisposition(associationId, workspaceId, body, options?)` — a PATCH
-to `/api/v1/github/task-prs/{id}/disposition?workspace_id=...` returning
-`TaskPR`, shaped like the neighbouring `deleteTaskPR` (`github-api.ts:92`).
-
-### `components/github/pr-disposition-row.tsx` (task 05, new)
-
-Rendered from `PRCIPopover` (`components/github/pr-ci-popover.tsx:575`) between
-`PRMergeabilityRow` and `PRCIAutomationControls`. `PRCIPopover` is the body the
-multi-PR popover renders for the selected tab
-(`multi-pr-ci-popover.tsx:216`), so placing the control there satisfies AC-31
-and additionally covers the single-PR popover — a superset of what the spec
-requires, with no separate code path to keep in sync.
-
-- Renders nothing unless `pr.state === "closed" && !pr.merged_at` (AC-31,
-  AC-34).
-- A select over the five values plus a clear affordance; when the current value
-  is non-null it is shown as selected and can be changed or cleared (AC-33).
-- Selecting `superseded` reveals a URL input; the server's 400 message is
-  surfaced verbatim in an inline error (AC-32).
-- On success, applies the returned row with the store's `setTaskPR(pr.task_id,
-  updated)` (`lib/state/slices/github/github-slice.ts:158`). The
-  `github.task_pr.updated` event delivers the same row to other clients.
-- All copy through `t()` in the `github` namespace (AC-35).
-
-### i18n (task 05)
-
-New keys in `src/locales/en/github.json` and the three sibling catalogs
-(`pseudo`, `pt-pt`, `zh-cn`). No U+2014. `pnpm run i18n:pseudo` regenerates the
-pseudo catalog. `components/github/pr-disposition-row.tsx` must be appended to
-`i18nGuardFiles` in `eslint.i18n.options.mjs` in the same change — both popover
-files are already on the list (lines 1396 and 1409) and a new sibling that is
-not would be a silent hole.
+**No component consumes these fields** (spec AC-30b). There is no API client
+method, no control, and no translation key for this feature. The frontend change
+is the type alone, verified by `pnpm run typecheck`.
 
 ---
+
 
 ## Tests
 
 - **Migration replay and no-backfill** — *What:* AC-01 through AC-07.
   *File:* `apps/backend/internal/github/store_task_pr_outcome_migration_test.go`.
   *How:* open an isolated SQLite DB, create `github_task_prs` **without** the
-  eight columns, seed a terminal row, run `initSchema` twice through the real
-  `NewStore` path, then assert: all eight columns exist, the seeded row is
-  `NULL` in all eight after both runs, `kandev_meta` holds
+  five columns, seed a terminal row, run `initSchema` twice through the real
+  `NewStore` path, then assert: all five columns exist, the seeded row is
+  `NULL` in all five after both runs, `kandev_meta` holds
   `github_task_pr_outcome_activated_at` exactly once and the second run does not
   advance it, and a fresh-install DB (columns already in `createTablesSQL`) also
   replays clean. Modelled on
@@ -358,15 +270,15 @@ not would be a silent hole.
   reports `false`; `ReadMetaKey` on an absent key returns `""`, nil.
 - **Column-list drift** — *What:* AC-07. *File:*
   `apps/backend/internal/github/store_taskpr_schema_drift_test.go` (extend).
-  *How:* the existing drift assertion should fail if any of the eight is missing
+  *How:* the existing drift assertion should fail if any of the five is missing
   from `taskPRColumns` / `taskPRColumnsQualified`; extend it to cover the
   `CreateTaskPR` / `ReplaceTaskPR` INSERT lists too.
-- **Disjoint writers (pinning)** — *What:* the Concurrency guarantee. *File:*
-  `apps/backend/internal/github/store_task_pr_disposition_test.go`. *How:*
-  assert `UpdateTaskPR`'s SQL contains no `disposition` substring, and that
-  `UpdateTaskPRDisposition`'s SQL contains none of the five sync-owned columns.
-  A behavioural companion: write a disposition, run a sync that changes state,
-  assert the disposition survives (AC-29c); and the reverse.
+- **Removal pinning** — *What:* AC-40, AC-41. *File:*
+  `apps/backend/internal/github/store_taskpr_schema_drift_test.go` (extend).
+  *How:* assert the `github_task_prs` DDL and every column projection contain no
+  `disposition` substring, and that no registered route path contains
+  `disposition`. This is what keeps the 2026-08-15 narrowing from silently
+  regressing.
 - **GraphQL field block and decode** — *What:* AC-08, AC-14. *File:*
   `apps/backend/internal/github/graphql_test.go` (extend). *How:* assert the
   built query text contains `changedFiles`, `mergedBy`, `autoMergeRequest`, and
@@ -391,48 +303,19 @@ not would be a silent hole.
   reads back non-nil; the latch sets once, survives a disarmed observation, and
   is not overwritten by a second armed one; an unchanged sync publishes no
   `github.task_pr.updated` while a changed one does.
-- **Disposition endpoint (integration, handler → service → store)** — *What:*
-  AC-20 through AC-29c. *File:*
-  `apps/backend/internal/github/controller_task_pr_disposition_test.go`. *How:*
-  gin test server over a real store: happy path persists all three and returns
-  the row; each 400 case (unknown enum, URL without `superseded`, unparseable
-  URL, self-supersession); 404 for missing and for cross-workspace; accepted on
-  a detached association; accepted on an `open` row (AC-29b); clearing to
-  `null` nulls all three in one statement; re-PATCH with an identical body
-  leaves `disposition_recorded_at` byte-identical and publishes nothing.
-- **Frontend unit** — *What:* AC-31, AC-32, AC-33, AC-34. *File:*
-  `apps/web/components/github/pr-disposition-row.test.tsx`. *How:* render with
-  a closed-unmerged `TaskPR` and assert the control appears; with `open`,
-  `merged`, and closed-with-`merged_at` and assert it does not; a rejected
-  PATCH surfaces the server message verbatim; an existing value renders as
-  selected and can be cleared.
-- **Store slice** — *What:* the PATCH response reaches the store. *File:*
-  `apps/web/lib/state/slices/github/github-slice.test.ts` (extend). *How:*
-  `setTaskPR` with a row carrying a disposition replaces the prior row in place.
+- **Frontend** — *What:* AC-30, AC-30b. *File:* none. `TaskPR` gains five typed
+  fields and no component consumes them, so `pnpm run typecheck` is the
+  verification. No component test and no store-slice test are added.
 
 ---
 
 ## E2E Tests
 
-- **Scenario:** GIVEN a task with a closed, unmerged PR, WHEN the user opens the
-  CI popover and records `superseded` with a superseding PR URL, THEN the
-  recorded value persists across a reload.
-  **File:** `apps/web/e2e/tests/pr/pr-disposition.spec.ts`.
-  **What to verify:** the disposition control is visible for the closed row; after
-  selecting `superseded`, entering a valid URL, and saving, the control shows the
-  recorded value; after `page.reload()` it still does.
-- **Scenario:** GIVEN a task with a merged PR, WHEN the user opens the CI
-  popover, THEN no disposition control is offered.
-  **File:** same spec.
-  **What to verify:** the control's testid is absent for the merged row.
-
-Seeding uses the existing `POST /api/v1/github/mock/task-prs`
-(`mock_controller.go:56`), which already accepts `state`. A `closed` row leaves
-`merged_at` nil, and a `merged` row is excluded by the state check, so both
-fixtures are reachable without extending `associateTaskPRRequest`. Confirm this
-during implementation; if the merged fixture needs `merged_at`, add the field to
-`associateTaskPRRequest` and `buildTaskPRFromRequest` rather than weakening the
-UI gate.
+**None.** The narrowed feature has no user-visible surface (spec AC-30b), so
+there is nothing on screen to assert. The two specs written against the removed
+disposition control (`pr-disposition.spec.ts`, `mobile-pr-disposition.spec.ts`)
+are deleted by [task 07](task-07-narrow-to-upstream-scope.md) and are not
+replaced.
 
 ---
 
@@ -445,7 +328,10 @@ Definition-of-done gauntlet run from the repo root on 2026-08-13:
 - **`make typecheck`** — clean (`tsc --noEmit` across web/desktop/theme/types/ui workspaces).
 - **`make lint`** — `0 issues` (`golangci-lint run ./...`), `eslint --max-warnings 0` clean, harness lint (118 files) clean, architecture lint clean.
 - **`make lint-format`** — `prettier --check` clean across web/cli/packages.
-- **`cd apps/web && pnpm run i18n:ratchet`** — clean (0 added + 3 modified files clean; guard allowlist intact, 1 added for `pr-disposition-row.tsx`).
+- **`cd apps/web && pnpm run i18n:ratchet`** — clean at the time of the original
+  (un-narrowed) run. Task 07 changes this surface: the guard-allowlist entry for
+  `pr-disposition-row.tsx` is dropped alongside the component (spec AC-41b), so
+  the whole gauntlet must be re-run after the narrowing lands.
 - **`make test`** — `test-backend`, `test-web`, `test-cli`, `test-scripts` all run. Every failure encountered is proven pre-existing/environmental, not caused by this change (evidence below); every suite that touches this feature's code is fully green.
 
 ### Pre-existing/environmental failures encountered (not this change)
@@ -479,26 +365,43 @@ Wave 2:
 
 Wave 3:
 - [x] [task-03-sync-writer](task-03-sync-writer.md)
-- [x] [task-04-disposition-endpoint](task-04-disposition-endpoint.md)
+- [~] [task-04-disposition-endpoint](task-04-disposition-endpoint.md) — withdrawn 2026-08-15
 
 Wave 4:
-- [x] [task-05-frontend-disposition-control](task-05-frontend-disposition-control.md)
+- [~] [task-05-frontend-disposition-control](task-05-frontend-disposition-control.md) — withdrawn 2026-08-15
 
 Wave 5:
-- [x] [task-06-e2e-disposition](task-06-e2e-disposition.md)
+- [~] [task-06-e2e-disposition](task-06-e2e-disposition.md) — withdrawn 2026-08-15
+
+Wave 6:
+- [ ] [task-07-narrow-to-upstream-scope](task-07-narrow-to-upstream-scope.md)
 ```
 
-Tasks 03 and 04 both depend on task 01 and are file-disjoint from each other
-(`service_pr_watch.go` + `metrics_vars.go` versus
-`service_task_pr_disposition.go` + `controller.go` + `handlers.go`), but they
-share `store.go` only through changes task 01 already landed. Task 03
-additionally depends on task 02 for the fields it writes.
+Tasks 01, 02 and 03 remain done and are not re-opened. Task 07 is subtractive
+with exactly one exception: it removes what the withdrawn tasks built and must
+leave every retained column's behaviour byte-identical, EXCEPT for the AC-43 fix
+added on 2026-08-16.
+
+**The one additive item (AC-43).** Spec Review round 1 found a live AC-17
+violation: `ReplaceTaskPR`'s `DELETE` + `INSERT` writes `auto_merge_observed_at`
+as a plain value, so the `COALESCE` guard that protects `UpdateTaskPR` cannot
+apply to the new row and a replace carrying `nil` silently clears a latched
+observation. The human directed the fix be made here rather than split out. Task
+07 therefore also carries the latch forward in `ReplaceTaskPR` and `RestoreTaskPR`
+with tests; see that task file's "ADDITIVE" section. Related: the spec's
+"exactly one writer" claim was false and is corrected — AC-07 now names four
+writers (`CreateTaskPR`, `ReplaceTaskPR`, `RestoreTaskPR`, `UpdateTaskPR`), so
+the `disposition*` columns must be stripped from all four column lists.
 
 ---
 
 ## Open Questions
 
-None. Two decisions were made in this plan rather than deferred, both recorded
-above with their rationale: the new outcome fields live on `PR` (not `PRStatus`)
-because `newPRStatus` is the single REST/gh convergence point; and an absent
-`disposition` key is treated identically to an explicit `null`.
+None. One decision was made in this plan rather than deferred, recorded above
+with its rationale: the new outcome fields live on `PR` (not `PRStatus`) because
+`newPRStatus` is the single REST/gh convergence point.
+
+The 2026-08-15 narrowing raised one question and answered it in the spec rather
+than leaving it here: a developer database that booted an earlier revision of
+this branch keeps three unused nullable columns, and no `DROP COLUMN` is emitted
+to remove them (spec AC-42).
