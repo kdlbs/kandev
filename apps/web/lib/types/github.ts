@@ -254,11 +254,11 @@ export type TaskPR = {
   closed_at: string | null;
   last_synced_at: string | null;
   updated_at: string;
-  // The eight PR-outcome-attribution fields below are always present on a
+  // The five PR-outcome-attribution fields below are always present on a
   // real API/WS payload (the backend sends every key, never omits one) — the
   // `?:` here follows this file's existing convention for nullable fields
   // added after the type's original shape (e.g. required_reviews?) so
-  // hand-written test fixtures aren't forced to enumerate all eight. Treat
+  // hand-written test fixtures aren't forced to enumerate all five. Treat
   // `undefined` the same as `null` ("nobody looked" / "never observed");
   // never treat `null` as "unknown" or vice versa.
   /** Never observed by a populating sync when null. */
@@ -276,24 +276,7 @@ export type TaskPR = {
    *  once it fires, so this can only mean "armed at some instant while
    *  Kandev was watching." */
   auto_merge_observed_at?: string | null;
-  /** Human-recorded closure reason. `null` and `"unknown"` are different
-   *  facts and must never be collapsed: null means nobody looked, "unknown"
-   *  means somebody looked and could not determine why. */
-  disposition?: TaskPRDisposition | null;
-  /** Set only alongside disposition === "superseded". */
-  disposition_superseded_by_url?: string | null;
-  /** Set only alongside a non-null disposition. */
-  disposition_recorded_at?: string | null;
 };
-
-/** The five permitted TaskPR.disposition values. Complete set: adding a
- *  sixth is a contract change, not an implementation detail. */
-export type TaskPRDisposition =
-  | "unknown"
-  | "superseded"
-  | "duplicate"
-  | "exploratory"
-  | "withdrawn";
 
 /** Workspace-scoped websocket payload emitted when a task PR association is detached. */
 export type TaskPRDeletedEvent = {
