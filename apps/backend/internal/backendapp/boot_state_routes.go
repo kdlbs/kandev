@@ -366,19 +366,29 @@ func (b bootStateBuilder) officeState(ctx context.Context, activeID string) map[
 	projects := b.officeProjects(ctx, activeID)
 	inboxItems, inboxCount := b.officeInbox(ctx, activeID)
 	dashboard := b.officeDashboard(ctx, activeID)
+	// Workspace-scoped collections ship keyed by workspace id, matching the
+	// store shape in lib/state/slices/office/types.ts. An empty activeID means
+	// no office workspace resolved, so every map stays empty rather than
+	// keying data under "".
+	byActive := func(value any) map[string]any {
+		if activeID == "" {
+			return map[string]any{}
+		}
+		return map[string]any{activeID: value}
+	}
 	return map[string]any{
-		"agentProfiles":  agents,
-		"skills":         []any{},
-		"projects":       projects,
-		"approvals":      []any{},
-		"activity":       []any{},
-		"costSummary":    nil,
-		"budgetPolicies": []any{},
-		"routines":       []any{},
-		"inboxItems":     inboxItems,
-		"inboxCount":     inboxCount,
-		"runs":           []any{},
-		"dashboard":      dashboard,
+		"agentProfilesByWorkspaceId": byActive(agents),
+		"skills":                     []any{},
+		"projectsByWorkspaceId":      byActive(projects),
+		"approvals":                  []any{},
+		"activity":                   []any{},
+		"costSummary":                nil,
+		"budgetPolicies":             []any{},
+		"routines":                   []any{},
+		"inboxItemsByWorkspaceId":    byActive(inboxItems),
+		"inboxCountByWorkspaceId":    byActive(inboxCount),
+		"runs":                       []any{},
+		"dashboardByWorkspaceId":     byActive(dashboard),
 		"tasks": map[string]any{
 			"items":          []any{},
 			"filters":        map[string]any{"statuses": []any{}, "priorities": []any{}, "assigneeIds": []any{}, "projectIds": []any{}, "search": ""},

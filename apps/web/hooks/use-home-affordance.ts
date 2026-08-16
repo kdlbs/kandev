@@ -2,6 +2,7 @@
 
 import { useAppStore } from "@/components/state-provider";
 import { useNavContext } from "@/hooks/use-app-destinations";
+import { useOfficeModeState } from "@/hooks/use-in-office";
 import { homeDestinationHref } from "@/lib/navigation/core-destinations";
 
 export type HomeAffordance = {
@@ -23,8 +24,10 @@ export type HomeAffordance = {
  */
 export function useHomeAffordance(variant: "breadcrumb" | "root" = "breadcrumb"): HomeAffordance {
   const ctx = useNavContext();
+  const workspaceMode = useOfficeModeState();
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
   const collapsed = useAppStore((s) => s.appSidebar.collapsed);
+  if (workspaceMode === "unknown") return { mode: "none", href: "" };
   const href = homeDestinationHref(ctx);
   if (variant === "root") return { mode: "none", href };
   // The takeover only renders in the expanded sidebar (see AppSidebarNavigation),

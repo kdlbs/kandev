@@ -8,6 +8,7 @@ const state = {
 };
 
 let inOffice = false;
+let modeUnknown = false;
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
@@ -15,6 +16,10 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/hooks/use-in-office", () => ({
   useInOffice: () => inOffice,
+  useOfficeModeState: () => {
+    if (modeUnknown) return "unknown";
+    return inOffice ? "office" : "kanban";
+  },
 }));
 
 describe("useHomeAffordance", () => {
@@ -23,6 +28,7 @@ describe("useHomeAffordance", () => {
     state.appSidebar.settingsMode = false;
     state.appSidebar.collapsed = false;
     inOffice = false;
+    modeUnknown = false;
   });
 
   it("defaults to a phone-only crumb pointing at the workspace overview", () => {
@@ -64,11 +70,23 @@ describe("useHomeAffordance", () => {
     expect(result.current.mode).toBe("phone");
   });
 
-  it("lands on the office dashboard inside Office", () => {
+  it("lands on the office dashboard for an office workspace", () => {
     inOffice = true;
 
     const { result } = renderHook(() => useHomeAffordance());
 
-    expect(result.current.href).toBe("/office");
+    // Carries the workspace id so this is byte-identical to the brand link's
+    // `workspaceHomeHref`. The two render side by side in the sidebar header,
+    // and pointing at different URLs was the original "two homes" defect.
+    expect(result.current.href).toBe("/office?workspaceId=ws-1");
+  });
+
+  it("hides Home until workspace mode resolves", () => {
+    modeUnknown = true;
+
+    const { result } = renderHook(() => useHomeAffordance());
+
+    expect(result.current.mode).toBe("none");
+    expect(result.current.href).toBe("");
   });
 });
