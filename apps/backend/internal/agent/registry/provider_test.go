@@ -45,7 +45,7 @@ func TestProvide_MockAgentModes(t *testing.T) {
 		name              string
 		envValue          string
 		wantMockEnabled   bool
-		wantOnlyMock      bool // only mock-agent registered (no other defaults)
+		wantOnlyMock      bool // only mock inference agent registered (virtual families remain)
 		wantDefaultsCount int  // minimum expected agent count (0 = don't check)
 	}{
 		{
@@ -102,9 +102,12 @@ func TestProvide_MockAgentModes(t *testing.T) {
 			// Check agent count
 			all := reg.List()
 			if tt.wantOnlyMock {
-				if len(all) != 1 {
-					t.Errorf("only mode: expected 1 agent, got %d", len(all))
+				if len(all) != 2 {
+					t.Errorf("only mode: expected mock agent plus virtual families, got %d", len(all))
 				}
+			}
+			if !reg.Exists(agents.DynamicAgentID) {
+				t.Error("dynamic virtual family should always be registered")
 			}
 			if tt.wantDefaultsCount > 0 && len(all) < tt.wantDefaultsCount {
 				t.Errorf("expected at least %d agents, got %d", tt.wantDefaultsCount, len(all))

@@ -235,6 +235,13 @@
   "moveDynamicCandidateDown": "Mover candidato para baixo",
   "removeDynamicCandidate": "Remover candidato",
   "dynamicCandidatePickerDescription": "Escolha um perfil concreto elegível para encaminhamento dinâmico.",
+  "searchDynamicCandidates": "Pesquisar perfis de agentes...",
+  "noDynamicCandidatesFound": "Não foram encontrados perfis de agentes elegíveis.",
+  "dynamicRouteAction": "Em caso de erro do fornecedor",
+  "dynamicRouteActionInfo": "Explicar o comportamento de encaminhamento: {{action}}",
+  "dynamicRouteRetryDescription": "Tenta novamente o mesmo candidato depois de um erro do fornecedor. Use esta opção quando a falha puder ser temporária.",
+  "dynamicRouteTryNextDescription": "Ignora este candidato nesta execução e continua com o próximo perfil elegível.",
+  "dynamicRouteStopDescription": "Para o encaminhamento quando este candidato falha. A tarefa aguarda uma ação manual de recuperação.",
   "dynamicProfileSaved": "Perfil dinâmico guardado.",
   "savingProfile": "A guardar..."
 }

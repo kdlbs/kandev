@@ -22,4 +22,10 @@ describe("utilityProfileEligibility", () => {
   ])("returns %s = %s", (_label, candidate, expected) => {
     expect(utilityProfileEligibility(candidate)).toBe(expected);
   });
+
+  it("allows workspace profiles when the picker explicitly includes them", () => {
+    expect(utilityProfileEligibility(profile({ workspace_id: "workspace-1" }), true, true)).toBe(
+      true,
+    );
+  });
 });

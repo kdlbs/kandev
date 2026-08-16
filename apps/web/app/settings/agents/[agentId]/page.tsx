@@ -482,6 +482,7 @@ function AgentSetupForm({
         matchedPath={discoveryAgent?.matched_path}
         isCreateMode={isCreateMode}
         savedAgent={savedAgent}
+        showInstallationStatus={draftAgent.name !== "dynamic"}
         onDelete={handleDeleteAgent}
       />
       <Separator />

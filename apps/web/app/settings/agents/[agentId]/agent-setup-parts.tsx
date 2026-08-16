@@ -54,6 +54,7 @@ export type AgentHeaderProps = {
   matchedPath: string | null | undefined;
   isCreateMode: boolean;
   savedAgent: Agent | null;
+  showInstallationStatus?: boolean;
   onDelete?: () => void;
 };
 
@@ -62,6 +63,7 @@ export function AgentHeader({
   matchedPath,
   isCreateMode,
   savedAgent,
+  showInstallationStatus = true,
   onDelete,
 }: AgentHeaderProps) {
   const { t } = useTranslation();
@@ -70,9 +72,11 @@ export function AgentHeader({
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-2xl font-bold">{displayName}</h2>
-          <span className="text-xs text-muted-foreground border border-muted-foreground/30 rounded-full px-2 py-1">
-            {matchedPath ?? t("agents:installationNotDetected")}
-          </span>
+          {showInstallationStatus && (
+            <span className="text-xs text-muted-foreground border border-muted-foreground/30 rounded-full px-2 py-1">
+              {matchedPath ?? t("agents:installationNotDetected")}
+            </span>
+          )}
         </div>
         <p className="text-sm text-muted-foreground mt-1">
           {isCreateMode ? t("agents:createProfileIntro") : t("agents:configureProfilesIntro")}

@@ -2,17 +2,20 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconArrowDown, IconArrowUp, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconArrowDown, IconArrowUp, IconInfoCircle, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
+import { Separator } from "@kandev/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
-import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { AgentLogo } from "@/components/agent-logo";
+import { AgentProfilePicker } from "@/components/settings/agent-profile-picker";
+import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { updateAgentProfileAction } from "@/app/actions/agents";
 import { useFeature } from "@/hooks/domains/features/use-feature";
@@ -45,7 +48,105 @@ function candidateLabel(candidate: DynamicAgentCandidate, profiles: AgentProfile
   );
 }
 
-// eslint-disable-next-line max-lines-per-function -- coordinates the shared desktop editor and mobile picker state.
+function dynamicRouteActionCopy(action: string): {
+  labelKey: "agents:retry" | "task:stop" | "task:dynamicRouteTryNext";
+  descriptionKey:
+    | "agents:dynamicRouteRetryDescription"
+    | "agents:dynamicRouteStopDescription"
+    | "agents:dynamicRouteTryNextDescription";
+} {
+  switch (action) {
+    case "retry_same":
+      return {
+        labelKey: "agents:retry",
+        descriptionKey: "agents:dynamicRouteRetryDescription",
+      };
+    case "stop":
+      return {
+        labelKey: "task:stop",
+        descriptionKey: "agents:dynamicRouteStopDescription",
+      };
+    default:
+      return {
+        labelKey: "task:dynamicRouteTryNext",
+        descriptionKey: "agents:dynamicRouteTryNextDescription",
+      };
+  }
+}
+
+function DynamicRouteActionHelp({ action }: { action: string }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const { labelKey, descriptionKey } = dynamicRouteActionCopy(action);
+  const actionLabel = t(labelKey);
+
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="size-11 shrink-0 cursor-help text-muted-foreground sm:size-7"
+          aria-label={t("agents:dynamicRouteActionInfo", { action: actionLabel })}
+          onClick={() => setOpen((current) => !current)}
+          data-testid={`dynamic-route-action-help-${action}`}
+        >
+          <IconInfoCircle className="size-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs text-xs leading-relaxed">
+        {t(descriptionKey)}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function DynamicProfileEditorHeader({
+  agent,
+  profile,
+  name,
+  enabled,
+  onEnabledChange,
+}: {
+  agent: Agent;
+  profile: AgentProfile;
+  name: string;
+  enabled: boolean;
+  onEnabledChange: (enabled: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-start">
+        <div className="min-w-0">
+          <h2 className="flex min-w-0 items-center gap-2 text-2xl font-bold wrap-break-word">
+            <AgentLogo agentName={agent.name} size={28} className="shrink-0" />
+            {profile.agentDisplayName} • {name}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("agents:dynamicProfileDescription")}
+          </p>
+        </div>
+        <div className="flex items-center gap-3 sm:shrink-0">
+          <div className="flex items-center gap-1 text-left sm:text-right">
+            <p className="text-sm font-medium">{t("agents:enabled")}</p>
+            <ProfileEnabledHelp />
+          </div>
+          <Switch
+            checked={enabled}
+            onCheckedChange={onEnabledChange}
+            data-testid="dynamic-profile-enabled-toggle"
+            aria-label={enabled ? t("agents:disableProfile") : t("agents:enableProfile")}
+          />
+        </div>
+      </div>
+      <Separator />
+    </>
+  );
+}
+
+// eslint-disable-next-line max-lines-per-function, complexity -- coordinates draft, save, and candidate state.
 export function DynamicAgentProfileEditor({
   agent,
   profile,
@@ -54,7 +155,7 @@ export function DynamicAgentProfileEditor({
   const { t } = useTranslation();
   const enabledLabel = t("agents:enabled");
   const { toast } = useToast();
-  const enabled = useFeature("dynamicAgentRouting");
+  const routingEnabled = useFeature("dynamicAgentRouting");
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
@@ -71,8 +172,8 @@ export function DynamicAgentProfileEditor({
     profile.enabled !== false,
   );
   const [savedRevision, setSavedRevision] = useState(initialRevision);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const standalone = onDraftChange === undefined;
 
   const concreteProfiles = useMemo(
     () =>
@@ -85,8 +186,22 @@ export function DynamicAgentProfileEditor({
         ),
     [settingsAgents],
   );
-  const availableProfiles = concreteProfiles.filter(
-    (candidate) => !candidates.some((item) => item.executionProfileId === candidate.id),
+  const availableProfileOptions = useMemo(
+    () =>
+      settingsAgents.flatMap((item) =>
+        item.name === "dynamic"
+          ? []
+          : item.profiles
+              .filter(
+                (candidate) =>
+                  candidate.kind !== "dynamic" &&
+                  candidate.enabled !== false &&
+                  !candidate.workspaceId &&
+                  !candidates.some((item) => item.executionProfileId === candidate.id),
+              )
+              .map((candidate) => toAgentProfileOption(item, candidate)),
+      ),
+    [candidates, settingsAgents],
   );
 
   const notifyDraft = (
@@ -118,7 +233,6 @@ export function DynamicAgentProfileEditor({
       notifyDraft(name, next);
       return next;
     });
-    setPickerOpen(false);
   };
 
   const moveCandidate = (index: number, direction: -1 | 1) => {
@@ -169,7 +283,7 @@ export function DynamicAgentProfileEditor({
   };
 
   const save = async () => {
-    if (!enabled || !name.trim() || candidates.length === 0 || !profile.dynamic) return;
+    if (!routingEnabled || !name.trim() || candidates.length === 0 || !profile.dynamic) return;
     setSaving(true);
     try {
       const draftPayload = {
@@ -234,13 +348,12 @@ export function DynamicAgentProfileEditor({
     }
   };
 
-  const standalone = onDraftChange === undefined;
   const draftRevision = dynamicDraftRevision(name, candidates, profileEnabled);
   useSettingsSaveContributor({
     id: `dynamic-profile:${profile.id}`,
     revision: draftRevision,
     isDirty: standalone && draftRevision !== savedRevision,
-    canSave: enabled && !saving && Boolean(name.trim()) && candidates.length > 0,
+    canSave: routingEnabled && !saving && Boolean(name.trim()) && candidates.length > 0,
     invalidReason: !name.trim() ? t("agents:profileNameRequired") : t("agents:noDynamicCandidates"),
     save,
     discard: () => {
@@ -253,7 +366,7 @@ export function DynamicAgentProfileEditor({
     },
   });
 
-  if (!enabled) {
+  if (!routingEnabled) {
     return (
       <Card>
         <CardContent className="py-12 text-center">
@@ -263,176 +376,174 @@ export function DynamicAgentProfileEditor({
     );
   }
 
+  const editorContent = (
+    <>
+      {!standalone && (
+        <div className="flex min-h-11 items-center justify-between gap-3 rounded-md border p-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">{enabledLabel}</p>
+            <p className="text-xs text-muted-foreground">{t("agents:enabledProfileHelper")}</p>
+          </div>
+          <Switch
+            id={`dynamic-profile-enabled-${profile.id}`}
+            checked={profileEnabled}
+            onCheckedChange={(checked) => {
+              setProfileEnabled(checked);
+              notifyDraft(name, candidates, checked);
+            }}
+            data-testid="dynamic-profile-enabled-toggle"
+            aria-label={enabledLabel}
+          />
+        </div>
+      )}
+      <label className="grid gap-2 text-sm font-medium" htmlFor="dynamic-profile-name">
+        {t("agents:profileName")}
+        <Input
+          id="dynamic-profile-name"
+          value={name}
+          onChange={(event) => {
+            const nextName = event.target.value;
+            setName(nextName);
+            notifyDraft(nextName, candidates);
+          }}
+          className="min-h-11"
+          data-testid="dynamic-profile-name"
+        />
+      </label>
+
+      <div className="space-y-3" data-testid="dynamic-profile-candidates">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-medium">{t("agents:dynamicCandidates")}</h3>
+            <p className="text-xs text-muted-foreground">
+              {t("agents:dynamicCandidatesDescription")}
+            </p>
+          </div>
+          <AgentProfilePicker
+            profiles={availableProfileOptions}
+            value=""
+            onValueChange={(value) => {
+              if (value) addCandidate(value);
+            }}
+            testId="add-dynamic-candidate"
+            placeholder={t("agents:addDynamicCandidate")}
+            searchPlaceholder={t("agents:searchDynamicCandidates")}
+            emptyMessage={t("agents:noDynamicCandidatesFound")}
+            ariaLabel={t("agents:addDynamicCandidate")}
+            triggerClassName="min-h-11 w-full sm:w-auto"
+          />
+        </div>
+
+        {candidates.length === 0 ? (
+          <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+            {t("agents:noDynamicCandidates")}
+          </p>
+        ) : (
+          <ol className="grid gap-2">
+            {candidates.map((candidate, index) => (
+              <li
+                key={candidate.executionProfileId}
+                className="flex min-w-0 flex-col gap-2 rounded-md border p-2 sm:flex-row sm:items-center"
+              >
+                <Badge variant="outline">{index + 1}</Badge>
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {candidateLabel(candidate, concreteProfiles)}
+                </span>
+                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
+                  <div className="flex min-h-11 items-center gap-2 rounded-md border px-2">
+                    <span className="text-xs text-muted-foreground">{enabledLabel}</span>
+                    <Switch
+                      checked={candidate.enabled}
+                      onCheckedChange={(checked) => updateCandidate(index, { enabled: checked })}
+                      aria-label={`${enabledLabel}: ${candidateLabel(candidate, concreteProfiles)}`}
+                    />
+                  </div>
+                  <div className="flex min-h-11 w-full items-center gap-1 sm:w-auto">
+                    <Select
+                      value={candidate.rules?.on_provider_error ?? defaultProviderErrorAction}
+                      onValueChange={(action) => updateCandidateAction(index, action)}
+                    >
+                      <SelectTrigger
+                        className="min-h-11 min-w-0 flex-1 sm:w-40 sm:flex-none"
+                        aria-label={t("agents:dynamicRouteAction")}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="retry_same">{t("agents:retry")}</SelectItem>
+                        <SelectItem value={defaultProviderErrorAction}>
+                          {t("task:dynamicRouteTryNext")}
+                        </SelectItem>
+                        <SelectItem value="stop">{t("task:stop")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <DynamicRouteActionHelp
+                      action={candidate.rules?.on_provider_error ?? defaultProviderErrorAction}
+                    />
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-11 min-w-11 shrink-0 cursor-pointer"
+                  onClick={() => moveCandidate(index, -1)}
+                  disabled={index === 0}
+                  aria-label={t("agents:moveDynamicCandidateUp")}
+                >
+                  <IconArrowUp className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-11 min-w-11 shrink-0 cursor-pointer"
+                  onClick={() => moveCandidate(index, 1)}
+                  disabled={index === candidates.length - 1}
+                  aria-label={t("agents:moveDynamicCandidateDown")}
+                >
+                  <IconArrowDown className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-11 min-w-11 shrink-0 cursor-pointer text-destructive"
+                  onClick={() => removeCandidate(index)}
+                  aria-label={t("agents:removeDynamicCandidate")}
+                >
+                  <IconTrash className="h-4 w-4" />
+                </Button>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </>
+  );
+
   return (
     <div className="min-w-0 space-y-6 overflow-x-hidden">
-      <div className="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-start">
-        <div className="min-w-0">
-          <h2 className="flex min-w-0 items-center gap-2 text-2xl font-bold wrap-break-word">
-            <AgentLogo agentName={agent.name} size={28} className="shrink-0" />
-            {profile.agentDisplayName} • {name}
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("agents:dynamicProfileDescription")}
-          </p>
-        </div>
-      </div>
+      {standalone && (
+        <DynamicProfileEditorHeader
+          agent={agent}
+          profile={profile}
+          name={name}
+          enabled={profileEnabled}
+          onEnabledChange={(checked) => {
+            setProfileEnabled(checked);
+            notifyDraft(name, candidates, checked);
+          }}
+        />
+      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("agents:dynamicProfileSettings")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="flex min-h-11 items-center justify-between gap-3 rounded-md border p-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium">{enabledLabel}</p>
-              <p className="text-xs text-muted-foreground">{t("agents:enabledProfileHelper")}</p>
-            </div>
-            <Switch
-              id={`dynamic-profile-enabled-${profile.id}`}
-              checked={profileEnabled}
-              onCheckedChange={(checked) => {
-                setProfileEnabled(checked);
-                notifyDraft(name, candidates, checked);
-              }}
-              aria-label={enabledLabel}
-            />
-          </div>
-          <label className="grid gap-2 text-sm font-medium" htmlFor="dynamic-profile-name">
-            {t("agents:profileName")}
-            <Input
-              id="dynamic-profile-name"
-              value={name}
-              onChange={(event) => {
-                const nextName = event.target.value;
-                setName(nextName);
-                notifyDraft(nextName, candidates);
-              }}
-              className="min-h-11"
-              data-testid="dynamic-profile-name"
-            />
-          </label>
-
-          <div className="space-y-3" data-testid="dynamic-profile-candidates">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-medium">{t("agents:dynamicCandidates")}</h3>
-                <p className="text-xs text-muted-foreground">
-                  {t("agents:dynamicCandidatesDescription")}
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                className="min-h-11"
-                onClick={() => setPickerOpen(true)}
-                disabled={availableProfiles.length === 0}
-                data-testid="add-dynamic-candidate"
-              >
-                <IconPlus className="mr-2 h-4 w-4" />
-                {t("agents:addDynamicCandidate")}
-              </Button>
-            </div>
-
-            {candidates.length === 0 ? (
-              <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                {t("agents:noDynamicCandidates")}
-              </p>
-            ) : (
-              <ol className="grid gap-2">
-                {candidates.map((candidate, index) => (
-                  <li
-                    key={candidate.executionProfileId}
-                    className="flex min-w-0 flex-col gap-2 rounded-md border p-2 sm:flex-row sm:items-center"
-                  >
-                    <Badge variant="outline">{index + 1}</Badge>
-                    <span className="min-w-0 flex-1 truncate text-sm">
-                      {candidateLabel(candidate, concreteProfiles)}
-                    </span>
-                    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
-                      <div className="flex min-h-11 items-center gap-2 rounded-md border px-2">
-                        <span className="text-xs text-muted-foreground">{enabledLabel}</span>
-                        <Switch
-                          checked={candidate.enabled}
-                          onCheckedChange={(checked) =>
-                            updateCandidate(index, { enabled: checked })
-                          }
-                          aria-label={`${enabledLabel}: ${candidateLabel(candidate, concreteProfiles)}`}
-                        />
-                      </div>
-                      <Select
-                        value={candidate.rules?.on_provider_error ?? defaultProviderErrorAction}
-                        onValueChange={(action) => updateCandidateAction(index, action)}
-                      >
-                        <SelectTrigger
-                          className="min-h-11 w-full sm:w-40"
-                          aria-label={t("agents:retry")}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="retry_same">{t("agents:retry")}</SelectItem>
-                          <SelectItem value={defaultProviderErrorAction}>
-                            {t("task:dynamicRouteTryNext")}
-                          </SelectItem>
-                          <SelectItem value="stop">{t("task:stop")}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="min-h-11 min-w-11 shrink-0"
-                      onClick={() => moveCandidate(index, -1)}
-                      disabled={index === 0}
-                      aria-label={t("agents:moveDynamicCandidateUp")}
-                    >
-                      <IconArrowUp className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="min-h-11 min-w-11 shrink-0"
-                      onClick={() => moveCandidate(index, 1)}
-                      disabled={index === candidates.length - 1}
-                      aria-label={t("agents:moveDynamicCandidateDown")}
-                    >
-                      <IconArrowDown className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="min-h-11 min-w-11 shrink-0 text-destructive"
-                      onClick={() => removeCandidate(index)}
-                      aria-label={t("agents:removeDynamicCandidate")}
-                    >
-                      <IconTrash className="h-4 w-4" />
-                    </Button>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <MobilePickerSheet
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        title={t("agents:addDynamicCandidate")}
-        description={t("agents:dynamicCandidatePickerDescription")}
-      >
-        <div className="grid gap-2 pb-2" data-testid="dynamic-candidate-picker">
-          {availableProfiles.map((candidate) => (
-            <Button
-              key={candidate.id}
-              variant="ghost"
-              className="min-h-11 justify-start"
-              onClick={() => addCandidate(candidate.id)}
-            >
-              {candidate.agentDisplayName} • {candidate.name}
-            </Button>
-          ))}
-        </div>
-      </MobilePickerSheet>
+      {standalone ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("agents:dynamicProfileSettings")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">{editorContent}</CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-5">{editorContent}</div>
+      )}
     </div>
   );
 }

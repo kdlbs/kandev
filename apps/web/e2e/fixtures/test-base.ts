@@ -200,7 +200,10 @@ export const test = backendFixture.extend<
       while (Date.now() < agentsDeadline) {
         const { agents } = await apiClient.listAgents();
         lastAgentCount = agents.length;
-        agentProfileId = agents[0]?.profiles[0]?.id;
+        // Virtual families (for example Dynamic) sort before concrete
+        // providers but do not own executable profiles. Search all returned
+        // families instead of assuming the first row is launchable.
+        agentProfileId = agents.flatMap((agent) => agent.profiles ?? [])[0]?.id;
         if (agentProfileId) break;
         await dwell(
           250,

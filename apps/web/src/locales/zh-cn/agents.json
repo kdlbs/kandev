@@ -248,6 +248,13 @@
   "moveDynamicCandidateDown": "下移候选配置",
   "removeDynamicCandidate": "移除候选配置",
   "dynamicCandidatePickerDescription": "选择一个符合动态路由条件的具体配置。",
+  "searchDynamicCandidates": "搜索代理配置...",
+  "noDynamicCandidatesFound": "未找到符合条件的代理配置。",
+  "dynamicRouteAction": "提供商出错时",
+  "dynamicRouteActionInfo": "说明{{action}}路由行为",
+  "dynamicRouteRetryDescription": "提供商出错后重试同一候选配置。适用于可能暂时恢复的故障。",
+  "dynamicRouteTryNextDescription": "本次执行跳过此候选配置，继续使用下一个符合条件的配置。",
+  "dynamicRouteStopDescription": "此候选配置失败后停止路由。任务会等待手动恢复操作。",
   "dynamicProfileSaved": "动态配置已保存。",
   "savingProfile": "正在保存..."
 }
