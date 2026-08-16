@@ -737,8 +737,9 @@ func (s *Service) cancelAgentSilentWithGuard(
 // turn created outside the orchestrator is rejected by the expected identity.
 // A non-nil expectedTurnID records either one specific turn or an explicit
 // no-turn expectation; nil preserves the fallback when turnService is unwired.
-// unlockGuard and relockGuard are a paired callback set. A joining non-owner
-// keeps the original owner's expected-turn snapshot instead of replacing it.
+// unlockGuard and relockGuard must be non-nil paired callbacks for the
+// caller-held guard. A joining non-owner keeps the original owner's
+// expected-turn snapshot instead of replacing it.
 func (s *Service) cancelAgentSilentExpectedWithGuard(
 	ctx context.Context,
 	taskID, sessionID string,
