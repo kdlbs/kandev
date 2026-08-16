@@ -4,3 +4,4 @@
 
 * [AGENTS plugin repository guidance](AGENTS.md:204) — corrected the Redmine plugin repository from `kdlbs/kandev-plugin-redmine` to `yattdev/kandev-plugin-redmine` (commit d8b17e6f0).
 * [Redmine task-plan metadata](docs/plans/redmine-plugin/task-02-plugin-repository-bootstrap.md:4) - marked task files 02-09 complete to match the released v0.1.0 plan (commit 2bd629730).
+* [Redmine packaged-plugin E2E scope](docs/plans/redmine-plugin/task-09-contract-e2e-release.md:31) — reconciled stale task-09 acceptance wording with the shipped zero-network host E2E strategy; Redmine-dependent watcher/sync/write-back behavior remains plugin-repository test coverage unless a live Redmine fixture is added (commit 8cff14d1f).
