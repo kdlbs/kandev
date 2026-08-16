@@ -78,9 +78,14 @@ export function findPendingClarification(
   messages?: readonly Message[] | null,
   scope?: PendingClarificationScope,
 ): Message | null {
-  if (!messages) return null;
+  if (!messages?.length) return null;
   const scoped = clarificationMessagesInScope(messages, scope);
+  // Sidebar callers do not have durable turn history. The newest message's
+  // turn still provides a safe boundary so detached requests from older turns
+  // cannot re-arm the task indicator.
+  const latestTurnId = scoped[scoped.length - 1]?.turn_id;
   for (let i = scoped.length - 1; i >= 0; i--) {
+    if (latestTurnId && scoped[i].turn_id !== latestTurnId) break;
     if (scoped[i].type !== "clarification_request") continue;
     if (isPendingClarificationMessage(scoped[i])) return scoped[i];
   }

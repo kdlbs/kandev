@@ -378,6 +378,10 @@ All locally available task gates passed; environment-gated parity also passed in
 - The final review follow-up passed all affected backend suites again, both projection-focused web
   suites (21 tests), web typecheck, zero-warning frontend and Go changed-lines lint, i18n checks and
   ratchet, and the public-doc validator's 61 tests plus 41-page scan.
+- Latest Claude review bounds the sidebar's message-only clarification fallback to the newest visible
+  turn. A second suggestion was already covered by `clearPendingLocked`; explicit restart coverage now
+  proves stale dismissal clears and persists an aggregate-only restored pending action. The three
+  affected web suites (110 tests) and full status-summary package pass.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

@@ -605,6 +605,42 @@ func TestProjectorRetainsStoredDomainsUntilTheirFirstObservation(t *testing.T) {
 	}
 }
 
+func TestProjectorStaleDismissedClearsRestoredPendingAction(t *testing.T) {
+	store := newProjectorTestStore()
+	storedAt := time.Date(2026, 8, 1, 17, 59, 0, 0, time.UTC)
+	store.rows["task-stale-dismiss-restart"] = &StoredTaskStatusSummary{
+		TaskID:      "task-stale-dismiss-restart",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision:      8,
+			UpdatedAt:     storedAt,
+			PendingAction: pendingClarification,
+		},
+	}
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		Now:   func() time.Time { return storedAt.Add(time.Minute) },
+	})
+
+	err := projector.HandleEvent(context.Background(), bus.NewEvent(
+		events.ClarificationStaleDismissed,
+		"test",
+		map[string]interface{}{
+			"task_id":      "task-stale-dismiss-restart",
+			"workspace_id": "workspace-1",
+			"session_id":   "session-stale-dismiss-restart",
+		},
+	))
+	if err != nil {
+		t.Fatalf("project stale dismissal after restart: %v", err)
+	}
+
+	got := store.summary("task-stale-dismiss-restart")
+	if got == nil || got.PendingAction != "" || got.Revision != 9 {
+		t.Fatalf("summary after stale dismissal = %+v, want empty pending action at revision 9", got)
+	}
+}
+
 func TestProjectorKeepsPRsWithTheSameRepositoryDistinct(t *testing.T) {
 	_, store, eventBus, _, _ := newProjectorTest(t)
 	const taskID = "task-pr-identity"

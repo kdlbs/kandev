@@ -78,6 +78,9 @@ func (p *Projector) clearPendingLocked(state *projectionState, sessionID string)
 	_, existed := state.pending[sessionID]
 	delete(state.pending, sessionID)
 	delete(state.pendingRequests, sessionID)
+	// A restarted projector has only the aggregate taskPending baseline, not
+	// the original per-session entry. Recompute before deciding this is a no-op
+	// so stale-dismissed events still clear and persist that restored value.
 	previousTaskPending := state.taskPending
 	recomputeTaskPending(state)
 	return existed || previousTaskPending != state.taskPending

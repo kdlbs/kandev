@@ -90,6 +90,54 @@ describe("hasPendingClarification", () => {
   });
 });
 
+describe("hasPendingClarification turn scoping", () => {
+  it("ignores a detached pending clarification from a previous turn", () => {
+    expect(
+      hasPendingClarification([
+        message({
+          id: "old-detached",
+          turn_id: "t1",
+          type: "clarification_request",
+          metadata: { status: "pending", agent_disconnected: true },
+        }),
+        message({ id: "current", turn_id: "t2", type: "message" }),
+      ]),
+    ).toBe(false);
+  });
+
+  it("detects a pending clarification in the current turn", () => {
+    expect(
+      hasPendingClarification([
+        message({
+          id: "stale",
+          turn_id: "t1",
+          type: "clarification_request",
+          metadata: { status: "pending" },
+        }),
+        message({
+          id: "active",
+          turn_id: "t2",
+          type: "clarification_request",
+          metadata: { status: "pending" },
+        }),
+      ]),
+    ).toBe(true);
+  });
+
+  it("ignores a legacy null-turn clarification when a newer turn exists", () => {
+    expect(
+      hasPendingClarification([
+        message({
+          id: "legacy",
+          type: "clarification_request",
+          metadata: { status: "pending" },
+        }),
+        message({ id: "current", turn_id: "t2", type: "message" }),
+      ]),
+    ).toBe(false);
+  });
+});
+
 describe("findPendingClarificationGroup", () => {
   it("returns empty array when there are no messages", () => {
     expect(findPendingClarificationGroup([])).toEqual([]);
