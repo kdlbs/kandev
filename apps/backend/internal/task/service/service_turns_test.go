@@ -24,6 +24,15 @@ type nilTaskSessionRepo struct {
 	repository.SessionRepository
 }
 
+func TestReconcileUnpublishedPromptTurnsRequiresTurnRepository(t *testing.T) {
+	svc := &Service{}
+
+	reconciled, err := svc.ReconcileUnpublishedPromptTurns(context.Background())
+	if err == nil {
+		t.Fatalf("ReconcileUnpublishedPromptTurns = %d, nil; want repository error", reconciled)
+	}
+}
+
 func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

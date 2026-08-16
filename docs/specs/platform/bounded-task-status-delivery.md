@@ -106,7 +106,9 @@ remain during migration, but switchers use the summary when present.
   observations are rehydrated even when the persisted aggregate is absent.
 - Pull-request state aggregates open PRs before terminal PRs and chooses the
   most attention-worthy current status. Full PR details remain owned by the
-  GitHub domain and are loaded only by surfaces that need them.
+  GitHub domain and are loaded only by surfaces that need them. On projector
+  restart or compare-and-set rebase, configured keyed pull-request observations
+  are rehydrated even when the persisted aggregate is absent.
 - A semantic no-op does not increment `revision` or emit an update.
 - Clients ignore a summary delta whose revision is not newer than the stored
   revision.

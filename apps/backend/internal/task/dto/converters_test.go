@@ -227,4 +227,7 @@ func TestFromTurnPreservesSubsecondOrderingPrecision(t *testing.T) {
 	if got.StartedAt >= got.CreatedAt || got.CreatedAt >= got.UpdatedAt || got.UpdatedAt >= *got.CompletedAt {
 		t.Fatalf("turn timestamps are not lexically chronological: %+v", got)
 	}
+	if _, err := time.Parse(time.RFC3339, got.StartedAt); err != nil {
+		t.Fatalf("time.Parse(RFC3339, StartedAt): %v", err)
+	}
 }

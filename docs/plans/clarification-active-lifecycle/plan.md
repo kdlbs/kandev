@@ -303,6 +303,13 @@ All task gates passed:
   wording now distinguishes hidden unattempted reservations from authoritative attempted or
   message-backed turns and preserves terminal clarification siblings during rejection.
 - Full status-summary and SQLite repository suites passed; changed-code Go lint reported zero issues.
+- Final review follow-up applies the same nil-aggregate restart and CAS-rebase guarantee to keyed pull
+  requests, makes unpublished-turn startup recovery a compile-time turn-repository requirement, and
+  adds PostgreSQL coverage for string truthy detached flags. Go RFC3339 parsing coverage confirms the
+  fixed nanosecond wire format remains compatible with existing Go consumers.
+- The focused regressions and full status-summary, SQLite repository, task-service, and backend-app
+  suites passed; changed-code Go lint reported zero issues. The PostgreSQL case skipped locally without
+  `KANDEV_TEST_POSTGRES_DSN` and remains enabled in PostgreSQL CI.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

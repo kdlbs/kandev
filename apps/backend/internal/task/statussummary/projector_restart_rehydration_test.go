@@ -55,3 +55,49 @@ func TestProjectorRehydratesGitObservationsAfterRestartWithoutAggregate(t *testi
 		t.Fatalf("Git loader calls = %d, want 1", loaderCalls)
 	}
 }
+
+func TestProjectorRehydratesPullRequestObservationsAfterRestartWithoutAggregate(t *testing.T) {
+	store := newProjectorTestStore()
+	store.rows["task-pr-restart-empty"] = &StoredTaskStatusSummary{
+		TaskID:      "task-pr-restart-empty",
+		WorkspaceID: "workspace-1",
+		Summary:     TaskStatusSummary{Revision: 1},
+	}
+	loaderCalls := 0
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		LoadPullRequests: func(context.Context, string) ([]PullRequestInput, error) {
+			loaderCalls++
+			return []PullRequestInput{
+				{Key: "repo-a#41", State: prStateOpen, Number: 41, URL: "https://example.test/41"},
+				{Key: "repo-b#42", State: prStateOpen, Number: 42, URL: "https://example.test/42"},
+			}, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 8, 16, 0, 30, 0, 0, time.UTC) },
+	})
+
+	err := projector.HandleEvent(context.Background(), bus.NewEvent(events.GitHubTaskPRUpdated, "test", map[string]interface{}{
+		"task_id":       "task-pr-restart-empty",
+		"workspace_id":  "workspace-1",
+		"repository_id": "repo-a",
+		"state":         prStateOpen,
+		"pr_number":     41,
+		"pr_url":        "https://example.test/41",
+		"checks_state":  prStateFailure,
+	}))
+	if err != nil {
+		t.Fatalf("replay PR event: %v", err)
+	}
+
+	got := store.summary("task-pr-restart-empty")
+	if got == nil || got.PullRequest == nil || got.PullRequest.Count != 2 ||
+		got.PullRequest.OpenCount != 2 || got.PullRequest.AggregateState != prStateFailure {
+		t.Fatalf("PR summary after empty-baseline restart = %+v, want two open PRs with failure", got)
+	}
+	if loaderCalls != 1 {
+		t.Fatalf("PR loader calls = %d, want 1", loaderCalls)
+	}
+}

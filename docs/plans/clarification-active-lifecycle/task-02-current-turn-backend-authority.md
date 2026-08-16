@@ -178,3 +178,8 @@ blockers/risks, and update task/plan status.
   of silently restoring a subset. The SQLite early-return path documents its database-level writer
   serialization, and the pending-action query documents its current-turn session boundary.
 - The full SQLite repository suite passed; changed-code Go lint reported zero issues.
+- Final review follow-up moves unpublished-turn reconciliation onto the compile-time turn-repository
+  contract and fails loudly when the service is miswired. PostgreSQL parity coverage now pins string
+  `"true"` and `"1"` detached flags alongside the SQLite cases.
+- The focused service regression, full SQLite repository and task-service suites, handler compile, and
+  changed-code Go lint passed. The PostgreSQL test remains environment-gated and skipped locally.

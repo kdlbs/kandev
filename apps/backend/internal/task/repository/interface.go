@@ -226,6 +226,10 @@ type AttachmentRepository interface {
 type TurnRepository interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
 	DeleteTurnIfUnreferenced(ctx context.Context, sessionID, turnID string) (bool, error)
+	// ReconcileUnpublishedPromptTurns repairs or accepts durable prompt
+	// reservations before startup admits new work. Every production turn store
+	// must provide this recovery boundary; callers fail rather than skip it.
+	ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error)
 	// CreateTurnWithStepStamp creates turn atomically with the
 	// workflow-step-at-start stamp: it reads the task's current step and
 	// inserts the turn row in the same transaction, taking the same lock

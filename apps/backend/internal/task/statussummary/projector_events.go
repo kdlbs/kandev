@@ -226,10 +226,8 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
 		return err
 	}
-	if summary.PullRequest != nil {
-		if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
-			return err
-		}
+	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
+		return err
 	}
 	return nil
 }
@@ -290,10 +288,8 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
 		return err
 	}
-	if current.PullRequest != nil {
-		if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
-			return err
-		}
+	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
+		return err
 	}
 	return nil
 }

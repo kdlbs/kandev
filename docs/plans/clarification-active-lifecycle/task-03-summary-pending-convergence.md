@@ -101,3 +101,8 @@ actual files, then update task/plan status.
 - Later Codex review rehydrates keyed Git observations whenever the loader is configured, including a
   restart whose persisted aggregate is nil. The nil-baseline multi-repository regression and full
   status-summary suite passed; changed-code Go lint reported zero issues.
+- Final review follow-up rehydrates keyed pull-request observations under the same nil-aggregate rule
+  during both restart restore and rejected-CAS rebase, preserving unchanged sibling pull requests when
+  the next source event updates one key.
+- The focused restart and rejected-CAS regressions and full status-summary suite passed; changed-code Go
+  lint reported zero issues.

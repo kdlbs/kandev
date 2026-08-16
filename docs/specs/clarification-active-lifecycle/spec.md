@@ -69,9 +69,10 @@ hiding the action the icon represents.
   claimed for its dispatch; an attempt marker or message evidence instead proves dispatch ambiguity and
   preserves the successor. Authority and recovery treat boolean `true`, strings `"true"` and `"1"`,
   and numeric `1` as equivalent pending/attempted flags across SQLite and PostgreSQL. If reservation
-  reconciliation fails, orchestrator startup
+  reconciliation is unavailable or fails, orchestrator startup
   fails before watcher, scheduler, or prompt admission starts; the next start retries recovery. A
-  rejection persists terminal status without resuming the agent.
+  production turn repository must provide this recovery capability through its compile-time contract.
+  A rejection persists terminal status without resuming the agent.
 - Every response atomically claims current-turn ownership before it can reach a live waiter or request
   a detached resume. Terminal message updates are published only after delivery succeeds. If detached
   resume acceptance fails, the endpoint returns an error and restores the still-current bundle to

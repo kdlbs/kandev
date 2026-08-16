@@ -116,6 +116,17 @@ func TestPostgresDetachActiveClarificationMessagesClaimsCurrentRows(t *testing.T
 		"turn-detach-current-pg", "pending-detach-current-pg", "q-current",
 		base.Add(time.Minute),
 	)
+	for index, flag := range []string{"true", "1"} {
+		messageID := "message-detach-string-" + flag + "-pg"
+		createClarificationBundleMessage(
+			t, repo, messageID, "task-detach-pg", "session-detach-pg",
+			"turn-detach-current-pg", "pending-detach-string-"+flag+"-pg", "q-string-"+flag,
+			base.Add(time.Minute+time.Duration(index+1)*time.Second),
+		)
+		setClarificationMessageMetadata(t, repo, messageID, func(metadata map[string]interface{}) {
+			metadata["agent_disconnected"] = flag
+		})
+	}
 
 	updated, err := repo.DetachActiveClarificationMessagesBySessionID(ctx, "session-detach-pg")
 	if err != nil {

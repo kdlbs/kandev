@@ -265,7 +265,6 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 			UpdatedAt:     storedAt,
 			PendingAction: pendingClarification,
 			Git:           &GitSummary{ChangedFiles: 1},
-			PullRequest:   &PullRequestSummary{Count: 2, OpenCount: 2, State: prStateOpen},
 		},
 	}
 	store := &rejectingPendingProjectorStore{
@@ -279,7 +278,6 @@ func TestProjectorPendingRefreshRetriesAfterCASRejection(t *testing.T) {
 				PendingAction:     pendingClarification,
 				QueuedPromptCount: 7,
 				Git:               &GitSummary{ChangedFiles: 2},
-				PullRequest:       &PullRequestSummary{Count: 2, OpenCount: 2, State: prStateOpen},
 			},
 		},
 	}
