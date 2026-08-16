@@ -39,6 +39,7 @@ import { isDraftEntryDirty, isEditorsSettingsDirty } from "./settings-dirty";
 import { LspLanguageCards } from "./lsp-language-cards";
 import { LSP_LANGUAGE_OPTIONS } from "./lsp-language-options";
 import { Trans, useTranslation } from "react-i18next";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 /**
  * Code identifiers rendered inside `<Trans>` copy. They are passed as
@@ -203,21 +204,21 @@ function CustomEditorRow({
       )}
       renderPreview={({ open }) => (
         <div
-          className="rounded-lg border border-border/70 bg-background p-4 flex items-center justify-between gap-3 cursor-pointer"
+          className="rounded-lg border border-border/70 bg-background p-4 flex flex-col gap-3 cursor-pointer md:flex-row md:items-center md:justify-between"
           onClick={open}
         >
           <div className="min-w-0">
-            <div className="font-medium text-sm text-foreground truncate">{editor.name}</div>
+            <div className="break-words font-medium text-sm text-foreground">{editor.name}</div>
             <div className="text-xs text-muted-foreground truncate">
               {getCustomEditorSummary(t, editor)}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="cursor-pointer"
+              className={settingsActionClassName("cursor-pointer")}
               onClick={(event) => {
                 event.stopPropagation();
                 open();
@@ -230,7 +231,7 @@ function CustomEditorRow({
               type="button"
               variant="outline"
               size="sm"
-              className="cursor-pointer"
+              className={settingsActionClassName("cursor-pointer")}
               onClick={(event) => {
                 event.stopPropagation();
                 void deleteRequest.run(editor.id);
@@ -259,9 +260,14 @@ function CustomEditorsList({
   const { t } = useTranslation();
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="text-sm font-medium text-foreground">{t("settings:customEditors")}</div>
-        <Button type="button" variant="outline" onClick={() => setIsAdding(true)}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setIsAdding(true)}
+          className={settingsActionClassName()}
+        >
           {t("settings:addCustomEditor")}
         </Button>
       </div>
@@ -406,7 +412,7 @@ function useSyncEditors(editors: EditorOption[], setEditors: (editors: EditorOpt
   useEffect(() => setEditors(editors), [editors, setEditors]);
 }
 
-export function EditorsSettings() {
+export function EditorsSettings({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation();
   const state = useEditorsSettingsState();
   const { setLspConfigStrings, setLspConfigErrors, setEditors, editors } = state;
@@ -447,6 +453,7 @@ export function EditorsSettings() {
         hasInvalidConfig ? t("settings:fixInvalidLspServerConfigurationBefore") : undefined
       }
       onSave={() => saveDefaultRequest.run()}
+      showPageChrome={!embedded}
     >
       <div className="space-y-6">
         <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.fileEditor} className="space-y-4">

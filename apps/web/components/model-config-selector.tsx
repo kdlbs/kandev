@@ -6,6 +6,7 @@ import type { TFunction } from "i18next";
 import { IconCheck, IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 import { Button } from "@kandev/ui/button";
 import {
   Command,
@@ -482,7 +483,7 @@ function ModelConfigSelectorTrigger({
   const compact = variant === "compact";
   const baseClassName = compact
     ? "h-7 max-w-[min(18rem,70vw)] cursor-pointer gap-1 px-2 text-xs hover:bg-muted/40"
-    : "w-full justify-between font-normal cursor-pointer";
+    : settingsControlClassName("w-full justify-between font-normal cursor-pointer");
   const trigger = (
     <PopoverTrigger asChild>
       <Button

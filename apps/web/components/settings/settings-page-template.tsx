@@ -3,6 +3,7 @@
 import { CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import {
   SettingsSaveDirtyScope,
   useSettingsSaveContributor,
@@ -30,6 +31,7 @@ type SettingsPageTemplateProps = {
   invalidReason?: string;
   onDiscard?: () => void;
   showSaveButton?: boolean;
+  showPageChrome?: boolean;
   children: React.ReactNode;
   deleteSection?: React.ReactNode;
 };
@@ -47,6 +49,7 @@ export function SettingsPageTemplate({
   invalidReason,
   onDiscard,
   showSaveButton = true,
+  showPageChrome = true,
   children,
   deleteSection,
 }: SettingsPageTemplateProps) {
@@ -64,14 +67,9 @@ export function SettingsPageTemplate({
 
   return (
     <div className="space-y-8">
-      {header ?? (
-        <div>
-          <h2 className="text-2xl font-bold">{title}</h2>
-          {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
-        </div>
-      )}
+      {showPageChrome && (header ?? <SettingsPageHeader title={title} description={description} />)}
 
-      <Separator />
+      {showPageChrome && <Separator />}
 
       <SettingsSaveDirtyScope>
         {(nestedIsDirty) => (

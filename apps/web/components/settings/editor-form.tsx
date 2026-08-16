@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { EditorOption } from "@/lib/types/http";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { useTranslation } from "react-i18next";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 type CustomKind = "custom_command" | "custom_remote_ssh" | "custom_hosted_url";
 
@@ -355,8 +356,14 @@ export function EditorForm({
         onChange={(kind) => setField("kind", kind)}
       />
       <EditorKindFields state={state} baseline={baseline} setField={setField} />
-      <div className="flex items-center justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          disabled={isSaving}
+          className={settingsActionClassName()}
+        >
           {t("settings:cancel")}
         </Button>
         {!coordinatedSaveId && (
@@ -364,7 +371,7 @@ export function EditorForm({
             type="button"
             onClick={() => void handleSave()}
             disabled={isSaving || !isValid}
-            className="cursor-pointer"
+            className={settingsActionClassName("cursor-pointer")}
           >
             {submitLabel}
           </Button>

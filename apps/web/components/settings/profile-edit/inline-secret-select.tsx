@@ -4,13 +4,18 @@ import { useState, useCallback } from "react";
 import { IconPlus, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Textarea } from "@kandev/ui/textarea";
 import { createSecret } from "@/lib/api/domains/secrets-api";
 import { useAppStore } from "@/components/state-provider";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import { useTranslation } from "react-i18next";
+import {
+  SettingsField,
+  SettingsErrorText,
+  SettingsFieldLabel,
+} from "@/components/settings/settings-field";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 
 const NONE_VALUE = "__none__";
 const CREATE_VALUE = "__create__";
@@ -46,9 +51,12 @@ export function InlineSecretSelect({
 
   return (
     <div className="space-y-2">
-      {label && <Label className="text-xs text-muted-foreground">{label}</Label>}
+      {label && <SettingsFieldLabel>{label}</SettingsFieldLabel>}
       <Select value={secretId ?? NONE_VALUE} onValueChange={handleValueChange}>
-        <SelectTrigger className="cursor-pointer" data-settings-dirty={isDirty}>
+        <SelectTrigger
+          className={settingsControlClassName("cursor-pointer")}
+          data-settings-dirty={isDirty}
+        >
           <SelectValue placeholder={placeholder ?? t("executors:selectASecret")} />
         </SelectTrigger>
         <SelectContent>
@@ -112,25 +120,23 @@ function InlineCreateForm({
 
   return (
     <div className="rounded-md border p-3 space-y-3 bg-muted/30">
-      <div className="space-y-1.5">
-        <Label className="text-xs">{t("executors:name")}</Label>
+      <SettingsField label={t("executors:name")}>
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder={t("executors:eGMyApiToken", { example: SECRET_NAME_EXAMPLE })}
-          className="h-8 text-sm"
+          className={settingsControlClassName("h-8 text-sm")}
         />
-      </div>
-      <div className="space-y-1.5">
-        <Label className="text-xs">{t("executors:value")}</Label>
+      </SettingsField>
+      <SettingsField label={t("executors:value")}>
         <Textarea
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder={t("executors:pasteYourSecretValue")}
-          className="text-sm min-h-[60px]"
+          className={settingsControlClassName("text-sm min-h-[60px]")}
         />
-      </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      </SettingsField>
+      {error && <SettingsErrorText>{error}</SettingsErrorText>}
       <div className="flex items-center gap-2 justify-end">
         <Button
           variant="outline"

@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
+import { settingsCredentialClassName } from "@/components/settings/settings-control";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
@@ -416,6 +417,7 @@ function ConnectionFields({
             autoComplete="new-password"
             aria-describedby="azure-devops-pat-help"
             data-testid="azure-devops-pat"
+            className={settingsCredentialClassName()}
           />
         </div>
       </div>

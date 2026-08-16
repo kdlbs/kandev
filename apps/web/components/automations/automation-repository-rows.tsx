@@ -1,7 +1,6 @@
 "use client";
 
 import { Button } from "@kandev/ui/button";
-import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { useMemo } from "react";
@@ -13,6 +12,8 @@ import {
   selectionToOptionId,
   type RepositorySelection,
 } from "./automation-repository-selection";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 type AutomationRepositoryRowsProps = {
   testId?: string;
@@ -63,7 +64,7 @@ export function AutomationRepositoryRows({
 
   return (
     <div className="space-y-1.5" data-testid={testId} data-settings-dirty={isDirty}>
-      <Label className="text-xs">{t("automations:repositoryLabel")}</Label>
+      <SettingsFieldLabel>{t("automations:repositoryLabel")}</SettingsFieldLabel>
       <div className="space-y-2">
         {selections.map((selection, index) => (
           <RepositoryRow
@@ -79,7 +80,7 @@ export function AutomationRepositoryRows({
           type="button"
           variant="outline"
           size="sm"
-          className="cursor-pointer"
+          className={settingsActionClassName("cursor-pointer")}
           disabled={!nextAvailableItem}
           onClick={addRow}
         >
@@ -87,7 +88,7 @@ export function AutomationRepositoryRows({
           {t("automations:addRepository")}
         </Button>
       </div>
-      <p className="text-[10px] text-muted-foreground">{t("automations:noRepositoriesHelp")}</p>
+      <p className="text-xs/relaxed text-muted-foreground">{t("automations:noRepositoriesHelp")}</p>
     </div>
   );
 }

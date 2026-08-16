@@ -16,6 +16,7 @@ import { MarketplaceBrowser } from "./marketplace-browser";
 import { PluginRow } from "./plugin-row";
 import { UninstallPluginDialog } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 /**
  * Operator UI to browse, install, enable, disable, uninstall, and update kandev
@@ -123,15 +124,15 @@ function InstalledTab({
     <>
       <GlobalAutoUpdateToggle settings={autoUpdate} />
 
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="text-sm font-medium text-foreground">{t("plugins:installedPlugins")}</div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
           <Button
             data-testid="plugins-sync-button"
             variant="secondary"
             disabled={actions.syncBusy}
             onClick={actions.handleSync}
-            className="cursor-pointer"
+            className={settingsActionClassName("cursor-pointer")}
           >
             <IconRefresh className={`h-4 w-4 ${actions.syncBusy ? "animate-spin" : ""}`} />
             {t("plugins:sync")}
@@ -139,7 +140,7 @@ function InstalledTab({
           <Button
             data-testid="install-plugin-trigger"
             onClick={actions.openInstall}
-            className="cursor-pointer"
+            className={settingsActionClassName("cursor-pointer")}
           >
             {t("plugins:installPlugin")}
           </Button>
