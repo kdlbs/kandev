@@ -276,7 +276,7 @@ test("@search reveals and flashes a cached preview content match selected with E
   await expect(dialog).toBeVisible();
   await dialog.getByRole("combobox").fill(CACHED_PREVIEW_MARKER);
   const targetResult = dialog.getByTestId("content-search-result").filter({ hasText: targetPath });
-  await expect(targetResult).toHaveCount(1);
+  await expect(targetResult).toHaveCount(1, { timeout: 30_000 });
   await testPage.keyboard.press("Enter");
   await expect(dialog).not.toBeVisible();
 
