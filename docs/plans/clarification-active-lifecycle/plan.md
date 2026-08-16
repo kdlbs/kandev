@@ -341,6 +341,10 @@ All locally available task gates passed; environment-gated parity also passed in
   comment was rejected because the reviewed spec deliberately keeps that stale continuation inert. The
   focused races passed ten repetitions, the full clarification race suite passed, and changed-code Go
   lint reported zero issues.
+- Fresh Codex review makes an explicit clean or permission session projection outrank filtered visible
+  turn history. This keeps a predecessor clarification inert while an authoritative attempted successor
+  is intentionally unpublished from client history, across both chat discovery and pending indicators.
+  The 108 focused web tests, typecheck, zero-warning focused lint, and i18n ratchet passed.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

@@ -15,6 +15,7 @@ import {
 } from "./pending-clarification";
 
 const CURRENT_TURN_ID = "turn-new";
+const OLD_PENDING_ID = "pending-old";
 const TURN_TIMESTAMP = "2026-08-14T12:00:00Z";
 
 function message(overrides: Partial<Message>): Message {
@@ -183,7 +184,7 @@ describe("current-turn clarification ownership", () => {
         id: "old",
         turn_id: "turn-old",
         type: "clarification_request",
-        metadata: { pending_id: "pending-old", status: "pending" },
+        metadata: { pending_id: OLD_PENDING_ID, status: "pending" },
       }),
       message({ id: "new", turn_id: CURRENT_TURN_ID, type: "message" }),
     ];
@@ -191,13 +192,29 @@ describe("current-turn clarification ownership", () => {
     expect(findPendingClarificationGroup(messages, { currentTurnId: CURRENT_TURN_ID })).toEqual([]);
   });
 
+  it.each([null, "permission"] as const)(
+    "treats a matching visible turn as inert when explicit authority is %s",
+    (pendingAction) => {
+      const pending = message({
+        id: "visible-predecessor",
+        turn_id: CURRENT_TURN_ID,
+        type: "clarification_request",
+        metadata: { pending_id: OLD_PENDING_ID, status: "pending" },
+      });
+      const scope = { currentTurnId: CURRENT_TURN_ID, pendingAction };
+
+      expect(findPendingClarification([pending], scope)).toBeNull();
+      expect(findPendingClarificationGroup([pending], scope)).toEqual([]);
+    },
+  );
+
   it("does not reactivate history when every newer-turn message is deleted", () => {
     const messages = [
       message({
         id: "old",
         turn_id: "turn-old",
         type: "clarification_request",
-        metadata: { pending_id: "pending-old", status: "pending" },
+        metadata: { pending_id: OLD_PENDING_ID, status: "pending" },
       }),
     ];
     expect(findPendingClarification(messages, { currentTurnId: CURRENT_TURN_ID })).toBeNull();
@@ -209,7 +226,7 @@ describe("current-turn clarification ownership", () => {
         id: "old",
         turn_id: "turn-old",
         type: "clarification_request",
-        metadata: { pending_id: "pending-old", status: "pending" },
+        metadata: { pending_id: OLD_PENDING_ID, status: "pending" },
       }),
       message({
         id: "current-a",

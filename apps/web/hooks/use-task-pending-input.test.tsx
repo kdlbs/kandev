@@ -220,6 +220,35 @@ describe("useTaskPendingInput current-turn clarification authority", () => {
     expect(result.current).toEqual({ clarification: false, permission: false });
   });
 
+  it("suppresses a visible predecessor when the session projection is explicitly clean", () => {
+    const visiblePredecessor = turn("turn-visible-predecessor", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
+    const cleanSession = Object.assign(session(PRIMARY_SESSION_ID, "RUNNING"), {
+      pending_action: null,
+    });
+    const { result } = renderHook(
+      () => useTaskPendingInput(PRIMARY_SESSION_ID, { taskId: "task-1" }),
+      {
+        wrapper: wrapper(
+          {
+            [PRIMARY_SESSION_ID]: [
+              message({
+                id: "stale-predecessor-question",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: visiblePredecessor.id,
+                type: "clarification_request",
+                metadata: { status: "pending" },
+              }),
+            ],
+          },
+          [cleanSession],
+          { [PRIMARY_SESSION_ID]: [visiblePredecessor] },
+        ),
+      },
+    );
+
+    expect(result.current).toEqual({ clarification: false, permission: false });
+  });
+
   it("quarantines pending clarification history for a terminal primary session", () => {
     const completedTurn = turn("turn-completed", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
     const { result } = renderHook(

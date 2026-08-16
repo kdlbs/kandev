@@ -303,6 +303,9 @@ session they can already access. Session selection does not broaden task visibil
   workflow barrier derives from it.
 - **GIVEN** a newer turn superseded an older pending question, **WHEN** every message in the newer turn
   is deleted, **THEN** the durable newer turn remains current and the older question stays inert.
+- **GIVEN** an attempted successor reservation is authoritative but intentionally hidden from client
+  turn history, **WHEN** the session projection explicitly reports no clarification action, **THEN** a
+  pending question on the visible predecessor stays inert in chat and pending-input indicators.
 - **GIVEN** an old detached question and a newer clarification bundle, **WHEN** the user skips the
   newer bundle and reloads, **THEN** neither bundle reappears, the task question icon is absent, and
   later turn completion cannot re-arm the old bundle.

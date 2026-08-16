@@ -66,6 +66,7 @@ function clarificationMessagesInScope(
   scope?: PendingClarificationScope,
 ): readonly Message[] {
   if (!scope) return messages;
+  if (scope.pendingAction !== undefined && scope.pendingAction !== "clarification") return [];
   if (scope.currentTurnId === null) return [];
   if (scope.currentTurnId === undefined) {
     return scope.pendingAction === "clarification" ? messages : [];
