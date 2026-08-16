@@ -9,6 +9,7 @@ import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { SummarizeSessionResult } from "@/hooks/use-summarize-session";
 import { applySummarizeSessionResult, type SummaryToastFn } from "./session-context-summary";
+import { t } from "@/lib/i18n";
 
 type SessionContextChangeOpts = {
   promptRef: RefObject<TaskFormInputsHandle | null>;
@@ -107,8 +108,8 @@ export function useSessionLaunchSubmit({
         onClose();
       } catch (error) {
         toast({
-          title: "Failed to create session",
-          description: error instanceof Error ? error.message : "Unknown error",
+          title: t("task:failedToCreateSession"),
+          description: error instanceof Error ? error.message : t("common:unknownError"),
           variant: "error",
         });
       } finally {

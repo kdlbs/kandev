@@ -397,6 +397,7 @@ type usageTracker struct {
 	consumedUsed         int64
 	latestCostSubcents   int64
 	consumedCostSubcents int64
+	costObserved         bool
 	// maxSize is the largest context-window size reported for this session.
 	// claude-acp's default model emits a 200K turn-start frame and a 1M
 	// turn-end frame; sticky-max prevents the stale 200K from shrinking
@@ -434,6 +435,7 @@ func (a *Adapter) retainConsumedUsageBaselineLocked(sessionID string) {
 	a.usageBySession[sessionID] = tracker
 	tracker.consumedUsed = tracker.latestUsed
 	tracker.consumedCostSubcents = tracker.latestCostSubcents
+	tracker.costObserved = false
 }
 
 // recordUsageAndMaxSize updates per-session usage/cost tracking and returns
@@ -453,6 +455,7 @@ func (a *Adapter) recordUsageAndMaxSize(sessionID string, size, used int64, cost
 	}
 	tr.latestUsed = used
 	if cost != nil && strings.EqualFold(cost.Currency, "USD") {
+		tr.costObserved = true
 		costSubcents := max(int64(cost.Amount*10000), 0)
 		if costSubcents < tr.latestCostSubcents {
 			tr.consumedCostSubcents = costSubcents
@@ -477,17 +480,29 @@ func (a *Adapter) resetContextWindowMaxSize(sessionID string) {
 // previous prompt boundary and the delta in cumulative USD session cost. Both
 // consumed baselines advance to the latest observed sample.
 func (a *Adapter) consumeUsageDelta(sessionID string) (int64, int64) {
+	delta, cost, _ := a.consumeUsageDeltaWithPresence(sessionID)
+	return delta, cost
+}
+
+// consumeUsageDeltaWithPresence returns nonnegative growth in context
+// occupancy, the cumulative USD cost delta, and whether the provider supplied
+// a USD cost sample for this turn. The presence bit is intentionally separate
+// from cost: an explicit zero is authoritative and must not fall through to
+// list-price estimation.
+func (a *Adapter) consumeUsageDeltaWithPresence(sessionID string) (int64, int64, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	tr := a.usageBySession[sessionID]
 	if tr == nil {
-		return 0, 0
+		return 0, 0, false
 	}
 	delta := max(tr.latestUsed-tr.consumedUsed, 0)
 	cost := max(tr.latestCostSubcents-tr.consumedCostSubcents, 0)
+	present := tr.costObserved
 	tr.consumedUsed = tr.latestUsed
 	tr.consumedCostSubcents = tr.latestCostSubcents
-	return delta, cost
+	tr.costObserved = false
+	return delta, cost, present
 }
 
 // consumeUsageBaselineLocked marks replayed usage and cost as historical so
@@ -497,6 +512,7 @@ func (a *Adapter) consumeUsageBaselineLocked(sessionID string) {
 	if tr := a.usageBySession[sessionID]; tr != nil {
 		tr.consumedUsed = tr.latestUsed
 		tr.consumedCostSubcents = tr.latestCostSubcents
+		tr.costObserved = false
 	}
 }
 

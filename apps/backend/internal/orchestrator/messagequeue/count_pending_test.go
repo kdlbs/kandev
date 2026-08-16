@@ -22,6 +22,7 @@ func TestCountPendingByTaskIDsAccumulatesAcrossSessions(t *testing.T) {
 	for name, repo := range repositoriesUnderTest(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
+			seedLiveSessionsIfSQLite(t, repo, "s1", "s2")
 			insert := func(sessionID, taskID string) {
 				t.Helper()
 				msg := &QueuedMessage{SessionID: sessionID, TaskID: taskID, Content: "x", QueuedBy: QueuedByUser}
@@ -50,6 +51,7 @@ func TestCountPendingByTaskIDsExcludesReservedInFlight(t *testing.T) {
 	for name, repo := range repositoriesUnderTest(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
+			seedLiveSessionsIfSQLite(t, repo, "s1")
 			insert := func(sessionID, taskID, content string, metadata map[string]interface{}) {
 				t.Helper()
 				msg := &QueuedMessage{SessionID: sessionID, TaskID: taskID, Content: content, QueuedBy: QueuedByWorkflow, Metadata: metadata}
@@ -97,6 +99,7 @@ func TestCountPendingByTaskIDsIsolatesTasks(t *testing.T) {
 	for name, repo := range repositoriesUnderTest(t) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
+			seedLiveSessionsIfSQLite(t, repo, "s1")
 			for _, taskID := range []string{"ta", "tb", "tc"} {
 				msg := &QueuedMessage{SessionID: "s1", TaskID: taskID, Content: "x", QueuedBy: QueuedByUser}
 				if err := repo.Insert(ctx, msg, 0); err != nil {
@@ -112,6 +115,41 @@ func TestCountPendingByTaskIDsIsolatesTasks(t *testing.T) {
 				t.Errorf("counts = %v, want %v", got, want)
 			}
 		})
+	}
+}
+
+func TestCountPendingByTaskIDsIgnoresOrphanSessions(t *testing.T) {
+	// Pre-fix session delete left queue rows whose session_id no longer exists.
+	// The sidebar badge must not count those orphans.
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	seedLiveSessions(t, repo, "live")
+	for _, sessionID := range []string{"live", "dead"} {
+		msg := &QueuedMessage{SessionID: sessionID, TaskID: "t1", Content: "x", QueuedBy: QueuedByUser}
+		if err := repo.Insert(ctx, msg, 0); err != nil {
+			t.Fatalf("insert %s: %v", sessionID, err)
+		}
+	}
+	// second orphan on dead session
+	if err := repo.Insert(ctx, &QueuedMessage{SessionID: "dead", TaskID: "t1", Content: "y", QueuedBy: QueuedByUser}, 0); err != nil {
+		t.Fatalf("insert dead-2: %v", err)
+	}
+
+	got, err := repo.CountPendingByTaskIDs(ctx, []string{"t1"})
+	if err != nil {
+		t.Fatalf("CountPendingByTaskIDs: %v", err)
+	}
+	if got["t1"] != 1 {
+		t.Fatalf("pending count = %d, want 1 (live session only; orphans ignored)", got["t1"])
+	}
+}
+
+// seedLiveSessionsIfSQLite is a no-op for memory repos (they have no session
+// join); SQLite count joins task_sessions and needs stubs.
+func seedLiveSessionsIfSQLite(t *testing.T, repo Repository, sessionIDs ...string) {
+	t.Helper()
+	if _, ok := repo.(*sqliteRepository); ok {
+		seedLiveSessions(t, repo, sessionIDs...)
 	}
 }
 

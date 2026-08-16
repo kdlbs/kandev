@@ -2,8 +2,8 @@ package profileconfig
 
 import "strings"
 
-// SanitizeConfigOptions drops reserved model/mode keys and blank entries so
-// profile config options persist only auxiliary select values.
+// SanitizeConfigOptions drops the top-level model/mode keys and blank entries.
+// All other keys are provider-defined and must pass through unchanged.
 func SanitizeConfigOptions(in map[string]string) map[string]string {
 	if len(in) == 0 {
 		return nil

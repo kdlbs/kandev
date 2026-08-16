@@ -117,6 +117,9 @@ func provideOrchestrator(
 		}
 		taskSvc.SetAttachmentService(attachmentSvc)
 	}
+	if attachmentSvc := taskSvc.AttachmentService(); attachmentSvc != nil {
+		attachmentSvc.SetTaskAuthorizer(taskSvc.AuthorizeTaskAccess)
+	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
 	if gitCredentialBroker != nil {
@@ -140,6 +143,7 @@ func provideOrchestrator(
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
+	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
 
@@ -152,6 +156,11 @@ func provideOrchestrator(
 	// compute the task-level MOST-ACTIVE-WINS activity aggregate carried on the
 	// boot payload and task.updated events.
 	taskSvc.SetForegroundActivityProvider(orchestratorSvc)
+
+	// Task dependencies gate every automated launch and drive chain advancement.
+	// Wired unconditionally: dependencies are a core Kanban relationship, not an
+	// Office feature.
+	orchestratorSvc.SetTaskDependencyReader(taskSvc)
 
 	// Let the task service stamp status_summary.queued_prompt_count on task
 	// list/snapshot payloads (initial-load backstop for the sidebar badge; the

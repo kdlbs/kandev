@@ -61,14 +61,10 @@ export function LoginPage() {
     } catch (err) {
       setSubmitting(false);
       if (err instanceof ApiError) {
-        setError(
-          err.status === 429
-            ? "Too many attempts. Please wait a moment and try again."
-            : "Invalid email or password.",
-        );
+        setError(err.status === 429 ? t("auth:tooManyAttempts") : t("auth:invalidEmailOrPassword"));
         return;
       }
-      setError("Something went wrong. Please try again.");
+      setError(t("auth:somethingWentWrong"));
     }
   }
 

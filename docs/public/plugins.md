@@ -134,9 +134,11 @@ just not yet running.
 
 Once installed, the plugin appears in the list with its category, a status
 badge (`active`), a signing badge (`unsigned` today), and **Disable** and
-**Uninstall** actions:
+**Uninstall** actions. Selecting the row anywhere opens that plugin's own
+settings page; a `Setup required` badge marks a plugin whose manifest declares
+a required setting that has no value yet:
 
-![The Settings > Plugins page listing an installed, active plugin with its category, an unsigned badge, and Disable/Uninstall actions.](../screenshots/plugin-settings-list.png)
+![The Settings > Plugins page listing an installed, active plugin with its category, a Setup required badge, an unsigned badge, Disable/Uninstall actions, and a chevron opening the plugin's settings page.](../screenshots/plugin-settings-list.png)
 
 <details>
 <summary>Filesystem sideload and synchronization</summary>

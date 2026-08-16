@@ -67,6 +67,7 @@ function useSidebarData(workspaceId: string | null) {
     allTasks,
     allSteps,
     stepsByWorkflowId,
+    wipQueueByTaskId,
     workflows,
     isLoading: isLoadingWorkflow,
     archivedError,
@@ -86,6 +87,7 @@ function useSidebarData(workspaceId: string | null) {
       titleById,
       workflowNameById,
       stepTitleById,
+      wipQueueByTaskId,
       acknowledgedAgentErrors,
       dismissedAgentErrors,
     };
@@ -105,6 +107,7 @@ function useSidebarData(workspaceId: string | null) {
     workflows,
     workspaceId,
     archivedState,
+    wipQueueByTaskId,
     acknowledgedAgentErrors,
     dismissedAgentErrors,
   ]);
@@ -181,6 +184,7 @@ function useMoveToStep(store: StoreApi) {
 }
 
 function useArchiveActions(store: StoreApi) {
+  const { t } = useTranslation();
   const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
   const [archivingTask, setArchivingTask] = useState<{
     id: string;
@@ -196,7 +200,7 @@ function useArchiveActions(store: StoreApi) {
       const task = findSidebarTask(state, taskId);
       setArchivingTask({
         id: taskId,
-        title: task?.title ?? "this task",
+        title: task?.title ?? t("task:thisTask"),
         executorType: task?.primaryExecutorType,
       });
     },
@@ -236,6 +240,7 @@ function useDeleteActions(
   store: StoreApi,
   removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
 ) {
+  const { t } = useTranslation();
   const { deleteTaskById } = useTaskActions();
   const [deletingTask, setDeletingTask] = useState<{
     id: string;
@@ -250,7 +255,7 @@ function useDeleteActions(
       const task = findSidebarTask(state, taskId);
       setDeletingTask({
         id: taskId,
-        title: task?.title ?? "this task",
+        title: task?.title ?? t("task:thisTask"),
         executorType: task?.primaryExecutorType,
       });
     },

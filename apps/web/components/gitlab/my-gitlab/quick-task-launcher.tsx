@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { Icon } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore } from "@/components/state-provider";
@@ -101,6 +102,7 @@ export function QuickTaskLauncher({
 }: QuickTaskLauncherProps) {
   const router = useRouter();
   const { toast } = useToast();
+  const { t } = useTranslation("gitlab");
   const setTaskMR = useAppStore((state) => state.setTaskMR);
   const workflow = workflows[0];
   const workflowSteps = useMemo(
@@ -132,10 +134,10 @@ export function QuickTaskLauncher({
         setTaskMR(workspaceId, task.id, association);
       } catch (error) {
         toast({
-          title: "Task created, but merge request was not linked",
-          description: `Open the task and use Link GitLab merge request to retry. ${
-            error instanceof Error ? error.message : "GitLab rejected the association."
-          }`,
+          title: t("gitlab:taskCreatedMrNotLinked"),
+          description: t("gitlab:taskCreatedMrNotLinkedDescription", {
+            error: error instanceof Error ? error.message : t("gitlab:gitlabRejectedAssociation"),
+          }),
           variant: "error",
           duration: 8000,
         });

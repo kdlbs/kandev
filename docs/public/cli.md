@@ -225,7 +225,9 @@ Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `statu
 
 There is no separate web-server port in an installed release: the backend serves embedded assets. For the `run`, `start`, and development launcher flows, if `--port`, `KANDEV_BACKEND_PORT`, or `KANDEV_PORT` specifies a port, the launcher checks it before declaring the backend ready, does not substitute another one, and fails startup if the configured listen address cannot bind it. `kandev service install --port` remains the separate installer behavior described above.
 
-The launcher prints `http://localhost:<port>`, but the backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. Bind it to loopback unless remote access is deliberately protected:
+The launcher prints `http://localhost:<port>`. When it can enumerate non-loopback interfaces, it also prints `network:` URLs for each unique non-loopback, non-link-local address on the same port, including local-network and Tailscale addresses. IPv6 addresses are shown in brackets. If `KANDEV_SERVER_HOST` restricts the listener, the launcher only prints matching addresses. These lines are informational and are omitted if interface discovery is unavailable.
+
+The backend's default `server.host` is `0.0.0.0`. That can expose Kandev to other machines on the network, and the current local product path is not an authenticated multi-user boundary. Bind it to loopback unless remote access is deliberately protected:
 
 ```bash
 KANDEV_SERVER_HOST=127.0.0.1 kandev
@@ -242,7 +244,7 @@ Flags take precedence over the equivalent port variables. `KANDEV_BACKEND_PORT` 
 | `KANDEV_BACKEND_PORT` | unset | Backend port when `--port` is absent. |
 | `KANDEV_PORT` | unset | Compatibility backend-port alias. |
 | `KANDEV_HOME_DIR` | `~/.kandev` | Root for application data, tasks, repositories, logs, and launcher state. |
-| `KANDEV_DATABASE_PATH` | `<home>/data/kandev.db` | Advanced SQLite path override. See the backup caveat in [Configuration](./configuration.md). |
+| `KANDEV_DATABASE_PATH` | `<home>/data/kandev.db` | Advanced SQLite path override. System backups use the sibling `backups/` directory. See [Configuration](./configuration.md). |
 | `KANDEV_LOG_LEVEL` | `warn` from the launcher | Explicit backend log level; overrides `--verbose` and `--debug` log-level selection. |
 | `KANDEV_HEALTH_TIMEOUT_MS` | `45000` | Positive integer startup-health timeout. Invalid or non-positive values fall back to 45 seconds. |
 | `KANDEV_NO_BROWSER` | unset | The exact value `1` suppresses browser opening. |
@@ -264,7 +266,7 @@ lists locations and retention.
 
 ## Data and cleanup
 
-The default persistent root is `~/.kandev` (on Windows, `.kandev` below the user's profile directory). The SQLite database normally resides at `<home>/data/kandev.db`; repositories, task worktrees, logs, and encrypted settings also live below the home root.
+The default persistent root is `~/.kandev` (on Windows, `.kandev` below the user's profile directory). The SQLite database normally resides at `<home>/data/kandev.db`; its snapshots reside at `<home>/data/backups/`. With `KANDEV_DATABASE_PATH`, Kandev uses `backups/` beside the configured database file. Repositories, task worktrees, logs, and encrypted settings also live below the home root.
 
 Runtime program files live in the Homebrew Cellar, the global npm dependency tree, or npm's `_npx` cache. They are not application data. `npm config get cache` and `npm root -g` show the latter two roots.
 

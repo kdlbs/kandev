@@ -16,24 +16,26 @@ import (
 type Code string
 
 const (
-	CodeAuthRequired           Code = "auth_required"
-	CodeMissingCredentials     Code = "missing_credentials"
-	CodeSubscriptionRequired   Code = "subscription_required"
-	CodeQuotaLimited           Code = "quota_limited"
-	CodeRateLimited            Code = "rate_limited"
-	CodeNetworkUnavailable     Code = "network_unavailable"
-	CodeProviderUnavailable    Code = "provider_unavailable"
-	CodeProviderOverloaded     Code = "provider_overloaded"
-	CodeModelCapacity          Code = "model_capacity"
-	CodeModelUnavailable       Code = "model_unavailable"
-	CodeProviderNotConfigured  Code = "provider_not_configured"
-	CodeUnknownProvider        Code = "unknown_provider_error"
-	CodeAgentRuntime           Code = "agent_runtime_error"
-	CodeTask                   Code = "task_error"
-	CodeRepo                   Code = "repo_error"
-	CodePermissionDeniedByUser Code = "permission_denied_by_user"
-	CodeNpxCacheCorrupted      Code = "npx_cache_corrupted"
-	CodeResumeCorrupted        Code = "resume_corrupted"
+	CodeAuthRequired                Code = "auth_required"
+	CodeMissingCredentials          Code = "missing_credentials"
+	CodeSubscriptionRequired        Code = "subscription_required"
+	CodeQuotaLimited                Code = "quota_limited"
+	CodeRateLimited                 Code = "rate_limited"
+	CodeNetworkUnavailable          Code = "network_unavailable"
+	CodeProviderUnavailable         Code = "provider_unavailable"
+	CodeProviderOverloaded          Code = "provider_overloaded"
+	CodeModelCapacity               Code = "model_capacity"
+	CodeModelUnavailable            Code = "model_unavailable"
+	CodeProviderNotConfigured       Code = "provider_not_configured"
+	CodeUnknownProvider             Code = "unknown_provider_error"
+	CodeAgentRuntime                Code = "agent_runtime_error"
+	CodeTask                        Code = "task_error"
+	CodeRepo                        Code = "repo_error"
+	CodePermissionDeniedByUser      Code = "permission_denied_by_user"
+	CodeNpxCacheCorrupted           Code = "npx_cache_corrupted"
+	CodeManagedRuntimeNpmResolution Code = "managed_runtime_npm_resolution"
+	CodeResumeCorrupted             Code = "resume_corrupted"
+	CodeAgentTransportLost          Code = "agent_transport_lost"
 )
 
 // RemediationStartFreshSession is the symbolic RemediationPath value for
@@ -137,24 +139,39 @@ func Classify(in Input) *Error {
 		e.ResetHint = in.ResetHint
 		return applyInvariants(e)
 	}
-	if e, ok := matchProviderRules(in.ProviderID, in.Stderr+"\n"+in.Stdout); ok {
+	if e, ok := matchProviderRules(in.ProviderID, excerpt); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchProviderNeutralRules(in.Stderr + "\n" + in.Stdout); ok {
+	if e, ok := matchProviderNeutralRules(excerpt); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchRuntimeEnvironmentRules(in.Stderr + "\n" + in.Stdout); ok {
+	if e, ok := matchRuntimeEnvironmentRules(excerpt); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
+		if e.Code == CodeNpxCacheCorrupted {
+			// Preserve the legacy path for the path-aware remediation guard;
+			// the path is validated again before deletion.
+			e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+		}
+		e.RawExcerpt = excerpt
+		return applyInvariants(e)
+	}
+	if e, ok := matchLegacyRuntimeEnvironmentRules(in.Stderr + "\n" + in.Stdout); ok {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
+		if e.Code == CodeNpxCacheCorrupted {
+			e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+		}
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
@@ -273,6 +290,10 @@ func applyInvariants(e *Error) *Error {
 	case CodeNpxCacheCorrupted:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
+	case CodeManagedRuntimeNpmResolution:
+		e.UserAction = true
+		e.AutoRetryable = false
+		e.FallbackAllowed = false
 	case CodeResumeCorrupted:
 		// The agent's persisted reasoning state is poisoned. Retrying the
 		// resume hits the same 400, and falling back to another provider
@@ -283,6 +304,14 @@ func applyInvariants(e *Error) *Error {
 	case CodePermissionDeniedByUser, CodeTask, CodeRepo, CodeAgentRuntime:
 		e.FallbackAllowed = false
 		e.AutoRetryable = false
+	case CodeAgentTransportLost:
+		// The ACP pipe dropped mid-turn: a recoverable transport failure, not a
+		// model-availability problem. Retrying the same provider is expected to
+		// succeed (the resume token belongs to the current provider), so
+		// falling back to another provider can't fix it and isn't offered.
+		e.AutoRetryable = true
+		e.FallbackAllowed = false
+		e.UserAction = false
 	}
 	if isPostStartPhase(e.Phase) && e.Code == CodeAgentRuntime {
 		e.FallbackAllowed = false

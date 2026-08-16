@@ -13,9 +13,18 @@ vi.mock("@/lib/routing/navigation-guard", () => ({
   setNavigationBlocker: () => () => {},
 }));
 
-const { makeEnabledMock } = vi.hoisted(() => ({
-  makeEnabledMock: (enabled: boolean) => () => ({ enabled, setEnabled: vi.fn(), loaded: true }),
-}));
+// The mocks record the workspace they were called with: the page's only job
+// here is to hand each slider the workspace whose toggles it is editing.
+const { makeEnabledMock, enabledCalls } = vi.hoisted(() => {
+  const enabledCalls: Array<string | null | undefined> = [];
+  return {
+    enabledCalls,
+    makeEnabledMock: (enabled: boolean) => (workspaceId?: string | null) => {
+      enabledCalls.push(workspaceId);
+      return { enabled, setEnabled: vi.fn(), loaded: true };
+    },
+  };
+});
 
 vi.mock("@/hooks/domains/azure-devops/use-azure-devops-enabled", () => ({
   useAzureDevOpsEnabled: makeEnabledMock(true),
@@ -50,6 +59,7 @@ function registerIntegration() {
 
 beforeEach(() => {
   pushNavigationStateSpy.mockClear();
+  enabledCalls.length = 0;
   window.localStorage.removeItem("kandev:integrations:hideDisabledInNav:v1");
 });
 
@@ -82,6 +92,15 @@ describe("IntegrationsIndexPage", () => {
 
     expect(ariaChecked(document.getElementById("azure-devops-enabled"))).toBe(ARIA_CHECKED_TRUE);
     expect(ariaChecked(document.getElementById("github-enabled"))).toBe(ARIA_CHECKED_FALSE);
+  });
+
+  it("gives every slider the workspace whose toggles it edits", () => {
+    // The toggles are per workspace, so a slider that never learns its
+    // workspace would silently edit (and read) the wrong one.
+    renderPage("ws-42");
+
+    expect(enabledCalls).toHaveLength(6);
+    expect(new Set(enabledCalls)).toEqual(new Set(["ws-42"]));
   });
 
   it("renders the hide-disabled-in-nav setting off by default and drafts a toggle without persisting until save", () => {

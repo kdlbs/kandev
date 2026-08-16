@@ -12,6 +12,7 @@ import type { AzureDevOpsFiltersState } from "./azure-devops-filters";
 import {
   DEFAULT_AZURE_PULL_REQUEST_QUERIES,
   DEFAULT_AZURE_WORK_ITEM_QUERIES,
+  azureQueryDisplayLabel,
 } from "./azure-devops-workspace-defaults";
 
 export type AzureDevOpsPresetKind = "work_item" | "pull_request";
@@ -75,11 +76,17 @@ export type AzureDevOpsQueryPresets = {
 export function presetsForKind(
   kind: AzureDevOpsPresetKind,
   configured?: AzureDevOpsQueryPresets,
+  translate?: (key: string) => string,
 ): AzureDevOpsPreset[] {
   const defaults =
     kind === "work_item" ? DEFAULT_AZURE_WORK_ITEM_QUERIES : DEFAULT_AZURE_PULL_REQUEST_QUERIES;
   const candidates = kind === "work_item" ? configured?.workItems : configured?.pullRequests;
-  return (candidates?.length ? candidates : defaults).map((preset) => toBrowsePreset(kind, preset));
+  return (candidates?.length ? candidates : defaults).map((preset) => {
+    const result = toBrowsePreset(kind, preset);
+    return translate
+      ? { ...result, label: azureQueryDisplayLabel(kind, preset, translate) }
+      : result;
+  });
 }
 
 export const AZURE_WORK_ITEM_PRESETS = presetsForKind("work_item");

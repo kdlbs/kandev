@@ -585,6 +585,18 @@ async function waitForScreen(page: Page, screen: Screen) {
 }
 
 /**
+ * A route anchor can be ready while a background panel is still reconciling.
+ * Do not scan during that window: the loading status is translated, but its
+ * first render can briefly retain the English fallback while the pseudo
+ * catalog update reaches the mounted component.
+ */
+async function waitForTransientLoadingToFinish(page: Page) {
+  await expect(page.locator('[role="status"][aria-label="Loading"]')).toHaveCount(0, {
+    timeout: 15_000,
+  });
+}
+
+/**
  * Attributes that carry display copy rather than a value the app compares.
  * Kept in sync with `jsx-attributes.include` in apps/web/eslint.i18n.options.mjs,
  * so the guard and this oracle answer the same question about the same set: on an
@@ -804,6 +816,7 @@ test.describe("i18n pseudo-locale coverage", () => {
     test(`no un-externalized copy on ${screen.name}`, async ({ testPage }) => {
       await activatePseudo(testPage, screen.url);
       await waitForScreen(testPage, screen);
+      await waitForTransientLoadingToFinish(testPage);
 
       const { leftovers, localizedAttributes, inspectedAttributes } = await findUnlocalizedCopy(
         testPage,
@@ -858,6 +871,7 @@ test.describe("i18n pseudo-locale coverage", () => {
 
     await activatePseudo(testPage, appearance.url);
     await waitForScreen(testPage, appearance);
+    await waitForTransientLoadingToFinish(testPage);
 
     const { localizedAttributes } = await findUnlocalizedCopy(testPage, ALLOWED);
 

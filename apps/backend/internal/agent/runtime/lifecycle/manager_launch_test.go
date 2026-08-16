@@ -95,7 +95,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=true with ACPSessionID includes --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverTrue}
 		req := &LaunchRequest{ACPSessionID: "sess-123"}
-		cmds, err := mgr.buildAgentCommand(req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
 		require.NoError(t, err)
 		require.Contains(t, cmds.initial, "--resume")
 		require.Contains(t, cmds.initial, "sess-123")
@@ -104,7 +104,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=false with ACPSessionID omits --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverFalse}
 		req := &LaunchRequest{ACPSessionID: "sess-123"}
-		cmds, err := mgr.buildAgentCommand(req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
 		require.NoError(t, err)
 		require.False(t, strings.Contains(cmds.initial, "--resume"),
 			"expected no --resume flag, got: %s", cmds.initial)
@@ -115,7 +115,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=true with empty ACPSessionID omits --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverTrue}
 		req := &LaunchRequest{ACPSessionID: ""}
-		cmds, err := mgr.buildAgentCommand(req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
 		require.NoError(t, err)
 		require.False(t, strings.Contains(cmds.initial, "--resume"),
 			"expected no --resume flag when ACPSessionID is empty, got: %s", cmds.initial)
@@ -124,7 +124,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=nil (default true) with ACPSessionID includes --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: nil}
 		req := &LaunchRequest{ACPSessionID: "sess-456"}
-		cmds, err := mgr.buildAgentCommand(req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
 		require.NoError(t, err)
 		require.Contains(t, cmds.initial, "--resume")
 		require.Contains(t, cmds.initial, "sess-456")
@@ -167,7 +167,7 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, nil, tt.agent, true)
+			cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, true)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, cmds.initial)
 		})
@@ -205,7 +205,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 				{Flag: "--add-dir /shared", Enabled: true},  // must be split
 			},
 		}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.NoError(t, err)
 
 		require.Contains(t, cmds.initial, "--allow-all-tools")
@@ -223,7 +223,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 				{Flag: `--broken "unterminated`, Enabled: true},
 			},
 		}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.NoError(t, err)
 		// The bad flag is dropped entirely; the launch still produces the
 		// agent's base command so a user with a typo still gets their task
@@ -232,7 +232,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 	})
 
 	t.Run("nil profile produces bare command", func(t *testing.T) {
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, ag, false)
 		require.NoError(t, err)
 		require.Equal(t, "copilot --acp", cmds.initial)
 	})
@@ -247,7 +247,7 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			ProfileID:     "p1",
 			CommandPrefix: "greywall --",
 		}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.NoError(t, err)
 		require.Equal(t, "greywall -- copilot --acp", cmds.initial)
 	})
@@ -258,14 +258,14 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			CommandPrefix: "greywall --",
 			CLIFlags:      []settingsmodels.CLIFlag{{Flag: "--allow-all-tools", Enabled: true}},
 		}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.NoError(t, err)
 		require.Equal(t, "greywall -- copilot --acp --allow-all-tools", cmds.initial)
 	})
 
 	t.Run("empty prefix leaves the command unwrapped", func(t *testing.T) {
 		profile := &AgentProfileInfo{ProfileID: "p3"}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.NoError(t, err)
 		require.Equal(t, "copilot --acp", cmds.initial)
 	})
@@ -275,7 +275,7 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			ProfileID:     "p4",
 			CommandPrefix: `greywall "unterminated`,
 		}
-		_, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		_, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
 		require.Error(t, err, "a configured prefix that cannot be resolved must abort the launch")
 	})
 
@@ -292,10 +292,38 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			CommandPrefix: "greywall --",
 			CLIFlags:      []settingsmodels.CLIFlag{{Flag: "--allow-all-tools", Enabled: true}},
 		}
-		cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, profile, continueAgent, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, continueAgent, false)
 		require.NoError(t, err)
 		require.Equal(t, "greywall -- amp threads continue --allow-all-tools", cmds.continue_)
 	})
+}
+
+func TestCollectContributionDestinationsRejectsDistinctIdentitiesWithSamePath(t *testing.T) {
+	first := lifecycleTestContributionDestination("200")
+	second := lifecycleTestContributionDestination("201")
+	req := &LaunchRequest{Repositories: []RepoLaunchSpec{
+		{RepoName: "primary"},
+		{RepoName: "shared", BaseBranch: "main", ContributionDestination: &first},
+		{RepoName: "shared", BaseBranch: "main", ContributionDestination: &second},
+	}}
+
+	_, err := collectContributionDestinations(req)
+	if err == nil {
+		t.Fatal("collectContributionDestinations accepted distinct target identities with the same path")
+	}
+}
+
+func lifecycleTestContributionDestination(providerID string) models.ContributionDestination {
+	return models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "alice/kandev", ProviderID: providerID, RemoteURL: "https://github.com/alice/kandev.git",
+		},
+	}
 }
 
 func TestBuildAgentCommand_RejectsInvalidBuiltArgv(t *testing.T) {
@@ -320,7 +348,7 @@ func TestBuildAgentCommand_RejectsInvalidBuiltArgv(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := mgr.buildAgentCommand(&LaunchRequest{}, nil, tt.agent, false)
+			_, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, false)
 			require.Error(t, err)
 		})
 	}

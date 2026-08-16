@@ -1,6 +1,7 @@
 import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { dwell } from "../../helpers/causal-waits";
 
 async function maxRingSpread(locator: Locator): Promise<number> {
   const boxShadow = await locator.evaluate((element) => getComputedStyle(element).boxShadow);
@@ -34,7 +35,10 @@ test.describe("Workflow settings", () => {
 
     // Should display workflow steps from the "simple" template
     for (const step of seedData.steps) {
-      await expect(card.getByText(step.name)).toBeVisible();
+      // Template data can contain the same step name more than once. The
+      // workflow card is the scope under test; any matching rendered step is
+      // sufficient and avoids a strict-mode race while the card hydrates.
+      await expect(card.getByText(step.name, { exact: true }).first()).toBeVisible();
     }
   });
 
@@ -320,9 +324,25 @@ test.describe("Workflow settings", () => {
     await expect(card).toBeVisible();
     await page.stepNodeByName(card, "Review").click();
 
+    const guidanceHelp = card.getByTestId(`${reviewStep.id}-pull-from-guidance-help`);
+    await expect(guidanceHelp).toBeVisible();
+    await guidanceHelp.hover();
+    const guidanceTooltip = testPage.getByRole("tooltip");
+    await expect(guidanceTooltip).toContainText(
+      "No feeder is selected. Direct moves and automatic transitions queue in this destination",
+    );
+    await expect(guidanceTooltip).toContainText(
+      "WIP limits active work, not visibility. Overflow remains on the board until capacity opens",
+    );
+    await testPage.keyboard.press("Escape");
+
     await card.getByTestId(`${reviewStep.id}-wip-limit-input`).fill("2");
     await card.getByTestId(`${reviewStep.id}-pull-from-step-select`).click();
     await testPage.getByRole("option", { name: "Backlog" }).click();
+    await guidanceHelp.hover();
+    await expect(guidanceTooltip).toContainText(
+      "Optional automatic feeder intake. Destination-queued tasks are admitted first",
+    );
 
     expect(
       (await apiClient.listWorkflowSteps(workflow.id)).steps.find(
@@ -666,9 +686,12 @@ test.describe("Seed protection", () => {
     // `workflow.created` WS event arrives at the open settings page.
     await apiClient.e2eCreateHiddenWorkflow(seedData.workspaceId, hiddenName);
 
-    // Allow the WS event to propagate and the React effect in
-    // useWorkflowSettings a chance to (incorrectly) add a card.
-    await testPage.waitForTimeout(500);
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "gives the workflow.created frame and the useWorkflowSettings effect a chance to incorrectly add a card; the assertion is that no card appears, which publishes nothing to wait on",
+    );
 
     // No new card appeared and the hidden entry is not in the list.
     const allCards = testPage.locator('[data-testid^="workflow-card-"]');

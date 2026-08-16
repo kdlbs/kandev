@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -62,8 +64,9 @@ type ContainerConfig struct {
 	// BaseBranches maps RepositoryName → base branch ref; forwarded into
 	// agentctl's CreateInstanceRequest so each WorkspaceTracker resolves
 	// diff stats against the task-recorded base.
-	BaseBranches        map[string]string
-	RemoteContributions map[string]models.RemoteContribution
+	BaseBranches             map[string]string
+	RemoteContributions      map[string]models.RemoteContribution
+	ContributionDestinations map[string]models.ContributionDestination
 }
 
 func boolPtr(v bool) *bool {
@@ -97,19 +100,20 @@ func buildContainerCreateInstanceRequest(
 			config.AutoApprovePermissions,
 			config.AutoApprovePermissionsOverride,
 		),
-		AutoStart:           false,
-		McpServers:          config.McpServers,
-		SessionID:           config.SessionID,
-		DisableAskQuestion:  disableAskQuestion,
-		AssumeMcpSse:        assumeMcpSse,
-		AssumeMcpHttp:       assumeMcpHttp,
-		McpMode:             config.McpMode,
-		McpProviders:        config.McpProviders,
-		McpProfile:          config.McpProfile,
-		RequiresProcessKill: requiresProcessKill,
-		StripEnv:            stripEnv,
-		BaseBranches:        config.BaseBranches,
-		RemoteContributions: config.RemoteContributions,
+		AutoStart:                false,
+		McpServers:               config.McpServers,
+		SessionID:                config.SessionID,
+		DisableAskQuestion:       disableAskQuestion,
+		AssumeMcpSse:             assumeMcpSse,
+		AssumeMcpHttp:            assumeMcpHttp,
+		McpMode:                  config.McpMode,
+		McpProviders:             config.McpProviders,
+		McpProfile:               config.McpProfile,
+		RequiresProcessKill:      requiresProcessKill,
+		StripEnv:                 stripEnv,
+		BaseBranches:             config.BaseBranches,
+		RemoteContributions:      config.RemoteContributions,
+		ContributionDestinations: config.ContributionDestinations,
 	}
 }
 
@@ -176,6 +180,10 @@ type LaunchResult struct {
 // the nonce is passed via env var, agentctl generates its own token,
 // and the backend retrieves it via POST /auth/handshake.
 func (cm *ContainerManager) LaunchContainer(ctx context.Context, config ContainerConfig) (*LaunchResult, error) {
+	baseCtx := preparationContext(ctx)
+	launchCtx, launchCancel := withLaunchPhaseTimeout(baseCtx)
+	defer launchCancel()
+
 	// Generate bootstrap nonce (NOT the auth token — agentctl generates that)
 	nonce, err := generateBootstrapNonce()
 	if err != nil {
@@ -183,7 +191,7 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	}
 	config.BootstrapNonce = nonce
 
-	containerID, containerIP, controlHost, controlPort, err := cm.createAndStartContainer(ctx, config)
+	containerID, containerIP, controlHost, controlPort, err := cm.createAndStartContainer(launchCtx, config)
 	if err != nil {
 		return nil, err
 	}
@@ -192,20 +200,22 @@ func (cm *ContainerManager) LaunchContainer(ctx context.Context, config Containe
 	ctl := agentctl.NewControlClient(controlHost, controlPort, cm.logger)
 
 	// Wait for agentctl to be healthy
-	if err := cm.waitForHealth(ctx, ctl); err != nil {
+	if err := cm.waitForHealth(baseCtx, ctl); err != nil {
 		cm.removeContainerBestEffort(containerID)
 		return nil, fmt.Errorf("agentctl health check failed: %w", err)
 	}
 
 	// Perform handshake: nonce → token
-	authToken, err := ctl.Handshake(ctx, nonce)
+	handshakeCtx, handshakeCancel := withLaunchPhaseTimeout(baseCtx)
+	defer handshakeCancel()
+	authToken, err := ctl.Handshake(handshakeCtx, nonce)
 	if err != nil {
 		cm.removeContainerBestEffort(containerID)
 		return nil, fmt.Errorf("agentctl handshake failed: %w", err)
 	}
 
 	// Create instance and client
-	client, err := cm.createInstanceAndClient(ctx, ctl, config, containerID, containerIP)
+	client, err := cm.createInstanceAndClient(handshakeCtx, ctl, config, containerID, containerIP)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +274,7 @@ func (cm *ContainerManager) createInstanceAndClient(
 	if config.AgentConfig != nil {
 		agentType = config.AgentConfig.ID()
 	}
-	disableAskQuestion := agents.IsPassthroughOnly(config.AgentConfig)
+	disableAskQuestion := !agents.SupportsInteractiveMCPTools(config.AgentConfig)
 	assumeMcpSse := false
 	assumeMcpHttp := false
 	requiresProcessKill := false
@@ -327,41 +337,40 @@ func (cm *ContainerManager) removeContainerBestEffort(containerID string) {
 }
 
 // waitForHealth waits for agentctl to be healthy with retries.
-// The budget covers the time it takes for the container's bootstrap to run the
-// prepare script (git clone, optional network installs) and then exec agentctl.
-// 120s is generous but matches what real workspaces need on first launch.
+// The budget covers the time it takes for the container's bootstrap to exec
+// agentctl after the prepare script's own common setup timeout.
 func (cm *ContainerManager) waitForHealth(ctx context.Context, ctl *agentctl.ControlClient) error {
-	const maxRetries = 240
 	const retryDelay = 500 * time.Millisecond
 
+	launchTimeout := constants.AgentLaunchTimeout
+	healthCtx, cancel := withLaunchPhaseTimeout(preparationContext(ctx))
+	defer cancel()
+
 	var lastErr error
-	for i := 0; i < maxRetries; i++ {
-		if err := ctl.Health(ctx); err == nil {
+	for {
+		if err := ctl.Health(healthCtx); err == nil {
 			return nil
 		} else {
 			lastErr = err
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		// Cancelable wait that also skips the final retry's sleep — the loop
-		// only re-enters if i+1 < maxRetries, so the extra delay was just
-		// added latency on aborted launches.
-		if i+1 < maxRetries {
-			select {
-			case <-ctx.Done():
+		if healthCtx.Err() != nil {
+			if ctx.Err() != nil {
 				return ctx.Err()
-			case <-time.After(retryDelay):
 			}
+			return fmt.Errorf("agentctl not healthy after %s: %w", launchTimeout, lastErr)
+		}
+
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-healthCtx.Done():
+			timer.Stop()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("agentctl not healthy after %s: %w", launchTimeout, lastErr)
+		case <-timer.C:
 		}
 	}
-
-	if lastErr != nil {
-		return fmt.Errorf("agentctl not healthy after %s: %w",
-			time.Duration(maxRetries)*retryDelay, lastErr)
-	}
-	return fmt.Errorf("agentctl not healthy after %s",
-		time.Duration(maxRetries)*retryDelay)
 }
 
 // StopContainer stops and removes a Docker container
@@ -504,7 +513,8 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// still bring agentctl up so the host can connect, surface the failure, and
 	// the user can debug from the Executor Settings popover.
 	//
-	//nolint:dupword // two `fi` tokens close two distinct shell blocks.
+	prepareTimeout := formatCoreutilsTimeout(constants.SetupScriptTimeout)
+	//nolint:dupword // shell branches contain repeated `fi` tokens.
 	bootstrap := []string{
 		"sh", "-c",
 		`if [ -n "${KANDEV_GITHUB_CREDENTIAL_BROKER_URL:-}" ] && [ -n "${KANDEV_GITHUB_CREDENTIAL_LEASE:-}" ]; then
@@ -515,7 +525,7 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
   fi
 fi
 if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
-  (eval "$KANDEV_PREPARE_SCRIPT")
+	  timeout -s TERM -k 1s ` + prepareTimeout + ` sh -c 'eval "$KANDEV_PREPARE_SCRIPT"'
   prep_rc=$?
   if [ "$prep_rc" -ne 0 ]; then
     echo "[kandev-bootstrap] prepare script failed (exit $prep_rc); starting agentctl anyway so the host can connect and the user can debug via Executor Settings" >&2
@@ -563,6 +573,13 @@ exec /usr/local/bin/agentctl`,
 	}
 
 	return containerCfg, nil
+}
+
+// formatCoreutilsTimeout converts a Go duration to the single-unit format
+// accepted by GNU timeout. time.Duration.String can emit compound values such
+// as "10m0s", which GNU timeout rejects as an invalid interval.
+func formatCoreutilsTimeout(timeout time.Duration) string {
+	return strconv.FormatFloat(timeout.Seconds(), 'f', -1, 64) + "s"
 }
 
 func dockerAgentctlPortBindings() []docker.PortBindingConfig {

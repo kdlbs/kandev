@@ -69,6 +69,35 @@ func seedTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessi
 	}
 }
 
+func TestStartSessionForWorkflowStepRejectsProfileMismatchBeforePrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-a"
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+		ID:             "step2",
+		WorkflowID:     "wf1",
+		AgentProfileID: "profile-b",
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+	err = svc.StartSessionForWorkflowStep(ctx, "t1", "s1", "step2")
+	if err == nil || !strings.Contains(err.Error(), "profile mismatch") {
+		t.Fatalf("StartSessionForWorkflowStep error = %v, want profile mismatch", err)
+	}
+}
+
 // taskEnvironmentFailureRepo injects an error after session creation but before
 // Executor reaches AgentManager.LaunchAgent. This models workspace-preparation
 // failures, which do not trigger the executor's launch-failure callback.

@@ -66,8 +66,9 @@ describe("useJiraAvailable", () => {
     window.localStorage.setItem("kandev:jira:enabled:v1", "false");
     getJiraConfigMock.mockResolvedValue(makeConfig({ hasSecret: true, lastOk: true }));
     const { result } = renderHook(() => useJiraAvailable());
-    // The toggle is install-wide now; an off-toggle keeps `enabled` at false
-    // while the auth probe still runs in the background.
+    // No workspace is passed here, so the toggle read is the unscoped one; an
+    // off-toggle keeps `enabled` at false while the auth probe still runs in
+    // the background.
     await waitFor(() => expect(result.current).toBe(false));
   });
 

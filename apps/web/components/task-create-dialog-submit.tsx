@@ -11,8 +11,11 @@ import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { useToast } from "@/components/toast-provider";
 import { linkToTask } from "@/lib/links";
 import type { SubmitHandlersDeps } from "@/components/task-create-dialog-types";
+import { t } from "@/lib/i18n";
 import { useFreshBranchConsent } from "@/components/task-create-dialog-fresh-branch-consent";
 import { queueTaskCreateLastUsedFromPayload } from "@/components/task-create-dialog-handlers";
+
+const GENERIC_ERROR_KEY = "common:anErrorOccurred";
 
 import {
   activatePlanMode,
@@ -27,18 +30,14 @@ import {
 } from "@/components/task-create-dialog-helpers";
 import { hasRegisteredRepositoryProviderCandidate } from "@/lib/plugins/repository-provider-url-resolution";
 
-const GENERIC_ERROR_MESSAGE = "An error occurred";
-const DUPLICATE_REPO_TITLE = "Duplicate repository";
-const UNRESOLVED_REPO_TITLE = "Repository is still being verified";
-
 function notifyQueuedTask(
   response: { queued_for_step_id?: string | null },
   notify: (input: { title: string; description: string }) => unknown,
 ) {
   if (!response.queued_for_step_id) return;
   notify({
-    title: "Task queued",
-    description: "The workflow step is at its WIP limit; this task will start when capacity opens.",
+    title: t("task:taskQueued"),
+    description: t("task:taskQueuedWipLimit"),
   });
 }
 
@@ -112,6 +111,7 @@ export function useTaskSubmitHandlers({
   repositoryLocalPath,
   noRepository,
   workspacePath,
+  blockedBy,
   transformDescriptionBeforeSubmit,
 }: SubmitHandlersDeps) {
   const router = useRouter();
@@ -168,8 +168,8 @@ export function useTaskSubmitHandlers({
     const duplicate = findDuplicateRemoteRepo(remoteRepos);
     if (!duplicate) return false;
     toast({
-      title: DUPLICATE_REPO_TITLE,
-      description: `${duplicate} is added more than once - remove the duplicate row.`,
+      title: t("task:duplicateRepository"),
+      description: t("task:duplicateRepositoryDescription", { repository: duplicate }),
       variant: "error",
     });
     return true;
@@ -188,10 +188,10 @@ export function useTaskSubmitHandlers({
     if (!unresolved) return false;
     const resolutionError = prInfoByUrl.error(unresolved.url);
     toast({
-      title: UNRESOLVED_REPO_TITLE,
+      title: t("task:repositoryStillBeingVerified"),
       description: resolutionError
-        ? "Kandev could not verify this provider URL. Use Retry on the repository row."
-        : "Wait for provider inspection to finish before creating the task.",
+        ? t("task:repositoryProviderVerificationFailed")
+        : t("task:repositoryProviderVerificationPending"),
       variant: "error",
     });
     return true;
@@ -240,8 +240,7 @@ export function useTaskSubmitHandlers({
         freshBranch: buildFreshBranchPayload(consentedDirtyFiles),
       });
     },
-    // buildFreshBranchPayload is a closure over current scope; lint exception kept narrow.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // buildFreshBranchPayload is a closure over current scope; dependencies stay explicit below.
     [
       noRepository,
       useRemote,
@@ -290,8 +289,8 @@ export function useTaskSubmitHandlers({
       router.push(linkToTask(taskId));
     } catch (error) {
       toast({
-        title: "Failed to create session",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToCreateSession"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
@@ -357,8 +356,8 @@ export function useTaskSubmitHandlers({
       onSuccess?.(updatedTask, "edit", { taskSessionId });
     } catch (error) {
       toast({
-        title: "Failed to update task",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToUpdateTask"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
@@ -386,8 +385,8 @@ export function useTaskSubmitHandlers({
       onSuccess?.(result.updatedTask, "edit");
     } catch (error) {
       toast({
-        title: "Failed to update task",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToUpdateTask"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
@@ -428,6 +427,7 @@ export function useTaskSubmitHandlers({
           // "empty path string" on the wire.
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
+          blockedBy,
         });
         submittedPayload = payload;
         return payload;
@@ -459,6 +459,7 @@ export function useTaskSubmitHandlers({
       workspaceId,
       effectiveWorkflowId,
       autoTitle,
+      blockedBy,
       agentProfileId,
       executorId,
       executorProfileId,
@@ -538,8 +539,8 @@ export function useTaskSubmitHandlers({
         await performEditWithPlanMode();
       } catch (error) {
         toast({
-          title: "Failed to start task in plan mode",
-          description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+          title: t("task:failedToStartTaskPlanMode"),
+          description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
           variant: "error",
         });
       } finally {
@@ -569,8 +570,8 @@ export function useTaskSubmitHandlers({
       });
     } catch (error) {
       toast({
-        title: "Failed to start task in plan mode",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToStartTaskPlanMode"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
@@ -637,8 +638,8 @@ export function useTaskSubmitHandlers({
       await submitCreateTask({ trimmedTitle, trimmedDescription, consent, attachments });
     } catch (error) {
       toast({
-        title: "Failed to create task",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToCreateTask"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
@@ -691,6 +692,7 @@ export function useTaskSubmitHandlers({
           attachments,
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
+          blockedBy,
         });
         p.workflow_step_id = requirements.workflowStepId;
         submittedPayload = p;
@@ -706,8 +708,8 @@ export function useTaskSubmitHandlers({
       onOpenChange(false);
     } catch (error) {
       toast({
-        title: "Failed to create task",
-        description: error instanceof Error ? error.message : GENERIC_ERROR_MESSAGE,
+        title: t("task:failedToCreateTask"),
+        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
         variant: "error",
       });
     } finally {
@@ -737,6 +739,7 @@ export function useTaskSubmitHandlers({
     toast,
     descriptionInputRef,
     setIsCreatingTask,
+    blockedBy,
   ]);
 
   const editSubmitHandler = isStartedEdit ? handleUpdateWithoutAgent : handleEditSubmit;

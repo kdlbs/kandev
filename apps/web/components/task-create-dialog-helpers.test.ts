@@ -10,6 +10,18 @@ import {
 import type { TaskRemoteRepoRow } from "./task-create-dialog-types";
 const STORAGE_KEYS = { LAST_BRANCH: "kandev.dialog.lastBranch" } as const;
 
+// The agent-bearing fields every buildCreateTaskPayload case needs but none of
+// them is asserting; each test spreads these and overrides only what it checks.
+const AGENT_PAYLOAD_DEFAULTS = {
+  workspaceId: "ws-1",
+  effectiveWorkflowId: "wf-1",
+  repositoriesPayload: [],
+  agentProfileId: "agent-1",
+  executorId: "executor-1",
+  executorProfileId: "profile-1",
+  withAgent: true,
+};
+
 beforeEach(() => {
   localStorage.clear();
 });
@@ -218,15 +230,9 @@ describe("auto-title creation helpers", () => {
 
   it("omits the manual title and opts into backend provisional naming", () => {
     const payload = buildCreateTaskPayload({
-      workspaceId: "ws-1",
-      effectiveWorkflowId: "wf-1",
+      ...AGENT_PAYLOAD_DEFAULTS,
       trimmedTitle: "ignored",
       trimmedDescription: "Fix the login flow",
-      repositoriesPayload: [],
-      agentProfileId: "agent-1",
-      executorId: "executor-1",
-      executorProfileId: "profile-1",
-      withAgent: true,
       autoTitle: true,
     });
 
@@ -236,15 +242,9 @@ describe("auto-title creation helpers", () => {
 
   it("includes autopilot only when the create form opts in", () => {
     const payload = buildCreateTaskPayload({
-      workspaceId: "ws-1",
-      effectiveWorkflowId: "wf-1",
+      ...AGENT_PAYLOAD_DEFAULTS,
       trimmedTitle: "Autonomous task",
       trimmedDescription: "Run the migration",
-      repositoriesPayload: [],
-      agentProfileId: "agent-1",
-      executorId: "executor-1",
-      executorProfileId: "profile-1",
-      withAgent: true,
       autopilot: true,
     });
 
@@ -253,18 +253,30 @@ describe("auto-title creation helpers", () => {
 
   it("keeps autopilot off when the create form does not opt in", () => {
     const payload = buildCreateTaskPayload({
-      workspaceId: "ws-1",
-      effectiveWorkflowId: "wf-1",
+      ...AGENT_PAYLOAD_DEFAULTS,
       trimmedTitle: "Manual task",
       trimmedDescription: "Run the migration",
-      repositoriesPayload: [],
-      agentProfileId: "agent-1",
-      executorId: "executor-1",
-      executorProfileId: "profile-1",
-      withAgent: true,
       autopilot: false,
     });
 
     expect(payload.autopilot).toBeUndefined();
+  });
+});
+
+describe("buildCreateTaskPayload dependencies", () => {
+  const base = {
+    ...AGENT_PAYLOAD_DEFAULTS,
+    trimmedTitle: "Second step",
+    trimmedDescription: "Runs after the first",
+  };
+
+  it("sends the selected predecessors as blocked_by", () => {
+    const payload = buildCreateTaskPayload({ ...base, blockedBy: ["task-a", "task-b"] });
+    expect(payload.blocked_by).toEqual(["task-a", "task-b"]);
+  });
+
+  it("omits blocked_by when nothing is selected", () => {
+    expect(buildCreateTaskPayload({ ...base, blockedBy: [] }).blocked_by).toBeUndefined();
+    expect(buildCreateTaskPayload(base).blocked_by).toBeUndefined();
   });
 });

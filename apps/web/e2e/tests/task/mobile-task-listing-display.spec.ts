@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 const VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
 const TASK_TITLE = "Mobile rich task";
@@ -18,6 +19,20 @@ test.describe("Mobile task listing display preferences", () => {
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
     });
+    await expect
+      .poll(
+        async () => {
+          const persistedTask = await apiClient.getTask(task.id);
+          return persistedTask.repositories?.some(
+            (repository) => repository.repository_id === seedData.repositoryId,
+          );
+        },
+        {
+          message: "task repository association was not persisted before listing",
+          timeout: 15_000,
+        },
+      )
+      .toBe(true);
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
       owner: "kandev",
@@ -41,7 +56,28 @@ test.describe("Mobile task listing display preferences", () => {
     await expect(testPage).toHaveURL(/\/tasks/);
     await expect(testPage.getByTestId("tasks-list")).toBeVisible();
 
+    const taskListLoaded = waitForHttp(testPage, "GET", /\/api\/v1\/workspaces\/[^/]+\/tasks$/, {
+      predicate: async (response) => {
+        if (response.status() !== 200) return false;
+        const body = (await response.json()) as {
+          tasks?: Array<{
+            id?: string;
+            repositories?: Array<{ repository_id?: string }>;
+          }>;
+        };
+        return (
+          body.tasks?.some(
+            (candidate) =>
+              candidate.id === task.id &&
+              candidate.repositories?.some(
+                (repository) => repository.repository_id === seedData.repositoryId,
+              ),
+          ) ?? false
+        );
+      },
+    });
     await testPage.goto("/");
+    await taskListLoaded;
     await expect(testPage).toHaveURL(/\/tasks/);
     await testPage.getByRole("button", { name: "Open menu" }).click();
     const tasksMenu = testPage.getByRole("dialog", { name: "Menu" });
@@ -70,6 +106,7 @@ test.describe("Mobile task listing display preferences", () => {
     );
     await testPage.goto("/");
     await expect(testPage.getByTestId("mobile-kanban-layout")).toBeVisible();
+    await expect(testPage.getByTestId("app-sidebar-layout")).toBeHidden();
     await expect(
       testPage.evaluate((key) => window.localStorage.getItem(key), VIEW_STORAGE_KEY),
     ).resolves.toBe(JSON.stringify("pipeline"));

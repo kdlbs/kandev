@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -368,7 +369,15 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 		return
 	}
 
-	task, err := c.getTaskCreator().CreateIssueTask(ctx, req)
+	// The genesis ledger row's actor is the watch that caused the create —
+	// external automation, not a human or a bare system default. Trigger is
+	// left unset: the repository's genesis writer always hard-codes
+	// task_created, so only the actor needs to travel on ctx here.
+	createCtx := steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		ActorKind: steptelemetry.ActorIntegration,
+		ActorID:   src.WatchID(evt),
+	})
+	task, err := c.getTaskCreator().CreateIssueTask(createCtx, req)
 	if err != nil {
 		if errors.Is(err, workflowmodels.ErrWIPLimitExceeded) {
 			c.logger.Info("watcher dispatch: workflow step at capacity; deferring issue task",

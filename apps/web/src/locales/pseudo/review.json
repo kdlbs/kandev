@@ -78,5 +78,16 @@
   "walkMeThroughTheseReviewChanges": "Ŵàĺķ ḿē ţĥŕōũĝĥ ţĥēśē ŕēvĩēŵ ćĥàńĝēś",
   "walkthrough": "Ŵàĺķţĥŕōũĝĥ",
   "walkthroughDiscarded": "Ŵàĺķţĥŕōũĝĥ ďĩśćàŕďēď",
-  "wrapLongLines": "Ŵŕàƥ ĺōńĝ ĺĩńēś"
+  "wrapLongLines": "Ŵŕàƥ ĺōńĝ ĺĩńēś",
+  "changesDiscarded": "Ćĥàńĝēś ďĩśćàŕďēď",
+  "changesStillLoading": "Ćĥàńĝēś àŕē śţĩĺĺ ĺōàďĩńĝ",
+  "couldNotSendFinding": "Ćōũĺď ńōţ śēńď ţĥē ƒĩńďĩńĝ",
+  "couldNotUpdateFinding": "Ćōũĺď ńōţ ũƥďàţē ƒĩńďĩńĝ",
+  "discardFailed": "Ďĩśćàŕď ƒàĩĺēď",
+  "failedToRequestWalkthrough": "Ƒàĩĺēď ţō ŕēqũēśţ ŵàĺķţĥŕōũĝĥ",
+  "findingQueuedForAgent": "Ƒĩńďĩńĝ qũēũēď ƒōŕ ţĥē àĝēńţ",
+  "findingSentToAgent": "Ƒĩńďĩńĝ śēńţ ţō ţĥē àĝēńţ",
+  "walkthroughRequestQueued": "Ŵàĺķţĥŕōũĝĥ ŕēqũēśţ qũēũēď",
+  "walkthroughRequestSent": "Ŵàĺķţĥŕōũĝĥ ŕēqũēśţ śēńţ",
+  "couldNotStartReview": "Ćōũĺď ńōţ śţàŕţ ţĥē ŕēvĩēŵ"
 }

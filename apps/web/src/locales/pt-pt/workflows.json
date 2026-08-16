@@ -141,6 +141,8 @@
   "promptSourceTaskDescription": "\"{{stepName}}\" não tem prompt de passo, pelo que voltar a entrar envia a descrição da tarefa.",
   "pullFrom": "Puxar de",
   "pullFromHelp": "Passo alimentador opcional do qual puxar trabalho em fila quando este passo tiver capacidade.",
+  "pullFromGuidanceWithFeeder": "Entrada automática opcional através de um alimentador. As tarefas em fila no destino são admitidas primeiro; depois, o Kandev puxa trabalho elegível de {{feeder}} quando surge capacidade. Movimentos diretos e transições automáticas entram na fila do destino e não precisam de alimentador. Tarefas novas para um passo cheio usam este alimentador.",
+  "pullFromGuidanceWithoutFeeder": "Não está selecionado nenhum alimentador. Movimentos diretos e transições automáticas entram na fila deste destino quando está cheio. As tarefas novas também permanecem visíveis nesta fila até surgir capacidade.",
   "readOnlyManagedBySync": "Só de leitura; gerido pela sincronização de fluxos de trabalho",
   "readOnlyManagedByImproveKandev": "Só de leitura; gerido pelo Melhorar o Kandev",
   "remove": "Remover",

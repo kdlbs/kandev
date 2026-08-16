@@ -33,7 +33,7 @@ import {
   IconTicket,
 } from "@tabler/icons-react";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
-import { linkToTaskOverview, linkToTasks } from "@/lib/links";
+import { linkToOfficeHome, linkToTaskOverview, linkToTasks } from "@/lib/links";
 import { EVERYWHERE, MENU_AND_PALETTE, SIDEBAR_AND_MENU } from "./surface-policy";
 import type { Destination, NavContext } from "./types";
 
@@ -44,9 +44,8 @@ import type { Destination, NavContext } from "./types";
  * resolve one rule and cannot disagree.
  */
 export function homeDestinationHref(ctx: NavContext): string {
-  return ctx.inOffice
-    ? "/office"
-    : linkToTaskOverview({ workspaceId: ctx.workspaceId ?? undefined });
+  if (!ctx.inOffice) return linkToTaskOverview({ workspaceId: ctx.workspaceId ?? undefined });
+  return linkToOfficeHome({ workspaceId: ctx.workspaceId ?? undefined });
 }
 
 /**

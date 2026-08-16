@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { createAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentRole, AgentProfile } from "@/lib/state/slices/office/types";
 import { useTranslation } from "react-i18next";
@@ -214,7 +215,7 @@ const FALLBACK_EXECUTOR_TYPES = [
 export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps) {
   const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const meta = useAppStore((s) => s.office.meta);
   const addOfficeAgentProfile = useAppStore((s) => s.addOfficeAgentProfile);
 
@@ -246,7 +247,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
         executorPreference: state.executorPref ? { type: state.executorPref } : undefined,
       } as Partial<AgentProfile>);
       if (result) {
-        addOfficeAgentProfile(result);
+        addOfficeAgentProfile(workspaceId, result);
       }
       setState(INITIAL_STATE);
       onOpenChange(false);

@@ -4,9 +4,10 @@ import { JiraSettingsPage } from "../../pages/jira-settings-page";
 test.describe("Jira settings", () => {
   test("empty workspace shows form with disabled save/test until secret is filled", async ({
     testPage,
+    seedData,
   }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
 
     await expect(settings.siteInput).toHaveValue("");
     await expect(settings.secretInput).toHaveValue("");
@@ -26,9 +27,10 @@ test.describe("Jira settings", () => {
   test("saving the config persists across reload and shows the auth banner", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
 
     await settings.fillForm({
       siteUrl: "https://acme.atlassian.net",
@@ -41,7 +43,10 @@ test.describe("Jira settings", () => {
     await expect(settings.saveButton).toHaveCount(0);
     // The post-save probe runs async; await it before reloading so the new
     // banner state is in the DB by the time the page re-fetches the config.
-    await apiClient.waitForIntegrationAuthHealthy("jira");
+    await apiClient.waitForIntegrationAuthHealthy("jira", {
+      workspaceId: seedData.workspaceId,
+      timeoutMs: 60_000,
+    });
 
     await testPage.reload();
     await settings.siteInput.waitFor();
@@ -51,9 +56,13 @@ test.describe("Jira settings", () => {
     await expect(settings.statusBanner).toHaveAttribute("data-state", "ok");
   });
 
-  test("test connection surfaces inline success and failure", async ({ testPage, apiClient }) => {
+  test("test connection surfaces inline success and failure", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
 
     await apiClient.mockJiraSetAuthResult({
       ok: true,
@@ -76,11 +85,12 @@ test.describe("Jira settings", () => {
   test("seeded auth-health failure renders the failed banner on load", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const settings = new JiraSettingsPage(testPage);
     // Save first so a config row exists, then simulate the poller writing
     // a failure status onto it.
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
     await settings.fillForm({
       siteUrl: "https://acme.atlassian.net",
       email: "alice@example.com",
@@ -91,9 +101,10 @@ test.describe("Jira settings", () => {
     // probe goroutine could otherwise overwrite our forced lastOk=false back
     // to true a few ms after the mockJiraSetAuthHealth call, flipping the
     // banner to "ok" right when the assertion expects "failed".
-    await apiClient.waitForIntegrationAuthHealthy("jira");
+    await apiClient.waitForIntegrationAuthHealthy("jira", { workspaceId: seedData.workspaceId });
 
     await apiClient.mockJiraSetAuthHealth({
+      workspaceId: seedData.workspaceId,
       ok: false,
       error: "session expired",
     });
@@ -103,9 +114,9 @@ test.describe("Jira settings", () => {
     await expect(settings.statusBanner).toContainText(/session expired/i);
   });
 
-  test("delete clears the saved configuration", async ({ testPage }) => {
+  test("delete clears the saved configuration", async ({ testPage, seedData }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
     await settings.fillForm({
       siteUrl: "https://acme.atlassian.net",
       email: "alice@example.com",
@@ -126,9 +137,10 @@ test.describe("Jira settings", () => {
   test("server / data center save flow with PAT persists across reload", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
 
     await settings.selectInstance("server");
     // Switching to Server auto-selects PAT — the dropdown should now show it
@@ -141,7 +153,7 @@ test.describe("Jira settings", () => {
     await expect(settings.saveButton).toBeEnabled();
     await settings.saveButton.click();
     await expect(settings.saveButton).toHaveCount(0);
-    await apiClient.waitForIntegrationAuthHealthy("jira");
+    await apiClient.waitForIntegrationAuthHealthy("jira", { workspaceId: seedData.workspaceId });
 
     await testPage.reload();
     await settings.siteInput.waitFor();
@@ -152,9 +164,9 @@ test.describe("Jira settings", () => {
     await expect(settings.statusBanner).toHaveAttribute("data-state", "ok");
   });
 
-  test("switching instance type swaps the auth-method options", async ({ testPage }) => {
+  test("switching instance type swaps the auth-method options", async ({ testPage, seedData }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
 
     // Cloud default: api_token + session_cookie options, no PAT.
     await expect(settings.authSelect).toContainText(/API token/i);
@@ -180,9 +192,10 @@ test.describe("Jira settings", () => {
 
   test("email field hides for session cookie and PAT, returns for cloud + api_token", async ({
     testPage,
+    seedData,
   }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
 
     // Cloud + api_token (default) shows email.
     await expect(settings.emailInput).toBeVisible();
@@ -204,9 +217,10 @@ test.describe("Jira settings", () => {
   test("saved secret is not reused after switching identity fields", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
     await settings.fillForm({
       siteUrl: "https://acme.atlassian.net",
       email: "alice@example.com",
@@ -214,7 +228,7 @@ test.describe("Jira settings", () => {
     });
     await settings.saveButton.click();
     await expect(settings.saveButton).toHaveCount(0);
-    await apiClient.waitForIntegrationAuthHealthy("jira");
+    await apiClient.waitForIntegrationAuthHealthy("jira", { workspaceId: seedData.workspaceId });
 
     await testPage.reload();
     await settings.siteInput.waitFor();
@@ -239,9 +253,9 @@ test.describe("Jira settings", () => {
     await expect(settings.saveButton).toBeDisabled();
   });
 
-  test("PAT help link targets the configured site", async ({ testPage }) => {
+  test("PAT help link targets the configured site", async ({ testPage, seedData }) => {
     const settings = new JiraSettingsPage(testPage);
-    await settings.goto();
+    await settings.gotoWorkspace(seedData.workspaceId);
 
     await settings.selectInstance("server");
     await settings.siteInput.fill("https://jira.acme.com/");

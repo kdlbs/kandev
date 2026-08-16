@@ -1,6 +1,7 @@
 # ADR-2026-07-26-user-managed-agent-runtime-updates: User-Managed Agent Runtime Updates
 
-**Status:** accepted
+**Status:** superseded by
+[ADR-2026-08-12-validated-managed-runtime-version-selection](2026-08-12-validated-managed-runtime-version-selection.md)
 **Date:** 2026-07-26
 **Area:** backend, frontend, protocol
 

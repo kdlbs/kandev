@@ -162,7 +162,11 @@ func (r *DockerExecutor) HealthCheck(_ context.Context) error {
 }
 
 func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (instance *ExecutorInstance, err error) {
+	baseCtx := preparationContext(ctx)
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
+		return nil, err
+	}
+	if _, err := validateContributionDestinations(req.ContributionDestinations); err != nil {
 		return nil, err
 	}
 	dockerClient, containerMgr, err := r.ensureClient()
@@ -174,11 +178,11 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		defer reportCreateInstanceProgress(req, &err)()
 	}
 
-	if reconnected, ok := r.tryReconnect(ctx, dockerClient, req); ok {
+	if reconnected, ok := r.tryReconnect(baseCtx, dockerClient, req); ok {
 		return reconnected, nil
 	}
 
-	r.seedSessionDir(ctx, req)
+	r.seedSessionDir(baseCtx, req)
 
 	containerCfg, err := r.buildContainerLaunchConfig(req)
 	if err != nil {
@@ -189,7 +193,7 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		return nil, fmt.Errorf("failed to launch container: %w", err)
 	}
 
-	containerIP, _ := dockerClient.GetContainerIP(ctx, result.ContainerID)
+	containerIP, _ := dockerClient.GetContainerIP(baseCtx, result.ContainerID)
 	r.logger.Info("docker instance created",
 		zap.String("instance_id", req.InstanceID),
 		zap.String("container_id", result.ContainerID),
@@ -273,6 +277,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		LocalClonePath:                 localCloneMountPath(req.Metadata),
 		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:            req.RemoteContributions,
+		ContributionDestinations:       req.ContributionDestinations,
 	}, nil
 }
 
@@ -542,7 +547,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 	var stripEnv []string
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
-		disableAskQuestion = agents.IsPassthroughOnly(req.AgentConfig)
+		disableAskQuestion = !agents.SupportsInteractiveMCPTools(req.AgentConfig)
 		if rt := req.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
 			assumeMcpHttp = rt.AssumeMcpHttp
@@ -559,20 +564,21 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
-		AutoStart:           false,
-		McpServers:          req.McpServers,
-		McpProviders:        req.McpProviders,
-		McpProfile:          req.McpProfile,
-		SessionID:           req.SessionID,
-		TaskID:              req.TaskID,
-		DisableAskQuestion:  disableAskQuestion,
-		AssumeMcpSse:        assumeMcpSse,
-		AssumeMcpHttp:       assumeMcpHttp,
-		McpMode:             req.McpMode,
-		RequiresProcessKill: requiresProcessKill,
-		StripEnv:            stripEnv,
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions: req.RemoteContributions,
+		AutoStart:                false,
+		McpServers:               req.McpServers,
+		McpProviders:             req.McpProviders,
+		McpProfile:               req.McpProfile,
+		SessionID:                req.SessionID,
+		TaskID:                   req.TaskID,
+		DisableAskQuestion:       disableAskQuestion,
+		AssumeMcpSse:             assumeMcpSse,
+		AssumeMcpHttp:            assumeMcpHttp,
+		McpMode:                  req.McpMode,
+		RequiresProcessKill:      requiresProcessKill,
+		StripEnv:                 stripEnv,
+		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:      req.RemoteContributions,
+		ContributionDestinations: req.ContributionDestinations,
 	}
 }
 
@@ -794,6 +800,13 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (strin
 			return "", err
 		}
 		script += contributionScript
+	}
+	if destination, ok := req.ContributionDestinations[""]; ok {
+		destinationScript, err := scriptengine.ContributionDestinationSetupScript(&destination)
+		if err != nil {
+			return "", err
+		}
+		script += destinationScript
 	}
 
 	resolver := scriptengine.NewResolver().

@@ -180,8 +180,27 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
 		}
+		if s.sessionID != "" && s.taskID != "" {
+			payload["source_session_id"] = s.sessionID
+		}
 		if externalID := req.GetString("external_id", ""); externalID != "" {
 			payload["external_id"] = externalID
+		}
+
+		// Dependency edges declared at create time. The handler already read
+		// blocked_by from its payload before this feature, but the tool schema
+		// never declared the parameter, so no agent could reach it.
+		if blockedBy := stringArrayArg(req, "blocked_by"); len(blockedBy) > 0 {
+			payload["blocked_by"] = blockedBy
+		}
+		// Omitted means "derive": with blocked_by set, a start request becomes a
+		// start-when-unblocked intent. start_agent defaults to true and agents
+		// pass it by habit, so deriving is what makes an agent-built chain run in
+		// order instead of launching every step at once.
+		if args := req.GetArguments(); args["start_when_unblocked"] != nil {
+			if v, ok := args["start_when_unblocked"].(bool); ok {
+				payload["start_when_unblocked"] = v
+			}
 		}
 
 		// Add repository info. For subtasks an explicit repo overrides the

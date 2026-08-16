@@ -1,6 +1,7 @@
 "use client";
 
 import { IconInfoCircle } from "@tabler/icons-react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { WorkflowStep } from "@/lib/types/http";
@@ -28,7 +29,7 @@ export function HelpTip({
   testId,
   ariaLabel,
 }: {
-  text: string;
+  text: ReactNode;
   testId?: string;
   ariaLabel?: string;
 }) {
@@ -70,6 +71,7 @@ export const STEP_COLORS = [
 // The `prompt` bodies are deliberately NOT translated: clicking a template
 // writes the text into `WorkflowStep.prompt`, which is persisted and sent to
 // the agent verbatim. Only the button `labelKey` is copy.
+// i18n-exempt: seeded step prompts, persisted and sent verbatim to the agent.
 export const PROMPT_TEMPLATES = [
   {
     labelKey: "workflows:templatePlan",

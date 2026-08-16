@@ -8,6 +8,7 @@ import {
   E2E_IMAGE_TAG,
   hasDocker,
   removeScopedKandevContainers,
+  waitForScopedKandevContainersRemoved,
 } from "./docker-probe";
 import { ApiClient } from "../helpers/api-client";
 import { makeGitEnv } from "../helpers/git-helper";
@@ -31,7 +32,7 @@ export type DockerSeedData = {
  * and pre-seeds a local_docker executor profile pointing at it.
  */
 export const dockerTest = backendFixture.extend<
-  { testPage: Page },
+  { testPage: Page; dockerCleanup: void },
   { apiClient: ApiClient; seedData: DockerSeedData }
 >({
   apiClient: [
@@ -40,6 +41,29 @@ export const dockerTest = backendFixture.extend<
       await use(client);
     },
     { scope: "worker" },
+  ],
+
+  // Keep reset and Docker cleanup in an automatic test-scoped fixture. A
+  // fixture teardown is ordered around every test, including API-only tests
+  // and serial suites, so a stopped container cannot leak into the next test.
+  dockerCleanup: [
+    async ({ apiClient, seedData }, use) => {
+      const reset = async () => {
+        try {
+          await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+        } finally {
+          await removeScopedKandevContainers();
+        }
+      };
+
+      await reset();
+      try {
+        await use();
+      } finally {
+        await reset();
+      }
+    },
+    { auto: true },
   ],
 
   seedData: [
@@ -111,7 +135,7 @@ export const dockerTest = backendFixture.extend<
       } finally {
         // The backend owns containers created by the test task. Do not sweep
         // the daemon here: another E2E shard may be using it concurrently.
-        removeScopedKandevContainers();
+        await waitForScopedKandevContainersRemoved();
       }
     },
     { scope: "worker", timeout: 120_000 },
@@ -145,25 +169,6 @@ export const dockerTest = backendFixture.extend<
     await use(page);
     await context.close();
   },
-});
-
-// Container lifecycle cleanup must run for API-only tests too. `testPage` is a
-// lazy fixture, so keeping reset there allowed tests that only request
-// apiClient/seedData to leave tasks and containers behind for the next test.
-dockerTest.beforeEach(async ({ apiClient, seedData }) => {
-  try {
-    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
-  } finally {
-    removeScopedKandevContainers();
-  }
-});
-
-dockerTest.afterEach(async ({ apiClient, seedData }) => {
-  try {
-    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
-  } finally {
-    removeScopedKandevContainers();
-  }
 });
 
 export { expect } from "@playwright/test";

@@ -1,11 +1,44 @@
 package registry
 
 import (
+	"context"
+	"errors"
 	"os"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
+	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 )
+
+type recordingManagedProviderAgent struct {
+	agents.Agent
+	selection agents.ManagedNPMRuntimeSpec
+	opts      agents.CommandOptions
+}
+
+func (a *recordingManagedProviderAgent) BuildCommand(opts agents.CommandOptions) agents.Command {
+	a.opts = opts
+	return a.selection.ACPCommand(opts.ManagedRuntimeVersion)
+}
+
+func (a *recordingManagedProviderAgent) ManagedNPMRuntime() agents.ManagedNPMRuntimeSpec {
+	return a.selection
+}
+
+type providerSelectionReader struct {
+	selection managedruntime.Selection
+	found     bool
+	err       error
+}
+
+func (s providerSelectionReader) Get(
+	context.Context,
+	string,
+	string,
+) (managedruntime.Selection, bool, error) {
+	return s.selection, s.found, s.err
+}
 
 func TestProvide_MockAgentModes(t *testing.T) {
 	tests := []struct {
@@ -84,6 +117,52 @@ func TestProvide_MockAgentModes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestResolveProviderCommandUsesActiveManagedRuntimeVersion(t *testing.T) {
+	log := newTestLogger()
+	reg := NewRegistry(log)
+	agent := &recordingManagedProviderAgent{
+		Agent:     agents.NewOpenCodeACP(),
+		selection: agents.NewOpenCodeACP().ManagedNPMRuntime(),
+	}
+	if err := reg.Register(agent); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	reg.SetManagedRuntimeSelectionStore(providerSelectionReader{
+		selection: managedruntime.Selection{Package: "opencode-ai", Version: "1.18.5"},
+		found:     true,
+	})
+
+	args, _, ok := reg.resolveProviderCommand(context.Background(), agent.ID())
+	if !ok {
+		t.Fatal("resolveProviderCommand returned !ok")
+	}
+	if got := args[3]; got != "opencode-ai@1.18.5" {
+		t.Fatalf("package arg = %q, want exact active version", got)
+	}
+	if agent.opts.Runtime != agentruntime.RuntimeStandalone {
+		t.Fatalf("runtime = %q, want standalone", agent.opts.Runtime)
+	}
+}
+
+func TestResolveProviderCommandFailsClosedOnSelectionReadError(t *testing.T) {
+	log := newTestLogger()
+	reg := NewRegistry(log)
+	agent := &recordingManagedProviderAgent{
+		Agent:     agents.NewOpenCodeACP(),
+		selection: agents.NewOpenCodeACP().ManagedNPMRuntime(),
+	}
+	if err := reg.Register(agent); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	wantErr := errors.New("selection unavailable")
+	reg.SetManagedRuntimeSelectionStore(providerSelectionReader{err: wantErr})
+
+	args, _, ok := reg.resolveProviderCommand(context.Background(), agent.ID())
+	if ok || args != nil {
+		t.Fatalf("resolveProviderCommand = (%v, ..., %v), want fail closed", args, ok)
 	}
 }
 

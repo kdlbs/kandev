@@ -23,6 +23,7 @@ import {
   ActiveWorkspaceBadge,
   workspaceSettingsHref,
 } from "@/components/settings/workspaces/workspace-settings-shell";
+import { orderWorkspacesForDisplay } from "@/lib/settings/workspace-display-order";
 import type { WorkspaceState } from "@/lib/state/slices";
 
 type Workspace = WorkspaceState["items"][number];
@@ -120,12 +121,14 @@ function WorkspaceListItem({ workspace }: { workspace: Workspace }) {
 
 export function WorkspacesPageClient() {
   const items = useAppStore((state) => state.workspaces.items);
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const setWorkspaces = useAppStore((state) => state.setWorkspaces);
   const [isAdding, setIsAdding] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const createRequest = useRequest(createWorkspaceAction);
   const { toast } = useToast();
   const { t } = useTranslation();
+  const orderedItems = orderWorkspacesForDisplay(items, activeWorkspaceId);
 
   const handleAddWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,11 +200,11 @@ export function WorkspacesPageClient() {
             />
           )}
 
-          {items.map((workspace: Workspace) => (
+          {orderedItems.map((workspace: Workspace) => (
             <WorkspaceListItem key={workspace.id} workspace={workspace} />
           ))}
 
-          {items.length === 0 && (
+          {orderedItems.length === 0 && (
             <Card>
               <CardContent className="py-8 text-center">
                 <p className="text-sm text-muted-foreground">

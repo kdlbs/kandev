@@ -30,7 +30,11 @@ type TaskRepositoryInput struct {
 	// intentionally excluded from JSON request surfaces; callers must not be
 	// able to forge a writable source binding.
 	RemoteContribution *models.RemoteContribution `json:"-"`
-	TrustedRemote      bool                       `json:"-"`
+	// ContributionDestination is server-authored during managed Improve
+	// Kandev task preparation. It is never accepted from REST, WebSocket, or
+	// MCP JSON request bodies.
+	ContributionDestination *models.ContributionDestination `json:"-"`
+	TrustedRemote           bool                            `json:"-"`
 
 	// ResolveProviderDefaults opts the GitHub-URL resolution path into a
 	// synchronous default-branch probe (git ls-remote --symref) when neither
@@ -79,6 +83,16 @@ type CreateTaskRequest struct {
 	ProjectID              string   `json:"project_id,omitempty"`
 	Labels                 string   `json:"labels,omitempty"`
 	BlockedBy              []string `json:"blocked_by,omitempty"`
+
+	// StartWhenUnblocked records the requested agent start as a deferred launch
+	// intent that dependency resolution consumes, instead of launching now.
+	//
+	// nil means "derive from the request's start intent": a create that asked to
+	// start an agent AND declared BlockedBy is describing a chain step, not a
+	// task to run immediately. Automated callers pass start_agent=true by habit,
+	// so deriving is what makes an agent-built chain run in order rather than
+	// launching every step at once.
+	StartWhenUnblocked *bool `json:"start_when_unblocked,omitempty"`
 }
 
 // UpdateTaskRequest contains the data for updating a task

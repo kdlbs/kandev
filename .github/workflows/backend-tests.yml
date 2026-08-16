@@ -1,32 +1,25 @@
 name: Backend Tests
 
+# No trigger-level `paths:` filter, deliberately. A workflow skipped by one
+# reports no conclusion at all, and a required check that never reports leaves
+# a pull request unable to enter a merge queue and a merge group unable to
+# leave it. `merge_group` cannot carry a `paths:` filter in the first place.
+# The filter lives in the `changes` job below instead, and the `test` job
+# reports the single conclusion the queue waits on. See docs/ci-merge-queue.md.
 on:
   push:
     branches: [main]
-    paths:
-      - "apps/backend/**"
-      # check-make-shells also lints the root Makefile's $(shell ...) probes, so
-      # a change there has to be able to trip it.
-      - "Makefile"
-      - "scripts/check-make-shells"
-      - ".github/workflows/backend-tests.yml"
-      - "!**/*.md"
-      - "!**/*.mdx"
-      - "!**/*.markdown"
   pull_request:
     branches: [main]
-    paths:
-      - "apps/backend/**"
-      - "Makefile"
-      - "scripts/check-make-shells"
-      - ".github/workflows/backend-tests.yml"
-      - "!**/*.md"
-      - "!**/*.mdx"
-      - "!**/*.markdown"
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a merge-queue run. Its ref is unique per queue entry, so a
+  # cancellation here could only come from a mis-keyed group, and the queue
+  # would read the cancelled check as a failure and eject the pull request.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 # Least-privilege default. The Linux static/test jobs and the Windows `test-windows`
 # job only read source and run tests — no PR/issue writes, no release ops.
@@ -39,8 +32,78 @@ permissions:
   packages: read
 
 jobs:
+  # The former trigger-level `paths:` list, applied one level down so a skip
+  # still produces a conclusion. `.github/scripts/changed-paths.py` implements
+  # the same last-match-wins semantics GitHub applies to `paths:`.
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.detect.outputs.run }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # The base commit has to be present locally for the diff below. Every
+          # other job in this workflow already pays for a full clone.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect relevant changes
+        id: detect
+        env:
+          PATTERNS: |
+            apps/backend/**
+            # check-make-shells also lints the root Makefile's $(shell ...)
+            # probes, so a change there has to be able to trip it.
+            Makefile
+            scripts/check-make-shells
+            .github/workflows/backend-tests.yml
+            .github/scripts/changed-paths.py
+            !**/*.md
+            !**/*.mdx
+            !**/*.markdown
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          case "${EVENT_NAME}" in
+            # The checkout is the merge ref, whose first parent is the base
+            # branch tip. Diffing against that tip directly collapses to a
+            # two-dot diff over everything main landed since the PR opened, so
+            # take the fork point instead.
+            pull_request) BASE="$(git merge-base HEAD "origin/${BASE_REF}")" ;;
+            # The queue branch is cut from this commit, so it is a true ancestor.
+            merge_group) BASE="${MERGE_GROUP_BASE_SHA}" ;;
+            push) BASE="${PUSH_BEFORE}" ;;
+            *) BASE="" ;;
+          esac
+
+          # Fail open. A first push to a branch, a force push, or an unknown
+          # event leaves no usable base, and running the suite needlessly is
+          # cheaper than merging something no job ever looked at.
+          if [[ -z "${BASE}" || "${BASE}" == "0000000000000000000000000000000000000000" ]] \
+             || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "No usable base commit for '${EVENT_NAME}'; running everything."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # `-z`, not plain --name-only: git quotes non-ASCII paths under its
+          # default core.quotePath, and a quoted path matches no pattern, so a
+          # change to one would skip every job and still report success.
+          git diff --name-only -z "${BASE}" HEAD \
+            | python3 .github/scripts/changed-paths.py
+
   static_checks:
     name: Backend Static Checks
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
@@ -94,13 +157,23 @@ jobs:
       - name: Resolve base SHA
         shell: bash
         working-directory: ${{ github.workspace }}
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          # A merge_group run has no pull request behind it, so neither
+          # `pull_request.base.sha` nor `event.before` exists. The queue branch
+          # is cut from `merge_group.base_sha`, which is the equivalent base.
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            BASE_SHA="${PR_BASE_SHA}"
+          elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
+            BASE_SHA="${MERGE_GROUP_BASE_SHA}"
           else
-            BASE_SHA="${{ github.event.before }}"
+            BASE_SHA="${PUSH_BEFORE}"
           fi
 
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
@@ -144,6 +217,8 @@ jobs:
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/2)
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -253,26 +328,125 @@ jobs:
             apps/backend/test-results-${{ matrix.shard }}.json
           retention-days: 30
 
+  test_ambient_env:
+    name: Backend (ambient integration env)
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    # test_shards runs in the same clean container and never sets these vars,
+    # so it cannot catch a package that starts reading them again — the class
+    # of bug that shipped alongside internal/gitlab's host-trust tests (they
+    # only passed because CI never set KANDEV_GITLAB_HOST/GITLAB_HOST/
+    # GITLAB_TOKEN). This job poisons them with obviously-fake .invalid-TLD
+    # values so both GitLab-facing packages are forced to prove they stay
+    # hermetic instead of accidentally depending on an unset ambient env.
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Mark workspace safe for git
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-ambient-env-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          restore-keys: |
+            go-ambient-env-${{ runner.os }}-
+            go-${{ runner.os }}-
+
+      - name: Run GitLab-facing packages under a poisoned host environment
+        env:
+          KANDEV_GITLAB_HOST: https://gitlab.ambient-ci.invalid
+          GITLAB_HOST: https://gitlab.ambient-ci.invalid
+          GITLAB_TOKEN: glpat-ambient-ci-not-a-real-token
+        run: go test -race ./internal/gitlab/... ./internal/agentctl/server/process/...
+
+  # The required check. Runs on every event, including the ones where every job
+  # above is correctly skipped, so the merge queue always has a conclusion to
+  # read instead of a check that stays pending forever.
+  #
+  # `needs` covers every other job in this workflow on purpose. A merge queue
+  # gates on check names an admin selects by hand, and a job missing from this
+  # list is a job whose failure would never block a merge — silently, and
+  # without appearing anywhere in the ruleset. `postgres-boot` and
+  # `test-windows` were outside it before this workflow became a gate.
   test:
     name: Run Backend Tests
     runs-on: ubuntu-latest
-    needs: [static_checks, test_shards]
+    needs:
+      - changes
+      - static_checks
+      - test_shards
+      - test_ambient_env
+      - postgres-boot
+      - test-windows
     if: ${{ always() }}
     steps:
       - name: Require backend checks to pass
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
           STATIC_CHECKS_RESULT: ${{ needs.static_checks.result }}
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
+          TEST_AMBIENT_ENV_RESULT: ${{ needs.test_ambient_env.result }}
+          POSTGRES_BOOT_RESULT: ${{ needs['postgres-boot'].result }}
+          TEST_WINDOWS_RESULT: ${{ needs['test-windows'].result }}
         run: |
           set -euo pipefail
-          if [[ "${STATIC_CHECKS_RESULT}" != "success" || "${TEST_SHARDS_RESULT}" != "success" ]]; then
-            echo "Static checks: ${STATIC_CHECKS_RESULT}"
-            echo "Test shards: ${TEST_SHARDS_RESULT}"
+
+          echo "Change detection: ${CHANGES_RESULT}"
+          echo "Static checks: ${STATIC_CHECKS_RESULT}"
+          echo "Test shards: ${TEST_SHARDS_RESULT}"
+          echo "Ambient env tests: ${TEST_AMBIENT_ENV_RESULT}"
+          echo "Postgres boot: ${POSTGRES_BOOT_RESULT}"
+          echo "Windows tests: ${TEST_WINDOWS_RESULT}"
+
+          # Change detection itself must succeed: if it errored we do not know
+          # whether the skips below were deliberate.
+          if [[ "${CHANGES_RESULT}" != "success" ]]; then
+            echo "Change detection did not succeed; refusing to report a pass." >&2
             exit 1
           fi
 
+          # `skipped` is a pass — the change-detection job decided nothing this
+          # workflow covers was touched. `cancelled` is not: a cancelled job
+          # never reached a verdict, and treating that as a pass would let an
+          # untested merge group through.
+          #
+          # This gate is the one check a human opens when a merge is blocked, so
+          # name the job that failed here rather than making them correlate the
+          # list above by eye.
+          for entry in \
+            "static_checks:${STATIC_CHECKS_RESULT}" \
+            "test_shards:${TEST_SHARDS_RESULT}" \
+            "test_ambient_env:${TEST_AMBIENT_ENV_RESULT}" \
+            "postgres-boot:${POSTGRES_BOOT_RESULT}" \
+            "test-windows:${TEST_WINDOWS_RESULT}"; do
+            name="${entry%%:*}"
+            result="${entry#*:}"
+            if [[ "${result}" != "success" && "${result}" != "skipped" ]]; then
+              echo "${name} finished with result: ${result}" >&2
+              exit 1
+            fi
+          done
+
   postgres-boot:
     name: Backend Postgres
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -339,6 +513,8 @@ jobs:
 
   test-windows:
     name: Backend (windows)
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
     # The race-sensitive Windows package suite can exceed 15 minutes on a
     # busy hosted runner; keep the cap finite while allowing normal completion.

@@ -285,7 +285,24 @@ test.describe("@chat last prompt scroll affordance", () => {
       .getByTestId("scroll-to-last-prompt-button");
     await scrollButton.click();
     await expect(marker).toBeInViewport({ timeout: 10_000 });
-    await testPage.waitForTimeout(500);
+    // The scroll is animated, so `toBeInViewport` can pass mid-flight. Wait
+    // for the container's scrollTop to stop changing before sampling geometry
+    // from it, rather than assuming the animation fits in a fixed budget.
+    let previousScrollTop = Number.NaN;
+    await expect
+      .poll(
+        async () => {
+          const current = await chat.evaluate(
+            (root) =>
+              root.querySelector<HTMLElement>(".chat-message-list")?.scrollTop ?? Number.NaN,
+          );
+          const settled = current === previousScrollTop;
+          previousScrollTop = current;
+          return settled;
+        },
+        { timeout: 10_000, message: "scroll animation did not settle" },
+      )
+      .toBe(true);
 
     const partialGeometry = await chat.evaluate((root, markerText) => {
       const scrollContainer = root.querySelector<HTMLElement>(".chat-message-list");

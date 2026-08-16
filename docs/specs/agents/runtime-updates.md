@@ -1,53 +1,64 @@
 ---
 status: approved
 created: 2026-07-26
+updated: 2026-08-16
 owner: Kandev
 ---
 
-# Managed Agent Runtime Updates
+# Managed Agent Runtime Version Recovery
 
 ## Why
 
-Operators need newly released agent capabilities and models without waiting for
-a Kandev release. They also need normal agent launches to avoid paying an
-upstream package-resolution cost on every session when a usable npm execution
-cache is already present.
+Operators need newly released agent models without waiting for a Kandev
+release. They also need a UI recovery path when the newest npm release is
+partly published, incompatible with ACP, or otherwise cannot start. Rebuilding
+an npm cache is not sufficient when an unversioned command selects the same
+broken release again.
+
+Managed runtimes can also fail when npm has stale package metadata. In that
+case, npm can report `ETARGET` and `No matching version found` for a dependency
+that the configured registry now contains. Kandev currently reports the later
+ACP disconnect instead of the npm cause. The user then has no useful recovery
+action unless they inspect backend logs.
 
 ## What
 
-- Kandev launches the managed npm runtime for Claude, Codex, OpenCode, Copilot,
-  and Gemini by package name without an exact version or an explicit `latest`
-  tag.
-- Normal launches may reuse npm's execution cache. Cache reuse is best-effort;
-  Kandev does not present it as a durable installed-version guarantee.
-- Each supported installed agent has a compact, accessible update icon action
-  on its Settings > Agents card on desktop and mobile. Update versions,
-  command details, progress, output, and results are not rendered in the card.
-- Opening the update action is read-only. It opens an update dialog that
-  resolves and shows the current runtime version, upstream target version,
-  exact built-in command, host-only scope, capability refresh, and active
-  session behavior before an update can start.
-- When the resolved current and upstream target versions are identical, the
-  update dialog shows the version once with an **Up to date** status and keeps
-  approval disabled because running the package update would not advance the
-  managed runtime.
-- The update starts only after the operator approves it in the dialog. The
-  dialog then shows live stdout/stderr, progress, and the terminal success or
-  failure state.
-- A successful package update automatically starts a fresh host capability
-  probe. The returned runtime version, models, modes, configuration options,
-  commands, and capability status replace the previous cached values.
-- An update affects new host probes, utility calls, and sessions. It does not
-  restart or mutate an already-running agent session.
-- Kandev uses the ACP initialization protocol version and advertised
-  capabilities as the compatibility boundary. Kandev does not gate managed
-  npm runtimes by a repository-maintained package-version allowlist.
-- Package update commands are defined by Kandev's built-in agent metadata.
-  Callers cannot submit package names, versions, registry URLs, or shell text.
-- Update jobs for the same agent are idempotent while queued or running. An
-  install and update for the same agent cannot run concurrently.
+- Settings exposes version management for the built-in managed npm runtimes
+  used by Claude, Codex, OpenCode, Copilot, and Gemini.
+- The update dialog lists stable versions published for the trusted package.
+  The list contains the newest 50 stable versions plus the active and last
+  observed versions when either falls outside that window. The upstream
+  `latest` stable version is selected initially.
+- The backend classifies the selected action as `update`, `rollback`, `repair`,
+  or `up_to_date`. The UI uses this structural state for copy and approval; it
+  never compares translated labels or version strings itself.
+- Kandev stages the exact trusted `package@version`, ACP-probes that candidate,
+  and activates it only after a successful probe. Candidate failure preserves
+  the prior active version and capability catalogue.
+- A successful activation persists the exact version for this Kandev install.
+  Later standalone host probes, utility calls, and local sessions use that
+  exact package spec. Active sessions continue unchanged.
+- When no active selection exists, legacy host launches remain unversioned.
+  The first successful update, rollback, or repair establishes the durable
+  active version.
+- SSH, containers, and other remote executors do not use the host selection.
+- Package name, ACP arguments, and command shape remain trusted built-in
+  metadata. A caller can submit only a version returned by the trusted
+  package's npm metadata. Tags, prereleases, package specs, registry URLs, and
+  shell text are rejected.
+- Managed runtime resolution changes only the structured ACP command surfaces.
+  When an agent's interactive passthrough CLI is distributed separately from
+  its ACP adapter, passthrough keeps its own package, executable, and install
+  recipe.
+- Jobs for one agent are idempotent while queued or running. Installation and
+  version management for the same agent cannot run concurrently.
+- A host-local managed runtime launch detects a strict npm `ETARGET` version
+  resolution failure before ACP initialization. Kandev refreshes npm metadata
+  and retries the same trusted package and version once.
+- If the retry also fails, Kandev reports an npm runtime preparation error and
+  offers one runtime retry action. The user does not need to understand ACP.
 
-The initial managed package set is:
+The managed package set is:
 
 | Agent | Managed runtime package |
 | --- | --- |
@@ -57,11 +68,35 @@ The initial managed package set is:
 | Copilot | `@github/copilot` |
 | Gemini | `@google/gemini-cli` |
 
-The managed package is the runtime Kandev uses for ACP capability discovery.
-Separately configured passthrough commands and native authentication helpers
-remain outside this update action when they use another package or installer.
+Passthrough commands, native authentication helpers, and native-only agents
+remain outside this version action when they use another installer or package.
 
-Decision: [ADR-2026-07-26-user-managed-agent-runtime-updates](../../decisions/2026-07-26-user-managed-agent-runtime-updates.md).
+Decision:
+[ADR-2026-08-12-validated-managed-runtime-version-selection](../../decisions/2026-08-12-validated-managed-runtime-version-selection.md).
+
+## Version and operation semantics
+
+Kandev distinguishes three version values:
+
+- `current_version` is the version reported by the last successful host ACP
+  probe. It can be absent after a failed probe.
+- `active_version` is the exact version persisted for future host-local
+  managed-runtime commands. It can be absent before the first activation.
+- `target_version` is the stable version selected by the operator.
+
+The backend derives the operation from `active_version` when present and
+otherwise from `current_version`:
+
+| Condition | Operation | Approval |
+| --- | --- | --- |
+| Target is newer than the effective version. | `update` | **Update runtime** |
+| Target is older than the effective version. | `rollback` | **Roll back runtime** |
+| Current is unknown, versions cannot be compared, or the observed version matches but has not been activated exactly. | `repair` | **Repair runtime** |
+| Active, current, and target versions match. | `up_to_date` | Disabled as **Up to date** |
+
+Only strict stable SemVer values from npm's published version list are
+selectable. Kandev does not offer prereleases. Version ordering and operation
+classification are backend responsibilities.
 
 ## API surface
 
@@ -73,37 +108,73 @@ Installed-agent catalogue entries expose optional runtime-management metadata:
 {
   "runtime_update": {
     "supported": true,
-    "package": "@agentclientprotocol/claude-agent-acp",
-    "current_version": "0.62.0"
+    "package": "opencode-ai",
+    "current_version": "1.18.5",
+    "active_version": "1.18.5"
   }
 }
 ```
 
-`current_version` is omitted when no successful capability probe has reported a
-runtime version. Unmanaged agents omit `runtime_update`.
+`current_version` and `active_version` are independently omitted when unknown
+or not yet established. Unmanaged agents omit `runtime_update`.
 
-### Update jobs
+### Preview and jobs
 
-- `GET /api/v1/agent-update/:agentName/preview` resolves the current and
-  upstream target versions and returns the exact trusted built-in update
-  command without starting an update.
-- `POST /api/v1/agent-update/:agentName` starts or returns the active update
-  job for a built-in managed agent.
-- `GET /api/v1/agent-update/jobs` returns active and recently completed update
-  jobs.
-- `GET /api/v1/agent-update/jobs/:id` returns one retained update job.
-- State-changing update requests use the same Settings interlock as agent
-  installation and profile mutation.
+- `GET /api/v1/agent-update/:agentName/preview` returns the version catalogue
+  and previews the upstream latest stable target.
+- `GET /api/v1/agent-update/:agentName/preview?target_version=1.18.5`
+  validates and previews one selected version without mutation.
+- `POST /api/v1/agent-update/:agentName` accepts JSON
+  `{ "target_version": "1.18.5" }` and starts or returns the active job.
+- `GET /api/v1/agent-update/jobs` and
+  `GET /api/v1/agent-update/jobs/:id` retain their current polling behavior.
+- State-changing requests use the Settings mutation interlock.
 
-An update job contains:
+A preview contains:
+
+```json
+{
+  "agent_name": "opencode-acp",
+  "package": "opencode-ai",
+  "current_version": "1.18.5",
+  "active_version": "1.18.5",
+  "target_version": "1.18.16",
+  "operation": "update",
+  "available_versions": [
+    { "version": "1.18.16", "latest": true },
+    { "version": "1.18.5", "latest": false }
+  ],
+  "command": [
+    "npm",
+    "exec",
+    "--yes",
+    "--prefer-online",
+    "--package=opencode-ai@1.18.16",
+    "--",
+    "node",
+    "-e",
+    ""
+  ],
+  "command_string": "npm exec --yes --prefer-online --package=opencode-ai@1.18.16 -- node -e \"\""
+}
+```
+
+The POST endpoint resolves npm metadata again and rejects a target that is no
+longer a published stable version. The request never controls the package,
+registry, command, or ACP arguments.
+
+A job retains the existing timestamps, output, and errors and adds the
+authoritative operation and active version:
 
 ```json
 {
   "job_id": "uuid",
-  "agent_name": "claude-acp",
-  "status": "resolving",
-  "current_version": "0.62.0",
-  "target_version": "0.63.0",
+  "agent_name": "opencode-acp",
+  "status": "refreshing",
+  "operation": "rollback",
+  "current_version": "1.18.16",
+  "active_version": "1.18.16",
+  "target_version": "1.18.5",
   "output": "",
   "error": "",
   "refresh_error": "",
@@ -112,154 +183,185 @@ An update job contains:
 }
 ```
 
-`current_version`, `target_version`, `finished_at`, `error`, and
-`refresh_error` are optional until known. The backend emits
-`agent.update.started`, `agent.update.output`, and `agent.update.finished`
-notifications with the same job identity and state. Output notifications carry
-only the appended output chunk.
+`active_version` reflects the persisted selection at that job snapshot. It
+changes to the target only after successful validation and persistence. The
+existing `agent.update.started`, `agent.update.output`, and
+`agent.update.finished` WebSocket notifications carry the same job fields.
 
-An update preview contains:
+## Activation lifecycle
 
-```json
-{
-  "agent_name": "claude-acp",
-  "package": "@agentclientprotocol/claude-agent-acp",
-  "current_version": "0.62.0",
-  "target_version": "0.63.0",
-  "command": [
-    "npm",
-    "exec",
-    "--yes",
-    "--prefer-online",
-    "--package=@agentclientprotocol/claude-agent-acp",
-    "--",
-    "node",
-    "-e",
-    ""
-  ],
-  "command_string": "npm exec --yes --prefer-online --package=@agentclientprotocol/claude-agent-acp -- node -e \"\""
-}
-```
-
-The preview endpoint accepts only the built-in agent name. Package names,
-versions, registry URLs, and command arguments are not caller-controlled.
-
-## State machine
-
-| State | Trigger | Observable behavior |
+| State | Backend behavior | Observable behavior |
 | --- | --- | --- |
-| `queued` | The backend accepts an update request. | The action is disabled and shows that the update is queued. |
-| `resolving` | A worker starts the job. | Kandev discovers the current runtime version and upstream npm target. |
-| `updating` | Version resolution succeeds. | Kandev streams package-update output and shows current → target. |
-| `refreshing` | The package update succeeds. | Kandev re-probes the host runtime and keeps the action disabled. |
-| `succeeded` | The capability probe succeeds, or the package updated but capability refresh returned a recoverable error. | The UI shows the installed target. When refresh succeeded, it replaces model and mode data. A refresh-only error is shown without claiming the package update was rolled back. |
-| `failed` | Registry lookup or package update fails, the command times out, or ACP initialization is incompatible. | The UI retains the previous model list and shows the captured error and output. |
+| `queued` | Accept the selected version and maintenance claim. | The version picker and action are disabled. |
+| `resolving` | Re-read npm versions, validate the exact target, and classify the operation. | The UI shows the selected target and resolving progress. |
+| `updating` | Prepare `package@target` in its version-specific npm execution tree. On first failure, invalidate only that exact tree and retry once. | Bounded stdout and stderr stream into the dialog. |
+| `refreshing` | Probe the candidate command without replacing cached capabilities. On success, persist the target and then publish the candidate capabilities. | The UI explains that Kandev is validating before activation. |
+| `succeeded` | The exact target is active and its capabilities are published. | The catalogue and models refresh without a page reload. |
+| `failed` | Resolution, preparation, probe, or persistence failed. The previous active version and capabilities remain unchanged. | The UI shows the captured error and permits a new selection or retry. |
 
-Jobs are terminal after `succeeded` or `failed`. Retrying creates a new job.
+Jobs are terminal after `succeeded` or `failed`. Selecting the active, healthy
+version produces `up_to_date` in preview and starts no job. Selecting the active
+version while its current probe is unknown produces a repair job.
 
-## Failure modes
+## Host command routing
 
-- If npm registry metadata cannot be resolved, the job fails before changing
-  the runtime and retains the prior capability data.
-- If the first package update command fails, Kandev may remove only the
-  deterministic npm execution-cache directory for that built-in package and
-  retry the update once. It never runs a global npm cache clean. If the repair
-  or retry fails or times out, the job fails and retains the prior capability
-  data.
-- If preview version resolution fails, the dialog shows the error and keeps
-  approval disabled. No update job or package command starts.
-- If the package update succeeds but the capability probe fails because
-  authentication is required or another recoverable probe error occurs, the
-  job reports package-update success plus `refresh_error`; the previous model
-  list remains visible and the operator can authenticate or retry the refresh.
-- If the updated runtime negotiates an unsupported ACP protocol version or
-  cannot initialize, the job fails visibly. Kandev does not silently fall back
-  to a repository-pinned runtime.
-- Raw process output is bounded using the existing in-memory job output limit.
-  Package-manager credentials and configured registry authentication are never
-  returned as structured fields.
-- Loss of the browser connection does not cancel a running job. Reopening the
-  page recovers retained job progress through the jobs endpoint.
+- A standalone managed-agent launch reads the active selection immediately
+  before building its command and passes the exact version through trusted
+  command options.
+- Boot probes, manual capability refreshes, model-configuration resolution, and
+  sessionless utility prompts use the same active-version resolver.
+- Native-binary preference continues to win when an agent deliberately selects
+  its supported native binary path.
+- Passthrough command construction does not receive or apply the active managed
+  ACP version. It continues to use the agent's declared interactive CLI.
+- SSH and container command builders receive no host version override.
+- A saved selection read error fails the new host command with an actionable
+  error. It does not fall back to an unversioned package.
+- Candidate validation bypasses the active selection only for the trusted exact
+  candidate command created by the version job.
+
+## Launch-time stale metadata recovery
+
+- Normal host-local managed runtime commands continue to use
+  `--prefer-offline`.
+- Kandev inspects bounded process stderr when ACP initialization ends before a
+  response. Automatic recovery requires both npm `ETARGET` and a matching
+  `No matching version found for package@version` message.
+- Kandev classifies the npm error from stderr. It does not build a command from
+  package names, versions, paths, or registry values found in stderr.
+- Recovery removes only the deterministic `_npx` execution tree for the
+  trusted built-in package specification. It never clears npm's full cache.
+- Kandev starts the same managed runtime once with `--prefer-online`. The
+  command keeps the same trusted package, exact active version when one exists,
+  ACP arguments, configured npm registry, command prefix, permissions, model,
+  and session identity.
+- Recovery is limited to one retry for each launch attempt. A delayed event
+  from the first child process cannot fail or complete the replacement process.
+- User cancellation and backend shutdown stop recovery. Kandev does not retry
+  a remote executor, a native runtime, a passthrough command, an unrelated npm
+  error, or a second failed online attempt.
+- A successful retry continues the original session without a failure card.
+  Kandev records structured recovery telemetry without exposing host paths or
+  raw process logs.
+- A failed retry emits a stable npm runtime failure code and bounded sanitized
+  details. This evidence is stored with the last agent error so the focused UI
+  survives a page reload.
+
+## Failure and recovery behavior
+
+- Registry failure during preview keeps approval disabled and runs no command.
+- Registry failure or target disappearance after approval fails before staging.
+- Preparation failure invalidates only the deterministic `_npx` tree for the
+  exact `package@version` and retries once. Kandev never runs a global npm cache
+  clean.
+- ACP initialization failure, unsupported protocol behavior, authentication
+  required, or an unsuccessful capability probe does not activate the
+  candidate. The staged npm cache may remain for a later retry.
+- Persistence failure after a successful candidate probe does not publish the
+  candidate capabilities and leaves the previous active selection unchanged.
+- Browser disconnect does not cancel a running job. The jobs endpoint can
+  recover process-local progress while the backend remains running.
+- Active sessions are never restarted, replaced, or hot-swapped.
+- A launch-time stale metadata retry is not a version rollback. It prepares the
+  same package selection again and does not change the active version.
 
 ## Persistence guarantees
 
-- Update jobs and capability data are process-local and do not survive a Kandev
-  backend restart.
-- Completed jobs remain queryable for the existing short job-retention window.
-- Settings does not rehydrate retained update jobs after a browser page
-  restart. Update dialog state, output, and results are intentionally
-  page-local and disappear when the page is restarted.
-- npm's host cache may survive Kandev restarts, but Kandev does not own or
-  guarantee that cache.
-- After a backend restart, normal host capability probing reports whichever
-  runtime npm resolves in that environment.
+- The trusted package identity and active version are stored install-wide per
+  built-in agent in the system settings store and survive backend and browser
+  restarts. A record whose package no longer matches the agent's built-in
+  metadata is treated as having no active selection and is not applied to the
+  replacement package.
+- The active version is written only after successful candidate validation, so
+  it is also the last known good selection.
+- Jobs, process output, and capability cache remain process-local and do not
+  survive a backend restart.
+- npm's execution cache is best-effort and is not Kandev-owned inventory. If an
+  exact selected cache entry disappears, npm may prepare that same exact
+  version again; it must not advance to another version.
+- Dialog selection, output, and result remain page-local after a browser page
+  restart.
+- A terminal launch-time npm resolution error stores its stable failure code
+  and bounded sanitized details in `last_agent_error`. No database migration is
+  required because the record is JSON metadata with optional fields.
+
+## Desktop and mobile behavior
+
+- The existing agent-card update icon remains the entry point on desktop and
+  mobile and keeps a minimum 44 px touch target.
+- Desktop uses the existing dialog. Phone layouts use the existing bottom
+  drawer; no nested drawer is introduced.
+- The version selector is inside the shared body, is keyboard and touch
+  accessible, and shows latest and active markers without encoding state in
+  color alone.
+- The body is the single internal scroll owner. The safe-area-aware footer
+  keeps the operation action reachable while long version lists and process
+  output remain viewport-contained.
+- Selection state, preview loading, operation labels, request payloads, and
+  terminal results are shared across desktop and mobile presentations.
+- A failed automatic launch retry uses the existing inline recovery card in
+  Kanban chat and Office chat. It does not open a dialog or drawer.
+- The card states that npm could not prepare the agent runtime. It states that
+  Kandev refreshed package data and retried once. Technical details are
+  collapsed initially.
+- The card offers one **Retry runtime** action. When a resume token exists, the
+  action resumes the session. Otherwise, it starts a replacement run. The card
+  does not present session history loss as a fix for an npm problem.
+- Phone actions stack when needed, remain at least 44 px high, and do not add a
+  second scroll container.
 
 ## Scenarios
 
-- **GIVEN** a managed agent with a cached runtime, **WHEN** a new session starts
-  without an explicit update, **THEN** Kandev invokes the unversioned package
-  spec and does not require a repository-maintained version pin.
-- **GIVEN** Claude reports runtime version `0.62.0` and npm reports `0.63.0`,
-  **WHEN** the operator opens its update action, **THEN** the dialog shows
-  `0.62.0 → 0.63.0`, the exact built-in command, and how the host update
-  affects capabilities and active sessions without starting the command.
-- **GIVEN** the current runtime and upstream target both report version
-  `0.64.0`, **WHEN** the operator opens the update action, **THEN** the dialog
-  shows `0.64.0` once with **Up to date**, does not show a version transition,
-  keeps **Approve update** disabled on desktop and mobile, and starts no update
-  job.
-- **GIVEN** the update dialog has a resolved preview, **WHEN** the operator
-  approves the update, **THEN** Kandev starts exactly one update and the dialog
-  streams stdout/stderr until the job is terminal.
-- **GIVEN** an update succeeds and the new runtime advertises an additional
-  model, **WHEN** the automatic capability probe completes, **THEN** the new
-  model appears without a page reload or manual Rescan.
-- **GIVEN** an update is already queued, resolving, updating, or refreshing,
-  **WHEN** the operator selects the action again, **THEN** Kandev returns the
-  existing job and does not run a second update.
-- **GIVEN** an install is active for an agent, **WHEN** an update is requested
-  for that agent, **THEN** Kandev returns the active maintenance job rather
-  than running install and update concurrently.
-- **GIVEN** npm registry lookup fails while preparing the dialog, **WHEN** the
-  update action is opened, **THEN** the dialog shows a retryable preview failure,
-  keeps approval disabled, and starts no update job.
-- **GIVEN** npm registry lookup succeeds for the preview but fails after
-  approval because the registry changed, **WHEN** the update job resolves its
-  target again, **THEN** the dialog shows a retryable update failure and retains
-  the previous models.
-- **GIVEN** a managed package's extracted `_npx` execution tree is corrupt,
-  **WHEN** the first update preparation fails, **THEN** Kandev invalidates only
-  that built-in package's deterministic execution-cache directory, retries
-  once, and probes the rebuilt runtime before reporting success.
-- **GIVEN** the package update succeeds but the fresh probe requires
-  authentication, **WHEN** the job finishes, **THEN** the dialog reports the new
-  package version and refresh error, the previous models remain available, and
-  the card keeps its existing authentication recovery action.
-- **GIVEN** an agent is unmanaged or native-only, **WHEN** Settings renders its
-  installed card, **THEN** no update action is shown.
-- **GIVEN** an update dialog has shown progress or a terminal result, **WHEN**
-  the operator restarts the page, **THEN** the dialog is closed and no prior
-  update details, output, or result appear on the agent card or in a newly
-  opened dialog.
-- **GIVEN** an update is running on a phone viewport, **WHEN** the operator
-  views the update surface, **THEN** current and target versions, the command,
-  progress, output, and retry state are reachable by touch without horizontal
-  page scrolling.
-- **GIVEN** an agent session is already running, **WHEN** its host runtime is
-  updated, **THEN** the existing session continues unchanged and only later
-  probes or launches use the updated runtime.
+- **GIVEN** OpenCode latest is partly published and its ACP probe fails,
+  **WHEN** an operator selects an older published stable version and approves
+  **Roll back runtime**, **THEN** Kandev prepares and probes that exact version,
+  persists it only after success, and restores its model list without restart.
+- **GIVEN** a healthy exact active version, **WHEN** Kandev restarts, **THEN**
+  boot probes and later standalone sessions use the same exact version.
+- **GIVEN** a candidate fails ACP initialization, **WHEN** the job ends,
+  **THEN** the previous active version and capabilities remain authoritative.
+- **GIVEN** the current version is unknown and there is no active selection,
+  **WHEN** the operator selects a published target, **THEN** the UI offers
+  **Repair runtime** and validation establishes the first exact active version.
+- **GIVEN** active, current, and target versions match, **WHEN** the dialog
+  opens, **THEN** it shows **Up to date** and starts no job.
+- **GIVEN** a different target is submitted while a job is active for the same
+  agent, **WHEN** the backend receives it, **THEN** it returns the existing job
+  and does not run a second candidate concurrently.
+- **GIVEN** an SSH or container session, **WHEN** the host active version
+  changes, **THEN** that executor's command remains unchanged.
+- **GIVEN** an agent whose interactive passthrough CLI is separate from its
+  managed ACP adapter, **WHEN** the host active ACP version changes, **THEN**
+  later passthrough sessions still launch the declared interactive CLI and do
+  not launch the ACP package under a PTY.
+- **GIVEN** a phone viewport and a long version catalogue or process log,
+  **WHEN** the operator selects and activates a version, **THEN** the drawer
+  remains contained and the primary action remains touch-reachable.
+- **GIVEN** a host-local managed runtime exits before ACP initialization with
+  npm `ETARGET` and a matching missing dependency version, **WHEN** Kandev
+  reads the captured stderr, **THEN** it removes only the trusted package's
+  deterministic `_npx` tree and retries the same runtime once with current npm
+  metadata.
+- **GIVEN** that online retry starts successfully, **WHEN** ACP initialization
+  completes, **THEN** the original session continues and no recovery card is
+  shown.
+- **GIVEN** that online retry fails with the same npm resolution error,
+  **WHEN** the failure reaches Kanban or Office chat, **THEN** the UI explains
+  the npm cause, keeps sanitized technical details collapsed, and offers only
+  **Retry runtime**.
+- **GIVEN** a native, SSH, container, passthrough, or unrelated failed launch,
+  **WHEN** Kandev classifies the error, **THEN** this automatic npm recovery
+  does not run.
 
 ## Out of scope
 
-- Scheduled or automatic package updates.
-- Automatically deleting or rebuilding npm execution caches during every
-  ordinary agent launch.
-- Exact package-version pins, version allowlists, rollback, or user-selected
-  historical versions.
-- Updating configured remote executors or every running container from the
-  host Settings action.
-- Restarting or hot-swapping active agent sessions.
-- Managing native-only update channels such as Cursor.
-- Updating separately distributed passthrough or authentication helper
-  packages when they are not the managed ACP runtime.
-- Resuming or recovering update dialog state after a browser page restart.
+- Scheduled or automatic updates and automatic rollback after launch failure.
+- Global npm cache cleanup, registry replacement, dependency substitution, or
+  automatic selection of another package version.
+- Prerelease, tag, arbitrary package-spec, registry, or shell-command input.
+- Kandev-owned npm artifact retention or a package lockfile.
+- Applying host selections to SSH, container, or other remote runtimes.
+- Restarting or hot-swapping active sessions.
+- Native-only update channels and separately distributed passthrough or
+  authentication packages.
+- Persisting job output or reopening the dialog after a browser restart.

@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/shellexec"
 	"github.com/kandev/kandev/internal/common/subproc"
@@ -59,7 +60,10 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	if workspacePath == "" {
 		workspacePath = req.RepositoryPath
 	}
-	resolvedScript := resolvePreparerSetupScript(req, workspacePath)
+	resolvedScript, err := resolvePreparerSetupScript(req, workspacePath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve setup script: %w", err)
+	}
 
 	// CheckoutBranch (PR head) takes priority over BaseBranch when both set.
 	effectiveBranch := req.CheckoutBranch
@@ -251,7 +255,10 @@ const setupScriptStreamInterval = 100 * time.Millisecond
 // streaming combined stdout/stderr to onOutput (if non-nil) as it runs.
 // Returns the full accumulated output (trimmed) and any execution error.
 func runSetupScript(ctx context.Context, script, workDir string, env map[string]string, onOutput func(current string)) (string, error) {
-	cmd := shellexec.CommandContext(ctx, shellexec.Bash, script)
+	setupCtx, cancel := context.WithTimeout(ctx, constants.SetupScriptTimeout)
+	defer cancel()
+
+	cmd := shellexec.CommandContext(setupCtx, shellexec.Bash, script)
 	if workDir != "" {
 		cmd.Dir = workDir
 	}

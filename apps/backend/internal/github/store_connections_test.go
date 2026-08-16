@@ -258,8 +258,8 @@ func TestStoreLegacyMigrationSeedsExistingWorkspacesAndBackfillsOwnership(t *tes
 
 	assertStoredWorkspaceID(t, db, "github_pr_watches", "watch-owned", "ws-1")
 	assertStoredWorkspaceID(t, db, "github_task_prs", "pr-owned", "ws-2")
-	assertStoredWorkspaceID(t, db, "github_pr_watches", "watch-orphan", "")
-	assertStoredWorkspaceID(t, db, "github_task_prs", "pr-orphan", "")
+	assertRowDeleted(t, db, "github_pr_watches", "watch-orphan")
+	assertRowDeleted(t, db, "github_task_prs", "pr-orphan")
 	var targetLogin string
 	if err := db.GetContext(ctx, &targetLogin,
 		`SELECT target_login FROM github_review_watches WHERE id = 'review-watch-1'`); err != nil {
@@ -558,9 +558,12 @@ func seedConnectionWorkspaces(t *testing.T, store *Store, workspaceIDs ...string
 	}
 }
 
-func TestStoreWorkspaceConnectionHealthIncludesDisconnectedWorkspaces(t *testing.T) {
+// A workspace with no connection row must not appear in any count. Seeding a
+// fourth workspace with nothing attached is the whole point: it used to be
+// reported as a disconnected connection, which no user could act on.
+func TestStoreWorkspaceConnectionHealthExcludesUnconfiguredWorkspaces(t *testing.T) {
 	store := newTestStore(t)
-	seedConnectionWorkspaces(t, store, "ws-active", "ws-invalid", "ws-suspended", "ws-disconnected")
+	seedConnectionWorkspaces(t, store, "ws-active", "ws-invalid", "ws-suspended", "ws-unconfigured")
 	seedStoreAppRegistration(t, store)
 	ctx := context.Background()
 	installationID := int64(42)
@@ -580,9 +583,38 @@ func TestStoreWorkspaceConnectionHealthIncludesDisconnectedWorkspaces(t *testing
 	if err != nil {
 		t.Fatalf("GetWorkspaceConnectionHealth() error = %v", err)
 	}
-	if health.WorkspaceCount != 4 || health.Active != 1 || health.Invalid != 1 ||
-		health.Suspended != 1 || health.Disconnected != 1 || health.Revoked != 0 {
-		t.Fatalf("GetWorkspaceConnectionHealth() = %+v", health)
+	want := WorkspaceConnectionHealth{Active: 1, Invalid: 1, Suspended: 1}
+	if health != want {
+		t.Fatalf("GetWorkspaceConnectionHealth() = %+v, want %+v (ws-unconfigured counts nowhere)", health, want)
+	}
+}
+
+// Connections have no database cascade, so a workspace row that disappeared
+// without its cleanup handler running must not keep its connection in the
+// aggregate forever.
+func TestStoreWorkspaceConnectionHealthExcludesOrphanedConnections(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "ws-active", "ws-doomed")
+	ctx := context.Background()
+	for _, connection := range []*WorkspaceConnection{
+		{WorkspaceID: "ws-active", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "active", Status: ConnectionStatusActive},
+		{WorkspaceID: "ws-doomed", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "doomed", Status: ConnectionStatusInvalid},
+	} {
+		if err := store.UpsertWorkspaceConnection(ctx, connection); err != nil {
+			t.Fatalf("UpsertWorkspaceConnection(%s): %v", connection.WorkspaceID, err)
+		}
+	}
+	if _, err := store.db.Exec(`DELETE FROM workspaces WHERE id = ?`, "ws-doomed"); err != nil {
+		t.Fatalf("delete workspace row: %v", err)
+	}
+
+	health, err := store.GetWorkspaceConnectionHealth(ctx)
+	if err != nil {
+		t.Fatalf("GetWorkspaceConnectionHealth() error = %v", err)
+	}
+	want := WorkspaceConnectionHealth{Active: 1}
+	if health != want {
+		t.Fatalf("GetWorkspaceConnectionHealth() = %+v, want %+v (orphan excluded)", health, want)
 	}
 }
 
@@ -652,5 +684,19 @@ func assertStoredWorkspaceID(t *testing.T, db *sqlx.DB, table, id, want string) 
 	}
 	if got != want {
 		t.Fatalf("%s %s workspace_id = %q, want %q", table, id, got, want)
+	}
+}
+
+// assertRowDeleted asserts a row referencing a nonexistent task was removed
+// by the task-contribution orphan sweep rather than surviving with a
+// backfilled (empty) workspace_id.
+func assertRowDeleted(t *testing.T, db *sqlx.DB, table, id string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE id = ?`, id).Scan(&count); err != nil {
+		t.Fatalf("count %s %s: %v", table, id, err)
+	}
+	if count != 0 {
+		t.Fatalf("%s %s still present, want deleted as a task-contribution orphan", table, id)
 	}
 }

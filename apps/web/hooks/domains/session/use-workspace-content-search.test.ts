@@ -49,9 +49,10 @@ describe("useWorkspaceContentSearch request lifecycle", () => {
     await act(async () => vi.advanceTimersByTimeAsync(249));
     expect(mockSearchWorkspaceContent).not.toHaveBeenCalled();
 
-    await act(async () => vi.advanceTimersByTimeAsync(1));
+    await act(async () => vi.runAllTimersAsync());
 
     expect(mockSearchWorkspaceContent).toHaveBeenCalledWith(mockClient, "session-1", "needle", 50);
+    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(8);
     expect(result.current.results).toEqual(results);
     expect(result.current.isSearching).toBe(false);
   });
@@ -67,19 +68,42 @@ describe("useWorkspaceContentSearch request lifecycle", () => {
         match_ranges: [],
       },
     ];
-    mockSearchWorkspaceContent
-      .mockResolvedValueOnce({ results: previousResults })
-      .mockResolvedValueOnce({ results: [] });
+    mockSearchWorkspaceContent.mockResolvedValue({ results: previousResults });
     const { result, rerender } = renderHook(
       ({ query }) => useWorkspaceContentSearch({ enabled: true, query, sessionId: "session-1" }),
       { initialProps: { query: "previous" } },
     );
-    await act(async () => vi.advanceTimersByTimeAsync(250));
+    await act(async () => vi.runAllTimersAsync());
     expect(result.current.results).toEqual(previousResults);
 
     rerender({ query: "next" });
 
     expect(result.current.results).toEqual([]);
+    expect(result.current.isSearching).toBe(true);
+  });
+
+  it("publishes the first available results while later repositories are still retrying", async () => {
+    const primaryResult = {
+      repository_name: "primary",
+      path: "src/primary.ts",
+      line: 1,
+      column: 1,
+      preview: "primary needle",
+      match_ranges: [],
+    };
+    mockSearchWorkspaceContent.mockResolvedValue({ results: [primaryResult] });
+    const { result } = renderHook(() =>
+      useWorkspaceContentSearch({
+        enabled: true,
+        query: "needle",
+        sessionId: "session-1",
+      }),
+    );
+
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+
+    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(1);
+    expect(result.current.results).toEqual([primaryResult]);
     expect(result.current.isSearching).toBe(true);
   });
 
@@ -138,11 +162,45 @@ describe("useWorkspaceContentSearch validation and failures", () => {
       }),
     );
 
-    await act(async () => vi.advanceTimersByTimeAsync(250));
+    await act(async () => vi.runAllTimersAsync());
 
     expect(result.current.results).toEqual([]);
     expect(result.current.error).toBe("transport-error");
     expect(result.current.isSearching).toBe(false);
+  });
+
+  it("merges repository results that arrive on later retry attempts", async () => {
+    const primary = {
+      repository_name: "primary",
+      path: "src/primary.ts",
+      line: 1,
+      column: 1,
+      preview: "primary needle",
+      match_ranges: [],
+    };
+    const extra = {
+      repository_name: "extra",
+      path: "src/extra.ts",
+      line: 2,
+      column: 1,
+      preview: "extra needle",
+      match_ranges: [],
+    };
+    mockSearchWorkspaceContent
+      .mockResolvedValueOnce({ results: [primary] })
+      .mockResolvedValueOnce({ results: [primary, extra] })
+      .mockResolvedValue({ results: [primary, extra] });
+    const { result } = renderHook(() =>
+      useWorkspaceContentSearch({
+        enabled: true,
+        query: "needle",
+        sessionId: "session-1",
+      }),
+    );
+
+    await act(async () => vi.runAllTimersAsync());
+
+    expect(result.current.results).toEqual([primary, extra]);
   });
 });
 
@@ -186,9 +244,53 @@ describe("useWorkspaceContentSearch stale responses", () => {
     rerender({ query: "second" });
     await act(async () => vi.advanceTimersByTimeAsync(250));
     await act(async () => resolveFirst?.({ results: firstResults }));
+    await act(async () => vi.runAllTimersAsync());
 
-    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(2);
+    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(9);
     expect(result.current.results).toEqual(secondResults);
     expect(result.current.isSearching).toBe(false);
+  });
+});
+
+describe("useWorkspaceContentSearch incremental publishing", () => {
+  // The retry loop exists so a repository that registers with the workspace
+  // process manager after task launch still contributes matches. Publishing
+  // the merged set only once the whole budget was spent put a fixed
+  // 250ms + 7 * 500ms = 3.75s floor under every search, which is what made
+  // the "cached preview content match" e2e spec fail its 5s assertion under
+  // CI load. This pins the per-attempt half of that contract: a repository
+  // whose matches only appear on a later attempt is published when that
+  // attempt lands, not when the budget runs out.
+  it("publishes a late repository's matches as soon as its attempt lands", async () => {
+    const primary = {
+      repository_name: "primary",
+      path: "src/primary.ts",
+      line: 1,
+      column: 1,
+      preview: "primary needle",
+      match_ranges: [],
+    };
+    const extra = {
+      repository_name: "extra",
+      path: "src/extra.ts",
+      line: 2,
+      column: 1,
+      preview: "extra needle",
+      match_ranges: [],
+    };
+    mockSearchWorkspaceContent
+      .mockResolvedValueOnce({ results: [primary] })
+      .mockResolvedValue({ results: [primary, extra] });
+    const { result } = renderHook(() =>
+      useWorkspaceContentSearch({ enabled: true, query: "needle", sessionId: "session-1" }),
+    );
+
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(result.current.results).toEqual([primary]);
+
+    // One retry delay later the second repository has registered.
+    await act(async () => vi.advanceTimersByTimeAsync(500));
+    expect(result.current.results).toEqual([primary, extra]);
+    expect(result.current.isSearching).toBe(true);
   });
 });

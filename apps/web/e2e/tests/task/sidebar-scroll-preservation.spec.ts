@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { dwell } from "../../helpers/causal-waits";
 
 const OVERLAY_SCROLLBAR_SELECTOR =
   "[data-slot='scroll-area-scrollbar'][data-orientation='vertical']";
@@ -24,22 +25,32 @@ test.describe("sidebar scrolling", () => {
     const appSidebar = testPage.getByTestId("app-sidebar");
     const taskSidebar = testPage.getByTestId("task-sidebar");
     const scrollRoot = taskSidebar.locator("[data-slot='scroll-area']");
-    await expect(taskSidebar.getByText("No tasks yet.")).toBeVisible();
+    const emptyMessage = taskSidebar.locator("[data-slot='task-switcher-empty-state']");
+    await expect(emptyMessage).toHaveText("No tasks yet.");
 
     await expect
       .poll(() => scrollRoot.evaluate((element) => getComputedStyle(element).backgroundColor))
       .toBe("rgba(0, 0, 0, 0)");
 
-    const [navigationBox, taskSidebarBox] = await Promise.all([
-      appSidebar.locator("nav").boundingBox(),
-      taskSidebar.boundingBox(),
-    ]);
+    const [navigationBox, taskSidebarBox, tasksTitleBox, emptyMessageBox, emptyPaddingLeft] =
+      await Promise.all([
+        appSidebar.locator("nav").boundingBox(),
+        taskSidebar.boundingBox(),
+        tasksToggle.locator("span").first().boundingBox(),
+        emptyMessage.boundingBox(),
+        emptyMessage.evaluate((element) => parseFloat(getComputedStyle(element).paddingLeft)),
+      ]);
     expect(navigationBox).not.toBeNull();
     expect(taskSidebarBox).not.toBeNull();
+    expect(tasksTitleBox).not.toBeNull();
+    expect(emptyMessageBox).not.toBeNull();
     expect(taskSidebarBox!.x).toBeCloseTo(navigationBox!.x, 0);
     expect(taskSidebarBox!.x + taskSidebarBox!.width).toBeCloseTo(
       navigationBox!.x + navigationBox!.width,
       0,
+    );
+    expect(Math.abs(emptyMessageBox!.x + emptyPaddingLeft - tasksTitleBox!.x)).toBeLessThanOrEqual(
+      0.5,
     );
   });
 
@@ -409,9 +420,12 @@ test.describe("sidebar scrolling", () => {
       });
       await expect(navigationDialog).toBeVisible();
 
-      // Let the old 60-frame sidebar reveal budget expire while the settings
-      // blocker keeps the task sidebar out of the DOM.
-      await testPage.waitForTimeout(1_500);
+      await dwell(
+        testPage,
+        1_500,
+        "product-timer",
+        "the regression under test is a frame-count reveal budget expiring while the sidebar is absent from the DOM; the budget's expiry is the event and nothing renders to signal it",
+      );
       await navigationDialog.getByRole("button", { name: "Discard and leave" }).click();
 
       await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));

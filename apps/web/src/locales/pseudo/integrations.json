@@ -53,9 +53,9 @@
   "copyingConfigTo": "Ćōƥŷĩńĝ {{label}} ćōńƒĩĝ ţō {{targetName}}…",
   "createAsDraft": "Ćŕēàţē àś ďŕàƒţ",
   "createdSuccessfully": "{{longName}} ćŕēàţēď śũććēśśƒũĺĺŷ",
-  "createdLinkNeedsAttention": "{{shortName}} ćŕēàţēď; ţàśķ ĺĩñķ ñēēďś àţţēñţĩőñ",
-  "associationRetryViaTaskMenu": "{{message}}. Ũśē Ĺĩñķ ĩñ ţĥē ţàśķ mēñũ ţő ŕēţŕŷ.",
-  "taskAssociationCouldNotBeSaved": "Ţàśķ àśśőćĩàţĩőñ ćőũĺď ñőţ bē śàvēď.",
+  "createdLinkNeedsAttention": "{{shortName}} ćŕēàţēď; ţàśķ ĺĩńķ ńēēďś àţţēńţĩōń",
+  "associationRetryViaTaskMenu": "{{message}}. Ũśē Ĺĩńķ ĩń ţĥē ţàśķ ḿēńũ ţō ŕēţŕŷ.",
+  "taskAssociationCouldNotBeSaved": "Ţàśķ àśśōćĩàţĩōń ćōũĺď ńōţ ƀē śàvēď.",
   "createFailed": "Ćŕēàţē {{shortName}} ƒàĩĺēď",
   "createLongName": "Ćŕēàţē {{longName}}",
   "createPr": "Ćŕēàţē ƤŔ",
@@ -187,6 +187,7 @@
   "queryNamePlaceholder": "ē.ĝ. Ńēēďś ḿŷ ŕēvĩēŵ",
   "saveQuery": "Śàvē qũēŕŷ",
   "waitingForTheNextBackendHealth": "Ŵàĩţĩńĝ ƒōŕ ţĥē ńēxţ ƀàćķēńď ĥēàĺţĥ ćĥēćķ…",
-  "cursorPaginationSummary_one": "Ƥàĝē {{page}} · {{count}} ŕēśũļţ",
-  "cursorPaginationSummary_other": "Ƥàĝē {{page}} · {{count}} ŕēśũļţś"
+  "cursorPaginationSummary_one": "Ƥàĝē {{page}} · {{count}} ŕēśũĺţ",
+  "cursorPaginationSummary_other": "Ƥàĝē {{page}} · {{count}} ŕēśũĺţś",
+  "allRepositories": "Àĺĺ ŕēƥōśĩţōŕĩēś"
 }

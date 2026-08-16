@@ -208,6 +208,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 	}
 	if store != nil {
 		service.resolver = NewCredentialResolver(store, secrets)
+		service.resolver.SetRateTracker(service.rateTracker)
 		service.resolver.SetLegacyFactory(func(ctx context.Context) (Client, string, error) {
 			return NewClient(ctx, secrets, log)
 		})

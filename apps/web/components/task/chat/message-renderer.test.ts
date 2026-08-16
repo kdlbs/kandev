@@ -17,7 +17,7 @@ describe("shouldShowDescriptionStartButton", () => {
     ).toBe(true);
   });
 
-  it("does NOT show for a resume-skipped session (the footer owns that surface)", () => {
+  it("does NOT show for a resume-skipped session (the composer hint owns that surface)", () => {
     expect(
       shouldShowDescriptionStartButton({
         sessionState: "WAITING_FOR_INPUT",

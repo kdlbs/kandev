@@ -9,6 +9,7 @@ import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { createProject } from "@/lib/api/domains/office-api";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
@@ -207,7 +208,7 @@ function useProjectForm(workspaceId: string, onClose: () => void) {
           ? { type: form.executorType, image: form.dockerImage || undefined }
           : undefined,
       });
-      if (result) addProject(result);
+      if (result) addProject(workspaceId, result);
       onClose();
       setForm(INITIAL_PROJECT_STATE);
       toast.success(t("office:projectCreated"));
@@ -302,7 +303,7 @@ function ProjectFormBody({
 
 export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateProjectDialogProps) {
   const { t } = useTranslation();
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const meta = useAppStore((s) => s.office.meta);
   const executorTypes =
     meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ??

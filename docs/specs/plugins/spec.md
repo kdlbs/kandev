@@ -758,6 +758,12 @@ C)` renders `C` beside the PR status icon on every kanban card, receiving
   kanban card (below the badges row), receiving the same
   `{ taskId, workspaceId, workflowStepId }` shape — for a contribution too wide
   for the cramped title-row `task-card-indicators` spot, e.g. a row of tag chips.
+- **Sidebar workspace actions:** `registerComponent("sidebar-workspace-actions", C)`
+  renders `C` after Quick Terminal/Quick Chat in the desktop sidebar's New Task
+  row and in the shared phone navigation sheet, forwarding
+  `{ workspaceId, workspaceLabel?, presentation }`. The host uses
+  `presentation: "desktop"` or `"mobile"`; mobile actions must expose a
+  touch-sized, accessible control.
 - **`host.storage`:** authenticated, per-user key/value storage
   (`get`/`set`/`delete`/`list`/`subscribe`), backed by the `plugin_user_state`
   table (separate from the plugin-backend-only `plugin_state` table — no gRPC/proto
@@ -1098,6 +1104,27 @@ complete.
   render, **WHEN** that card renders, **THEN** the card's title and its other
   slot components (e.g. `"task-card-indicators"`) still render, isolated by
   the existing per-registration error boundary.
+
+- **GIVEN** a plugin registers a component for `"sidebar-workspace-actions"`,
+  **WHEN** the sidebar's New Task row renders with the rail expanded and a
+  workspace active, **THEN** that component mounts in the row's action
+  cluster after the built-in Quick Terminal and Quick Chat icons, receiving
+  `{ workspaceId, workspaceLabel, presentation: "desktop" }` for the active
+  workspace, and the flex row keeps the label and every registered action
+  reachable without overlap.
+  **GIVEN** no plugin is registered for the slot, **WHEN** the row renders,
+  **THEN** no plugin action markup or extra row spacing appears. **GIVEN** the
+  desktop rail is collapsed or no workspace is active, **WHEN** the desktop
+  row renders, **THEN** no `"sidebar-workspace-actions"` markup renders,
+  matching the built-in icons' own visibility. **GIVEN** a
+  `"sidebar-workspace-actions"`
+  component throws during render, **WHEN** the row renders, **THEN** Quick
+  Terminal and Quick Chat still render and function, isolated by the existing
+  per-registration error boundary.
+  **GIVEN** the same plugin is active on a phone, **WHEN** the shared navigation
+  sheet opens, **THEN** the component mounts with
+  `presentation: "mobile"` and its control remains reachable with a 44px
+  touch target.
 
 ## Out of scope
 

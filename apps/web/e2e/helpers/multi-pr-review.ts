@@ -1,4 +1,5 @@
 import type { SeedData } from "../fixtures/test-base";
+import { expect } from "@playwright/test";
 import type { ApiClient } from "./api-client";
 
 export const REVIEW_OWNER = "testorg";
@@ -80,13 +81,38 @@ export async function seedMultiPRReviewTask(
         patch: `@@ -0,0 +1 @@\n+${pr.marker}`,
       },
     ]);
-    await apiClient.associateGitHubTaskPR({
+    await apiClient.mockGitHubAssociateTaskPR({
       workspace_id: seedData.workspaceId,
       task_id: task.id,
       repository_id: seedData.repositoryId,
+      owner: REVIEW_OWNER,
+      repo: repositoryName,
+      pr_number: pr.number,
       pr_url: `https://github.com/${REVIEW_OWNER}/${repositoryName}/pull/${pr.number}`,
+      pr_title: pr.title,
+      head_branch: pr.branch,
+      base_branch: "main",
+      author_login: "reviewer",
+      additions: 1,
+      deletions: 0,
     });
   }
+
+  // Association requests are synchronous, but this read barrier makes the
+  // seed contract explicit before the browser's first task-PR sync. Without
+  // it, a cold worker could open the changes panel after only the first row
+  // was visible to the frontend.
+  const expectedNumbers = REVIEW_PRS.map((pr) => pr.number).sort((a, b) => a - b);
+  await expect
+    .poll(
+      async () =>
+        (await apiClient.listTaskPRs(task.id)).map((pr) => pr.pr_number).sort((a, b) => a - b),
+      {
+        timeout: 15_000,
+        message: "waiting for both seeded review PR associations",
+      },
+    )
+    .toEqual(expectedNumbers);
 
   return task;
 }

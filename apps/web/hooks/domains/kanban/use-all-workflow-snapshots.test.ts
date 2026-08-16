@@ -296,3 +296,91 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
     expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].autopilot).toBe(false);
   });
 });
+
+/**
+ * A snapshot request issued before a `task.status_summary.updated` delta can
+ * land after it. Writing the response's summary unconditionally regresses the
+ * cached row to the older revision, and a settled task emits no further
+ * deltas — so the row stays wrong until the next full hydrate. This surfaced
+ * as a finished task stuck behind a "preparing" spinner in the sidebar.
+ */
+type SummaryFixture = Record<string, unknown> | undefined;
+
+function seedSummaryRace(cached: SummaryFixture, response: SummaryFixture) {
+  mockState.kanbanMulti.snapshots = {
+    "wf-A": {
+      workflowId: "wf-A",
+      workflowName: "A",
+      steps: [],
+      tasks: [{ id: "task-1", workflowStepId: "step-1", statusSummary: cached }],
+    },
+  };
+  // Not `...Once`: the hook can fetch more than once (mount + foreground
+  // refresh), and falling back to the empty default would make the assertion
+  // read a write that carries no tasks at all.
+  mockFetchWorkflowSnapshot.mockResolvedValue({
+    steps: [{ id: "step-1", name: "In Progress", position: 0 }],
+    tasks: [
+      {
+        id: "task-1",
+        workflow_step_id: "step-1",
+        title: "Task",
+        ...(response ? { status_summary: response } : {}),
+      },
+    ],
+  });
+  renderHook(() => useAllWorkflowSnapshots("ws-A"));
+  // Boot-hydrated snapshots skip the mount fetch; focus forces the refetch.
+  act(() => window.dispatchEvent(new Event("focus")));
+}
+
+async function writtenSummary() {
+  await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+  return mockSetWorkflowSnapshot.mock.calls.at(-1)![1].tasks[0].statusSummary;
+}
+
+describe("useAllWorkflowSnapshots — status summary revision race", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
+
+  it("keeps the newer cached summary when a slow response carries an older revision", async () => {
+    seedSummaryRace(
+      { revision: 4, primary_session: { state: "WAITING_FOR_INPUT" } },
+      { revision: 1, primary_session: { state: "STARTING" } },
+    );
+
+    const written = await writtenSummary();
+    expect(written.revision).toBe(4);
+    expect(written.primary_session.state).toBe("WAITING_FOR_INPUT");
+  });
+
+  it("adopts the response summary when it is newer than the cached one", async () => {
+    seedSummaryRace(
+      { revision: 1, primary_session: { state: "STARTING" } },
+      { revision: 5, primary_session: { state: "WAITING_FOR_INPUT" } },
+    );
+
+    const written = await writtenSummary();
+    expect(written.revision).toBe(5);
+    expect(written.primary_session.state).toBe("WAITING_FOR_INPUT");
+  });
+
+  it("takes an equal-revision response so a re-stamped queued count is not pinned", async () => {
+    // The snapshot endpoint re-stamps queued_prompt_count from a fresh queue
+    // read without incrementing the revision, so preferring the cached copy at
+    // an equal revision would pin a stale queued badge.
+    seedSummaryRace(
+      { revision: 3, queued_prompt_count: 0 },
+      { revision: 3, queued_prompt_count: 5 },
+    );
+
+    expect((await writtenSummary()).queued_prompt_count).toBe(5);
+  });
+
+  it("keeps the cached summary when the response omits it entirely", async () => {
+    seedSummaryRace({ revision: 4, primary_session: { state: "WAITING_FOR_INPUT" } }, undefined);
+
+    expect((await writtenSummary()).revision).toBe(4);
+  });
+});

@@ -95,6 +95,13 @@ type officeTaskSessionCreator interface {
 	CreateOfficeTaskSession(context.Context, *models.TaskSession) error
 }
 
+// initialRuntimeSeedTaskSessionCreator lets repositories claim the launch-only
+// runtime seed and create the session in one transaction. Test and legacy
+// stores can omit it; the executor keeps its existing best-effort fallback.
+type initialRuntimeSeedTaskSessionCreator interface {
+	CreateTaskSessionWithInitialRuntimeSeed(context.Context, *models.TaskSession) error
+}
+
 type primarySessionTaskStateStore interface {
 	UpdateTaskStateIfPrimarySessionState(
 		context.Context,
@@ -286,6 +293,13 @@ type AgentManagerClient interface {
 	WaitForAgentctlReady(ctx context.Context, sessionID string) error
 }
 
+// PromptTurnIDSetter is an optional lifecycle capability. Keeping it out of
+// AgentManagerClient lets test and legacy adapters continue to work while the
+// production lifecycle carries durable turn identity with completion events.
+type PromptTurnIDSetter interface {
+	SetPromptTurnID(ctx context.Context, agentExecutionID, turnID string) error
+}
+
 // RemoteRuntimeStatus mirrors runtime status details needed by orchestrator/UI.
 type RemoteRuntimeStatus struct {
 	RuntimeName   agentruntime.Runtime
@@ -329,6 +343,7 @@ type LaunchAgentRequest struct {
 	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
 	TaskTitle         string // Human-readable task title for semantic worktree naming
 	AgentProfileID    string
+	TurnID            string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -377,20 +392,21 @@ type LaunchAgentRequest struct {
 	CopyFiles string
 
 	// Worktree configuration for concurrent agent execution
-	UseWorktree            bool   // Whether to use a Git worktree for isolation
-	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID           string // Repository ID for worktree tracking
-	RepositoryPath         string // Path to the main repository (for worktree creation)
-	BaseBranch             string // Base branch for the worktree (e.g., "main")
-	DefaultBranch          string // Repository's default_branch, used as a fallback when BaseBranch is missing
-	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeBranchPrefix   string // Branch prefix for worktree branches
-	WorktreeBranchTemplate string // Branch name template for worktree branches
-	WorktreeBranchTicket   string // External ticket value for branch templates
-	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
-	RemoteSyncHandled      bool   // Provider-authenticated origin refresh already completed
+	UseWorktree             bool   // Whether to use a Git worktree for isolation
+	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID            string // Repository ID for worktree tracking
+	RepositoryPath          string // Path to the main repository (for worktree creation)
+	BaseBranch              string // Base branch for the worktree (e.g., "main")
+	DefaultBranch           string // Repository's default_branch, used as a fallback when BaseBranch is missing
+	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
+	WorktreeBranchPrefix    string // Branch prefix for worktree branches
+	WorktreeBranchTemplate  string // Branch name template for worktree branches
+	WorktreeBranchTicket    string // External ticket value for branch templates
+	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled       bool   // Provider-authenticated origin refresh already completed
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -421,24 +437,25 @@ type WorkspaceFolderSpec struct{ Name, LocalPath string }
 // the orchestrator package does not need to import lifecycle types into its
 // public API.
 type RepoSpec struct {
-	RepositoryID           string
-	RepositoryPath         string
-	RepositoryURL          string
-	RepoName               string
-	BaseBranch             string
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string
-	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeID             string
-	WorktreeBranchPrefix   string
-	WorktreeBranchTemplate string
-	WorktreeBranchTicket   string
-	PullBeforeWorktree     bool
-	RemoteSyncHandled      bool
-	RepoSetupScript        string
-	RepoCleanupScript      string
-	CopyFiles              string
+	RepositoryID            string
+	RepositoryPath          string
+	RepositoryURL           string
+	RepoName                string
+	BaseBranch              string
+	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch          string
+	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	ContributionDestination *models.ContributionDestination
+	WorktreeID              string
+	WorktreeBranchPrefix    string
+	WorktreeBranchTemplate  string
+	WorktreeBranchTicket    string
+	PullBeforeWorktree      bool
+	RemoteSyncHandled       bool
+	RepoSetupScript         string
+	RepoCleanupScript       string
+	CopyFiles               string
 	// BranchSlug, when non-empty, suffixes the repo dir so the same repo can
 	// host multiple branch worktrees as siblings within one task. Set by the
 	// orchestrator when buildRepoSpecs detects multiple rows sharing a
@@ -470,6 +487,7 @@ type LaunchOptions struct {
 	AgentProfileID       string
 	OfficeAgentProfileID string
 	ExecutorID           string
+	TurnID               string
 	Prompt               string
 	WorkflowStepID       string
 	StartAgent           bool

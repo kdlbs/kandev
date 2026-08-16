@@ -1,5 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionState } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
@@ -458,13 +460,23 @@ test.describe("Git Changes Panel", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    const session = await openTaskSession(testPage, "Git PR-only Detail Test");
 
     const remoteSha = "d".repeat(40);
     const remoteMessage = "Force-pushed remote commit";
-    const checkoutBranch = execSync("git branch --show-current", {
-      cwd: path.join(backend.tmpDir, "repos", "e2e-repo"),
-      encoding: "utf8",
-    }).trim();
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+    git.createFile("pr-shared-marker.ts", "shared provider checkout commit");
+    git.stageFile("pr-shared-marker.ts");
+    const sharedSha = git.commit("Shared provider checkout commit");
+    const checkoutBranch = git.exec("git branch --show-current").trim();
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("remote-author");
     await apiClient.mockGitHubAddPRs([
@@ -477,9 +489,16 @@ test.describe("Git Changes Panel", () => {
         author_login: "remote-author",
         repo_owner: "testorg",
         repo_name: "testrepo",
+        head_sha: remoteSha,
       },
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 2253, [
+      {
+        sha: sharedSha,
+        message: "Shared provider checkout commit",
+        author_login: "remote-author",
+        author_date: "2026-08-03T12:00:00Z",
+      },
       {
         sha: remoteSha,
         message: remoteMessage,
@@ -506,6 +525,7 @@ test.describe("Git Changes Panel", () => {
         },
       ],
     });
+    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 2253, 1);
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
       owner: "testorg",
@@ -518,14 +538,41 @@ test.describe("Git Changes Panel", () => {
       author_login: "remote-author",
     });
 
-    const session = await openTaskSession(testPage, "Git PR-only Detail Test");
+    await testPage.reload();
+    await session.waitForLoad();
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 20_000 });
     await session.expandCommitsSection();
+    const commitsList = testPage.getByTestId("commits-list");
 
     const row = testPage.getByTestId(`commit-row-${remoteSha.slice(0, 7)}`);
     await expect(row).toBeVisible({ timeout: 20_000 });
+    await expect(row.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "current_pr",
+    );
+    await expect(row.getByTestId("commit-provenance")).toHaveAttribute(
+      "title",
+      "Current PR commit",
+    );
+    const sharedRow = testPage.getByTestId(`commit-row-${sharedSha.slice(0, 7)}`);
+    await expect(sharedRow).toBeVisible({ timeout: 20_000 });
+    await expect(sharedRow.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "pushed",
+    );
+    await expect(testPage.getByTestId("header-remote-contribution-warning")).toHaveCount(0);
+    const commitMessages = await commitsList
+      .locator('[data-testid^="commit-row-"]')
+      .allTextContents();
+    const remoteIndex = commitMessages.findIndex((message) => message.includes(remoteMessage));
+    const sharedIndex = commitMessages.findIndex((message) =>
+      message.includes("Shared provider checkout commit"),
+    );
+    expect(remoteIndex).toBeGreaterThanOrEqual(0);
+    expect(sharedIndex).toBeGreaterThanOrEqual(0);
+    expect(remoteIndex).toBeLessThan(sharedIndex);
     await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
     await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
     await row.hover();
@@ -627,14 +674,27 @@ test.describe("Git Changes Panel", () => {
     test.setTimeout(120_000);
     const profile = await createStandardProfile(apiClient, "Git Reset Profile");
 
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Reset Test", profile.id, {
-      description: "Testing reset to commit",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Reset Test",
+      profile.id,
+      {
+        description: "Testing reset to commit",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
 
     const session = await openTaskSession(testPage, "Git Reset Test");
+    expect(task.session_id, "task must have a session to await").toBeTruthy();
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id as string,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "the initial reset-test turn did not settle before git actions",
+      timeout: 30_000,
+    });
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -696,7 +756,10 @@ test.describe("Git Changes Panel", () => {
     await firstCommitRow.hover();
     const resetButton = firstCommitRow.getByRole("button", { name: "Reset to this commit" });
     await expect(resetButton).toBeVisible({ timeout: 5_000 });
-    await resetButton.click();
+    // The action is rendered inside a group-hover span. Keep the row hovered
+    // for the user-facing check above, then bypass CSS interception while the
+    // stable idle session keeps the row from being replaced by a status push.
+    await resetButton.click({ force: true });
 
     // Confirm the reset in the dialog
     const resetDialog = testPage.getByRole("dialog");
@@ -821,8 +884,12 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
 
-    // Wait for initial load
-    await testPage.waitForTimeout(2_000);
+    await dwell(
+      testPage,
+      2_000,
+      "unverified",
+      "pre-existing spacing before the external-git edits below; the panel is already asserted visible above and no timer was identified behind this, so it is labelled as debt rather than given a cause it does not have",
+    );
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -1225,10 +1292,15 @@ test.describe("Git Changes Panel", () => {
 
     const session = await openTaskSession(testPage, "Git Cumulative Test");
 
-    // Wait for the session to fully initialize including base commit capture.
-    // The captureBaseCommit runs async after agent launch, we need it to complete
-    // before making commits so the cumulative diff works correctly.
-    await testPage.waitForTimeout(3_000);
+    // captureBaseCommit runs asynchronously after agent launch and has to finish
+    // before the commits below, or the cumulative diff is computed against the
+    // wrong base.
+    await dwell(
+      testPage,
+      3_000,
+      "product-timer",
+      "captureBaseCommit runs async after agent launch and publishes nothing when it completes, so the commits below have to be spaced past it",
+    );
 
     // Set up git helper
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
@@ -1263,17 +1335,48 @@ test.describe("Git Changes Panel", () => {
     await expect(session.changes.getByText("Add first line")).toBeVisible({ timeout: 10_000 });
     await expect(session.changes.getByText("Add second line")).toBeVisible({ timeout: 10_000 });
 
+    // The poll below proves a "diff-viewer" panel exists after the click, which
+    // only implicates the click if none existed before it. Nothing in this test
+    // opens one earlier, so this reads as already-true today — it is here so
+    // that stops being an unstated assumption if the surrounding test ever
+    // reuses a session or restores a saved layout.
+    const diffViewerOpen = () =>
+      testPage.evaluate(() => {
+        type Api = { getPanel: (id: string) => unknown };
+        return Boolean(
+          (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__?.getPanel("diff-viewer"),
+        );
+      });
+    expect(await diffViewerOpen(), "no cumulative diff panel before clicking Diff").toBe(false);
+
     // Click the "Diff" button in the header to open the cumulative diff view
     await session.changes.getByRole("button", { name: "Diff" }).click();
 
-    // Wait for diff viewer to load
-    await testPage.waitForTimeout(2_000);
+    // Assert what the click actually opens. Without this the checks below are
+    // vacuous: the two commit texts were already visible before the click and
+    // never go away, and "No changes" is absent from a page where the diff
+    // never opened at all, so all three passed whether or not the button did
+    // anything. The button calls `addDiffViewerPanel()`, which mounts a
+    // dockview panel with id "diff-viewer" -- it is not the Review dialog, as a
+    // first attempt at this assertion assumed and a run disproved.
+    await expect
+      .poll(diffViewerOpen, {
+        timeout: 15_000,
+        message: "the Diff button never opened the cumulative diff panel",
+      })
+      .toBe(true);
 
-    // Verify commits are visible (this proves git changes are tracked)
     await expect(session.changes.getByText("Add first line")).toBeVisible({ timeout: 5_000 });
     await expect(session.changes.getByText("Add second line")).toBeVisible({ timeout: 5_000 });
 
-    // The cumulative diff should NOT show "No changes"
+    // The cumulative diff should NOT show "No changes". A negative has no event
+    // to wait on, so it needs the render window to elapse before sampling.
+    await dwell(
+      testPage,
+      2_000,
+      "negative-assertion",
+      'asserts the cumulative diff never renders its empty state; "No changes" not appearing publishes nothing, so the check has to outlast the dialog\'s own load',
+    );
     await expect(testPage.locator("text=No changes")).not.toBeVisible({ timeout: 5_000 });
   });
 
@@ -1676,7 +1779,18 @@ test.describe("Git Changes Panel", () => {
     ).toHaveAttribute("aria-expanded", "false");
     await expect(localSection.locator('[data-testid^="commit-row-"]')).toHaveCount(6);
     await providerSection.getByTestId("current-pr-commits-section-collapse-toggle").click();
+    await expect(providerSection.locator('[data-commit-provenance="current_pr"]')).toHaveCount(15);
+    await expect(localSection.locator('[data-commit-provenance="local_checkout"]')).toHaveCount(6);
+    await expect(
+      providerSection.locator('[data-commit-provenance="current_pr"]').first(),
+    ).toHaveAttribute("title", "Current PR commit");
+    await expect(
+      localSection.locator('[data-commit-provenance="local_checkout"]').first(),
+    ).toHaveAttribute("title", "Local checkout commit");
     await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
+    await expect(providerSection.locator('[data-testid^="commit-row-"]').first()).toContainText(
+      "Rewritten provider commit 15",
+    );
 
     // A rewritten provider history must not label the preserved checkout as
     // six unpushed commits, and reading the panel must not mutate the checkout.
@@ -1707,6 +1821,8 @@ test.describe("Git Changes Panel", () => {
     const useInfo = driftMenu.getByRole("img", { name: /Use the current PR version/ });
     await useInfo.hover();
     await expect(openTooltip).toContainText("Use the current PR version");
+    await testPage.mouse.move(0, 0);
+    await expect(openTooltip).toBeHidden({ timeout: 5_000 });
     await driftMenu.getByTestId("header-replace-pr-branch").click();
     const resolutionDialog = testPage.getByTestId("remote-contribution-resolution-dialog");
     await expect(resolutionDialog).toBeVisible();
@@ -1814,7 +1930,12 @@ test.describe("Git Changes Panel", () => {
 
     const changes = testPage.getByTestId("changes-panel");
     await expect(changes.getByTestId("commits-section")).toBeVisible({ timeout: 30_000 });
-    await expect(changes.getByText("Current PR commit")).toBeVisible();
+    const currentPRRow = changes.getByTestId(`commit-row-${currentHead.slice(0, 7)}`);
+    await expect(currentPRRow).toBeVisible();
+    await expect(currentPRRow.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "pushed",
+    );
     await expect(changes.getByText("Rewritten provider commit 15")).toHaveCount(0);
     await expect(changes.getByTestId("header-remote-contribution-warning")).toHaveCount(0);
     await expect(changes.getByTestId("remote-contribution-drift-status")).toHaveCount(0);

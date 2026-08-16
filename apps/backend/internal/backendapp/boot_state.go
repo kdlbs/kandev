@@ -82,8 +82,20 @@ func bootInitialState(
 	}
 
 	if route.Route == webapp.RouteSettings {
-		builder.addWorkspaceState(ctx, state, nil)
-		builder.addUserSettingsState(ctx, state, "")
+		// Resolve an active workspace rather than emitting null. The SPA derives
+		// Office-vs-kanban chrome from the active workspace record, so a settings
+		// boot that names no workspace leaves the sidebar unable to tell which
+		// mode it is in until the client's own fetch lands.
+		// One workspace snapshot for both selection and serialisation: listing
+		// twice could name an activeId that a concurrent deletion has already
+		// removed from items.
+		workspaces, ok := builder.listBootWorkspaces(ctx)
+		activeID := ""
+		if ok {
+			activeID = builder.settingsWorkspaceID(ctx, req, workspaces)
+			builder.addWorkspaceStateFrom(workspaces, state, &activeID)
+		}
+		builder.addUserSettingsState(ctx, state, activeID)
 		builder.addSettingsRouteState(ctx, state, route.Path)
 	}
 	// Home and unknown SPA routes both render the full app shell (nav,
@@ -152,14 +164,32 @@ type bootStateBuilder struct {
 }
 
 func (b bootStateBuilder) addWorkspaceState(ctx context.Context, state map[string]any, activeID *string) {
-	if b.p.taskSvc == nil {
+	workspaces, ok := b.listBootWorkspaces(ctx)
+	if !ok {
 		return
+	}
+	b.addWorkspaceStateFrom(workspaces, state, activeID)
+}
+
+// listBootWorkspaces returns the workspace snapshot a boot payload is built
+// from; ok is false when the service is unavailable or the listing fails.
+func (b bootStateBuilder) listBootWorkspaces(ctx context.Context) ([]*taskmodels.Workspace, bool) {
+	if b.p.taskSvc == nil {
+		return nil, false
 	}
 	workspaces, err := b.p.taskSvc.ListWorkspaces(ctx)
 	if err != nil {
 		b.logBootError("list workspaces", err)
-		return
+		return nil, false
 	}
+	return workspaces, true
+}
+
+func (b bootStateBuilder) addWorkspaceStateFrom(
+	workspaces []*taskmodels.Workspace,
+	state map[string]any,
+	activeID *string,
+) {
 	items := make([]taskdto.WorkspaceDTO, 0, len(workspaces))
 	for _, workspace := range workspaces {
 		if workspace == nil {
@@ -175,6 +205,30 @@ func (b bootStateBuilder) addWorkspaceState(ctx context.Context, state map[strin
 		"items":    items,
 		"activeId": active,
 	}
+}
+
+// settingsWorkspaceID resolves the active workspace for a /settings boot:
+// whatever the user last had active, then their stored preference, then the
+// first workspace that exists.
+//
+// Deliberately not filtered to kanban workspaces. Settings is shared chrome —
+// reachable from either mode — so preferring a kanban workspace here would
+// silently switch an Office user's active workspace just by opening Settings.
+func (b bootStateBuilder) settingsWorkspaceID(
+	ctx context.Context,
+	req *http.Request,
+	workspaces []*taskmodels.Workspace,
+) string {
+	settingsWorkspaceID := ""
+	if settings, ok := b.userSettings(ctx); ok {
+		settingsWorkspaceID = settings.Settings.WorkspaceID
+	}
+	return firstValidID(
+		workspaceIDSet(workspaces),
+		readActiveWorkspaceCookie(req),
+		settingsWorkspaceID,
+		firstWorkspaceID(workspaces),
+	)
 }
 
 func (b bootStateBuilder) addUserSettingsState(ctx context.Context, state map[string]any, workspaceID string) {
@@ -669,6 +723,9 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 	if queuedErr != nil {
 		b.logBootError("queued prompt counts", queuedErr)
 	}
+	// Dependency state is derived per read (never stored, so the auto-start gate
+	// can never read a stale value). One batched call for the whole boot payload.
+	dependencyViews := b.p.taskSvc.BuildDependencyViews(ctx, tasks)
 	result := make([]taskdto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		if task == nil {
@@ -710,6 +767,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
 		}
+		taskdto.EnrichTaskDependencies(&dto, bootDependencyProjection(dependencyViews[task.ID]), task)
 		dto.StatusSummary = statusSummaries[task.ID]
 		if dto.StatusSummary != nil {
 			switch {

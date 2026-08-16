@@ -85,6 +85,7 @@ export function jiraIssueWatchPlaceholders(t: TFunction): ScriptPlaceholder[] {
  * instruction rather than as UI copy. Same contract as
  * `DEFAULT_ISSUE_WATCH_PROMPT` in components/github/issue-watch-placeholders.ts.
  */
+// i18n-exempt: default watch prompt, persisted and sent verbatim to the agent.
 export const DEFAULT_JIRA_ISSUE_WATCH_PROMPT = `You have been assigned a JIRA ticket to work on.
 
 **Ticket:** {{issue.url}}

@@ -48,6 +48,7 @@
   "logOut": "Ĺōĝ ōũţ",
   "maxViews_one": "{{count}} ḿàx",
   "maxViews_other": "{{count}} ḿàx",
+  "morePluginItems": "Ḿōŕē ƥĺũĝĩń ĩţēḿś",
   "nestUnder": "Ńēśţ ũńďēŕ {{title}}",
   "newKanbanWorkspace": "Ńēŵ ķàńƀàń ŵōŕķśƥàćē",
   "newOfficeWorkspace": "Ńēŵ ōƒƒĩćē ŵōŕķśƥàćē",
@@ -70,6 +71,7 @@
   "projects": "Ƥŕōĵēćţś",
   "queuedPromptCount_one": "{{count}} qũēũēď ƥŕōḿƥţ",
   "queuedPromptCount_other": "{{count}} qũēũēď ƥŕōḿƥţś",
+  "wipQueuePosition": "Ƥōśĩţĩōń {{position}} ōƒ {{total}} ĩń {{step}} qũēũē",
   "quickChat": "Qũĩćķ Ćĥàţ",
   "quickTerminal": "Qũĩćķ ţēŕḿĩńàĺ",
   "quickChatTerminals": "Ţēŕḿĩńàĺś",
@@ -106,5 +108,7 @@
   "viewLabel": "Vĩēŵ: {{name}}",
   "whatsNew": "Ŵĥàţ'ś ńēŵ",
   "work": "Ŵōŕķ",
-  "workspaceFallback": "Ŵōŕķśƥàćē"
+  "workspaceFallback": "Ŵōŕķśƥàćē",
+  "taskPreferences": "Śĩďēƀàŕ ţàśķ ƥŕēƒēŕēńćēś",
+  "views": "Śĩďēƀàŕ vĩēŵś"
 }

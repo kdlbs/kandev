@@ -31,12 +31,32 @@ test("unarchive restores a quarantined workspace before branch recovery", async 
   fs.utimesSync(root, old, old);
 
   await testPage.goto("/settings/system/data-storage");
-  await testPage.getByTestId("storage-run-now").click();
-  await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
-    "data-job-state",
-    "succeeded",
-  );
-  expect(fs.existsSync(root)).toBe(false);
+  const runNow = testPage.getByTestId("storage-run-now");
+  await expect(runNow).toBeEnabled({ timeout: 30_000 });
+  await runNow.click();
+
+  // Another E2E task can still be releasing host activity when this test
+  // reaches the settings page. The backend correctly returns a force-available
+  // busy response in that case; use the same explicit recovery the UI exposes
+  // instead of waiting for a job that was never accepted.
+  const runAnyway = testPage.getByTestId("storage-run-anyway");
+  await expect
+    .poll(
+      async () => {
+        if ((await runNow.getAttribute("data-job-state")) === "succeeded") return "succeeded";
+        if (await runAnyway.isVisible()) return "busy";
+        return "pending";
+      },
+      { timeout: 30_000, message: "storage maintenance job accepted or marked busy" },
+    )
+    .not.toBe("pending");
+  if ((await runNow.getAttribute("data-job-state")) !== "succeeded") {
+    await runAnyway.click();
+    await expect(runNow).toHaveAttribute("data-job-state", "succeeded", { timeout: 30_000 });
+  }
+  await expect
+    .poll(() => fs.existsSync(root), { timeout: 30_000, message: "quarantined workspace removed" })
+    .toBe(false);
 
   await testPage.goto(`/t/${task.id}`);
   const responsePromise = testPage.waitForResponse((response) =>

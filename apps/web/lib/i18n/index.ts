@@ -18,14 +18,17 @@ import { writeLocaleCookie } from "./cookie";
  */
 export const DEFAULT_LOCALE = "en";
 export const DEFAULT_NAMESPACE = "common";
-export const SUPPORTED_LOCALES = ["en", "pt-pt", "zh-cn", "pseudo"] as const;
+export const SUPPORTED_LOCALES = ["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "pseudo"] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 /** Human-readable labels for the language switcher. */
+// i18n-exempt: fixed endonyms: each locale names itself in its own language, in every UI locale.
 export const LOCALE_LABELS: Record<SupportedLocale, string> = {
   en: "English",
   "pt-pt": "Português (Portugal)",
   "zh-cn": "简体中文",
+  "zh-tw": "繁體中文（台灣）",
+  "zh-hk": "繁體中文（香港）",
   pseudo: "Pseudo (QA)",
 };
 

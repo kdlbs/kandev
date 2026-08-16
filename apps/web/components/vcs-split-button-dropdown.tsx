@@ -117,6 +117,8 @@ export type VcsDropdownItemsProps = {
   aheadCount: number;
   pushDisabled: boolean;
   pullDisabled: boolean;
+  pushDisabledReason?: string;
+  pullDisabledReason?: string;
   showContributionResolution: boolean;
   replaceDisabled: boolean;
   useDisabled: boolean;
@@ -139,6 +141,8 @@ export function VcsDropdownItems({
   aheadCount,
   pushDisabled,
   pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
   showContributionResolution,
   replaceDisabled,
   useDisabled,
@@ -153,7 +157,8 @@ export function VcsDropdownItems({
   onMerge,
 }: VcsDropdownItemsProps) {
   const { t } = useTranslation();
-  const remoteActionsDisabledTitle = t("task:providerHistoryUnavailable");
+  const pushDisabledTitle = pushDisabledReason ?? t("task:divergedActionsUnavailable");
+  const pullDisabledTitle = pullDisabledReason ?? t("task:divergedActionsUnavailable");
   return (
     <DropdownMenuContent align="end" className="w-56">
       <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPR} disabled={disabled}>
@@ -165,7 +170,7 @@ export function VcsDropdownItems({
         className="cursor-pointer gap-3"
         onClick={onPull}
         disabled={disabled || pullDisabled}
-        title={pullDisabled ? remoteActionsDisabledTitle : undefined}
+        title={pullDisabled ? pullDisabledTitle : undefined}
       >
         <IconCloudDownload className="h-4 w-4 text-muted-foreground" />
         <span className="flex-1">{t("integrations:pull")}</span>
@@ -183,7 +188,7 @@ export function VcsDropdownItems({
           aheadCount={aheadCount}
           pushDisabled={pushDisabled}
           onPush={onPush}
-          disabledTitle={remoteActionsDisabledTitle}
+          disabledTitle={pushDisabledTitle}
         />
       )}
       {showContributionResolution && (

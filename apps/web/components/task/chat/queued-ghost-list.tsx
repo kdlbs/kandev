@@ -32,7 +32,9 @@ import {
   QueueSendNowError,
 } from "@/lib/api/domains/queue-api";
 import { useQueue } from "@/hooks/domains/session/use-queue";
+import { useQueuePinned } from "@/hooks/use-queue-pinned";
 import { canMergeWithAbove, QueuedGhostMessage } from "./queued-ghost-message";
+import { useQueuePanelOpenState } from "./use-queue-panel-open-state";
 import { QueuePanelHeader } from "./queued-ghost-panel-header";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
@@ -261,10 +263,12 @@ type QueuePanelDisclosureProps = {
   isLoading: boolean;
   cancellationPending: boolean;
   mergeEnabled: boolean;
+  pinned: boolean;
   onClose: () => void;
   onClear: () => void;
   onDrain: () => void;
   onSendNow: () => void;
+  onTogglePin: () => void;
   onSave: (entryId: string, content: string, refs: EntityReference[]) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
   onMerge: (entryId: string) => Promise<void>;
@@ -284,10 +288,12 @@ function QueuePanelDisclosure({
   isLoading,
   cancellationPending,
   mergeEnabled,
+  pinned,
   onClose,
   onClear,
   onDrain,
   onSendNow,
+  onTogglePin,
   onSave,
   onRemove,
   onMerge,
@@ -311,10 +317,12 @@ function QueuePanelDisclosure({
           isLoading={isLoading}
           cancellationPending={cancellationPending}
           mergeEnabled={mergeEnabled}
+          pinned={pinned}
           onClose={onClose}
           onClear={onClear}
           onDrain={onDrain}
           onSendNow={onSendNow}
+          onTogglePin={onTogglePin}
           onSave={onSave}
           onRemove={onRemove}
           onMerge={onMerge}
@@ -324,21 +332,6 @@ function QueuePanelDisclosure({
       </CollapsibleContent>
     </Collapsible>
   );
-}
-
-function useQueuePanelOpenState(sessionId: string | null, entryCount: number) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [lastSession, setLastSession] = useState(sessionId);
-  const [lastEntryCount, setLastEntryCount] = useState(entryCount);
-  if (sessionId !== lastSession) {
-    setLastSession(sessionId);
-    setIsOpen(false);
-  }
-  if (entryCount !== lastEntryCount) {
-    setLastEntryCount(entryCount);
-    if (entryCount === 0) setIsOpen(false);
-  }
-  return [isOpen, setIsOpen] as const;
 }
 
 /**
@@ -372,8 +365,8 @@ export function QueueAffordance({
     sendAllNow,
     cancellationPending,
   } = useQueue(sessionId);
-  const entryCount = entries.length;
-  const [isOpen, setIsOpen] = useQueuePanelOpenState(sessionId, entryCount);
+  const { value: pinned, toggle: togglePin } = useQueuePinned(sessionId);
+  const [isOpen, setIsOpen] = useQueuePanelOpenState(sessionId, entries.length, pinned);
   const {
     handleSave,
     handleRemove,
@@ -400,7 +393,7 @@ export function QueueAffordance({
   const close = useCallback(() => setIsOpen(false), []);
   useEscToClose(isOpen, close);
 
-  const hasEntries = !!sessionId && entryCount > 0;
+  const hasEntries = !!sessionId && entries.length > 0;
   const chipNode =
     hasEntries && !isOpen ? (
       <QueueChip
@@ -435,10 +428,12 @@ export function QueueAffordance({
         isLoading={isLoading}
         cancellationPending={cancellationPending}
         mergeEnabled={mergeEnabled}
+        pinned={pinned}
         onClose={close}
         onClear={handleClear}
         onDrain={handleDrain}
         onSendNow={handleSendAllNow}
+        onTogglePin={togglePin}
         onSave={handleSave}
         onRemove={handleRemove}
         onMerge={handleMerge}
@@ -515,10 +510,12 @@ type QueuePanelProps = {
   isLoading: boolean;
   cancellationPending: boolean;
   mergeEnabled: boolean;
+  pinned: boolean;
   onClose: () => void;
   onClear: () => void;
   onDrain: () => void;
   onSendNow: () => void;
+  onTogglePin: () => void;
   onSave: (entryId: string, content: string, entityReferences: EntityReference[]) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
   onMerge: (entryId: string) => Promise<void>;
@@ -583,10 +580,12 @@ function QueuePanel({
   isLoading,
   cancellationPending,
   mergeEnabled,
+  pinned,
   onClose,
   onClear,
   onDrain,
   onSendNow,
+  onTogglePin,
   onSave,
   onRemove,
   onMerge,
@@ -623,9 +622,11 @@ function QueuePanel({
         canDrain={canDrain}
         isLoading={isLoading}
         cancellationPending={cancellationPending}
+        pinned={pinned}
         onClear={onClear}
         onDrain={onDrain}
         onSendNow={onSendNow}
+        onTogglePin={onTogglePin}
         onClose={onClose}
       />
       <div

@@ -14,6 +14,7 @@ import type {
   PRCommitDetail,
   TaskCIAutomationOptions,
   TaskCIAutomationPatch,
+  TaskPR,
 } from "../../lib/types/github";
 import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
 import type { SecretListItem, SecretScope } from "../../lib/types/http-secrets";
@@ -39,6 +40,7 @@ import type {
   SSHTestResult,
 } from "../../lib/types/http-ssh";
 import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
+import { dwell } from "./causal-waits";
 
 // --- GitHub Mock Types ---
 
@@ -176,6 +178,25 @@ type CreateTaskOpts = {
   workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
   workspace_group_id?: string;
   attachments?: MessageAttachmentInput[];
+  /** Task IDs this task must wait on. Suppresses the immediate agent launch. */
+  blocked_by?: string[];
+  /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
+  start_when_unblocked?: boolean;
+};
+
+export type TaskDependencyRef = {
+  id: string;
+  title: string;
+  state: string;
+  /** Only present on `depends_on` entries. */
+  status?: "resolved" | "failed" | "pending" | "missing";
+};
+
+export type TaskDependencyProjection = {
+  blocked?: boolean;
+  blocked_reason?: "pending" | "failed" | "unknown";
+  depends_on?: TaskDependencyRef[];
+  blocks?: TaskDependencyRef[];
 };
 
 type TaskRepositoryInput = {
@@ -225,6 +246,10 @@ function buildCreateTaskBody(
   setIf(body, "parent_id", options.parent_id);
   setIf(body, "workspace_mode", options.workspace_mode);
   setIf(body, "workspace_group_id", options.workspace_group_id);
+  setIf(body, "blocked_by", options.blocked_by);
+  if (options.start_when_unblocked !== undefined) {
+    body.start_when_unblocked = options.start_when_unblocked;
+  }
   return body;
 }
 
@@ -248,6 +273,10 @@ type OptionalAgentTaskOpts = {
   workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
   autopilot?: boolean;
   attachments?: MessageAttachmentInput[];
+  /** Task IDs this task must wait on. Suppresses the immediate agent launch. */
+  blocked_by?: string[];
+  /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
+  start_when_unblocked?: boolean;
 };
 
 /** `repositories` (with per-entry branches) takes precedence over the shorthand
@@ -272,6 +301,10 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   setIf(fields, "workspace_mode", opts.workspace_mode);
   if (opts.autopilot) fields.autopilot = true;
   setIf(fields, "attachments", opts.attachments);
+  setIf(fields, "blocked_by", opts.blocked_by);
+  if (opts.start_when_unblocked !== undefined) {
+    fields.start_when_unblocked = opts.start_when_unblocked;
+  }
   return fields;
 }
 
@@ -444,6 +477,10 @@ export class ApiClient {
       /** Existing group required when workspace_mode is shared_group. */
       workspace_group_id?: string;
       attachments?: MessageAttachmentInput[];
+      /** Task IDs this task must wait on. Suppresses the immediate agent launch. */
+      blocked_by?: string[];
+      /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
+      start_when_unblocked?: boolean;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
@@ -654,6 +691,10 @@ export class ApiClient {
       /** Start the task with the immutable autopilot MCP/prompt contract. */
       autopilot?: boolean;
       attachments?: MessageAttachmentInput[];
+      /** Task IDs this task must wait on. Suppresses the immediate agent launch. */
+      blocked_by?: string[];
+      /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
+      start_when_unblocked?: boolean;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -1123,17 +1164,24 @@ export class ApiClient {
     return this.request("POST", "/api/v1/_test/task-sessions", body);
   }
 
+  /**
+   * Seeds an agent message via the e2e harness. `metadata` lands on the
+   * message row; `turnMetadata` is persisted on the ensured turn so specs can
+   * exercise the metadata dialog's `turn_metadata` field.
+   */
   async seedSessionMessage(
     sessionId: string,
     opts: {
       type: string;
       content?: string;
       metadata?: Record<string, unknown>;
+      turnMetadata?: Record<string, unknown>;
     },
   ): Promise<void> {
     const body: Record<string, unknown> = { session_id: sessionId, type: opts.type };
     if (opts.content !== undefined) body.content = opts.content;
     if (opts.metadata !== undefined) body.metadata = opts.metadata;
+    if (opts.turnMetadata !== undefined) body.turn_metadata = opts.turnMetadata;
     await this.request("POST", "/api/v1/_test/messages", body);
   }
 
@@ -1433,6 +1481,20 @@ export class ApiClient {
     });
   }
 
+  async mockGitHubSetPRCommitsFailures(
+    owner: string,
+    repo: string,
+    number: number,
+    failures: number,
+  ): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/pr-commits-failures", {
+      owner,
+      repo,
+      number,
+      failures,
+    });
+  }
+
   async mockGitHubAddPRCommitDetail(
     owner: string,
     repo: string,
@@ -1479,6 +1541,7 @@ export class ApiClient {
   async mockGitHubAssociateTaskPR(data: {
     task_id: string;
     workspace_id?: string;
+    repository_id?: string;
     owner: string;
     repo: string;
     pr_number: number;
@@ -1544,6 +1607,14 @@ export class ApiClient {
       throw new Error(`getTaskPR failed (${res.status}): ${await res.text()}`);
     }
     return res.json();
+  }
+
+  async listTaskPRs(taskId: string): Promise<TaskPR[]> {
+    const response = await this.request<{ task_prs?: Record<string, TaskPR[]> }>(
+      "GET",
+      `/api/v1/github/task-prs?task_ids=${encodeURIComponent(taskId)}`,
+    );
+    return response.task_prs?.[taskId] ?? [];
   }
 
   async mockGitHubSeedPRFeedback(data: {
@@ -1932,6 +2003,8 @@ export class ApiClient {
       id: string;
       task_id: string;
       agent_profile_id?: string;
+      executor_id?: string;
+      executor_profile_id?: string;
       state: string;
       started_at: string;
       task_environment_id?: string;
@@ -1945,6 +2018,54 @@ export class ApiClient {
     total: number;
   }> {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
+  }
+
+  /**
+   * Read a task's dependency projection. `blocked_reason` is `pending`,
+   * `failed`, or `unknown`; the last one means the store could not be read and
+   * the gate failed closed, so it must not be treated as unblocked.
+   */
+  async getTaskDependencies(taskId: string): Promise<TaskDependencyProjection> {
+    return this.request("GET", `/api/v1/tasks/${taskId}`);
+  }
+
+  /** Record "taskId is blocked by dependsOnTaskId". */
+  async addTaskDependency(
+    taskId: string,
+    dependsOnTaskId: string,
+  ): Promise<TaskDependencyProjection> {
+    return this.request("POST", `/api/v1/tasks/${taskId}/dependencies`, {
+      depends_on_task_id: dependsOnTaskId,
+    });
+  }
+
+  /**
+   * Raw add, for asserting the rejection path. A cycle answers 409 with a
+   * `cycle` array; the typed helper above would throw the body away.
+   */
+  async rawAddTaskDependency(taskId: string, dependsOnTaskId: string): Promise<Response> {
+    return this.rawRequest("POST", `/api/v1/tasks/${taskId}/dependencies`, {
+      depends_on_task_id: dependsOnTaskId,
+    });
+  }
+
+  /** Remove an edge. Removing one that is not there is a success no-op. */
+  async removeTaskDependency(
+    taskId: string,
+    dependsOnTaskId: string,
+  ): Promise<TaskDependencyProjection> {
+    return this.request("DELETE", `/api/v1/tasks/${taskId}/dependencies/${dependsOnTaskId}`);
+  }
+
+  async ensureTaskSession(taskId: string): Promise<{
+    success: boolean;
+    task_id: string;
+    session_id?: string;
+    state: string;
+    source: string;
+    newly_created: boolean;
+  }> {
+    return this.request("POST", `/api/v1/tasks/${taskId}/sessions/ensure`);
   }
 
   async setPrimarySession(sessionId: string): Promise<void> {
@@ -2202,6 +2323,25 @@ export class ApiClient {
     });
   }
 
+  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-model`, {
+      model_id: modelId,
+    });
+  }
+
+  async setSessionMode(sessionId: string, modeId: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-mode`, {
+      mode_id: modeId,
+    });
+  }
+
+  async setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<void> {
+    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-config-option`, {
+      config_id: configId,
+      value,
+    });
+  }
+
   async queueMessage(
     taskId: string,
     sessionId: string,
@@ -2219,6 +2359,10 @@ export class ApiClient {
   /** Removes every pending queued message for a session (message.queue.cancel). */
   async clearQueue(sessionId: string): Promise<void> {
     await this.wsRequest("message.queue.cancel", { session_id: sessionId });
+  }
+
+  async getQueueStatus(sessionId: string): Promise<{ count: number }> {
+    return this.wsRequest("message.queue.get", { session_id: sessionId });
   }
 
   // --- Integration config seeding (real API, not mock) ---
@@ -2279,14 +2423,18 @@ export class ApiClient {
    */
   async waitForIntegrationAuthHealthy(
     integration: "jira" | "linear" | "sentry",
-    options: number | { timeoutMs?: number; workspaceId?: string } = 5_000,
+    options: number | { timeoutMs?: number; workspaceId?: string } = 60_000,
   ): Promise<void> {
-    const timeoutMs = typeof options === "number" ? options : (options.timeoutMs ?? 5_000);
+    const timeoutMs = typeof options === "number" ? options : (options.timeoutMs ?? 60_000);
     const workspaceId = typeof options === "number" ? undefined : options.workspaceId;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (await this.integrationReportsHealthy(integration, workspaceId)) return;
-      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      await dwell(
+        100,
+        "poll-interval",
+        "sampling interval for the auth-health loop above; this client has no Page, and the 90s health poller updates the record without publishing anything it can subscribe to",
+      );
     }
     throw new Error(`${integration} config never reported lastOk: true within ${timeoutMs}ms`);
   }
@@ -2298,20 +2446,27 @@ export class ApiClient {
     integration: "jira" | "linear" | "sentry",
     workspaceId?: string,
   ): Promise<boolean> {
-    if (integration === "sentry") {
-      const path = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
+    try {
+      if (integration === "sentry") {
+        const path = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
+        const res = await this.rawRequest("GET", path);
+        if (!res.ok || res.status !== 200) return false;
+        const body = (await res.json()) as {
+          instances?: Array<{ hasSecret?: boolean; lastOk?: boolean }>;
+        };
+        return (body.instances ?? []).some((i) => Boolean(i.hasSecret) && Boolean(i.lastOk));
+      }
+      const path = await this.withActiveWorkspace(`/api/v1/${integration}/config`, workspaceId);
       const res = await this.rawRequest("GET", path);
       if (!res.ok || res.status !== 200) return false;
-      const body = (await res.json()) as {
-        instances?: Array<{ hasSecret?: boolean; lastOk?: boolean }>;
-      };
-      return (body.instances ?? []).some((i) => Boolean(i.hasSecret) && Boolean(i.lastOk));
+      const cfg = (await res.json()) as { hasSecret?: boolean; lastOk?: boolean };
+      return Boolean(cfg.hasSecret) && Boolean(cfg.lastOk);
+    } catch {
+      // The auth-health probe runs while a worker backend can be restarting.
+      // Treat a refused connection like any other not-yet-healthy response so
+      // the bounded poll can observe the recovered backend.
+      return false;
     }
-    const path = await this.withActiveWorkspace(`/api/v1/${integration}/config`, workspaceId);
-    const res = await this.rawRequest("GET", path);
-    if (!res.ok || res.status !== 200) return false;
-    const cfg = (await res.json()) as { hasSecret?: boolean; lastOk?: boolean };
-    return Boolean(cfg.hasSecret) && Boolean(cfg.lastOk);
   }
 
   // --- Azure DevOps Mock Control ---
@@ -2674,6 +2829,7 @@ export class ApiClient {
     idempotencyKey?: string;
     errorMessage?: string;
     requestedAt?: string;
+    scheduledRetryAt?: string;
     claimedAt?: string;
     finishedAt?: string;
   }): Promise<{ run_id: string }> {
@@ -2689,6 +2845,7 @@ export class ApiClient {
     if (opts.idempotencyKey !== undefined) payload.idempotency_key = opts.idempotencyKey;
     if (opts.errorMessage !== undefined) payload.error_message = opts.errorMessage;
     if (opts.requestedAt !== undefined) payload.requested_at = opts.requestedAt;
+    if (opts.scheduledRetryAt !== undefined) payload.scheduled_retry_at = opts.scheduledRetryAt;
     if (opts.claimedAt !== undefined) payload.claimed_at = opts.claimedAt;
     if (opts.finishedAt !== undefined) payload.finished_at = opts.finishedAt;
     return this.request("POST", "/api/v1/_test/runs", payload);

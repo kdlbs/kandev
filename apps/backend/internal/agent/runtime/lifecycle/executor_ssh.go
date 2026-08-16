@@ -191,6 +191,7 @@ func (r *SSHExecutor) workdirRoot(md map[string]interface{}) string {
 // backend restart), reuse the resumed SSH client + forwarder + remote pid
 // instead of starting a second remote agentctl on top of the live one.
 func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	baseCtx := preparationContext(ctx)
 	resumed, ok := r.resumedStateForCreate(req)
 	if ok {
 		return r.buildResumedInstance(req, resumed), nil
@@ -198,12 +199,15 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
 		return nil, fmt.Errorf("ssh: validate remote contributions: %w", err)
 	}
+	if _, err := validateContributionDestinations(req.ContributionDestinations); err != nil {
+		return nil, fmt.Errorf("ssh: validate contribution destinations: %w", err)
+	}
 
 	target, err := r.targetFromMetadata(req.Metadata)
 	if err != nil {
 		return nil, err
 	}
-	client, err := dialSSH(ctx, target)
+	client, err := dialSSH(baseCtx, target)
 	if err != nil {
 		return nil, fmt.Errorf("ssh: connect to %s@%s: %w", target.User, target.Host, err)
 	}
@@ -214,36 +218,38 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		}
 	}()
 	r.report(req.OnProgress, "Connecting to SSH host", PrepareStepCompleted, "")
-	if err := r.preflightGitHubCredentialBroker(ctx, client, req, SSHRemotePlatform{}); err != nil {
+	if err := r.preflightGitHubCredentialBroker(baseCtx, client, req, SSHRemotePlatform{}); err != nil {
 		return nil, err
 	}
 
-	agentctlBin, platform, err := r.prepareRemoteHost(ctx, client, req)
+	agentctlBin, platform, err := r.prepareRemoteHost(baseCtx, client, req)
 	if err != nil {
 		return nil, err
 	}
 
 	workdir := r.workdirRoot(req.Metadata)
-	taskDir, err := r.prepareRemoteTaskDir(ctx, client, workdir, req)
+	taskDir, err := r.prepareRemoteTaskDir(baseCtx, client, workdir, req)
 	if err != nil {
 		return nil, err
 	}
-	r.maybeUploadCredentials(ctx, client, req, platform)
-	if err := r.runPrepareScript(ctx, client, taskDir, req, platform, agentctlBin); err != nil {
+	r.maybeUploadCredentials(baseCtx, client, req, platform)
+	if err := r.runPrepareScript(baseCtx, client, taskDir, req, platform, agentctlBin); err != nil {
 		return nil, err
 	}
-	if err := r.verifyPrimaryCheckout(ctx, client, taskDir, req, platform); err != nil {
+	launchCtx, launchCancel := withLaunchPhaseTimeout(baseCtx)
+	defer launchCancel()
+	if err := r.verifyPrimaryCheckout(launchCtx, client, taskDir, req, platform); err != nil {
 		return nil, err
 	}
-	sessionDir, err := r.prepareRemoteSessionDir(ctx, client, taskDir, req)
+	sessionDir, err := r.prepareRemoteSessionDir(launchCtx, client, taskDir, req)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.preflightAgentBinary(ctx, client, req, platform); err != nil {
+	if err := r.preflightAgentBinary(launchCtx, client, req, platform); err != nil {
 		return nil, err
 	}
 
-	port, pid, fwd, authToken, err := r.startAndForwardAgentctl(ctx, client, agentctlBin, taskDir, sessionDir, req, platform)
+	port, pid, fwd, authToken, err := r.startAndForwardAgentctl(launchCtx, client, agentctlBin, taskDir, sessionDir, req, platform)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +381,10 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	// Keep only the managed broker values in the long-lived remote process.
 	// sshAgentctlLaunchEnv adds the bootstrap credentials required for the
 	// authenticated control handshake without forwarding profile secrets.
-	env := sshAgentctlLaunchEnv(managedGitHubBrokerEnv(req.Env), nonce)
+	env := sshAgentctlLaunchEnv(
+		managedGitCredentialBrokerEnv(sshRemoteContributionEnv(req, agentctlBin)),
+		nonce,
+	)
 	shell := sshShellForRemote(req.Metadata, platform)
 	controlPort, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, env, r.logger)
 	if err != nil {
@@ -393,7 +402,9 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 		return 0, 0, nil, "", ierr
 	}
-	instancePort, ierr := createRemoteAgentInstance(ctx, client, controlPort, taskDir, req, authToken, r.logger)
+	instancePort, ierr := createRemoteAgentInstance(
+		ctx, client, controlPort, taskDir, agentctlBin, req, authToken, r.logger,
+	)
 	if ierr != nil {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 		r.report(req.OnProgress, "Creating agent instance", PrepareStepFailed, ierr.Error())

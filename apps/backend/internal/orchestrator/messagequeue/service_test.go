@@ -849,9 +849,10 @@ func TestRestoreSession(t *testing.T) {
 	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
 
 	require.NoError(t, svc.RestoreSession(ctx, "s", []QueuedMessage{*original}, &PendingMove{
-		TaskID:         "task-1",
-		WorkflowStepID: "step-a",
-		QueuedAt:       original.QueuedAt,
+		TaskID:          "task-1",
+		WorkflowStepID:  "step-a",
+		QueuedAt:        original.QueuedAt,
+		SenderSessionID: "sender-s",
 	}))
 
 	status := svc.GetStatus(ctx, "s")
@@ -865,6 +866,7 @@ func TestRestoreSession(t *testing.T) {
 	move, ok := svc.TakePendingMove(ctx, "s")
 	require.True(t, ok)
 	assert.Equal(t, "step-a", move.WorkflowStepID)
+	assert.Equal(t, "sender-s", move.SenderSessionID)
 }
 
 func TestPendingMove(t *testing.T) {
@@ -872,13 +874,14 @@ func TestPendingMove(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-2", Position: 3})
+		svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-2", Position: 3, SenderSessionID: "sender-s"})
 
 		got, ok := svc.TakePendingMove(ctx, "s")
 		require.True(t, ok)
 		assert.Equal(t, "t1", got.TaskID)
 		assert.Equal(t, "step-2", got.WorkflowStepID)
 		assert.Equal(t, 3, got.Position)
+		assert.Equal(t, "sender-s", got.SenderSessionID)
 		assert.NotZero(t, got.QueuedAt)
 
 		_, ok = svc.TakePendingMove(ctx, "s")

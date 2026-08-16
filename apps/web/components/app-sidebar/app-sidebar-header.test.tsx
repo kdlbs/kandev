@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WorkspaceScopeProvider } from "@/components/workspace-scope-provider";
 
 const setWorkspacePickerOpen = vi.fn();
 
@@ -12,6 +13,7 @@ const state = {
       { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
     ],
   },
+  features: { office: true },
   appSidebar: { workspacePickerOpen: false },
   setWorkspacePickerOpen,
 };
@@ -42,7 +44,9 @@ import { AppSidebarHeader } from "./app-sidebar-header";
 function renderHeader(collapsed = false) {
   return render(
     <TooltipProvider>
-      <AppSidebarHeader collapsed={collapsed} onToggleCollapse={vi.fn()} />
+      <WorkspaceScopeProvider>
+        <AppSidebarHeader collapsed={collapsed} onToggleCollapse={vi.fn()} />
+      </WorkspaceScopeProvider>
     </TooltipProvider>,
   );
 }

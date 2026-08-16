@@ -366,19 +366,29 @@ func (b bootStateBuilder) officeState(ctx context.Context, activeID string) map[
 	projects := b.officeProjects(ctx, activeID)
 	inboxItems, inboxCount := b.officeInbox(ctx, activeID)
 	dashboard := b.officeDashboard(ctx, activeID)
+	// Workspace-scoped collections ship keyed by workspace id, matching the
+	// store shape in lib/state/slices/office/types.ts. An empty activeID means
+	// no office workspace resolved, so every map stays empty rather than
+	// keying data under "".
+	byActive := func(value any) map[string]any {
+		if activeID == "" {
+			return map[string]any{}
+		}
+		return map[string]any{activeID: value}
+	}
 	return map[string]any{
-		"agentProfiles":  agents,
-		"skills":         []any{},
-		"projects":       projects,
-		"approvals":      []any{},
-		"activity":       []any{},
-		"costSummary":    nil,
-		"budgetPolicies": []any{},
-		"routines":       []any{},
-		"inboxItems":     inboxItems,
-		"inboxCount":     inboxCount,
-		"runs":           []any{},
-		"dashboard":      dashboard,
+		"agentProfilesByWorkspaceId": byActive(agents),
+		"skills":                     []any{},
+		"projectsByWorkspaceId":      byActive(projects),
+		"approvals":                  []any{},
+		"activity":                   []any{},
+		"costSummary":                nil,
+		"budgetPolicies":             []any{},
+		"routines":                   []any{},
+		"inboxItemsByWorkspaceId":    byActive(inboxItems),
+		"inboxCountByWorkspaceId":    byActive(inboxCount),
+		"runs":                       []any{},
+		"dashboardByWorkspaceId":     byActive(dashboard),
 		"tasks": map[string]any{
 			"items":          []any{},
 			"filters":        map[string]any{"statuses": []any{}, "priorities": []any{}, "assigneeIds": []any{}, "projectIds": []any{}, "search": ""},
@@ -574,6 +584,8 @@ func mapKanbanStepState(step taskdto.WorkflowStepDTO) map[string]any {
 		"show_in_command_panel": step.ShowInCommandPanel,
 		"agent_profile_id":      nullString(step.AgentProfileID),
 		"stage_type":            nullString(step.StageType),
+		"wip_limit":             step.WIPLimit,
+		"pull_from_step_id":     nullString(step.PullFromStepID),
 	}
 }
 
@@ -606,6 +618,9 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"primarySessionState":         task.PrimarySessionState,
 		"primarySessionPendingAction": task.PrimarySessionPendingAction,
 		"taskPendingAction":           task.TaskPendingAction,
+		"wipAdmitted":                 task.WIPAdmitted,
+		"queuedForStepId":             nullString(task.QueuedForStepID),
+		"queuedAt":                    task.QueuedAt,
 		"interrupted":                 task.Interrupted,
 		"statusSummary":               task.StatusSummary,
 		"sessionCount":                task.SessionCount,
@@ -613,7 +628,32 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"parentTaskId":                nullString(task.ParentID),
 		"updatedAt":                   task.UpdatedAt,
 		"createdAt":                   task.CreatedAt,
+		// Dependency projection. This mapper is a camelCase whitelist writing
+		// straight into the frontend store shape, so a new DTO field is invisible
+		// to the boot payload until it is listed here — the board badge and the
+		// dependency chip both read these on first paint.
+		"blocked":            task.Blocked,
+		"blockedReason":      nullString(task.BlockedReason),
+		"dependsOn":          dependencyRefStates(task.DependsOn),
+		"blocks":             dependencyRefStates(task.Blocks),
+		"startWhenUnblocked": task.StartWhenUnblocked,
 	}
+}
+
+// dependencyRefStates maps dependency edge entries into the store shape. Returns
+// an empty slice rather than nil so the client reads "no edges" instead of
+// "unknown" and does not keep a stale badge.
+func dependencyRefStates(refs []taskdto.TaskDependencyRefDTO) []map[string]any {
+	out := make([]map[string]any, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, map[string]any{
+			"id":      ref.ID,
+			"title":   ref.Title,
+			"state":   ref.State,
+			statusKey: ref.Status,
+		})
+	}
+	return out
 }
 
 // mapSidebarViews maps sidebar views to the SPA boot shape.

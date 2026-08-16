@@ -58,6 +58,7 @@
   "noRepositoriesAvailableInWorkspace": "Não há repositórios disponíveis nesta área de trabalho",
   "noRepository": "Sem repositório",
   "optional": "(opcional)",
+  "pinQueuedMessages": "Afixar fila de mensagens",
   "providerQuotaModel": "Modelo: {{model}}",
   "providerQuotaProviderFallback": "Fornecedor",
   "providerQuotaReset": "A capacidade é reposta {{resetAt}}.",
@@ -113,6 +114,9 @@
   "sendNowAttachmentOverflow": "Os anexos combinados excedem os limites da mensagem.",
   "sendNowReferenceOverflow": "As referências a entidades combinadas excedem o limite da mensagem.",
   "technicalDetails": "Detalhes técnicos",
+  "managedRuntimeNpmTitle": "O npm não conseguiu preparar o runtime",
+  "managedRuntimeNpmBody": "O Kandev atualizou os dados do pacote e repetiu o mesmo runtime uma vez.",
+  "managedRuntimeRetry": "Repetir runtime",
   "theAssociatedWorktree": "O worktree associado",
   "theTaskAndItsData": "A tarefa e os respetivos dados",
   "thisActionCannotBeUndone": "Esta ação não pode ser anulada.",
@@ -128,6 +132,7 @@
   "transientRetryReasonProviderOverloaded": "Fornecedor sobrecarregado",
   "transientRetryReasonProviderUnavailable": "Fornecedor temporariamente indisponível",
   "transientRetryReasonRateLimited": "Limite de pedidos atingido",
+  "transientRetryReasonAgentTransportLost": "Ligação ao agente perdida",
   "transientRetryReasonGeneric": "Erro do fornecedor",
   "transientRetryIn": "A repetir em {{countdown}}",
   "transientRetryNow": "A repetir agora…",
@@ -135,5 +140,6 @@
   "transientRetryAttempt": "Tentativa {{attempt}} de {{maxAttempts}}",
   "transientRetryProviderModel": "{{provider}} · {{model}}",
   "transientRetryProvider": "Fornecedor: {{provider}}",
-  "transientRetryModel": "Modelo: {{model}}"
+  "transientRetryModel": "Modelo: {{model}}",
+  "unpinQueuedMessages": "Desafixar fila de mensagens"
 }

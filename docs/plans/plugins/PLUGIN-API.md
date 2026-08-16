@@ -39,12 +39,15 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    initialization finishes. Slow or failed reloads do not by themselves revoke
    open or saved task panels. On explicit plugin disable/uninstall the host calls
    `destroy?.()`, removes the plugin's registrations, and closes its panels.
-   Each initialization attempt is transactional: failure or timeout unregisters
-   its partial contributions, aborts plugin-owned work, and fences callbacks from
-   the expired generation. The same generation owns host-created subscriptions,
+   Each initialization attempt is transactional for plugin-owned runtime state:
+   failure or timeout aborts plugin-owned work and fences callbacks from the
+   expired generation. The same generation owns host-created subscriptions,
    modal and task-link handles, toasts, and review surfaces; the loader closes or
    unsubscribes them before calling `destroy` exactly once. Requests and callbacks
-   from an expired generation cannot mutate the replacement generation.
+   from an expired generation cannot mutate the replacement generation. Failure or
+   timeout does **not** unregister `registry` contributions (nav items, routes,
+   etc.) already made before the failure — those persist, and only the plugin's
+   lifecycle status becomes failed, until the plugin's *next* load revokes them.
 
 ## Global entry point
 
@@ -560,16 +563,23 @@ own write).
 // React. Unknown/missing names render a puzzle glyph in the sidebar.
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
-// the first-party integration links (GitHub, Jira, ...). Hosts predating a
-// section value simply don't render items targeting it (additive change).
+// the first-party integration links (GitHub, Jira, ...); "sidebar-footer"
+// renders as an icon button in the sidebar footer's icon row and as a
+// labelled row in the phone menu's Utilities group, subject to the footer's
+// inline budget — an over-budget item is reached through the footer's
+// overflow menu instead of an inline button; "settings" is accepted but
+// renders on no surface. Hosts predating a section value, or seeing an
+// unrecognised one, simply degrade to "main"'s placement — nothing is ever
+// silently dropped.
 type PluginIcon = string | React.ComponentType<{ className?: string }>;
+export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
 
 interface NavItem {
   id: string;
   label: string;
   path: string;
   icon?: PluginIcon;
-  section?: "main" | "settings" | "integrations";
+  section?: PluginNavSection;
 }
 
 // Configuration for the kandev-style title bar the host renders above a plugin
@@ -629,7 +639,8 @@ interface PluginRegistry {
   // "settings-nav", "chat-input-actions", "task-create-input-actions",
   // "new-session-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
-  // "plugin-settings", "task-card-indicators", and "task-card-tags".
+  // "plugin-settings", "task-card-indicators", "task-card-tags", and
+  // "sidebar-workspace-actions".
   // "task-card-indicators" renders a small icon/badge beside the PR status
   // icon on every kanban card and forwards
   // `{ taskId, workspaceId, workflowStepId }` as `slotProps`. Not a closed
@@ -653,6 +664,12 @@ interface PluginRegistry {
   // controls) and forwards `{ workspaceId, workspaceLabel, currentPage }`. It is
   // the app-wide, task-agnostic counterpart to "chat-top-bar", so it carries no
   // task/session ids.
+  // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
+  // Terminal and Quick Chat actions in the desktop sidebar's New Task row and
+  // in the shared phone navigation sheet. It forwards
+  // `SidebarWorkspaceActionsSlotProps` as `slotProps`, with `presentation` set
+  // to "desktop" or "mobile". The mobile presentation must use a touch target
+  // of at least 44px in its active dimension.
   // Resolving a session id to an agent/ACP transcript id (e.g. to key
   // tokscale cost data on a session) is the plugin's job, done server-side in
   // the plugin backend via the Host data API; the host only propagates ids.

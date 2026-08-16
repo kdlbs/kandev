@@ -42,9 +42,13 @@ import {
 } from "./changes-panel-helpers";
 import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
+import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
 import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
-import { remoteContributionActionPolicy } from "@/hooks/domains/session/remote-contribution-relation";
+import {
+  remoteContributionActionPolicy,
+  remoteContributionActionReasonKey,
+} from "@/hooks/domains/session/remote-contribution-relation";
 import {
   buildRemoteContributionResolutionTarget,
   type RemoteContributionResolutionTarget,
@@ -53,6 +57,7 @@ import { useRemoteContributionResolution } from "./use-remote-contribution-resol
 import { useTranslation } from "react-i18next";
 
 function useChangesPanelStoreData() {
+  const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useEnvironmentSessionId();
   const taskTitle = useAppStore((state) => {
@@ -65,9 +70,12 @@ function useChangesPanelStoreData() {
   const activeSessionMetadata = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.metadata : undefined,
   );
+  // `t` is a dependency even though the helper resolves through the module-level
+  // translator: without it the memo returns the labels built under the previous
+  // locale and the panel never restates them.
   const gitCredentialDisplay = useMemo(
     () => getGitCredentialDisplay(activeSessionMetadata),
-    [activeSessionMetadata],
+    [activeSessionMetadata, t],
   );
   return {
     activeTaskId,
@@ -90,8 +98,6 @@ export type ChangesPanelBodyProps = {
   relation: RemoteContributionRelation;
   resolution: ReturnType<typeof useRemoteContributionResolution>;
   resolutionTarget: RemoteContributionResolutionTarget | null;
-  providerCommitsLoading: boolean;
-  providerCommitsError: string | null;
   providerPRNumber: number | undefined;
   pushDisabled: boolean;
   pullDisabled: boolean;
@@ -154,18 +160,19 @@ function usePerRepoCallbacks(
   vcsDialogs: ReturnType<typeof useVcsDialogs>,
   gitHandlers: ReturnType<typeof useChangesGitHandlers>,
 ) {
+  const { t } = useTranslation();
   return useMemo(
     () => ({
       onRepoStageAll: (repo: string) => {
         gitHandlers.handleGitOperation(
           () => git.stage(undefined, repo),
-          repo ? `Stage all (${repo})` : "Stage all",
+          gitOperationLabel(t, "task:stageAll", repo),
         );
       },
       onRepoUnstageAll: (repo: string) => {
         gitHandlers.handleGitOperation(
           () => git.unstage(undefined, repo),
-          repo ? `Unstage all (${repo})` : "Unstage all",
+          gitOperationLabel(t, "task:unstageAll", repo),
         );
       },
       onRepoCommit: (repo: string) => vcsDialogs.openCommitDialog(repo),
@@ -285,7 +292,14 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
       repo: taskPR.repo,
       repository_name: useRepositoryKeys ? selectedPRRepositoryName : undefined,
     }));
-  }, [prCommitsList, workspaceId, taskPR?.owner, taskPR?.repo, selectedPRRepositoryName]);
+  }, [
+    prCommitsList,
+    workspaceId,
+    taskPR?.owner,
+    taskPR?.repo,
+    selectedPRRepositoryName,
+    useRepositoryKeys,
+  ]);
   const { prFiles, prDiffFiles } = useMemo(
     () =>
       buildChangesPanelPRData({
@@ -320,8 +334,6 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
     prs,
     repositoryName: relationState.repositoryName,
     selectedPR: taskPR,
-    providerCommitsLoading: relationState.loading,
-    providerCommitsError: relationState.error,
     refreshProviderEvidence: relationState.refreshProviderEvidence,
   };
 }
@@ -376,6 +388,10 @@ export function useChangesPanelData() {
     () => remoteContributionActionPolicy(prData.relation),
     [prData.relation],
   );
+  const pullDisabledReason = useMemo(() => {
+    const key = remoteContributionActionReasonKey(prData.relation, "pull");
+    return key ? t(key) : undefined;
+  }, [prData.relation, t]);
   const vcsDialogs = useVcsDialogs();
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);
@@ -436,6 +452,7 @@ export function useChangesPanelData() {
     resolutionTarget,
     pushDisabled: remoteActionPolicy.pushDisabled,
     pullDisabled: remoteActionPolicy.pullDisabled,
+    pullDisabledReason,
     ...prData,
   };
 }
@@ -462,8 +479,6 @@ export function buildChangesPanelBodyProps(
     relation: data.relation,
     resolution: data.resolution,
     resolutionTarget: data.resolutionTarget,
-    providerCommitsLoading: data.providerCommitsLoading,
-    providerCommitsError: data.providerCommitsError,
     providerPRNumber: data.selectedPR?.pr_number,
     pushDisabled: data.pushDisabled,
     pullDisabled: data.pullDisabled,

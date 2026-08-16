@@ -398,7 +398,7 @@ func (c *Client) readUpdatesStream(
 
 	var lastErr error
 	defer func() {
-		// Clean up pending requests BEFORE draining the worker. On a
+		// Clean up this connection's pending requests BEFORE draining the worker. On a
 		// connection drop mid-cancel, a worker handler
 		// (orchestrator.handleAgentReady) can block acquiring the per-session
 		// cancelInFlight guard that an in-flight Service.CancelAgent holds
@@ -408,8 +408,8 @@ func (c *Client) readUpdatesStream(
 		// the blocked handler finish and the worker exit. Draining first
 		// (<-workerDone) would wait on that handler forever, so cleanup could
 		// never run — the exact deadlock class this stream rework fixes, but on
-		// the disconnect path.
-		c.cleanupPendingRequests()
+		// the disconnect path. A replacement stream's requests remain pending.
+		c.cleanupPendingRequests(conn)
 
 		// Stop the worker and wait for the in-flight handler to unwind before
 		// signaling disconnect, so the drain barrier semantics callers rely on
@@ -418,7 +418,12 @@ func (c *Client) readUpdatesStream(
 		<-workerDone
 
 		c.mu.Lock()
-		c.agentStreamConn = nil
+		// A startup retry can install a replacement connection before the
+		// first reader's deferred cleanup runs. Only the reader that owns the
+		// current connection may clear the shared handle.
+		if c.agentStreamConn == conn {
+			c.agentStreamConn = nil
+		}
 		c.mu.Unlock()
 		if err := conn.Close(); err != nil {
 			c.logger.Debug("failed to close updates websocket", zap.Error(err))

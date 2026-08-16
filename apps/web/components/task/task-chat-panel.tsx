@@ -23,6 +23,7 @@ import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
 import { ClarificationInputOverlay } from "./chat/clarification-input-overlay";
+import { useComposerAgentStartHint } from "./chat/use-composer-agent-start-hint";
 import { ResizeHandle } from "./chat/resize-handle";
 import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 import { PanelSearchBar } from "@/components/search/panel-search-bar";
@@ -170,6 +171,13 @@ type TaskChatPanelProps = {
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId?: string | null;
   taskId?: string | null;
+  /**
+   * Task this panel belongs to, independent of whether it has a session yet.
+   * Only the status row uses it, so a task with no session still shows its
+   * dependency and autopilot chips. `taskId` above stays session-gated because
+   * it also drives plan mode, the composer, and read tracking.
+   */
+  statusTaskId?: string | null;
   onOpenFile?: (path: string) => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
@@ -193,6 +201,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
   taskId: taskIdHint = null,
+  statusTaskId = null,
   onOpenFile,
   showRequestChangesTooltip = false,
   onRequestChangesTooltipDismiss,
@@ -232,6 +241,12 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     isVisible,
     groupedItems,
     isInitialMessagesLoading,
+  );
+  const showAgentStartHint = useComposerAgentStartHint(
+    resolvedSessionId,
+    session?.state,
+    allMessages,
+    footerActionMessages,
   );
   const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef);
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
@@ -414,6 +429,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         lastPromptScrollDirection={scrollDirection}
         showScrollToStart={showScrollToStartButton}
         onScrollToStart={scrollToStart}
+        statusTaskId={statusTaskId ?? taskIdHint}
+        showAgentStartHint={showAgentStartHint}
       />
     </PanelRoot>
   );
@@ -479,8 +496,16 @@ type ChatFooterProps = {
   lastPromptScrollDirection: "up" | "down";
   showScrollToStart: boolean;
   onScrollToStart: () => void;
+  statusTaskId: string | null;
+  /** Recovered-idle sessions render the composer hint (see ChatInputArea). */
+  showAgentStartHint: boolean;
 };
 
+/**
+ * Composer footer: renders the chat input area (or the read-only archived
+ * banner) and forwards the recovered-idle agent-start-hint visibility from
+ * the panel down to the input.
+ */
 function ChatFooter({
   isArchived,
   chatInputRef,
@@ -498,6 +523,8 @@ function ChatFooter({
   lastPromptScrollDirection,
   showScrollToStart,
   onScrollToStart,
+  statusTaskId,
+  showAgentStartHint,
 }: ChatFooterProps) {
   const { t } = useTranslation();
   if (isArchived) {
@@ -524,6 +551,8 @@ function ChatFooter({
       lastPromptScrollDirection={lastPromptScrollDirection}
       showScrollToStart={showScrollToStart}
       onScrollToStart={onScrollToStart}
+      statusTaskId={statusTaskId}
+      showAgentStartHint={showAgentStartHint}
     />
   );
 }

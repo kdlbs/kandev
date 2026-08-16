@@ -11,6 +11,10 @@ import {
 } from "@tabler/icons-react";
 import { Card } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
+import {
+  selectOfficeAgentProfiles,
+  selectOfficeDashboard,
+} from "@/lib/state/slices/office/selectors";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import * as officeApi from "@/lib/api/domains/office-api";
 import { normalizeActivityEntry } from "@/lib/api/domains/office-activity-normalize";
@@ -36,6 +40,7 @@ function formatMonthSpend(subcents: number): string {
 
 type OfficePageClientProps = {
   initialDashboard?: DashboardData | null;
+  initialWorkspaceId?: string | null;
 };
 
 const EMPTY_METRICS = {
@@ -221,11 +226,11 @@ function SubscriptionUsageCard({ agents }: { agents: AgentProfile[] }) {
   );
 }
 
-export function OfficePageClient({ initialDashboard }: OfficePageClientProps) {
+export function OfficePageClient({ initialDashboard, initialWorkspaceId }: OfficePageClientProps) {
   const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const dashboard = useAppStore((s) => s.office.dashboard);
-  const agents = useAppStore((s) => s.office.agentProfiles);
+  const dashboard = useAppStore(selectOfficeDashboard);
+  const agents = useAppStore(selectOfficeAgentProfiles);
   const setDashboard = useAppStore((s) => s.setDashboard);
   const dashboardWorkspaceIdRef = useRef<string | null>(
     (dashboard || initialDashboard) && workspaceId ? workspaceId : null,
@@ -234,17 +239,27 @@ export function OfficePageClient({ initialDashboard }: OfficePageClientProps) {
   // Hydrate from SSR exactly once on first mount; subsequent updates flow
   // through the WS-driven refetch below. Skipping the unconditional mount
   // fetch removes a redundant round-trip when SSR data is already in the
-  // store (Stream G of office optimization).
+  // store (Stream G of office optimization). Once means once: the payload
+  // belongs to the workspace that was active at SSR time, and re-running on a
+  // workspace switch would file it under the new workspace.
+  const initialDashboardHydratedRef = useRef(false);
   useEffect(() => {
-    if (initialDashboard) {
-      setDashboard(initialDashboard);
+    if (
+      initialDashboardHydratedRef.current ||
+      !workspaceId ||
+      !initialDashboard ||
+      (initialWorkspaceId !== undefined && initialWorkspaceId !== workspaceId)
+    ) {
+      return;
     }
-  }, [initialDashboard, setDashboard]);
+    initialDashboardHydratedRef.current = true;
+    setDashboard(workspaceId, initialDashboard);
+  }, [initialDashboard, initialWorkspaceId, setDashboard, workspaceId]);
 
   const fetchDashboard = useCallback(async () => {
     if (!workspaceId) return;
     const data = await officeApi.getDashboard(workspaceId);
-    setDashboard(data);
+    setDashboard(workspaceId, data);
     dashboardWorkspaceIdRef.current = workspaceId;
   }, [workspaceId, setDashboard]);
 

@@ -1,72 +1,30 @@
 name: Lint Action Pinning
 
+# No trigger-level `paths:` filter, deliberately. A workflow skipped by one
+# reports no conclusion at all, and a required check that never reports leaves
+# a pull request unable to enter a merge queue and a merge group unable to
+# leave it. `merge_group` cannot carry a `paths:` filter in the first place.
+#
+# The heavier gates push their filtering down into a `changes` job (see
+# `.github/scripts/changed-paths.py`). This one is deliberately unfiltered
+# instead: the list it replaced had grown to thirty-odd entries that each had
+# to be added by hand whenever a contract test gained a new subject, and every
+# omission was a silently unguarded file. Always running is both cheaper to
+# reason about and strictly safer. See docs/ci-merge-queue.md.
 on:
   push:
     branches: [main]
-    paths:
-      - ".github/workflows/**"
-      - ".github/scripts/lint-action-pinning.py"
-      - ".github/scripts/lint-action-pinning_test.py"
-      - ".github/scripts/claude-code-review-workflow-contract_test.py"
-      - ".github/scripts/preview-env-workflow-contract_test.py"
-      - ".github/scripts/collect-macos-desktop-diagnostics.sh"
-      - ".github/scripts/release-workflow-contract_test.py"
-      - ".github/release-signing-key.asc"
-      - "docs/public/release-process.md"
-      - "Makefile"
-      - "apps/backend/Makefile"
-      - "scripts/release/package-bundle.sh"
-      - "scripts/release/runtime-bundle.test.sh"
-      - "scripts/release/validate-darwin-arm64-helper.mjs"
-      - "scripts/release/npm-packages.sh"
-      - "scripts/release/nightly-version.mjs"
-      - "scripts/release/nightly-version.test.mjs"
-      - "scripts/release/nightly-release.sh"
-      - "scripts/release/nightly-release.test.mjs"
-      - "scripts/release/npm-view-version.sh"
-      - "scripts/release/npm-view-version.test.mjs"
-      - "scripts/release/package-npm-runtime.sh"
-      - "scripts/release/publish-npm.sh"
-      - "scripts/release/publish-npm.test.mjs"
-      - "scripts/release/update-scoop-bucket.sh"
-      - "scripts/release/update-scoop-bucket.test.mjs"
-      - "scripts/release/retry-ghcr-command.sh"
-      - "scripts/release/retry-ghcr-command.test.sh"
   pull_request:
     branches: [main]
-    paths:
-      - ".github/workflows/**"
-      - ".github/scripts/lint-action-pinning.py"
-      - ".github/scripts/lint-action-pinning_test.py"
-      - ".github/scripts/claude-code-review-workflow-contract_test.py"
-      - ".github/scripts/preview-env-workflow-contract_test.py"
-      - ".github/scripts/collect-macos-desktop-diagnostics.sh"
-      - ".github/scripts/release-workflow-contract_test.py"
-      - ".github/release-signing-key.asc"
-      - "docs/public/release-process.md"
-      - "Makefile"
-      - "apps/backend/Makefile"
-      - "scripts/release/package-bundle.sh"
-      - "scripts/release/runtime-bundle.test.sh"
-      - "scripts/release/validate-darwin-arm64-helper.mjs"
-      - "scripts/release/npm-packages.sh"
-      - "scripts/release/nightly-version.mjs"
-      - "scripts/release/nightly-version.test.mjs"
-      - "scripts/release/nightly-release.sh"
-      - "scripts/release/nightly-release.test.mjs"
-      - "scripts/release/npm-view-version.sh"
-      - "scripts/release/npm-view-version.test.mjs"
-      - "scripts/release/package-npm-runtime.sh"
-      - "scripts/release/publish-npm.sh"
-      - "scripts/release/publish-npm.test.mjs"
-      - "scripts/release/update-scoop-bucket.sh"
-      - "scripts/release/update-scoop-bucket.test.mjs"
-      - "scripts/release/retry-ghcr-command.sh"
-      - "scripts/release/retry-ghcr-command.test.sh"
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a merge-queue run. Its ref is unique per queue entry, so a
+  # cancellation here could only come from a mis-keyed group, and the queue
+  # would read the cancelled check as a failure and eject the pull request.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 # Least-privilege: only reads source.
 permissions:
@@ -86,11 +44,17 @@ jobs:
       - name: Test action-pinning lint
         run: python3 .github/scripts/lint-action-pinning_test.py
 
+      - name: Test in-job path filter
+        run: python3 .github/scripts/changed-paths_test.py
+
       - name: Test Claude Code review workflow contract
         run: python3 .github/scripts/claude-code-review-workflow-contract_test.py
 
       - name: Test preview environment workflow contract
         run: python3 .github/scripts/preview-env-workflow-contract_test.py
+
+      - name: Test frontend tests workflow contract
+        run: python3 .github/scripts/frontend-tests-workflow-contract_test.py
 
       - name: Test release workflow contract
         run: python3 .github/scripts/release-workflow-contract_test.py

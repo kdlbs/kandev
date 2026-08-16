@@ -1,6 +1,6 @@
 "use client";
 
-import { IconArrowUpCircle } from "@tabler/icons-react";
+import { IconArrowUpCircle, IconChevronRight } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -20,6 +20,8 @@ type PluginRowProps = {
   autoUpdateDefault: boolean;
   /** True while this row's auto-update override request is in flight. */
   autoUpdateBusy: boolean;
+  /** True when the plugin declares required settings the operator has not filled in. */
+  needsSetup?: boolean;
   onEnable: (plugin: PluginRecord) => void;
   onDisable: (plugin: PluginRecord) => void;
   onUninstall: (plugin: PluginRecord) => void;
@@ -31,6 +33,13 @@ type PluginRowProps = {
  * One plugin's row. Div-based (not a `<table>`) so it wraps/stacks naturally
  * on narrow viewports and inside the mobile settings sheet — no separate
  * mobile layout needed.
+ *
+ * The whole card opens the plugin's settings page, via an overlay link and a
+ * trailing chevron (the pattern the workspaces list already uses). The name
+ * alone used to carry the link, which was indistinguishable from a heading
+ * until hovered — and therefore invisible on touch, where nothing hovers.
+ * Every control in the card sits above the overlay at z-10 so it keeps its
+ * own click.
  */
 export function PluginRow({
   plugin,
@@ -38,6 +47,7 @@ export function PluginRow({
   update,
   autoUpdateDefault,
   autoUpdateBusy,
+  needsSetup = false,
   onEnable,
   onDisable,
   onUninstall,
@@ -52,70 +62,107 @@ export function PluginRow({
   return (
     <div
       data-testid={`plugin-row-${plugin.id}`}
-      className="rounded-lg border border-border/70 bg-background p-4 space-y-3"
+      className="group relative rounded-lg border border-border/70 bg-background p-4 transition-colors hover:border-border hover:bg-muted"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={`/settings/plugins/${encodeURIComponent(plugin.id)}`}
-              data-testid={`plugin-row-link-${plugin.id}`}
-              className="text-sm font-medium text-foreground truncate cursor-pointer hover:underline"
-            >
-              {plugin.display_name}
-            </Link>
-            <PluginStatusBadge status={plugin.status} />
-            {plugin.signed === false && (
-              <Badge
-                data-testid="plugin-unsigned-badge"
-                variant="outline"
-                className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px]"
-              >
-                {t("plugins:unsigned")}
-              </Badge>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span className="font-mono truncate">
-              {plugin.id} · v{plugin.version}
-            </span>
-            <PluginRepoLink url={plugin.repo_url} />
+      <Link
+        href={`/settings/plugins/${encodeURIComponent(plugin.id)}`}
+        aria-label={t("plugins:openSettingsFor", { name: plugin.display_name })}
+        data-testid={`plugin-row-link-${plugin.id}`}
+        className="absolute inset-0 rounded-lg cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      {/*
+        The spacing lives on this inner wrapper, not on the card. `space-y-*`
+        compiles to a margin on every child bar the last, and with the overlay
+        link as a card child that margin shortened it by one gap, leaving the
+        bottom strip of the card unclickable.
+      */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <PluginRowIdentity plugin={plugin} needsSetup={needsSetup} />
+
+          <div className="flex items-center gap-2 shrink-0">
+            <PluginRowActions
+              plugin={plugin}
+              busy={busy}
+              update={update}
+              canEnable={canEnable}
+              canDisable={canDisable}
+              onEnable={onEnable}
+              onDisable={onDisable}
+              onUninstall={onUninstall}
+              onUpdate={onUpdate}
+            />
+            <IconChevronRight
+              aria-hidden
+              className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+            />
           </div>
         </div>
 
-        <PluginRowActions
+        {plugin.description && (
+          <div className="text-xs text-muted-foreground">{plugin.description}</div>
+        )}
+        <PluginErrorDiagnostic plugin={plugin} />
+        {plugin.categories.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {plugin.categories.map((category) => (
+              <Badge key={category} variant="secondary" className="text-[11px]">
+                {category}
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        <PluginAutoUpdateRow
           plugin={plugin}
-          busy={busy}
-          update={update}
-          canEnable={canEnable}
-          canDisable={canDisable}
-          onEnable={onEnable}
-          onDisable={onDisable}
-          onUninstall={onUninstall}
-          onUpdate={onUpdate}
+          autoUpdateDefault={autoUpdateDefault}
+          busy={autoUpdateBusy}
+          onSetAutoUpdate={onSetAutoUpdate}
         />
       </div>
+    </div>
+  );
+}
 
-      {plugin.description && (
-        <div className="text-xs text-muted-foreground">{plugin.description}</div>
-      )}
-      <PluginErrorDiagnostic plugin={plugin} />
-      {plugin.categories.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {plugin.categories.map((category) => (
-            <Badge key={category} variant="secondary" className="text-[11px]">
-              {category}
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      <PluginAutoUpdateRow
-        plugin={plugin}
-        autoUpdateDefault={autoUpdateDefault}
-        busy={autoUpdateBusy}
-        onSetAutoUpdate={onSetAutoUpdate}
-      />
+/**
+ * The row's name, state badges and identifiers. Everything here is inert and
+ * sits under the card's overlay link, except the repo link, which raises
+ * itself to z-10 to keep its own click.
+ */
+function PluginRowIdentity({ plugin, needsSetup }: { plugin: PluginRecord; needsSetup: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className="min-w-0 space-y-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-foreground truncate group-hover:underline">
+          {plugin.display_name}
+        </span>
+        <PluginStatusBadge status={plugin.status} />
+        {needsSetup && (
+          <Badge
+            data-testid={`plugin-setup-required-${plugin.id}`}
+            variant="outline"
+            className="border-primary/40 bg-primary/10 text-primary text-[11px]"
+          >
+            {t("plugins:setupRequired")}
+          </Badge>
+        )}
+        {plugin.signed === false && (
+          <Badge
+            data-testid="plugin-unsigned-badge"
+            variant="outline"
+            className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px]"
+          >
+            {t("plugins:unsigned")}
+          </Badge>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span className="font-mono truncate">
+          {plugin.id} · v{plugin.version}
+        </span>
+        <PluginRepoLink url={plugin.repo_url} className="relative z-10" />
+      </div>
     </div>
   );
 }
@@ -151,7 +198,7 @@ function PluginAutoUpdateRow({
           </Badge>
         )}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="relative z-10 flex items-center gap-2">
         {isOverridden && (
           <button
             type="button"
@@ -184,6 +231,7 @@ type PluginRowActionsProps = Omit<
   | "onUninstall"
   | "autoUpdateDefault"
   | "autoUpdateBusy"
+  | "needsSetup"
   | "onSetAutoUpdate"
 > & {
   canEnable: boolean;
@@ -206,7 +254,7 @@ function PluginRowActions({
 }: PluginRowActionsProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-wrap items-center gap-2 shrink-0">
+    <div className="relative z-10 flex flex-wrap items-center gap-2 shrink-0">
       {update && onUpdate && (
         <Button
           variant="outline"

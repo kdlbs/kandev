@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -36,6 +37,7 @@ type fakeOrchestrator struct {
 	resumeCalls             int
 	turnStartCalls          []turnStartCall
 	onTurnStart             func(context.Context, string, string) error
+	turnStartResult         orchestrator.ProcessOnTurnStartResult
 	interruptCalls          []interruptCall
 	launchCalls             []*orchestrator.LaunchSessionRequest
 	launchErr               error
@@ -149,15 +151,20 @@ func (f *fakeOrchestrator) ResumeTaskSession(_ context.Context, _, _ string) (*e
 	return &executor.TaskExecution{}, nil
 }
 
-func (f *fakeOrchestrator) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
+func (f *fakeOrchestrator) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error) {
 	f.mu.Lock()
 	f.turnStartCalls = append(f.turnStartCalls, turnStartCall{taskID: taskID, sessionID: sessionID})
 	fn := f.onTurnStart
 	f.mu.Unlock()
 	if fn != nil {
-		return fn(ctx, taskID, sessionID)
+		return f.turnStartResult, fn(ctx, taskID, sessionID)
 	}
-	return nil
+	return f.turnStartResult, nil
+}
+
+func (f *fakeOrchestrator) QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error {
+	_, err := f.queue.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, model, messagequeue.QueuedByUser, planMode, nil, metadata)
+	return err
 }
 
 func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
@@ -283,6 +290,15 @@ func seedTaskWithSession(t *testing.T, svc *service.Service, repo seedRepo, stat
 	})
 	sender := senderResult.Task
 	require.NoError(t, err)
+	// senderPayload's hardcoded "sender_session_id": "sender-sess-1" must be
+	// a real row — session_id has a foreign key to task_sessions, and in
+	// production sender_session_id always names the genuine calling
+	// session (senderPayload's own doc comment: "agentctl injects
+	// sender_task_id and sender_session_id").
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "sender-sess-1", TaskID: sender.ID, AgentProfileID: "agent-profile-sender",
+		State: models.TaskSessionStateRunning,
+	}))
 
 	sess := &models.TaskSession{
 		ID:             "sess-1",
@@ -507,6 +523,30 @@ func TestHandleMessageTask_IdleSiblingSession_PinsTargetSession(t *testing.T) {
 	senderMessages, err := svc.ListMessages(ctx, primary.ID)
 	require.NoError(t, err)
 	assert.Empty(t, senderMessages, "sender's own session must not receive the message")
+}
+
+func TestHandleMessageTask_QueuesPromptWhenOnTurnStartQueuesTask(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.turnStartResult = orchestrator.ProcessOnTurnStartResult{Queued: true}
+
+	payload := senderPayload(target.ID, "wait for admission", sender.ID)
+	payload["session_id"] = session.ID
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, "queued", out["status"])
+	assert.Equal(t, session.ID, out["session_id"])
+	assert.Empty(t, orch.promptCalls, "a queued turn-start transition must not send immediately")
+	status := orch.queue.GetStatus(context.Background(), session.ID)
+	require.Len(t, status.Entries, 1)
+	assert.Contains(t, status.Entries[0].Content, "wait for admission")
 }
 
 func TestHandleMessageTask_SessionIDWrongTask_Rejected(t *testing.T) {
@@ -1658,6 +1698,17 @@ func TestHandleMessageTask_DispatchErrorRollsBackTurnStartOutsideReview(t *testi
 	require.NoError(t, err)
 	assert.Equal(t, v1.TaskStateInProgress, updatedTask.State)
 	assert.Equal(t, "step-in-progress", updatedTask.WorkflowStepID)
+
+	// Review round 3 must-fix #2: the rollback's ledger row (from
+	// "step-next" back to "step-in-progress") must attribute the causal
+	// MCP sender session, not the session-less system default.
+	ledgerRows := ledgerRowsForTask(t, repo, target.ID)
+	lastLedgerRow := ledgerRows[len(ledgerRows)-1]
+	assert.Equal(t, string(steptelemetry.TriggerUnarchiveRestore), lastLedgerRow.trigger)
+	assert.Equal(t, string(steptelemetry.ActorAgent), lastLedgerRow.actorKind, "rollback must attribute the causal sender session, not system")
+	if assert.NotNil(t, lastLedgerRow.actorID) {
+		assert.Equal(t, "sender-sess-1", *lastLedgerRow.actorID)
+	}
 
 	primary, err := svc.GetPrimarySession(ctx, target.ID)
 	require.NoError(t, err)

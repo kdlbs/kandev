@@ -518,12 +518,19 @@ func TestPromptUsage_RecordsCostEvent(t *testing.T) {
 		t.Fatalf("cost event model = %q, want %q", costs[0].Model, "gpt-4o-mini")
 	}
 	// With no pricing lookup wired and no provider-reported cost, the row
-	// records 0 with estimated=true (Layer A miss + no Layer B).
+	// records 0 (Layer A miss + no Layer B), tagged cost_source=unpriced.
+	// Estimated tracks data.Usage.Estimated verbatim (unset here, so false)
+	// — it is a token-synthesis flag, distinct from cost_source, which is
+	// what actually carries the "we could not resolve a price" signal. See
+	// costContractVersion's v1->v2 doc comment in prompt_usage_cost.go.
 	if costs[0].CostSubcents != 0 {
 		t.Fatalf("cost_subcents = %d, want 0 (no pricing lookup wired)", costs[0].CostSubcents)
 	}
-	if !costs[0].Estimated {
-		t.Fatal("expected estimated=true when both lookup layers miss")
+	if costs[0].Estimated {
+		t.Fatal("expected estimated=false: usage carried no estimated flag, and an unresolved price must not overwrite it")
+	}
+	if costs[0].CostSource == nil || *costs[0].CostSource != models.CostSourceUnpriced {
+		t.Fatalf("cost_source = %v, want %q", costs[0].CostSource, models.CostSourceUnpriced)
 	}
 }
 

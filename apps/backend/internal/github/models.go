@@ -756,6 +756,26 @@ type GitHubRepo struct {
 	PushedAt      *time.Time `json:"pushed_at,omitempty"`
 }
 
+// GitHubRepository is the provider-authoritative identity and permission
+// projection needed when preparing a managed contribution destination. The
+// derived parent and permission fields deliberately do not carry raw API
+// response shapes into task metadata.
+type GitHubRepository struct {
+	ID             int64
+	NodeID         string
+	FullName       string
+	Owner          string
+	Name           string
+	CloneURL       string
+	HTMLURL        string
+	DefaultBranch  string
+	Fork           bool
+	ParentID       int64
+	ParentFullName string
+	PushAccess     bool
+	AdminAccess    bool
+}
+
 // RepoBranch represents a branch in a GitHub repository.
 type RepoBranch struct {
 	Name string `json:"name"`

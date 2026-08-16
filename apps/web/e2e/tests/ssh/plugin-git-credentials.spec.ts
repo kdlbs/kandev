@@ -86,20 +86,20 @@ test.describe("Bitbucket plugin contract — SSH executor credential leases", ()
         ).trim(),
       );
       expect(agentctlPID).toBeGreaterThan(0);
-      const remoteURL = runRemoteGit(
+      const remoteURL = await runRemoteGit(
         agentctlPID,
         `cd '${row.remote_task_dir}' && git remote get-url origin`,
         seedData.sshTarget.containerName,
       );
-      expect(remoteURL.status).toBe(0);
+      expect(remoteURL.status, remoteURL.output).toBe(0);
       expect(remoteURL.output.trim()).toBe(fixtureGitURL);
 
-      const push = runRemoteGit(
+      const push = await runRemoteGit(
         agentctlPID,
         `cd '${row.remote_task_dir}' && printf 'pushed\\n' >> README.md && git add README.md && git -c user.name=E2E -c user.email=e2e@test.local commit -m 'credential fixture push' && git push origin HEAD:main`,
         seedData.sshTarget.containerName,
       );
-      expect(push.status).toBe(0);
+      expect(push.status, push.output).toBe(0);
       expect(fixture.pushed()).toBe(true);
       assertExactFixtureTransport(fixture);
 
@@ -109,18 +109,15 @@ test.describe("Bitbucket plugin contract — SSH executor credential leases", ()
       );
       expect(agentctlLog).not.toContain(fixtureGitSecret);
       expect(agentctlLog).not.toContain(`${fixtureGitUser}:${fixtureGitSecret}`);
-      const agentctlEnv = execInContainer(seedData.sshTarget, [
-        "sh",
-        "-c",
-        `tr '\\0' '\\n' < /proc/${agentctlPID}/environ`,
-      ]);
-      expect(agentctlEnv).not.toContain(fixtureGitSecret);
-      expect(agentctlEnv).not.toContain(`${fixtureGitUser}:${fixtureGitSecret}`);
+      const agentctlEnv = await runRemoteGit(agentctlPID, "env", seedData.sshTarget.containerName);
+      expect(agentctlEnv.status, agentctlEnv.output).toBe(0);
+      expect(agentctlEnv.output).not.toContain(fixtureGitSecret);
+      expect(agentctlEnv.output).not.toContain(`${fixtureGitUser}:${fixtureGitSecret}`);
 
       const revoke = await revokeFixtureConnection(backend.baseUrl, seedData.workspaceId);
       expect(revoke.status).toBe(200);
       expect(await revoke.text()).not.toContain(fixtureGitSecret);
-      const afterRevocation = runRemoteGit(
+      const afterRevocation = await runRemoteGit(
         agentctlPID,
         `cd '${row.remote_task_dir}' && git fetch origin`,
         seedData.sshTarget.containerName,

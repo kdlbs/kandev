@@ -61,10 +61,23 @@ func TestHandleAskParentQuestion_PersistsRoutesAndPauses(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parent, child, parentSession, childSession := seedParentQuestionScenario(t, svc, repo)
 	h, orch := newMessageTaskHandler(t, svc, repo)
-	pauser := &recordingClarificationInputPauser{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pauser := &recordingClarificationInputPauser{
+		before: func() {
+			// The parent must not receive a reply route until the child's pause
+			// has completed. Otherwise message_task can resume a still-cancelling
+			// turn and lose the answer in a lifecycle race.
+			status := orch.queue.GetStatus(context.Background(), parentSession.ID)
+			require.Empty(t, status.Entries)
+			// The real pause cancels the MCP turn context. Parent delivery must
+			// survive that cancellation because it happens after the pause.
+			cancel()
+		},
+	}
 	h.inputPauser = pauser
 
-	resp, err := h.handleAskParentQuestion(context.Background(), parentQuestionMessage(t, child.ID, childSession.ID))
+	resp, err := h.handleAskParentQuestion(ctx, parentQuestionMessage(t, child.ID, childSession.ID))
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 

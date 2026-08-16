@@ -5,6 +5,7 @@ import type { TaskCreateDialogProps } from "./task-create-dialog";
 const mocks = vi.hoisted(() => ({
   agentGeneratedTaskTitles: false,
   submit: vi.fn(),
+  submitDeps: {} as Record<string, unknown>,
 }));
 
 vi.mock("@/lib/keyboard/constants", () => ({ SHORTCUTS: { SUBMIT: "submit" } }));
@@ -33,7 +34,10 @@ vi.mock("@/components/state-provider", () => ({
     }),
 }));
 vi.mock("@/components/task-create-dialog-submit", () => ({
-  useTaskSubmitHandlers: () => ({ handleSubmit: mocks.submit, pendingDiscard: null }),
+  useTaskSubmitHandlers: (deps: Record<string, unknown>) => {
+    mocks.submitDeps = deps;
+    return { handleSubmit: mocks.submit, pendingDiscard: null };
+  },
 }));
 vi.mock("@/components/task-create-dialog-workflow-context", () => ({
   useResolvedTaskCreateWorkflowContext: (props: TaskCreateDialogProps) => props,
@@ -58,6 +62,8 @@ vi.mock("@/components/task-create-dialog-state", () => ({
     executorProfileId: "",
     freshBranchEnabled: false,
     noRepository: false,
+    blockedBy: ["dep-1"],
+    setBlockedBy: vi.fn(),
     workspacePath: "",
     isCreatingSession: false,
     isCreatingTask: false,
@@ -141,4 +147,13 @@ describe("useTaskCreateDialogSetup auto-title mode", () => {
 
     expect(result.current.autoTitle).toBe(expected);
   });
+});
+
+it("forwards the selected dependencies to the submit handlers", () => {
+  // The payload builder handled blocked_by correctly all along; the break was
+  // this hop — useSubmitHandlersWiring never passed blockedBy through, so the
+  // create dialog's selection silently never reached the request. Assert the
+  // hop itself, not just the leaf.
+  renderHook(() => useTaskCreateDialogSetup({ ...props, mode: "create" }));
+  expect(mocks.submitDeps.blockedBy).toEqual(["dep-1"]);
 });
