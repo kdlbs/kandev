@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -179,7 +180,7 @@ export function WorkspacesPageClient() {
             {t("workspaces:manageYourWorkspacesAndWorkflows")}
           </p>
         </div>
-        <Button size="sm" onClick={() => setIsAdding(true)}>
+        <Button size="sm" className={settingsActionClassName()} onClick={() => setIsAdding(true)}>
           <IconPlus className="h-4 w-4 mr-2" />
           {t("workspaces:addWorkspace")}
         </Button>

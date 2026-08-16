@@ -99,6 +99,9 @@ func (m *mockRepository) CountOpenWatcherCreatedTasks(_ context.Context, _, _ st
 func (m *mockRepository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
 	return nil
 }
+func (m *mockRepository) SetTaskMetadataKeyIfPresent(context.Context, string, string, interface{}) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) UpdateTaskStateIfSessionState(
 	_ context.Context, _, _ string, _ models.TaskSessionState, _ v1.TaskState,
 ) (v1.TaskState, bool, error) {

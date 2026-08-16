@@ -871,6 +871,40 @@ func (r *Repository) SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID
 	return rows > 0, err
 }
 
+// SetTaskMetadataKeyIfPresent rewrites one metadata key only while that key is
+// still present, and reports whether the write landed.
+//
+// It is the compare-and-swap counterpart to RemoveTaskMetadataKey: an editor
+// that read a key, decided to change it, and then writes it back must not
+// RE-CREATE the key if a concurrent claim removed it in between. Editing a
+// deferred launch prompt is the case this exists for — a full-row UpdateTask
+// there would resurrect a launch intent that a just-started task had already
+// consumed, and the gate would then fire a second session.
+func (r *Repository) SetTaskMetadataKeyIfPresent(ctx context.Context, taskID, key string, value interface{}) (bool, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return false, err
+	}
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `UPDATE tasks SET metadata = jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ?
+			WHERE id = ? AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?) IS NOT NULL`
+	} else {
+		query = `UPDATE tasks SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ?
+			WHERE id = ? AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NOT NULL`
+	}
+	path := key
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		path = jsonPath(key)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, string(payload), time.Now().UTC(), taskID, path)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
 func jsonPath(key string) string { return "$." + key }
 
 func agentTitlePendingPredicate(driver string) string {

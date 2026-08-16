@@ -4,9 +4,9 @@ import { SessionPage } from "../../pages/session-page";
 
 test.describe("PR detail panel — manual open", () => {
   /**
-   * Regression: when the user removes the layout-owned PR Details panel and
-   * opens a pull request manually from the topbar, the keyed review tab must
-   * use the center fallback — not create a separate split.
+   * Regression: after the user removes the layout-owned PR Details panel, a
+   * topbar open keeps its center fallback while a group's add-panel menu uses
+   * that invoking group.
    *
    * The manual path uses `addPRPanel(prKey)` which historically anchored on
    * the store's `centerGroupId`. That value can be stale across layout
@@ -17,7 +17,7 @@ test.describe("PR detail panel — manual open", () => {
    *   Inbox → Working (auto_start, on_turn_complete → Done) → Done
    *   Task A (with PR #501)
    */
-  test("uses the center fallback when PR Details is absent", async ({
+  test("distinguishes topbar fallback from add-menu split placement", async ({
     testPage,
     apiClient,
     seedData,
@@ -133,5 +133,30 @@ test.describe("PR detail panel — manual open", () => {
     expect(location.error, location.error).toBeUndefined();
     expect(location.canonicalExists).toBe(false);
     expect(location.keyedGroupId).toBe(location.sessionGroupId);
+
+    // Remove the keyed topbar result, then reopen the same missing review from
+    // the Terminal split's own + menu. The new tab must join Terminal rather
+    // than reuse the topbar's center fallback.
+    await session.prDetailTab().hover();
+    await session.prDetailTab().locator(".dv-default-tab-action").click();
+    await expect(session.prDetailTab()).toHaveCount(0);
+
+    const terminalGroup = testPage.locator(".dv-groupview").filter({
+      has: testPage.locator(".dv-default-tab").filter({ hasText: /^Terminal$/ }),
+    });
+    const agentGroup = testPage.locator('.dv-groupview:has([data-testid^="session-tab-"])');
+    await terminalGroup.getByTestId("dockview-add-panel-btn").click();
+    await testPage.getByTestId("add-panel-pr-item-testorg-testrepo-501").click();
+
+    const reopenedTab = testPage.locator(".dv-default-tab").filter({ hasText: /^PR #501$/ });
+    await expect(
+      terminalGroup.locator(".dv-default-tab").filter({ hasText: /^PR #501$/ }),
+    ).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(
+      agentGroup.locator(".dv-default-tab").filter({ hasText: /^PR #501$/ }),
+    ).toHaveCount(0);
+    await expect(reopenedTab).toHaveCount(1);
   });
 });

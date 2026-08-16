@@ -4,12 +4,15 @@ import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import type { CLIFlag, PermissionSetting } from "@/lib/types/http";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 /**
  * Editor-side representation of a single custom CLI flag. The persisted
@@ -363,11 +366,9 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (next: CLIFlag) => void }) {
     }
   };
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+    <div className="flex flex-col gap-2 md:flex-row md:items-end">
       <div className="flex-[2] space-y-1">
-        <Label className="text-xs" htmlFor={flagId}>
-          {t("agents:flag")}
-        </Label>
+        <SettingsFieldLabel htmlFor={flagId}>{t("agents:flag")}</SettingsFieldLabel>
         <Input
           id={flagId}
           value={newFlag}
@@ -379,9 +380,7 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (next: CLIFlag) => void }) {
         />
       </div>
       <div className="flex-[3] space-y-1">
-        <Label className="text-xs" htmlFor={valueId}>
-          {t("agents:valueOptionalLabel")}
-        </Label>
+        <SettingsFieldLabel htmlFor={valueId}>{t("agents:valueOptionalLabel")}</SettingsFieldLabel>
         <Input
           id={valueId}
           value={newValue}
@@ -398,7 +397,7 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (next: CLIFlag) => void }) {
         size="sm"
         onClick={commit}
         disabled={newFlag.trim() === ""}
-        className="cursor-pointer"
+        className={settingsActionClassName("cursor-pointer")}
         data-testid="cli-flag-add-button"
       >
         <IconPlus className="h-3.5 w-3.5 mr-1" />
@@ -457,22 +456,20 @@ export function CustomCLIFlagsCard({
       discoveryTargetId={discoveryTargetId}
       data-testid="custom-cli-flags-card"
     >
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <CardTitle>{t("agents:agentCliFlags")}</CardTitle>
-            <CardDescription>{t("agents:agentCliFlagsDescription")}</CardDescription>
-          </div>
-          {customFlags.length > 0 && (
+      <SettingsCardHeader
+        title={t("agents:agentCliFlags")}
+        description={t("agents:agentCliFlagsDescription")}
+        actions={
+          customFlags.length > 0 ? (
             <span className="text-[10px] text-muted-foreground" data-testid="cli-flags-count">
               {t("agents:cliFlagsEnabledCount", {
                 count: customFlags.length,
                 enabled: enabledCount,
               })}
             </span>
-          )}
-        </div>
-      </CardHeader>
+          ) : undefined
+        }
+      />
       <CardContent data-settings-dirty={isDirty} data-settings-dirty-level="container">
         <CustomFlagsSection
           customFlags={customFlags}

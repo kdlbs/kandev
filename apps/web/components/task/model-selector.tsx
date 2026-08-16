@@ -46,7 +46,48 @@ function configValueKeys(value: unknown): string[] {
     .map(([key]) => key);
 }
 
+function recordValue(value: unknown, key: string): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return (value as Record<string, unknown>)[key];
+}
+
+function configValue(value: unknown, key: string): string | undefined {
+  const candidate = recordValue(value, key);
+  return typeof candidate === "string" && candidate ? candidate : undefined;
+}
+
 const MODEL_CONFIG_KEY = "model";
+// Legacy snapshots used config_options.agent for agent identity. Provider-defined
+// agent options stay valid unless the value matches the session identity.
+const AGENT_CONFIG_KEY = "agent";
+
+function isLegacyAgentIdentityConfig(session: TaskSession | null, agents: Agent[]): boolean {
+  if (!session) return false;
+  const snapshot = session.agent_profile_snapshot;
+  const profile = agents
+    .flatMap((agent) => agent.profiles)
+    .find((item) => item.id === session.agent_profile_id);
+  const identityValues = new Set(
+    [
+      configValue(snapshot, "agent_id"),
+      configValue(snapshot, "agent_name"),
+      profile?.agentId,
+      profile?.agentDisplayName,
+    ].filter((value): value is string => !!value),
+  );
+  if (identityValues.size === 0) return false;
+  const metadata = session.metadata;
+  const optionSources = [
+    snapshot?.config_options,
+    profile?.configOptions,
+    recordValue(recordValue(metadata, "runtime_config"), "config_options"),
+    recordValue(recordValue(metadata, "runtime_config_overrides"), "config_options"),
+  ];
+  return optionSources.some((source) => {
+    const value = configValue(source, AGENT_CONFIG_KEY);
+    return !!value && identityValues.has(value);
+  });
+}
 
 export function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
   if (!session) return [];
@@ -83,8 +124,12 @@ export function hasCompleteDynamicConfig(
   // configOptions. Treat that key as satisfied when the session has a flat model
   // list — the selector renders fine from it.
   const hasFlatModelList = !!sessionModelsData.models.length;
+  const hasLegacyAgentIdentity = isLegacyAgentIdentityConfig(session, agents);
   return required.every(
-    (key) => available.has(key) || (key === MODEL_CONFIG_KEY && hasFlatModelList),
+    (key) =>
+      available.has(key) ||
+      (key === AGENT_CONFIG_KEY && hasLegacyAgentIdentity) ||
+      (key === MODEL_CONFIG_KEY && hasFlatModelList),
   );
 }
 

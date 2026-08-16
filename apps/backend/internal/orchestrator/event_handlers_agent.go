@@ -1562,6 +1562,7 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 	if errMsg == "" {
 		errMsg = "agent failed"
 	}
+	details := routingerr.Sanitize(data.FailureDetails)
 	// Keep this metadata until the user dismisses the UI notice locally or a
 	// later recoverable failure replaces it. A successful turn should not erase
 	// the investigation breadcrumb that explains why the task was marked REVIEW.
@@ -1570,6 +1571,8 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		OccurredAt:       time.Now().UTC(),
 		AgentExecutionID: data.AgentExecutionID,
 		RemediationURL:   providerRemediationURL(data),
+		Code:             data.FailureCode,
+		Details:          details,
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
 		s.logger.Warn("failed to persist last agent error",
@@ -1590,6 +1593,12 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		}
 		if lastErr.RemediationURL != "" {
 			eventData["remediation_url"] = lastErr.RemediationURL
+		}
+		if lastErr.Code != "" {
+			eventData["code"] = lastErr.Code
+		}
+		if lastErr.Details != "" {
+			eventData["details"] = lastErr.Details
 		}
 		if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
 			events.TaskSessionErrorChanged,
@@ -1702,6 +1711,13 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"is_auth_error":    authErr,
 		"resume_corrupted": resumeCorrupted,
 	}
+	managedRuntimeNpmFailure := data.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution)
+	if managedRuntimeNpmFailure {
+		meta["failure_kind"] = string(routingerr.CodeManagedRuntimeNpmResolution)
+		if details := routingerr.Sanitize(data.FailureDetails); details != "" {
+			meta["error_output"] = details
+		}
+	}
 	// The validated remediation URL is carried independently of quota
 	// classification so the generic recoverable card can still show the link.
 	if remediationURL := providerRemediationURL(data); remediationURL != "" {
@@ -1716,7 +1732,21 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		}
 	}
 
-	meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr, resumeCorrupted)
+	if managedRuntimeNpmFailure {
+		meta["actions"] = []map[string]interface{}{
+			wsRecoveryAction(
+				data.TaskID,
+				data.SessionID,
+				"runtime_retry",
+				"Retry runtime",
+				"refresh",
+				"",
+				"managed-runtime-npm-retry-button",
+			),
+		}
+	} else {
+		meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr, resumeCorrupted)
+	}
 
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx,
@@ -1789,6 +1819,17 @@ func (s *Service) isOfficeSession(ctx context.Context, sessionID string) bool {
 // error on focus / auto-resume.
 // Returns true if the failure was handled (caller should skip default FAILED logic).
 func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) bool {
+	failureData := watcher.AgentEventData{
+		TaskID:           taskID,
+		SessionID:        sessionID,
+		AgentExecutionID: agentExecutionID,
+		ErrorMessage:     err.Error(),
+	}
+	if classified := classifyManagedRuntimeNpmStartFailure(err); classified != nil {
+		failureData.ErrorMessage = "managed npm runtime failed to prepare"
+		failureData.FailureCode = string(routingerr.CodeManagedRuntimeNpmResolution)
+		failureData.FailureDetails = classified.RawExcerpt
+	}
 	if sessionID != "" {
 		lock, release := s.acquireCancelInFlightGuard(sessionID)
 		defer release()
@@ -1802,12 +1843,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			return true
 		}
 
-		if drop, terminalState := s.shouldDropSessionFailure(ctx, watcher.AgentEventData{
-			TaskID:           taskID,
-			SessionID:        sessionID,
-			AgentExecutionID: agentExecutionID,
-			ErrorMessage:     err.Error(),
-		}, "agent process start", false); drop {
+		if drop, terminalState := s.shouldDropSessionFailure(ctx, failureData, "agent process start", false); drop {
 			// A cancellation that landed after the executor's first terminal-state
 			// read still needs its exact-execution cleanup path. Returning false lets
 			// the executor observe the final CANCELLED state and arbitrate teardown.
@@ -1816,6 +1852,14 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			}
 			return true
 		}
+	}
+	if failureData.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution) {
+		s.logger.Info("managed npm runtime startup failure is recoverable",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID))
+		s.handleRecoverableFailureLocked(ctx, failureData)
+		return true
 	}
 
 	if !isAuthError(err.Error()) {
@@ -1831,13 +1875,27 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 	s.logger.Info("agent start failure is auth error, treating as recoverable",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
-	s.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{
-		TaskID:           taskID,
-		SessionID:        sessionID,
-		AgentExecutionID: agentExecutionID,
-		ErrorMessage:     err.Error(),
-	})
+	s.handleRecoverableFailureLocked(ctx, failureData)
 	return true
+}
+
+func classifyManagedRuntimeNpmStartFailure(err error) *routingerr.Error {
+	if err == nil {
+		return nil
+	}
+	var structured *routingerr.ManagedRuntimeStartupError
+	if errors.As(err, &structured) {
+		if structured.Code != routingerr.CodeManagedRuntimeNpmResolution {
+			return nil
+		}
+		return &routingerr.Error{
+			Code:       structured.Code,
+			Confidence: routingerr.ConfHigh,
+			Phase:      routingerr.PhaseSessionInit,
+			RawExcerpt: structured.Details,
+		}
+	}
+	return nil
 }
 
 // actionMetaKey* are the shared keys of the frontend ActionMessage button
@@ -1861,17 +1919,20 @@ const (
 // the map keys in one place avoids drift between the buttons and keeps the
 // metadata shape consistent.
 func wsRecoveryAction(taskID, sessionID, recoverAction, label, icon, tooltip, testID string) map[string]interface{} {
-	return map[string]interface{}{
-		actionMetaKeyType:    "ws_request",
-		actionMetaKeyLabel:   label,
-		actionMetaKeyIcon:    icon,
-		actionMetaKeyTooltip: tooltip,
-		actionMetaKeyTestID:  testID,
+	action := map[string]interface{}{
+		actionMetaKeyType:   "ws_request",
+		actionMetaKeyLabel:  label,
+		actionMetaKeyIcon:   icon,
+		actionMetaKeyTestID: testID,
 		"params": map[string]interface{}{
 			"method":  "session.recover",
 			"payload": map[string]interface{}{"task_id": taskID, "session_id": sessionID, "action": recoverAction},
 		},
 	}
+	if tooltip != "" {
+		action[actionMetaKeyTooltip] = tooltip
+	}
+	return action
 }
 
 // buildRecoveryActions creates the generic actions array for agent error

@@ -93,7 +93,7 @@ function ProfileEditorHeader({
 }: ProfileEditorHeaderProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-start">
+    <div className="flex flex-col items-stretch justify-between gap-4 md:flex-row md:items-start">
       <div className="min-w-0">
         <h2 className="text-2xl font-bold flex min-w-0 items-center gap-2 wrap-break-word">
           <AgentLogo agentName={agentName} size={28} className="shrink-0" />
@@ -103,12 +103,12 @@ function ProfileEditorHeader({
           {t("agents:agentProfileSettings", { name: agentDisplayName })}
         </p>
       </div>
-      <div className="flex items-center gap-3 sm:shrink-0">
+      <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center md:gap-3 md:shrink-0">
         <Button
           variant="outline"
           onClick={onDuplicate}
           data-testid="duplicate-profile-header"
-          className="min-h-11"
+          className="min-h-11 w-full md:w-auto"
           disabled={duplicating}
           aria-busy={duplicating}
           title={t("agents:duplicateProfileNamed", { name: savedProfileName })}

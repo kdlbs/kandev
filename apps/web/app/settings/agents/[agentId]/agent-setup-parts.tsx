@@ -15,8 +15,11 @@ import {
   AlertDialogTrigger,
 } from "@kandev/ui/alert-dialog";
 import { Button } from "@kandev/ui/button";
-import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { SettingsPageHeader, SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
 import { ProfileEnvVarsSection } from "@/components/settings/agent-profile-page";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
@@ -68,45 +71,60 @@ export function AgentHeader({
 }: AgentHeaderProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-start justify-between gap-6">
-      <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-2xl font-bold">{displayName}</h2>
+    <SettingsPageHeader
+      title={
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="min-w-0 break-words">{displayName}</span>
           {showInstallationStatus && (
-            <span className="text-xs text-muted-foreground border border-muted-foreground/30 rounded-full px-2 py-1">
+            <span
+              className={
+                SETTINGS_TYPOGRAPHY.meta +
+                " max-w-full truncate rounded-full border border-muted-foreground/30 px-2 py-1"
+              }
+            >
               {matchedPath ?? t("agents:installationNotDetected")}
             </span>
           )}
-        </div>
-        <p className="text-sm text-muted-foreground mt-1">
-          {isCreateMode ? t("agents:createProfileIntro") : t("agents:configureProfilesIntro")}
-        </p>
-      </div>
-      {savedAgent?.tui_config && onDelete && (
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button variant="destructive" size="sm" className="cursor-pointer">
-              <IconTrash className="h-4 w-4 mr-2" />
-              {t("agents:deleteAgent")}
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {t("agents:deleteAgentTitle", { name: displayName })}
-              </AlertDialogTitle>
-              <AlertDialogDescription>{t("agents:deleteAgentDescription")}</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
-              <AlertDialogAction onClick={onDelete} className="cursor-pointer">
-                {t("agents:delete")}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      )}
-    </div>
+        </span>
+      }
+      description={
+        isCreateMode ? t("agents:createProfileIntro") : t("agents:configureProfilesIntro")
+      }
+      actions={
+        savedAgent?.tui_config && onDelete ? (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="destructive"
+                size="sm"
+                className={settingsActionClassName("cursor-pointer")}
+              >
+                <IconTrash className="h-4 w-4 mr-2" />
+                {t("agents:deleteAgent")}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {t("agents:deleteAgentTitle", { name: displayName })}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {t("agents:deleteAgentDescription")}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="cursor-pointer">
+                  {t("common:cancel")}
+                </AlertDialogCancel>
+                <AlertDialogAction onClick={onDelete} className="cursor-pointer">
+                  {t("agents:delete")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -257,18 +275,20 @@ export function ProfilesCard({
   if (dynamicProfiles.length > 0) {
     return (
       <SettingsCard isDirty={isAgentDirty}>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle>{t("agents:dynamicProfileSettings")}</CardTitle>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onAddProfile}
-            className="min-h-11 cursor-pointer"
-          >
-            <IconPlus className="mr-2 h-4 w-4" />
-            {t("agents:addProfile")}
-          </Button>
-        </CardHeader>
+        <SettingsCardHeader
+          title={t("agents:dynamicProfileSettings")}
+          actions={
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onAddProfile}
+              className={settingsActionClassName("cursor-pointer")}
+            >
+              <IconPlus className="mr-2 h-4 w-4" />
+              {t("agents:addProfile")}
+            </Button>
+          }
+        />
         <CardContent className="space-y-6">
           {dynamicProfiles.map((profile) => (
             <div key={profile.id}>
@@ -290,17 +310,24 @@ export function ProfilesCard({
 
   return (
     <SettingsCard isDirty={isAgentDirty}>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>
-          {isCreateMode
+      <SettingsCardHeader
+        title={
+          isCreateMode
             ? t("agents:createAgentProfileTitle", { name: displayName })
-            : t("agents:agentProfilesTitle", { name: displayName })}
-        </CardTitle>
-        <Button size="sm" variant="outline" onClick={onAddProfile} className="cursor-pointer">
-          <IconPlus className="h-4 w-4 mr-2" />
-          {t("agents:addProfile")}
-        </Button>
-      </CardHeader>
+            : t("agents:agentProfilesTitle", { name: displayName })
+        }
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onAddProfile}
+            className={settingsActionClassName("cursor-pointer")}
+          >
+            <IconPlus className="h-4 w-4 mr-2" />
+            {t("agents:addProfile")}
+          </Button>
+        }
+      />
       <CardContent className="space-y-4">
         {draftAgent.profiles.map((profile) => (
           <ProfileCardItem

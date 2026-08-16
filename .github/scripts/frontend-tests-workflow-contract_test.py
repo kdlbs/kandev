@@ -31,10 +31,6 @@ LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 STEP_MARKER = "      - name: Run tests\n"
 NEXT_STEP_MARKER = "\n      - name: "
 
-# The subjects above that live outside `.github/`, and so are not covered by
-# this job's `.github/workflows/**` trigger.
-UNTRIGGERED_SUBJECTS = ("apps/web/vitest.config.ts", "apps/.npmrc")
-
 
 def run_tests_step(workflow: str) -> str:
     """Return the body of the `Run tests` step, up to the following step."""
@@ -44,26 +40,12 @@ def run_tests_step(workflow: str) -> str:
     return remainder.partition(NEXT_STEP_MARKER)[0]
 
 
-def trigger_paths(workflow: str, trigger: str) -> str:
-    """Return the `paths:` list of `trigger`'s block under `on:`.
-
-    Scoped to the `paths:` key rather than the whole trigger block. GitHub
-    rejects `paths` and `paths-ignore` on the same event, so renaming the key
-    inverts the filter wholesale: the job would then run on everything *except*
-    these files, and a match against the block as a whole would not notice.
-    """
+def trigger_block(workflow: str, trigger: str) -> str:
+    """Return `trigger`'s block under `on:`, up to the next top-level key."""
     block = re.search(rf"(?m)^  {trigger}:\n(?:^ {{4}}.*\n|^\n)*", workflow)
     if block is None:
         raise AssertionError(f"lint-action-pinning.yml has no {trigger} trigger")
-
-    paths = re.search(r"(?m)^    paths:\n((?:^      - .*\n)+)", block.group(0))
-    if paths is None:
-        raise AssertionError(
-            f"lint-action-pinning.yml's {trigger} trigger has no `paths:` list. A "
-            "`paths-ignore:` key in its place inverts the filter, and the job stops "
-            "running for the very files listed under it."
-        )
-    return paths.group(1)
+    return block.group(0)
 
 
 class FrontendTestsWorkflowContractTest(unittest.TestCase):
@@ -109,35 +91,40 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
     def test_this_contract_runs_when_its_subjects_change(self) -> None:
         """The assertions above are only worth anything if CI runs them.
 
-        `lint-action-pinning.yml` triggers on `.github/workflows/**`, which
-        covers `frontend-tests.yml` but neither subject in
-        `UNTRIGGERED_SUBJECTS`. `frontend-tests.yml` does not cover
-        `apps/.npmrc` either, so without an explicit trigger here a PR that
-        deletes `production=false` and nothing else runs no job at all and the
-        assertion above never executes. Mirrors the equivalent test in
-        `release-workflow-contract_test.py`.
+        Two of this file's subjects, `apps/web/vitest.config.ts` and
+        `apps/.npmrc`, live outside `.github/`. `lint-action-pinning.yml` used
+        to name them in a hand-maintained `paths:` list so that a PR deleting
+        `production=false` and nothing else still brought this job up; every
+        new subject meant remembering to extend that list, and every omission
+        was a silently unguarded file.
 
-        The step assertion at the end is weaker than the path ones by
+        The list is gone. `lint-action-pinning.yml` now runs on every push and
+        every pull request, which subsumes the old guarantee for every subject
+        at once -- and is what lets it be a merge-queue required check, since a
+        path-filtered workflow reports no conclusion when it is skipped and a
+        required check that never reports blocks the queue forever.
+
+        The step assertion at the end is weaker than the trigger ones by
         construction: this file runs only from that step, so the PR that deletes
         it also deletes the only thing that would fail. It holds for local runs
         and for a step whose command is renamed or moved elsewhere. Keeping the
         job a required check is what covers outright removal, and that lives in
-        branch protection, not here.
+        the repository ruleset, not here.
         """
         lint_workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
 
-        for trigger in ("push", "pull_request"):
-            paths = trigger_paths(lint_workflow, trigger)
+        for trigger in ("push", "pull_request", "merge_group"):
+            block = trigger_block(lint_workflow, trigger)
 
-            for subject in UNTRIGGERED_SUBJECTS:
-                self.assertIn(
-                    f'      - "{subject}"\n',
-                    paths,
-                    f"{subject} must be a {trigger} path trigger in "
-                    "lint-action-pinning.yml. It is a subject of this contract "
-                    "but lives outside .github/, so nothing else brings this "
-                    "job up when it changes.",
-                )
+            self.assertNotIn(
+                "    paths:",
+                block,
+                f"lint-action-pinning.yml's {trigger} trigger must stay "
+                "unfiltered. A `paths:` list there reintroduces both failure "
+                "modes it was removed for: subjects outside the list stop "
+                "being guarded, and a skipped run reports no conclusion, which "
+                "a merge queue waits on forever.",
+            )
 
         self.assertIn(
             "\n        run: python3 .github/scripts/frontend-tests-workflow-contract_test.py\n",

@@ -240,7 +240,7 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 type wsRecoverSessionRequest struct {
 	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
-	Action    string `json:"action"` // "resume", "fresh_start", or "cancel_retry"
+	Action    string `json:"action"` // "resume", "fresh_start", "runtime_retry", or "cancel_retry"
 }
 
 // wsRecoverSession recovers a session by id (resume or fresh start).
@@ -263,8 +263,8 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
 	}
 
-	if req.Action != "resume" && req.Action != "fresh_start" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'fresh_start', or 'cancel_retry'", nil)
+	if req.Action != "resume" && req.Action != "fresh_start" && req.Action != "runtime_retry" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "action must be 'resume', 'fresh_start', 'runtime_retry', or 'cancel_retry'", nil)
 	}
 
 	resp, err := h.service.RecoverSession(ctx, req.TaskID, req.SessionID, req.Action)

@@ -58,6 +58,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
 | [provider-error-recovery](platform/provider-error-recovery.md) | draft |
+| [duplicated-tab-stale-data](fix-duplicated-tab-stale-data/spec.md) | building |
 | [health-endpoint-version](health-endpoint-version/spec.md) | building |
 | [go-dev-launcher](go-dev-launcher/spec.md) | draft |
 
@@ -213,6 +214,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [message-queue-send-now](ui/message-queue-send-now.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [settings-discovery](ui/settings-discovery.md) | shipped |
+| [settings-typography](settings-typography/spec.md) | draft |
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
