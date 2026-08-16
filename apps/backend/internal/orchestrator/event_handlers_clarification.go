@@ -523,16 +523,17 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 
 	hasPendingClarification := s.sessionHasPendingClarification(writeCtx, sessionID)
 	detached := 0
+	var detachErr error
 	if s.clarificationCanceller != nil {
-		detached, err = s.clarificationCanceller.DetachSessionAndNotify(writeCtx, sessionID)
-		if err != nil {
-			return 0, fmt.Errorf("detach clarification before pause: %w", err)
+		detached, detachErr = s.clarificationCanceller.DetachSessionAndNotify(writeCtx, sessionID)
+		if detachErr != nil {
+			detachErr = fmt.Errorf("detach clarification before pause: %w", detachErr)
 		}
 	}
 	if isTerminalSessionState(session.State) {
-		return detached, nil
+		return detached, detachErr
 	}
-	if !hasPendingClarification && detached == 0 {
+	if !hasPendingClarification && detached == 0 && detachErr == nil {
 		return detached, nil
 	}
 	if _, has := models.LoadPendingStepSignal(session.Metadata); has {
@@ -556,11 +557,11 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 			zap.String("task_id", session.TaskID),
 			zap.String("session_id", sessionID),
 			zap.String("expected_turn_id", expectedTurnID))
-		return detached, nil
+		return detached, detachErr
 	} else if err != nil {
-		return detached, err
+		return detached, errors.Join(detachErr, err)
 	}
-	return detached, nil
+	return detached, detachErr
 }
 
 // cancelAgentSilent cancels the agent turn without creating a visible message

@@ -32,6 +32,18 @@ func (c *zeroClarificationCanceller) ExpireSessionAndNotify(context.Context, str
 	return 0, nil
 }
 
+type failingDetachClarificationCanceller struct {
+	err error
+}
+
+func (c *failingDetachClarificationCanceller) DetachSessionAndNotify(context.Context, string) (int, error) {
+	return 0, c.err
+}
+
+func (c *failingDetachClarificationCanceller) ExpireSessionAndNotify(context.Context, string) (int, error) {
+	return 0, nil
+}
+
 type failingStartTurnService struct {
 	TurnService
 	err error
@@ -889,6 +901,35 @@ func TestPauseForClarificationInput_SilentlyCancelsTurnWithoutWorkflowTransition
 		t.Fatalf("get active turn: %v", err)
 	} else if turn != nil {
 		t.Fatalf("expected active turn to be completed, got %#v", turn)
+	}
+}
+
+func TestPauseForClarificationInput_ContinuesHardPauseAfterDetachFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+
+	wantErr := errors.New("detach failed")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.SetClarificationCanceller(&failingDetachClarificationCanceller{err: wantErr})
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	detached, err := svc.PauseForClarificationInput(ctx, "s1")
+	if detached != 0 || !errors.Is(err, wantErr) {
+		t.Fatalf("PauseForClarificationInput = %d, %v; want 0 and detach error", detached, err)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("detach failure must still hard-pause the active turn, got %d cancel calls", got)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected session waiting for input after detach failure, got %q", session.State)
 	}
 }
 
