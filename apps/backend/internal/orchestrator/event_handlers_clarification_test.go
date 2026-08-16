@@ -947,6 +947,61 @@ func TestPauseForClarificationInput_ContinuesHardPauseAfterDetachFailure(t *test
 	}
 }
 
+func TestPauseForClarificationInput_RetriesHardPauseAfterSuccessfulDetach(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+	requireNoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"s1",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	))
+
+	wantErr := errors.New("cancel temporarily unavailable")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	agentMgr.cancelAgentFunc = func(context.Context, string) error {
+		if agentMgr.cancelAgentCalls.Load() == 1 {
+			return wantErr
+		}
+		return nil
+	}
+	store := clarification.NewStore(time.Minute)
+	store.CreateRequest(&clarification.Request{
+		PendingID: "pending-s1",
+		SessionID: "s1",
+	})
+	svc := createEngineService(t, repo, newMockStepGetter(), agentMgr)
+	svc.SetClarificationCanceller(clarification.NewCanceller(store, repo, nil, testLogger()))
+	svc.turnService = &repoBackedTurnService{repo: repo}
+
+	detached, err := svc.PauseForClarificationInput(ctx, "s1")
+	if detached != 1 || !errors.Is(err, wantErr) {
+		t.Fatalf("first PauseForClarificationInput = %d, %v; want 1 and cancel error", detached, err)
+	}
+	pending, err := repo.FindActiveClarificationMessagesBySessionID(ctx, "s1")
+	if err != nil || len(pending) != 1 || pending[0].Metadata["agent_disconnected"] != true {
+		t.Fatalf("detached clarification authority = %#v, %v; want one pending detached row", pending, err)
+	}
+	detached, err = svc.PauseForClarificationInput(ctx, "s1")
+	if err != nil {
+		t.Fatalf("retry PauseForClarificationInput: %v", err)
+	}
+	if detached != 0 {
+		t.Fatalf("retry detached bundles = %d, want 0 for already-detached row", detached)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 2 {
+		t.Fatalf("hard-pause cancel calls = %d, want retry after successful detach", got)
+	}
+	if turn, turnErr := repo.GetActiveTurnBySessionID(ctx, "s1"); turnErr != nil && !errors.Is(turnErr, sql.ErrNoRows) {
+		t.Fatalf("get active turn: %v", turnErr)
+	} else if turn != nil {
+		t.Fatalf("retry left clarification turn active: %#v", turn)
+	}
+}
+
 func TestPauseForClarificationInput_CancelsWhileSessionAlreadyWaiting(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
