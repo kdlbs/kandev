@@ -368,6 +368,9 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	}
 
 	execution.ACPSessionID = result.SessionID
+	if !cacheFreshSessionModelState(execution) && (profileModel != "" || runtimeModel != "") {
+		waitForFreshSessionModelState(ctx, sm.logger, execution)
+	}
 	providerDefaultConfig := execution.GetModelState()
 
 	// Decide the effective model up front under the executor-authoritative

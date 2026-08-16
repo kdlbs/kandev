@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -58,6 +59,49 @@ type Client struct {
 	// Pending request/response tracking for agent stream
 	pendingRequests map[string]chan *ws.Message
 	pendingMu       sync.Mutex
+
+	// lastSessionModelState is populated synchronously by session/new,
+	// session/reset, or session/load responses. Lifecycle policy evaluation can
+	// use it before the corresponding session_models event reaches its handler.
+	lastSessionModelState *streams.SessionModelState
+}
+
+func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastSessionModelState = cloneSessionModelState(state)
+}
+
+// GetLastSessionModelState returns the model catalog included in the most
+// recent session creation or load response.
+func (c *Client) GetLastSessionModelState() *streams.SessionModelState {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return cloneSessionModelState(c.lastSessionModelState)
+}
+
+func cloneSessionModelState(state *streams.SessionModelState) *streams.SessionModelState {
+	if state == nil {
+		return nil
+	}
+	cloned := &streams.SessionModelState{
+		CurrentModelID: state.CurrentModelID,
+		Models:         append([]streams.SessionModelInfo(nil), state.Models...),
+		ConfigOptions:  append([]streams.ConfigOption(nil), state.ConfigOptions...),
+	}
+	for i, model := range cloned.Models {
+		if model.Meta == nil {
+			continue
+		}
+		cloned.Models[i].Meta = make(map[string]any, len(model.Meta))
+		for key, value := range model.Meta {
+			cloned.Models[i].Meta[key] = value
+		}
+	}
+	for i, option := range cloned.ConfigOptions {
+		cloned.ConfigOptions[i].Options = append([]streams.ConfigOptionValue(nil), option.Options...)
+	}
+	return cloned
 }
 
 // ClientOption configures optional Client settings.

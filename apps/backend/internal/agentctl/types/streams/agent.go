@@ -442,6 +442,15 @@ type SessionModelInfo struct {
 	Meta map[string]any `json:"meta,omitempty"`
 }
 
+// SessionModelState is the synchronous model snapshot returned with a newly
+// created or loaded session. It lets lifecycle callers apply a saved model
+// before the asynchronous session_models stream event is dispatched.
+type SessionModelState struct {
+	CurrentModelID string             `json:"current_model_id,omitempty"`
+	Models         []SessionModelInfo `json:"models,omitempty"`
+	ConfigOptions  []ConfigOption     `json:"config_options,omitempty"`
+}
+
 // AuthMethodInfo represents an authentication method from ACP initialize.
 type AuthMethodInfo struct {
 	// ID is the auth method identifier.

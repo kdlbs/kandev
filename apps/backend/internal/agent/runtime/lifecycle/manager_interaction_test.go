@@ -46,6 +46,7 @@ type restartMockAgentctlServer struct {
 
 	failStop       bool
 	failSessionNew bool
+	modelState     *streams.SessionModelState
 }
 
 func TestStopAgentWithReason_MissingExecutionIsClassified(t *testing.T) {
@@ -54,6 +55,21 @@ func TestStopAgentWithReason_MissingExecutionIsClassified(t *testing.T) {
 	err := mgr.StopAgentWithReason(context.Background(), "missing", "cleanup", true)
 
 	require.ErrorIs(t, err, ErrExecutionNotFound)
+}
+
+func TestWaitForFreshSessionModelStateWaitsForAdvertisedCatalog(t *testing.T) {
+	execution := &AgentExecution{ID: "exec-model-catalog"}
+	execution.SetModelState(&CachedModelState{CurrentModelID: "mock-fast"})
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		execution.SetModelState(&CachedModelState{
+			CurrentModelID: "mock-fast",
+			Models:         []streams.SessionModelInfo{{ModelID: "mock-fast"}},
+		})
+	}()
+
+	require.True(t, waitForFreshSessionModelState(context.Background(), newTestLogger(), execution))
 }
 
 func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *restartMockAgentctlServer {
@@ -135,10 +151,14 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					})
 				}
 			case "agent.session.reset":
-				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				payload := map[string]interface{}{
 					"success":    true,
 					"session_id": "reset-session-456",
-				})
+				}
+				if m.modelState != nil {
+					payload["model_state"] = m.modelState
+				}
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, payload)
 			case "agent.session.set_mode":
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"success": true,
@@ -755,6 +775,48 @@ func TestManager_ResetAgentContext_ReappliesSessionModel(t *testing.T) {
 		"an empty fresh-session model catalog must not receive a model-selection request")
 	require.Empty(t, mock.getSetModelIDs(),
 		"reset must continue on the fresh-session provider default when no model is advertised")
+}
+
+func TestManager_ResetAgentContext_UsesSynchronousSessionModelCatalog(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-1": {SessionID: "session-1", RuntimeModel: "mock-smart"},
+		},
+	}
+	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.modelState = &streams.SessionModelState{
+		CurrentModelID: "mock-fast",
+		Models:         []streams.SessionModelInfo{{ModelID: "mock-fast"}, {ModelID: "mock-smart"}},
+	}
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	exec := &AgentExecution{
+		ID:                 "exec-model-reset-response",
+		TaskID:             "task-1",
+		SessionID:          "session-1",
+		AgentProfileID:     "profile-1",
+		ACPSessionID:       "old-session",
+		AgentCommand:       "auggie --model test",
+		Status:             v1.AgentStatusRunning,
+		WorkspacePath:      "/workspace",
+		sessionInitialized: true,
+		agentctl:           client,
+		promptDoneCh:       make(chan PromptCompletionSignal, 1),
+	}
+	exec.SetModelState(&CachedModelState{CurrentModelID: "mock-fast"})
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	require.NoError(t, mgr.ResetAgentContext(ctx, exec.ID))
+
+	require.Equal(t, []string{"mock-smart"}, mock.getSetModelIDs(),
+		"reset must use the synchronous session catalog before the stream event is dispatched")
 }
 
 // TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache is the

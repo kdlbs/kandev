@@ -140,6 +140,7 @@ func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentE
 	}
 	previousMode := execution.GetModeState()
 	previousModel := execution.GetModelState()
+	previousModelID := m.effectiveSessionModelForReset(ctx, execution)
 	execution.SetModelState(nil)
 	newSessionID, err := execution.agentctl.NewSession(ctx, execution.WorkspacePath, mcpServers)
 	if err != nil {
@@ -151,7 +152,10 @@ func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentE
 	execution.resumeContextInjected = false
 	execution.needsResumeContext = m.historyManager != nil &&
 		m.historyManager.HasHistory(execution.SessionID)
-	if err := m.reapplyReboundSessionConfig(ctx, execution, newSessionID, previousModel, previousMode); err != nil {
+	if !cacheFreshSessionModelState(execution) && previousModelID != "" {
+		waitForFreshSessionModelState(ctx, m.logger, execution)
+	}
+	if err := m.reapplyReboundSessionConfig(ctx, execution, newSessionID, previousModel, previousModelID, previousMode); err != nil {
 		return err
 	}
 	if m.eventPublisher != nil {
@@ -165,16 +169,17 @@ func (m *Manager) reapplyReboundSessionConfig(
 	execution *AgentExecution,
 	sessionID string,
 	model *CachedModelState,
+	modelID string,
 	mode *CachedModeState,
 ) error {
-	if model != nil && model.CurrentModelID != "" {
+	if modelID != "" {
 		policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
-		policy.Model = model.CurrentModelID
+		policy.Model = modelID
 		decision, err := applyStartModelPolicy(ctx, m.logger, execution.agentctl, execution.GetModelState(), policy)
 		if err != nil {
 			m.logger.Warn("failed to re-apply model after workspace rebind",
 				zap.String("execution_id", execution.ID),
-				zap.String("model", model.CurrentModelID),
+				zap.String("model", modelID),
 				zap.Error(err))
 			return err
 		}
