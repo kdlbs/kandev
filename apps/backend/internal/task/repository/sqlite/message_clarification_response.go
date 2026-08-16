@@ -257,7 +257,7 @@ func (r *Repository) RestoreActiveClarificationBundle(
 	if err := r.restoreClarificationMessages(
 		ctx,
 		tx,
-		r.db.DriverName(),
+		drv,
 		restorable,
 		terminalStatus,
 	); err != nil {
