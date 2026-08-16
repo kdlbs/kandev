@@ -16,6 +16,7 @@ func TestSpawnSessionToolDescribesEffectiveAgentProfile(t *testing.T) {
 	description := tool.Tool.Description
 	assert.Contains(t, description, "not a native subagent")
 	assert.Contains(t, description, "do NOT call this tool")
+	assert.Contains(t, description, "only when the user has explicitly authorized delegation")
 	assert.Contains(t, description, "explicitly asks for another Kandev session/tab")
 	assert.Contains(t, description, "do not use this tool as a fallback")
 	assert.NotContains(t, description, "pair of hands")

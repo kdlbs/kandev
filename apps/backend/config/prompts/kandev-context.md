@@ -6,7 +6,7 @@ Kandev Session ID: {session_id}
 Use these IDs when calling tools that require task_id or session_id.
 
 DELEGATION POLICY:
-For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool). Do NOT use Kandev task or session tools as a generic worker mechanism.
+For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool) only when the user has explicitly authorized delegation for this task. Otherwise continue in this session or ask the user. Do NOT use Kandev task or session tools as a generic worker mechanism.
 Use create_task_kandev only when the user explicitly wants a persistent Kandev task or subtask, workflow tracking, or Kandev task lifecycle. Use spawn_session_kandev only when the user explicitly wants another Kandev session/tab. If no native subagent tool is available, continue in this session or ask the user; do not silently create a Kandev task or session.
 
 {autopilot_section}

@@ -122,6 +122,7 @@ func TestKandevContext_PrefersNativeSubagentsForOrdinaryDelegation(t *testing.T)
 
 	assert.Contains(t, context, "DELEGATION POLICY")
 	assert.Contains(t, context, "native subagent mechanism")
+	assert.Contains(t, context, "only when the user has explicitly authorized delegation")
 	assert.Contains(t, context, "user explicitly wants a persistent Kandev task or subtask")
 	assert.Contains(t, context, "user explicitly wants another Kandev session/tab")
 	assert.Contains(t, context, "do not silently create a Kandev task or session")

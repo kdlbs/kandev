@@ -966,7 +966,7 @@ func (s *Server) registerKanbanTools() {
 		mcp.NewTool("message_task_kandev",
 			mcp.WithDescription(`Send a follow-up prompt (message) to an existing task's primary session, or to a specific session via session_id.
 
-This tool coordinates already-created Kandev tasks and sessions. It is not a substitute for your host agent's native subagent messaging or coordination. For ordinary coding, research, review, or parallel work, use the host's native subagent mechanism.
+This tool coordinates already-created Kandev tasks and sessions. It is not a substitute for your host agent's native subagent messaging or coordination. For ordinary coding, research, review, or parallel work, use the host's native subagent mechanism only when the user has explicitly authorized delegation for this task; otherwise continue in this session or ask the user.
 
 Use this to communicate with a sibling task, a parent task, or any task you know the ID of — for example to ask a delegated subtask for clarification, hand it new context, or nudge a paused task forward. Pass session_id to target a specific session — including a sibling session on your OWN task (e.g. one you spawned with spawn_session_kandev).
 
@@ -1089,8 +1089,8 @@ func (s *Server) registerCreateTaskTool() {
 	toolDesc := `Create a new persistent Kandev task or subtask and auto-start a task agent on it.
 
 DELEGATION POLICY:
-- For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool). Do NOT use Kandev task or session tools as a generic worker mechanism.
-- Use this tool only when the user explicitly wants a persistent Kandev task or subtask, workflow tracking, or Kandev task lifecycle. If no native subagent tool is available, continue in this session or ask the user; do not silently create a Kandev task.
+- For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool) only when the user has explicitly authorized delegation for this task. Otherwise continue in this session or ask the user. Do NOT use Kandev task or session tools as a generic worker mechanism.
+- Use this tool only when the user explicitly wants a persistent Kandev task or subtask, workflow tracking, or Kandev task lifecycle. When there is no such request, do not silently create a Kandev task.
 
 WHEN TO USE parent_id='self':
 - Breaking down your current task into persistent Kandev workflow phases/steps → use parent_id='self'
@@ -1129,8 +1129,8 @@ IDEMPOTENCY (external_id):
 		toolDesc = `Create a new persistent top-level Kandev task and auto-start a task agent on it.
 
 DELEGATION POLICY:
-- For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool). Do NOT use Kandev task or session tools as a generic worker mechanism.
-- Use this tool only when the user explicitly wants a persistent Kandev task, workflow tracking, or Kandev task lifecycle. If no native subagent tool is available, continue in this session or ask the user; do not silently create a Kandev task.
+- For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool) only when the user has explicitly authorized delegation for this task. Otherwise continue in this session or ask the user. Do NOT use Kandev task or session tools as a generic worker mechanism.
+- Use this tool only when the user explicitly wants a persistent Kandev task, workflow tracking, or Kandev task lifecycle. When there is no such request, do not silently create a Kandev task.
 
 IMPORTANT:
 - Provide a repository via repository_url, repository_id, or local_path
@@ -1232,7 +1232,7 @@ func (s *Server) registerSpawnSessionTool() {
 		mcp.NewTool("spawn_session_kandev",
 			mcp.WithDescription(`Spawn an ADDITIONAL agent session on an existing task (defaults to your current task) and start it with the given prompt.
 
-IMPORTANT DELEGATION RULE: This creates an additional Kandev platform session, not a native subagent. For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism and do NOT call this tool. Use this only when the user explicitly asks for another Kandev session/tab on an existing task or the workflow explicitly requires persistent Kandev session coordination. If native subagents are unavailable, continue in this session or ask the user; do not use this tool as a fallback.
+IMPORTANT DELEGATION RULE: This creates an additional Kandev platform session, not a native subagent. For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism only when the user has explicitly authorized delegation for this task; otherwise continue in this session or ask the user. For ordinary delegation, do NOT call this tool. Use this only when the user explicitly asks for another Kandev session/tab on an existing task or the workflow explicitly requires persistent Kandev session coordination. If native subagents are unavailable, continue in this session or ask the user; do not use this tool as a fallback.
 
 Unlike create_task_kandev this does NOT create a new task. The new session runs alongside the task's existing sessions in the same workspace, as a separate session tab.
 

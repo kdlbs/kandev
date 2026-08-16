@@ -177,6 +177,30 @@ describe("useWorkspaceContentSearch validation and failures", () => {
 
     expect(result.current.results).toEqual([primary, extra]);
   });
+
+  it("publishes matches before retry polling completes", async () => {
+    const match = {
+      repository_name: "primary",
+      path: "src/match.ts",
+      line: 1,
+      column: 1,
+      preview: "needle",
+      match_ranges: [],
+    };
+    mockSearchWorkspaceContent.mockResolvedValue({ results: [match] });
+    const { result } = renderHook(() =>
+      useWorkspaceContentSearch({
+        enabled: true,
+        query: "needle",
+        sessionId: "session-1",
+      }),
+    );
+
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+
+    expect(result.current.results).toEqual([match]);
+    expect(result.current.isSearching).toBe(true);
+  });
 });
 
 describe("useWorkspaceContentSearch stale responses", () => {

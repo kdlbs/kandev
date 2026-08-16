@@ -75,6 +75,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.NotContains(t, tool.Tool.Description, "'description' is the sub-agent's initial prompt")
 	assert.Contains(t, tool.Tool.Description, "DELEGATION POLICY")
 	assert.Contains(t, tool.Tool.Description, "native subagent mechanism")
+	assert.Contains(t, tool.Tool.Description, "only when the user has explicitly authorized delegation")
 	assert.Contains(t, tool.Tool.Description, "persistent Kandev task or subtask")
 	assert.Contains(t, tool.Tool.Description, "do not silently create a Kandev task")
 	assert.NotContains(t, tool.Tool.Description, "Delegating work to another agent")
