@@ -40,6 +40,12 @@ export type TaskPendingSelectionSnapshot = {
   pendingAction: TaskPendingAction | null | undefined;
 };
 
+export function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === "object" && error !== null && "name" in error && error.name === "AbortError"
+  );
+}
+
 export function taskPendingSelectionMatches(
   initial: TaskPendingSelectionSnapshot,
   current: TaskPendingSelectionSnapshot,
@@ -66,6 +72,7 @@ function handlePendingSelectionOwnerChange(
   store: StoreApi<AppState>,
   taskId: string,
   initial: TaskPendingSelectionSnapshot,
+  taskProjectionExisted: boolean,
   onChanged: () => void,
 ): boolean {
   if (!initial.pendingAction) return false;
@@ -76,14 +83,29 @@ function handlePendingSelectionOwnerChange(
     state.kanban?.tasks ?? [],
   );
   if (!currentTask) {
-    // Legacy callers may not have a durable summary to revalidate. A summary-
-    // backed selection must fail closed if its task projection disappears.
-    return initial.revision !== null;
+    // Callers without an initial store projection cannot revalidate existence.
+    // A projected task must fail closed if it disappears during session loading.
+    return taskProjectionExisted;
   }
   const current = taskPendingSelectionSnapshot(currentTask);
   if (taskPendingSelectionMatches(initial, current)) return false;
   onChanged();
   return true;
+}
+
+function pendingOwnerGuard(
+  store: StoreApi<AppState>,
+  taskId: string,
+  task: PendingTask | undefined,
+  onChanged: () => void,
+): () => boolean {
+  const state = store.getState();
+  const initial = taskPendingSelectionSnapshot(task);
+  const taskProjectionExisted = Boolean(
+    findTaskInSnapshots(taskId, state.kanbanMulti?.snapshots ?? {}, state.kanban?.tasks ?? []),
+  );
+  return () =>
+    handlePendingSelectionOwnerChange(store, taskId, initial, taskProjectionExisted, onChanged);
 }
 
 function loadTaskSessionsForSelection(
@@ -337,9 +359,7 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
   const navigateToTask = params.navigateToTask ?? replaceTaskUrl;
   const openWithoutSession = () => openTaskWithoutSession(params, navigateToTask);
   const taskPendingAction = effectiveTaskPendingAction(task);
-  const pendingSnapshot = taskPendingSelectionSnapshot(task);
-  const pendingOwnerHandled = () =>
-    handlePendingSelectionOwnerChange(store, taskId, pendingSnapshot, openWithoutSession);
+  const pendingOwnerHandled = pendingOwnerGuard(store, taskId, task, openWithoutSession);
   const selectionGuard = createTaskSelectionGuard(
     store,
     taskId,
@@ -382,7 +402,8 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
         switchToSession(taskId, resolvedSessionId, currentOldSessionId);
         navigateToTask(taskId);
       })
-      .catch(() => {
+      .catch((error) => {
+        if (isAbortError(error)) return;
         if (selectionGuard.wasSuperseded()) return;
         if (pendingOwnerHandled()) return;
         if (taskPendingAction) return openWithoutSession();
@@ -427,7 +448,8 @@ export function selectTaskWithLayout(params: SelectTaskWithLayoutParams): void {
       params.setActiveTask(taskId);
       navigateToTask(taskId);
     })
-    .catch(() => {
+    .catch((error) => {
+      if (isAbortError(error)) return;
       if (selectionGuard.wasSuperseded()) return;
       if (pendingOwnerHandled()) return;
       openWithoutSession();

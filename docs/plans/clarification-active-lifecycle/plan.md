@@ -287,6 +287,12 @@ All task gates passed:
   PostgreSQL predicate case skipped locally and remains enabled in CI.
 - Follow-up review bounds terminal bundle publication with the same fresh persistence context. The
   cancelled-caller regression, full clarification suite, and focused lint passed.
+- Latest Codex review makes superseded forced-load aborts inert across desktop and phone and records
+  initial task-projection presence so deletion also invalidates legacy pending-action selections. This
+  changes shared selection state only, not mobile composition or touch behavior; focused desktop/mobile
+  unit coverage satisfies mobile parity without another Playwright case.
+- Four focused task-selection suites passed 61 tests; full web lint, typecheck, and the i18n ratchet
+  passed.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

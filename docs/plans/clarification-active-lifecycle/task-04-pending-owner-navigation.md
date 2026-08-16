@@ -112,6 +112,13 @@ update task/plan status.
   ordering coverage; a focused created-time tie-break case closes the remaining comparison branch.
 - Final Codex review reconciles the durable wording with implemented behavior: a changed owner opens the
   task-only fallback, while a disappeared task projection alone leaves selection inert.
+- Latest Codex review ignores `AbortError` from a superseded shared forced load on desktop and phone,
+  preventing the losing continuation from clearing the winning session. Desktop now captures whether a
+  legacy pending task had a store projection at click time and remains inert if that projection is
+  deleted. This is shared state-only behavior with no layout, navigation surface, touch, or breakpoint
+  change, so focused desktop/mobile unit regressions satisfy mobile parity without new Playwright scope.
+- Four focused task-selection suites passed 61 tests; full web lint, typecheck, and the i18n ratchet
+  passed.
 - Six shared desktop/mobile selection and removal suites passed 75 tests; web typecheck, zero-warning
   full lint, and the i18n ratchet passed.
 - `cd apps && pnpm install --frozen-lockfile` passed.

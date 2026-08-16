@@ -96,7 +96,8 @@ hiding the action the icon represents.
   the outgoing session layout and fails closed to the task route without guessing a session. Normal
   preference order returns only for a clean task. If the task projection disappears while that
   authoritative load is in flight, desktop and phone leave the selection inert instead of navigating to
-  a deleted task.
+  a deleted task, including tasks using the legacy pending-action projection. A forced load aborted by a
+  newer load is also inert; it is not treated as a request failure requiring task-only fallback.
 
 ## Data model
 
@@ -324,6 +325,9 @@ session they can already access. Session selection does not broaden task visibil
   reporting retryability and publishes the restored pending rows so other clients converge.
 - **GIVEN** the selected task projection disappears while desktop or mobile session loading is in
   flight, **WHEN** the delayed load settles, **THEN** Kandev leaves task and session selection unchanged.
+- **GIVEN** a newer desktop or mobile forced session load aborts an older load for the same task,
+  **WHEN** the older continuation handles `AbortError`, **THEN** it leaves the winning task and session
+  selection unchanged.
 - **GIVEN** authoritative pending-action projection fails while listing a task's sessions, **WHEN** the
   HTTP or WebSocket list request completes, **THEN** it returns an internal error rather than a false
   clean-session response.

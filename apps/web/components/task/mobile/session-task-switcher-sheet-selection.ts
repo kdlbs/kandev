@@ -4,6 +4,7 @@ import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
 import {
   effectiveTaskPendingAction,
+  isAbortError,
   resolvePreferredSessionId,
   resolveTaskSessionId,
   taskPendingSelectionMatches,
@@ -86,6 +87,7 @@ export async function selectPendingTaskFromSheet(
       taskPendingAction: params.taskPendingAction,
     });
   } catch (error) {
+    if (isAbortError(error)) return;
     console.error("Failed to load pending task sessions:", error);
   }
   const initialSnapshot = params.pendingSnapshot ?? {

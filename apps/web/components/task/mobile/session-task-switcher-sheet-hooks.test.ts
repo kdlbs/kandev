@@ -267,6 +267,29 @@ describe("selectPendingTaskFromSheet", () => {
   });
 });
 
+describe("selectPendingTaskFromSheet aborts", () => {
+  it("leaves selection inert when a forced session load is superseded", async () => {
+    const order: string[] = [];
+    const abortError = new Error("superseded");
+    abortError.name = "AbortError";
+
+    await selectPendingTaskFromSheet({
+      taskId: "task-1",
+      preferredSessionId: "primary",
+      taskPendingAction: "permission",
+      loadTaskSessionsForTask: vi.fn(async () => {
+        throw abortError;
+      }),
+      setActiveSession: (_taskId, sessionId) => order.push(`session:${sessionId}`),
+      setActiveTask: () => order.push("task"),
+      navigate: () => order.push("navigate"),
+      onOpenChange: () => order.push("close"),
+    });
+
+    expect(order).toEqual([]);
+  });
+});
+
 describe("selectTaskFromSheet races", () => {
   it("ignores an older pending selection that resolves after a newer tap", async () => {
     let resolveTaskA: (sessions: TaskSession[]) => void = () => undefined;
