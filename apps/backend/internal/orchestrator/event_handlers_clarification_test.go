@@ -44,6 +44,20 @@ func (c *failingDetachClarificationCanceller) ExpireSessionAndNotify(context.Con
 	return 0, nil
 }
 
+func TestClarificationInputPhaseContextStartsFreshAfterPriorCancellation(t *testing.T) {
+	prior, cancelPrior := context.WithCancel(context.Background())
+	cancelPrior()
+
+	phase, cancelPhase := clarificationInputPhaseContext(prior)
+	defer cancelPhase()
+	if err := phase.Err(); err != nil {
+		t.Fatalf("fresh clarification phase inherited prior cancellation: %v", err)
+	}
+	if _, ok := phase.Deadline(); !ok {
+		t.Fatal("fresh clarification phase has no bounded deadline")
+	}
+}
+
 type failingStartTurnService struct {
 	TurnService
 	err error

@@ -26,6 +26,10 @@ const (
 	detachedClarificationDispatchTimeout = 30 * time.Second
 )
 
+func clarificationInputPhaseContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), clarificationInputPauseTimeout)
+}
+
 // subscribeClarificationEvents subscribes to clarification-related events.
 func (s *Service) subscribeClarificationEvents() {
 	if s.eventBus == nil {
@@ -500,7 +504,7 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	if sessionID == "" {
 		return 0, fmt.Errorf("session_id is required")
 	}
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clarificationInputPauseTimeout)
+	writeCtx, cancel := clarificationInputPhaseContext(ctx)
 	defer cancel()
 	guard := s.lockCancelInFlightGuard(sessionID)
 	defer guard.release()
@@ -536,8 +540,10 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	if !hasPendingClarification && detached == 0 && detachErr == nil {
 		return detached, nil
 	}
+	pauseCtx, cancelPause := clarificationInputPhaseContext(writeCtx)
+	defer cancelPause()
 	if _, has := models.LoadPendingStepSignal(session.Metadata); has {
-		s.clearPendingStepSignal(writeCtx, session)
+		s.clearPendingStepSignal(pauseCtx, session)
 	}
 
 	// Detach and cancellation registration share the same guard as prompt turn
@@ -546,7 +552,7 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	// ErrCancelEscalated/ErrNoExecutionForSession once the first pause wins, and
 	// completeTurnForSession is idempotent when there is no active turn left.
 	if err := s.cancelAgentSilentExpectedWithGuard(
-		writeCtx,
+		pauseCtx,
 		session.TaskID,
 		sessionID,
 		expectedTurn,
