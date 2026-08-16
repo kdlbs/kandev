@@ -216,10 +216,10 @@ survive reload. Managed runner builds production artifacts. No fixed sleeps or w
 
 ## Verification Results
 
-All task gates passed:
+All locally available task gates passed; environment-gated parity also passed in PR CI:
 
-- Backend authority: repository, clarification, and orchestrator packages passed; PostgreSQL parity
-  remains env-gated and skipped locally without `KANDEV_TEST_POSTGRES_DSN`.
+- Backend authority: repository, clarification, and orchestrator packages passed. PostgreSQL parity
+  was skipped locally without `KANDEV_TEST_POSTGRES_DSN` and passed in PR CI.
 - Summary convergence: status-summary, task-service, backend-app, and focused handler tests passed.
 - Frontend: 3 Vitest files / 68 tests, TypeScript, i18n, and frozen install passed.
 - Final review remediation: backend repository, clarification, and orchestrator packages passed;

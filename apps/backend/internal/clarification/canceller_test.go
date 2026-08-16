@@ -62,7 +62,8 @@ func (s *stubMessageStore) FindActiveClarificationMessagesBySessionID(ctx contex
 	for _, msgs := range s.messages {
 		for _, m := range msgs {
 			if m.TaskSessionID == sessionID {
-				if status, _ := m.Metadata["status"].(string); status == "pending" {
+				status, _ := m.Metadata["status"].(string)
+				if status == "" || status == "pending" {
 					out = append(out, m)
 				}
 			}
@@ -181,7 +182,6 @@ func TestCanceller_MarksDetachedOnDisconnect(t *testing.T) {
 		ID:            "m1",
 		TaskSessionID: "s1",
 		Metadata: map[string]any{
-			"status":     "pending",
 			"pending_id": pendingID,
 		},
 	}}
@@ -201,8 +201,8 @@ func TestCanceller_MarksDetachedOnDisconnect(t *testing.T) {
 	if got, _ := updated.Metadata["agent_disconnected"].(bool); !got {
 		t.Errorf("expected agent_disconnected=true, got %v", updated.Metadata["agent_disconnected"])
 	}
-	if got, _ := updated.Metadata["status"].(string); got != "pending" {
-		t.Errorf("expected status=pending, got %q", got)
+	if _, exists := updated.Metadata["status"]; exists {
+		t.Errorf("expected missing status to remain missing, got %#v", updated.Metadata["status"])
 	}
 }
 
@@ -217,7 +217,6 @@ func TestCanceller_ExpireSessionAndNotify_MarksExpired(t *testing.T) {
 		ID:            "m1",
 		TaskSessionID: "s1",
 		Metadata: map[string]any{
-			"status":     "pending",
 			"pending_id": pendingID,
 		},
 	}}
@@ -392,7 +391,6 @@ func TestCanceller_MarksDetachedWhenStoreAlreadyDrained(t *testing.T) {
 		ID:            "m1",
 		TaskSessionID: "s1",
 		Metadata: map[string]any{
-			"status":     "pending",
 			"pending_id": pendingID,
 		},
 	}}
@@ -408,8 +406,8 @@ func TestCanceller_MarksDetachedWhenStoreAlreadyDrained(t *testing.T) {
 		t.Fatalf("expected 1 message update, got %d", len(repo.updated))
 	}
 	updated := repo.updated[0]
-	if got, _ := updated.Metadata["status"].(string); got != "pending" {
-		t.Errorf("expected status=pending, got %q", got)
+	if _, exists := updated.Metadata["status"]; exists {
+		t.Errorf("expected missing status to remain missing, got %#v", updated.Metadata["status"])
 	}
 	if got, _ := updated.Metadata["agent_disconnected"].(bool); !got {
 		t.Errorf("expected agent_disconnected=true")
