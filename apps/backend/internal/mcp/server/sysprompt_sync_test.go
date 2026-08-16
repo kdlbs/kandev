@@ -114,9 +114,9 @@ func TestSyspromptToolNames_MatchMCPTaskMode(t *testing.T) {
 }
 
 // TestTaskControlDocs_MatchMessageSchemaAndStopChoice keeps the short injected
-// context aligned with the task-control choices exposed by task-mode MCP. The
-// full tool descriptions remain authoritative for lifecycle detail, but the
-// first-turn context must make the queue/interrupt/stop decision discoverable.
+// context aligned with the task-control choices exposed by task-mode MCP. Tool
+// descriptions carry tool-specific behavior, while the first-turn context makes
+// the queue/interrupt/stop relationship discoverable.
 func TestTaskControlDocs_MatchMessageSchemaAndStopChoice(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
@@ -408,9 +408,8 @@ func TestAskUserQuestionDocs_MatchSchema(t *testing.T) {
 	facts := taskFacts
 	bounds := fmt.Sprintf("%d-%d", facts.minItems, facts.maxItems)
 
-	// Each prompt must mention the array param name, the bounds, and every
-	// required sub-field name. We assert phrases (not exact wording) so authors
-	// can rewrite the prose freely as long as the load-bearing facts survive.
+	// The shared contexts advertise the tool and bundle size. The input schema is
+	// authoritative for per-question fields so that prompt text does not repeat it.
 	cases := map[string]string{
 		"KandevContext": sysprompt.KandevContext(),
 		"ConfigContext": sysprompt.ConfigContext(),
@@ -420,10 +419,6 @@ func TestAskUserQuestionDocs_MatchSchema(t *testing.T) {
 			"%s must mention ask_user_question param name %q", name, facts.paramName)
 		assert.Contains(t, prompt, bounds,
 			"%s must mention the question-count bounds %q from the schema", name, bounds)
-		for _, field := range facts.requiredFields {
-			assert.Contains(t, prompt, field,
-				"%s must mention required question sub-field %q", name, field)
-		}
 	}
 }
 
@@ -480,17 +475,13 @@ func TestWalkthroughDocs_MatchSchema(t *testing.T) {
 			"KandevContext must advertise task-mode walkthrough tool %q", toolName)
 	}
 
-	for name, prompt := range map[string]string{
-		"KandevContext":      context,
-		"ChangesWalkthrough": promptcfg.Get("changes-walkthrough"),
-	} {
-		assert.Contains(t, prompt, "`steps`",
-			"%s must identify the walkthrough steps parameter", name)
-		assert.Contains(t, prompt, "ordered array",
-			"%s must say walkthrough steps preserve order", name)
-		for _, field := range requiredFields {
-			assert.Contains(t, prompt, fmt.Sprintf("`%s`", field),
-				"%s must identify required walkthrough step field %q", name, field)
-		}
+	prompt := promptcfg.Get("changes-walkthrough")
+	assert.Contains(t, prompt, "`steps`",
+		"ChangesWalkthrough must identify the walkthrough steps parameter")
+	assert.Contains(t, prompt, "ordered array",
+		"ChangesWalkthrough must say walkthrough steps preserve order")
+	for _, field := range requiredFields {
+		assert.Contains(t, prompt, fmt.Sprintf("`%s`", field),
+			"ChangesWalkthrough must identify required walkthrough step field %q", field)
 	}
 }

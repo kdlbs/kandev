@@ -827,11 +827,11 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 	if len(out) == 0 {
 		// Nothing matched by id — surface the raw payload so the agent can still inspect it.
 		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data))
+		return mcp.NewToolResultStructured(result, string(data))
 	}
 
 	data, _ := json.MarshalIndent(out, "", "  ")
-	return mcp.NewToolResultText(string(data))
+	return mcp.NewToolResultStructured(out, string(data))
 }
 
 // simplifyAnswer normalizes the answer map. Single-choice per question, but

@@ -951,6 +951,10 @@ func (s *Server) registerKanbanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_task_kandev",
 			mcp.WithDescription("Delete a task permanently. Use to clean up orphaned, duplicate, or test tasks you no longer need. This cannot be undone — prefer archive_task_kandev when the task may still be wanted. Restoring an archived task is a user action done from the UI, not via MCP."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(false),
+			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
 		),
 		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
@@ -958,34 +962,17 @@ func (s *Server) registerKanbanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("archive_task_kandev",
 			mcp.WithDescription("Archive a task. The task is hidden from active board views but kept in the database. Use to tidy up finished or abandoned tasks. Archiving an already-archived task is a no-op that succeeds with already_archived: true. Unarchiving is a user action done from the UI, not via MCP."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
 		),
 		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("message_task_kandev",
-			mcp.WithDescription(`Send a follow-up prompt (message) to an existing task's primary session, or to a specific session via session_id.
-
-This tool coordinates already-created Kandev tasks and sessions. It is not a substitute for your host agent's native subagent messaging or coordination. For ordinary coding, research, review, or parallel work, use the host's native subagent mechanism only when the user has explicitly authorized delegation for this task; otherwise continue in this session or ask the user.
-
-Use this to communicate with a sibling task, a parent task, or any task you know the ID of — for example to ask a delegated subtask for clarification, hand it new context, or nudge a paused task forward. Pass session_id to target a specific session — including a sibling session on your OWN task (e.g. one you spawned with spawn_session_kandev).
-
-Choose the control by intent:
-- Information that can wait: use delivery_mode="queued" (the default). The current turn continues and the message waits FIFO.
-- Urgent replacement work for a running/starting direct child: use delivery_mode="interrupt". This requests immediate cancel-and-redispatch. Only the target task's direct parent may request it; non-parent requests fail. If immediate cancellation and dispatch cannot be confirmed safely, the message safely falls back to "queued".
-- Halt-only work with no replacement prompt: use stop_task_kandev instead.
-
-Behaviour by session state:
-- Running/starting: queued delivery waits for turn-end; interrupt delivery follows the direct-parent behavior and safe fallback above.
-- Idle (waiting for input or completed): the message is sent immediately as a new turn (delivery_mode has no effect).
-- Created (not yet started): the agent is started with this message as its first prompt (delivery_mode has no effect).
-- Failed/cancelled: an error is returned (use create_task_kandev to start fresh).
-
-For an autopilot child question, pass reply_to_question_id with the question_id
-from the child message. The direct parent answer is recorded against that
-question and retries are idempotent.
-
-Returns the dispatch status: "queued", "sent", or "started".`),
+			mcp.WithDescription(`Send a prompt to an existing Kandev task session; this coordinates Kandev sessions, not native subagents. Use delivery_mode="queued" (default) for information that can wait, delivery_mode="interrupt" for urgent replacement work on a running direct child, and stop_task_kandev for halt-only work. Non-parent interrupt requests fail; if cancellation cannot be confirmed, the prompt remains queued. Pass reply_to_question_id when answering an autopilot child question. Returns "queued", "sent", or "started".`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
 			mcp.WithString("session_id", mcp.Description("Optional target session ID (must belong to task_id). Omit to message the task's primary session. Required when messaging a sibling session on your OWN task (task_id may then be your own task ID) — e.g. a session you spawned with spawn_session_kandev.")),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
@@ -1000,13 +987,11 @@ Returns the dispatch status: "queued", "sent", or "started".`),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("stop_task_kandev",
-			mcp.WithDescription(`Stop all live sessions Kandev observes for a direct child task. Only the target task's direct parent may use this tool; self, sibling, child-to-parent, grandparent, unrelated, and cross-workspace requests are rejected. The operation has no session-specific option.
-
-This is halt-only: it does not send a prompt or start a replacement turn. For urgent stop-and-steer work, use message_task_kandev with delivery_mode="interrupt". For ordinary information that can wait, use message_task_kandev with delivery_mode="queued" or omit delivery_mode.
-
-For every accepted live execution, Kandev first marks its session CANCELLED, then schedules graceful runtime teardown. An eligible active, unarchived, non-Office task is also moved to REVIEW through the normal guarded transition; other task states are preserved. Runtime teardown continues asynchronously, so status="stopped" confirms logical cancellation and scheduled teardown, not process exit.
-
-If the child has no live execution, the call succeeds idempotently with status="not_running" and changes no task or session state. Worktrees, environments, commits, task records, descendants, and queued messages are preserved.`),
+			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; it does not send a prompt or start a replacement turn. For stop-and-steer work, use message_task_kandev with delivery_mode="interrupt". Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, task records, descendants, and queued messages are preserved.`),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The direct child task's full UUID (not a truncated prefix)")),
 		),
 		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
@@ -1086,66 +1071,12 @@ func (s *Server) registerMRAutomationTools() {
 // guidance differ by mode: in external mode there is no current task, so the
 // 'self' shorthand is omitted.
 func (s *Server) registerCreateTaskTool() {
-	toolDesc := `Create a new persistent Kandev task or subtask and auto-start a task agent on it.
-
-DELEGATION POLICY:
-- For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool) only when the user has explicitly authorized delegation for this task. Otherwise continue in this session or ask the user. Do NOT use Kandev task or session tools as a generic worker mechanism.
-- Use this tool only when the user explicitly wants a persistent Kandev task or subtask, workflow tracking, or Kandev task lifecycle. When there is no such request, do not silently create a Kandev task.
-
-WHEN TO USE parent_id='self':
-- Breaking down your current task into persistent Kandev workflow phases/steps → use parent_id='self'
-- Creating tasks from a user-requested Kandev plan → use parent_id='self' (inherits repo, task workspace, workflow, and materialized workspace by default)
-- Creating a persistent Kandev subtask explicitly requested by the user → use parent_id='self'
-- Creating persistent Kandev work that lives in a sibling repo → use parent_id='self' AND pass repository_url / repository_id / local_path to point the subtask at that repo
-
-WHEN TO OMIT parent_id (top-level task):
-- Creating an unrelated, standalone task
-- Provide a repository via repository_url, repository_id, or local_path
-- workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
-
-IMPORTANT:
-- Subtasks inherit task workspace, workflow, agent profile, executor, and materialized workspace from the parent by default. Pass workspace_id/workflow_id only when deliberately targeting a different task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. Pass workspace_mode='new_workspace' when the subtask needs its own materialized workspace/worktree.
-- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When no workflow profile wins and agent_profile_id is omitted, the saved user policy applies: current_task uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call. Without verified session context, it falls back to the current/source task or parent profile, then workflow and target-workspace defaults. workspace_default skips the creating session, current/source task, and parent profiles, honors workflow profiles first, then uses the target workspace default. An explicit agent_profile_id prevents creator-session runtime inheritance.
-- Creator-session runtime values are copied only when current_task selects that verified session profile. Executor and executor-profile inheritance from the current/source task or parent is unchanged by either saved agent-profile policy.
-- Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
-- Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead
-- base_branch behaviour:
-  - Same repo as parent (no repo args): subtask inherits the parent's base_branch (sibling branches off the same starting point — useful for PR stacks)
-  - Different repo (you passed repository_url / repository_id / local_path): subtask defaults to that repo's default_branch
-  - Pass base_branch explicitly to override either default. Use list_repositories_kandev to see each repo's default_branch.
-- Top-level tasks need a repository via repository_url, repository_id, or local_path
-- 'prompt' is the task agent's initial prompt — be specific and detailed
-- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work), and still pass agent_profile_id unless it can be inherited. When in doubt, leave it true.
-- Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)
-
-IDEMPOTENCY (external_id):
-- Passing external_id makes this call create-if-absent, not a lookup: it creates the task when nothing holds that identity yet, and it DOES create something the first time you call it. Do not call it just to check whether an identity exists.
-- deduplicated:true in the result means a task already held that identity and nothing new was created — do not report having created a task in that case.
-- deduplicated:true together with creation_complete:false means another create claimed the identity and had not finished when observed; it may still be running. Proceed with the returned task_id or escalate to a human — never release the identity and create again, which can produce a duplicate task and a duplicate agent.`
-	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
+	toolDesc := `Create a persistent Kandev task or subtask and optionally start its agent. Use only for user-requested Kandev-tracked work; use the host's native subagent mechanism for ordinary delegation. Set parent_id="self" for a subtask of the current task and omit it for an unrelated top-level task. Subtasks inherit the parent's workspace, workflow, repository, profiles, executor, and materialized workspace unless the matching input overrides them. external_id provides create-if-absent idempotency and is not a lookup.`
+	parentDesc := "Parent task ID for subtasks. Use 'self' for a user-requested Kandev subtask or plan phase. Omit only for unrelated top-level tasks."
 	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call, then falls back to the current/source or parent profile without verified session context. workspace_default skips those task profiles and the creating session, then uses workflow profiles before the target workspace default. Explicit profiles do not copy creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start."
 
 	if s.mode == ModeExternal {
-		toolDesc = `Create a new persistent top-level Kandev task and auto-start a task agent on it.
-
-DELEGATION POLICY:
-- For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool) only when the user has explicitly authorized delegation for this task. Otherwise continue in this session or ask the user. Do NOT use Kandev task or session tools as a generic worker mechanism.
-- Use this tool only when the user explicitly wants a persistent Kandev task, workflow tracking, or Kandev task lifecycle. When there is no such request, do not silently create a Kandev task.
-
-IMPORTANT:
-- Provide a repository via repository_url, repository_id, or local_path
-- workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
-- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task uses the parent task profile because external mode has no creating session or current/source task context, then checks workflow and target-workspace defaults. workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no creating session, so it never copies creator-session runtime values.
-- Executor and executor-profile inheritance from a parent is unchanged by either saved agent-profile policy.
-- Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
-- 'prompt' is the task agent's initial prompt — be specific and detailed
-- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later), and still pass agent_profile_id unless a default exists. When in doubt, leave it true.
-- Use parent_id only when delegating to a known existing task by its ID
-
-IDEMPOTENCY (external_id):
-- Passing external_id makes this call create-if-absent, not a lookup: it creates the task when nothing holds that identity yet, and it DOES create something the first time you call it. Do not call it just to check whether an identity exists.
-- deduplicated:true in the result means a task already held that identity and nothing new was created — do not report having created a task in that case.
-- deduplicated:true together with creation_complete:false means another create claimed the identity and had not finished when observed; it may still be running. Proceed with the returned task_id or escalate to a human — never release the identity and create again, which can produce a duplicate task and a duplicate agent.`
+		toolDesc = `Create a persistent Kandev task and optionally start its agent from an external client. Use only for user-requested Kandev-tracked work; use the host's native subagent mechanism for ordinary delegation. Provide a repository for a top-level task; parent_id may target a known task when the user requested a subtask. external_id provides create-if-absent idempotency and is not a lookup.`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
 		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the parent task profile because external mode has no creating session or current/source task context; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode never copies creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start."
 	}
@@ -1201,11 +1132,7 @@ const (
 func (s *Server) registerTaskDependencyTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("add_task_dependency_kandev",
-			mcp.WithDescription(`Declare that a task is blocked by another task: it will not start until that one completes successfully.
-
-`+blockedByParamDesc+`
-
-task_id defaults to your CURRENT task. Rejected when the edge would create a cycle (the error names the cycle path), when both IDs are the same, or when the two tasks are in different workspaces. Returns the task's resulting depends_on list.`),
+			mcp.WithDescription(`Block a task until another task completes successfully. Use dependencies for execution order and parent_id for hierarchy. task_id defaults to the current task. Self-dependencies, cross-workspace dependencies, and cycles are rejected. A failed or cancelled predecessor leaves the task blocked for human action. Returns the resulting depends_on list.`),
 			mcp.WithString(mcpKeyTaskID, mcp.Description("The blocked task. Defaults to your current task when omitted.")),
 			mcp.WithString("depends_on_task_id", mcp.Required(), mcp.Description("The task that must complete first (the predecessor).")),
 		),
@@ -1230,17 +1157,7 @@ Removing the last edge unblocks the task but does NOT start it: an automatic sta
 func (s *Server) registerSpawnSessionTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("spawn_session_kandev",
-			mcp.WithDescription(`Spawn an ADDITIONAL agent session on an existing task (defaults to your current task) and start it with the given prompt.
-
-IMPORTANT DELEGATION RULE: This creates an additional Kandev platform session, not a native subagent. For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism only when the user has explicitly authorized delegation for this task; otherwise continue in this session or ask the user. For ordinary delegation, do NOT call this tool. Use this only when the user explicitly asks for another Kandev session/tab on an existing task or the workflow explicitly requires persistent Kandev session coordination. If native subagents are unavailable, continue in this session or ask the user; do not use this tool as a fallback.
-
-Unlike create_task_kandev this does NOT create a new task. The new session runs alongside the task's existing sessions in the same workspace, as a separate session tab.
-
-The spawned session knows it was spawned by you and can reply via message_task_kandev using your task_id + session_id. You can message it the same way using the session_id returned by this tool.
-
-The returned agent_profile_id is the effective agent profile used by the new session. On a workflow step, the step's launch profile wins: a pinned step profile outranks the requested agent_profile_id, and an unpinned step uses the workflow default. Without a workflow launch profile, an explicit agent_profile_id wins; when omitted, the existing inheritance rules apply.
-
-Returns {task_id, session_id, state, agent_profile_id}.`),
+			mcp.WithDescription(`Start an additional Kandev session on an existing task. This creates a persistent Kandev session/tab, not a native subagent; call it only when the user explicitly requests another Kandev session or a Kandev workflow requires session coordination. It does not create a task. Returns {task_id, session_id, state, agent_profile_id}; a workflow step may override the requested profile.`),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The Kandev session's initial prompt. This is the ONLY context the new agent receives — be specific and detailed.")),
 			mcp.WithString("agent_profile_id", mcp.Description("Requested agent profile for the new session. Omit to inherit your session's profile; a workflow launch profile may override it.")),
 			mcp.WithString("name", mcp.Description("Optional session name shown on the session tab (e.g. 'reviewer'). Helps the user tell concurrent sessions apart.")),
@@ -1259,11 +1176,11 @@ Returns {task_id, session_id, state, agent_profile_id}.`),
 func (s *Server) registerListTaskSessionsTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_task_sessions_kandev",
-			mcp.WithDescription(`List every agent session attached to a task, most recently started first.
-
-Use it to find the session_id to pass to get_task_conversation_kandev or message_task_kandev when a task has more than one session — for example after spawn_session_kandev, or to read a sibling session on your own task. Both of those tools default to the task's primary session when session_id is omitted, so other sessions are only reachable by ID.
-
-Each entry reports session_id, name (the session tab label, if set), state, is_primary (the session the other tools default to), is_current (true for your own session), agent_profile_id, and started/updated/completed timestamps.`),
+			mcp.WithDescription(`List a task's sessions, newest first. Use the returned session_id with get_task_conversation_kandev or message_task_kandev; those tools otherwise use the primary session. Entries include name, state, is_primary, is_current, agent_profile_id, and timestamps.`),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The task ID whose sessions to list")),
 		),
 		s.wrapHandler("list_task_sessions_kandev", s.listTaskSessionsHandler()),
@@ -1277,17 +1194,7 @@ Each entry reports session_id, name (the session tab label, if set), state, is_p
 func (s *Server) registerAddBranchToTaskTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("add_branch_to_task_kandev",
-			mcp.WithDescription(`Attach an additional (repository, branch) worktree to an existing task.
-
-Use this when the task should open more than one PR — same repo with different branches, or a second repository entirely. The new branch gets its own sibling worktree under the task directory and behaves like any other multi-repo entry for changes, PRs, and review surfaces. The running agent and terminals keep their current working directory; use the returned worktree_path for the exact new location. task_workspace_path is the promoted task root used by the Files tree.
-
-IMPORTANT:
-- Only works on tasks running the WORKTREE executor. Tasks on docker / sprites / local-pc / SSH / remote_docker reject this tool because sibling worktrees are a git-worktree-specific layout — other executors bind one workspace path per task and the new branch would silently never appear on disk.
-- task_id defaults to your CURRENT task when omitted and must match that task when provided.
-- Repository selection (matches create_task_kandev): pass exactly one of repository_id / repository_url / local_path. For single-repo tasks all three are optional — the service auto-resolves to the task's only repository. Multi-repo tasks must identify the target repo explicitly.
-- checkout_branch is the branch the new worktree will check out. Leave empty to create a fresh feature branch from base_branch.
-- base_branch is optional; defaults to the repository's default_branch.
-- The (task_id, repository_id, base_branch, checkout_branch) tuple must be unique on the task — re-adding the same combination is an error, not a no-op.`),
+			mcp.WithDescription(`Attach another repository branch worktree to the current task for an additional PR or repository. This works only with the worktree executor. Single-repository tasks can omit the repository locator; multi-repository tasks must pass exactly one of repository_id, repository_url, or local_path. checkout_branch selects an existing branch; omit it to create a feature branch from base_branch. Returns worktree_path and task_workspace_path.`),
 			mcp.WithString("task_id", mcp.Description("The current task. Defaults to the current task when omitted.")),
 			mcp.WithString("repository_id", mcp.Description("Repository UUID. Optional for single-repo tasks (auto-resolved). Required for multi-repo tasks unless repository_url or local_path is supplied.")),
 			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). Alternative to repository_id when you don't have the UUID handy. The repository is found-or-created in the task's workspace.")),
@@ -1402,13 +1309,7 @@ func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
 func (s *Server) registerUpdateRepositoryBaseBranchTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_repository_base_branch_kandev",
-			mcp.WithDescription(`Change the base branch used by a task repository for diff stats and the Changes panel.
-
-Use when a task was created against the wrong base (e.g. picked up `+"`main`"+` when the work was forked from a release / QA / staging branch). The Changes panel and per-task +/- counts compare HEAD against this branch.
-
-Scope: this updates the value the WorkspaceTracker uses for diff comparison (BaseCommit / Ahead / Behind / cumulative diff). It does NOT auto-set the PR target on push; the PR target is whatever value the caller passes to the create-PR endpoint at push time. Callers that want both to move together should pass the new base_branch on the next PR-create call.
-
-The agentctl tracker is updated live: a successful call refreshes BaseCommit / Ahead / Behind without needing a session restart.`),
+			mcp.WithDescription(`Change the base branch used for task diff statistics and the Changes panel. This updates BaseCommit, Ahead, Behind, and cumulative diff immediately without restarting the session. It does not change a pull request's target branch; pass the same base_branch when creating the PR if both must change.`),
 			mcp.WithString("task_id", mcp.Description("The task whose repository to update. Defaults to the current task when omitted.")),
 			mcp.WithString("task_repository_id", mcp.Description("UUID of the task_repositories row to update. Required — disambiguates multi-repo tasks. Find it via list_tasks_kandev's repositories[] field.")),
 			mcp.WithString("base_branch", mcp.Description("New base branch name (e.g. 'staging', 'release/v2.4'). Required.")),
@@ -1457,24 +1358,7 @@ func (s *Server) updateRepositoryBaseBranchHandler() server.ToolHandlerFunc {
 func (s *Server) registerStepCompleteTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("step_complete_kandev",
-			mcp.WithDescription(`Signal that every user-stated requirement for the CURRENT workflow step is satisfied.
-
-WHEN TO CALL:
-- All work for the current step is finished and the task is ready to move forward in the workflow.
-- This is the LAST thing you do in the step — call it after the final tool call / commit / answer that completes the requested work.
-
-WHEN NOT TO CALL:
-- You are about to ask the user a question (use ask_user_question_kandev instead and wait).
-- The work is partially done or you ran into a blocker you couldn't resolve.
-- You are mid-conversation and expect the user to reply with more direction.
-
-BEHAVIOUR:
-- The call is idempotent within a step: subsequent calls return accepted=false with reason="already_signaled" and have no other effect.
-- The call returns immediately. The workflow transition (if the step is configured to auto-advance) is driven asynchronously by the orchestrator on turn-end.
-- If the user sends another message before the transition fires, the signal is cancelled and the conversation continues on the current step. Call again at the end of the new turn if appropriate.
-- For steps that do NOT have auto-advance enabled, the call succeeds (accepted=true) but the workflow does not move automatically. The signal is discarded on the next turn start; there is no separate audit history to query later.
-
-The summary you provide is shown to the user in chat and may be forwarded to the next step's agent as a hand-off note.`),
+			mcp.WithDescription(`Signal that every requirement for the current workflow step is complete. Call this as the step's final action; do not call before asking the user, during partial work, or with an unresolved blocker. The signal is idempotent within a step, and any configured transition runs asynchronously at turn end. A new user message cancels a pending signal. The summary is shown to the user and may be forwarded to the next step.`),
 			mcp.WithString("summary", mcp.Required(), mcp.Description("One-paragraph plain-text summary of what was done in this step. Shown to the user.")),
 			mcp.WithString("handoff", mcp.Description("Optional context the next step's agent will need to pick up where you left off (decisions, open files, follow-ups).")),
 			mcp.WithString("blockers", mcp.Description("Optional list of known unresolved issues. Use sparingly — only when the step is complete in the sense that you cannot make further progress without input, not for normal partial work.")),
@@ -1489,20 +1373,7 @@ The summary you provide is shown to the user in chat and may be forwarded to the
 func (s *Server) registerSetTaskTitleTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("set_task_title_kandev",
-			mcp.WithDescription(`Set the user-facing title for the CURRENT task.
-
-Call this as your first action in the session, before planning, inspecting files,
-or doing any other work. The task currently has a provisional title derived from
-the prompt; call this tool even when that provisional title looks usable.
-
-Use a concise title targeting about 6 words.
-Write a short title phrase, not a sentence or a progress update. Your title should
-summarize the requested outcome and will replace the provisional title. For tasks created
-without a title, Kandev also uses this final title when naming Kandev-generated branches;
-branches checked out from a remote link (such as a GitHub PR) and local-executor branches
-are intentionally preserved. Use sentence case:
-capitalize only the first word and proper nouns (for example, "Improve task title casing", not
-"Improve Task Title Casing").`),
+			mcp.WithDescription(`Replace the current task's provisional title. Call this as the session's first action, even when the provisional title looks usable. Use a short title phrase in sentence case, targeting about 6 words and summarizing the requested outcome. Do not use a sentence or progress update (for example, "Improve task title casing"). Kandev may also use it for generated branch names.`),
 			mcp.WithString(titleArg, mcp.Required(), mcp.Description("Short sentence-case task title targeting about 6 words.")),
 		),
 		s.wrapHandler("set_task_title_kandev", s.setTaskTitleHandler()),
@@ -1557,66 +1428,31 @@ func (s *Server) stepCompleteHandler() server.ToolHandlerFunc {
 	}
 }
 
+const askUserQuestionOutputSchema = `{
+  "type": "object",
+  "properties": {
+    "rejected": {"type": "boolean", "description": "True when the user rejected the question bundle."},
+    "reject_reason": {"type": "string", "description": "Optional reason supplied when the bundle was rejected."}
+  },
+  "additionalProperties": {
+    "type": "object",
+    "description": "Answer keyed by question id.",
+    "properties": {
+      "selected_option": {"type": "string"},
+      "custom_text": {"type": "string"},
+      "answered": {"type": "boolean"},
+      "rejected": {"type": "boolean"}
+    },
+    "additionalProperties": false
+  }
+}`
+
 func (s *Server) registerInteractionTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question_kandev",
-			mcp.WithDescription(`Ask the user one or more clarifying questions in a single tool call.
-
-Use this tool when you need user input to proceed. Bundle related questions
-together in one call so the user answers them all in one back-and-forth instead
-of sequential round-trips. Each question is rendered as its own card; the user
-selects an option or provides a custom text response per question, and the
-agent receives a map keyed by question id once every question has been answered.
-
-IMPORTANT:
-- Provide 1 to 4 questions per call.
-- Each question must have 2 to 6 concrete, actionable options.
-- Each option must have a short "label" (1-5 words) and a "description"
-  explaining what selecting it means. NEVER use meta-text like "Answer below".
-- Only call this tool when you genuinely need information you cannot infer.
-
-Example usage:
-{
-  "questions": [
-    {
-      "id": "db",
-      "prompt": "Which database should I use for this project?",
-      "options": [
-        {"label": "PostgreSQL", "description": "Relational, good for complex queries"},
-        {"label": "MongoDB", "description": "Document database, flexible schema"},
-        {"label": "SQLite", "description": "Embedded, simple setup"}
-      ]
-    },
-    {
-      "id": "migration",
-      "prompt": "How should I handle the existing user data during migration?",
-      "options": [
-        {"label": "Migrate all", "description": "Keep all existing records"},
-        {"label": "Archive old", "description": "Archive records older than 1 year"},
-        {"label": "Fresh start", "description": "Delete existing data and start fresh"}
-      ]
-    }
-  ],
-  "context": "Backend redesign — picking the persistence layer and migration policy together."
-}
-
-The response is a JSON object keyed by each question id. Each entry may include
-"selected_option" (the option_id the user picked), "custom_text" (the user's
-free-form answer; can co-exist with a selected option), or "answered": false
-when the user did not respond to that question. When the user skipped the entire
-bundle, the envelope also carries "rejected": true and an optional
-"reject_reason". Example success response:
-{
-  "db": {"selected_option": "q1_opt1"},
-  "migration": {"custom_text": "Migrate all but flag rows older than 2 years"}
-}
-Example rejection:
-{
-  "rejected": true,
-  "reject_reason": "User skipped",
-  "db": {"answered": false, "rejected": true},
-  "migration": {"answered": false, "rejected": true}
-}`),
+			mcp.WithDescription(`Ask the user 1-4 related questions and wait for all answers. Each question requires a prompt and 2-6 concrete options with short labels and descriptions; use a stable id when response keys matter. Call only when required input cannot be inferred, and bundle related questions in one call. Returns answers keyed by question id; a rejected bundle includes rejected=true and may include reject_reason.`),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithRawOutputSchema(json.RawMessage(askUserQuestionOutputSchema)),
 			mcp.WithArray(questionsArg, mcp.Required(),
 				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label).`),
 				mcp.MinItems(1),
@@ -1689,20 +1525,7 @@ func (s *Server) registerPlanTools() {
 func (s *Server) registerWalkthroughTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("show_walkthrough_kandev",
-			mcp.WithDescription(
-				"Show and store a guided code walkthrough for this task. Accepts an ordered list of "+
-					"steps; each step anchors a short markdown explanation to a specific file line or "+
-					"line range, and renders as a popover over the review diff/editor. The user cycles "+
-					"through steps with Previous and Next. The walkthrough is saved to the task and "+
-					"replaces any prior one. Only reference files that exist in the task's local worktree "+
-					"or current review diff; for PR-only files, do not assume the PR head is checked out "+
-					"locally. Use line_end when a logical explanation spans multiple lines. "+
-					"Use this after producing a change to narrate the diff (what each hunk does and why), "+
-					"or to explain how a part of the codebase works. Order steps to follow the reader's "+
-					"natural path through the code (entry point first, then the call chain). Keep text "+
-					"concise and do not add a 'Justification:' preamble. task_id defaults to your current "+
-					"task; pass another task's ID to target it directly, allowed only within your reach "+
-					"(same workspace / task tree)."),
+			mcp.WithDescription("Store an ordered, file-anchored code walkthrough that replaces any prior walkthrough on the task. Use it to narrate a completed diff or explain a code path; order steps from the entry point through the call chain. Reference only files in the local worktree or current review diff, and use line_end for a range. task_id defaults to the current task and may target another task within your reach."),
 			mcp.WithString("task_id", mcp.Description("The task ID to attach the walkthrough to. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
 			mcp.WithString("title", mcp.Description("Optional title for the walkthrough (default: 'Walkthrough')")),
 			mcp.WithArray("steps", mcp.Required(),
@@ -1735,19 +1558,7 @@ func (s *Server) registerWalkthroughTools() {
 func (s *Server) registerReviewTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("publish_review_findings_kandev",
-			mcp.WithDescription(
-				"Publish code-review findings for this task. Each finding anchors a markdown explanation "+
-					"to a file and line range in the task's current changes, and renders as an inline "+
-					"review comment the user can resolve, dismiss, or send back to an agent. Findings are "+
-					"advisory: nothing is applied automatically. Only anchor to files that appear in the "+
-					"task's current changes, and use line numbers from the new version of the file. "+
-					"Report real defects — correctness, security, concurrency, error handling, resource "+
-					"leaks, contract breaks, missing tests — not style or formatting a linter owns. "+
-					"Be honest with severity; marking everything a blocker makes the review useless. "+
-					"Publishing adds to the task's findings; it does not replace earlier ones, except "+
-					"that an unresolved finding with the same file, line range, and title is refreshed. "+
-					"task_id defaults to your current task; pass another task's ID to target it directly, "+
-					"allowed only within your reach (same workspace / task tree)."),
+			mcp.WithDescription("Publish actionable code-review findings as comments anchored to the task's current changes. Use changed files and line numbers from the new version. Report correctness, security, concurrency, error handling, resource, contract, or test defects rather than linter-owned style. Findings are advisory and additive; an unresolved finding with the same anchor and title is refreshed. task_id defaults to the current task and may target another task within your reach."),
 			mcp.WithString("task_id", mcp.Description("The task ID to attach the findings to. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
 			mcp.WithString("summary", mcp.Description("Optional one-paragraph summary of the review")),
 			mcp.WithArray("findings", mcp.Required(),

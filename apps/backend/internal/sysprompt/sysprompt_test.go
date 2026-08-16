@@ -575,7 +575,7 @@ func TestContexts_DocumentCurrentAskUserQuestionSchema(t *testing.T) {
 		"KandevContext": KandevContext(),
 	} {
 		assert.Contains(t, ctx, "questions", "%s should mention the questions array param", name)
-		assert.Contains(t, ctx, "1-4 question objects", "%s should document the 1-4 question limit", name)
+		assert.Contains(t, ctx, "1-4", "%s should document the question limit", name)
 		assert.NotContains(t, ctx, "Required params: prompt (string), options", "%s leaks the legacy ask_user_question schema", name)
 		assert.NotContains(t, ctx, "Required: prompt, options", "%s leaks the legacy ask_user_question schema", name)
 	}

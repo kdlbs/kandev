@@ -13,20 +13,20 @@ Use create_task_kandev only when the user explicitly wants a persistent Kandev t
 
 Available tools:
 {question_tool_section}
-{step_complete_section}{task_title_section}- create_task_plan_kandev: Save an implementation plan for the current task. Required params: task_id, content (markdown). Optional: title.
-- get_task_plan_kandev: Retrieve the current plan for a task (includes any user edits). Required params: task_id.
-- update_task_plan_kandev: Update an existing plan. Required params: task_id, content (markdown). Optional: title.
-- delete_task_plan_kandev: Delete a task plan. Required params: task_id.
-- show_walkthrough_kandev: Show and store a code walkthrough for the current task. Required param: `steps` (ordered array; every step requires `file`, `line`, and `text`). Optional: task_id, title; each step may include repo, title, and line_end.
-- get_walkthrough_kandev: Retrieve the stored walkthrough for a task. Optional: task_id (defaults to the current task).
-- delete_walkthrough_kandev: Delete the stored walkthrough for a task. Optional: task_id (defaults to the current task).
+{step_complete_section}{task_title_section}- create_task_plan_kandev: Save an implementation plan for a task.
+- get_task_plan_kandev: Read a task plan, including user edits.
+- update_task_plan_kandev: Update an existing task plan.
+- delete_task_plan_kandev: Delete a task plan.
+- show_walkthrough_kandev: Store an ordered, file-anchored code walkthrough.
+- get_walkthrough_kandev: Read a task's stored walkthrough.
+- delete_walkthrough_kandev: Delete a task's walkthrough.
 - list_workspaces_kandev: List all workspaces.
-- list_workflows_kandev: List workflows in a workspace. Required params: workspace_id.
-- list_tasks_kandev: List tasks in a workflow. Required params: workflow_id.
-- create_task_kandev: Create a persistent Kandev task or subtask. Use only for user-requested Kandev-tracked work, not ordinary delegation. Required params: title (keep it concise, a few words, and no more than 60 characters; put detailed context in description). For subtasks, set parent_id to the literal string "self" (the MCP server expands it to your current task ID) and omit workspace_id/workflow_id/workflow_step_id; they inherit from the parent. Pass workspace_id/workflow_id on a subtask only when deliberately targeting another task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. MCP subtasks reuse the parent's materialized workspace by default; set workspace_mode to "new_workspace" only when the subtask should launch in its own worktree/materialized workspace. For top-level tasks, provide workspace_id/workflow_id unless each can be auto-resolved uniquely. workflow_step_id is optional.
-- update_task_kandev: Update a task. Required params: task_id.
-- spawn_session_kandev: Spawn an ADDITIONAL Kandev platform session on your current task (no new task is created). Use only when the user explicitly wants another Kandev session/tab, not as a native-subagent fallback. Required params: prompt (the new session's ONLY initial context). Optional: agent_profile_id (defaults to your profile; specify a different one to spawn a different agent), name (session tab label, e.g. "reviewer"), task_id (defaults to your task). Returns the new session_id.
-- message_task_kandev: Coordinate another persistent Kandev task or session, or a specific session via optional session_id. This is not a substitute for native subagent messaging. Required params: task_id, prompt.{coordinator_task_control_section}
-- list_task_sessions_kandev: List every agent session on a task, most recently started first. Use it to find the session_id for message_task_kandev or get_task_conversation_kandev when a task has more than one session; both of those default to the primary session, so siblings are only reachable by ID. Required params: task_id. Each entry reports session_id, name, state, is_primary, is_current (your own session), agent_profile_id, and timestamps.
+- list_workflows_kandev: List workflows in a workspace.
+- list_tasks_kandev: List tasks in a workflow.
+- create_task_kandev: Create user-requested persistent Kandev-tracked work. Use parent_id="self" for a current-task subtask; its context is inherited unless explicitly overridden.
+- update_task_kandev: Update a task.
+- spawn_session_kandev: Start an additional Kandev session/tab without creating a task. Use only when the user explicitly requests one.
+- message_task_kandev: Send a prompt to an existing Kandev task session.{coordinator_task_control_section}
+- list_task_sessions_kandev: List a task's sessions and their IDs.
 
 IMPORTANT: You MUST use these MCP tools when instructed to create plans, ask questions, or interact with the Kandev platform. Do not skip them.

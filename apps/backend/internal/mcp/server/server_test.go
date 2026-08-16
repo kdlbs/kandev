@@ -983,12 +983,16 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	// External mode includes create_task_kandev so external agents can spawn tasks
 	assert.Contains(t, tools, "create_task_kandev")
 	createTask := s.mcpServer.ListTools()["create_task_kandev"]
-	assert.Contains(t, createTask.Tool.Description, "outranks an explicit agent_profile_id")
-	assert.Contains(t, createTask.Tool.Description, "current_task")
-	assert.Contains(t, createTask.Tool.Description, "workspace_default")
-	assert.Contains(t, createTask.Tool.Description, "workflow profiles first")
-	assert.Contains(t, createTask.Tool.Description, "no creating session")
-	assert.Contains(t, createTask.Tool.Description, "parent task profile")
+	assert.Contains(t, createTask.Tool.Description, "external client")
+	assert.Contains(t, createTask.Tool.Description, "native subagent mechanism")
+	assert.Contains(t, createTask.Tool.Description, "external_id")
+	agentProfile := toolInputProperties(t, s, "create_task_kandev")["agent_profile_id"].(map[string]interface{})
+	agentProfileDescription := agentProfile["description"].(string)
+	assert.Contains(t, agentProfileDescription, "current_task")
+	assert.Contains(t, agentProfileDescription, "workspace_default")
+	assert.Contains(t, agentProfileDescription, "workflow profiles")
+	assert.Contains(t, agentProfileDescription, "parent task profile")
+	assert.Contains(t, agentProfileDescription, "External mode never copies creator-session runtime values")
 
 	// External mode does NOT include session-scoped tools
 	assert.NotContains(t, tools, "ask_user_question_kandev")

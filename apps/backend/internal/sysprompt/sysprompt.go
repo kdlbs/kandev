@@ -132,7 +132,7 @@ func KandevContext() string {
 	})
 }
 
-const userQuestionSection = `- ask_user_question_kandev: Ask the user one or more clarifying questions in a single tool call. Use this whenever you need user input to proceed. Required params: questions (array of 1-4 question objects; each object has prompt (string) and options (array of 2-6 {label, description})). Optional: context (string).
+const userQuestionSection = `- ask_user_question_kandev: Ask the user 1-4 related questions and wait for all answers. Use this whenever you need user input to proceed.
 `
 
 const parentQuestionSection = `- ask_parent_question_kandev: Ask the direct parent task one or more critical questions. Use this only when you cannot continue safely without a parent decision. The question is sent to the parent task, and this call MUST end your turn; do not use an operator-question tool.
@@ -153,13 +153,10 @@ This task runs in autopilot mode. Continue independently and make reasonable dec
 // without forcing the template to add its own. Dropping the "\n" silently
 // merges the two bullets onto one line; the omit path (empty string) is
 // unaffected since the next line in the template already starts the bullet.
-const stepCompleteSection = "- step_complete_kandev: Signal that every user-stated requirement for the CURRENT workflow step is satisfied. " +
-	"This is the canonical MCP protocol name; a client registry may display the client-specific alias mcp__kandev__step_complete_kandev for the same tool. " +
-	"If the tool is not already visible, use the client's tool search/discovery with the canonical name. " +
-	"Call this as the LAST action of the step (after the final tool call / commit / answer). " +
-	"Idempotent — a second call within the same step is a no-op. " +
-	"Do NOT call when asking a question, mid-conversation, or on partial progress. " +
-	"Required params: summary (one-paragraph plain text). Optional: handoff, blockers.\n"
+const stepCompleteSection = "- step_complete_kandev: Signal that every requirement for the CURRENT workflow step is satisfied. " +
+	"Call it as the LAST action, never before a question or during partial progress. " +
+	"If it is not visible, use tool search/discovery with the canonical name; some clients display mcp__kandev__step_complete_kandev. " +
+	"Required param: summary.\n"
 
 // coordinatorTaskControlSection documents task-mode-only parent/child controls.
 // Restricted MCP modes omit the section because neither message_task_kandev nor
