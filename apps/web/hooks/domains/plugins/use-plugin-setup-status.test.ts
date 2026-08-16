@@ -41,6 +41,15 @@ function schema(required: string[] = ["api_token"]) {
   };
 }
 
+/** A schema whose only required field is a boolean. */
+function booleanSchema() {
+  return {
+    type: "object",
+    required: ["verbose"],
+    properties: { verbose: { type: "boolean", title: "Verbose" } },
+  };
+}
+
 beforeEach(() => {
   getPluginConfig.mockReset();
   getPluginConfig.mockResolvedValue({});
@@ -65,7 +74,9 @@ describe("usePluginSetupStatus", () => {
     expect(result.current.has("acme")).toBe(false);
   });
 
-  it("treats a schema default as a value, so a defaulted field needs no setup", async () => {
+  it("flags a required field the schema defaults but nobody stored", async () => {
+    // A schema default is not a stored value: the host's checkRequiredKeys
+    // rejects the config and the plugin's GetConfig sees nothing.
     const plugins = [
       plugin({
         config_schema: {
@@ -77,23 +88,37 @@ describe("usePluginSetupStatus", () => {
     ];
     const { result } = renderHook(() => usePluginSetupStatus(plugins));
 
+    await waitFor(() => expect(result.current.has("acme")).toBe(true));
+  });
+
+  it("flags a required boolean that was never stored", async () => {
+    const plugins = [plugin({ config_schema: booleanSchema() })];
+    const { result } = renderHook(() => usePluginSetupStatus(plugins));
+
+    await waitFor(() => expect(result.current.has("acme")).toBe(true));
+  });
+
+  it("accepts a stored false for a required boolean", async () => {
+    getPluginConfig.mockResolvedValue({ verbose: false });
+    const plugins = [plugin({ config_schema: booleanSchema() })];
+    const { result } = renderHook(() => usePluginSetupStatus(plugins));
+
     await waitFor(() => expect(getPluginConfig).toHaveBeenCalled());
     expect(result.current.size).toBe(0);
+  });
+
+  it("does not treat a blank stored string as configured", async () => {
+    getPluginConfig.mockResolvedValue({ api_token: "   " });
+    const plugins = [plugin({ config_schema: schema() })];
+    const { result } = renderHook(() => usePluginSetupStatus(plugins));
+
+    await waitFor(() => expect(result.current.has("acme")).toBe(true));
   });
 
   it("never probes a plugin with no required fields", async () => {
     const plugins = [
       plugin({ id: "no-schema" }),
       plugin({ id: "optional-only", config_schema: schema([]) }),
-      // A required boolean is never "missing": false is a legitimate value.
-      plugin({
-        id: "bool-only",
-        config_schema: {
-          type: "object",
-          required: ["verbose"],
-          properties: { verbose: { type: "boolean" } },
-        },
-      }),
     ];
     const { result } = renderHook(() => usePluginSetupStatus(plugins));
 

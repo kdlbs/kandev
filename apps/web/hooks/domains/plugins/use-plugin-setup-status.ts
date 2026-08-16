@@ -2,36 +2,46 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getPluginConfig } from "@/lib/api/domains/plugins-api";
-import {
-  buildInitialValues,
-  missingRequiredFields,
-  parseConfigSchema,
-  type PluginConfigField,
-} from "@/lib/plugins/config-schema";
+import { parseConfigSchema } from "@/lib/plugins/config-schema";
 import type { PluginRecord } from "@/lib/types/plugins";
 
 type SetupProbe = {
   id: string;
   version: string;
-  fields: PluginConfigField[];
+  /** Names from the manifest's `required` list, in schema order. */
+  required: string[];
 };
 
 /**
- * The installed plugins worth probing: an unconfigured plugin can only exist
- * where the manifest declares a required field the operator has to fill in.
- * Boolean fields are excluded for the same reason the settings form excludes
- * them from its required check — `false` is a legitimate value, so they are
- * never "missing".
+ * Whether a stored config value satisfies a required field. This mirrors the
+ * host's own rule (checkRequiredKeys in internal/plugins/config.go): the key
+ * being present is what satisfies `required`, whatever its type. So a stored
+ * `false` counts as configured, and a required boolean that was never saved
+ * does not — the host rejects that config, and the plugin's Host.GetConfig
+ * sees no synthesized value.
+ *
+ * The empty-string case cannot come from the settings form (it omits blank
+ * inputs rather than storing ""), but a hand-edited config file can carry
+ * one, and a blank is not a value anyone set on purpose.
+ */
+function isConfigured(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  return typeof value !== "string" || value.trim() !== "";
+}
+
+/**
+ * The installed plugins worth probing: only a manifest that declares a
+ * required field can leave the operator with something to fill in.
  */
 function buildProbes(plugins: PluginRecord[]): SetupProbe[] {
   const probes: SetupProbe[] = [];
   for (const plugin of plugins) {
     if (plugin.status === "uninstalled") continue;
-    const fields = parseConfigSchema(plugin.config_schema).filter(
-      (field) => field.required && field.type !== "boolean",
-    );
-    if (fields.length === 0) continue;
-    probes.push({ id: plugin.id, version: plugin.version, fields });
+    const required = parseConfigSchema(plugin.config_schema)
+      .filter((field) => field.required)
+      .map((field) => field.name);
+    if (required.length === 0) continue;
+    probes.push({ id: plugin.id, version: plugin.version, required });
   }
   return probes;
 }
@@ -48,13 +58,15 @@ function buildProbes(plugins: PluginRecord[]): SetupProbe[] {
  */
 export function usePluginSetupStatus(plugins: PluginRecord[]): Set<string> {
   const probes = useMemo(() => buildProbes(plugins), [plugins]);
-  // Fields are derived from the manifest, which cannot change without the
-  // version changing, so id@version is a complete signature for the probe set.
+  // The required list comes from the manifest, which cannot change without
+  // the version changing, so id@version is a complete signature.
   const signature = probes.map((probe) => `${probe.id}@${probe.version}`).join(",");
   const [needsSetup, setNeedsSetup] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (probes.length === 0) {
+      // No request is in flight, so this branch needs no cleanup, unlike the
+      // `cancelled` path below.
       setNeedsSetup((prev) => (prev.size === 0 ? prev : new Set()));
       return;
     }
@@ -63,8 +75,8 @@ export function usePluginSetupStatus(plugins: PluginRecord[]): Set<string> {
       probes.map(async (probe) => {
         try {
           const config = await getPluginConfig(probe.id, { cache: "no-store" });
-          const values = buildInitialValues(probe.fields, config);
-          return missingRequiredFields(probe.fields, values).length > 0 ? probe.id : null;
+          const unset = probe.required.some((name) => !isConfigured(config[name]));
+          return unset ? probe.id : null;
         } catch {
           return null;
         }
