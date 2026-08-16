@@ -110,6 +110,70 @@ func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testin
 	}
 }
 
+func TestPublishReservedTurnDoesNotReopenCompletedReservation(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	turn, err := svc.ReserveTurn(ctx, sessionID, &models.PromptDispatchRecovery{})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	if err := svc.MarkReservedTurnDispatchAttempted(ctx, turn); err != nil {
+		t.Fatalf("MarkReservedTurnDispatchAttempted: %v", err)
+	}
+	if err := repo.CompleteTurn(ctx, turn.ID); err != nil {
+		t.Fatalf("CompleteTurn: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if err := svc.PublishReservedTurn(ctx, turn); err != nil {
+		t.Fatalf("PublishReservedTurn(completed): %v", err)
+	}
+	persisted, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if persisted.CompletedAt == nil {
+		t.Fatal("PublishReservedTurn reopened completed reservation")
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type == events.TurnStarted {
+			t.Fatal("completed reservation published turn.started")
+		}
+	}
+}
+
+func TestPublishReservedTurnRejectsMissingReservationWithoutEvent(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	turn, err := svc.ReserveTurn(ctx, sessionID, &models.PromptDispatchRecovery{})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	if err := svc.MarkReservedTurnDispatchAttempted(ctx, turn); err != nil {
+		t.Fatalf("MarkReservedTurnDispatchAttempted: %v", err)
+	}
+	deleted, err := repo.DeleteTurnIfUnreferenced(ctx, sessionID, turn.ID)
+	if err != nil || !deleted {
+		t.Fatalf("DeleteTurnIfUnreferenced: deleted=%v err=%v", deleted, err)
+	}
+	eventBus.ClearEvents()
+
+	if err := svc.PublishReservedTurn(ctx, turn); err == nil {
+		t.Fatal("PublishReservedTurn(missing) error = nil")
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type == events.TurnStarted {
+			t.Fatal("missing reservation published turn.started")
+		}
+	}
+}
+
 func TestStartTurnPersistsImmutableEffectiveRuntimeConfigSnapshot(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

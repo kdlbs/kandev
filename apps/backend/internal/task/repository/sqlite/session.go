@@ -226,22 +226,56 @@ func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID str
 func (r *Repository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	turn.UpdatedAt = time.Now().UTC()
 
-	metadataJSON := "{}"
-	if turn.Metadata != nil {
-		metadataBytes, err := json.Marshal(turn.Metadata)
-		if err != nil {
-			return fmt.Errorf("failed to serialize turn metadata: %w", err)
-		}
-		metadataJSON = string(metadataBytes)
+	metadataJSON, err := serializeTurnMetadata(turn.Metadata)
+	if err != nil {
+		return err
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_turns
 		SET completed_at = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
 	`), turn.CompletedAt, metadataJSON, turn.UpdatedAt, turn.ID)
 
 	return err
+}
+
+// UpdateActiveTurnMetadata replaces metadata without copying a caller's stale
+// completion state over a concurrently completed turn.
+func (r *Repository) UpdateActiveTurnMetadata(
+	ctx context.Context,
+	id string,
+	metadata map[string]interface{},
+) (bool, time.Time, error) {
+	metadataJSON, err := serializeTurnMetadata(metadata)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	updatedAt := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_session_turns
+		SET metadata = ?, updated_at = ?
+		WHERE id = ? AND completed_at IS NULL
+	`), metadataJSON, updatedAt, id)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("inspect active turn metadata update: %w", err)
+	}
+	return affected == 1, updatedAt, nil
+}
+
+func serializeTurnMetadata(metadata map[string]interface{}) (string, error) {
+	if metadata == nil {
+		return "{}", nil
+	}
+	metadataBytes, err := json.Marshal(metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize turn metadata: %w", err)
+	}
+	return string(metadataBytes), nil
 }
 
 // CompleteTurn marks a turn as completed with the current time

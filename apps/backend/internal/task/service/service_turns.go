@@ -27,6 +27,14 @@ import (
 
 const runtimeModelConfigID = "model"
 
+type activeTurnMetadataUpdater interface {
+	UpdateActiveTurnMetadata(
+		context.Context,
+		string,
+		map[string]interface{},
+	) (bool, time.Time, error)
+}
+
 // StartTurn creates a new turn for a session and publishes the turn.started event.
 // Returns the created turn.
 func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
@@ -141,10 +149,32 @@ func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) er
 	published := *turn
 	published.Metadata = maps.Clone(turn.Metadata)
 	models.ClearPromptDispatchMetadata(published.Metadata)
-	if err := s.turns.UpdateTurn(ctx, &published); err != nil {
+	updater, ok := s.turns.(activeTurnMetadataUpdater)
+	if !ok {
+		return fmt.Errorf("publish reserved turn %s: active metadata updater is unavailable", turn.ID)
+	}
+	updated, updatedAt, err := updater.UpdateActiveTurnMetadata(ctx, turn.ID, published.Metadata)
+	if err != nil {
 		return fmt.Errorf("publish reserved turn %s: %w", turn.ID, err)
 	}
+	if !updated {
+		persisted, getErr := s.turns.GetTurn(ctx, turn.ID)
+		if errors.Is(getErr, sql.ErrNoRows) {
+			return fmt.Errorf("publish reserved turn %s: reservation missing: %w", turn.ID, getErr)
+		}
+		if getErr != nil {
+			return fmt.Errorf("inspect unpublished reserved turn %s: %w", turn.ID, getErr)
+		}
+		if persisted.CompletedAt == nil {
+			return fmt.Errorf("publish reserved turn %s: active metadata update was rejected", turn.ID)
+		}
+		turn.Metadata = persisted.Metadata
+		turn.CompletedAt = persisted.CompletedAt
+		turn.UpdatedAt = persisted.UpdatedAt
+		return nil
+	}
 	turn.Metadata = published.Metadata
+	turn.UpdatedAt = updatedAt
 	s.publishTurnEvent(events.TurnStarted, turn, nil)
 	return nil
 }

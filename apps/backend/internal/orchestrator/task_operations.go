@@ -3,6 +3,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"maps"
@@ -3840,9 +3841,13 @@ func (s *Service) promptDispatchCallback(
 					zap.Error(publicationErr))
 			}
 			// The pre-dispatch attempt marker makes restart recovery and rollback
-			// fail closed even if this post-acceptance publication fails.
-			s.activeTurns.Store(sessionID, reservedTurn.ID)
-			s.bindAcceptedDispatchTurn(sessionID, reservedTurn.ID)
+			// fail closed even if this post-acceptance publication fails. Do not
+			// restore an active-turn cache entry when cancellation already made the
+			// reservation terminal or publication could not find it.
+			if reservedTurn.CompletedAt == nil && !errors.Is(publicationErr, sql.ErrNoRows) {
+				s.activeTurns.Store(sessionID, reservedTurn.ID)
+				s.bindAcceptedDispatchTurn(sessionID, reservedTurn.ID)
+			}
 			s.resolveReservedPromptTurn(sessionID, reservedTurn.ID, true)
 		}
 		outcome.recordAccepted(publicationErr)

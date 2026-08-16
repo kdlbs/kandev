@@ -28,6 +28,10 @@ type failingReservedTurnPublisher struct {
 	err error
 }
 
+type completedReservedTurnPublisher struct {
+	TurnService
+}
+
 type failingPromptTurnReconciler struct {
 	TurnService
 	err error
@@ -40,6 +44,12 @@ type failingReservedTurnRollback struct {
 
 func (s failingReservedTurnPublisher) PublishReservedTurn(context.Context, *models.Turn) error {
 	return s.err
+}
+
+func (s completedReservedTurnPublisher) PublishReservedTurn(_ context.Context, turn *models.Turn) error {
+	completedAt := time.Now().UTC()
+	turn.CompletedAt = &completedAt
+	return nil
 }
 
 func (s failingPromptTurnReconciler) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
@@ -255,6 +265,44 @@ func TestAcceptedReservationStaysActiveWhenPublicationWriteFails(t *testing.T) {
 	}
 	if pending := svc.reservedPromptTurnID("session1"); pending != "" {
 		t.Fatalf("private reservation cache = %q, want cleared after agentctl acceptance", pending)
+	}
+}
+
+func TestAcceptedReservationDoesNotRestoreTerminalOrMissingCache(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		publisher func(TurnService) TurnService
+	}{
+		{
+			name: "terminal",
+			publisher: func(delegate TurnService) TurnService {
+				return completedReservedTurnPublisher{TurnService: delegate}
+			},
+		},
+		{
+			name: "missing",
+			publisher: func(delegate TurnService) TurnService {
+				return failingReservedTurnPublisher{TurnService: delegate, err: sql.ErrNoRows}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newTurnLifecycleTestService(t)
+			reserved := &models.Turn{ID: "turn-accepted", TaskSessionID: "session1", TaskID: "task1"}
+			svc.turnService = tc.publisher(svc.turnService)
+			svc.reservedPromptTurns.Store("session1", newReservedPromptTurn(reserved.ID))
+
+			svc.promptDispatchCallback(
+				context.Background(), "task1", "session1", reserved, nil, &promptDispatchOutcome{},
+			)()
+
+			if active, ok := svc.activeTurns.Load("session1"); ok {
+				t.Fatalf("terminal or missing reservation restored active cache: %v", active)
+			}
+			if pending := svc.reservedPromptTurnID("session1"); pending != "" {
+				t.Fatalf("private reservation cache = %q, want cleared", pending)
+			}
+		})
 	}
 }
 
