@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -50,7 +51,9 @@ func (s *Service) ReconcileTaskStatusSummaries(
 	if s == nil || s.statusSummaries == nil || len(tasks) == 0 {
 		return summaries, nil
 	}
-	s.reconcileExistingSummaries(ctx, tasks, sessionsByTask, pendingBySession, summaries)
+	if err := s.reconcileExistingSummaries(ctx, tasks, sessionsByTask, pendingBySession, summaries); err != nil {
+		return summaries, err
+	}
 	return s.rebuildMissingSummaries(ctx, tasks, sessionsByTask, pendingBySession, summaries), nil
 }
 
@@ -60,25 +63,36 @@ func (s *Service) reconcileExistingSummaries(
 	sessionsByTask map[string][]*models.TaskSession,
 	pendingBySession map[string]models.TaskPendingAction,
 	summaries map[string]*statussummary.TaskStatusSummary,
-) {
+) error {
+	var reconcileErr error
 	for _, task := range tasks {
 		if task == nil || task.ID == "" || summaries[task.ID] == nil {
 			continue
 		}
 		sessions := sessionsByTask[task.ID]
 		action := pendingActionForTask(sessions, pendingBySession)
-		reconciled := s.reconcileExistingSummary(
+		reconciled, err := s.reconcileExistingSummary(
 			ctx,
 			task,
 			summaries[task.ID],
 			action,
 		)
+		if err != nil {
+			delete(summaries, task.ID)
+			s.logSummaryRepairFailure(task.ID, "reconcile", err)
+			reconcileErr = errors.Join(
+				reconcileErr,
+				fmt.Errorf("reconcile task %s status summary: %w", task.ID, err),
+			)
+			continue
+		}
 		if reconciled == nil {
 			delete(summaries, task.ID)
 			continue
 		}
 		summaries[task.ID] = reconciled
 	}
+	return reconcileErr
 }
 
 func (s *Service) rebuildMissingSummaries(
@@ -170,22 +184,20 @@ func (s *Service) reconcileExistingSummary(
 	task *models.Task,
 	current *statussummary.TaskStatusSummary,
 	pendingAction string,
-) *statussummary.TaskStatusSummary {
+) (*statussummary.TaskStatusSummary, error) {
 	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
 		if current.PendingAction == pendingAction {
-			return current
+			return current, nil
 		}
 		if current.Revision == ^uint64(0) {
-			s.logSummaryRepairFailure(task.ID, "revision", fmt.Errorf("revision overflow"))
-			return current
+			return nil, errors.New("revision overflow")
 		}
 		next := *current
 		next.PendingAction = pendingAction
 		next.Revision = current.Revision + 1
 		next.UpdatedAt = advancedSummaryTime(current.UpdatedAt, time.Now().UTC())
 		if err := next.Validate(); err != nil {
-			s.logSummaryRepairFailure(task.ID, "validate", err)
-			return current
+			return nil, fmt.Errorf("validate repair: %w", err)
 		}
 		accepted, err := s.statusSummaries.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
 			TaskID:      task.ID,
@@ -193,42 +205,37 @@ func (s *Service) reconcileExistingSummary(
 			Summary:     next,
 		})
 		if err != nil {
-			s.logSummaryRepairFailure(task.ID, "persist", err)
-			return current
+			return nil, fmt.Errorf("persist repair: %w", err)
 		}
 		if accepted {
 			s.publishReconciledSummary(ctx, task, next)
-			return &next
+			return &next, nil
 		}
 		rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{task.ID})
 		if err != nil {
-			s.logSummaryRepairFailure(task.ID, "reload", err)
-			return current
+			return nil, fmt.Errorf("reload after compare-and-set rejection: %w", err)
 		}
 		current = rows[task.ID]
 		if current == nil {
-			return nil
+			return nil, nil
 		}
 		if s.sessions == nil {
-			s.logSummaryRepairFailure(task.ID, "reload sessions", fmt.Errorf("session repository unavailable"))
-			return current
+			return nil, errors.New("reload sessions: session repository unavailable")
 		}
 		refreshedSessions, err := s.sessions.ListTaskSessions(ctx, task.ID)
 		if err != nil {
-			s.logSummaryRepairFailure(task.ID, "reload sessions", err)
-			return current
+			return nil, fmt.Errorf("reload sessions: %w", err)
 		}
 		pendingBySession, err := s.GetPendingActionsForSessions(ctx, taskSessionIDs(refreshedSessions))
 		if err != nil {
-			s.logSummaryRepairFailure(task.ID, "reload pending", err)
-			return current
+			return nil, fmt.Errorf("reload pending actions: %w", err)
 		}
 		pendingAction = pendingActionForTask(refreshedSessions, pendingBySession)
 	}
-	if current != nil && current.PendingAction != pendingAction {
-		s.logSummaryRepairFailure(task.ID, "persist", fmt.Errorf("exhausted compare-and-set retries"))
+	if current != nil && current.PendingAction == pendingAction {
+		return current, nil
 	}
-	return current
+	return nil, errors.New("exhausted compare-and-set retries")
 }
 
 func advancedSummaryTime(previous, now time.Time) time.Time {

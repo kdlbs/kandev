@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -54,6 +55,18 @@ type rejectingStatusSummaryRepository struct {
 type vanishingStatusSummaryRepository struct {
 	repository.TaskStatusSummaryRepository
 	compareCalls int
+}
+
+type failingStatusSummaryRepository struct {
+	repository.TaskStatusSummaryRepository
+	err error
+}
+
+func (r *failingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
+	context.Context,
+	*statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	return false, r.err
 }
 
 func (r *vanishingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
@@ -336,6 +349,39 @@ func TestReconcileTaskStatusSummariesRepairsExistingPendingOnly(t *testing.T) {
 	}
 	if len(eventBus.GetPublishedEvents()) != 0 {
 		t.Fatalf("no-op repair published events = %+v", eventBus.GetPublishedEvents())
+	}
+}
+
+func TestReconcileTaskStatusSummariesOmitsStaleSummaryOnRepairFailure(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	repairErr := errors.New("status summary write failed")
+	svc.statusSummaries = &failingStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		err:                         repairErr,
+	}
+	stored := &statussummary.TaskStatusSummary{Revision: 4}
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: task.ID,
+		State:  models.TaskSessionStateWaitingForInput,
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		context.Background(),
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{task.ID: {session}},
+		map[string]models.TaskPendingAction{
+			session.ID: models.TaskPendingActionClarification,
+		},
+		map[string]*statussummary.TaskStatusSummary{task.ID: stored},
+	)
+
+	if !errors.Is(err, repairErr) {
+		t.Fatalf("ReconcileTaskStatusSummaries error = %v, want %v", err, repairErr)
+	}
+	if got[task.ID] != nil {
+		t.Fatalf("stale summary remained in response: %+v", got[task.ID])
 	}
 }
 

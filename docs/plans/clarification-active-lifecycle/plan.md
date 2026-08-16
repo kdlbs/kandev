@@ -319,6 +319,10 @@ All task gates passed:
   navigation. The focused startup regressions and full orchestrator suite passed.
 - Follow-up Codex review invalidates the phone task-sheet selection controller on unmount so a deferred
   load cannot mutate or close a replacement tablet sheet. The 48-test focused selection run passed.
+- Fresh Claude review wires the existing expiry path into every accepted terminal-session transition.
+  Fresh Codex review propagates status-summary repair failures and removes each failed stale summary from
+  task-list and boot responses so their authoritative coarse pending action remains visible. Focused
+  regressions, all five affected backend suites, and changed-code lint passed.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

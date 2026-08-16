@@ -657,10 +657,9 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		reconciledSummaries, reconcileErr := b.p.taskSvc.ReconcileTaskStatusSummaries(
 			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
 		)
+		statusSummaries = reconciledSummaries
 		if reconcileErr != nil {
 			b.logBootError("reconcile task status summaries", reconcileErr)
-		} else {
-			statusSummaries = reconciledSummaries
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary so

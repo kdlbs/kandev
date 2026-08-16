@@ -236,10 +236,9 @@ func buildTaskDTOsWithSessionInfo(
 		reconciledSummaries, reconcileErr := svc.ReconcileTaskStatusSummaries(
 			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
 		)
+		statusSummaries = reconciledSummaries
 		if reconcileErr != nil {
 			log.Warn("failed to reconcile task status summaries", zap.Error(reconcileErr))
-		} else {
-			statusSummaries = reconciledSummaries
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary.

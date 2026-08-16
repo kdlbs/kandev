@@ -188,3 +188,6 @@ blockers/risks, and update task/plan status.
   as safe to retry. The focused failure cases and full clarification suite passed.
 - Latest Codex review makes the orchestrator's composition boundary fail closed when no turn service is
   wired, preventing watcher, scheduler, and prompt admission startup without reservation recovery.
+- Fresh Claude review turns the pre-existing expiry scaffold into shipped behavior: any accepted
+  completed, failed, or cancelled session transition expires its current-turn pending bundles. Focused
+  coverage and the full clarification and orchestrator suites passed.

@@ -1006,6 +1006,9 @@ func (s *Service) updateTaskSessionStateWithHook(
 	if onChanged != nil {
 		onChanged()
 	}
+	if isTerminalSessionState(nextState) {
+		s.expireClarificationWaiters(ctx, sessionID)
+	}
 	// Work has resumed: a session entering STARTING/RUNNING clears the
 	// startup interruption marker and republishes the task so open clients
 	// drop the red interruption icon. No-op when the marker is absent.
@@ -1146,6 +1149,9 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if onChanged != nil {
 		onChanged()
+	}
+	if isTerminalSessionState(nextState) {
+		s.expireClarificationWaiters(ctx, sessionID)
 	}
 	s.publishTaskSessionStateChanged(
 		ctx,
@@ -2326,6 +2332,17 @@ func (s *Service) detachClarificationWaiters(ctx context.Context, sessionID stri
 	}
 	if n := s.clarificationCanceller.DetachSessionAndNotify(ctx, sessionID); n > 0 {
 		s.logger.Info("detached pending clarifications on turn complete",
+			zap.String("session_id", sessionID),
+			zap.Int("count", n))
+	}
+}
+
+func (s *Service) expireClarificationWaiters(ctx context.Context, sessionID string) {
+	if s.clarificationCanceller == nil || sessionID == "" {
+		return
+	}
+	if n := s.clarificationCanceller.ExpireSessionAndNotify(ctx, sessionID); n > 0 {
+		s.logger.Info("expired pending clarifications on terminal session",
 			zap.String("session_id", sessionID),
 			zap.Int("count", n))
 	}

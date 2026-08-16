@@ -23,6 +23,8 @@ hiding the action the icon represents.
   belongs to the session's current turn.
 - A detached bundle remains active and answerable while its turn remains current. Detachment sets
   `agent_disconnected=true`; it does not by itself resolve the question.
+- After a session successfully enters a terminal state, its current-turn pending clarification bundles
+  expire so no answerable overlay survives a completed, failed, or cancelled session.
 - Acceptance of a newer turn supersedes every pending clarification from an older turn. Superseded
   rows remain transcript history but cannot drive a chat overlay, task/session pending projection,
   workflow guard, turn-completion detach pass, or late agent resume.
@@ -192,7 +194,9 @@ session they can already access. Session selection does not broaden task visibil
   request instead of returning a successful list with empty pending ownership.
 - Summary compare-and-set loses a race: reload the newer summary, reapply authoritative pending state,
   and retry within a bounded loop. Exhaustion is an error, so restored-state acknowledgement is withheld
-  until the pending action is durably confirmed. Never overwrite unrelated newer summary fields.
+  until the pending action is durably confirmed. Task-list and boot reads omit that task's stale summary
+  on repair failure so the authoritative coarse pending action remains visible. Never overwrite unrelated
+  newer summary fields.
 - Summary repair persists but its WebSocket publication fails: the initiating response carries the
   corrected summary; other clients converge on their next event or read.
 - A stale browser submits an older-turn answer: return conflict, do not update runtime ownership, and
@@ -326,6 +330,9 @@ session they can already access. Session selection does not broaden task visibil
   back, **THEN** Kandev drops the uncorrelatable event without changing session or workflow state.
 - **GIVEN** a cancelled request triggers clarification detach or expiry, **WHEN** repository work
   begins, **THEN** it uses a non-cancelled context with a finite deadline.
+- **GIVEN** a session transition to completed, failed, or cancelled is durably accepted, **WHEN** the
+  transition publishes, **THEN** current-turn pending clarification bundles expire before a terminal
+  session can leave an interactive overlay behind.
 - **GIVEN** a detached answer reaches synchronous orchestrator resume, **WHEN** the orchestrator does
   not acknowledge it before the bounded deadline, **THEN** Kandev treats acceptance as failed and
   restores the still-current bundle.

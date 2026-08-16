@@ -1353,13 +1353,14 @@ func (s *Service) SetPromptReferenceExpander(e PromptReferenceExpander) {
 	s.promptExpander = e
 }
 
-// ClarificationCanceller detaches in-memory clarification waiters when an agent's
-// turn completes while questions are still pending in the DB.
+// ClarificationCanceller updates pending clarification ownership when an agent
+// turn detaches or its session becomes terminal.
 type ClarificationCanceller interface {
 	DetachSessionAndNotify(ctx context.Context, sessionID string) int
+	ExpireSessionAndNotify(ctx context.Context, sessionID string) int
 }
 
-// SetClarificationCanceller sets the canceller for cleaning up pending clarifications on turn complete.
+// SetClarificationCanceller sets the canceller for turn and terminal-session cleanup.
 func (s *Service) SetClarificationCanceller(c ClarificationCanceller) {
 	s.clarificationCanceller = c
 }

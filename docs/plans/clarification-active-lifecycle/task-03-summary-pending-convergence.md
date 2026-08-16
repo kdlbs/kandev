@@ -109,3 +109,6 @@ actual files, then update task/plan status.
 - Final Codex review moves configured session, Git, and pull-request rehydration ahead of missing-row
   creation, so the first keyed event cannot omit unchanged siblings. The focused missing-row regression
   and full status-summary suite passed.
+- Fresh Codex review propagates existing-summary repair failures, deletes the failed stale row from the
+  response map, and makes task-list and boot assembly use that partial authoritative result. Focused
+  coverage plus the full task-service, handler, and backend-app suites passed.

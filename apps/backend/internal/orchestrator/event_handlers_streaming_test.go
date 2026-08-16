@@ -112,11 +112,17 @@ func (r *taskServiceStateRepository) UpdateTaskStateIfSessionState(
 }
 
 type recordingClarificationCanceller struct {
-	sessions []string
+	sessions        []string
+	expiredSessions []string
 }
 
 func (c *recordingClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) int {
 	c.sessions = append(c.sessions, sessionID)
+	return 1
+}
+
+func (c *recordingClarificationCanceller) ExpireSessionAndNotify(_ context.Context, sessionID string) int {
+	c.expiredSessions = append(c.expiredSessions, sessionID)
 	return 1
 }
 
@@ -349,6 +355,27 @@ func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
 	require.Equal(t, session.UpdatedAt.UTC().Format(time.RFC3339Nano), data["updated_at"])
 }
 
+func TestUpdateTaskSessionStateExpiresClarificationsOnTerminalTransition(t *testing.T) {
+	for _, terminalState := range []models.TaskSessionState{
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+	} {
+		t.Run(string(terminalState), func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+			canceller := &recordingClarificationCanceller{}
+			svc.clarificationCanceller = canceller
+
+			svc.updateTaskSessionState(ctx, "t1", "s1", terminalState, "", false)
+
+			require.Equal(t, []string{"s1"}, canceller.expiredSessions)
+		})
+	}
+}
+
 func TestUpdateTaskSessionState_EnabledClaudePublishesSettledBackground(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -385,6 +412,8 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	eb := &recordingEventBus{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.eventBus = eb
+	canceller := &recordingClarificationCanceller{}
+	svc.clarificationCanceller = canceller
 
 	changed, finalState, err := svc.transitionTaskSessionState(
 		ctx,
@@ -400,6 +429,7 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	require.Equal(t, models.TaskSessionStateCancelled, finalState)
 	require.Len(t, eb.events, 1)
 	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
+	require.Equal(t, []string{"s1"}, canceller.expiredSessions)
 }
 
 func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
