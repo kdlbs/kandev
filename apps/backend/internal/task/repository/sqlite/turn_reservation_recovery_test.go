@@ -63,6 +63,40 @@ func TestReconcileUnpublishedPromptTurnsRestoresOnlyClaimedMessages(t *testing.T
 	}
 }
 
+func TestReconcileUnpublishedPromptTurnsRejectsMalformedClaimMessageIDs(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-malformed-recovery"
+	const sessionID = "session-malformed-recovery"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	base := time.Date(2026, time.August, 16, 0, 20, 0, 0, time.UTC)
+	createRecoveryTurn(t, repo, taskID, sessionID, "turn-clarification", base, nil)
+	createRecoveryClarification(
+		t, repo, "message-claimed", taskID, sessionID, "turn-clarification", "pending-recovery", base,
+	)
+	createRecoveryTurn(t, repo, taskID, sessionID, "turn-unpublished", base.Add(time.Minute), map[string]interface{}{
+		models.TurnMetaKeyPromptDispatchPending:                 true,
+		models.TurnMetaKeyPromptDispatchClarificationPendingID:  "pending-recovery",
+		models.TurnMetaKeyPromptDispatchClarificationTurnID:     "turn-clarification",
+		models.TurnMetaKeyPromptDispatchClarificationMessageIDs: []interface{}{"message-claimed", float64(7)},
+	})
+
+	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
+	if err == nil || reconciled != 0 {
+		t.Fatalf("ReconcileUnpublishedPromptTurns = %d, %v; want 0 and malformed metadata error", reconciled, err)
+	}
+	if _, err := repo.GetTurn(ctx, "turn-unpublished"); err != nil {
+		t.Fatalf("malformed reservation was deleted: %v", err)
+	}
+	message, err := repo.GetMessage(ctx, "message-claimed")
+	if err != nil {
+		t.Fatalf("GetMessage(claimed): %v", err)
+	}
+	if message.Metadata["status"] != "answered" {
+		t.Fatalf("claimed message status = %v, want answered", message.Metadata["status"])
+	}
+}
+
 func TestReconcileUnpublishedPromptTurnsAcceptsMessageBackedReservation(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

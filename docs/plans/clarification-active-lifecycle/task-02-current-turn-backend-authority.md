@@ -174,3 +174,7 @@ blockers/risks, and update task/plan status.
   the PostgreSQL case skipped locally without `KANDEV_TEST_POSTGRES_DSN` and remains enabled in CI.
 - Follow-up review bounds every terminal clarification publication with the fresh 30-second persistence
   context. A cancelled-caller regression and the full clarification suite passed with zero lint issues.
+- Later Claude review makes malformed claimed-message ID arrays fail startup recovery atomically instead
+  of silently restoring a subset. The SQLite early-return path documents its database-level writer
+  serialization, and the pending-action query documents its current-turn session boundary.
+- The full SQLite repository suite passed; changed-code Go lint reported zero issues.

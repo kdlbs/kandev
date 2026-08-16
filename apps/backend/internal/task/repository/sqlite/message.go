@@ -547,6 +547,8 @@ func pendingActionsBySessionQuery(driverName string, placeholders []string) stri
 	permissionOrderExpr := pendingActionMessageOrder(driverName, "m")
 	// Durable turns are authoritative. A message without a matching turn is
 	// malformed under the schema foreign key and must not reactivate old input.
+	// Both message CTEs inherit the requested-session boundary through their
+	// task_session_id and turn_id joins to current_turn.
 	return fmt.Sprintf(`
 		WITH current_turn AS (
 			SELECT task_session_id, id AS turn_id

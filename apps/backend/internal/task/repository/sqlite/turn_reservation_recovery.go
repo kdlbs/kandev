@@ -192,7 +192,10 @@ func (r *Repository) restoreReservedClarificationClaim(
 ) error {
 	pendingID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID].(string)
 	turnID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationTurnID].(string)
-	messageIDs := metadataStringSlice(metadata[models.TurnMetaKeyPromptDispatchClarificationMessageIDs])
+	messageIDs, err := metadataStringSlice(metadata[models.TurnMetaKeyPromptDispatchClarificationMessageIDs])
+	if err != nil {
+		return fmt.Errorf("decode prompt dispatch clarification message ids: %w", err)
+	}
 	if pendingID == "" || turnID == "" || len(messageIDs) == 0 {
 		return nil
 	}
@@ -283,20 +286,29 @@ func (r *Repository) deleteEmptyUnpublishedPromptTurn(
 	return nil
 }
 
-func metadataStringSlice(value interface{}) []string {
+func metadataStringSlice(value interface{}) ([]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	if values, ok := value.([]string); ok {
+		for index, value := range values {
+			if value == "" {
+				return nil, fmt.Errorf("entry %d is empty", index)
+			}
+		}
+		return values, nil
+	}
 	values, ok := value.([]interface{})
 	if !ok {
-		if strings, ok := value.([]string); ok {
-			return strings
-		}
-		return nil
+		return nil, fmt.Errorf("expected an array, got %T", value)
 	}
 	result := make([]string, 0, len(values))
-	for _, value := range values {
+	for index, value := range values {
 		text, ok := value.(string)
-		if ok && text != "" {
-			result = append(result, text)
+		if !ok || text == "" {
+			return nil, fmt.Errorf("entry %d is not a non-empty string", index)
 		}
+		result = append(result, text)
 	}
-	return result
+	return result, nil
 }

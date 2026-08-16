@@ -98,3 +98,6 @@ actual files, then update task/plan status.
   detached guard now treats string `"true"` and `"1"` like boolean/numeric truthy metadata.
 - Full SQLite repository and task-service suites passed in 49s and 129s; changed-code Go lint reported
   zero issues.
+- Later Codex review rehydrates keyed Git observations whenever the loader is configured, including a
+  restart whose persisted aggregate is nil. The nil-baseline multi-repository regression and full
+  status-summary suite passed; changed-code Go lint reported zero issues.

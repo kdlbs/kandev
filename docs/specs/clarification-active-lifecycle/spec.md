@@ -235,6 +235,8 @@ session they can already access. Session selection does not broaden task visibil
   it cannot be correlated safely with the predecessor.
 - Unpublished-reservation reconciliation fails during startup: fail startup before event processing or
   prompt admission begins so no new turn can supersede an unrecovered clarification claim.
+- Unpublished-reservation recovery metadata contains a non-string or empty claimed-message ID: fail the
+  recovery transaction and startup, preserving the reservation and claimed rows for diagnosis and retry.
 
 ## Persistence guarantees
 
@@ -320,6 +322,9 @@ session they can already access. Session selection does not broaden task visibil
   restores the still-current bundle.
 - **GIVEN** startup cannot reconcile an unpublished prompt reservation, **WHEN** the orchestrator starts,
   **THEN** startup returns an error before watcher, scheduler, or prompt admission begins.
+- **GIVEN** an unpublished prompt reservation contains a malformed claimed-message ID list, **WHEN**
+  startup recovery decodes it, **THEN** recovery fails closed without deleting the reservation or
+  reopening only a subset of its claimed rows.
 - **GIVEN** pending ownership changes while desktop or mobile task selection loads sessions, **WHEN** the
   delayed load settles, **THEN** Kandev ignores its stale owner choice but still opens the selected task
   through the task-only fallback, and the mobile sheet closes.

@@ -23,6 +23,7 @@ func lockSessionTurnWrites(
 	sessionIDs ...string,
 ) error {
 	if !dialect.IsPostgres(driverName) {
+		// SQLite's database-level single-writer lock already serializes these writes.
 		return nil
 	}
 	unique := make(map[string]struct{}, len(sessionIDs))

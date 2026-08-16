@@ -105,9 +105,11 @@ Pending clarification bundles can be skipped from task chat.
 - The chat X control is labelled "Skip all questions" and posts the exact visible bundle to
   `POST /clarification/:id/respond` with `rejected=true`.
 - When the in-memory waiter still owns the bundle, rejection unblocks `WaitForResponse` in the same
-  turn and every question row becomes `status = "rejected"`.
-- When the current-turn bundle is detached, rejection still persists every question row as rejected,
-  closes the overlay, and completes clarification cleanup without resuming the agent.
+  turn and every still-pending question row becomes `status = "rejected"`; terminal siblings remain
+  unchanged.
+- When the current-turn bundle is detached, rejection still persists every still-pending question row
+  as rejected, preserves terminal siblings, closes the overlay, and completes clarification cleanup
+  without resuming the agent.
 - A pending row from an older turn is superseded history. It cannot reappear as the active overlay,
   re-arm a task icon, block workflow completion, or resume the agent from a stale response.
 - `POST /clarification/:id/cancel` remains a low-level cancellation operation for a request still in
@@ -206,7 +208,7 @@ Index: `idx_tree_hold_members_task` on `(task_id)` — supports "is this task ga
 
 **GIVEN** a task tree has spent across 5 tasks, **WHEN** the operator opens the root task detail, **THEN** the tree cost card shows the aggregated total from `GET /tasks/:rootId/tree/cost-summary`, including token breakdown.
 
-**GIVEN** an agent has posted a current-turn clarification bundle, **WHEN** the operator clicks the Skip (X) control, **THEN** `POST /clarification/:id/respond` rejects that exact bundle, every question updates to `status="rejected"`, and an already-detached agent is not resumed.
+**GIVEN** an agent has posted a current-turn clarification bundle, **WHEN** the operator clicks the Skip (X) control, **THEN** `POST /clarification/:id/respond` rejects that exact bundle, every still-pending question updates to `status="rejected"` while terminal siblings remain unchanged, and an already-detached agent is not resumed.
 
 **GIVEN** a detached clarification remains pending in an older turn, **WHEN** the session accepts newer work, **THEN** the old row remains in history but no active overlay, task icon, workflow barrier, or stale response derives from it.
 

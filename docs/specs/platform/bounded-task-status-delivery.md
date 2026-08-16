@@ -74,9 +74,12 @@ remain during migration, but switchers use the summary when present.
   state icon. Both outrank generating/background activity, which outranks
   coarse lifecycle state. This is the existing task-row precedence.
 - A clarification contributes to `pending_action` only while its bundle is pending in the session's
-  current durable `task_session_turns` record. Within that turn, unrelated rows do not clear the
-  request. A newer turn supersedes older pending clarification rows without requiring transcript
-  history to be rewritten; deleting newer-turn messages cannot move this boundary backward.
+  current authoritative `task_session_turns` record. An empty, unattempted
+  `prompt_dispatch_pending` reservation does not advance this boundary. A message-backed reservation or
+  one marked `prompt_dispatch_attempted` is authoritative because dispatch may have occurred. Within
+  that turn, unrelated rows do not clear the request. A newer authoritative turn supersedes older
+  pending clarification rows without requiring transcript history to be rewritten; deleting newer-turn
+  messages cannot move this boundary backward.
 - Within the same current turn, a session's `pending_action` clears only when the specific request that
   armed it resolves: a `message.updated` on that same permission/clarification
   request row (matched by type and `pending_id`) reaching a terminal,
@@ -99,7 +102,8 @@ remain during migration, but switchers use the summary when present.
   session event.
 - Git totals aggregate the latest observation for every repository in the
   task. A multi-repository update must not expose a partial replacement that
-  forgets unchanged repositories.
+  forgets unchanged repositories. On projector restart, configured keyed Git
+  observations are rehydrated even when the persisted aggregate is absent.
 - Pull-request state aggregates open PRs before terminal PRs and chooses the
   most attention-worthy current status. Full PR details remain owned by the
   GitHub domain and are loaded only by surfaces that need them.
@@ -255,6 +259,10 @@ intermediate replacement.
   to the newer error, **WHEN** the projector restarts and the newer session is
   deleted, **THEN** the retained session's error becomes the task's
   `active_error` instead of leaving the summary empty.
+- **GIVEN** keyed Git observations committed before their aggregate summary,
+  **WHEN** the projector restarts with a nil persisted Git aggregate and later
+  receives one repository event, **THEN** it rehydrates every repository before
+  rebuilding totals so unchanged siblings remain included.
 - **GIVEN** two sessions in one task have recoverable errors, **WHEN** both
   sessions are deleted concurrently while retained-error repair is in flight,
   **THEN** the final task summary contains no error for either deleted session.

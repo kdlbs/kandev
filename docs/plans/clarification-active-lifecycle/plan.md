@@ -298,6 +298,11 @@ All task gates passed:
   unavailable or fails, while the acknowledgement error still reaches the caller.
 - Full SQLite repository and task-service suites passed in 49s and 129s; changed-code Go lint reported
   zero issues.
+- Later Codex/Claude review rehydrates keyed Git observations after a nil-aggregate restart and rejects
+  malformed clarification recovery message-ID arrays instead of silently restoring a subset. Review
+  wording now distinguishes hidden unattempted reservations from authoritative attempted or
+  message-backed turns and preserves terminal clarification siblings during rejection.
+- Full status-summary and SQLite repository suites passed; changed-code Go lint reported zero issues.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
