@@ -495,5 +495,17 @@
   "weekdaySunday": "domingo",
   "weekdayThursday": "quinta-feira",
   "weekdayTuesday": "terça-feira",
-  "weekdayWednesday": "quarta-feira"
+  "weekdayWednesday": "quarta-feira",
+  "preciseDated": "{{date}}, {{time}}",
+  "preciseToday": "Hoje, {{time}}",
+  "preciseYesterday": "Ontem, {{time}}",
+  "relativeDaysAgo_one": "há {{count}}d",
+  "relativeDaysAgo_other": "há {{count}}d",
+  "relativeHoursAgo_one": "há {{count}}h",
+  "relativeHoursAgo_other": "há {{count}}h",
+  "relativeMinutesAgo_one": "há {{count}}m",
+  "relativeMinutesAgo_other": "há {{count}}m",
+  "relativeSecondsAgo_one": "há {{count}}s",
+  "relativeSecondsAgo_other": "há {{count}}s",
+  "relativeYesterday": "ontem"
 }

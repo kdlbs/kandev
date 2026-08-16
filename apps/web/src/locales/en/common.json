@@ -495,5 +495,17 @@
   "noOptionFound": "No option found.",
   "searchPlaceholder": "Search...",
   "selectOption": "Select option...",
-  "terminalNumbered": "Terminal {{seq}}"
+  "terminalNumbered": "Terminal {{seq}}",
+  "preciseDated": "{{date}}, {{time}}",
+  "preciseToday": "Today, {{time}}",
+  "preciseYesterday": "Yesterday, {{time}}",
+  "relativeDaysAgo_one": "{{count}}d ago",
+  "relativeDaysAgo_other": "{{count}}d ago",
+  "relativeHoursAgo_one": "{{count}}h ago",
+  "relativeHoursAgo_other": "{{count}}h ago",
+  "relativeMinutesAgo_one": "{{count}}m ago",
+  "relativeMinutesAgo_other": "{{count}}m ago",
+  "relativeSecondsAgo_one": "{{count}}s ago",
+  "relativeSecondsAgo_other": "{{count}}s ago",
+  "relativeYesterday": "yesterday"
 }

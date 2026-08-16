@@ -73,7 +73,7 @@ const TOOLTIP_KEYS: Record<Exclude<BranchIntent, "none">, string> = {
  */
 export function computeBranchTooltip(intent: BranchIntent | undefined): string {
   if (!intent || intent === "none") return t("task:branchTooltipGeneric");
-  return t(TOOLTIP_KEYS[intent] ?? "task:branchTooltipGeneric");
+  return t(TOOLTIP_KEYS[intent]);
 }
 
 export function computeBranchDisabledReason({

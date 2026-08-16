@@ -729,5 +729,6 @@
   "statusBar": "Barra de estado",
   "taskBehavior": "Comportamento das tarefas",
   "terminalAndEditors": "Terminal e editores",
-  "workspacesAndAccess": "Workspaces e acesso"
+  "workspacesAndAccess": "Workspaces e acesso",
+  "profileStartModelNotAdvertisedOnHost": "A sondagem do anfitrião não anunciou {{model}}. O executor selecionado decidirá o modelo no arranque."
 }

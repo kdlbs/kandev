@@ -495,5 +495,17 @@
   "noOptionFound": "Ńō ōƥţĩōń ƒōũńď.",
   "searchPlaceholder": "Śēàŕćĥ...",
   "selectOption": "Śēĺēćţ ōƥţĩōń...",
-  "terminalNumbered": "Ţēŕḿĩńàĺ {{seq}}"
+  "terminalNumbered": "Ţēŕḿĩńàĺ {{seq}}",
+  "preciseDated": "{{date}}, {{time}}",
+  "preciseToday": "Ţōďàŷ, {{time}}",
+  "preciseYesterday": "Ŷēśţēŕďàŷ, {{time}}",
+  "relativeDaysAgo_one": "{{count}}ď àĝō",
+  "relativeDaysAgo_other": "{{count}}ď àĝō",
+  "relativeHoursAgo_one": "{{count}}ĥ àĝō",
+  "relativeHoursAgo_other": "{{count}}ĥ àĝō",
+  "relativeMinutesAgo_one": "{{count}}ḿ àĝō",
+  "relativeMinutesAgo_other": "{{count}}ḿ àĝō",
+  "relativeSecondsAgo_one": "{{count}}ś àĝō",
+  "relativeSecondsAgo_other": "{{count}}ś àĝō",
+  "relativeYesterday": "ŷēśţēŕďàŷ"
 }

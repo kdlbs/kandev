@@ -729,5 +729,6 @@
   "secretNameTooLong": "名稱不能超過 100 位元組。",
   "keyValueAddItem": "新增條目",
   "keyValueKeyPlaceholder": "鍵",
-  "keyValueValuePlaceholder": "值"
+  "keyValueValuePlaceholder": "值",
+  "profileStartModelNotAdvertisedOnHost": "主機探測未公佈 {{model}}。所選執行器將在啟動時決定使用的模型。"
 }

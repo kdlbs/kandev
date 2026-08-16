@@ -729,5 +729,6 @@
   "secretNameTooLong": "名称不能超过 100 字节。",
   "keyValueAddItem": "添加条目",
   "keyValueKeyPlaceholder": "键",
-  "keyValueValuePlaceholder": "值"
+  "keyValueValuePlaceholder": "值",
+  "profileStartModelNotAdvertisedOnHost": "主机探测未公布 {{model}}。所选执行器将在启动时决定使用的模型。"
 }

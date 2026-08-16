@@ -259,5 +259,22 @@
   "usesTheLocalDockerDaemonOn": "使用本機上的本地 Docker 守護處理程序。",
   "value": "值",
   "verifyingConnection": "正在驗證連線…",
-  "profileNameExample": "生產、開發"
+  "profileNameExample": "生產、開發",
+  "portableConfigAvailable": "可用",
+  "portableConfigBundleClaudeSettings": "複製 Claude 設定",
+  "portableConfigBundleCodexConfig": "複製 Codex 設定",
+  "portableConfigBundleGeneric": "代理程式設定檔（{{id}}）",
+  "portableConfigBundleMockSettings": "複製模擬代理程式設定",
+  "portableConfigBundleOpenCodeConfig": "複製 OpenCode 設定",
+  "portableConfigDescription": "把選定的代理程式設定複製到新建或重置的環境中；這些設定可能包含金鑰或命令。",
+  "portableConfigFileMapping": "{{source}} 到 {{target}}",
+  "portableConfigInfoCopyTiming": "Kandev 只在全新建置或環境重置時原樣複製選定的檔案。新的複製可能覆蓋已存在的目標檔案。熱恢復會保留現有環境。",
+  "portableConfigInfoErrors": "缺失或無法讀取的可選檔案會被跳過並給出警告，不會阻止啟動。這些檔案可能包含金鑰或環境變數值。",
+  "portableConfigInfoLabel": "可遷移代理程式設定檔詳情",
+  "portableConfigInfoScope": "只有在允許清單中的檔案會被複制。一個檔案可能新增鉤子或命令，改變模型、權限、MCP 伺服器或接入點，也可能包含在執行器中無效的主機路徑。驗證檔案與設定包是各自獨立的選項。",
+  "portableConfigInfoSsh": "在 SSH 上，目標是所設定遠端使用者的共享主目錄，可能覆蓋該主機上其他處理程序正在使用的設定。",
+  "portableConfigInfoTitle": "可遷移的代理程式設定檔",
+  "portableConfigNotFound": "未找到",
+  "portableConfigNotFoundHint": "這只是編輯提示。你可以先儲存設定，稍後再新增該檔案。",
+  "portableConfigTitle": "代理程式設定檔"
 }

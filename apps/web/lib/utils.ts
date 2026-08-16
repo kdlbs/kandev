@@ -213,12 +213,15 @@ export function formatRelativeTime(dateString: string): string {
   const diffHour = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHour / 24);
 
+  // Every branch, not just the first. Localizing only "just now" would show a
+  // translated string for ten seconds and then flip to English `10s ago`, which
+  // is worse than leaving the whole ladder in English.
   if (diffSec < 10) return t("common:justNow");
-  if (diffSec < 60) return `${diffSec}s ago`;
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHour < 24) return `${diffHour}h ago`;
-  if (diffDay === 1) return "yesterday";
-  if (diffDay < 7) return `${diffDay}d ago`;
+  if (diffSec < 60) return t("common:relativeSecondsAgo", { count: diffSec });
+  if (diffMin < 60) return t("common:relativeMinutesAgo", { count: diffMin });
+  if (diffHour < 24) return t("common:relativeHoursAgo", { count: diffHour });
+  if (diffDay === 1) return t("common:relativeYesterday");
+  if (diffDay < 7) return t("common:relativeDaysAgo", { count: diffDay });
   return date.toLocaleDateString();
 }
 
@@ -235,15 +238,15 @@ export function formatPreciseTime(dateString: string): string {
   const diffMin = Math.floor(diffSec / 60);
 
   if (diffSec < 10) return t("common:justNow");
-  if (diffSec < 60) return `${diffSec}s ago`;
-  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffSec < 60) return t("common:relativeSecondsAgo", { count: diffSec });
+  if (diffMin < 60) return t("common:relativeMinutesAgo", { count: diffMin });
 
   const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   const sameDay =
     date.getFullYear() === now.getFullYear() &&
     date.getMonth() === now.getMonth() &&
     date.getDate() === now.getDate();
-  if (sameDay) return `Today, ${time}`;
+  if (sameDay) return t("common:preciseToday", { time });
 
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
@@ -251,7 +254,7 @@ export function formatPreciseTime(dateString: string): string {
     date.getFullYear() === yesterday.getFullYear() &&
     date.getMonth() === yesterday.getMonth() &&
     date.getDate() === yesterday.getDate();
-  if (isYesterday) return `Yesterday, ${time}`;
+  if (isYesterday) return t("common:preciseYesterday", { time });
 
   const sameYear = date.getFullYear() === now.getFullYear();
   const dateLabel = date.toLocaleDateString(undefined, {
@@ -259,7 +262,7 @@ export function formatPreciseTime(dateString: string): string {
     day: "numeric",
     year: sameYear ? undefined : "numeric",
   });
-  return `${dateLabel}, ${time}`;
+  return t("common:preciseDated", { date: dateLabel, time });
 }
 
 /**

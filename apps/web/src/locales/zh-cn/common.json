@@ -495,5 +495,17 @@
   "weekdaySunday": "星期日",
   "weekdayThursday": "星期四",
   "weekdayTuesday": "星期二",
-  "weekdayWednesday": "星期三"
+  "weekdayWednesday": "星期三",
+  "preciseDated": "{{date}} {{time}}",
+  "preciseToday": "今天 {{time}}",
+  "preciseYesterday": "昨天 {{time}}",
+  "relativeDaysAgo_one": "{{count}} 天前",
+  "relativeDaysAgo_other": "{{count}} 天前",
+  "relativeHoursAgo_one": "{{count}} 小时前",
+  "relativeHoursAgo_other": "{{count}} 小时前",
+  "relativeMinutesAgo_one": "{{count}} 分钟前",
+  "relativeMinutesAgo_other": "{{count}} 分钟前",
+  "relativeSecondsAgo_one": "{{count}} 秒前",
+  "relativeSecondsAgo_other": "{{count}} 秒前",
+  "relativeYesterday": "昨天"
 }

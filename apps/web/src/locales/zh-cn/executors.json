@@ -259,5 +259,22 @@
   "usesTheLocalDockerDaemonOn": "使用本机上的本地 Docker 守护进程。",
   "value": "值",
   "verifyingConnection": "正在验证连接…",
-  "profileNameExample": "生产、开发"
+  "profileNameExample": "生产、开发",
+  "portableConfigAvailable": "可用",
+  "portableConfigBundleClaudeSettings": "复制 Claude 设置",
+  "portableConfigBundleCodexConfig": "复制 Codex 配置",
+  "portableConfigBundleGeneric": "智能体配置（{{id}}）",
+  "portableConfigBundleMockSettings": "复制模拟智能体设置",
+  "portableConfigBundleOpenCodeConfig": "复制 OpenCode 配置",
+  "portableConfigDescription": "把选定的智能体设置复制到新建或重置的环境中；这些设置可能包含密钥或命令。",
+  "portableConfigFileMapping": "{{source}} 到 {{target}}",
+  "portableConfigInfoCopyTiming": "Kandev 只在全新建置或环境重置时原样复制选定的文件。新的复制可能覆盖已存在的目标文件。热恢复会保留现有环境。",
+  "portableConfigInfoErrors": "缺失或无法读取的可选文件会被跳过并给出警告，不会阻止启动。这些文件可能包含密钥或环境变量值。",
+  "portableConfigInfoLabel": "可迁移智能体配置详情",
+  "portableConfigInfoScope": "只有在允许列表中的文件会被复制。一个文件可能添加钩子或命令，改变模型、权限、MCP 服务器或接入点，也可能包含在执行器中无效的主机路径。认证文件与配置包是各自独立的选项。",
+  "portableConfigInfoSsh": "在 SSH 上，目标是所配置远程用户的共享主目录，可能覆盖该主机上其他进程正在使用的配置。",
+  "portableConfigInfoTitle": "可迁移的智能体配置",
+  "portableConfigNotFound": "未找到",
+  "portableConfigNotFoundHint": "这只是编辑提示。你可以先保存配置，稍后再添加该文件。",
+  "portableConfigTitle": "智能体配置"
 }
