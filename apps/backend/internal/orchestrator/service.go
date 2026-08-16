@@ -1912,6 +1912,14 @@ func (s *Service) Start(ctx context.Context) error {
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
 	// when the user opens them (via task.session.status → task.session.resume).
+	if s.turnService == nil {
+		err := errors.New("reconcile unpublished prompt turns on startup: turn service is unavailable")
+		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		return err
+	}
 	if err := s.reconcileUnpublishedPromptTurnsOnStartup(ctx); err != nil {
 		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
 		s.mu.Lock()

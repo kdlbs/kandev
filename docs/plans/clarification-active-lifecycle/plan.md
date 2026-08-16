@@ -314,6 +314,9 @@ All task gates passed:
   keeps a durably restored clarification retryable when live convergence fails, and replaces mobile's
   module-global selection sequence with one controller per mounted sheet. Focused Go suites, 42 web
   selection tests, typecheck, zero-warning focused lint, and the i18n ratchet passed.
+- Latest Codex review fails orchestrator startup when its turn service is absent instead of silently
+  bypassing reservation recovery, and aligns the remaining stale-summary scenario with task-only phone
+  navigation. The focused startup regressions and full orchestrator suite passed.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 

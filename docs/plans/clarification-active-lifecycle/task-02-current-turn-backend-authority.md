@@ -186,3 +186,5 @@ blockers/risks, and update task/plan status.
 - Final Claude review distinguishes durable restore from live convergence: once the database bundle is
   pending again, a publication or summary error is logged but the response still identifies the answer
   as safe to retry. The focused failure cases and full clarification suite passed.
+- Latest Codex review makes the orchestrator's composition boundary fail closed when no turn service is
+  wired, preventing watcher, scheduler, and prompt admission startup without reservation recovery.

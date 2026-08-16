@@ -124,6 +124,8 @@ update task/plan status.
 - Final Claude review replaces the module-global phone selection sequence with a controller owned by
   each mounted task sheet. Independent-controller and lifecycle regressions passed in the 42-test
   focused selection run; this remains state-only mobile parity work with no layout or touch change.
+- Latest Codex review corrects the last stale-summary scenario to match the implemented phone behavior:
+  discard the obsolete owner, open the selected task-only route, and close the sheet.
 - `cd apps && pnpm install --frozen-lockfile` passed.
 - The exact three-file Vitest command passed: 3 files, 68 tests.
 - `cd apps/web && pnpm run typecheck` passed.

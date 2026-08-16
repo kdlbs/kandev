@@ -285,7 +285,8 @@ session they can already access. Session selection does not broaden task visibil
   and does not cancel or complete that new turn.
 - **GIVEN** pending-owner loading began for one task-summary revision, **WHEN** a newer summary changes
   the pending action before the session response is applied, **THEN** desktop and phone activation do
-  not navigate to the obsolete owner or close the phone drawer.
+  not navigate to the obsolete owner, open the selected task through the task-only fallback, and close
+  the phone drawer.
 - **GIVEN** two forced session loads overlap for one task, **WHEN** the older response finishes last,
   **THEN** it cannot overwrite the newer session snapshot or revive an obsolete pending owner.
 - **GIVEN** a pending task has no loaded owner, **WHEN** activation falls back to its task route,

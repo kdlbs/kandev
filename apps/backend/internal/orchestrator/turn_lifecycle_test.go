@@ -405,6 +405,20 @@ func TestStartFailsClosedWhenPromptTurnRecoveryFails(t *testing.T) {
 	}
 }
 
+func TestStartFailsClosedWithoutTurnService(t *testing.T) {
+	svc, _ := newTurnLifecycleTestService(t)
+	svc.turnService = nil
+
+	err := svc.Start(context.Background())
+	if err == nil {
+		_ = svc.Stop()
+		t.Fatal("Start error = nil, want missing turn service failure")
+	}
+	if svc.running {
+		t.Fatal("service remained running without prompt-turn recovery")
+	}
+}
+
 func TestPublishedReservedTurnCannotBeRolledBack(t *testing.T) {
 	svc, repo := newTurnLifecycleTestService(t)
 	ctx := context.Background()
