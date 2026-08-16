@@ -3925,6 +3925,9 @@ func (h *Handlers) handleDeleteWalkthrough(ctx context.Context, msg *ws.Message)
 // clarification so the user's eventual answer goes through the event fallback path
 // (new turn) instead of the primary path (which would be dropped).
 func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	const cancelledField = "cancelled"
+	const pausedField = "paused"
+
 	var req struct {
 		SessionID string `json:"session_id"`
 	}
@@ -3939,6 +3942,20 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 		cancelled, err := h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID)
 		if err != nil {
 			h.logger.Warn("failed to pause session after clarification timeout",
+				zap.String("session_id", req.SessionID),
+				zap.Error(err))
+			// Retry the complete idempotent pause before falling back to waiter
+			// detachment. The orchestrator pauser gives each attempt a fresh
+			// bounded context, so a transient read failure cannot leave the turn
+			// running after its clarification waiter is detached.
+			cancelled, err = h.inputPauser.PauseForClarificationInput(context.WithoutCancel(ctx), req.SessionID)
+			if err == nil {
+				h.logger.Info("paused session after retrying clarification timeout",
+					zap.String("session_id", req.SessionID),
+					zap.Int("count", cancelled))
+				return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, cancelledField: cancelled, pausedField: true})
+			}
+			h.logger.Warn("failed to pause session after retrying clarification timeout",
 				zap.String("session_id", req.SessionID),
 				zap.Error(err))
 			if h.sessionCanceller == nil {
@@ -3956,12 +3973,12 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 			h.logger.Info("detached clarification waiters after pause failure",
 				zap.String("session_id", req.SessionID),
 				zap.Int("count", cancelled))
-			return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": cancelled, "paused": false})
+			return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, cancelledField: cancelled, pausedField: false})
 		}
 		h.logger.Info("paused session after agent MCP clarification timeout",
 			zap.String("session_id", req.SessionID),
 			zap.Int("count", cancelled))
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": cancelled, "paused": true})
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, cancelledField: cancelled, pausedField: true})
 	}
 
 	if h.sessionCanceller == nil {
@@ -3979,5 +3996,5 @@ func (h *Handlers) handleClarificationTimeout(ctx context.Context, msg *ws.Messa
 		zap.String("session_id", req.SessionID),
 		zap.Int("count", cancelled))
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, "cancelled": cancelled})
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"ok": true, cancelledField: cancelled})
 }
