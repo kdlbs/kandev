@@ -474,6 +474,20 @@ export class SessionPage {
     return this.activeChat().getByTestId("clarification-overlay");
   }
 
+  /**
+   * The persistent bar wrapping the clarification overlay. Stays mounted
+   * (collapsed to a header row) while the bundle is pending, even after the
+   * user dismisses it with Escape or the collapse toggle.
+   */
+  clarificationBar(): Locator {
+    return this.activeChat().getByTestId("clarification-overlay-container");
+  }
+
+  /** Expand/collapse toggle in the clarification bar's header row. */
+  clarificationCollapseToggle(): Locator {
+    return this.activeChat().getByTestId("clarification-collapse-toggle");
+  }
+
   /** Shared context shown once above the active clarification question. */
   clarificationContext(): Locator {
     return this.clarificationOverlay().getByTestId("clarification-context");

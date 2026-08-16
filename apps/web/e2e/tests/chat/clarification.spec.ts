@@ -5,6 +5,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { seedClarificationSession } from "../../helpers/clarification";
 import { waitForSessionState } from "../../helpers/session";
+import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
@@ -302,6 +303,84 @@ test.describe("Clarification flow", () => {
     expect(Math.abs(inputCenter - rowCenter)).toBeLessThanOrEqual(1);
 
     await input.press("Enter");
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("Use the embedded database for this task");
+  });
+
+  test("Escape after the clarification detaches still doesn't reject, and the question stays answerable", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Clarification Timeout Esc Workflow",
+    );
+    const timeoutStep = await apiClient.createWorkflowStep(workflow.id, "Timeout Step", 0);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Clarification Timeout Esc",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:clarification-timeout",
+        workflow_id: workflow.id,
+        workflow_step_id: timeoutStep.id,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await testPage.goto(`/t/${task.id}`);
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("Question timed out", { timeout: 30_000 });
+    await expect(session.clarificationDeferredNotice()).toBeVisible({ timeout: 10_000 });
+
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "timed-out clarification session must remain ready for a deferred answer",
+      timeout: 30_000,
+    });
+
+    let respondCalls = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      respondCalls += 1;
+      await route.continue();
+    });
+
+    // The MCP wait already detached (agent_disconnected cleanup ran), but
+    // Escape must still be a local-only dismiss — not a rejection — and the
+    // deferred question must stay answerable after restoring it.
+    await session.chat.focus();
+    await testPage.keyboard.press("Escape");
+    await expect(session.clarificationOverlay()).not.toBeVisible();
+    await expect(session.clarificationBar()).toBeVisible();
+
+    await dwell(
+      testPage,
+      300,
+      "negative-assertion",
+      "asserts Escape never posts a rejection after detach; there is no event for the request that must not fire",
+    );
+    expect(respondCalls).toBe(0);
+
+    await session.clarificationCollapseToggle().click();
+    await expect(session.clarificationOverlay()).toBeVisible();
+
+    const input = session.clarificationInput();
+    const inputRow = session.clarificationCustomInput();
+    await expect(input).toBeEnabled();
+    await inputRow.click({ position: { x: 4, y: 4 } });
+    await expect(input).toBeFocused();
+    await input.pressSequentially("Use the embedded database for this task");
+    await input.press("Enter");
+
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("Use the embedded database for this task");
   });
@@ -764,9 +843,12 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(submitTooltip).toContainText(/Ctrl|⌘/);
     await expect(submitTooltip).toContainText("Enter");
 
+    // Skip has no keyboard shortcut: Escape only dismisses the bundle locally
+    // (see the "Escape dismisses" tests below), so its tooltip must not claim "Esc".
     await testPage.getByTestId("clarification-skip-shortcut").hover();
     const skipTooltip = testPage.getByRole("tooltip", { name: /Skip all questions/ });
-    await expect(skipTooltip).toContainText("Esc");
+    await expect(skipTooltip).toBeVisible();
+    await expect(skipTooltip).not.toContainText("Esc");
 
     await session.clarificationOption("PostgreSQL").click();
     await session.clarificationPrev().hover();
@@ -819,7 +901,7 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
   });
 
-  test("Esc skips the entire bundle from anywhere in the carousel", async ({
+  test("Escape dismisses the bundle locally from anywhere in the carousel, without rejecting it", async ({
     testPage,
     apiClient,
     seedData,
@@ -828,17 +910,147 @@ test.describe("Multi-question clarification carousel", () => {
       testPage,
       apiClient,
       seedData,
-      "Multi-q esc",
+      "Multi-q esc dismiss",
       "clarification-multi",
     );
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
+    let respondCalls = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      respondCalls += 1;
+      await route.continue();
+    });
+
     await session.clarificationStep(1).click();
     await testPage.keyboard.press("Escape");
 
+    // The overlay collapses locally, but the bar stays put — the bundle is
+    // still pending and reachable, not answered or rejected.
+    await expect(session.clarificationOverlay()).not.toBeVisible();
+    await expect(session.clarificationBar()).toBeVisible();
+    await expect(session.clarificationCollapseToggle()).toBeVisible();
+
+    await dwell(
+      testPage,
+      300,
+      "negative-assertion",
+      "asserts Escape never posts a rejection; there is no event for the request that must not fire",
+    );
+    expect(respondCalls).toBe(0);
+    await expect(session.chat).not.toContainText("rejected");
+  });
+
+  test("Escape leaves the agent blocked on the pending clarification", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Clarification esc keeps agent blocked",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:clarification-multi",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    const { sessions: before } = await apiClient.listTaskSessions(task.id);
+    const stateBeforeEscape = before.find((s) => s.id === task.session_id)?.state;
+    if (!stateBeforeEscape) throw new Error("expected to find the seeded session's state");
+
+    await session.chat.focus();
+    await testPage.keyboard.press("Escape");
+    await expect(session.clarificationOverlay()).not.toBeVisible();
+
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "asserts Escape never resumes the blocked turn; there is no event for the state transition that must not happen",
+    );
+
+    const { sessions: after } = await apiClient.listTaskSessions(task.id);
+    expect(after.find((s) => s.id === task.session_id)?.state).toBe(stateBeforeEscape);
+  });
+
+  test("dismissing with Escape and restoring lets the user answer normally", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q esc restore answer",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    await session.chat.focus();
+    await testPage.keyboard.press("Escape");
+    await expect(session.clarificationOverlay()).not.toBeVisible();
+    await expect(session.clarificationBar()).toBeVisible();
+
+    await session.clarificationCollapseToggle().click();
+    await expect(session.clarificationOverlay()).toBeVisible();
+
+    await session.clarificationOption("PostgreSQL").click();
+    await session.clarificationOption("Go").click();
+    await session.clarificationOption("Docker").click();
+    await session.clarificationSubmit().click();
+
     await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 30_000 });
-    await expect(session.chat).toContainText("rejected");
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("dismissing mid-bundle preserves recorded answers through the round trip", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Multi-q esc preserves answers",
+      "clarification-multi",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    await session.clarificationOption("PostgreSQL").click();
+    await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "true");
+    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
+
+    await session.chat.focus();
+    await testPage.keyboard.press("Escape");
+    await expect(session.clarificationOverlay()).not.toBeVisible();
+
+    await session.clarificationCollapseToggle().click();
+    await expect(session.clarificationOverlay()).toBeVisible();
+
+    // Both the stepper's answered mark and the recorded answer itself must
+    // survive the dismiss/restore round trip.
+    await expect(session.clarificationStep(0)).toHaveAttribute("data-answered", "true");
+    await expect(session.clarificationGroupProgress()).toContainText("1 of 3 answered");
+
+    await session.clarificationStep(0).click();
+    const selectedOption = session
+      .clarificationQuestionCardById("db")
+      .locator('[data-testid="clarification-option"][data-selected="true"]');
+    await expect(selectedOption).toContainText("PostgreSQL");
   });
 
   test("Back button is disabled on the first step", async ({ testPage, apiClient, seedData }) => {

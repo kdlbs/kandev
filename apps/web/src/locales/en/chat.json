@@ -95,6 +95,8 @@
   "queueEditAlreadySent": "Message already sent; agent picked it up before your edit landed.",
   "queueEditSaveFailed": "Failed to save edit. Please try again.",
   "queueFullSuffix": "· full",
+  "questionsWaiting_one": "{{count}} question waiting",
+  "questionsWaiting_other": "{{count}} questions waiting",
   "quickChatDialogIntro": "Start a quick conversation with an agent without creating a formal task.",
   "quickChatIntro": "Chat with an agent about an idea, question, or codebase.",
   "quickChatIntroSecondary": "Quick chats stay outside your task board.",

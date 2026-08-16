@@ -78,8 +78,8 @@ test.describe("Clarification overlay resizable layout", () => {
     seedData,
   }) => {
     // Tall viewport so the content-sized overlay has plenty of room to grow
-    // without bumping into the 50vh safety cap on the first drag.
-    await testPage.setViewportSize({ width: 1280, height: 1000 });
+    // without bumping into the 35vh safety cap on the first drag.
+    await testPage.setViewportSize({ width: 1280, height: 3000 });
 
     const session = await seedTaskAndWaitForIdle(
       testPage,
@@ -94,7 +94,10 @@ test.describe("Clarification overlay resizable layout", () => {
     const container = testPage.getByTestId("clarification-overlay-container");
     await expect(container).toBeVisible();
 
-    const scrollRegion = container;
+    // The container now also carries the persistent header row (collapse
+    // toggle + waiting count), so it no longer scrolls itself — the nested
+    // scroll region below the header does.
+    const scrollRegion = container.getByTestId("clarification-scroll-region");
     const initial = await container.evaluate((el) => {
       return {
         height: el.getBoundingClientRect().height,
@@ -102,13 +105,13 @@ test.describe("Clarification overlay resizable layout", () => {
         inlineHeight: (el as HTMLElement).style.height,
       };
     });
-    await expect(scrollRegion).toHaveCSS("overflow-y", "scroll");
+    await expect(scrollRegion).toHaveCSS("overflow-y", "auto");
     // Default state: no inline height → container sizes to its content.
     expect(initial.inlineHeight).toBe("");
     // Sanity check: content-sized overlay is at least tall enough for the
-    // question card but well under the 50vh cap.
+    // question card but well under the 35vh safety cap.
     expect(initial.height).toBeGreaterThan(200);
-    expect(initial.height).toBeLessThan(1000 * 0.5);
+    expect(initial.height).toBeLessThan(3000 * 0.35);
 
     const handle = container.locator("xpath=..").locator("button[aria-label='Resize']");
     await expect(handle).toBeVisible();

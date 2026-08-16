@@ -22,10 +22,8 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
-import { ClarificationInputOverlay } from "./chat/clarification-input-overlay";
+import { ClarificationPanelSection } from "./chat/clarification-panel-section";
 import { useComposerAgentStartHint } from "./chat/use-composer-agent-start-hint";
-import { ResizeHandle } from "./chat/resize-handle";
-import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
@@ -35,7 +33,6 @@ import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-un
 import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
 import { useAppStore } from "@/components/state-provider";
-import type { Message } from "@/lib/types/http";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 import { useTranslation } from "react-i18next";
@@ -250,18 +247,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   );
   const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef);
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
-  const {
-    height: clarificationHeight,
-    containerRef: clarificationContainerRef,
-    resetHeight: clarificationResetHeight,
-    resizeHandleProps: clarificationResizeProps,
-  } = useResizableClarificationOverlay();
-
-  // Reset the dragged height when the overlay closes so a fresh
-  // clarification starts auto-sized instead of inheriting a stale value.
-  useEffect(() => {
-    if (!pendingClarification) clarificationResetHeight();
-  }, [pendingClarification, clarificationResetHeight]);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const messageListRef = useRef<MessageListHandle>(null);
@@ -402,16 +387,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         />
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
-      <ClarificationSection
-        pendingClarification={Boolean(pendingClarification)}
-        isArchived={isArchived}
-        containerRef={clarificationContainerRef}
-        resizeProps={clarificationResizeProps}
-        height={clarificationHeight}
-        messages={pendingClarificationGroup}
-        onResolved={handleClarificationResolved}
-        shortcutScopeRef={panelRef}
-      />
+      {!isArchived && (
+        <ClarificationPanelSection
+          pending={Boolean(pendingClarification)}
+          messages={pendingClarificationGroup}
+          onResolved={handleClarificationResolved}
+          shortcutScopeRef={panelRef}
+        />
+      )}
       <ChatFooter
         isArchived={isArchived}
         chatInputRef={chatInputRef}
@@ -435,47 +418,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     </PanelRoot>
   );
 });
-
-type ClarificationSectionProps = {
-  pendingClarification: boolean;
-  isArchived: boolean;
-  containerRef: RefObject<HTMLDivElement | null>;
-  resizeProps: { onMouseDown: (e: React.MouseEvent) => void; onDoubleClick: () => void };
-  height: number | null;
-  messages: readonly Message[] | null | undefined;
-  onResolved: () => void;
-  shortcutScopeRef: RefObject<HTMLElement | null>;
-};
-
-function ClarificationSection({
-  pendingClarification,
-  isArchived,
-  containerRef,
-  resizeProps,
-  height,
-  messages,
-  onResolved,
-  shortcutScopeRef,
-}: ClarificationSectionProps) {
-  if (!pendingClarification || isArchived) return null;
-  return (
-    <div className="relative flex-shrink-0 border-t border-sky-400/30 bg-card">
-      <ResizeHandle {...resizeProps} />
-      <div
-        ref={containerRef}
-        data-testid="clarification-overlay-container"
-        className="px-1 overflow-y-scroll overscroll-contain max-h-[50vh]"
-        style={height === null ? undefined : { height }}
-      >
-        <ClarificationInputOverlay
-          messages={messages}
-          onResolved={onResolved}
-          shortcutScopeRef={shortcutScopeRef}
-        />
-      </div>
-    </div>
-  );
-}
 
 type ChatFooterProps = {
   isArchived: boolean;
