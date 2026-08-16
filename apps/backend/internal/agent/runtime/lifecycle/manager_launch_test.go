@@ -298,6 +298,34 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 	})
 }
 
+func TestCollectContributionDestinationsRejectsDistinctIdentitiesWithSamePath(t *testing.T) {
+	first := lifecycleTestContributionDestination("200")
+	second := lifecycleTestContributionDestination("201")
+	req := &LaunchRequest{Repositories: []RepoLaunchSpec{
+		{RepoName: "primary"},
+		{RepoName: "shared", BaseBranch: "main", ContributionDestination: &first},
+		{RepoName: "shared", BaseBranch: "main", ContributionDestination: &second},
+	}}
+
+	_, err := collectContributionDestinations(req)
+	if err == nil {
+		t.Fatal("collectContributionDestinations accepted distinct target identities with the same path")
+	}
+}
+
+func lifecycleTestContributionDestination(providerID string) models.ContributionDestination {
+	return models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "alice/kandev", ProviderID: providerID, RemoteURL: "https://github.com/alice/kandev.git",
+		},
+	}
+}
+
 func TestBuildAgentCommand_RejectsInvalidBuiltArgv(t *testing.T) {
 	mgr := newTestManager(t)
 	tests := []struct {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/gitcredentials"
 	githubpkg "github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -245,7 +246,8 @@ func (a *githubBrokerScopeAuthorizer) authorizeRepositoryIdentity(ctx context.Co
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
 	host, path, err := repositoryHTTPSIdentity(repository)
-	if err != nil || !strings.EqualFold(host, scope.Host) || path != scope.Path {
+	if err != nil || !strings.EqualFold(host, scope.Host) ||
+		githubauth.CanonicalCredentialPath(path) != githubauth.CanonicalCredentialPath(scope.Path) {
 		return fmt.Errorf("repository identity does not match lease scope")
 	}
 	return nil
@@ -267,13 +269,37 @@ func repositoryHTTPSIdentity(repository *taskmodels.Repository) (string, string,
 	return strings.ToLower(parsed.Host), parsed.Path, nil
 }
 
+// repositoryHTTPSCloneURL mirrors the executor's credentialIdentityCloneURL:
+// an HTTPS remote wins, then the persisted provider identity whose host carries
+// the real HTTPS origin, and only then a rewrite of a non-HTTPS remote. The two
+// must agree, because one issues the lease scope and the other authorizes it.
 func repositoryHTTPSCloneURL(repository *taskmodels.Repository) string {
 	remoteURL := strings.TrimSpace(repository.RemoteURL)
-	if remoteURL != "" || !strings.EqualFold(repository.Provider, gitCredentialGitHubProviderID) ||
-		repository.ProviderOwner == "" || repository.ProviderName == "" {
+	if strings.HasPrefix(strings.ToLower(remoteURL), "https://") {
 		return remoteURL
 	}
-	return "https://" + gitCredentialGitHubHost + "/" + repository.ProviderOwner + "/" + repository.ProviderName + ".git"
+	if derived := providerHTTPSCloneURL(repository); derived != "" {
+		return derived
+	}
+	if converted := repoclone.CanonicalHTTPSCloneURL(remoteURL); converted != "" {
+		return converted
+	}
+	return remoteURL
+}
+
+func providerHTTPSCloneURL(repository *taskmodels.Repository) string {
+	if !strings.EqualFold(repository.Provider, gitCredentialGitHubProviderID) ||
+		repository.ProviderOwner == "" || repository.ProviderName == "" {
+		return ""
+	}
+	cloneURL, err := repoclone.CloneURLWithHost(
+		repository.Provider, repository.ProviderHost,
+		repository.ProviderOwner, repository.ProviderName, repoclone.ProtocolHTTPS,
+	)
+	if err != nil {
+		return ""
+	}
+	return cloneURL
 }
 
 func parseRepositoryHTTPSCloneURL(remoteURL string) (*url.URL, error) {

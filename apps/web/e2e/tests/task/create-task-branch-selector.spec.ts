@@ -368,10 +368,12 @@ test.describe("Fresh-branch flow", () => {
       // Submit and assert the discard modal never appears (clean tree).
       // Wait for the create-task request to fire so we know the submit path
       // really executed and didn't short-circuit before the modal would render.
+      const submit = testPage.getByTestId("submit-start-agent");
+      await expect(submit).toBeEnabled({ timeout: 10_000 });
       const createTaskRequest = testPage.waitForRequest(
         (req) => req.url().endsWith("/api/v1/tasks") && req.method() === "POST",
       );
-      await testPage.getByTestId("submit-start-agent").click();
+      await submit.click();
       await createTaskRequest;
       await expect(testPage.getByTestId("discard-local-changes-dialog")).toHaveCount(0);
     } finally {

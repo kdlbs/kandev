@@ -51,7 +51,9 @@ test.describe("Task creation: custom prompt autocomplete", () => {
 
     const menu = testPage.getByText(MENU_TITLE);
     await expect(menu).toBeVisible({ timeout: 5_000 });
-    await expect(testPage.getByRole("option", { name: new RegExp(PROMPT_NAME) })).toBeVisible();
+    const promptOption = testPage.getByRole("option").filter({ hasText: PROMPT_NAME });
+    await expect(promptOption).toBeVisible();
+    await expect(promptOption).toHaveAttribute("aria-selected", "true");
 
     await textarea.press("Enter");
 
@@ -104,9 +106,14 @@ test.describe("Task creation: custom prompt autocomplete", () => {
     // pressing Enter against an empty/half-open menu lets the key fall through
     // to the form submit, which closes the dialog and fails the assertions
     // below. Gating on the option (not just the title) is the condition that
-    // makes the selection deterministic.
+    // makes the selection deterministic. Also wait for the filtered result to
+    // become the active item: the menu opens on the bare `@` trigger before
+    // the async frame that applies the typed query, so an early Enter could
+    // still select the first built-in prompt.
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
-    await expect(testPage.getByRole("option", { name: new RegExp(PROMPT_NAME) })).toBeVisible();
+    const promptOption = testPage.getByRole("option").filter({ hasText: PROMPT_NAME });
+    await expect(promptOption).toBeVisible();
+    await expect(promptOption).toHaveAttribute("aria-selected", "true");
     await textarea.press("Enter");
 
     // Dialog must still be open — Enter selected the menu item, not the form submit.

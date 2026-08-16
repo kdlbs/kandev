@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 // extra API call.
 type GitHubInfo interface {
 	GetAuthenticatedLogin(ctx context.Context) (string, error)
+	GetRepositoryID(ctx context.Context, owner, name string) (string, error)
 	HasRepoWriteAccess(ctx context.Context, owner, name string) (bool, error)
 	UserHasFork(ctx context.Context, login, name string) (bool, error)
 }
@@ -36,6 +38,18 @@ func (d *defaultGitHubInfo) GetAuthenticatedLogin(ctx context.Context) (string, 
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+func (d *defaultGitHubInfo) GetRepositoryID(ctx context.Context, owner, name string) (string, error) {
+	out, err := runGH(ctx, "api", fmt.Sprintf("repos/%s/%s", owner, name), "--jq", ".id")
+	if err != nil {
+		return "", err
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	if err != nil || id <= 0 {
+		return "", fmt.Errorf("GitHub repository %s/%s returned an invalid provider ID", owner, name)
+	}
+	return strconv.FormatInt(id, 10), nil
 }
 
 func (d *defaultGitHubInfo) HasRepoWriteAccess(ctx context.Context, owner, name string) (bool, error) {

@@ -20,6 +20,7 @@ test.describe("Sentry settings — instances", () => {
     const settings = new SentrySettingsPage(testPage);
     await settings.goto(seedData.workspaceId);
     const card = settings.cardByName("Original Sentry");
+    await expect(card).toBeVisible({ timeout: 15_000 });
     await card.getByTestId("sentry-instance-edit-button").click();
     await testPage.getByTestId("sentry-edit-name-input").fill("Renamed Sentry");
 

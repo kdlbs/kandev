@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
+import type { SecretListItem } from "../../../lib/types/http-secrets";
 
 const GLOBAL_VALUE = "e2e-copy-move-global-value";
 
@@ -29,6 +31,18 @@ async function createSecretFromSettings(
   await expect(page.locator("body")).not.toContainText(value);
 }
 
+/** Selects a workspace by its exact name in the open destination picker. */
+async function selectWorkspaceDestination(
+  page: import("@playwright/test").Page,
+  dialog: import("@playwright/test").Locator,
+  workspaceName: string,
+) {
+  const destination = dialog.getByRole("combobox", { name: "Destination" });
+  await expect(destination).toBeVisible();
+  await destination.click();
+  await page.getByRole("listbox").getByRole("option", { name: workspaceName, exact: true }).click();
+}
+
 /**
  * Opens the copy/move dialog for a named secret and submits through the
  * dialog's OWN primary button (never the settings floating Save control).
@@ -37,15 +51,48 @@ async function submitCopyMove(
   page: import("@playwright/test").Page,
   secretName: string,
   mode: "Copy" | "Move",
-) {
+  destinationWorkspaceName?: string,
+): Promise<SecretListItem> {
   await page.getByRole("button", { name: `Copy or move ${secretName}` }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   if (mode === "Move") {
     await dialog.getByRole("radio", { name: /Move/ }).click();
   }
+  if (destinationWorkspaceName) {
+    await selectWorkspaceDestination(page, dialog, destinationWorkspaceName);
+  }
+  const transferResponse = waitForHttp(page, "POST", /\/api\/v1\/secrets\/[^/]+\/(?:copy|move)$/, {
+    predicate: (response) => response.status() === 201,
+  });
   await dialog.getByRole("button", { name: mode, exact: true }).click();
+  const transferred = (await (await transferResponse).json()) as SecretListItem;
   await expect(dialog).toBeHidden();
+  return transferred;
+}
+
+async function waitForWorkspaceSecret(
+  apiClient: {
+    listSecrets: (options: {
+      scope: "workspace";
+      workspaceId: string;
+    }) => Promise<Array<{ name: string }>>;
+  },
+  workspaceId: string,
+  name: string,
+) {
+  // The transfer request and the settings list are separate reads. Wait for
+  // the persisted row before navigating so the destination page cannot fetch
+  // the workspace list during the short write-to-read window.
+  await expect
+    .poll(
+      async () => {
+        const secrets = await apiClient.listSecrets({ scope: "workspace", workspaceId });
+        return secrets.some((secret) => secret.name === name);
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
 }
 
 test.describe("secrets-copy-move", () => {
@@ -56,14 +103,25 @@ test.describe("secrets-copy-move", () => {
   }) => {
     const sourceName = `E2E Copy Move Global Copy ${runToken()}`;
     const copiedName = `${sourceName} (from Global)`;
+    const workspaces = await apiClient.listWorkspaces();
+    const workspaceName = workspaces.workspaces.find(
+      (workspace) => workspace.id === seedData.workspaceId,
+    )?.name;
+    expect(workspaceName).toBeTruthy();
     await createSecretFromSettings(testPage, "/settings/general/secrets", sourceName, GLOBAL_VALUE);
     const global = (await apiClient.listSecrets()).find((secret) => secret.name === sourceName);
     expect(global?.id).toBeTruthy();
 
-    await submitCopyMove(testPage, sourceName, "Copy");
+    const transferred = await submitCopyMove(testPage, sourceName, "Copy", workspaceName!);
+    expect(transferred).toMatchObject({
+      name: copiedName,
+      scope: "workspace",
+      workspace_id: seedData.workspaceId,
+    });
 
     // The source stays on the Global page; the copy appears in the workspace.
     await expect(testPage.getByText(sourceName, { exact: true })).toBeVisible();
+    await waitForWorkspaceSecret(apiClient, seedData.workspaceId, copiedName);
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/secrets`);
     await expect(testPage.getByText(copiedName, { exact: true })).toBeVisible();
     await expect(testPage.locator("body")).not.toContainText(GLOBAL_VALUE);
@@ -116,9 +174,14 @@ test.describe("secrets-copy-move", () => {
   }) => {
     const sourceName = `E2E Copy Move Global Move ${runToken()}`;
     const movedName = `${sourceName} (from Global)`;
+    const workspaces = await apiClient.listWorkspaces();
+    const workspaceName = workspaces.workspaces.find(
+      (workspace) => workspace.id === seedData.workspaceId,
+    )?.name;
+    expect(workspaceName).toBeTruthy();
     await createSecretFromSettings(testPage, "/settings/general/secrets", sourceName, GLOBAL_VALUE);
 
-    await submitCopyMove(testPage, sourceName, "Move");
+    await submitCopyMove(testPage, sourceName, "Move", workspaceName!);
 
     await expect(testPage.getByText(sourceName, { exact: true })).toHaveCount(0);
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/secrets`);
@@ -135,6 +198,7 @@ test.describe("secrets-copy-move", () => {
 
   test("blocks a duplicate target name and marks the name field invalid", async ({
     testPage,
+    apiClient,
     seedData,
   }) => {
     const sourceName = `E2E Copy Move Conflict Source ${runToken()}`;
@@ -146,11 +210,17 @@ test.describe("secrets-copy-move", () => {
       conflictingName,
       WORKSPACE_VALUE,
     );
+    const workspaces = await apiClient.listWorkspaces();
+    const workspaceName = workspaces.workspaces.find(
+      (workspace) => workspace.id === seedData.workspaceId,
+    )?.name;
+    expect(workspaceName).toBeTruthy();
 
     await testPage.goto("/settings/general/secrets");
     await testPage.getByRole("button", { name: `Copy or move ${sourceName}` }).click();
     const dialog = testPage.getByRole("dialog");
     await expect(dialog).toBeVisible();
+    await selectWorkspaceDestination(testPage, dialog, workspaceName!);
 
     const nameInput = dialog.getByLabel("Name");
     await expect(nameInput).toHaveValue(conflictingName);

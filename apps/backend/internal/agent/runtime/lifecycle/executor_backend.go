@@ -54,6 +54,42 @@ func validateRemoteContributions(values map[string]models.RemoteContribution) (m
 	return validated, nil
 }
 
+func contributionDestinationsFromMetadata(metadata map[string]interface{}) (map[string]models.ContributionDestination, error) {
+	if metadata == nil {
+		return nil, nil
+	}
+	raw, ok := metadata[MetadataKeyContributionDestinations]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	if typed, ok := raw.(map[string]models.ContributionDestination); ok {
+		return validateContributionDestinations(typed)
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("encode contribution destinations: %w", err)
+	}
+	var decoded map[string]models.ContributionDestination
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil, fmt.Errorf("decode contribution destinations: %w", err)
+	}
+	return validateContributionDestinations(decoded)
+}
+
+func validateContributionDestinations(values map[string]models.ContributionDestination) (map[string]models.ContributionDestination, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	validated := make(map[string]models.ContributionDestination, len(values))
+	for key, destination := range values {
+		if err := destination.Validate(); err != nil {
+			return nil, fmt.Errorf("validate contribution destination %q: %w", key, err)
+		}
+		validated[key] = destination
+	}
+	return validated, nil
+}
+
 // Runtime abstracts the agent execution environment (Docker, Standalone, K8s, SSH, etc.)
 // Each runtime is responsible for creating and managing agentctl instances.
 // Agent subprocess launching is handled separately via agentctl client methods.
@@ -112,20 +148,21 @@ const (
 	// MetadataKeyBaseBranches stores a map[string]string (RepositoryName →
 	// base branch ref) for per-repo diff-stat resolution inside agentctl.
 	// The empty key "" applies to the root / single-repo tracker.
-	MetadataKeyBaseBranches        = "base_branches"
-	MetadataKeyRemoteContributions = "remote_contributions"
-	MetadataKeyIsRemote            = "is_remote"
-	MetadataKeyRemoteAuthHome      = "remote_auth_target_home"
-	MetadataKeyAgentConfigBundles  = "agent_config_bundles"
-	MetadataKeyExecutorProfileID   = "executor_profile_id"
-	MetadataKeyGitUserName         = "git_user_name"
-	MetadataKeyGitUserEmail        = "git_user_email"
-	MetadataKeyImageTagOverride    = "image_tag_override"
-	MetadataKeyContainerID         = "container_id"
-	MetadataKeySpriteName          = "sprite_name"
-	MetadataKeySpriteState         = "sprite_state"
-	MetadataKeySpriteCreatedAt     = "sprite_created_at"
-	MetadataKeyLocalPort           = "local_port"
+	MetadataKeyBaseBranches             = "base_branches"
+	MetadataKeyRemoteContributions      = "remote_contributions"
+	MetadataKeyContributionDestinations = "contribution_destinations"
+	MetadataKeyIsRemote                 = "is_remote"
+	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
+	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
+	MetadataKeyExecutorProfileID        = "executor_profile_id"
+	MetadataKeyGitUserName              = "git_user_name"
+	MetadataKeyGitUserEmail             = "git_user_email"
+	MetadataKeyImageTagOverride         = "image_tag_override"
+	MetadataKeyContainerID              = "container_id"
+	MetadataKeySpriteName               = "sprite_name"
+	MetadataKeySpriteState              = "sprite_state"
+	MetadataKeySpriteCreatedAt          = "sprite_created_at"
+	MetadataKeyLocalPort                = "local_port"
 
 	// MetadataKeyModelOverride holds a user-requested model that overrides the
 	// agent profile's configured model on the next launch. Set by SetSessionModel
@@ -192,21 +229,22 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyIsRemote: true,
 
 	// Executor profile / auth config
-	MetadataKeyCleanupScript:       true,
-	MetadataKeyRepoSetupScript:     true,
-	MetadataKeyRemoteAuthHome:      true,
-	MetadataKeyAgentConfigBundles:  true,
-	MetadataKeyGitUserName:         true,
-	MetadataKeyGitUserEmail:        true,
-	"remote_credentials":           true,
-	"remote_auth_secrets":          true,
-	"executor_mcp_policy":          true,
-	"sprites_network_policy_rules": true,
-	MetadataKeyExecutorProfileID:   true,
-	MetadataKeyImageTagOverride:    true,
-	MetadataKeyContainerID:         true,
-	MetadataKeyWorktreeBranch:      true,
-	MetadataKeyRemoteContributions: true,
+	MetadataKeyCleanupScript:            true,
+	MetadataKeyRepoSetupScript:          true,
+	MetadataKeyRemoteAuthHome:           true,
+	MetadataKeyAgentConfigBundles:       true,
+	MetadataKeyGitUserName:              true,
+	MetadataKeyGitUserEmail:             true,
+	"remote_credentials":                true,
+	"remote_auth_secrets":               true,
+	"executor_mcp_policy":               true,
+	"sprites_network_policy_rules":      true,
+	MetadataKeyExecutorProfileID:        true,
+	MetadataKeyImageTagOverride:         true,
+	MetadataKeyContainerID:              true,
+	MetadataKeyWorktreeBranch:           true,
+	MetadataKeyRemoteContributions:      true,
+	MetadataKeyContributionDestinations: true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.
@@ -363,15 +401,16 @@ type ExecutorCreateRequest struct {
 	// RemoteContributions carries validated, credential-free bindings to the
 	// runtime/agentctl boundary. Keys use the same workspace subpath convention
 	// as BaseBranches; the empty key is the workspace root.
-	RemoteContributions map[string]models.RemoteContribution
-	McpServers          []McpServerConfig
-	AgentConfig         agents.Agent // Agent type info needed by runtimes
-	PreviousExecutionID string       // Non-empty when reconnecting to a previous execution
-	McpMode             string       // MCP tool mode: "task" (default), "config", or "office"
-	McpProviders        []string     // Normalized provider capabilities attached to the task
-	McpProfile          *mcpprofile.Context
-	AuthToken           string // Previously handshaken agentctl token for reconnects
-	BootstrapNonce      string // Stored nonce for re-handshake after container restart
+	RemoteContributions      map[string]models.RemoteContribution
+	ContributionDestinations map[string]models.ContributionDestination
+	McpServers               []McpServerConfig
+	AgentConfig              agents.Agent // Agent type info needed by runtimes
+	PreviousExecutionID      string       // Non-empty when reconnecting to a previous execution
+	McpMode                  string       // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders             []string     // Normalized provider capabilities attached to the task
+	McpProfile               *mcpprofile.Context
+	AuthToken                string // Previously handshaken agentctl token for reconnects
+	BootstrapNonce           string // Stored nonce for re-handshake after container restart
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can

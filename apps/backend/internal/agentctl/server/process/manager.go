@@ -921,6 +921,9 @@ func (m *Manager) GitOperator() *GitOperator {
 		if binding, ok := m.cfg.RemoteContributions[""]; ok {
 			m.gitOperator.setRemoteContribution(&binding)
 		}
+		if destination, ok := m.cfg.ContributionDestinations[""]; ok {
+			m.gitOperator.setContributionDestination(&destination)
+		}
 	}
 	return m.gitOperator
 }
@@ -957,6 +960,9 @@ func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
 	op.setEnvironmentProvider(m.gitEnvironment)
 	if binding, ok := m.cfg.RemoteContributions[cleaned]; ok {
 		op.setRemoteContribution(&binding)
+	}
+	if destination, ok := m.cfg.ContributionDestinations[cleaned]; ok {
+		op.setContributionDestination(&destination)
 	}
 	m.gitOperatorsBySubpath[cleaned] = op
 	return op, nil

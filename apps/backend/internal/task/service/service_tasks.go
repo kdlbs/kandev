@@ -250,6 +250,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.validateTaskWorkflow(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.prepareContributionDestination(ctx, req); err != nil {
+		return nil, err
+	}
 
 	workflowStepID := s.resolveWorkflowStep(ctx, req)
 	task := s.buildTask(req, workflowStepID)
@@ -262,6 +265,48 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 		}
 	}
 	return task, nil
+}
+
+func (s *Service) prepareContributionDestination(ctx context.Context, req *CreateTaskRequest) error {
+	if s.contributionDestinationPreparer == nil || req.WorkflowID == "" {
+		return nil
+	}
+	workflow, err := s.workflows.GetWorkflow(ctx, req.WorkflowID)
+	if err != nil {
+		return fmt.Errorf("load workflow for contribution destination: %w", err)
+	}
+	if workflow == nil || workflow.WorkflowTemplateID == nil || *workflow.WorkflowTemplateID == "" {
+		return nil
+	}
+	repositories, err := s.loadContributionDestinationRepositories(ctx, req)
+	if err != nil {
+		return err
+	}
+	return s.contributionDestinationPreparer.PrepareContributionDestination(ctx, req, workflow, repositories)
+}
+
+func (s *Service) loadContributionDestinationRepositories(
+	ctx context.Context,
+	req *CreateTaskRequest,
+) ([]*models.Repository, error) {
+	if len(req.Repositories) == 0 || s.repoEntities == nil {
+		return nil, nil
+	}
+	repositories := make([]*models.Repository, len(req.Repositories))
+	for index, input := range req.Repositories {
+		if input.RepositoryID == "" {
+			continue
+		}
+		repository, err := s.repoEntities.GetRepository(ctx, input.RepositoryID)
+		if err != nil {
+			return nil, fmt.Errorf("load repository %s for contribution destination: %w", input.RepositoryID, err)
+		}
+		if repository == nil || repository.WorkspaceID != req.WorkspaceID {
+			return nil, repoerrors.ErrRepositoryNotFound
+		}
+		repositories[index] = repository
+	}
+	return repositories, nil
 }
 
 // finalizeCreatedTask runs create-sequence step 6, the required synchronous
@@ -706,6 +751,11 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 				return fmt.Errorf("remote contribution branches do not match the resolved binding")
 			}
 		}
+		if repoInput.ContributionDestination != nil {
+			if err := repoInput.ContributionDestination.Validate(); err != nil {
+				return fmt.Errorf("invalid contribution destination: %w", err)
+			}
+		}
 		repositoryID, baseBranch, _, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
 		if err != nil {
 			return err
@@ -741,6 +791,11 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		if repoInput.RemoteContribution != nil {
 			if err := models.PutRemoteContribution(metadata, repoInput.RemoteContribution); err != nil {
 				return fmt.Errorf("persist remote contribution: %w", err)
+			}
+		}
+		if repoInput.ContributionDestination != nil {
+			if err := models.PutContributionDestination(metadata, repoInput.ContributionDestination); err != nil {
+				return fmt.Errorf("persist contribution destination: %w", err)
 			}
 		}
 		taskRepo := &models.TaskRepository{

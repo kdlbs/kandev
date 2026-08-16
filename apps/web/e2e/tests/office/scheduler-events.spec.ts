@@ -18,14 +18,46 @@ import { test, expect } from "../../fixtures/office-fixture";
 
 type RunRow = { id: string; reason: string; task_id?: string; comment_id?: string };
 
+type RunPage = {
+  runs?: RunRow[];
+  next_cursor?: string;
+  next_id?: string;
+};
+
 async function listAgentRuns(
   apiClient: { rawRequest: (m: string, u: string) => Promise<Response> },
   agentId: string,
 ): Promise<RunRow[]> {
-  const res = await apiClient.rawRequest("GET", `/api/v1/office/agents/${agentId}/runs`);
-  if (!res.ok) return [];
-  const body = (await res.json()) as { runs?: RunRow[] };
-  return body.runs ?? [];
+  const runs: RunRow[] = [];
+  let cursor = "";
+  let cursorId = "";
+
+  for (;;) {
+    const query = new URLSearchParams({ limit: "100" });
+    if (cursor) {
+      query.set("cursor", cursor);
+      if (cursorId) query.set("cursor_id", cursorId);
+    }
+
+    const res = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/office/agents/${agentId}/runs?${query.toString()}`,
+    );
+    if (!res.ok) return [];
+
+    const body = (await res.json()) as RunPage;
+    runs.push(...(body.runs ?? []));
+    if (!body.next_cursor) return runs;
+
+    // The API returns a stable (requested_at, id) cursor pair. Guard against
+    // a malformed response looping forever while still allowing old servers
+    // that omit the tie-breaker ID to make progress by timestamp.
+    if (body.next_cursor === cursor && (body.next_id ?? "") === cursorId) {
+      return runs;
+    }
+    cursor = body.next_cursor;
+    cursorId = body.next_id ?? "";
+  }
 }
 
 test.describe("Office reactive scheduler", () => {

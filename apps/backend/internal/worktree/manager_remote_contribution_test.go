@@ -10,6 +10,16 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+func TestContributionDestinationPushURLsMatchAcceptsRepeatedTarget(t *testing.T) {
+	targetURL := "https://github.com/agent/kandev.git"
+	if !contributionDestinationPushURLsMatch(targetURL+"\n"+targetURL, targetURL) {
+		t.Fatal("repeated identical contribution push URLs were rejected")
+	}
+	if contributionDestinationPushURLsMatch(targetURL+"\nhttps://github.com/other/kandev.git", targetURL) {
+		t.Fatal("mixed contribution push URLs were accepted")
+	}
+}
+
 func TestCreateWorktree_RemoteContributionUsesSourceRemoteAndExactHead(t *testing.T) {
 	contributionURL := "https://github.com/contributor/widget.git"
 	sourceBare, sourceSHA := initContributionSource(t)

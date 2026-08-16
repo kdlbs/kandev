@@ -623,16 +623,7 @@ func repositoryCloneURL(repo *models.Repository) string {
 		return strings.TrimSpace(repo.RemoteURL)
 	}
 	if repo.ProviderOwner != "" && repo.ProviderName != "" {
-		if strings.EqualFold(repo.Provider, "gitlab") && strings.TrimSpace(repo.ProviderHost) == "" {
-			return ""
-		}
-		cloneURL, err := repoclone.CloneURLWithHost(
-			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName, repoclone.ProtocolHTTPS,
-		)
-		if err != nil {
-			return ""
-		}
-		return cloneURL
+		return providerHTTPSCloneURL(repo)
 	}
 	if repo.LocalPath == "" {
 		return ""
@@ -643,6 +634,26 @@ func repositoryCloneURL(repo *models.Repository) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// providerHTTPSCloneURL derives the HTTPS clone URL from the persisted provider
+// identity. Its host is authoritative: it carries the provider's real HTTPS
+// origin, including a non-default port, which a clone URL from another
+// transport cannot supply.
+func providerHTTPSCloneURL(repo *models.Repository) string {
+	if repo.ProviderOwner == "" || repo.ProviderName == "" {
+		return ""
+	}
+	if strings.EqualFold(repo.Provider, "gitlab") && strings.TrimSpace(repo.ProviderHost) == "" {
+		return ""
+	}
+	cloneURL, err := repoclone.CloneURLWithHost(
+		repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName, repoclone.ProtocolHTTPS,
+	)
+	if err != nil {
+		return ""
+	}
+	return cloneURL
 }
 
 // getSessionLock returns a per-session mutex, creating one if it doesn't exist.
@@ -1458,16 +1469,17 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
-			RepositoryID:           info.RepositoryID,
-			RepositoryPath:         info.RepositoryPath,
-			BaseBranch:             info.BaseBranch,
-			CheckoutBranch:         info.CheckoutBranch,
-			PRNumber:               info.PRNumber,
-			RemoteContribution:     info.RemoteContribution,
-			WorktreeBranchPrefix:   info.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: info.WorktreeBranchTemplate,
-			PullBeforeWorktree:     info.PullBeforeWorktree,
-			RemoteSyncHandled:      info.RemoteSyncHandled,
+			RepositoryID:            info.RepositoryID,
+			RepositoryPath:          info.RepositoryPath,
+			BaseBranch:              info.BaseBranch,
+			CheckoutBranch:          info.CheckoutBranch,
+			PRNumber:                info.PRNumber,
+			RemoteContribution:      info.RemoteContribution,
+			ContributionDestination: info.ContributionDestination,
+			WorktreeBranchPrefix:    info.WorktreeBranchPrefix,
+			WorktreeBranchTemplate:  info.WorktreeBranchTemplate,
+			PullBeforeWorktree:      info.PullBeforeWorktree,
+			RemoteSyncHandled:       info.RemoteSyncHandled,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
@@ -1531,6 +1543,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.PRNumber = repoInfo.PRNumber
 		req.RemoteContribution = repoInfo.RemoteContribution
+		req.ContributionDestination = repoInfo.ContributionDestination
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree

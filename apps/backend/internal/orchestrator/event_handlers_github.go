@@ -48,6 +48,7 @@ type GitHubService interface {
 	ListPRWatchesBySession(ctx context.Context, sessionID string) ([]*github.PRWatch, error)
 	UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error
 	UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error
+	UpdatePRWatchRepository(ctx context.Context, id, owner, repo string) error
 	ResetPRWatch(ctx context.Context, id, branch string) error
 	AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error)
 	AssociatePRWithTaskForWorkspace(ctx context.Context, workspaceID, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error)
@@ -807,6 +808,19 @@ func (s *Service) searchPRForExistingWatch(
 		ctx, workspaceID, watch.Owner, watch.Repo, branch,
 	)
 	if findErr == nil && foundPR != nil {
+		if foundPR.RepoOwner != "" && foundPR.RepoName != "" &&
+			(!strings.EqualFold(watch.Owner, foundPR.RepoOwner) || !strings.EqualFold(watch.Repo, foundPR.RepoName)) {
+			if err := s.githubService.UpdatePRWatchRepository(ctx, watch.ID, foundPR.RepoOwner, foundPR.RepoName); err != nil {
+				s.logger.Warn("failed to rebind PR watch repository",
+					zap.String("watch_id", watch.ID),
+					zap.String("owner", foundPR.RepoOwner),
+					zap.String("repo", foundPR.RepoName),
+					zap.Error(err))
+				return
+			}
+			watch.Owner = foundPR.RepoOwner
+			watch.Repo = foundPR.RepoName
+		}
 		if err := s.githubService.UpdatePRWatchPRNumber(ctx, watch.ID, foundPR.Number); err != nil {
 			s.logger.Warn("failed to update PR watch number",
 				zap.String("watch_id", watch.ID),
@@ -1170,13 +1184,24 @@ func (s *Service) resolveTaskRepo(ctx context.Context, taskID string) (string, s
 func (s *Service) associatePRFromPushScoped(
 	ctx context.Context, workspaceID, sessionID, taskID, owner, repoName, repositoryID, branch string, pr *github.PR,
 ) {
-	if _, watchErr := s.githubService.CreatePRWatchForWorkspace(
-		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repoName, pr.Number, branch,
-	); watchErr != nil {
+	watchOwner, watchRepo := owner, repoName
+	if pr != nil && pr.RepoOwner != "" && pr.RepoName != "" {
+		watchOwner, watchRepo = pr.RepoOwner, pr.RepoName
+	}
+	watch, watchErr := s.githubService.CreatePRWatchForWorkspace(
+		ctx, workspaceID, sessionID, taskID, repositoryID, watchOwner, watchRepo, pr.Number, branch,
+	)
+	if watchErr != nil {
 		s.logger.Error("failed to create PR watch on push detection",
 			zap.String("session_id", sessionID),
 			zap.String("repository_id", repositoryID),
 			zap.Error(watchErr))
+	} else if watch != nil && watch.ID != "" &&
+		(!strings.EqualFold(watch.Owner, watchOwner) || !strings.EqualFold(watch.Repo, watchRepo)) {
+		if err := s.githubService.UpdatePRWatchRepository(ctx, watch.ID, watchOwner, watchRepo); err != nil {
+			s.logger.Warn("failed to rebind existing PR watch repository",
+				zap.String("watch_id", watch.ID), zap.Error(err))
+		}
 	}
 
 	if _, assocErr := s.githubService.AssociatePRWithTaskForWorkspace(

@@ -30,7 +30,11 @@ type TaskRepositoryInput struct {
 	// intentionally excluded from JSON request surfaces; callers must not be
 	// able to forge a writable source binding.
 	RemoteContribution *models.RemoteContribution `json:"-"`
-	TrustedRemote      bool                       `json:"-"`
+	// ContributionDestination is server-authored during managed Improve
+	// Kandev task preparation. It is never accepted from REST, WebSocket, or
+	// MCP JSON request bodies.
+	ContributionDestination *models.ContributionDestination `json:"-"`
+	TrustedRemote           bool                            `json:"-"`
 
 	// ResolveProviderDefaults opts the GitHub-URL resolution path into a
 	// synchronous default-branch probe (git ls-remote --symref) when neither
