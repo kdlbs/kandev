@@ -18,6 +18,7 @@ export function buildClaudeCodeConfig(streamableUrl: string): string {
   );
 }
 
+// i18n-exempt: CLI command the user copies and runs verbatim.
 export function buildClaudeCodeCliCommand(streamableUrl: string): string {
   return `claude mcp add --transport http --scope user ${SERVER_NAME} ${streamableUrl}`;
 }
@@ -44,6 +45,7 @@ export function buildCodexConfig(streamableUrl: string): string {
   ].join("\n");
 }
 
+// i18n-exempt: CLI command the user copies and runs verbatim.
 export function buildCodexCliCommand(streamableUrl: string): string {
   return `codex mcp add ${SERVER_NAME} --url ${streamableUrl}`;
 }
@@ -53,6 +55,7 @@ export function buildAuggieConfig(streamableUrl: string): string {
   return buildClaudeCodeConfig(streamableUrl);
 }
 
+// i18n-exempt: CLI command the user copies and runs verbatim.
 export function buildAuggieCliCommand(streamableUrl: string): string {
   return `auggie mcp add ${SERVER_NAME} --transport http --url ${streamableUrl}`;
 }

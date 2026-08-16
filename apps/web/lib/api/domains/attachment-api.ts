@@ -42,6 +42,8 @@ export async function uploadAttachment(
     } catch {
       // Keep the status as the useful error when the server returned no JSON.
     }
+    // i18n-exempt: server-provided error text, or an HTTP status diagnostic when
+    // the server sent none. Callers render translated copy for the generic case.
     const message =
       body && typeof body === "object" && "error" in body && typeof body.error === "string"
         ? body.error

@@ -22,6 +22,8 @@ import {
 
 export type SettingsSaveRevision = string | number;
 
+// i18n-exempt: control-flow signal. The save coordinator matches this error by
+// type to abandon a save silently; the message is never rendered.
 export class SettingsSaveCancelledError extends Error {
   constructor(message = "Save cancelled") {
     super(message);

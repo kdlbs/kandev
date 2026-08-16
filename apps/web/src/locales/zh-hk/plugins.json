@@ -115,5 +115,6 @@
   "uploadFile": "上傳檔案",
   "utilityAgentsUnavailable": "輔助代理程式不可用",
   "viewRaw": "查看原始內容",
-  "yes": "是"
+  "yes": "是",
+  "pluginDialog": "外掛程式對話框"
 }

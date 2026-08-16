@@ -17,6 +17,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { usePathname } from "@/lib/routing/client-router";
 import type { ExternalLinkProvider } from "./task-external-link-dialog";
+import { t } from "@/lib/i18n";
 
 type StoreApi = {
   getState: () => {
@@ -198,7 +199,7 @@ export function useSidebarLinkActions(store: StoreApi) {
       const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
       return {
         id: taskId,
-        title: task?.title ?? fallbackTitle ?? "this task",
+        title: task?.title ?? fallbackTitle ?? t("task:thisTask"),
         repositoryId: task?.repositoryId,
         issueUrl: task?.issueUrl,
         issueNumber: task?.issueNumber,

@@ -258,5 +258,6 @@
   "user": "用户",
   "usesTheLocalDockerDaemonOn": "使用本机上的本地 Docker 守护进程。",
   "value": "值",
-  "verifyingConnection": "正在验证连接…"
+  "verifyingConnection": "正在验证连接…",
+  "profileNameExample": "生产、开发"
 }

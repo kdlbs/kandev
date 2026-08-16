@@ -1,19 +1,25 @@
 import type { Task, TaskState } from "@/lib/types/http";
 
+// Values only. These carried a parallel `label: "Updated newest"` alongside the
+// key maps below, described as a "fallback/debug value" — but the mobile menu
+// (`mobile-menu-task-list-options.tsx`) rendered `option.label` directly, so the
+// phone sort and group pickers shipped untranslated while the desktop ones
+// resolved through the keys. One source of display copy, and no way to render
+// the wrong one.
 export const TASKS_LIST_SORT_OPTIONS = [
-  { value: "updated_desc", label: "Updated newest" },
-  { value: "updated_asc", label: "Updated oldest" },
-  { value: "created_desc", label: "Created newest" },
-  { value: "created_asc", label: "Created oldest" },
-  { value: "title_asc", label: "Title A-Z" },
-  { value: "title_desc", label: "Title Z-A" },
+  { value: "updated_desc" },
+  { value: "updated_asc" },
+  { value: "created_desc" },
+  { value: "created_asc" },
+  { value: "title_asc" },
+  { value: "title_desc" },
 ] as const;
 
 export const TASKS_LIST_GROUP_OPTIONS = [
-  { value: "state", label: "State" },
-  { value: "workflow", label: "Workflow" },
-  { value: "repository", label: "Repository" },
-  { value: "none", label: "None" },
+  { value: "state" },
+  { value: "workflow" },
+  { value: "repository" },
+  { value: "none" },
 ] as const;
 
 export type TasksListSort = (typeof TASKS_LIST_SORT_OPTIONS)[number]["value"];
@@ -22,9 +28,8 @@ export type TasksListGroup = (typeof TASKS_LIST_GROUP_OPTIONS)[number]["value"];
 export const DEFAULT_TASKS_LIST_SORT: TasksListSort = "updated_desc";
 export const DEFAULT_TASKS_LIST_GROUP: TasksListGroup = "state";
 
-// i18next key for each option's display label. The `label` fields above stay
-// as plain English fallback/debug values — UI rendering resolves through
-// these keys instead, in `tasks:` catalog.
+// The only source of display copy for these options; resolved at render against
+// the `tasks:` catalog.
 export const SORT_OPTION_LABEL_KEYS: Record<TasksListSort, string> = {
   updated_desc: "tasks:sortUpdatedNewest",
   updated_asc: "tasks:sortUpdatedOldest",

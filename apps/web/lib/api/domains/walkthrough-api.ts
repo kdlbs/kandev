@@ -1,6 +1,8 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskWalkthrough } from "@/lib/types/http";
 
+// i18n-exempt: precondition diagnostic for a programmer error; callers branch
+// on the error type, never render this message.
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
 
 /**

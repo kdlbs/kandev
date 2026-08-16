@@ -4,6 +4,8 @@ import { MARKDOWN_DEMO_MESSAGE_CONTENT } from "./demo-messages-content";
 const AUTH_CONFIG_PATH = "src/auth/config.ts";
 const B = { session_id: sessionId("demo"), task_id: taskId("demo-task") };
 
+// i18n-exempt: fixture content for the /demo/messages renderer playground; the
+// strings stand in for agent output, which is never translated.
 export const dummyMessages: Message[] = [
   // Task description
   {

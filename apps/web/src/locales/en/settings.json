@@ -726,5 +726,8 @@
   "noValidDestinations": "No valid destinations available.",
   "transferFailed": "Could not copy or move the secret.",
   "destinationGlobal": "Global",
-  "secretNameTooLong": "Name must be at most 100 bytes."
+  "secretNameTooLong": "Name must be at most 100 bytes.",
+  "keyValueAddItem": "Add Item",
+  "keyValueKeyPlaceholder": "Key",
+  "keyValueValuePlaceholder": "Value"
 }

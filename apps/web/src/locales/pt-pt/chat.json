@@ -141,5 +141,9 @@
   "transientRetryProviderModel": "{{provider}} · {{model}}",
   "transientRetryProvider": "Fornecedor: {{provider}}",
   "transientRetryModel": "Modelo: {{model}}",
-  "unpinQueuedMessages": "Desafixar fila de mensagens"
+  "unpinQueuedMessages": "Desafixar fila de mensagens",
+  "emptyTurnKnownCommand": "`/{{command}}` correu mas não produziu qualquer resultado. {{hint}}",
+  "emptyTurnNoOutput": "O agente terminou sem produzir qualquer resultado.",
+  "emptyTurnResendHint": "Experimente reenviar o seu pedido como mensagem normal, sem a barra inicial.",
+  "emptyTurnUnknownCommand": "`/{{command}}` não é um comando que este agente reconheça, por isso não devolveu nada. {{hint}}"
 }

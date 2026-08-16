@@ -189,5 +189,6 @@
   "waitingForTheNextBackendHealth": "Ŵàĩţĩńĝ ƒōŕ ţĥē ńēxţ ƀàćķēńď ĥēàĺţĥ ćĥēćķ…",
   "cursorPaginationSummary_one": "Ƥàĝē {{page}} · {{count}} ŕēśũĺţ",
   "cursorPaginationSummary_other": "Ƥàĝē {{page}} · {{count}} ŕēśũĺţś",
-  "allRepositories": "Àĺĺ ŕēƥōśĩţōŕĩēś"
+  "allRepositories": "Àĺĺ ŕēƥōśĩţōŕĩēś",
+  "changeRequestCreationFailed": "Ćĥàńĝē-ŕēqũēśţ ćŕēàţĩōń ƒàĩĺēď"
 }

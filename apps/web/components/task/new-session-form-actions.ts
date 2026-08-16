@@ -101,7 +101,7 @@ export function useSessionLaunchSubmit({
         activateSession(
           response.session_id,
           taskId,
-          profile?.label ?? "Agent",
+          profile?.label ?? t("common:agent"),
           groupId,
           setActiveSession,
         );

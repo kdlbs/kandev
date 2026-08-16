@@ -10,6 +10,8 @@ const hrs = (h: number) => new Date(n - h * 60 * 60 * 1000).toISOString();
 const base = { primarySessionId: null as null, isArchived: false } as const;
 
 /* prettier-ignore */
+// i18n-exempt: prototype fixture behind MOCK_SIDEBAR, which ships false; the
+// titles stand in for user-authored task names.
 export const MOCK_ITEMS: TaskSwitcherItem[] = [
   { ...base, id: "mock-1", title: "Full stack authentication migration", state: "IN_PROGRESS", sessionState: "RUNNING", repositories: [MOCK_REPO, "kdlbs/kandev-web", "kdlbs/infra"], diffStats: { additions: 88, deletions: 12 }, updatedAt: mins(2), createdAt: hrs(3) },
   { ...base, id: "mock-1a", title: "Migrate auth endpoints to new provider", state: "IN_PROGRESS", sessionState: "RUNNING", diffStats: { additions: 24, deletions: 8 }, parentTaskId: "mock-1", updatedAt: mins(1), createdAt: hrs(2) },

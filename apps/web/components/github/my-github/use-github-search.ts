@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { searchUserPRs, searchUserIssues } from "@/lib/api/domains/github-api";
 import type { GitHubPR, GitHubIssue } from "@/lib/types/github";
 import type { PresetOption } from "./search-bar";
+import { t } from "@/lib/i18n";
 
 type SearchKind = "pr" | "issue";
 
@@ -114,7 +115,7 @@ export function useGitHubSearch<T extends GitHubPR | GitHubIssue>({
         setState((s) => ({
           items: [],
           loading: false,
-          error: err instanceof Error ? err.message : "Failed to search GitHub",
+          error: err instanceof Error ? err.message : t("github:failedToSearchGitHub"),
           lastFetchedAt: s.lastFetchedAt,
           total: 0,
         }));

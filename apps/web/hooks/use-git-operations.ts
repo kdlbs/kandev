@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
+import { t } from "@/lib/i18n";
 
 // GitOperationResult matches the backend response
 export interface GitOperationResult {
@@ -273,7 +274,7 @@ export function useGitOperations(sessionId: string | null): UseGitOperationsRetu
         if (!result.success && result.error) setError(result.error);
         return result;
       } catch (e) {
-        const errorMessage = e instanceof Error ? e.message : "Operation failed";
+        const errorMessage = e instanceof Error ? e.message : t("task:gitOperationFailedGeneric");
         setError(errorMessage);
         throw e;
       } finally {

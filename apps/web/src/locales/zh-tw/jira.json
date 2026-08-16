@@ -208,5 +208,7 @@
   "watcherUpdated": "已更新監控",
   "workflow": "工作流程",
   "workflowStep": "工作流程步驟",
-  "yourJiraSessionExpiredOrNeeds": "你的 Jira 工作階段已過期或需要二次驗證。請重新連線以檢視此工單。"
+  "yourJiraSessionExpiredOrNeeds": "你的 Jira 工作階段已過期或需要二次驗證。請重新連線以檢視此工單。",
+  "builtinViewAssignedToMe": "指派給我",
+  "builtinViewUnassigned": "未指派"
 }

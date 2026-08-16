@@ -6,6 +6,7 @@ import { useToast } from "@/components/toast-provider";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 import type { UtilityGenerationResult } from "./use-utility-agent-generator";
+import { t } from "@/lib/i18n";
 
 type UsePromptResultDeliveryOptions = {
   scopeKey: string;
@@ -22,9 +23,10 @@ export type PromptResultDelivery = {
   dismissPending: () => void;
 };
 
-const INSERT_FAILURE_MESSAGE = "Enhanced prompt was generated but could not be inserted.";
-const COPY_SUCCESS_MESSAGE = "Enhanced prompt copied to clipboard.";
-const COPY_FAILURE_MESSAGE = "Enhanced prompt could not be copied.";
+// Catalog keys: module scope, so callers resolve them at use.
+const INSERT_FAILURE_MESSAGE_KEY = "task:enhancedPromptCouldNotBeInserted";
+const COPY_SUCCESS_MESSAGE_KEY = "task:enhancedPromptCopiedToClipboard";
+const COPY_FAILURE_MESSAGE_KEY = "task:enhancedPromptCouldNotBeCopied";
 
 type PendingResult = {
   result: UtilityGenerationResult;
@@ -55,7 +57,7 @@ export function usePromptResultDelivery({
   const retainPendingResult = useCallback(
     (result: UtilityGenerationResult, generation: number) => {
       setPendingResult({ result, generation });
-      toast({ description: INSERT_FAILURE_MESSAGE, variant: "error" });
+      toast({ description: t(INSERT_FAILURE_MESSAGE_KEY), variant: "error" });
     },
     [toast],
   );
@@ -101,7 +103,7 @@ export function usePromptResultDelivery({
 
     const copied = await copyToClipboard(pendingResult.result.content);
     toast({
-      description: copied ? COPY_SUCCESS_MESSAGE : COPY_FAILURE_MESSAGE,
+      description: t(copied ? COPY_SUCCESS_MESSAGE_KEY : COPY_FAILURE_MESSAGE_KEY),
       variant: copied ? "success" : "error",
     });
   }, [pendingResult, toast]);

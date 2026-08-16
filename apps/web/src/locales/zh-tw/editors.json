@@ -85,5 +85,6 @@
   "switchToUnifiedView": "切換到統一檢視",
   "toggleCode": "切換程式碼",
   "toggleWordWrap": "切換自動換行",
-  "underlineCmdU": "下劃線（Cmd+U）"
+  "underlineCmdU": "下劃線（Cmd+U）",
+  "failedToOpenEditor": "開啟編輯器失敗"
 }

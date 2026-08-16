@@ -143,7 +143,7 @@ function PresetGroupList({
       {items.map((p) => (
         <PresetItem
           key={`${kind}-${p.value}`}
-          label={p.label}
+          label={t(p.labelKey)}
           Icon={p.icon}
           active={selected.source === "preset" && selected.id === p.value}
           onClick={() => onSelect({ kind, source: "preset", id: p.value })}

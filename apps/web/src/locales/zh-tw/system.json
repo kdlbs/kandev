@@ -509,5 +509,8 @@
   "versionCurrent": "目前",
   "versionLatest": "最新",
   "versionTitle": "版本",
-  "versionViewUpdates": "檢視更新"
+  "versionViewUpdates": "檢視更新",
+  "messageQueueAutoMergeDescription": "在投遞前，把來自同一來源的連續且相容的排隊訊息合併為一輪。",
+  "messageQueueAutoMergeNotice": "如果某條訊息的來源不同，或任務、模型、模式、後設資料或共享限制不相容，它會保持為單獨的排隊訊息。這隻適用於新接收的訊息，不會改變手動合併控制。",
+  "messageQueueAutoMergeToggleLabel": "自動合併連續訊息"
 }

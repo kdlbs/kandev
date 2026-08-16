@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listWorkspaceAutomationRuns } from "@/lib/api/domains/automation-api";
 import type { WorkspaceAutomationRun } from "@/lib/types/automation";
+import { t } from "@/lib/i18n";
 
 /**
  * The feed is a reading surface, not an audit trail — a couple of hundred rows
@@ -57,7 +58,7 @@ export function useWorkspaceRuns(workspaceId: string | undefined) {
       .catch((err: unknown) => {
         if (requestRef.current !== requestId) return;
         setLoaded({ workspaceId, runs: EMPTY_RUNS });
-        setError(err instanceof Error ? err.message : "Failed to load runs");
+        setError(err instanceof Error ? err.message : t("automations:failedToLoadRuns"));
       })
       .finally(() => {
         if (requestRef.current !== requestId) return;

@@ -40,6 +40,8 @@ type WatchState = {
   error: string | null;
 };
 
+// i18n-exempt: precondition diagnostic for a programmer error; callers branch
+// on the error type, never render this message.
 const WORKSPACE_REQUIRED = "workspace is required";
 
 // eslint-disable-next-line max-lines-per-function -- this hook exposes the complete CRUD and reset API for both watch kinds.

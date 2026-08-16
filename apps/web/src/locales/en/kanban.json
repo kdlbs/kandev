@@ -100,5 +100,10 @@
   "workflowStepFallback": "workflow step {{stepId}}",
   "columns": "Columns",
   "columnsForWorkflow": "Columns for {{name}}",
-  "needsReassignment": "Needs Reassignment"
+  "needsReassignment": "Needs Reassignment",
+  "noTasksYet": "No tasks yet",
+  "noWorkflowsAvailableYet": "No workflows available yet.",
+  "pullToRefreshPull": "Pull to refresh",
+  "pullToRefreshRefreshing": "Refreshing tasks",
+  "pullToRefreshRelease": "Release to refresh"
 }

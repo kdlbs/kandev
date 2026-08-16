@@ -258,5 +258,6 @@
   "user": "Utilizador",
   "usesTheLocalDockerDaemonOn": "Usa o daemon local do Docker nesta máquina.",
   "value": "Valor",
-  "verifyingConnection": "A verificar a ligação..."
+  "verifyingConnection": "A verificar a ligação...",
+  "profileNameExample": "Produção, Desenvolvimento"
 }

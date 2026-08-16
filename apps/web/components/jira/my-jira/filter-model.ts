@@ -32,22 +32,30 @@ function searchClause(raw: string): string | null {
   return `text ~ ${quote(trimmed)}`;
 }
 
+// i18n-exempt: JQL fragment sent to the Jira API; the keywords are query
+// syntax the server parses, not display copy.
 function statusClause(statuses: string[]): string | null {
   if (statuses.length === 0) return null;
   return `status in (${statuses.map(quote).join(", ")})`;
 }
 
+// i18n-exempt: JQL fragment sent to the Jira API; the keywords are query
+// syntax the server parses, not display copy.
 function assigneeClause(a: AssigneeFilter): string | null {
   if (a === "me") return "assignee = currentUser()";
   if (a === "unassigned") return "assignee is EMPTY";
   return null;
 }
 
+// i18n-exempt: JQL fragment sent to the Jira API; the keywords are query
+// syntax the server parses, not display copy.
 function projectClause(keys: string[]): string | null {
   if (keys.length === 0) return null;
   return `project in (${keys.map(quote).join(", ")})`;
 }
 
+// i18n-exempt: JQL fragment sent to the Jira API; the keywords are query
+// syntax the server parses, not display copy.
 function sortClause(s: SortKey): string {
   if (s === "created") return "ORDER BY created DESC";
   if (s === "priority") return "ORDER BY priority DESC, updated DESC";

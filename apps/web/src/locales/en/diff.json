@@ -46,5 +46,11 @@
   "walkthrough": "Walkthrough",
   "walkthroughNoteAdded": "Walkthrough note added",
   "walkthroughNoteQueued": "Walkthrough note queued",
-  "walkthroughNoteSent": "Walkthrough note sent"
+  "walkthroughNoteSent": "Walkthrough note sent",
+  "fileStatusAdded": "Added",
+  "fileStatusDeleted": "Deleted",
+  "fileStatusModified": "Modified",
+  "fileStatusMoved": "Moved",
+  "fileStatusMovedFrom": "Moved from {{oldPath}}",
+  "fileStatusUntracked": "Untracked"
 }

@@ -78,5 +78,20 @@
   "walkMeThroughTheseReviewChanges": "帶我瀏覽這些審閱更改",
   "walkthrough": "導覽",
   "walkthroughDiscarded": "導覽已丟棄",
-  "wrapLongLines": "長行自動換行"
+  "wrapLongLines": "長行自動換行",
+  "changesDiscarded": "更改已丟棄",
+  "changesStillLoading": "更改仍在載入中",
+  "couldNotSendFinding": "無法傳送發現項",
+  "couldNotUpdateFinding": "無法更新發現項",
+  "discardFailed": "丟棄失敗",
+  "failedToRequestWalkthrough": "請求導覽失敗",
+  "findingQueuedForAgent": "發現項已加入代理佇列",
+  "findingSentToAgent": "發現項已傳送給代理",
+  "walkthroughRequestQueued": "導覽請求已排隊",
+  "walkthroughRequestSent": "導覽請求已傳送",
+  "couldNotStartReview": "無法開始審查",
+  "severityBlocker": "阻斷",
+  "severityMajor": "嚴重",
+  "severityMinor": "次要",
+  "severityNit": "細節"
 }

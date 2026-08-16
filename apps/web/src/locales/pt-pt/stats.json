@@ -79,5 +79,9 @@
   "turnsPerTask": "Turnos por tarefa",
   "userMsgs": "Msgs do utilizador",
   "userShare": "Quota do utilizador",
-  "workload": "Carga de trabalho"
+  "workload": "Carga de trabalho",
+  "failedToLoadSection": "Falha ao carregar a secção",
+  "failedToLoadStats": "Falha ao carregar as estatísticas",
+  "loadingStats": "A carregar estatísticas…",
+  "noGitActivity": "sem atividade git"
 }

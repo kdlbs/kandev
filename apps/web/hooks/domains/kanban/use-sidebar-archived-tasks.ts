@@ -6,6 +6,7 @@ import type { Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
+import { t } from "@/lib/i18n";
 
 const ARCHIVED_PAGE_SIZE = 100;
 const EMPTY_ARCHIVED_TASKS: KanbanState["tasks"] = [];
@@ -100,7 +101,7 @@ export function useSidebarArchivedTasks(workspaceId: string | null, enabled: boo
         }
         latest.setSidebarArchivedTasksError(
           workspaceId,
-          loadError instanceof Error ? loadError.message : "Failed to load archived tasks",
+          loadError instanceof Error ? loadError.message : t("sidebar:failedToLoadArchivedTasks"),
         );
       } finally {
         const latest = store.getState();

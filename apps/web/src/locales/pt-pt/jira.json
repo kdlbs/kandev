@@ -119,7 +119,7 @@
   "pause": "Pausar",
   "paused": "Em pausa",
   "pauseOrResumePolling": "Pausar ou retomar a sondagem.",
-  "personalAccessToken": "Personal Access Token",
+  "personalAccessToken": "Token de acesso pessoal",
   "placeholderAssigneeDisplayName": "Nome do responsável",
   "placeholderIssueType": "Tipo de issue",
   "placeholderPriority": "Prioridade",
@@ -208,5 +208,7 @@
   "watcherUpdated": "Vigilância atualizada",
   "workflow": "Fluxo de trabalho",
   "workflowStep": "Passo do fluxo de trabalho",
-  "yourJiraSessionExpiredOrNeeds": "A sua sessão do Jira expirou ou precisa de autenticação reforçada. Volte a ligar para ver este ticket."
+  "yourJiraSessionExpiredOrNeeds": "A sua sessão do Jira expirou ou precisa de autenticação reforçada. Volte a ligar para ver este ticket.",
+  "builtinViewAssignedToMe": "Atribuídos a mim",
+  "builtinViewUnassigned": "Sem responsável"
 }

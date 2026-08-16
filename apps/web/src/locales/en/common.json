@@ -482,5 +482,18 @@
   "weekdayWednesday": "Wednesday",
   "weekdayThursday": "Thursday",
   "weekdayFriday": "Friday",
-  "weekdaySaturday": "Saturday"
+  "weekdaySaturday": "Saturday",
+  "checking": "Checking",
+  "configured": "Configured",
+  "connected": "Connected",
+  "debug": "Debug",
+  "failedToLoadRoute": "Failed to load route",
+  "improveStepImprove": "Agent reads the report, explores the codebase, and implements the change with TDD. Runs make fmt, typecheck, test, lint, then commits.",
+  "improveStepOpenIssue": "Agent gathers every required field from the repository template, confirms the public draft with you, and publishes the GitHub issue.",
+  "improveStepPr": "Agent runs the pr skill: pushes the branch and opens a pull request to kdlbs/kandev for the maintainers to review.",
+  "improveStepTest": "Agent boots a secondary kandev instance with make dev and tells you what to verify. You confirm the change works in the running app.",
+  "noOptionFound": "No option found.",
+  "searchPlaceholder": "Search...",
+  "selectOption": "Select option...",
+  "terminalNumbered": "Terminal {{seq}}"
 }

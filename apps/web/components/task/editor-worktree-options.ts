@@ -1,5 +1,6 @@
 import type { Worktree } from "@/lib/state/slices/session/types";
 import type { Repository } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
 
 export type WorktreeOption = {
   worktreeId: string;
@@ -23,7 +24,9 @@ export function buildWorktreeOptions(
   return worktrees.map((worktree, index) => {
     const repository = repositories.find((repo) => repo.id === worktree.repositoryId);
     const label =
-      repository?.name ?? worktreePathBasename(worktree.path) ?? `Worktree ${index + 1}`;
+      repository?.name ??
+      worktreePathBasename(worktree.path) ??
+      t("task:worktreeNumbered", { index: index + 1 });
     return { worktreeId: worktree.id, label, branch: worktree.branch };
   });
 }

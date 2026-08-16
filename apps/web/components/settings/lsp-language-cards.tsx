@@ -10,6 +10,7 @@ import {
   lspLanguageDisplayLabel,
 } from "./lsp-language-options";
 
+// i18n-exempt: shell command the user runs verbatim.
 const NPM_INSTALL_COMMAND = "npm install";
 
 type LspLanguageCardsProps = {

@@ -347,5 +347,17 @@
   "mrChipAutoMerge": "自動合併",
   "mrChipDrawerTitle": "合併請求 !{{mriid}}",
   "mrChipDrawerDescription": "流水線狀態、審閱狀態和合並請求操作。",
-  "mrChipDrawerClose": "關閉合並請求狀態面板"
+  "mrChipDrawerClose": "關閉合並請求狀態面板",
+  "gitlabRejectedAssociation": "GitLab 拒絕了關聯。",
+  "taskCreatedMrNotLinked": "任務已建立，但未關聯合並請求",
+  "taskCreatedMrNotLinkedDescription": "開啟任務並使用「關聯 GitLab 合併請求」重試。{{error}}",
+  "addedMrFeedbackToTaskContext": "已將 merge request 反饋加入任務上下文",
+  "failedToLoadMergeRequest": "載入 merge request 失敗",
+  "failedToLoadMrAutomationOptions": "載入 MR 自動化選項失敗。",
+  "failedToSearchGitLab": "在 GitLab 上搜尋失敗",
+  "memberSearchFailed": "成員搜尋失敗",
+  "presetAssigned": "指派給我",
+  "presetAuthored": "我建立的",
+  "presetCreated": "我建立的",
+  "presetReviewRequested": "請求我審查"
 }

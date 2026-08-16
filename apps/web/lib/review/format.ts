@@ -1,6 +1,12 @@
 import type { TaskReviewFinding } from "@/lib/types/review";
 
-/** Human label for a severity, used in headings and chips. */
+/**
+ * Severity wording for the markdown block sent to an agent.
+ *
+ * Held stable in English so a reviewer's UI locale cannot change what the
+ * agent is told. The on-screen chip resolves `SEVERITY_LABEL_KEYS` instead.
+ */
+// i18n-exempt: agent-facing prompt content, deliberately not localized.
 export const SEVERITY_LABELS: Record<string, string> = {
   blocker: "Blocker",
   major: "Major",
@@ -11,6 +17,14 @@ export const SEVERITY_LABELS: Record<string, string> = {
 export function severityLabel(severity: string): string {
   return SEVERITY_LABELS[severity] ?? severity;
 }
+
+/** Catalog keys for the same severities, for anything rendered on screen. */
+export const SEVERITY_LABEL_KEYS: Record<string, string> = {
+  blocker: "review:severityBlocker",
+  major: "review:severityMajor",
+  minor: "review:severityMinor",
+  nit: "review:severityNit",
+};
 
 /** `repo/path:12-14` or `path:12`, the form used in headings and agent context. */
 export function findingLocation(finding: TaskReviewFinding): string {

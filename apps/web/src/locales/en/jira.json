@@ -208,5 +208,7 @@
   "watcherUpdated": "Watcher updated",
   "workflow": "Workflow",
   "workflowStep": "Workflow Step",
-  "yourJiraSessionExpiredOrNeeds": "Your Jira session expired or needs step-up authentication. Reconnect to view this ticket."
+  "yourJiraSessionExpiredOrNeeds": "Your Jira session expired or needs step-up authentication. Reconnect to view this ticket.",
+  "builtinViewAssignedToMe": "Assigned to me",
+  "builtinViewUnassigned": "Unassigned"
 }

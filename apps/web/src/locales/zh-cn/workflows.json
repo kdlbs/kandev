@@ -262,5 +262,8 @@
   "workflows": "工作流",
   "workflowsSectionDescription": "创建带自动流转的自主流水线，或由你手动移动任务的手动工作流",
   "workflowSteps": "工作流步骤",
-  "workflowSyncCompleted": "工作流同步完成"
+  "workflowSyncCompleted": "工作流同步完成",
+  "loadingSteps": "正在加载步骤…",
+  "noStepsInThisWorkflow": "该工作流没有步骤",
+  "selectAWorkflowFirst": "请先选择一个工作流"
 }

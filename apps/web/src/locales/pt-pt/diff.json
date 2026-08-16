@@ -46,5 +46,11 @@
   "walkthrough": "Passo a passo",
   "walkthroughNoteAdded": "Nota do passo a passo adicionada",
   "walkthroughNoteQueued": "Nota do passo a passo em fila",
-  "walkthroughNoteSent": "Nota do passo a passo enviada"
+  "walkthroughNoteSent": "Nota do passo a passo enviada",
+  "fileStatusAdded": "Adicionado",
+  "fileStatusDeleted": "Eliminado",
+  "fileStatusModified": "Modificado",
+  "fileStatusMoved": "Movido",
+  "fileStatusMovedFrom": "Movido de {{oldPath}}",
+  "fileStatusUntracked": "Não rastreado"
 }

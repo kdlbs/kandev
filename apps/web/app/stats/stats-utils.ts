@@ -1,5 +1,6 @@
 import type { StatsRange } from "@/lib/api/domains/stats-api";
 import type { StatsResponse } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
 
 export type RangeKey = StatsRange;
 
@@ -13,11 +14,11 @@ export function isRangeKey(value: string | null | undefined): value is RangeKey 
 export function getRangeLabel(range: RangeKey): string {
   switch (range) {
     case "week":
-      return "Last Week";
+      return t("stats:rangeLastWeek");
     case "month":
-      return "Last Month";
+      return t("stats:rangeLastMonth");
     case "all":
-      return "All Time";
+      return t("stats:rangeAllTime");
   }
 }
 
@@ -35,7 +36,7 @@ export function getSubtitle(global: StatsResponse["global"] | null, hasError: bo
   if (global) {
     return `${global.total_tasks} tasks · ${global.total_sessions} sessions · ${formatDuration(global.total_duration_ms)}`;
   }
-  return hasError ? "Failed to load stats" : "Loading stats…";
+  return hasError ? t("stats:failedToLoadStats") : t("stats:loadingStats");
 }
 
 export type StatsState = {
@@ -88,7 +89,7 @@ export function buildStatsSummary(
     git_stats && (git_stats.total_commits > 0 || git_stats.total_files_changed > 0);
   const gitLine = hasGitStats
     ? `${git_stats.total_commits} commits, +${git_stats.total_insertions.toLocaleString()}/-${git_stats.total_deletions.toLocaleString()}`
-    : "no git activity";
+    : t("stats:noGitActivity");
   return [
     `*Kandev Stats - ${rangeLabel}*`,
     `- Tasks: ${global.total_tasks} total (${global.completed_tasks} done, ${global.in_progress_tasks} in progress) · ${completion} completion`,

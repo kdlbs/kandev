@@ -5,6 +5,7 @@ import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { PRDiffFile } from "@/lib/types/github";
+import { t } from "@/lib/i18n";
 
 const debug = createDebugLogger("review:pr-diff");
 
@@ -62,7 +63,7 @@ async function fetchPRFiles(
     setState({ sourceKey, files, loading: false, error: null });
     debug("fetch.success", { owner, repo, prNumber, fileCount: files.length });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to fetch PR files";
+    const message = err instanceof Error ? err.message : t("github:failedToFetchPrFiles");
     setState({ sourceKey, files: [], loading: false, error: message });
     debug("fetch.error", { owner, repo, prNumber, error: message });
   }

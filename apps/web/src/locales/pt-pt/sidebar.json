@@ -107,5 +107,13 @@
   "work": "Trabalho",
   "workspaceFallback": "Área de trabalho",
   "taskPreferences": "Preferências de tarefas da barra lateral",
-  "views": "Vistas da barra lateral"
+  "views": "Vistas da barra lateral",
+  "collapseAllBranches": "Fechar tudo",
+  "failedToLoadArchivedTasks": "Falha ao carregar as tarefas arquivadas",
+  "failedToSyncSidebarTaskPrefs": "Falha ao sincronizar as preferências de tarefas da barra lateral",
+  "failedToSyncSidebarViews": "Falha ao sincronizar as vistas da barra lateral",
+  "morePluginItems": "Mais itens de plugins",
+  "newViewNumbered": "Nova vista {{suffix}}",
+  "orgChart": "Organograma",
+  "untitledView": "Vista sem título"
 }

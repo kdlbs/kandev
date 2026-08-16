@@ -894,5 +894,10 @@
   "writeTheDatabaseStateToOn": "Ŵŕĩţē ţĥē ďàţàƀàśē śţàţē ţō ōń-ďĩśķ ŶÀḾĹ ƒĩĺēś.",
   "yourModel": "ŷōũŕ ḿōďēĺ",
   "zoomIn": "Źōōḿ ĩń",
-  "zoomOut": "Źōōḿ ōũţ"
+  "zoomOut": "Źōōḿ ōũţ",
+  "failedToLoadAgentRoute": "Ƒàĩĺēď ţō ĺōàď àĝēńţ ŕōũţē",
+  "failedToLoadProviderHealth": "Ƒàĩĺēď ţō ĺōàď ƥŕōvĩďēŕ ĥēàĺţĥ",
+  "failedToLoadRouteAttempts": "Ƒàĩĺēď ţō ĺōàď ŕōũţē àţţēḿƥţś",
+  "failedToLoadRoutingConfig": "Ƒàĩĺēď ţō ĺōàď ŕōũţĩńĝ ćōńƒĩĝ",
+  "failedToLoadRoutingPreview": "Ƒàĩĺēď ţō ĺōàď ŕōũţĩńĝ ƥŕēvĩēŵ"
 }

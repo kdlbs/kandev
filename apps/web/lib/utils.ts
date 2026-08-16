@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { t } from "@/lib/i18n";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -212,7 +213,7 @@ export function formatRelativeTime(dateString: string): string {
   const diffHour = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHour / 24);
 
-  if (diffSec < 10) return "just now";
+  if (diffSec < 10) return t("common:justNow");
   if (diffSec < 60) return `${diffSec}s ago`;
   if (diffMin < 60) return `${diffMin}m ago`;
   if (diffHour < 24) return `${diffHour}h ago`;
@@ -233,7 +234,7 @@ export function formatPreciseTime(dateString: string): string {
   const diffSec = Math.floor(diffMs / 1000);
   const diffMin = Math.floor(diffSec / 60);
 
-  if (diffSec < 10) return "just now";
+  if (diffSec < 10) return t("common:justNow");
   if (diffSec < 60) return `${diffSec}s ago`;
   if (diffMin < 60) return `${diffMin}m ago`;
 

@@ -351,5 +351,13 @@
   "gitlabRejectedAssociation": "GitLab rejected the association.",
   "taskCreatedMrNotLinked": "Task created, but merge request was not linked",
   "taskCreatedMrNotLinkedDescription": "Open the task and use Link GitLab merge request to retry. {{error}}",
-  "memberSearchFailed": "Member search failed"
+  "memberSearchFailed": "Member search failed",
+  "addedMrFeedbackToTaskContext": "Added merge request feedback to task context",
+  "failedToLoadMergeRequest": "Failed to load merge request",
+  "failedToLoadMrAutomationOptions": "Failed to load MR automation options.",
+  "failedToSearchGitLab": "Failed to search GitLab",
+  "presetAssigned": "Assigned",
+  "presetAuthored": "Authored",
+  "presetCreated": "Created",
+  "presetReviewRequested": "Review requested"
 }

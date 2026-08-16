@@ -115,5 +115,6 @@
   "uploadFile": "上传文件",
   "utilityAgentsUnavailable": "辅助智能体不可用",
   "viewRaw": "查看原始内容",
-  "yes": "是"
+  "yes": "是",
+  "pluginDialog": "插件对话框"
 }

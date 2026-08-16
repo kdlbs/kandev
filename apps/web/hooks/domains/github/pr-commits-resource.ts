@@ -1,5 +1,6 @@
 import type { PRCommitInfo } from "@/lib/types/github";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { t } from "@/lib/i18n";
 
 export type PRCommitsState = {
   commits: PRCommitInfo[];
@@ -67,7 +68,7 @@ function identityFor(request: PRCommitsRequest): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Failed to fetch PR commits";
+  return error instanceof Error ? error.message : t("github:failedToFetchPrCommits");
 }
 
 async function requestPRCommits(request: PRCommitsRequest): Promise<PRCommitsResponse | null> {

@@ -19,6 +19,8 @@ import type {
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 
 /** Check whether the notification should be suppressed. */
+// i18n-exempt: the returned reason is used only for truthiness at the call
+// site; it is never rendered or logged.
 function shouldSuppressNotification(state: AppState, taskId: string | undefined): string | null {
   // Suppress when user is actively viewing this task.
   if (document.visibilityState === "visible" && taskId && state.tasks.activeTaskId === taskId) {

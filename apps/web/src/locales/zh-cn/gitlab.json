@@ -350,5 +350,14 @@
   "mrChipDrawerClose": "关闭合并请求状态面板",
   "gitlabRejectedAssociation": "GitLab 拒绝了关联。",
   "taskCreatedMrNotLinked": "任务已创建，但未关联合并请求",
-  "taskCreatedMrNotLinkedDescription": "打开任务并使用“关联 GitLab 合并请求”重试。{{error}}"
+  "taskCreatedMrNotLinkedDescription": "打开任务并使用“关联 GitLab 合并请求”重试。{{error}}",
+  "addedMrFeedbackToTaskContext": "已将 merge request 反馈加入任务上下文",
+  "failedToLoadMergeRequest": "加载 merge request 失败",
+  "failedToLoadMrAutomationOptions": "加载 MR 自动化选项失败。",
+  "failedToSearchGitLab": "在 GitLab 上搜索失败",
+  "memberSearchFailed": "成员搜索失败",
+  "presetAssigned": "指派给我",
+  "presetAuthored": "我创建的",
+  "presetCreated": "我创建的",
+  "presetReviewRequested": "请求我评审"
 }

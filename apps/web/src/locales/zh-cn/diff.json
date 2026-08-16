@@ -46,5 +46,11 @@
   "walkthrough": "导览",
   "walkthroughNoteAdded": "已添加导览备注",
   "walkthroughNoteQueued": "导览备注已排队",
-  "walkthroughNoteSent": "导览备注已发送"
+  "walkthroughNoteSent": "导览备注已发送",
+  "fileStatusAdded": "已添加",
+  "fileStatusDeleted": "已删除",
+  "fileStatusModified": "已修改",
+  "fileStatusMoved": "已移动",
+  "fileStatusMovedFrom": "从 {{oldPath}} 移动而来",
+  "fileStatusUntracked": "未跟踪"
 }

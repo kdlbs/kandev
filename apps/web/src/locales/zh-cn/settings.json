@@ -709,12 +709,6 @@
   "shortcutTaskContentSearch": "搜索任务内容",
   "shortcutTogglePlanMode": "切换计划模式",
   "shortcutToggleSidebar": "切换侧边栏",
-  "connectionLostDescription": "连接已丢失至少 10 秒，实时更新可能已过期。",
-  "connectionUnstableDescription": "连接不稳定，正在重新连接 Kandev。",
-  "home": "主页",
-  "openSettingsMenu": "打开设置菜单",
-  "openSettingsMenuWithConnectionIssue": "{{description}} 打开设置菜单",
-  "statusWithConnectionIssue": "状态。{{description}}",
   "copyMove": "复制/移动",
   "copyMoveSecretNamed": "复制或移动{{name}}",
   "copyMoveDialogHint": "将密钥复制或移动到其他范围。值在服务端传输，绝不会显示。",
@@ -732,5 +726,8 @@
   "noValidDestinations": "没有可用的有效目标。",
   "transferFailed": "无法复制或移动密钥。",
   "destinationGlobal": "全局",
-  "secretNameTooLong": "名称不能超过 100 字节。"
+  "secretNameTooLong": "名称不能超过 100 字节。",
+  "keyValueAddItem": "添加条目",
+  "keyValueKeyPlaceholder": "键",
+  "keyValueValuePlaceholder": "值"
 }

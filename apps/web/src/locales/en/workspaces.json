@@ -121,5 +121,10 @@
   "worktreeSync": "Worktree Sync",
   "enterRepositoryName": "Enter a repository name.",
   "chooseDifferentRepositoryName": "Choose a different repository name.",
-  "repositoryNameMustBeOneFolder": "The repository name must be one folder name."
+  "repositoryNameMustBeOneFolder": "The repository name must be one folder name.",
+  "sourceChooseAFolder": "Choose a folder.",
+  "sourceChooseRepoAndBranch": "Choose a repository and base branch.",
+  "sourceEnterValidRemoteUrl": "Enter a valid remote repository URL and base branch.",
+  "sourceFolderAlreadySelected": "This folder is already selected.",
+  "sourceRepoBranchAlreadySelected": "This repository and branch are already selected."
 }

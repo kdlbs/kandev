@@ -10,6 +10,7 @@ import {
 } from "./use-session-subscription-retry";
 import { doFetchMessages } from "./use-session-message-fetch";
 import { autoBackfillUntilUserMessage, hasUserOrAgentMessage } from "./message-backfill";
+import { t } from "@/lib/i18n";
 
 export {
   autoBackfillUntilUserMessage,
@@ -170,7 +171,7 @@ function logFetchSummary(
       limit,
       hasMore: response.has_more ?? false,
       byType: summary.byType,
-      hint: "The fetch limit may be too small for this session's last turn - user prompt and agent replies live further back. Paginate or raise the limit to see them.",
+      hint: t("task:messageFetchLimitHint"),
     });
   }
 }

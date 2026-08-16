@@ -79,5 +79,9 @@
   "turnsPerTask": "每任務回合數",
   "userMsgs": "使用者訊息",
   "userShare": "使用者佔比",
-  "workload": "工作負載"
+  "workload": "工作負載",
+  "failedToLoadSection": "載入該部分失敗",
+  "failedToLoadStats": "載入統計資料失敗",
+  "loadingStats": "正在載入統計資料…",
+  "noGitActivity": "無 git 活動"
 }

@@ -141,5 +141,9 @@
   "composerSteerPlaceholder": "Send now; delivered to the running turn",
   "unknownError": "Unknown error",
   "useWorkspaceDefault": "Use workspace default...",
-  "useWorkspaceDefaultOption": "Use workspace default"
+  "useWorkspaceDefaultOption": "Use workspace default",
+  "emptyTurnKnownCommand": "`/{{command}}` ran but produced no output. {{hint}}",
+  "emptyTurnNoOutput": "The agent finished without producing any output.",
+  "emptyTurnResendHint": "Try resending your request as a normal message, without the leading slash.",
+  "emptyTurnUnknownCommand": "`/{{command}}` isn't a command this agent recognizes, so it returned no output. {{hint}}"
 }

@@ -38,6 +38,7 @@ import type { Task } from "@/components/kanban-card";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import type { Repository } from "@/lib/types/http";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
+import { t } from "@/lib/i18n";
 
 export type SwimlaneContainerProps = {
   viewMode: string;
@@ -78,9 +79,9 @@ function getEmptyMessage({
   visibleWorkflows,
   showEmptyBoard,
 }: EmptyMessageOptions): string | null {
-  if (isLoading && Object.keys(snapshots).length === 0) return "Loading...";
-  if (orderedWorkflows.length === 0) return "No workflows available yet.";
-  if (visibleWorkflows.length === 0 && !showEmptyBoard) return "No tasks yet";
+  if (isLoading && Object.keys(snapshots).length === 0) return t("common:loading");
+  if (orderedWorkflows.length === 0) return t("kanban:noWorkflowsAvailableYet");
+  if (visibleWorkflows.length === 0 && !showEmptyBoard) return t("kanban:noTasksYet");
   return null;
 }
 

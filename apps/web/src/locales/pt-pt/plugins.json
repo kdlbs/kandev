@@ -115,5 +115,6 @@
   "uploadFile": "Carregar ficheiro",
   "utilityAgentsUnavailable": "Agentes utilitários indisponíveis",
   "viewRaw": "Ver o original",
-  "yes": "sim"
+  "yes": "sim",
+  "pluginDialog": "Janela do plugin"
 }

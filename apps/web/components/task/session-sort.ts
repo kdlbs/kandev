@@ -1,5 +1,6 @@
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { t } from "@/lib/i18n";
 
 const STATUS_ORDER: Record<TaskSessionState, number> = {
   RUNNING: 1,
@@ -46,7 +47,7 @@ export function resolveAgentLabelFor(
   if (storeLabel) return storeLabel;
   const snapshotLabel = (session.agent_profile_snapshot?.label as string | undefined) ?? null;
   if (snapshotLabel) return snapshotLabel;
-  return "Unknown agent";
+  return t("task:unknownAgent");
 }
 
 export function pickActiveSessionId(

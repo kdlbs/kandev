@@ -95,5 +95,15 @@
   "workflowStepFallback": "工作流步骤 {{stepId}}",
   "columns": "列",
   "columnsForWorkflow": "{{name}} 的列",
-  "needsReassignment": "需要重新分配"
+  "needsReassignment": "需要重新分配",
+  "blockedByCount_one": "被 {{count}} 项阻塞",
+  "blockedByCount_other": "被 {{count}} 项阻塞",
+  "blockedByTasksTitle": "正在等待：{{tasks}}",
+  "blockedFailed": "阻塞项失败",
+  "blockedPredecessorFailed": "该任务依赖的一个任务失败了：{{tasks}}",
+  "noTasksYet": "暂无任务",
+  "noWorkflowsAvailableYet": "暂无可用的工作流。",
+  "pullToRefreshPull": "下拉刷新",
+  "pullToRefreshRefreshing": "正在刷新任务",
+  "pullToRefreshRelease": "松开即可刷新"
 }

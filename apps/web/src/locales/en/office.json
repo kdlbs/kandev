@@ -894,5 +894,10 @@
   "writeTheDatabaseStateToOn": "Write the database state to on-disk YAML files.",
   "yourModel": "your model",
   "zoomIn": "Zoom in",
-  "zoomOut": "Zoom out"
+  "zoomOut": "Zoom out",
+  "failedToLoadAgentRoute": "Failed to load agent route",
+  "failedToLoadProviderHealth": "Failed to load provider health",
+  "failedToLoadRouteAttempts": "Failed to load route attempts",
+  "failedToLoadRoutingConfig": "Failed to load routing config",
+  "failedToLoadRoutingPreview": "Failed to load routing preview"
 }

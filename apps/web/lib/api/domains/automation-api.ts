@@ -14,6 +14,8 @@ import type {
   WorkspaceAutomationRun,
 } from "@/lib/types/automation";
 
+// i18n-exempt: precondition diagnostic for a programmer error; callers branch
+// on the error type, never render this message.
 const WS_UNAVAILABLE = "WebSocket client not available";
 
 function requireClient() {

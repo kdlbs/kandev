@@ -93,5 +93,17 @@
   "wipTaskCount": "Tarefas em {{label}}",
   "workflow": "Fluxo de trabalho",
   "workflowStepFallback": "passo do fluxo de trabalho {{stepId}}",
-  "needsReassignment": "Precisa de reatribuição"
+  "needsReassignment": "Precisa de reatribuição",
+  "blockedByCount_one": "Bloqueada por {{count}}",
+  "blockedByCount_other": "Bloqueada por {{count}}",
+  "blockedByTasksTitle": "À espera de: {{tasks}}",
+  "blockedFailed": "O bloqueio falhou",
+  "blockedPredecessorFailed": "Uma tarefa de que esta depende falhou: {{tasks}}",
+  "columns": "Colunas",
+  "columnsForWorkflow": "Colunas de {{name}}",
+  "noTasksYet": "Ainda sem tarefas",
+  "noWorkflowsAvailableYet": "Ainda não há fluxos de trabalho disponíveis.",
+  "pullToRefreshPull": "Puxe para atualizar",
+  "pullToRefreshRefreshing": "A atualizar tarefas",
+  "pullToRefreshRelease": "Largue para atualizar"
 }

@@ -31,6 +31,8 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
         if (status === "connected") {
           client.subscribeUser();
         }
+        // i18n-exempt: transport diagnostic interpolated into the translated
+        // `sidebar:connectionErrorDetail` frame; see connection-status-item.tsx.
         setConnectionStatus(status, status === "error" ? "WebSocket connection failed" : null);
       },
       {

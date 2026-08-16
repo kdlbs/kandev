@@ -79,5 +79,9 @@
   "turnsPerTask": "Ţũŕńś ƥēŕ ţàśķ",
   "userMsgs": "Ũśēŕ ḿśĝś",
   "userShare": "Ũśēŕ śĥàŕē",
-  "workload": "Ŵōŕķĺōàď"
+  "workload": "Ŵōŕķĺōàď",
+  "failedToLoadSection": "Ƒàĩĺēď ţō ĺōàď śēćţĩōń",
+  "failedToLoadStats": "Ƒàĩĺēď ţō ĺōàď śţàţś",
+  "loadingStats": "Ĺōàďĩńĝ śţàţś…",
+  "noGitActivity": "ńō ĝĩţ àćţĩvĩţŷ"
 }

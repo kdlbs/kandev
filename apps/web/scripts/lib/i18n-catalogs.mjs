@@ -1,13 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 
+/** The verbatim registry, not a namespace. Underscore-prefixed so it sorts apart. */
+export const VERBATIM_FILE = "_verbatim.json";
+
 export function readLocaleNamespaces(localesDir, locale) {
   const dir = path.join(localesDir, locale);
   const namespaces = new Map();
   if (!fs.existsSync(dir)) return namespaces;
   for (const file of fs
     .readdirSync(dir)
-    .filter((entry) => entry.endsWith(".json"))
+    .filter((entry) => entry.endsWith(".json") && entry !== VERBATIM_FILE)
     .sort()) {
     const namespace = file.replace(/\.json$/, "");
     const messages = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
@@ -148,4 +151,111 @@ export function realLocaleParityIssues(source, translated, locale) {
 export function formatParityIssue(issue) {
   const suffix = issue.key ? `: ${issue.key}` : "";
   return `${issue.locale} / ${issue.namespace}: ${issue.type}${suffix}`;
+}
+
+/**
+ * Read a verbatim registry: `{ "ns:key": "<reason>" }`.
+ *
+ * `localesDir/_verbatim.json` is the SHARED registry — values every locale may
+ * legitimately keep in English because they are proper nouns, technical terms,
+ * or frames made only of placeholders. `localesDir/<locale>/_verbatim.json` is
+ * the per-locale one, for the narrower case where the correct translation
+ * happens to BE the English word ("Total", "Manual", "Menu" in pt-PT).
+ *
+ * Missing file reads as empty: a locale that translates everything needs none.
+ */
+export function readVerbatimRegistry(localesDir, locale = null) {
+  const file = locale
+    ? path.join(localesDir, locale, VERBATIM_FILE)
+    : path.join(localesDir, VERBATIM_FILE);
+  if (!fs.existsSync(file)) return new Map();
+  return new Map(Object.entries(JSON.parse(fs.readFileSync(file, "utf8"))));
+}
+
+/** A reason must actually say something, exactly like an `i18n-exempt` marker. */
+const MIN_REASON_LENGTH = 3;
+
+function flatten(namespaces) {
+  const flat = new Map();
+  for (const [namespace, messages] of namespaces) {
+    for (const [key, value] of messages) flat.set(`${namespace}:${key}`, value);
+  }
+  return flat;
+}
+
+/**
+ * Values a locale left identical to English without saying why.
+ *
+ * The structural checks above compare SHAPES, so a catalog copy-pasted from `en`
+ * passes every one of them. This is the check that does not.
+ *
+ * Two tiers, so the registry only ever holds real decisions:
+ *
+ *  1. RULE. If the English value is not copy by `looksLikeCopy` — a brand noun,
+ *     an acronym, a wire value, a frame of nothing but placeholders — then every
+ *     locale is expected to keep it verbatim and nothing needs declaring. That
+ *     predicate is the same one `i18next/no-literal-string` and
+ *     `check-nonjsx-copy.mjs` use to decide what counts as copy, so the three
+ *     cannot disagree about what a translatable string is.
+ *  2. DECLARATION. What survives tier 1 is prose, and prose that reads the same
+ *     in the target language is a judgement a person made. It is declared in a
+ *     registry with a reason, which is what separates "we checked, it is the
+ *     same word" from "we never translated this".
+ *
+ * @param {Map<string, Map<string, string>>} source `en` namespaces
+ * @param {Map<string, Map<string, string>>} translated the locale's namespaces
+ * @param {string} locale
+ * @param {(value: string) => boolean} isCopy
+ * @param {{shared: Map<string, string>, own: Map<string, string>}} verbatim
+ */
+export function untranslatedValueIssues(source, translated, locale, isCopy, verbatim) {
+  const en = flatten(source);
+  const them = flatten(translated);
+  const issues = [];
+  for (const [id, value] of them) {
+    if (!en.has(id) || en.get(id) !== value) continue;
+    if (typeof value !== "string" || !isCopy(value)) continue;
+    const reason = verbatim.own.get(id) ?? verbatim.shared.get(id);
+    const [namespace, ...rest] = id.split(":");
+    const key = rest.join(":");
+    if (reason === undefined) {
+      issues.push({ locale, namespace, key, type: "value identical to English" });
+      continue;
+    }
+    if (typeof reason !== "string" || reason.trim().length < MIN_REASON_LENGTH) {
+      issues.push({ locale, namespace, key, type: "verbatim entry with no reason" });
+    }
+  }
+  return issues;
+}
+
+/**
+ * Registry entries that guard nothing, so the files cannot accumulate debt.
+ *
+ * A per-locale entry is stale as soon as that locale translates the value; a
+ * shared entry is stale only when NO locale keeps it verbatim, since it exists
+ * for whichever ones still do.
+ *
+ * @param {Map<string, string>} registry
+ * @param {Map<string, string>} en flattened `en` catalog
+ * @param {Array<{locale: string, flat: Map<string, string>}>} locales
+ * @param {string|null} owner locale name, or null for the shared registry
+ */
+export function staleVerbatimEntries(registry, en, locales, owner = null) {
+  const stale = [];
+  for (const id of registry.keys()) {
+    if (!en.has(id)) {
+      stale.push({ id, owner, type: "no such key in en" });
+      continue;
+    }
+    const scope = owner ? locales.filter((l) => l.locale === owner) : locales;
+    const kept = scope.some(({ flat }) => flat.get(id) === en.get(id));
+    if (!kept) stale.push({ id, owner, type: "every locale translates this" });
+  }
+  return stale;
+}
+
+export function formatVerbatimIssue(issue) {
+  const where = issue.owner ? `${issue.owner}/${VERBATIM_FILE}` : VERBATIM_FILE;
+  return `${where}: ${issue.id} — ${issue.type}`;
 }

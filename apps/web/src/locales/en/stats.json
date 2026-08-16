@@ -79,5 +79,9 @@
   "turnsPerTask": "Turns per task",
   "userMsgs": "User msgs",
   "userShare": "User share",
-  "workload": "Workload"
+  "workload": "Workload",
+  "failedToLoadSection": "Failed to load section",
+  "failedToLoadStats": "Failed to load stats",
+  "loadingStats": "Loading stats…",
+  "noGitActivity": "no git activity"
 }
