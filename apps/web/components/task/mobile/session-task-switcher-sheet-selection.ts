@@ -114,7 +114,6 @@ export async function selectPendingTaskFromSheet(
   if (!selectionIsCurrent(params)) return;
   const pendingState = pendingActionState(params, params.taskId, initialSnapshot);
   if (pendingState === "missing") {
-    params.onOpenChange(false);
     return;
   }
   if (pendingState === "changed") {

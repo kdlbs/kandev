@@ -442,7 +442,7 @@ describe("selectTaskFromSheet summary races", () => {
 });
 
 describe("selectTaskFromSheet deleted-task race", () => {
-  it("closes the sheet when the pending task projection disappears", async () => {
+  it("leaves the sheet open when the pending task projection disappears", async () => {
     const taskId = "task-deleted-race";
     let resolveLoad: (sessions: TaskSession[]) => void = () => undefined;
     const loadTaskSessionsForTask = vi.fn(
@@ -492,7 +492,7 @@ describe("selectTaskFromSheet deleted-task race", () => {
     expect(setActiveSession).not.toHaveBeenCalled();
     expect(setActiveTask).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 });
 
