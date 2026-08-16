@@ -322,23 +322,20 @@ func (sm *StreamManager) handleUpdatesDisconnectWithGeneration(
 	disconnectErr error,
 	startupGeneration uint64,
 ) {
-	if !execution.acceptsStartupAttempt(startupGeneration) {
+	promptGeneration := execution.promptGenerationSnapshot()
+	if !execution.signalPromptCompletionForStartupGeneration(
+		startupGeneration,
+		PromptCompletionSignal{
+			IsError:          true,
+			Error:            "agent stream disconnected: " + disconnectErr.Error(),
+			PromptGeneration: promptGeneration,
+		},
+	) {
 		sm.logger.Debug("ignoring stale updates stream disconnect",
 			zap.String("execution_id", execution.ID),
 			zap.Uint64("stream_startup_generation", startupGeneration),
 			zap.Uint64("current_startup_generation", execution.startupAttemptSnapshot()))
 		return
-	}
-	// Capture prompt ownership before signaling the waiter. A replacement may
-	// advance the generation before the lifecycle callback runs.
-	promptGeneration := execution.promptGenerationSnapshot()
-	select {
-	case execution.promptDoneCh <- PromptCompletionSignal{
-		IsError:          true,
-		Error:            "agent stream disconnected: " + disconnectErr.Error(),
-		PromptGeneration: promptGeneration,
-	}:
-	default:
 	}
 	if sm.callbacks.OnStreamDisconnectWithGeneration != nil {
 		sm.callbacks.OnStreamDisconnectWithGeneration(execution, disconnectErr, promptGeneration, startupGeneration)

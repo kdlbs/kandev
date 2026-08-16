@@ -177,16 +177,15 @@ func handleCompleteEventSignal(execution *AgentExecution, event *agentctl.AgentE
 			stopReason = sr
 		}
 	}
-	select {
-	case execution.promptDoneCh <- PromptCompletionSignal{
-		StopReason:       stopReason,
-		IsError:          isError,
-		Error:            errorMsg,
-		PromptGeneration: event.PromptGeneration,
-	}:
-	default:
-		// Channel full or no one waiting — that's fine (e.g., initial prompt in goroutine)
-	}
+	execution.signalPromptCompletionForStartupGeneration(
+		execution.startupAttemptSnapshot(),
+		PromptCompletionSignal{
+			StopReason:       stopReason,
+			IsError:          isError,
+			Error:            errorMsg,
+			PromptGeneration: event.PromptGeneration,
+		},
+	)
 }
 
 type promptCompletionClaim struct {
@@ -688,16 +687,13 @@ func (m *Manager) handlePromptHandoffEvent(
 	execution.messageMu.Unlock()
 	m.flushAssistantHistory(execution)
 
-	select {
-	case execution.promptDoneCh <- PromptCompletionSignal{
-		StopReason:       streams.EventTypeForegroundIdle,
-		PromptGeneration: event.PromptGeneration,
-	}:
-	default:
-		m.logger.Warn("prompt handoff could not signal lifecycle waiter",
-			zap.String("execution_id", execution.ID),
-			zap.Uint64("prompt_generation", event.PromptGeneration))
-	}
+	execution.signalPromptCompletionForStartupGeneration(
+		execution.startupAttemptSnapshot(),
+		PromptCompletionSignal{
+			StopReason:       streams.EventTypeForegroundIdle,
+			PromptGeneration: event.PromptGeneration,
+		},
+	)
 }
 
 // handleAgentEvent processes incoming agent events from the agent

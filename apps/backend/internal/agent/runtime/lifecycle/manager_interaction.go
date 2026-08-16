@@ -254,15 +254,14 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
 
-	select {
-	case execution.promptDoneCh <- PromptCompletionSignal{
-		IsError:          true,
-		Error:            "cancel escalated: agent did not complete turn within timeout",
-		PromptGeneration: execution.promptGenerationSnapshot(),
-	}:
-	default:
-		// Channel already has a pending signal; SendPrompt will pick that up instead.
-	}
+	execution.signalPromptCompletionForStartupGeneration(
+		execution.startupAttemptSnapshot(),
+		PromptCompletionSignal{
+			IsError:          true,
+			Error:            "cancel escalated: agent did not complete turn within timeout",
+			PromptGeneration: execution.promptGenerationSnapshot(),
+		},
+	)
 
 	select {
 	case <-ch:

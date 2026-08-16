@@ -2673,6 +2673,12 @@ func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) 
 	if classifyManagedRuntimeNpmStartFailure(generic) != nil {
 		t.Fatal("generic structured startup failure must not use the npm recovery card")
 	}
+
+	if classifyManagedRuntimeNpmStartFailure(errors.New(
+		"npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
+	)) != nil {
+		t.Fatal("unstructured npm text must not select the managed runtime recovery card")
+	}
 }
 
 func TestHandleAgentStartFailed(t *testing.T) {

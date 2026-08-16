@@ -913,10 +913,19 @@ func (sm *SessionManager) waitForPromptDone(
 	stallTicker := time.NewTicker(time.Minute)
 	defer stallTicker.Stop()
 	stallReported := false
+	startupGeneration := execution.startupAttemptSnapshot()
 
 	for {
 		select {
 		case signal := <-execution.promptDoneCh:
+			if signal.StartupGeneration != startupGeneration &&
+				(signal.StartupGeneration != 0 || startupGeneration != 0) {
+				sm.logger.Debug("ignoring completion signal for superseded startup generation",
+					zap.String("execution_id", execution.ID),
+					zap.Uint64("signal_startup_generation", signal.StartupGeneration),
+					zap.Uint64("active_startup_generation", startupGeneration))
+				continue
+			}
 			if signal.PromptGeneration != 0 &&
 				promptGeneration != 0 &&
 				signal.PromptGeneration != promptGeneration {

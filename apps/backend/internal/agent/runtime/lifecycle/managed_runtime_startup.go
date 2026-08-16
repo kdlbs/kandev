@@ -88,6 +88,21 @@ func (m *Manager) updateExecutionFailure(executionID, message, code, details str
 	})
 }
 
+func (m *Manager) publishManagedRuntimeStartupFailure(
+	execution *AgentExecution,
+	message string,
+	code routingerr.Code,
+	details string,
+	cause error,
+) error {
+	m.updateExecutionFailure(execution.ID, message, string(code), details)
+	return &routingerr.ManagedRuntimeStartupError{
+		Code:    code,
+		Details: details,
+		Cause:   cause,
+	}
+}
+
 type managedRuntimeStartupRetry struct {
 	managed          agents.ManagedNPMRuntimeAgent
 	preferOnlineArgs []string
@@ -249,19 +264,6 @@ func (m *Manager) retryManagedRuntimeStartup(
 	failureCode := routingerr.CodeManagedRuntimeNpmResolution
 	failureDetails := retry.failureDetails
 	var failureCause error
-	failAfterRetry := func() error {
-		m.updateExecutionFailure(
-			execution.ID,
-			"managed npm runtime failed to prepare",
-			string(failureCode),
-			failureDetails,
-		)
-		return &routingerr.ManagedRuntimeStartupError{
-			Code:    failureCode,
-			Details: failureDetails,
-			Cause:   failureCause,
-		}
-	}
 	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
 		return false, err
 	}
@@ -280,12 +282,17 @@ func (m *Manager) retryManagedRuntimeStartup(
 	// same execution can reconnect its streams and retain its identity.
 	if needsFailure, err := m.stopAndInvalidateManagedRuntime(ctx, execution, retry); err != nil {
 		if needsFailure {
-			return true, failAfterRetry()
+			failureCode = routingerr.CodeAgentRuntime
+			failureDetails = routingerr.Sanitize(err.Error())
+			failureCause = err
+			return false, m.publishManagedRuntimeStartupFailure(
+				execution, "managed runtime cache repair failed", failureCode, failureDetails, failureCause,
+			)
 		}
-		return true, err
+		return false, err
 	}
 	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
-		return true, err
+		return false, err
 	}
 
 	m.resetManagedRuntimeExecutionForRetry(execution, retry.preferOnlineArgs)
@@ -301,7 +308,7 @@ func (m *Manager) retryManagedRuntimeStartup(
 	)
 	if retryErr != nil {
 		if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
-			return true, aborted
+			return false, aborted
 		}
 		failureCause = retryErr
 		var second *routingerr.Error
@@ -311,7 +318,9 @@ func (m *Manager) retryManagedRuntimeStartup(
 		failureCode, failureDetails = managedRuntimeRetryFailureClassification(
 			failureCode, failureDetails, retryErr, initializationFailed, second,
 		)
-		return true, failAfterRetry()
+		return true, m.publishManagedRuntimeStartupFailure(
+			execution, "managed npm runtime failed to prepare", failureCode, failureDetails, failureCause,
+		)
 	}
 	return true, nil
 }

@@ -78,7 +78,7 @@ func (a *Gemini) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *Gemini) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().ACPCommandWithNpmPreference(opts.ManagedRuntimeVersion, opts.ManagedRuntimePreferOnline)
+	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
 }
 
 func (a *Gemini) ManagedNPMRuntime() ManagedNPMRuntimeSpec {

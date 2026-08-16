@@ -326,10 +326,11 @@ func (e *AgentExecution) officeProfileID() string {
 
 // PromptCompletionSignal carries the result from a complete event or disconnect.
 type PromptCompletionSignal struct {
-	StopReason       string
-	IsError          bool
-	Error            string
-	PromptGeneration uint64
+	StopReason        string
+	IsError           bool
+	Error             string
+	PromptGeneration  uint64
+	StartupGeneration uint64
 }
 
 func (e *AgentExecution) promptGenerationSnapshot() uint64 {
@@ -377,6 +378,31 @@ func (e *AgentExecution) acceptsStartupAttempt(generation uint64) bool {
 	e.startupLifecycleMu.Lock()
 	defer e.startupLifecycleMu.Unlock()
 	return e.startupAttemptGeneration == generation
+}
+
+// signalPromptCompletionForStartupGeneration claims the current startup
+// generation and enqueues its completion signal as one ownership operation.
+// A stream can finish its generation check just before recovery advances the
+// execution, so checking and sending under the same mutex prevents an old
+// stream from publishing into the replacement prompt's channel.
+func (e *AgentExecution) signalPromptCompletionForStartupGeneration(
+	startupGeneration uint64,
+	signal PromptCompletionSignal,
+) bool {
+	if e == nil {
+		return false
+	}
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	if e.startupAttemptGeneration != startupGeneration {
+		return false
+	}
+	signal.StartupGeneration = startupGeneration
+	select {
+	case e.promptDoneCh <- signal:
+	default:
+	}
+	return true
 }
 
 func (e *AgentExecution) promptTurnIDSnapshot() string {

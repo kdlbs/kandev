@@ -91,7 +91,7 @@ func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) 
 func (a *CopilotACP) NativeBinaryName() string { return copilotNativeBinary }
 
 func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
-	return a.ManagedNPMRuntime().ACPCommandWithNpmPreference(opts.ManagedRuntimeVersion, opts.ManagedRuntimePreferOnline)
+	return a.ManagedNPMRuntime().ACPCommand(opts.ManagedRuntimeVersion)
 }
 
 func (a *CopilotACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {

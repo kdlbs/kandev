@@ -102,6 +102,9 @@ func TestCreateRecoveryStatusMessage_ManagedRuntimeNpmUsesOneRetryAction(t *test
 	if actions[0]["test_id"] != "managed-runtime-npm-retry-button" {
 		t.Fatalf("action test_id = %#v", actions[0]["test_id"])
 	}
+	if _, ok := actions[0]["tooltip"]; ok {
+		t.Fatal("managed runtime recovery action must not carry an untranslated tooltip")
+	}
 	payload := actions[0]["params"].(map[string]interface{})["payload"].(map[string]interface{})
 	if payload["action"] != "runtime_retry" {
 		t.Fatalf("action payload = %#v", payload)

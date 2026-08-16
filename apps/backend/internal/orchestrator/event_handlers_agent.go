@@ -1736,7 +1736,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 				"runtime_retry",
 				"Retry runtime",
 				"refresh",
-				"Refresh npm package data and retry the runtime once",
+				"",
 				"managed-runtime-npm-retry-button",
 			),
 		}
@@ -1891,14 +1891,7 @@ func classifyManagedRuntimeNpmStartFailure(err error) *routingerr.Error {
 			RawExcerpt: structured.Details,
 		}
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:  routingerr.PhaseSessionInit,
-		Stderr: err.Error(),
-	})
-	if classified.Code != routingerr.CodeManagedRuntimeNpmResolution {
-		return nil
-	}
-	return classified
+	return nil
 }
 
 // actionMetaKey* are the shared keys of the frontend ActionMessage button
@@ -1922,17 +1915,20 @@ const (
 // the map keys in one place avoids drift between the buttons and keeps the
 // metadata shape consistent.
 func wsRecoveryAction(taskID, sessionID, recoverAction, label, icon, tooltip, testID string) map[string]interface{} {
-	return map[string]interface{}{
-		actionMetaKeyType:    "ws_request",
-		actionMetaKeyLabel:   label,
-		actionMetaKeyIcon:    icon,
-		actionMetaKeyTooltip: tooltip,
-		actionMetaKeyTestID:  testID,
+	action := map[string]interface{}{
+		actionMetaKeyType:   "ws_request",
+		actionMetaKeyLabel:  label,
+		actionMetaKeyIcon:   icon,
+		actionMetaKeyTestID: testID,
 		"params": map[string]interface{}{
 			"method":  "session.recover",
 			"payload": map[string]interface{}{"task_id": taskID, "session_id": sessionID, "action": recoverAction},
 		},
 	}
+	if tooltip != "" {
+		action[actionMetaKeyTooltip] = tooltip
+	}
+	return action
 }
 
 // buildRecoveryActions creates the generic actions array for agent error

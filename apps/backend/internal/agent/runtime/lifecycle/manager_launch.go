@@ -1902,7 +1902,7 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 				return nil
 			}
 			err = retryErr
-		} else if context.Cause(ctx) != nil || m.IsShuttingDown() {
+		} else if retryErr != nil {
 			err = retryErr
 		}
 		m.finalizeBootMessage(execution, bootMsg, bootStopCh, execution.agentctl, "failed")
