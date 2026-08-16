@@ -44,7 +44,7 @@ None.
 ## TDD Sequence
 
 1. Change the Pi expectations in `new_acp_agents_test.go` to require
-   `PassthroughCmd == ["pi"]`, detection through `pi`, and the exact install
+   `PassthroughCmd == ["pi"]`, detection through `pi --version`, and the exact install
    script
    `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
 2. Extend `TestPassthroughPiWritesProjectFile` to require the lifecycle-resolved
@@ -64,7 +64,8 @@ None.
 - Passthrough lifecycle command resolution returns `pi`, including the path
   that materializes Pi's project MCP configuration.
 - Pi discovery requires `pi`, and installation runs exactly
-  `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
+  `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`; discovery
+  rejects a same-named executable that fails the non-interactive version check.
 - Public docs explain the separate ACP adapter and interactive CLI without
   implying that managed ACP version selection controls passthrough.
 
@@ -73,7 +74,7 @@ None.
 Run from the repository root:
 
 ```bash
-cd apps/backend && go test ./internal/agent/agents ./internal/agent/runtime/lifecycle -run 'Test(NewACPAgents_(AllCommandSurfaces|InstallScript|DetectionRequiresGlobalBinary)|PassthroughPiWritesProjectFile)$' -count=1 && cd ../../ && node --test scripts/validate-public-docs.test.mjs && node scripts/validate-public-docs.mjs && git diff --check
+cd apps/backend && go test ./internal/agent/agents ./internal/agent/runtime/lifecycle -run 'Test(NewACPAgents_(AllCommandSurfaces|InstallScript|DetectionRequiresGlobalBinary)|PiACPDetectionRejectsPiBinaryWithoutVersionSupport|PassthroughPiWritesProjectFile)$' -count=1 && cd ../../ && node --test scripts/validate-public-docs.test.mjs && node scripts/validate-public-docs.mjs && git diff --check
 ```
 
 ## Parallelism
@@ -100,10 +101,12 @@ primary conversation.
 
 - Red: the focused Go contract run failed on the old Pi passthrough argv and
   install script before the production change.
-- Green: the focused Go command passed with 42 tests across the agents and
-  lifecycle packages.
+- Green: the focused Go command passed with 43 tests across the agents and
+  lifecycle packages, including the collision regression for `pi --version`.
 - Public docs validation passed: 61 validation tests, 41 published pages, and
   `git diff --check`.
 - The lifecycle regression preserves Pi's existing `--model default` profile
   flag while proving the executable is `pi` and the `.pi/mcp.json` file is
   materialized.
+- PR fixup: restored the `pi` collision rationale and validated the package's
+  non-interactive version flag with the repository's `WithCommandCheck` helper.

@@ -2,7 +2,10 @@ package agents
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -308,6 +311,27 @@ func TestNewACPAgents_DetectionRequiresGlobalBinary(t *testing.T) {
 					tc.spec.detectBinaries)
 			}
 		})
+	}
+}
+
+func TestPiACPDetectionRejectsPiBinaryWithoutVersionSupport(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell executable fixture is Unix-specific")
+	}
+
+	binDir := t.TempDir()
+	piPath := filepath.Join(binDir, "pi")
+	if err := os.WriteFile(piPath, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write fake pi executable: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	result, err := NewPiACP().IsInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("IsInstalled error: %v", err)
+	}
+	if result.Available {
+		t.Fatalf("Available=true for pi executable that fails --version")
 	}
 }
 

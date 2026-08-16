@@ -33,9 +33,9 @@ Pi uses separate executables for its two Kandev modes:
 - The Pi install action runs `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
 
 After installation, select **Rescan**. Kandev detects Pi when `pi` is on the
-`PATH` of the backend process. The `pi-acp` adapter is not the interactive
-terminal CLI, and managed ACP runtime selection does not replace the
-passthrough command.
+`PATH` of the backend process and responds to the non-interactive `--version`
+check. The `pi-acp` adapter is not the interactive terminal CLI, and managed
+ACP runtime selection does not replace the passthrough command.
 
 1. Select **Rescan** after installing or updating a CLI.
 2. If the card offers an install action, review the command before running it. Installation runs on the Kandev host.

@@ -34,8 +34,9 @@ and the observable behavior is specified in
   executable. Do not route the passthrough path through managed ACP package or
   version resolution.
 - Make `IsInstalled` probe `pi`, the executable provisioned for users and
-  required by passthrough, instead of accepting an adapter-only `pi-acp`
-  installation that cannot satisfy the full integration.
+  required by passthrough, with a non-interactive `--version` check instead of
+  accepting an adapter-only `pi-acp` installation or an unrelated `pi`
+  executable that cannot satisfy the full integration.
 - Change `InstallScript` to the supplied safe install recipe:
   `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`.
 
@@ -73,9 +74,10 @@ profile mode.
 
 - Red: the focused Go contract run failed on Pi's old passthrough command and
   install script, as expected.
-- Green: `go test ./internal/agent/agents ./internal/agent/runtime/lifecycle
-  -run 'Test(NewACPAgents_(AllCommandSurfaces|InstallScript|DetectionRequiresGlobalBinary)|PassthroughPiWritesProjectFile)$' -count=1`
-  passed with 42 tests.
+- Green: the focused Go command, including the `pi --version` collision
+  regression, passed with 43 tests across the agents and lifecycle packages.
+- PR fixup: the detection probe now uses `WithCommandCheck("pi", "--version")`
+  and restores the rationale comment for the remaining binary-name tradeoff.
 - Public docs: `node --test scripts/validate-public-docs.test.mjs` passed all
   61 tests, `node scripts/validate-public-docs.mjs` validated 41 pages, and
   `git diff --check` passed.

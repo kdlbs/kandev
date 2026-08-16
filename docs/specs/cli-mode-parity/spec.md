@@ -35,7 +35,8 @@ For Pi, structured chat and inference use `npx -y pi-acp`, while CLI
 passthrough launches the globally installed `pi` executable. Kandev's Pi
 install action runs
 `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`, and agent
-discovery treats `pi` on the Kandev process `PATH` as the installation signal.
+discovery treats a `pi` executable on the Kandev process `PATH` that passes its
+non-interactive `--version` check as the installation signal.
 
 ### Prompt allowed at task creation in CLI mode
 
@@ -74,8 +75,8 @@ Users can still press Ctrl-C directly inside the xterm terminal. A dedicated too
 ## Scenarios
 
 ### Pi uses its interactive CLI in passthrough mode
-- GIVEN a Pi profile with `cli_passthrough: true` and `pi` available on the
-  Kandev process `PATH`
+- GIVEN a Pi profile with `cli_passthrough: true` and a `pi` executable on the
+  Kandev process `PATH` that passes `pi --version`
 - WHEN Kandev starts its passthrough PTY
 - THEN the command starts with `pi`
 - AND Kandev does not launch `pi-acp` or `npx` as the passthrough process
@@ -90,7 +91,7 @@ Users can still press Ctrl-C directly inside the xterm terminal. A dedicated too
 - WHEN the operator runs the Pi install action and rescans agents
 - THEN Kandev runs
   `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`
-- AND discovery finds the installed `pi` executable
+- AND discovery finds the installed `pi` executable after its version check
 
 ### CLI-mode task can have a prompt
 - GIVEN a Claude profile with `cli_passthrough: true`
