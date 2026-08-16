@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { IssueWatchDialog } from "./issue-watch-dialog";
 
 const store = {
+  features: { dynamicAgentRouting: false },
   workspaces: { activeId: "ws-1" },
   workflows: { items: [] },
   agentProfiles: { items: [] },

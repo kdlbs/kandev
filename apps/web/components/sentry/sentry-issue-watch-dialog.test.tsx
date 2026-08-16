@@ -14,6 +14,7 @@ const { WORKSPACE_ID } = vi.hoisted(() => ({ WORKSPACE_ID: "ws-1" }));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
+      features: { dynamicAgentRouting: false },
       workspaces: { activeId: WORKSPACE_ID, items: [{ id: WORKSPACE_ID, name: "Workspace" }] },
       workflows: { items: [] },
       agentProfiles: { items: [] },

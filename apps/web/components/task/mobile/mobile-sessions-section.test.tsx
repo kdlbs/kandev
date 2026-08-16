@@ -21,6 +21,7 @@ vi.mock("@/hooks/use-task-sessions", () => ({
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
+      features: { dynamicAgentRouting: false },
       tasks: { activeSessionId: mocks.activeSessionId },
       agentProfiles: { items: mocks.agentProfiles },
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
