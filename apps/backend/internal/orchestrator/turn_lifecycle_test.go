@@ -594,6 +594,49 @@ func TestAgentReadyRevalidatesAfterReservedPromptRollback(t *testing.T) {
 	}
 }
 
+func TestAgentReadyDetachesDeliveryCancellationAfterReservedPromptRollback(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	stepGetter := svc.workflowStepGetter.(*mockStepGetter)
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1"}
+	agentMgr := svc.agentManager.(*mockAgentManager)
+	agentMgr.currentPromptExecutionID = "exec1"
+	agentMgr.currentPromptGeneration.Store(1)
+
+	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(context.Background(), "session1", true)
+	if err != nil {
+		t.Fatalf("reserve successor turn: %v", err)
+	}
+	deliveryCtx, cancelDelivery := context.WithCancel(context.Background())
+	readyDone := make(chan struct{})
+	go func() {
+		svc.handleAgentReady(deliveryCtx, watcher.AgentEventData{
+			TaskID: "task1", SessionID: "session1",
+			AgentExecutionID: "exec1", PromptGeneration: 1,
+		})
+		close(readyDone)
+	}()
+	select {
+	case <-readyDone:
+		t.Fatal("predecessor ready returned before reservation resolution")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	cancelDelivery()
+	svc.rollbackReservedPromptTurn(context.Background(), "session1", turnID)
+	select {
+	case <-readyDone:
+	case <-time.After(time.Second):
+		t.Fatal("predecessor ready did not resume after reservation rollback")
+	}
+	session, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("load session after ready: %v", err)
+	}
+	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+		t.Fatalf("canceled delivery context stranded predecessor in %q", session.State)
+	}
+}
+
 func TestAgentReadyReconcilesWhenReservedPromptRollbackFinishesAfterWaitTimeout(t *testing.T) {
 	svc, repo := newTurnLifecycleTestService(t)
 	svc.agentReadyReservationWaitTimeout = 20 * time.Millisecond

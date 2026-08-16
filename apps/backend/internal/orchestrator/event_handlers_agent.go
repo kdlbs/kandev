@@ -552,6 +552,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		}
 	}
 	if waitedForReservation {
+		ctx = agentReadyDetachedContext(ctx)
 		if data.PromptGeneration == 0 {
 			s.logger.Debug("ignoring generationless agent.ready that overlapped a prompt reservation",
 				zap.String("task_id", data.TaskID),
