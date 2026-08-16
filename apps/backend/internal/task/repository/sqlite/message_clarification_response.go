@@ -20,6 +20,8 @@ const (
 	// clarificationStatusResponding is an intra-transaction claim marker.
 	// CompleteActiveClarificationBundle never commits it independently.
 	clarificationStatusResponding = "responding"
+
+	clarificationResponseDeliveryPendingKey = "response_delivery_pending"
 )
 
 func nonTerminalSessionPredicate(messageAlias string) string {
@@ -166,6 +168,15 @@ func clarificationExpiredMetadataExpr(driverName string) string {
 func clarificationNotDetachedPredicate(driverName string) string {
 	value := dialect.JSONExtract(driverName, "task_session_messages.metadata", "agent_disconnected")
 	return fmt.Sprintf("CAST(COALESCE(%s, '') AS TEXT) NOT IN ('true', '1')", value)
+}
+
+func clarificationResponseDeliveryPendingPredicate(driverName, messageAlias string) string {
+	value := dialect.JSONExtract(
+		driverName,
+		messageAlias+".metadata",
+		clarificationResponseDeliveryPendingKey,
+	)
+	return fmt.Sprintf("CAST(COALESCE(%s, '') AS TEXT) IN ('true', '1')", value)
 }
 
 // CompleteActiveClarificationBundle atomically claims a current-turn pending
@@ -408,6 +419,7 @@ func (r *Repository) restoreClarificationMessages(
 		restoredMetadata := maps.Clone(message.Metadata)
 		restoredMetadata["status"] = clarificationStatusPending
 		delete(restoredMetadata, "response")
+		delete(restoredMetadata, clarificationResponseDeliveryPendingKey)
 		metadataJSON, marshalErr := json.Marshal(restoredMetadata)
 		if marshalErr != nil {
 			return fmt.Errorf("marshal clarification message %s for restore: %w", message.ID, marshalErr)
@@ -550,6 +562,7 @@ func (r *Repository) completeClaimedClarificationMessages(
 		}
 		completedMetadata := maps.Clone(message.Metadata)
 		completedMetadata["status"] = status
+		completedMetadata[clarificationResponseDeliveryPendingKey] = true
 		if status == clarificationStatusAnswered {
 			response, ok := responses[questionID]
 			if !ok {

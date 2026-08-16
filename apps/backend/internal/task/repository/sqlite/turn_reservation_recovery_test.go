@@ -22,6 +22,7 @@ func TestReconcileUnpublishedPromptTurnsRestoresOnlyClaimedMessages(t *testing.T
 	createRecoveryClarification(
 		t, repo, "message-claimed", taskID, sessionID, "turn-clarification", "pending-recovery", base,
 	)
+	markRecoveryClarificationDeliveryPending(t, repo, "message-claimed")
 	createRecoveryClarification(
 		t, repo, "message-terminal", taskID, sessionID, "turn-clarification", "pending-recovery", base.Add(time.Second),
 	)
@@ -193,6 +194,7 @@ func TestReconcileUnpublishedPromptTurnsPreservesAmbiguousEmptyReservation(t *te
 		t, repo, "message-accepted-claim", taskID, sessionID, "turn-clarification",
 		"pending-accepted", base,
 	)
+	markRecoveryClarificationDeliveryPending(t, repo, "message-accepted-claim")
 	createRecoveryTurn(t, repo, taskID, sessionID, "turn-accepted-reservation", base.Add(time.Minute), map[string]interface{}{
 		models.TurnMetaKeyPromptDispatchPending:                 true,
 		models.TurnMetaKeyPromptDispatchAttempted:               true,
@@ -337,5 +339,17 @@ func createRecoveryClarification(
 		},
 	}); err != nil {
 		t.Fatalf("CreateMessage(%s): %v", messageID, err)
+	}
+}
+
+func markRecoveryClarificationDeliveryPending(t *testing.T, repo *Repository, messageID string) {
+	t.Helper()
+	message, err := repo.GetMessage(context.Background(), messageID)
+	if err != nil {
+		t.Fatalf("GetMessage(%s): %v", messageID, err)
+	}
+	message.Metadata[clarificationResponseDeliveryPendingKey] = true
+	if err := repo.UpdateMessage(context.Background(), message); err != nil {
+		t.Fatalf("mark response delivery pending for %s: %v", messageID, err)
 	}
 }

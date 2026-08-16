@@ -175,8 +175,9 @@ func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) er
 	return nil
 }
 
-// ReconcileUnpublishedPromptTurns restores clarification claims whose empty
-// successor never reached agentctl, or accepts reservations with output proof.
+// ReconcileUnpublishedPromptTurns restores unhanded clarification responses
+// and claims whose empty successor never reached agentctl, or accepts
+// reservations with output proof.
 func (s *Service) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error) {
 	if s.turns == nil {
 		return 0, errors.New("cannot reconcile unpublished prompt turns without a turn repository")

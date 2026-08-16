@@ -1419,6 +1419,12 @@ func TestRetryClarificationAfterCancel_DoesNotStarveUserCancel(t *testing.T) {
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+	turnService := &repoTurnService{repo: repo}
+	svc.turnService = turnService
+	clarificationTurn, err := turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("start clarification turn: %v", err)
+	}
 
 	// Kick off the clarification-timeout recovery. Its silent cancel succeeds
 	// (mock CancelAgent returns nil), then it hands the retry prompt to the
@@ -1427,7 +1433,7 @@ func TestRetryClarificationAfterCancel_DoesNotStarveUserCancel(t *testing.T) {
 	recoveryDone := make(chan struct{})
 	go func() {
 		svc.retryClarificationAfterCancel(ctx, clarificationAnsweredData{
-			TaskID: "task1", SessionID: "session1",
+			TaskID: "task1", SessionID: "session1", ClarificationTurnID: clarificationTurn.ID,
 		}, "the clarification answer", fmt.Errorf("wrap: %w", ErrAgentPromptInProgress))
 		close(recoveryDone)
 	}()

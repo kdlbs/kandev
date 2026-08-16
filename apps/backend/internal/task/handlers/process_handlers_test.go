@@ -246,6 +246,14 @@ func (m *mockRepository) CompleteActiveClarificationBundle(
 ) ([]*models.Message, bool, error) {
 	return nil, false, nil
 }
+func (m *mockRepository) FinalizeClarificationResponseDelivery(
+	context.Context,
+	string,
+	string,
+	[]*models.Message,
+) ([]*models.Message, bool, error) {
+	return nil, false, nil
+}
 func (m *mockRepository) RestoreActiveClarificationBundle(
 	context.Context,
 	string,

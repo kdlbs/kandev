@@ -790,6 +790,21 @@ func (s *Service) CompleteActiveClarificationBundle(
 	return s.messages.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
 }
 
+// FinalizeClarificationResponseDelivery retires the durable recovery intent
+// after the claimed response reaches its live or detached handoff boundary.
+func (s *Service) FinalizeClarificationResponseDelivery(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return s.messages.FinalizeClarificationResponseDelivery(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
 // RestoreActiveClarificationBundle reopens a terminal bundle after detached
 // resume acceptance fails and returns the committed pending rows for publication.
 func (s *Service) RestoreActiveClarificationBundle(

@@ -152,6 +152,7 @@ func TestOrdinaryPromptRollsBackClaimAfterTurnCallCancelsContext(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		"",
 	)
 	if !errors.Is(err, persistenceErr) {
 		t.Fatalf("claim error = %v, want %v", err, persistenceErr)

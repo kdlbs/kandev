@@ -21,8 +21,8 @@ type unpublishedPromptTurn struct {
 
 const metadataTrueString = "true"
 
-// ReconcileUnpublishedPromptTurns repairs durable reservations left behind by
-// a backend stop between turn insertion and prompt-dispatch acknowledgement.
+// ReconcileUnpublishedPromptTurns repairs durable prompt reservations first,
+// then response-delivery claims left behind before their handoff completed.
 func (r *Repository) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error) {
 	turns, err := r.listUnpublishedPromptTurns(ctx)
 	if err != nil {
@@ -45,7 +45,11 @@ func (r *Repository) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, 
 			reconciled++
 		}
 	}
-	return reconciled, errors.Join(reconcileErrs...)
+	if err := errors.Join(reconcileErrs...); err != nil {
+		return reconciled, err
+	}
+	deliveries, err := r.reconcilePendingClarificationResponseDeliveries(ctx)
+	return reconciled + deliveries, err
 }
 
 func (r *Repository) listUnpublishedPromptTurns(ctx context.Context) ([]unpublishedPromptTurn, error) {
@@ -101,8 +105,11 @@ func (r *Repository) reconcileUnpublishedPromptTurn(
 	updatedAt := r.nowUTC()
 	attempted := metadataFlagIsTrue(metadata[models.TurnMetaKeyPromptDispatchAttempted])
 	if attempted || referenced {
-		models.ClearPromptDispatchMetadata(metadata)
-		err = updateTurnMetadata(ctx, tx, r.db, turn.id, metadata, updatedAt)
+		err = r.finalizeReservedClarificationDelivery(ctx, tx, metadata)
+		if err == nil {
+			models.ClearPromptDispatchMetadata(metadata)
+			err = updateTurnMetadata(ctx, tx, r.db, turn.id, metadata, updatedAt)
+		}
 	} else {
 		err = r.restoreReservedClarificationClaim(ctx, tx, metadata, updatedAt)
 		if err == nil {
@@ -116,6 +123,61 @@ func (r *Repository) reconcileUnpublishedPromptTurn(
 		return false, fmt.Errorf("commit unpublished prompt turn recovery: %w", err)
 	}
 	return true, nil
+}
+
+func (r *Repository) finalizeReservedClarificationDelivery(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	metadata map[string]interface{},
+) error {
+	pendingID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID].(string)
+	turnID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationTurnID].(string)
+	messageIDs, err := metadataStringSlice(metadata[models.TurnMetaKeyPromptDispatchClarificationMessageIDs])
+	if err != nil {
+		return fmt.Errorf("decode prompt dispatch clarification message ids: %w", err)
+	}
+	if pendingID == "" || turnID == "" || len(messageIDs) == 0 {
+		return nil
+	}
+	claimedIDs := make(map[string]struct{}, len(messageIDs))
+	for _, messageID := range messageIDs {
+		claimedIDs[messageID] = struct{}{}
+	}
+	messages, err := r.loadPendingClarificationResponseDeliveryBundle(
+		ctx,
+		tx,
+		r.db.DriverName(),
+		pendingID,
+	)
+	if err != nil {
+		return err
+	}
+	for _, message := range messages {
+		if _, claimed := claimedIDs[message.ID]; !claimed {
+			return fmt.Errorf("response delivery intent includes unreserved message %s", message.ID)
+		}
+		if message.TurnID != turnID {
+			return fmt.Errorf(
+				"response delivery intent message %s belongs to turn %s, want %s",
+				message.ID,
+				message.TurnID,
+				turnID,
+			)
+		}
+		if status, _ := message.Metadata["status"].(string); status != clarificationStatusAnswered {
+			return fmt.Errorf("response delivery intent message %s has status %q", message.ID, status)
+		}
+	}
+	if len(messages) == 0 {
+		return nil
+	}
+	return r.clearClarificationResponseDeliveryMarkers(
+		ctx,
+		tx,
+		r.db.DriverName(),
+		messages,
+		clarificationStatusAnswered,
+	)
 }
 
 // metadataFlagIsTrue mirrors the SQL JSON predicates across supported
@@ -243,6 +305,7 @@ func (r *Repository) restoreReservedClarificationMessage(
 	}
 	metadata["status"] = clarificationStatusPending
 	delete(metadata, "response")
+	delete(metadata, clarificationResponseDeliveryPendingKey)
 	updated, err := json.Marshal(metadata)
 	if err != nil {
 		return fmt.Errorf("encode clarification message %s for prompt recovery: %w", messageID, err)

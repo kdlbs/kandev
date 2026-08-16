@@ -30,6 +30,9 @@ type stubMessageCreator struct {
 	publishedBundles   int
 	publishedMessages  [][]*taskmodels.Message
 	claimedMessages    []*taskmodels.Message
+	finalizedBundles   int
+	finalizeErr        error
+	refuseFinalize     bool
 	restoreErr         error
 	refuseRestore      bool
 	publishErr         error
@@ -96,6 +99,7 @@ func (s *stubMessageCreator) CompleteActiveClarificationBundle(
 		}
 		questionID := stringFromMetadata(message.Metadata, "question_id")
 		message.Metadata["status"] = status
+		message.Metadata["response_delivery_pending"] = true
 		if response, ok := responses[questionID]; ok && response != nil {
 			message.Metadata["response"] = response
 		}
@@ -114,6 +118,42 @@ func (s *stubMessageCreator) CompleteActiveClarificationBundle(
 	}
 	s.claimedMessages = returnedMessages
 	return returnedMessages, len(returnedMessages) > 0, nil
+}
+
+func (s *stubMessageCreator) FinalizeClarificationResponseDelivery(
+	_ context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*taskmodels.Message,
+) ([]*taskmodels.Message, bool, error) {
+	if s.finalizeErr != nil {
+		return nil, false, s.finalizeErr
+	}
+	if s.refuseFinalize || len(claimedMessages) == 0 {
+		return nil, false, nil
+	}
+	finalizedMessages := make([]*taskmodels.Message, 0, len(claimedMessages))
+	for _, claimedMessage := range claimedMessages {
+		var storedMessage *taskmodels.Message
+		for _, candidate := range s.repo.messages[pendingID] {
+			if candidate.ID == claimedMessage.ID {
+				storedMessage = candidate
+				break
+			}
+		}
+		if storedMessage == nil || stringFromMetadata(storedMessage.Metadata, "status") != terminalStatus {
+			return nil, false, nil
+		}
+		if storedMessage.Metadata["response_delivery_pending"] != true {
+			return nil, false, nil
+		}
+		storedMessage.Metadata = maps.Clone(storedMessage.Metadata)
+		delete(storedMessage.Metadata, "response_delivery_pending")
+		copyMessage := *storedMessage
+		copyMessage.Metadata = maps.Clone(storedMessage.Metadata)
+		finalizedMessages = append(finalizedMessages, &copyMessage)
+	}
+	s.finalizedBundles++
+	return finalizedMessages, true, nil
 }
 
 func (s *stubMessageCreator) RestoreActiveClarificationBundle(
@@ -156,6 +196,7 @@ func (s *stubMessageCreator) RestoreActiveClarificationBundle(
 		storedMessage.Metadata = maps.Clone(storedMessage.Metadata)
 		storedMessage.Metadata["status"] = "pending"
 		delete(storedMessage.Metadata, "response")
+		delete(storedMessage.Metadata, "response_delivery_pending")
 		s.updates = append(s.updates, struct {
 			pendingID  string
 			questionID string
@@ -214,13 +255,23 @@ func TestPrimaryAnsweredEventUsesFreshBoundedContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	h.publishPrimaryAnsweredEvent(ctx, pendingID, nil, true, "cancelled")
+	h.publishPrimaryAnsweredEvent(ctx, pendingID, nil, true, "cancelled", "turn-primary")
 
 	if len(eventBus.publishHasDeadline) != 1 || !eventBus.publishHasDeadline[0] {
 		t.Fatalf("publication deadlines = %v, want one bounded context", eventBus.publishHasDeadline)
 	}
 	if len(eventBus.contextErrs) != 1 || eventBus.contextErrs[0] != nil {
 		t.Fatalf("publication context errors = %v, want fresh context", eventBus.contextErrs)
+	}
+	if len(eventBus.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(eventBus.events))
+	}
+	eventData, ok := eventBus.events[0].Data.(map[string]any)
+	if !ok {
+		t.Fatalf("primary answered event data = %T, want map", eventBus.events[0].Data)
+	}
+	if got := eventData["clarification_turn_id"]; got != "turn-primary" {
+		t.Fatalf("clarification turn id = %v, want turn-primary", got)
 	}
 }
 
@@ -917,6 +968,14 @@ func TestHttpRespond_AllAnswers_PrimaryPath_Success(t *testing.T) {
 	for _, u := range msgCreator.updates {
 		if u.status != "answered" {
 			t.Errorf("expected status=answered, got %q", u.status)
+		}
+	}
+	if msgCreator.finalizedBundles != 1 {
+		t.Fatalf("finalized bundles = %d, want 1", msgCreator.finalizedBundles)
+	}
+	for _, message := range repo.messages[pendingID] {
+		if marker := message.Metadata["response_delivery_pending"]; marker != nil {
+			t.Fatalf("message %s retained delivery marker %v", message.ID, marker)
 		}
 	}
 }

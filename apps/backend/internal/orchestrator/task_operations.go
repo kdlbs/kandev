@@ -3495,6 +3495,7 @@ type promptTaskOptions struct {
 	// dispatch, while delaying the visible turn.started event until acceptance.
 	reserveTurnUntilDispatch bool
 	promptDispatchRecovery   *models.PromptDispatchRecovery
+	expectedCurrentTurnID    string
 }
 
 type promptDispatchOutcome struct {
@@ -3651,7 +3652,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	session, rollback, err := s.claimPromptDispatch(
 		ctx, taskID, sessionID, options.claimEntryID, options.lifecyclePrompt,
 		options.reserveTurnUntilDispatch, options.promptDispatchRecovery,
-		options.afterClaim, foregroundClaim,
+		options.afterClaim, foregroundClaim, options.expectedCurrentTurnID,
 	)
 	if err != nil {
 		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
@@ -3893,6 +3894,7 @@ func (s *Service) claimPromptDispatch(
 	promptDispatchRecovery *models.PromptDispatchRecovery,
 	afterClaim func() error,
 	foregroundClaim *foregroundClaim,
+	expectedCurrentTurnID string,
 ) (*models.TaskSession, promptClaimRollback, error) {
 	if lifecyclePrompt {
 		return s.claimLifecyclePromptDispatch(
@@ -3901,7 +3903,7 @@ func (s *Service) claimPromptDispatch(
 	}
 	claimed, previousState, turnID, createdTurn, reservedTurn, err := s.claimSessionRunningForPrompt(
 		ctx, taskID, sessionID, claimEntryID, reserveTurnUntilDispatch,
-		promptDispatchRecovery, foregroundClaim,
+		promptDispatchRecovery, foregroundClaim, expectedCurrentTurnID,
 	)
 	if err != nil {
 		return nil, promptClaimRollback{}, err
@@ -4216,6 +4218,7 @@ func (s *Service) claimSessionRunningForPrompt(
 	reserveTurnUntilDispatch bool,
 	promptDispatchRecovery *models.PromptDispatchRecovery,
 	foregroundClaim *foregroundClaim,
+	expectedCurrentTurnID string,
 ) (*models.TaskSession, models.TaskSessionState, string, bool, *models.Turn, error) {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
@@ -4223,6 +4226,21 @@ func (s *Service) claimSessionRunningForPrompt(
 	defer lock.Unlock()
 	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
 		return nil, "", "", false, nil, err
+	}
+	if expectedCurrentTurnID != "" {
+		if s.turnService == nil {
+			return nil, "", "", false, nil, errors.New("cannot verify expected prompt turn without turn service")
+		}
+		activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+		if err != nil {
+			return nil, "", "", false, nil, fmt.Errorf("verify expected prompt turn: %w", err)
+		}
+		if activeTurn == nil || activeTurn.ID != expectedCurrentTurnID {
+			return nil, "", "", false, nil, fmt.Errorf(
+				"clarification turn %s is no longer current",
+				expectedCurrentTurnID,
+			)
+		}
 	}
 
 	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {

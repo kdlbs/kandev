@@ -198,6 +198,7 @@ type MessageRepository interface {
 	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*models.Message, bool, error)
+	FinalizeClarificationResponseDelivery(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	RestoreActiveClarificationBundle(ctx context.Context, pendingID, terminalStatus string, claimedMessages []*models.Message) ([]*models.Message, bool, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
@@ -227,8 +228,9 @@ type TurnRepository interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
 	DeleteTurnIfUnreferenced(ctx context.Context, sessionID, turnID string) (bool, error)
 	// ReconcileUnpublishedPromptTurns repairs or accepts durable prompt
-	// reservations before startup admits new work. Every production turn store
-	// must provide this recovery boundary; callers fail rather than skip it.
+	// reservations and response-delivery claims before startup admits new work.
+	// Every production turn store must provide this recovery boundary; callers
+	// fail rather than skip it.
 	ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error)
 	// CreateTurnWithStepStamp creates turn atomically with the
 	// workflow-step-at-start stamp: it reads the task's current step and

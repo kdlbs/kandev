@@ -26,6 +26,10 @@ const (
 	metaQuestionKey   = "question"
 	metaQuestionIDKey = "question_id"
 	metaStatusKey     = "status"
+	metaSessionIDKey  = "session_id"
+	metaTaskIDKey     = "task_id"
+	metaPendingIDKey  = "pending_id"
+	metaRejectedKey   = "rejected"
 
 	clarificationPersistenceTimeout = 30 * time.Second
 )
@@ -71,6 +75,13 @@ type MessageCreator interface {
 	// CompleteActiveClarificationBundle atomically transitions a bundle only
 	// when it still belongs to the session's current durable turn.
 	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*taskmodels.Message, bool, error)
+	// FinalizeClarificationResponseDelivery clears the durable recovery intent
+	// after the response reaches a live waiter or detached-resume boundary.
+	FinalizeClarificationResponseDelivery(
+		ctx context.Context,
+		pendingID, terminalStatus string,
+		claimedMessages []*taskmodels.Message,
+	) ([]*taskmodels.Message, bool, error)
 	// RestoreActiveClarificationBundle reopens a claimed bundle when detached
 	// resume acceptance fails and returns the committed pending rows for publication.
 	RestoreActiveClarificationBundle(
@@ -412,8 +423,19 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 	// yet drained the superseded in-memory request.
 	deliveryErr := h.store.Respond(pendingID, claim.response)
 	if deliveryErr == nil {
+		if !h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
+			return http.StatusInternalServerError,
+				"clarification response was delivered, but delivery state could not be finalized"
+		}
 		h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
-		h.publishPrimaryAnsweredEvent(ctx, pendingID, body.Answers, body.Rejected, body.RejectReason)
+		h.publishPrimaryAnsweredEvent(
+			ctx,
+			pendingID,
+			body.Answers,
+			body.Rejected,
+			body.RejectReason,
+			clarificationClaimTurnID(claim.messages),
+		)
 		h.logger.Info("clarification answered via primary path (same turn)",
 			zap.String("pending_id", pendingID),
 			zap.Int("answers", len(body.Answers)),
@@ -425,7 +447,9 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 		// safety net if the in-memory waiter ever diverges from durable state.
 		// Re-publishing these already-terminal rows is idempotent for connected
 		// clients and converges any client that missed the winner's publication.
-		h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
+		if h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
+			h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
+		}
 		h.logger.Warn("duplicate response attempt", zap.String("pending_id", pendingID))
 		return http.StatusConflict, "response already submitted"
 	}
@@ -459,6 +483,10 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 	// We still need to mark the bundle rejected in the DB; otherwise the durable
 	// pending-clarification guard would keep blocking future workflow transitions.
 	if body.Rejected {
+		if !h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
+			return http.StatusInternalServerError,
+				"clarification rejection was recorded, but delivery state could not be finalized"
+		}
 		h.publishStaleDismissedEvent(ctx, pendingID)
 		h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
 		h.logger.Info("clarification rejected after agent moved on; no-op",
@@ -480,7 +508,9 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 			// The prompt reached agentctl. Keep the durable answer terminal so an
 			// HTTP retry cannot dispatch it again, even though turn publication
 			// failed and the caller must receive a server error.
-			h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
+			if h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
+				h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
+			}
 			h.logger.Error("accepted clarification resume was not durably published",
 				zap.String("pending_id", pendingID),
 				zap.Error(err))
@@ -495,6 +525,10 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 			return http.StatusInternalServerError, "failed to resume clarification; response can be retried"
 		}
 		return http.StatusInternalServerError, "failed to resume clarification and recover pending clarification state"
+	}
+	if !h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
+		return http.StatusInternalServerError,
+			"clarification response was accepted, but delivery state could not be finalized"
 	}
 	h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
 	return 0, ""
@@ -815,49 +849,6 @@ func (h *Handlers) publishStaleDismissedEvent(ctx context.Context, pendingID str
 		eventData,
 	)); err != nil {
 		h.logger.Warn("failed to publish stale-dismissed clarification event",
-			zap.String("pending_id", pendingID),
-			zap.String("session_id", clarificationCtx.SessionID),
-			zap.Error(err))
-	}
-}
-
-func (h *Handlers) publishPrimaryAnsweredEvent(ctx context.Context, pendingID string, answers []Answer, rejected bool, rejectReason string) {
-	if h.eventBus == nil {
-		return
-	}
-	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
-	defer cancel()
-	clarificationCtx, err := h.resolveClarificationEventContext(persistenceCtx, pendingID)
-	if err != nil {
-		h.logger.Warn("failed to resolve context for primary clarification event",
-			zap.String("pending_id", pendingID),
-			zap.Error(err))
-		return
-	}
-	if clarificationCtx.SessionID == "" || clarificationCtx.TaskID == "" {
-		h.logger.Warn("missing session/task for primary clarification event",
-			zap.String("pending_id", pendingID),
-			zap.String("session_id", clarificationCtx.SessionID),
-			zap.String("task_id", clarificationCtx.TaskID))
-		return
-	}
-
-	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
-	eventData := map[string]any{
-		"session_id":    clarificationCtx.SessionID,
-		"task_id":       clarificationCtx.TaskID,
-		"pending_id":    pendingID,
-		metaQuestionKey: clarificationCtx.QuestionSummary,
-		"answer_text":   answerText,
-		"rejected":      rejected,
-		"reject_reason": rejectReason,
-	}
-	if err := h.eventBus.Publish(persistenceCtx, events.ClarificationPrimaryAnswered, bus.NewEvent(
-		events.ClarificationPrimaryAnswered,
-		"clarification-handlers",
-		eventData,
-	)); err != nil {
-		h.logger.Warn("failed to publish primary clarification event",
 			zap.String("pending_id", pendingID),
 			zap.String("session_id", clarificationCtx.SessionID),
 			zap.Error(err))

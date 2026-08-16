@@ -111,13 +111,14 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 
 // clarificationAnsweredData is the event payload for ClarificationAnswered events.
 type clarificationAnsweredData struct {
-	SessionID    string `json:"session_id"`
-	TaskID       string `json:"task_id"`
-	PendingID    string `json:"pending_id"`
-	Question     string `json:"question"`
-	AnswerText   string `json:"answer_text"`
-	Rejected     bool   `json:"rejected"`
-	RejectReason string `json:"reject_reason"`
+	SessionID           string `json:"session_id"`
+	TaskID              string `json:"task_id"`
+	PendingID           string `json:"pending_id"`
+	ClarificationTurnID string `json:"clarification_turn_id"`
+	Question            string `json:"question"`
+	AnswerText          string `json:"answer_text"`
+	Rejected            bool   `json:"rejected"`
+	RejectReason        string `json:"reject_reason"`
 }
 
 type clarificationWatchdogEntry struct {
@@ -166,13 +167,14 @@ func (s *Service) ResumeDetachedClarification(
 	resumeCtx, cancel := context.WithTimeout(ctx, detachedClarificationDispatchTimeout)
 	defer cancel()
 	return s.resumeDetachedClarificationWithPrompt(resumeCtx, clarificationAnsweredData{
-		SessionID:    request.SessionID,
-		TaskID:       request.TaskID,
-		PendingID:    request.PendingID,
-		Question:     request.Question,
-		AnswerText:   request.AnswerText,
-		Rejected:     request.Rejected,
-		RejectReason: request.RejectReason,
+		SessionID:           request.SessionID,
+		TaskID:              request.TaskID,
+		PendingID:           request.PendingID,
+		ClarificationTurnID: request.ClarificationTurnID,
+		Question:            request.Question,
+		AnswerText:          request.AnswerText,
+		Rejected:            request.Rejected,
+		RejectReason:        request.RejectReason,
 	}, true, promptTaskOptions{
 		preservePromptContext:    true,
 		reserveTurnUntilDispatch: true,
@@ -323,7 +325,20 @@ func (s *Service) resumeClarificationViaFallback(data clarificationAnsweredData)
 		zap.String("pending_id", data.PendingID))
 
 	ctx := context.Background()
-	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, false); err != nil {
+	if !s.clarificationTurnStillCurrent(ctx, data) {
+		return
+	}
+	if _, err := s.promptTask(
+		ctx,
+		data.TaskID,
+		data.SessionID,
+		prompt,
+		"",
+		false,
+		nil,
+		false,
+		promptTaskOptions{expectedCurrentTurnID: data.ClarificationTurnID},
+	); err != nil {
 		if !s.retryClarificationAfterCancel(ctx, data, prompt, err) {
 			s.logger.Error("failed to resume agent via clarification watchdog fallback",
 				zap.String("task_id", data.TaskID),
@@ -384,6 +399,9 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		s.logger.Debug("skipping clarification recovery for terminal session",
 			zap.String("session_id", data.SessionID),
 			zap.String("session_state", string(session.State)))
+		return false
+	}
+	if !s.clarificationTurnStillCurrent(ctx, data) {
 		return false
 	}
 

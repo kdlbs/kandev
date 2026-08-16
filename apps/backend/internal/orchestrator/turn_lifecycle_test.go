@@ -464,6 +464,7 @@ func TestReservedTurnAttemptMarkingHoldsCancellationGuard(t *testing.T) {
 			&models.PromptDispatchRecovery{},
 			nil,
 			nil,
+			"",
 		)
 		claimDone <- err
 	}()

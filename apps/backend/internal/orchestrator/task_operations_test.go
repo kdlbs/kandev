@@ -3054,7 +3054,7 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 		snapshotTaken:   make(chan struct{}),
 	}
 	svc.turnService = turnSync
-	_, err := turnSync.StartTurn(ctx, "session1")
+	clarificationTurn, err := turnSync.StartTurn(ctx, "session1")
 	require.NoError(t, err)
 
 	// Clarification-timeout recovery claims the guard first and blocks
@@ -3063,7 +3063,7 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 	var recovered bool
 	go func() {
 		recovered = svc.retryClarificationAfterCancel(ctx, clarificationAnsweredData{
-			TaskID: "task1", SessionID: "session1",
+			TaskID: "task1", SessionID: "session1", ClarificationTurnID: clarificationTurn.ID,
 		}, "the clarification answer", fmt.Errorf("wrap: %w", ErrAgentPromptInProgress))
 		close(recoveryDone)
 	}()
@@ -3174,13 +3174,13 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 		snapshotTaken:   make(chan struct{}),
 	}
 	svc.turnService = turnSync
-	_, err := turnSync.StartTurn(ctx, "session1")
+	clarificationTurn, err := turnSync.StartTurn(ctx, "session1")
 	require.NoError(t, err)
 
 	recoveryDone := make(chan bool, 1)
 	go func() {
 		recoveryDone <- svc.retryClarificationAfterCancel(ctx, clarificationAnsweredData{
-			TaskID: "task1", SessionID: "session1",
+			TaskID: "task1", SessionID: "session1", ClarificationTurnID: clarificationTurn.ID,
 		}, "clarification answer", fmt.Errorf("wrap: %w", ErrAgentPromptInProgress))
 	}()
 	<-retryAccepted

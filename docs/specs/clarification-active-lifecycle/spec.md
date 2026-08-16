@@ -75,15 +75,21 @@ hiding the action the icon represents.
   fails before watcher, scheduler, or prompt admission starts; the next start retries recovery. A
   production turn repository must provide this recovery capability through its compile-time contract.
   A rejection persists terminal status without resuming the agent.
-- Every response atomically claims current-turn ownership before it can reach a live waiter or request
-  a detached resume. Terminal message updates are published only after delivery succeeds. If detached
+- Every response atomically claims current-turn ownership and persists a response-delivery recovery
+  intent before it can reach a live waiter or request a detached resume. The intent is retired only
+  after the live waiter or durable detached-resume boundary accepts the response. Startup first
+  reconciles prompt reservations, then restores an unhanded current-turn claim to pending; a terminal
+  session or newer authoritative turn instead retires the stale intent without reactivating history.
+  Terminal message updates are published only after delivery succeeds. If detached
   resume acceptance fails, the endpoint returns an error and restores the still-current bundle to
   pending so the same answer can be retried. Restored rows publish after commit even when synchronous
   task-summary acknowledgement fails, preventing clients from retaining the terminal snapshot while the
   endpoint still returns the acknowledgement error. A publication or summary-convergence error after
   the database restore does not make that retry unsafe; durable pending state remains authoritative.
   Once agentctl accepts the prompt, later publication or completion errors cannot roll back the
-  successor turn or reopen the answer.
+  successor turn or reopen the answer. A primary-answer watchdog carries the clarification turn ID
+  and revalidates that ID both before fallback and inside serialized prompt admission, so it cannot
+  dispatch a stale answer into a successor turn.
 - A current-turn bundle remains answerable while any sibling question is pending. Recovery claims only
   those pending rows, preserves siblings already made terminal by an earlier partial write, and restores
   only the claimed rows if detached delivery fails.
@@ -159,26 +165,33 @@ No new route or response field.
 
 ## State machine
 
-One clarification bundle has four operational states:
+One clarification bundle has five operational states:
 
 1. `active_live`: rows are pending in the current turn and an in-memory waiter exists.
 2. `active_detached`: rows are pending in the current turn, no waiter exists, and
    `agent_disconnected=true` records deferred-answer behavior.
-3. `terminal`: every actionable row is answered, rejected, cancelled, expired, or deleted.
-4. `superseded_history`: rows still carry pending history, but a newer turn is current.
+3. `delivery_claimed`: current-turn rows carry their provisional terminal answer plus a durable
+   response-delivery intent, but no handoff boundary has been acknowledged yet.
+4. `terminal`: every actionable row is answered, rejected, cancelled, expired, or deleted, with no
+   outstanding delivery intent.
+5. `superseded_history`: rows still carry pending history, but a newer turn is current.
 
 Transitions:
 
 - Request creation enters `active_live`.
 - Wait timeout, disconnect, or turn teardown moves `active_live -> active_detached` once.
-- Successful answer delivery, Skip, cancel, expiry, or deletion moves either active state to
-  `terminal` for that exact `pending_id`. A failed detached resume acceptance returns to
+- A response first moves either active state to `delivery_claimed`. Successful answer delivery or Skip
+  then moves that exact `pending_id` to `terminal`. A backend restart before any handoff restores a
+  still-current `delivery_claimed` bundle to its prior active state; if a newer turn or terminal session
+  already superseded it, recovery retires the intent and preserves terminal history. Cancel, expiry,
+  or deletion moves an active state directly to `terminal`. A failed detached resume acceptance returns to
   `active_detached` while the same turn remains current only when dispatch is known not to have been
   accepted and rollback succeeds. A post-attempt crash or post-acceptance publication failure remains
   terminal because the prompt may already be running.
 - Acceptance of a newer turn moves any older pending bundle to `superseded_history` operationally;
   no history rewrite is required.
-- Neither `terminal` nor `superseded_history` can become active again. A new request creates a new
+- Neither `terminal` nor `superseded_history` can become active again. Only the provisional
+  `delivery_claimed` state is recoverable. A new request creates a new
   bundle identity; message deletion cannot reverse this transition.
 
 ## Permissions
@@ -247,6 +260,8 @@ session they can already access. Session selection does not broaden task visibil
   it cannot be correlated safely with the predecessor.
 - Unpublished-reservation reconciliation fails during startup: fail startup before event processing or
   prompt admission begins so no new turn can supersede an unrecovered clarification claim.
+- Response-delivery intent reconciliation fails during startup: fail startup before event processing or
+  prompt admission begins. Never leave an unhanded terminal claim permanently unanswerable.
 - Unpublished-reservation recovery metadata contains a non-string or empty claimed-message ID: fail the
   recovery transaction and startup, preserving the reservation and claimed rows for diagnosis and retry.
 
@@ -261,6 +276,9 @@ session they can already access. Session selection does not broaden task visibil
 - Unpublished detached-answer reservations carry enough recovery identity to restore only their own
   claimed rows. A durable attempt marker separates safe rollback from ambiguous dispatch, and startup
   reconciliation runs even when no executor record remains.
+- Provisional terminal response claims carry a durable delivery intent. Startup restores that exact
+  current-turn claim when no live or detached handoff became authoritative, while prompt-reservation
+  recovery owns any detached dispatch that reached its durable reservation boundary.
 - Task summaries are caches. Boot and task-list reads correct a stale persisted `pending_action` with
   a monotonic revision while preserving all unrelated summary fields.
 - No one-off mutation or backfill of an existing installation database is required. Deploying the
@@ -319,6 +337,12 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** the backend stops after marking a detached-answer dispatch attempted but before observing
   acknowledgement, **WHEN** it starts again, **THEN** it preserves the successor as current and keeps
   the exact claimed rows terminal rather than risking duplicate answer dispatch.
+- **GIVEN** the backend stops after claiming a current-turn response but before either a live waiter or
+  detached resumer receives it, **WHEN** it starts again, **THEN** startup restores the exact claimed
+  rows to pending and the same answer can be submitted again.
+- **GIVEN** a primary-answer watchdog survives until another turn supersedes its clarification turn,
+  **WHEN** its fallback timer expires, **THEN** both the preflight and serialized prompt-admission checks
+  reject the stale answer without prompting or cancelling the successor.
 - **GIVEN** a predecessor ready event arrives while a detached-answer successor is reserved, **WHEN**
   the successor dispatch resolves, **THEN** the handler revalidates prompt generation and the stale
   predecessor cannot complete the successor or run `on_turn_complete` against it; if reservation

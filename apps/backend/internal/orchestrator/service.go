@@ -2172,7 +2172,7 @@ func (s *Service) Stop() error {
 //  4. Pre-poll remote executor status for remote runtimes (sprites, remote_docker)
 //
 // Tests and explicit reconciliation callers use this combined entrypoint;
-// Start calls both phases directly so prompt-turn recovery errors are fatal.
+// Start calls both phases directly so prompt/clarification recovery errors are fatal.
 func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
 	if err := s.reconcileUnpublishedPromptTurnsOnStartup(ctx); err != nil {
 		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))

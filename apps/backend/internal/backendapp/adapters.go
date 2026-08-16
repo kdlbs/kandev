@@ -1052,6 +1052,19 @@ func (a *messageCreatorAdapter) CompleteActiveClarificationBundle(
 	return a.svc.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
 }
 
+func (a *messageCreatorAdapter) FinalizeClarificationResponseDelivery(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return a.svc.FinalizeClarificationResponseDelivery(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
 func (a *messageCreatorAdapter) RestoreActiveClarificationBundle(
 	ctx context.Context,
 	pendingID, terminalStatus string,
