@@ -77,6 +77,27 @@ describe("TerminalPanel", () => {
     expect(screen.queryByTestId("passthrough-terminal")).toBeNull();
   });
 
+  it("ignores a stale processId in the panel params", () => {
+    // A restart mints a new process id. A panel that kept the old one in its
+    // params would render a dead process: no output, no stopping state.
+    appState.processes.devProcessBySessionId = { [SESSION_ID]: DEV_PROCESS_ID };
+    appState.processes.outputsByProcessId = {
+      [DEV_PROCESS_ID]: "restarted",
+      "proc-old": "stale output",
+    };
+
+    render(
+      <TerminalPanel
+        panelId={DEV_SERVER_PANEL_ID}
+        params={{ type: DEV_SERVER_PANEL_ID, processId: "proc-old" }}
+      />,
+    );
+
+    const terminal = screen.getByTestId("shell-terminal");
+    expect(terminal.getAttribute("data-process-id")).toBe(DEV_PROCESS_ID);
+    expect(terminal.textContent).toBe("restarted");
+  });
+
   it("renders a PTY for ordinary terminal panels", () => {
     render(<TerminalPanel panelId="shell-1" params={{ terminalId: "shell-1" }} />);
 

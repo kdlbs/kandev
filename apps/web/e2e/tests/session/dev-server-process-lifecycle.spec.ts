@@ -81,7 +81,7 @@ async function startDevProcess(apiClient: ApiClient, sessionId: string): Promise
         );
         return res.status;
       },
-      { timeout: 120_000, intervals: [1000, 2000], message: "dev process never started" },
+      { timeout: 90_000, intervals: [1000, 2000], message: "dev process never started" },
     )
     .toBe(200);
 }
@@ -96,6 +96,13 @@ async function expectProcessReaped(pid: number): Promise<void> {
 }
 
 test.describe("dev server process lifecycle", () => {
+  // Each test creates a task, launches an agent, prepares a worktree, starts a
+  // real process, and then waits on asynchronous backend cleanup. That is well
+  // past the 60s default: under it the polls below can never spend the budget
+  // they ask for, so a loaded CI runner fails on the test deadline instead of
+  // on the thing being asserted.
+  test.describe.configure({ timeout: 240_000 });
+
   test("archiving the task stops the dev script, including its background children", async ({
     apiClient,
     seedData,
@@ -145,17 +152,20 @@ test.describe("dev server process lifecycle", () => {
     apiClient,
     seedData,
   }) => {
-    const pidFile = pidFilePath("kandev-dev-stop-");
+    const parentPidFile = pidFilePath("kandev-dev-stop-parent-");
+    const childPidFile = pidFilePath("kandev-dev-stop-child-");
     const { sessionId } = await seedDevScriptTask(
       apiClient,
       seedData,
       "Dev server manual stop",
-      `echo $$ > ${pidFile}; exec sleep 600`,
+      `sleep 600 & echo $! > ${childPidFile}; echo $$ > ${parentPidFile}; wait`,
     );
 
     await startDevProcess(apiClient, sessionId);
-    const pid = await readPidWhenWritten(pidFile);
-    expect(isAlive(pid)).toBe(true);
+    const parentPid = await readPidWhenWritten(parentPidFile);
+    const childPid = await readPidWhenWritten(childPidFile);
+    expect(isAlive(parentPid)).toBe(true);
+    expect(isAlive(childPid)).toBe(true);
 
     const processes = (await (
       await apiClient.rawRequest("GET", `/api/v1/task-sessions/${sessionId}/processes`)
@@ -168,6 +178,7 @@ test.describe("dev server process lifecycle", () => {
       `/api/v1/task-sessions/${sessionId}/processes/${devProcess!.id}/stop`,
     );
 
-    await expectProcessReaped(pid);
+    await expectProcessReaped(parentPid);
+    await expectProcessReaped(childPid);
   });
 });

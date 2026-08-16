@@ -37,10 +37,16 @@ function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts
 
 export { reviewPanelId };
 
-function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string): void {
-  const browserPanel =
+/** The browser panel a preview should reuse: the active one, else the first. */
+function findBrowserPanel(api: DockviewApi) {
+  return (
     (api.activePanel?.api.component === "browser" ? api.activePanel : undefined) ??
-    api.panels.find((panel) => panel.api.component === "browser");
+    api.panels.find((panel) => panel.api.component === "browser")
+  );
+}
+
+function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string): void {
+  const browserPanel = findBrowserPanel(api);
 
   if (browserPanel) {
     browserPanel.api.updateParameters({ url });
@@ -491,6 +497,30 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
         component: "browser",
         title: panelTitle("browser"),
         params: { url: url ?? "" },
+      });
+    },
+    /**
+     * Open the preview browser without stacking a tab per call.
+     *
+     * `addBrowserPanel()` mints `browser:<timestamp>` when it has no URL, so an
+     * automatic open (start dev server, then stop, then start again) left a new
+     * empty tab behind on every cycle, and a URL detected later updated only the
+     * first of them. Explicit "+ > Browser" still uses `addBrowserPanel`, where
+     * a second tab is what the user asked for.
+     */
+    focusOrAddBrowserPanel: (groupId?: string) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      const existing = findBrowserPanel(api);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      addSimplePanel(api, groupId ?? centerGroupId, {
+        id: `browser:${Date.now()}`,
+        component: "browser",
+        title: panelTitle("browser"),
+        params: { url: "" },
       });
     },
     openBrowserPanel: (url: string) => {

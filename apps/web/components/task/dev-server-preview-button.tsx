@@ -32,7 +32,7 @@ export function DevServerPreviewButton({
 }: DevServerPreviewButtonProps) {
   const { t } = useTranslation();
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
+  const focusOrAddBrowserPanel = useDockviewStore((s) => s.focusOrAddBrowserPanel);
   const addDevServerPanel = useDockviewStore((s) => s.addDevServerPanel);
   const dev = useDevServerPreview(activeSessionId);
 
@@ -42,10 +42,10 @@ export function DevServerPreviewButton({
       await dev.stop();
       return;
     }
-    addBrowserPanel();
+    focusOrAddBrowserPanel();
     addDevServerPanel(outputGroupId ?? undefined);
     await dev.start();
-  }, [activeSessionId, dev, addBrowserPanel, addDevServerPanel, outputGroupId]);
+  }, [activeSessionId, dev, focusOrAddBrowserPanel, addDevServerPanel, outputGroupId]);
 
   const label = dev.isRunning ? t("task:stopDevServerPreview") : t("task:startDevServerPreview");
 

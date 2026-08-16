@@ -1,10 +1,29 @@
 import { describe, it, expect } from "vitest";
 import { makeApi, makeStore } from "./dockview-panel-actions.test-utils";
 import type { MockPanel } from "./dockview-panel-actions.test-utils";
-import { buildExtraPanelActions } from "./dockview-panel-actions";
+import { buildExtraPanelActions, buildPanelActions } from "./dockview-panel-actions";
 import { DEV_SERVER_PANEL_ID } from "./layout-manager/constants";
 
 const RIGHT_BOTTOM_GROUP = "group-right-bottom";
+
+describe("focusOrAddBrowserPanel", () => {
+  it("opens one preview browser and focuses it again on later starts", () => {
+    // addBrowserPanel mints browser:<timestamp> when it has no URL, so an
+    // automatic open left a new empty tab behind on every start/stop cycle.
+    const api = makeApi();
+    const store = makeStore(api);
+    const actions = buildPanelActions(store.set, store.get);
+
+    actions.focusOrAddBrowserPanel();
+    actions.focusOrAddBrowserPanel();
+
+    const browsers = api.panels.filter(
+      (panel) => panel.api.component === "browser",
+    ) as unknown as MockPanel[];
+    expect(browsers).toHaveLength(1);
+    expect(browsers[0].isActive).toBe(true);
+  });
+});
 
 describe("addDevServerPanel", () => {
   it("opens the dev-server output panel in the terminal group", () => {

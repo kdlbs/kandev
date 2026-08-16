@@ -9,7 +9,7 @@ const api = vi.hoisted(() => ({
 }));
 
 const dockview = vi.hoisted(() => ({
-  addBrowserPanel: vi.fn(),
+  focusOrAddBrowserPanel: vi.fn(),
   addDevServerPanel: vi.fn(),
 }));
 
@@ -30,6 +30,7 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) => selector(appState),
+  useAppStoreApi: () => ({ getState: () => appState }),
 }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
@@ -90,11 +91,44 @@ describe("DevServerPreviewButton", () => {
     fireEvent.click(screen.getByRole("button", { name: START_LABEL }));
 
     await waitFor(() => expect(api.startProcess).toHaveBeenCalledWith(SESSION_ID, { kind: "dev" }));
-    expect(dockview.addBrowserPanel).toHaveBeenCalled();
+    expect(dockview.focusOrAddBrowserPanel).toHaveBeenCalled();
     expect(dockview.addDevServerPanel).toHaveBeenCalled();
     expect(appState.upsertProcessStatus).toHaveBeenCalledWith(
       expect.objectContaining({ processId: DEV_PROCESS_ID, kind: "dev" }),
     );
+  });
+
+  it("issues a single start when both header controls are clicked at once", async () => {
+    // The control renders in two dockview headers; each has its own pending
+    // flag, so only shared in-flight state can keep the backend's non-atomic
+    // dedup from being raced into a second dev process.
+    let resolveStart: (value: unknown) => void = () => {};
+    api.startProcess.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    render(
+      <>
+        <DevServerPreviewButton className="btn" iconClassName="icon" testId="toggle-a" />
+        <DevServerPreviewButton className="btn" iconClassName="icon" testId="toggle-b" />
+      </>,
+    );
+
+    fireEvent.click(screen.getByTestId("toggle-a"));
+    fireEvent.click(screen.getByTestId("toggle-b"));
+    resolveStart({ process: null });
+
+    await waitFor(() => expect(api.startProcess).toHaveBeenCalledTimes(1));
+  });
+
+  it("reuses the preview browser instead of stacking a tab per start", async () => {
+    renderButton();
+
+    fireEvent.click(screen.getByRole("button", { name: START_LABEL }));
+
+    await waitFor(() => expect(dockview.focusOrAddBrowserPanel).toHaveBeenCalledTimes(1));
   });
 
   it("offers Stop while the dev process is running", () => {

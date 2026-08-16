@@ -23,14 +23,15 @@ export const TerminalPanel = memo(function TerminalPanel({ params }: TerminalPan
 
   const environmentId = useEnvironmentId();
 
-  // A restored layout carries no process id, and the dev process is restarted
-  // under a new id on every start, so the live id is read from the store rather
-  // than frozen into the panel params.
+  // The dev process is restarted under a new id on every start, so the store is
+  // the authoritative source and a `processId` in the panel params is ignored:
+  // a stale one would pin the panel to a process that no longer exists, showing
+  // neither the restarted server's output nor its stopping state.
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const storeDevProcessId = useAppStore((state) =>
     activeSessionId ? state.processes.devProcessBySessionId[activeSessionId] : undefined,
   );
-  const processId = (params.processId as string | undefined) ?? storeDevProcessId;
+  const processId = isDevServer ? storeDevProcessId : undefined;
 
   const devOutput = useAppStore((state) =>
     processId ? (state.processes.outputsByProcessId[processId] ?? "") : "",
