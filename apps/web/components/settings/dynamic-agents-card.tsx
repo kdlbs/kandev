@@ -45,6 +45,9 @@ type DynamicAgentsCardProps = {
 export function DynamicAgentsCard({ agent }: DynamicAgentsCardProps) {
   const { t } = useTranslation();
   const routingEnabled = useFeature("dynamicAgentRouting");
+
+  if (!routingEnabled) return null;
+
   const profiles = agent?.profiles ?? [];
 
   return (
@@ -56,35 +59,20 @@ export function DynamicAgentsCard({ agent }: DynamicAgentsCardProps) {
             {t("agents:dynamicAgents")}
           </CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
-            {routingEnabled
-              ? t("agents:dynamicAgentsDescription")
-              : t("agents:dynamicProfileDisabled")}
+            {t("agents:dynamicAgentsDescription")}
           </p>
         </div>
-        {routingEnabled ? (
-          <Button
-            size="sm"
-            className="min-h-11 cursor-pointer sm:min-h-7"
-            asChild
-            data-testid="new-dynamic-profile"
-          >
-            <Link href={`/settings/agents/${DYNAMIC_AGENT_NAME}?mode=create`}>
-              <IconPlus className="mr-2 h-4 w-4" />
-              {t("agents:newProfile")}
-            </Link>
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            className="min-h-11 sm:min-h-7"
-            disabled
-            data-testid="new-dynamic-profile"
-            title={t("agents:dynamicProfileDisabled")}
-          >
+        <Button
+          size="sm"
+          className="min-h-11 cursor-pointer sm:min-h-7"
+          asChild
+          data-testid="new-dynamic-profile"
+        >
+          <Link href={`/settings/agents/${DYNAMIC_AGENT_NAME}?mode=create`}>
             <IconPlus className="mr-2 h-4 w-4" />
             {t("agents:newProfile")}
-          </Button>
-        )}
+          </Link>
+        </Button>
       </CardHeader>
       <CardContent className="space-y-2 px-3 pb-3">
         {profiles.length > 0 ? (

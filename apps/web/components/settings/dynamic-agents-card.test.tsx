@@ -5,6 +5,10 @@ import type { AgentProfile } from "@/lib/types/http";
 import { agentProfileId } from "@/lib/types/ids";
 import { DynamicAgentsCard } from "./dynamic-agents-card";
 
+const { mockUseFeature } = vi.hoisted(() => ({
+  mockUseFeature: vi.fn(() => true),
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) =>
@@ -22,7 +26,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => true,
+  useFeature: mockUseFeature,
 }));
 
 vi.mock("@/components/routing/app-link", () => ({
@@ -64,7 +68,18 @@ const dynamicProfile: AgentProfile = {
 };
 
 describe("DynamicAgentsCard", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    mockUseFeature.mockReturnValue(true);
+  });
+
+  it("does not render when dynamic routing is disabled", () => {
+    mockUseFeature.mockReturnValue(false);
+
+    render(<DynamicAgentsCard agent={{ profiles: [dynamicProfile] }} />);
+
+    expect(screen.queryByTestId("dynamic-agents-card")).toBeNull();
+  });
 
   it("offers creation and links each existing dynamic profile", () => {
     render(<DynamicAgentsCard agent={{ profiles: [dynamicProfile] }} />);
