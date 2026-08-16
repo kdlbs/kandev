@@ -80,8 +80,8 @@ const POPULAR_SERVERS: Record<string, Record<string, unknown>> = {
 // i18n-exempt: server name and tool ids are config values the user copies verbatim into an agent.
 const KANDEV_MCP_NAME = "Kandev MCP";
 
+// i18n-exempt: server name and tool ids are config values the user copies verbatim into an agent.
 const KANDEV_TOOL_NAMES =
-  // i18n-exempt: server name and tool ids are config values the user copies verbatim into an agent.
   "list_workspaces, list_boards, list_workflow_steps, list_tasks, create_task, update_task";
 
 // i18n-exempt: MCP server product names.

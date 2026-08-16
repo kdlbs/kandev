@@ -148,7 +148,7 @@ function useSessionOptions(taskId: string) {
       const name = profile ? agentProfileDisplayLabel(profile) : t("task:panelAgent");
       return { id: s.id, label: name, index: idx + 1, agentName: profile?.agent_name };
     });
-  }, [sessions, agentProfiles]);
+  }, [sessions, agentProfiles, t]);
 }
 
 function isMissingCompatibleProfile(

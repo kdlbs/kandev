@@ -6,6 +6,7 @@ import { StorageSettingHelp } from "./storage-setting-help";
 import { SettingRow } from "./storage-policy-fields";
 
 // Keep this display snapshot in sync with backend DependencyDirectoryAllowlist.
+// i18n-exempt: dependency directory name on disk.
 const DEPENDENCY_DIRECTORIES = [
   "node_modules",
   "bower_components",
@@ -17,7 +18,6 @@ const DEPENDENCY_DIRECTORIES = [
   ".tox",
   ".nox",
   "__pypackages__",
-  // i18n-exempt: dependency directory name on disk.
   "Pods",
   ".gradle",
 ] as const;

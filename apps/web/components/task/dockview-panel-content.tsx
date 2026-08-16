@@ -27,12 +27,17 @@ import { TaskPlanPanel } from "./task-plan-panel";
 import { TerminalPanel } from "./terminal-panel";
 import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
+import { useTranslation } from "react-i18next";
 
-export function resolveChatPanelTitle(agentLabel: string | null | undefined): string {
-  return agentLabel || t("task:panelAgent");
+export function resolveChatPanelTitle(
+  agentLabel: string | null | undefined,
+  translate: (key: string) => string,
+): string {
+  return agentLabel || translate("task:panelAgent");
 }
 
 function useChatSessionTitle(panelId: string, sessionId: string | null) {
+  const { t } = useTranslation();
   const agentLabel = useAppStore((state) => {
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
@@ -47,9 +52,11 @@ function useChatSessionTitle(panelId: string, sessionId: string | null) {
     const parts = profile.label.split(" \u2022 ");
     return parts[1] || parts[0] || profile.label;
   });
+  // `t` is a dependency: a locale switch changes the title with no change to
+  // the panel or the label, and without it the tab keeps the old language.
   useEffect(() => {
-    setPanelTitle(panelId, resolveChatPanelTitle(agentLabel));
-  }, [panelId, agentLabel]);
+    setPanelTitle(panelId, resolveChatPanelTitle(agentLabel, t));
+  }, [panelId, agentLabel, t]);
 }
 
 function ChatContent({ panelId, params }: { panelId: string; params: Record<string, unknown> }) {
@@ -125,6 +132,7 @@ function DiffViewerContent({
 }
 
 function ChangesContent({ panelId }: { panelId: string }) {
+  const { t } = useTranslation();
   const addDiffViewerPanel = useDockviewStore((s) => s.addDiffViewerPanel);
   const addFileDiffPanel = useDockviewStore((s) => s.addFileDiffPanel);
   const addCommitDetailPanel = useDockviewStore((s) => s.addCommitDetailPanel);
@@ -139,7 +147,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
     const title =
       totalCount > 0 ? `${t("task:panelChanges")} (${totalCount})` : t("task:panelChanges");
     setPanelTitle(panelId, title);
-  }, [totalCount, panelId]);
+  }, [totalCount, panelId, t]);
 
   const handleEditFile = useCallback(
     (path: string, repo?: string) => openFile(path, repo),

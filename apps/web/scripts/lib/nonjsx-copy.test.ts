@@ -16,6 +16,9 @@ import { describe, expect, it } from "vitest";
 
 import { findNonJsxCopy, looksLikeCopy } from "./nonjsx-copy.mjs";
 
+/** Stand-in copy, reused so the fixtures differ only in the shape under test. */
+const COPY = "Disk usage";
+
 /** The values reported for `source`, in order. */
 function copyIn(source: string, excludes: string[] = []) {
   return findNonJsxCopy(source, { filename: "sample.tsx", excludes }).findings.map((f) => f.value);
@@ -89,7 +92,7 @@ describe("looksLikeCopy", () => {
 describe("findNonJsxCopy", () => {
   it("finds a label in a SCREAMING_CASE table, which eslint skips entirely", () => {
     const source = `const ROWS = [{ id: "disk", label: "Disk usage" }];`;
-    expect(copyIn(source)).toEqual(["Disk usage"]);
+    expect(copyIn(source)).toEqual([COPY]);
     expect(kindsIn(source)).toEqual(["config-table"]);
   });
 
@@ -186,13 +189,41 @@ describe("i18n-exempt markers", () => {
     expect(copyIn(source)).toEqual([]);
   });
 
+  it("does not leak from one statement to a later one in the same function", () => {
+    // REGRESSION (review of #2711): the marker used to attach by LINE RANGE —
+    // every line from an enclosing target's start down to the finding — so a
+    // marker on one statement inside a function silenced every literal after it
+    // in that function. Attachment is now by Babel's `leadingComments`, which
+    // binds a comment to exactly the node it precedes.
+    const source = [
+      `function build(flag) {`,
+      `  // i18n-exempt: persisted preset seed.`,
+      `  const seeded = "New action";`,
+      `  if (flag) return "Visible user label";`,
+      `  return seeded;`,
+      `}`,
+    ].join("\n");
+    expect(copyIn(source)).toEqual(["Visible user label"]);
+  });
+
+  it("silences one row of a config table without covering its siblings", () => {
+    const source = [
+      `const ROWS = [`,
+      `  // i18n-exempt: directory name on disk.`,
+      `  { label: "Pods" },`,
+      `  { label: "Disk usage" },`,
+      `];`,
+    ].join("\n");
+    expect(copyIn(source)).toEqual([COPY]);
+  });
+
   it("does not silence the next statement as well", () => {
     const source = [
       `// i18n-exempt: persisted preset seed.`,
       `const PRESETS = [{ label: "New action" }];`,
       `const HEADERS = [{ label: "Disk usage" }];`,
     ].join("\n");
-    expect(copyIn(source)).toEqual(["Disk usage"]);
+    expect(copyIn(source)).toEqual([COPY]);
   });
 
   it("rejects a marker with no reason instead of honouring it", () => {
@@ -202,7 +233,7 @@ describe("i18n-exempt markers", () => {
     const source = [`// i18n-exempt`, `const ROWS = [{ label: "Disk usage" }];`].join("\n");
     const result = findNonJsxCopy(source, { filename: "sample.tsx" });
     expect(result.markersWithoutReason).toEqual([1]);
-    expect(result.findings.map((f) => f.value)).toEqual(["Disk usage"]);
+    expect(result.findings.map((f) => f.value)).toEqual([COPY]);
   });
 });
 

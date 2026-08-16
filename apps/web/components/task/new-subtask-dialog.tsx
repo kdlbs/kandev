@@ -187,7 +187,7 @@ function useSessionOptions(taskId: string) {
       const name = parts?.[1] || parts?.[0] || t("task:panelAgent");
       return { id: s.id, label: name, index: idx + 1, agentName: profile?.agent_name };
     });
-  }, [sessions, agentProfiles]);
+  }, [sessions, agentProfiles, t]);
 }
 
 function useExecutorProfiles(

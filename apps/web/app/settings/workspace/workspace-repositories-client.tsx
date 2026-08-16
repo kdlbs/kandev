@@ -198,8 +198,8 @@ async function saveExistingRepository({
     repo.scripts.map((script, index) => {
       if (script.id.startsWith("temp-script-"))
         return createRepositoryScriptAction({
-          // i18n-exempt: persisted script name, sent to a shell verbatim.
           repository_id: repoId,
+          // i18n-exempt: persisted script name, sent to a shell verbatim.
           name: script.name.trim() || "New Script",
           command: script.command.trim() || 'echo ""',
           position: script.position ?? index,

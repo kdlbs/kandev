@@ -29,11 +29,11 @@ export type GitLabWatchForm = {
 // locale would keep that locale's prompt forever, and the agent reads it as an
 // instruction rather than as UI copy. Same contract as
 // DEFAULT_ISSUE_WATCH_PROMPT in components/github/issue-watch-placeholders.ts.
+// i18n-exempt: default prompt, persisted and sent verbatim to the agent.
 const DEFAULT_REVIEW_PROMPT =
-  // i18n-exempt: default prompt, persisted and sent verbatim to the agent.
   "Review GitLab merge request {{mr.url}}. Summarize risks and leave actionable feedback.";
+// i18n-exempt: default prompt, persisted and sent verbatim to the agent.
 const DEFAULT_ISSUE_PROMPT =
-  // i18n-exempt: default prompt, persisted and sent verbatim to the agent.
   "Investigate GitLab issue {{issue.url}} and implement the requested change.";
 
 export function makeWatchForm(kind: GitLabWatchKind, workspaceId: string): GitLabWatchForm {

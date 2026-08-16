@@ -57,6 +57,7 @@ import { useRemoteContributionResolution } from "./use-remote-contribution-resol
 import { useTranslation } from "react-i18next";
 
 function useChangesPanelStoreData() {
+  const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useEnvironmentSessionId();
   const taskTitle = useAppStore((state) => {
@@ -69,9 +70,12 @@ function useChangesPanelStoreData() {
   const activeSessionMetadata = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.metadata : undefined,
   );
+  // `t` is a dependency even though the helper resolves through the module-level
+  // translator: without it the memo returns the labels built under the previous
+  // locale and the panel never restates them.
   const gitCredentialDisplay = useMemo(
     () => getGitCredentialDisplay(activeSessionMetadata),
-    [activeSessionMetadata],
+    [activeSessionMetadata, t],
   );
   return {
     activeTaskId,

@@ -101,13 +101,27 @@ const excludes = noLiteralStringOptions.words?.exclude ?? [];
 for (const repoPath of targets) {
   if (!/\.tsx?$/.test(repoPath) || /\.(test|spec|d)\.tsx?$/.test(repoPath)) continue;
   const source = readFileSync(path.join(REPO_ROOT, repoPath), "utf8");
-  const { findings } = findNonJsxCopy(source, { filename: repoPath, excludes });
+  const { findings, markersWithoutReason } = findNonJsxCopy(source, {
+    filename: repoPath,
+    excludes,
+  });
   for (const finding of findings) {
     record(
       repoPath,
       addedSet.has(repoPath),
       finding.line,
       `Hardcoded copy in a non-JSX position [${finding.kind}]: ${JSON.stringify(finding.value)}`,
+    );
+  }
+  // A reasonless `// i18n-exempt` still SILENCES the findings around it, so
+  // dropping this list would let new code opt out of the check by writing the
+  // marker and nothing else — the one hole the mandatory reason exists to close.
+  for (const line of markersWithoutReason) {
+    record(
+      repoPath,
+      addedSet.has(repoPath),
+      line,
+      "i18n-exempt marker with no reason — write `// i18n-exempt: <why this is not copy>`",
     );
   }
 }

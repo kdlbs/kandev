@@ -171,6 +171,7 @@ function ToolsPreview() {
  * locale — the surrounding sentence is the only copy, and it interpolates them
  * so the pseudo-locale cannot turn them into dead pointers.
  */
+// i18n-exempt: third-party product names.
 const SNIPPET_CARDS: Array<{
   title: string;
   build: (streamableUrl: string) => string;
@@ -183,7 +184,6 @@ const SNIPPET_CARDS: Array<{
   /** File the one-liner writes to, as the user would recognise it. */
   cliTarget?: string;
 }> = [
-  // i18n-exempt: third-party product names.
   {
     title: "Claude Code",
     path: "~/.claude.json",

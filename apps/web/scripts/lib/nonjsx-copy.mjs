@@ -241,19 +241,22 @@ function enclosingFunction(ancestors) {
  * statement would need a marker on each, repeating the same sentence four times
  * and inviting whoever adds the fifth to skip it.
  *
- * So the enclosing FUNCTION counts too. That is broader than it looks safe, and
- * it is bounded by the reason being mandatory: silencing a whole component takes
- * writing down why, in a diff a reviewer reads.
+ * So the enclosing FUNCTION counts too — but ONLY via a marker that LEADS the
+ * function declaration itself. An earlier version scanned every line from each
+ * target's start down to the finding, which meant a marker on one statement
+ * inside a function silenced every literal after it in that function: exempting
+ * a persisted assignment on line 10 also passed a `return "Visible label"` on
+ * line 30. Matching leading comments makes the attachment explicit rather than
+ * positional.
  */
 function exemptionTargets(ancestors) {
-  const targets = [];
-  for (let index = ancestors.length - 1; index >= 0; index -= 1) {
-    const candidate = ancestors[index];
-    if (/(Statement|Declaration)$/.test(candidate.type) || FUNCTION_TYPES.has(candidate.type)) {
-      targets.push(candidate);
-    }
-  }
-  return targets;
+  // Every ancestor, because a leading comment is attached by Babel to exactly
+  // the node it precedes and so cannot leak sideways. That makes the natural
+  // placements all work and all stay precise: above one row of a config table
+  // it covers that row, above the `const TABLE = [...]` it covers the table,
+  // above a prompt builder it covers that function. What it will not do is
+  // reach a sibling — the case that made the previous line-range version wrong.
+  return [...ancestors].reverse();
 }
 
 /**
@@ -389,12 +392,14 @@ export function findNonJsxCopy(source, options = {}) {
 
   const report = (node, ancestors, kind, context, value) => {
     const line = node.loc.start.line;
-    // A marker on the line above any enclosing statement or function — through
-    // to the finding itself — silences it.
+    // A marker silences a finding when it LEADS one of the finding's enclosing
+    // statements or functions, or trails the finding's own line. Babel's
+    // `leadingComments` is what makes "leads" precise; a line-range scan let a
+    // marker anywhere inside a function cover everything after it.
+    if (withReason.has(line)) return;
     for (const target of exemptionTargets(ancestors)) {
-      for (let candidate = target.loc.start.line - 1; candidate <= line; candidate += 1) {
-        if (withReason.has(candidate)) return;
-      }
+      const leading = target.leadingComments ?? [];
+      if (leading.some((comment) => withReason.has(comment.loc.start.line))) return;
     }
     const id = `${line}:${node.loc.start.column}`;
     if (seen.has(id)) return;
