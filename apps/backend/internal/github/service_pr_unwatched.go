@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/events"
-	"github.com/kandev/kandev/internal/events/bus"
 	"go.uber.org/zap"
 )
 
@@ -154,19 +152,13 @@ func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, stat
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
 
-	// AC-38/AC-18c: the counter fires at the populated-ness decision point,
-	// before the write is attempted, and survives write failure.
-	incTaskPROutcomeSync(status.OutcomeFieldsPopulated)
-	if err := s.store.UpdateTaskPR(ctx, tp); err != nil {
-		return fmt.Errorf("update task PR: %w", err)
-	}
-	if changed && s.eventBus != nil {
-		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
-		if err := s.eventBus.Publish(ctx, events.GitHubTaskPRUpdated, event); err != nil {
-			s.logger.Debug("failed to publish task PR updated event", zap.Error(err))
-		}
-	}
-	return nil
+	// AC-18: publish must reflect the row as stored, not this call's
+	// in-memory tp — UpdateTaskPR latches AutoMergeObservedAt through
+	// COALESCE, so a concurrent writer can persist an earlier timestamp than
+	// this call's own resolved value. persistAndPublishTaskPRSync already
+	// re-reads before publishing for exactly this reason (codex [P2] on the
+	// SyncTaskPR path); reuse it here instead of duplicating the write.
+	return s.persistAndPublishTaskPRSync(ctx, tp, changed, status.OutcomeFieldsPopulated)
 }
 
 // fetchUnwatchedTaskPRs prefers the batched GraphQL query — one call for the

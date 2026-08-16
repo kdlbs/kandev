@@ -498,3 +498,70 @@ func TestUnwatchedTaskPRs_Selection(t *testing.T) {
 		t.Errorf("selected PRs = %d, %d; want 1, 6", got[0].PRNumber, got[1].PRNumber)
 	}
 }
+
+// TestReconcileTaskPRLifecycle_PublishesReReadValueNotStaleInMemoryOne is the
+// AC-18 regression on the unwatched-sync path, mirroring
+// TestPersistAndPublishTaskPRSync_PublishesReReadValueNotStaleInMemoryOne in
+// service_pr_outcome_sync_test.go for the codex [P2] race on the other
+// writer. reconcileTaskPRLifecycle used to publish its own in-memory tp
+// directly after UpdateTaskPR; because UpdateTaskPR persists
+// AutoMergeObservedAt through COALESCE(auto_merge_observed_at, ?), a
+// concurrent writer that lands first leaves the stored column holding an
+// earlier timestamp than this call's own resolved value, and the old code
+// would broadcast the wrong one. It now delegates the write+publish to
+// persistAndPublishTaskPRSync, which re-reads before publishing.
+func TestReconcileTaskPRLifecycle_PublishesReReadValueNotStaleInMemoryOne(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedUnwatchedTaskPR(t, store, "task-unwatched-p2-race", 1293, "feature/first")
+
+	tp, err := store.GetTaskPRByRepoAndNumber(ctx, "task-unwatched-p2-race", "repo-1", 1293)
+	if err != nil || tp == nil {
+		t.Fatalf("GetTaskPRByRepoAndNumber: err=%v row=%v", err, tp)
+	}
+
+	// Simulate a concurrent sync that already landed its own write: the DB
+	// now holds persistedAt, set while this call's own tp (below) still
+	// reflects the pre-race value it read moments earlier.
+	concurrentWriter := *tp
+	persistedAt := time.Now().UTC()
+	concurrentWriter.AutoMergeObservedAt = &persistedAt
+	if err := store.UpdateTaskPR(ctx, &concurrentWriter); err != nil {
+		t.Fatalf("simulate concurrent writer: %v", err)
+	}
+
+	// This call's stale in-memory view, computed before the concurrent
+	// writer's timestamp above landed.
+	staleObservedAt := persistedAt.Add(-time.Minute)
+	tp.AutoMergeObservedAt = &staleObservedAt
+
+	updated := subscribeTaskPRUpdated(t, svc)
+
+	mergedAt := time.Now().UTC()
+	status := &PRStatus{
+		PR: &PR{
+			Number: 1293, State: prStateMerged, MergedAt: &mergedAt,
+			HeadBranch: "feature/first", BaseBranch: "main",
+			RepoOwner: "owner", RepoName: "repo",
+		},
+	}
+
+	if err := svc.reconcileTaskPRLifecycle(ctx, tp, status); err != nil {
+		t.Fatalf("reconcileTaskPRLifecycle: %v", err)
+	}
+
+	published := awaitTaskPRUpdated(t, updated)
+	if published.AutoMergeObservedAt == nil || !published.AutoMergeObservedAt.Equal(persistedAt) {
+		t.Fatalf("published AutoMergeObservedAt = %v, want the re-read persisted value %v, not the stale in-memory %v",
+			published.AutoMergeObservedAt, persistedAt, staleObservedAt)
+	}
+
+	got, err := store.GetTaskPRByID(ctx, tp.ID)
+	if err != nil {
+		t.Fatalf("GetTaskPRByID: %v", err)
+	}
+	if got.AutoMergeObservedAt == nil || !got.AutoMergeObservedAt.Equal(persistedAt) {
+		t.Fatalf("persisted AutoMergeObservedAt = %v, want the concurrent writer's %v preserved by COALESCE",
+			got.AutoMergeObservedAt, persistedAt)
+	}
+}

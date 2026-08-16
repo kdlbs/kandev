@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -228,8 +229,12 @@ func assertOutcomeColumnsRoundTrip(
 }
 
 // TestReplaceTaskPR_PreservesAutoMergeLatch covers AC-43: a non-populating
-// observation must not clobber an already-latched auto_merge_observed_at
-// just because ReplaceTaskPR's DELETE+INSERT upsert touches the row.
+// observation must not clobber any of the five outcome columns just because
+// ReplaceTaskPR's DELETE+INSERT upsert touches the row. Seeding and
+// asserting all five, not just the latch, matters here: the spec's
+// verification-surfaces section calls out that a latch-only implementation
+// can pass a latch-only test while silently zeroing is_draft, changed_files,
+// merged_by_login and closed_by_login.
 func TestReplaceTaskPR_PreservesAutoMergeLatch(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -238,6 +243,10 @@ func TestReplaceTaskPR_PreservesAutoMergeLatch(t *testing.T) {
 	}
 
 	latchedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	seedIsDraft := true
+	seedChangedFiles := 9
+	seedMergedBy := "carlosflorencio"
+	seedClosedBy := "nova28"
 	seed := &TaskPR{
 		WorkspaceID:         "ws-latch",
 		TaskID:              "task-latch-replace",
@@ -248,6 +257,10 @@ func TestReplaceTaskPR_PreservesAutoMergeLatch(t *testing.T) {
 		PRTitle:             "latch seed",
 		State:               "open",
 		CreatedAt:           time.Now().UTC(),
+		IsDraft:             &seedIsDraft,
+		ChangedFiles:        &seedChangedFiles,
+		MergedByLogin:       &seedMergedBy,
+		ClosedByLogin:       &seedClosedBy,
 		AutoMergeObservedAt: &latchedAt,
 	}
 	if err := store.CreateTaskPR(ctx, seed); err != nil {
@@ -269,7 +282,9 @@ func TestReplaceTaskPR_PreservesAutoMergeLatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReplaceTaskPR: %v", err)
 	}
-	if replaced.AutoMergeObservedAt == nil || !replaced.AutoMergeObservedAt.Equal(latchedAt) {
+	assertOutcomeColumnsRoundTrip(t, "ReplaceTaskPR return value (preserved)",
+		replaced, seedIsDraft, seedChangedFiles, seedMergedBy, seedClosedBy)
+	if !replaced.AutoMergeObservedAt.Equal(latchedAt) {
 		t.Fatalf("ReplaceTaskPR return value: AutoMergeObservedAt = %v, want preserved %v", replaced.AutoMergeObservedAt, latchedAt)
 	}
 
@@ -277,6 +292,8 @@ func TestReplaceTaskPR_PreservesAutoMergeLatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTaskPRByRepoAndNumber: %v", err)
 	}
+	assertOutcomeColumnsRoundTrip(t, "ReplaceTaskPR stored row (preserved)",
+		got, seedIsDraft, seedChangedFiles, seedMergedBy, seedClosedBy)
 	if got == nil || got.AutoMergeObservedAt == nil || !got.AutoMergeObservedAt.Equal(latchedAt) {
 		t.Fatalf("stored row: AutoMergeObservedAt = %v, want preserved %v", got, latchedAt)
 	}
@@ -284,8 +301,9 @@ func TestReplaceTaskPR_PreservesAutoMergeLatch(t *testing.T) {
 
 // TestRestoreTaskPR_PreservesAutoMergeLatch mirrors
 // TestReplaceTaskPR_PreservesAutoMergeLatch for the relink-after-detach path
-// (AC-43): RestoreTaskPR must carry the deleted row's auto_merge_observed_at
-// forward when the relink's observation doesn't populate outcome fields.
+// (AC-43): RestoreTaskPR must carry the deleted row's outcome columns
+// forward — all five, not just auto_merge_observed_at — when the relink's
+// observation doesn't populate outcome fields.
 func TestRestoreTaskPR_PreservesAutoMergeLatch(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -294,6 +312,10 @@ func TestRestoreTaskPR_PreservesAutoMergeLatch(t *testing.T) {
 	}
 
 	latchedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	seedIsDraft := true
+	seedChangedFiles := 3
+	seedMergedBy := "carlosflorencio"
+	seedClosedBy := "nova28"
 	seed := &TaskPR{
 		WorkspaceID:         "ws-latch",
 		TaskID:              "task-latch-restore",
@@ -304,6 +326,10 @@ func TestRestoreTaskPR_PreservesAutoMergeLatch(t *testing.T) {
 		PRTitle:             "latch seed",
 		State:               "open",
 		CreatedAt:           time.Now().UTC(),
+		IsDraft:             &seedIsDraft,
+		ChangedFiles:        &seedChangedFiles,
+		MergedByLogin:       &seedMergedBy,
+		ClosedByLogin:       &seedClosedBy,
 		AutoMergeObservedAt: &latchedAt,
 	}
 	if err := store.CreateTaskPR(ctx, seed); err != nil {
@@ -322,7 +348,157 @@ func TestRestoreTaskPR_PreservesAutoMergeLatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestoreTaskPR: %v", err)
 	}
-	if restored == nil || restored.AutoMergeObservedAt == nil || !restored.AutoMergeObservedAt.Equal(latchedAt) {
+	if restored == nil {
+		t.Fatalf("RestoreTaskPR: row not found")
+	}
+	assertOutcomeColumnsRoundTrip(t, "RestoreTaskPR (preserved)",
+		restored, seedIsDraft, seedChangedFiles, seedMergedBy, seedClosedBy)
+	if restored.AutoMergeObservedAt == nil || !restored.AutoMergeObservedAt.Equal(latchedAt) {
 		t.Fatalf("RestoreTaskPR: AutoMergeObservedAt = %v, want preserved %v", restored, latchedAt)
+	}
+}
+
+// TestReplaceTaskPR_ConcurrentWritersBothLand is the AC-43a regression:
+// unlike TestUpdateTaskPR_AutoMergeLatchIsAtomicUnderConcurrentStaleWrites
+// (which must manufacture a stale-read scenario because UpdateTaskPR has no
+// injectable pause point), ReplaceTaskPR's read-resolve-write lives entirely
+// inside one BeginTxx/Commit and the store's writer connection pool is
+// SetMaxOpenConns(1) (see newTestStore), so two real concurrent goroutines
+// calling ReplaceTaskPR are genuinely, deterministically serialized by the
+// pool rather than interleaving — which is exactly the guarantee AC-43a
+// requires. This launches two goroutines that each populate a DIFFERENT
+// outcome field (one resolves merged_by_login, the other resolves
+// closed_by_login, each preserving the field it doesn't touch) and asserts
+// the final row carries BOTH contributions. If the outgoing read were taken
+// outside the transaction (or against a stale snapshot) — the defect class
+// the spec calls "invisible in a serial test" — whichever goroutine
+// committed last would silently revert the other's write, and this would be
+// flaky/order-dependent instead of reliably showing both fields set.
+func TestReplaceTaskPR_ConcurrentWritersBothLand(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-race-replace', 'ws-race')`); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	seed := &TaskPR{
+		WorkspaceID: "ws-race", TaskID: "task-race-replace", Owner: "kdlbs", Repo: "kandev",
+		PRNumber: 6003, PRURL: "https://github.com/kdlbs/kandev/pull/6003", PRTitle: "race seed",
+		State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, seed); err != nil {
+		t.Fatalf("seed CreateTaskPR: %v", err)
+	}
+
+	mergerStatus := &PRStatus{
+		PR:                     &PR{MergedByLogin: "carlosflorencio"},
+		OutcomeFieldsPopulated: true,
+	}
+	closerStatus := &PRStatus{
+		ClosedByLogin:               "nova28",
+		ClosureAttributionPopulated: true,
+	}
+	replaceWith := func(title string) *TaskPR {
+		return &TaskPR{
+			WorkspaceID: "ws-race", TaskID: "task-race-replace", Owner: "kdlbs", Repo: "kandev",
+			PRNumber: 6003, PRURL: "https://github.com/kdlbs/kandev/pull/6003", PRTitle: title,
+			State: "closed", CreatedAt: time.Now().UTC(),
+		}
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if _, err := store.ReplaceTaskPR(ctx, replaceWith("replaced by merger"), mergerStatus); err != nil {
+			errs <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if _, err := store.ReplaceTaskPR(ctx, replaceWith("replaced by closer"), closerStatus); err != nil {
+			errs <- err
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("ReplaceTaskPR: %v", err)
+	}
+
+	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-race-replace", "", 6003)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskPRByRepoAndNumber: err=%v row=%v", err, got)
+	}
+	if got.MergedByLogin == nil || *got.MergedByLogin != "carlosflorencio" {
+		t.Errorf("MergedByLogin = %v, want %q — the merger goroutine's write was lost to a non-serialized read",
+			got.MergedByLogin, "carlosflorencio")
+	}
+	if got.ClosedByLogin == nil || *got.ClosedByLogin != "nova28" {
+		t.Errorf("ClosedByLogin = %v, want %q — the closer goroutine's write was lost to a non-serialized read",
+			got.ClosedByLogin, "nova28")
+	}
+}
+
+// TestRestoreTaskPR_ConcurrentWritersBothLand mirrors
+// TestReplaceTaskPR_ConcurrentWritersBothLand for RestoreTaskPR's own
+// in-transaction read-resolve-write (AC-43a).
+func TestRestoreTaskPR_ConcurrentWritersBothLand(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-race-restore', 'ws-race')`); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	seed := &TaskPR{
+		WorkspaceID: "ws-race", TaskID: "task-race-restore", Owner: "kdlbs", Repo: "kandev",
+		PRNumber: 6004, PRURL: "https://github.com/kdlbs/kandev/pull/6004", PRTitle: "race seed",
+		State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, seed); err != nil {
+		t.Fatalf("seed CreateTaskPR: %v", err)
+	}
+
+	basePR := PR{
+		Number: 6004, RepoOwner: "kdlbs", RepoName: "kandev",
+		HTMLURL: "https://github.com/kdlbs/kandev/pull/6004", Title: "restored", State: "open",
+	}
+	mergerPR := basePR
+	mergerPR.MergedByLogin = "carlosflorencio"
+	mergerStatus := &PRStatus{PR: &mergerPR, OutcomeFieldsPopulated: true}
+	closerPR := basePR
+	closerStatus := &PRStatus{PR: &closerPR, ClosedByLogin: "nova28", ClosureAttributionPopulated: true}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if _, err := store.RestoreTaskPR(ctx, "task-race-restore", "", mergerStatus); err != nil {
+			errs <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if _, err := store.RestoreTaskPR(ctx, "task-race-restore", "", closerStatus); err != nil {
+			errs <- err
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("RestoreTaskPR: %v", err)
+	}
+
+	got, err := store.GetTaskPRByRepoAndNumber(ctx, "task-race-restore", "", 6004)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskPRByRepoAndNumber: err=%v row=%v", err, got)
+	}
+	if got.MergedByLogin == nil || *got.MergedByLogin != "carlosflorencio" {
+		t.Errorf("MergedByLogin = %v, want %q — the merger goroutine's write was lost to a non-serialized read",
+			got.MergedByLogin, "carlosflorencio")
+	}
+	if got.ClosedByLogin == nil || *got.ClosedByLogin != "nova28" {
+		t.Errorf("ClosedByLogin = %v, want %q — the closer goroutine's write was lost to a non-serialized read",
+			got.ClosedByLogin, "nova28")
 	}
 }

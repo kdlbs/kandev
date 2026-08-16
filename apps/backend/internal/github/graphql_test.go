@@ -189,6 +189,24 @@ func TestPRFieldsBlock_RequestsOutcomeFields(t *testing.T) {
 	}
 }
 
+// TestPRFieldsBlock_PinsLastOneForClosedEventOrdering is the AC-08a
+// regression: closedEventActor (below) trusts the query to hand it at most
+// one timelineItems node and unconditionally reads nodes[0], so "most
+// recent closure" is guaranteed entirely by the GraphQL connection argument,
+// not by any Go-side ordering logic. TestPRFieldsBlock_RequestsOutcomeFields
+// only substring-matches "CLOSED_EVENT", which stays green if `last: 1` were
+// changed to `first: N` — GitHub connection ordering is oldest-first, so
+// `first: N` would silently attribute closure to the PR's FIRST close
+// instead of its latest one across a reopen cycle, with every existing
+// single-node test still passing. Pin the exact argument.
+func TestPRFieldsBlock_PinsLastOneForClosedEventOrdering(t *testing.T) {
+	block := prFieldsBlock()
+	const want = "timelineItems(last: 1, itemTypes: CLOSED_EVENT)"
+	if !strings.Contains(block, want) {
+		t.Errorf("prFieldsBlock() = %s, want it to contain %q", block, want)
+	}
+}
+
 func TestBuildBatchedBranchQuery_AliasesAllBranches(t *testing.T) {
 	q, _ := buildBatchedBranchQuery([]graphQLBranchRef{
 		{Owner: "o", Repo: "r", Branch: "feat-1"},
@@ -315,6 +333,32 @@ func TestConvertBatchedPRResult_NullActorLeavesAttributionUnpopulated(t *testing
 			t.Error("ClosureAttributionPopulated = true, want false")
 		}
 	})
+}
+
+// TestConvertBatchedPRResult_ClosedEventActorReflectsLatestClosureAfterReopen
+// is the AC-08a close-reopen-close regression. A PR closed by "alice",
+// reopened, then closed again by "bob" must attribute closure to "bob" — the
+// PR's CURRENT closure, not its first one ever. `timelineItems(last: 1, ...)`
+// is what makes this true: GitHub only ever sends the single most-recent
+// CLOSED_EVENT node in the slice this test constructs, so decoding it and
+// reading nodes[0] (closedEventActor's actual logic) yields "bob". This
+// documents the semantic the pinned `last: 1` argument
+// (TestPRFieldsBlock_PinsLastOneForClosedEventOrdering) exists to guarantee.
+func TestConvertBatchedPRResult_ClosedEventActorReflectsLatestClosureAfterReopen(t *testing.T) {
+	raw := &batchedPRResult{State: "CLOSED"}
+	// What GitHub returns for timelineItems(last: 1, itemTypes: CLOSED_EVENT)
+	// after alice's close, a reopen, then bob's close: only bob's event.
+	raw.TimelineItems.Nodes = []timelineClosedEventNode{
+		{Actor: &timelineActor{Login: "bob"}},
+	}
+	status := convertBatchedPRResult(raw, "kdlbs", "kandev", 3001)
+	if !status.ClosureAttributionPopulated {
+		t.Fatal("ClosureAttributionPopulated = false, want true")
+	}
+	if status.ClosedByLogin != "bob" {
+		t.Errorf("ClosedByLogin = %q, want %q (the reopen cycle's later closer, not alice's earlier close)",
+			status.ClosedByLogin, "bob")
+	}
 }
 
 func TestRunBatchedPRQuery_DecodesAliasesBackToRefs(t *testing.T) {
