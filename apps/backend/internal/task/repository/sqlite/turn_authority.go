@@ -32,6 +32,21 @@ func turnAuthorityPredicate(driverName, turnAlias string) string {
 	)`, pending, attempted, turnAlias)
 }
 
+// turnHistoryPredicate keeps live prompt reservations out of client history.
+// An attempt marker is authority for crash recovery, but not publication: the
+// reservation can still be rejected and rolled back without a turn event.
+func turnHistoryPredicate(driverName, turnAlias string) string {
+	pending := turnDispatchPendingPredicate(driverName, turnAlias)
+	return fmt.Sprintf(`(
+		NOT (%s)
+		OR EXISTS (
+			SELECT 1
+			FROM task_session_messages turn_history_message
+			WHERE turn_history_message.turn_id = %s.id
+		)
+	)`, pending, turnAlias)
+}
+
 func turnDispatchPendingPredicate(driverName, turnAlias string) string {
 	return turnMetadataFlagPredicate(
 		driverName, turnAlias, models.TurnMetaKeyPromptDispatchPending,

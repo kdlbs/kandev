@@ -2091,7 +2091,10 @@ func TestTurnReadsHideEmptyUnpublishedReservationUntilMessageEvidence(t *testing
 		{
 			ID: "turn-unpublished", TaskSessionID: sessionID, TaskID: taskID,
 			StartedAt: base.Add(time.Minute),
-			Metadata:  map[string]interface{}{models.TurnMetaKeyPromptDispatchPending: true},
+			Metadata: map[string]interface{}{
+				models.TurnMetaKeyPromptDispatchPending:   true,
+				models.TurnMetaKeyPromptDispatchAttempted: true,
+			},
 		},
 	} {
 		if err := repo.CreateTurn(ctx, turn); err != nil {
@@ -2103,8 +2106,8 @@ func TestTurnReadsHideEmptyUnpublishedReservationUntilMessageEvidence(t *testing
 	if err != nil {
 		t.Fatalf("GetActiveTurnBySessionID: %v", err)
 	}
-	if active.ID != "turn-accepted" {
-		t.Fatalf("active turn = %q, want accepted predecessor", active.ID)
+	if active.ID != "turn-unpublished" {
+		t.Fatalf("active turn = %q, want attempted reservation", active.ID)
 	}
 	listed, err := repo.ListTurnsBySession(ctx, sessionID)
 	if err != nil {

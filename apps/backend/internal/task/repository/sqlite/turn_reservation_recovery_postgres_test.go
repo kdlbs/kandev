@@ -76,7 +76,8 @@ func TestPostgresListTurnsHidesEmptyReservationUntilMessageEvidence(t *testing.T
 	base := time.Date(2026, time.August, 16, 9, 0, 0, 0, time.UTC)
 	createRecoveryTurn(t, repo, taskID, sessionID, "turn-accepted-pg", base, nil)
 	createRecoveryTurn(t, repo, taskID, sessionID, "turn-reserved-pg", base.Add(time.Minute), map[string]interface{}{
-		models.TurnMetaKeyPromptDispatchPending: true,
+		models.TurnMetaKeyPromptDispatchPending:   true,
+		models.TurnMetaKeyPromptDispatchAttempted: true,
 	})
 
 	listed, err := repo.ListTurnsBySession(ctx, sessionID)

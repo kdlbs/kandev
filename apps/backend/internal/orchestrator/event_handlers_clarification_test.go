@@ -1381,6 +1381,61 @@ func TestClarificationWatchdogExpirationPreservesSuccessorEntry(t *testing.T) {
 	}
 }
 
+type blockingClarificationTurnLookup struct {
+	*repoTurnService
+	entered chan context.Context
+	release chan struct{}
+}
+
+func (s *blockingClarificationTurnLookup) GetActiveTurn(
+	ctx context.Context,
+	_ string,
+) (*models.Turn, error) {
+	s.entered <- ctx
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.release:
+		return nil, nil
+	}
+}
+
+func TestClarificationWatchdogCancellationInterruptsFallbackLookup(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		newMockTaskRepo(),
+		&mockAgentManager{isAgentRunning: true},
+	)
+	lookup := &blockingClarificationTurnLookup{
+		repoTurnService: &repoTurnService{repo: repo},
+		entered:         make(chan context.Context, 1),
+		release:         make(chan struct{}),
+	}
+	svc.turnService = lookup
+	svc.clarificationWatchdogTimeout = time.Millisecond
+	defer close(lookup.release)
+
+	svc.scheduleClarificationWatchdog(clarificationAnsweredData{
+		TaskID: "task-watchdog-shutdown", SessionID: "session-watchdog-shutdown",
+		PendingID: "pending-watchdog-shutdown", ClarificationTurnID: "turn-watchdog-shutdown",
+	})
+
+	var lookupCtx context.Context
+	select {
+	case lookupCtx = <-lookup.entered:
+	case <-time.After(time.Second):
+		t.Fatal("watchdog fallback did not enter turn lookup")
+	}
+	svc.cancelAllClarificationWatchdogs()
+	select {
+	case <-lookupCtx.Done():
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("watchdog cancellation did not interrupt fallback turn lookup")
+	}
+}
+
 // TestRetryClarificationAfterCancel_DoesNotStarveUserCancel is the regression
 // test for the production hang where a clarification-timeout recovery left a
 // session permanently unstoppable. retryClarificationAfterCancel used to send

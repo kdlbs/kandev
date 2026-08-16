@@ -324,6 +324,9 @@ All locally available task gates passed; environment-gated parity also passed in
   task-list and boot responses so their authoritative coarse pending action remains visible. Focused
   regressions, all five affected backend suites, and changed-code lint passed.
 - Managed production E2E: Chromium 3/3 plus detached recovery 1/1; mobile Chrome 12/12.
+- Current-head review remediation keeps unpublished attempted reservations out of client turn history
+  and propagates watchdog cancellation through fallback database and prompt work. Focused SQLite and
+  orchestrator regressions passed; PostgreSQL parity remains environment-gated in CI.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

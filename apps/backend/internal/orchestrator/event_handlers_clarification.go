@@ -307,24 +307,25 @@ func (s *Service) runClarificationWatchdog(
 	case <-watchCtx.Done():
 		return
 	case <-timer.C:
-		if !s.clarificationWatchdogs.CompareAndDelete(key, entry) {
+		current, ok := s.clarificationWatchdogs.Load(key)
+		if !ok || current != entry {
 			return
 		}
+		defer s.clarificationWatchdogs.CompareAndDelete(key, entry)
 		if entry.cancel != nil {
-			entry.cancel()
+			defer entry.cancel()
 		}
-		s.resumeClarificationViaFallback(data)
+		s.resumeClarificationViaFallback(watchCtx, data)
 	}
 }
 
-func (s *Service) resumeClarificationViaFallback(data clarificationAnsweredData) {
+func (s *Service) resumeClarificationViaFallback(ctx context.Context, data clarificationAnsweredData) {
 	prompt := buildClarificationPrompt(data)
 	s.logger.Warn("clarification resume watchdog expired; triggering fallback resume",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.String("pending_id", data.PendingID))
 
-	ctx := context.Background()
 	if !s.clarificationTurnStillCurrent(ctx, data) {
 		return
 	}

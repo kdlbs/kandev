@@ -90,7 +90,9 @@ hiding the action the icon represents.
   Once agentctl accepts the prompt, later publication or completion errors cannot roll back the
   successor turn or reopen the answer. A primary-answer watchdog carries the clarification turn ID
   and revalidates that ID both before fallback and inside serialized prompt admission, so it cannot
-  dispatch a stale answer into a successor turn.
+  dispatch a stale answer into a successor turn. Its fallback keeps the watchdog cancellation context
+  through authority reads and prompt admission so session activity or service shutdown interrupts
+  in-flight recovery work.
 - A current-turn bundle remains answerable while any sibling question is pending. Recovery claims only
   those pending rows, preserves siblings already made terminal by an earlier partial write, and restores
   only the claimed rows if detached delivery fails.
@@ -146,8 +148,9 @@ No new route or response field.
 - `GET /api/v1/tasks/:taskId/task-sessions` continues to expose each session's current derived
   `pending_action`; task navigation uses this existing field.
 - `GET /api/v1/task-sessions/:sessionId/turns` continues to expose durable turn history;
-  empty unattempted reservations are recovered at startup and excluded from turn authority, while
-  attempted reservations are preserved because their dispatch outcome is ambiguous.
+  unpublished reservations stay hidden until publication or durable message evidence, including while
+  an attempt marker makes them internal current-turn authority. Attempted reservations are preserved
+  across restart because their dispatch outcome is ambiguous.
 - Task list, workflow snapshot, and boot payloads continue to expose task-level `pending_action` in
   the status summary and legacy fallback fields.
 - `POST /api/v1/clarification/:pendingId/respond` uses one state-based contract:
@@ -347,6 +350,12 @@ session they can already access. Session selection does not broaden task visibil
 - **GIVEN** a primary-answer watchdog survives until another turn supersedes its clarification turn,
   **WHEN** its fallback timer expires, **THEN** both the preflight and serialized prompt-admission checks
   reject the stale answer without prompting or cancelling the successor.
+- **GIVEN** a primary-answer watchdog has entered fallback authority or prompt work, **WHEN** session
+  activity or service shutdown cancels the watchdog, **THEN** that cancellation reaches the in-flight
+  repository and prompt calls.
+- **GIVEN** a reserved successor is marked dispatch-attempted but remains unpublished, **WHEN** a client
+  loads turn history before agentctl accepts or rejects it, **THEN** the successor is omitted until
+  publication or durable message evidence prevents rollback from leaving stale client-only history.
 - **GIVEN** a predecessor ready event arrives while a detached-answer successor is reserved, **WHEN**
   the successor dispatch resolves, **THEN** the handler revalidates prompt generation and the stale
   predecessor cannot complete the successor or run `on_turn_complete` against it; if reservation

@@ -10,7 +10,7 @@ import (
 
 func TestClarificationWatchdogDoesNotDispatchAfterTurnIsSuperseded(t *testing.T) {
 	svc, agentMgr := setupSupersededClarificationTurn(t)
-	svc.resumeClarificationViaFallback(clarificationAnsweredData{
+	svc.resumeClarificationViaFallback(context.Background(), clarificationAnsweredData{
 		TaskID: "task-watchdog-authority", SessionID: "session-watchdog-authority",
 		PendingID: "pending-watchdog-authority", ClarificationTurnID: "turn-clarification",
 		AnswerText: "Continue",
