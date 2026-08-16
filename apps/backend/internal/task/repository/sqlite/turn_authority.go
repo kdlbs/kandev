@@ -12,6 +12,10 @@ import (
 // is durable evidence that the prompt may have been accepted before a crash, so
 // that turn remains current. The orchestrator keeps its live reservation private
 // from ready handling until dispatch resolution.
+//
+// Startup recovery removes stale empty reservations before prompt admission
+// resumes. A new live unattempted reservation remains intentionally excluded
+// until dispatch resolution or durable attempt evidence makes it authoritative.
 func turnAuthorityPredicate(driverName, turnAlias string) string {
 	pending := turnDispatchPendingPredicate(driverName, turnAlias)
 	attempted := turnDispatchAttemptedPredicate(driverName, turnAlias)

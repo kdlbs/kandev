@@ -777,10 +777,8 @@ func (s *Service) cancelAgentSilentExpectedWithGuard(
 	if owner {
 		go s.runSilentCancellation(ctx, taskID, sessionID, operation)
 	}
-	if unlockGuard != nil {
-		unlockGuard()
-		defer relockGuard()
-	}
+	unlockGuard()
+	defer relockGuard()
 	return operation.wait(ctx)
 }
 

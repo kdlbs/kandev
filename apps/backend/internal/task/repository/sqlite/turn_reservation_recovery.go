@@ -284,9 +284,9 @@ func (r *Repository) deleteEmptyUnpublishedPromptTurn(
 		return fmt.Errorf("count deleted unpublished prompt turn %s: %w", turn.id, err)
 	}
 	if rows != 1 {
-		// The session write lock prevents a message insertion between the
-		// NOT EXISTS check above and this DELETE. Zero rows therefore means an
-		// unexpected unowned write or corrupted reservation, so fail closed.
+		// The session write lock serializes message creation and reservation
+		// publication with the checks above and this DELETE. Zero rows therefore
+		// means an unexpected unowned write or corrupted reservation, so fail closed.
 		return fmt.Errorf("unpublished prompt turn %s could not be removed (rows=%d) during recovery", turn.id, rows)
 	}
 	return nil

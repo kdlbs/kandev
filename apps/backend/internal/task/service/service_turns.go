@@ -27,14 +27,6 @@ import (
 
 const runtimeModelConfigID = "model"
 
-type activeTurnMetadataUpdater interface {
-	UpdateActiveTurnMetadata(
-		context.Context,
-		string,
-		map[string]interface{},
-	) (bool, time.Time, error)
-}
-
 // StartTurn creates a new turn for a session and publishes the turn.started event.
 // Returns the created turn.
 func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
@@ -121,11 +113,9 @@ func (s *Service) MarkReservedTurnDispatchAttempted(ctx context.Context, turn *m
 		attempted.Metadata = map[string]interface{}{}
 	}
 	attempted.Metadata[models.TurnMetaKeyPromptDispatchAttempted] = true
-	updater, ok := s.turns.(activeTurnMetadataUpdater)
-	if !ok {
-		return fmt.Errorf("mark reserved turn %s dispatch attempted: active metadata updater is unavailable", turn.ID)
-	}
-	updated, _, err := updater.UpdateActiveTurnMetadata(ctx, turn.ID, attempted.Metadata)
+	updated, _, err := s.turns.UpdateActiveTurnMetadata(
+		ctx, turn.TaskSessionID, turn.ID, attempted.Metadata,
+	)
 	if err != nil {
 		return fmt.Errorf("mark reserved turn %s dispatch attempted: %w", turn.ID, err)
 	}
@@ -157,11 +147,9 @@ func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) er
 	published := *turn
 	published.Metadata = maps.Clone(turn.Metadata)
 	models.ClearPromptDispatchMetadata(published.Metadata)
-	updater, ok := s.turns.(activeTurnMetadataUpdater)
-	if !ok {
-		return fmt.Errorf("publish reserved turn %s: active metadata updater is unavailable", turn.ID)
-	}
-	updated, updatedAt, err := updater.UpdateActiveTurnMetadata(ctx, turn.ID, published.Metadata)
+	updated, updatedAt, err := s.turns.UpdateActiveTurnMetadata(
+		ctx, turn.TaskSessionID, turn.ID, published.Metadata,
+	)
 	if err != nil {
 		return fmt.Errorf("publish reserved turn %s: %w", turn.ID, err)
 	}

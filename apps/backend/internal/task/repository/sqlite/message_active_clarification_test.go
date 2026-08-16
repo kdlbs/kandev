@@ -677,6 +677,46 @@ func TestCompleteClaimedClarificationMessagesLeavesInputUnchangedOnWriteFailure(
 	}
 }
 
+func TestClaimActiveClarificationBundleUsesRepositoryClock(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 22, 30, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-claim-clock", "session-claim-clock")
+	createPendingActionTurn(
+		t, repo, "task-claim-clock", "session-claim-clock", "turn-claim-clock", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-claim-clock", "task-claim-clock", "session-claim-clock",
+		"turn-claim-clock", "pending-claim-clock", "question-clock", base,
+	)
+	claimAt := time.Date(2037, time.March, 4, 5, 6, 7, 0, time.UTC)
+	repo.clockNow = func() time.Time { return claimAt }
+
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTxx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	claimed, err := repo.claimActiveClarificationBundle(
+		ctx, tx, repo.db.DriverName(), "pending-claim-clock",
+	)
+	if err != nil || claimed != 1 {
+		t.Fatalf("claimActiveClarificationBundle = %d, %v; want 1, nil", claimed, err)
+	}
+	var updatedAt time.Time
+	if err := tx.GetContext(
+		ctx,
+		&updatedAt,
+		repo.db.Rebind(`SELECT updated_at FROM task_session_messages WHERE id = ?`),
+		"message-claim-clock",
+	); err != nil {
+		t.Fatalf("load claimed timestamp: %v", err)
+	}
+	if !updatedAt.Equal(claimAt) {
+		t.Fatalf("claimed updated_at = %v, want repository time %v", updatedAt, claimAt)
+	}
+}
+
 func TestRestoreActiveClarificationBundleDoesNotReactivateSupersededTurn(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

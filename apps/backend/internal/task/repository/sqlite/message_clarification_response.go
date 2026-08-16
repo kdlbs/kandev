@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"sort"
 
 	"github.com/jmoiron/sqlx"
 
@@ -288,7 +289,25 @@ func (r *Repository) lockClarificationBundleTurnWrites(
 	if err := tx.SelectContext(ctx, &sessionIDs, r.db.Rebind(query), pendingID); err != nil {
 		return fmt.Errorf("load clarification bundle sessions: %w", err)
 	}
-	return lockSessionTurnWrites(ctx, tx, driverName, sessionIDs...)
+	sort.Strings(sessionIDs)
+	if err := lockSessionTurnWrites(ctx, tx, driverName, sessionIDs...); err != nil {
+		return err
+	}
+	// Terminal session writers acquire row locks through UPDATE. Locking the
+	// same rows before evaluating the non-terminal claim predicate forces one
+	// side to observe the other's committed state.
+	for _, sessionID := range sessionIDs {
+		var lockedSessionID string
+		if err := tx.GetContext(
+			ctx,
+			&lockedSessionID,
+			r.db.Rebind(`SELECT id FROM task_sessions WHERE id = ? FOR UPDATE`),
+			sessionID,
+		); err != nil {
+			return fmt.Errorf("lock clarification session %q: %w", sessionID, err)
+		}
+	}
+	return nil
 }
 
 func clarificationClaimIDs(messages []*models.Message) (map[string]struct{}, error) {
@@ -430,11 +449,10 @@ func (r *Repository) claimActiveClarificationBundle(
 	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
 	// A pending ID spanning message types, sessions, or turns is malformed. The
 	// NOT EXISTS guard intentionally makes the whole bundle ineligible to claim.
-	// This transaction-local timestamp is overwritten by completion before commit;
-	// a failed transaction rolls it back, so no separate Go timestamp bind is needed.
+	claimAt := r.nowUTC()
 	claimQuery := fmt.Sprintf(`
 		UPDATE task_session_messages
-		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
+		SET metadata = %s, updated_at = ?
 		WHERE %s = ?
 		  AND type = 'clarification_request'
 		  AND COALESCE(%s, '') IN ('', 'pending')
@@ -460,7 +478,7 @@ func (r *Repository) claimActiveClarificationBundle(
 	`, dialect.JSONSet(drv, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr,
 		nonTerminalSessionPredicate("task_session_messages"),
 		turnAuthorityPredicate(drv, "turn_row"), bundlePendingIDExpr)
-	result, err := tx.ExecContext(ctx, r.db.Rebind(claimQuery), pendingID, pendingID)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(claimQuery), claimAt, pendingID, pendingID)
 	if err != nil {
 		return 0, fmt.Errorf("claim active clarification bundle: %w", err)
 	}

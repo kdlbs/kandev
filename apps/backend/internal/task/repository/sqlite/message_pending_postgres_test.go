@@ -91,6 +91,70 @@ func TestPostgresCompleteActiveClarificationBundleClaimsOnce(t *testing.T) {
 	}
 }
 
+func TestPostgresClarificationClaimWaitsForTerminalSessionWrite(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 5)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 16, 13, 40, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-terminal-claim-pg", "session-terminal-claim-pg")
+	createPendingActionTurn(
+		t, repo, "task-terminal-claim-pg", "session-terminal-claim-pg",
+		"turn-terminal-claim-pg", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-terminal-claim-pg", "task-terminal-claim-pg",
+		"session-terminal-claim-pg", "turn-terminal-claim-pg",
+		"pending-terminal-claim-pg", "q1", base,
+	)
+
+	terminalWriter, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin terminal session writer: %v", err)
+	}
+	t.Cleanup(func() { _ = terminalWriter.Rollback() })
+	if _, err := terminalWriter.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE task_sessions SET state = ? WHERE id = ?
+	`), string(models.TaskSessionStateCancelled), "session-terminal-claim-pg"); err != nil {
+		t.Fatalf("stage terminal session state: %v", err)
+	}
+
+	type completionResult struct {
+		claimed bool
+		err     error
+	}
+	completionDone := make(chan completionResult, 1)
+	go func() {
+		_, claimed, completionErr := repo.CompleteActiveClarificationBundle(
+			ctx,
+			"pending-terminal-claim-pg",
+			clarificationStatusAnswered,
+			map[string]interface{}{"q1": "continue"},
+		)
+		completionDone <- completionResult{claimed: claimed, err: completionErr}
+	}()
+	waitForPostgresLockWait(t, ctx, repo, "SELECT id FROM task_sessions")
+	select {
+	case result := <-completionDone:
+		t.Fatalf("clarification claim bypassed terminal session row lock: %+v", result)
+	default:
+	}
+
+	if err := terminalWriter.Commit(); err != nil {
+		t.Fatalf("commit terminal session state: %v", err)
+	}
+	select {
+	case result := <-completionDone:
+		if result.err != nil || result.claimed {
+			t.Fatalf("clarification claim after terminal commit = %+v, want unclaimed", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for clarification claim")
+	}
+}
+
 func TestPostgresDetachActiveClarificationMessagesClaimsCurrentRows(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

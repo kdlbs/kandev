@@ -245,25 +245,36 @@ func (r *Repository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 // completion state over a concurrently completed turn.
 func (r *Repository) UpdateActiveTurnMetadata(
 	ctx context.Context,
-	id string,
+	sessionID, turnID string,
 	metadata map[string]interface{},
 ) (bool, time.Time, error) {
 	metadataJSON, err := serializeTurnMetadata(metadata)
 	if err != nil {
 		return false, time.Time{}, err
 	}
-	updatedAt := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, time.Time{}, fmt.Errorf("begin active turn metadata update: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, time.Time{}, err
+	}
+	updatedAt := r.nowUTC()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_turns
 		SET metadata = ?, updated_at = ?
-		WHERE id = ? AND completed_at IS NULL
-	`), metadataJSON, updatedAt, id)
+		WHERE id = ? AND task_session_id = ? AND completed_at IS NULL
+	`), metadataJSON, updatedAt, turnID, sessionID)
 	if err != nil {
 		return false, time.Time{}, err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("inspect active turn metadata update: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, time.Time{}, fmt.Errorf("commit active turn metadata update: %w", err)
 	}
 	return affected == 1, updatedAt, nil
 }

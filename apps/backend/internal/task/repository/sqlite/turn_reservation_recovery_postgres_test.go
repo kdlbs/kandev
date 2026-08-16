@@ -184,3 +184,65 @@ func TestPostgresReconcileAmbiguousEmptyPromptTurn(t *testing.T) {
 		t.Fatalf("accepted postgres claim status = %v, want answered", message.Metadata["status"])
 	}
 }
+
+func TestPostgresActiveTurnMetadataUpdateUsesSessionTurnLock(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 5)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	const taskID = "task-metadata-lock-pg"
+	const sessionID = "session-metadata-lock-pg"
+	const turnID = "turn-metadata-lock-pg"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	base := time.Date(2026, time.August, 16, 13, 45, 0, 0, time.UTC)
+	createRecoveryTurn(t, repo, taskID, sessionID, turnID, base, map[string]interface{}{
+		models.TurnMetaKeyPromptDispatchPending: true,
+	})
+
+	blocker, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin session turn lock blocker: %v", err)
+	}
+	t.Cleanup(func() { _ = blocker.Rollback() })
+	if err := lockSessionTurnWrites(ctx, blocker, repo.db.DriverName(), sessionID); err != nil {
+		t.Fatalf("hold session turn lock: %v", err)
+	}
+
+	type updateResult struct {
+		updated bool
+		err     error
+	}
+	updateDone := make(chan updateResult, 1)
+	go func() {
+		updated, _, updateErr := repo.UpdateActiveTurnMetadata(
+			ctx,
+			sessionID,
+			turnID,
+			map[string]interface{}{
+				models.TurnMetaKeyPromptDispatchPending:   true,
+				models.TurnMetaKeyPromptDispatchAttempted: true,
+			},
+		)
+		updateDone <- updateResult{updated: updated, err: updateErr}
+	}()
+	waitForPostgresLockWait(t, ctx, repo, "pg_advisory_xact_lock")
+	select {
+	case result := <-updateDone:
+		t.Fatalf("metadata update bypassed session turn lock: %+v", result)
+	default:
+	}
+
+	if err := blocker.Commit(); err != nil {
+		t.Fatalf("release session turn lock: %v", err)
+	}
+	select {
+	case result := <-updateDone:
+		if result.err != nil || !result.updated {
+			t.Fatalf("metadata update after lock release = %+v, want updated", result)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for metadata update")
+	}
+}
