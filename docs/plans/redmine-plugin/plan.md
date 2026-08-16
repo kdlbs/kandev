@@ -97,24 +97,23 @@ word on parity with Jira/Linear/Sentry's native settings pages.
 
 ## Current status
 
-2026-08-15: Tasks 01-08 (waves 0-3) are complete on the plugin repo
-(`yattdev/kandev-plugin-redmine`, branch `feature/redmine-plugin-build-os2`, local-only,
-not yet pushed to `origin/main`): bootstrap, connection/secrets/health poll, projects and
+2026-08-16: Tasks 01-08 (waves 0-3) are complete on the plugin repo
+(`yattdev/kandev-plugin-redmine`): bootstrap, connection/secrets/health poll, projects and
 field mapping, issue read/write and attachments, task linking and bidirectional sync,
 issue watchers, and the native settings UI with `reference_sources` wiring. The
 plugin's own Go test suite covers connection.save/link.set round-trips against an
-`httptest` fixture server (`server/actions_test.go`). Only task 09 (contract E2E,
-release, registry pointer) remains, gated on `wave 4`'s dependency on 06/07/08.
+`httptest` fixture server (`server/actions_test.go`).
 
-The `kdlbs/kandev` side of task 09 is already in progress on a sibling task/branch
-(`feature/feat-implement-redmi-ib8`): `apps/web/e2e/tests/plugins/redmine-packaged-plugin.spec.ts`
-exists there (commit `4ed46b9c6`), gated on `KANDEV_REDMINE_PLUGIN_PACKAGE` and scoped to
-zero-network assertions (unconfigured defaults, settings-page rendering, Link dialog
-opening) — it deliberately does not exercise a real connection.save/link.set flow, which
-is covered instead by the plugin repo's own httptest-backed tests above. Remaining task 09
-work on this branch: `make package-host`, install/exercise against a disposable dev
-instance, cut a GitHub Release on `yattdev/kandev-plugin-redmine`, and add the
-`plugin-registry/plugins.yaml` pointer once that release exists.
+Task 09 is in progress: `make package-host` produced `kandev-plugin-redmine-0.1.0.tar.gz`,
+verified against `apps/web/e2e/tests/plugins/redmine-packaged-plugin.spec.ts` (authored on
+sibling branch `feature/feat-implement-redmi-ib8`, commit `4ed46b9c6`) — both tests pass.
+`feature/redmine-plugin-build-os2` is fast-forward-merged into `yattdev/kandev-plugin-redmine`
+main, and `v0.1.0` is released:
+https://github.com/yattdev/kandev-plugin-redmine/releases/tag/v0.1.0 (assets
+`kandev-plugin-redmine-0.1.0.tar.gz`, `checksums.txt`; `min_kandev_version` `0.88.0`). Only
+the `plugin-registry/plugins.yaml` pointer remains, owned by the sibling task on
+`kdlbs/kandev`, which now has the release URL. See task 09's own "Current status" for
+full detail.
 
 ## Risks
 
