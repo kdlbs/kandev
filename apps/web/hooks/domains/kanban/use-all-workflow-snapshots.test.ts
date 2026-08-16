@@ -297,6 +297,79 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
   });
 });
 
+describe("useAllWorkflowSnapshots — executor field preservation", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
+
+  function seedCachedExecutor() {
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": {
+        workflowId: "wf-A",
+        workflowName: "A",
+        isPlaceholder: true,
+        steps: [],
+        tasks: [
+          {
+            id: "task-1",
+            workflowStepId: "step-1",
+            primaryExecutorId: "exec-1",
+            primaryExecutorType: "worktree",
+            primaryExecutorName: "Worktree",
+            isRemoteExecutor: false,
+          },
+        ],
+      },
+    };
+  }
+
+  it("preserves cached executor fields when a fresh snapshot omits them", async () => {
+    seedCachedExecutor();
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [{ id: "task-1", workflow_step_id: "step-1", title: "Task" }],
+    });
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0]).toMatchObject({
+      primaryExecutorId: "exec-1",
+      primaryExecutorType: "worktree",
+      primaryExecutorName: "Worktree",
+      isRemoteExecutor: false,
+    });
+  });
+
+  it("adopts a legitimately different executor value from the fresh snapshot", async () => {
+    seedCachedExecutor();
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [
+        {
+          id: "task-1",
+          workflow_step_id: "step-1",
+          title: "Task",
+          primary_executor_id: "exec-2",
+          primary_executor_type: "ssh",
+          primary_executor_name: "Remote box",
+          is_remote_executor: true,
+        },
+      ],
+    });
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0]).toMatchObject({
+      primaryExecutorId: "exec-2",
+      primaryExecutorType: "ssh",
+      primaryExecutorName: "Remote box",
+      isRemoteExecutor: true,
+    });
+  });
+});
+
 /**
  * A snapshot request issued before a `task.status_summary.updated` delta can
  * land after it. Writing the response's summary unconditionally regresses the

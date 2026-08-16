@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { fetchWorkflowSnapshot } from "@/lib/api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { toKanbanTask } from "@/lib/kanban/map-task";
+import { toKanbanTask, preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { Task } from "@/lib/types/http";
 import type { StoreApi } from "zustand";
@@ -86,6 +86,9 @@ function mergeFetchedTask(
   if (mapped.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
     mapped.autoStartFailed = existing.autoStartFailed;
   }
+  // Executor fields are omitted from lightweight task payloads. Preserve the
+  // cached executor projection when this snapshot does not include it.
+  preserveOmittedExecutorFields(mapped, existing);
   return mapped;
 }
 

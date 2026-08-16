@@ -12,6 +12,7 @@ import {
   reconcileActiveTurnAfterHydrationDraft,
   seedSettledSessionBoundaries,
 } from "@/lib/state/slices/session/turn-actions";
+import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
 /**
@@ -54,7 +55,11 @@ function mergeKanbanTasks(
       const incomingTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;
       const idx = draftTasks.findIndex((t) => t.id === incoming.id);
       if (incomingTime >= existingTime) {
-        if (idx >= 0) draftTasks[idx] = incoming;
+        if (idx >= 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          preserveOmittedExecutorFields(incoming, existing as any);
+          draftTasks[idx] = incoming;
+        }
       } else if (idx >= 0) {
         backfillServerDerivedFields(draftTasks[idx], incoming);
       }
