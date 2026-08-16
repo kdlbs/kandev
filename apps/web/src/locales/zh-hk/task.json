@@ -833,7 +833,6 @@
   "onBranch": "位於分支 <1>{{branch}}</1>",
   "onDisk": "磁碟上",
   "ontoBranch": "到 {{branch}}",
-  "openBrowserPreview": "開啟瀏覽器預覽",
   "openCodeReview": "開啟程式碼審閱",
   "openComposeBoxHelp": "在終端上方開啟由 Kandev 控制的編寫框以輸入跟進訊息。按 <1>Enter</1> 傳送，<3>Shift+Enter</3> 換行。",
   "openEditor": "開啟編輯器",

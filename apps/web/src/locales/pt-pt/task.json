@@ -833,7 +833,6 @@
   "onBranch": "No branch <1>{{branch}}</1>",
   "onDisk": "em disco",
   "ontoBranch": "sobre {{branch}}",
-  "openBrowserPreview": "Abrir a pré-visualização no navegador",
   "openCodeReview": "Abrir a revisão de código",
   "openComposeBoxHelp": "Abre uma caixa de composição controlada pelo kandev por cima do terminal para escrever uma mensagem de seguimento. Prima <1>Enter</1> para enviar e <3>Shift+Enter</3> para mudar de linha.",
   "openEditor": "Abrir o editor",

@@ -221,6 +221,8 @@ export const noLiteralStringOptions = {
  * the completeness check. See docs/i18n.md.
  */
 export const i18nGuardFiles = [
+  // Dev-server preview control (added with the feature, per the same-PR rule).
+  "components/task/dev-server-preview-button.tsx",
   // Task dependencies (added with the feature, per the same-PR rule).
   "components/task/task-dependency-chip.tsx",
   "components/task-create-dialog-dependencies.tsx",

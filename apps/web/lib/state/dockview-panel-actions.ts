@@ -3,8 +3,8 @@ import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
 import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
 import { reviewPanelId, type ReviewPanelTarget } from "./dockview-review-panel-id";
-import { TERMINAL_DEFAULT_ID } from "./layout-manager/constants";
 import { panelTitle } from "./layout-manager/panel-title";
+import { buildTerminalPanelActions } from "./dockview-terminal-panel-actions";
 import {
   parsePluginPanelId,
   pluginPanelId,
@@ -690,31 +690,6 @@ export function buildExtraPanelActions(get: StoreGet) {
       );
     },
     ...buildReviewPanelActions(get),
-    addTerminalPanel: (
-      terminalId?: string,
-      groupId?: string,
-      environmentId?: string,
-      taskID?: string,
-      title?: string,
-    ) => {
-      const { api, rightBottomGroupId } = get();
-      if (!api) return;
-      const id = terminalId ?? `terminal-${Date.now()}`;
-      // Stamp env id + task id into the panel's params so cleanup
-      // (dockview-layout-setup.onDidRemovePanel) can call destroyUserShell
-      // with the correct task scope even after the user switches tasks.
-      // task_id is what the backend uses to verify ownership now — without
-      // it `requireOwnership` rejects with ErrTaskMismatch.
-      addSimplePanel(api, groupId ?? rightBottomGroupId, {
-        id,
-        component: "terminal",
-        // terminalTab is a custom dockview tab that adds the `#N` badge
-        // when there's more than one ordinary terminal in the task and
-        // exposes a context menu for rename / park / destroy.
-        tabComponent: "terminalTab",
-        title: title ?? panelTitle(TERMINAL_DEFAULT_ID),
-        params: { terminalId: id, environmentId, taskID },
-      });
-    },
+    ...buildTerminalPanelActions(get),
   };
 }

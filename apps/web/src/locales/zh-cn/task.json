@@ -832,7 +832,6 @@
   "onBranch": "位于分支 <1>{{branch}}</1>",
   "onDisk": "磁盘上",
   "ontoBranch": "到 {{branch}}",
-  "openBrowserPreview": "打开浏览器预览",
   "openCodeReview": "打开代码审阅",
   "openComposeBoxHelp": "在终端上方打开由 Kandev 控制的编写框以输入跟进消息。按 <1>Enter</1> 发送，<3>Shift+Enter</3> 换行。",
   "openEditor": "打开编辑器",

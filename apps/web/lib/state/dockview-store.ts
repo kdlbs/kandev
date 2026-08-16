@@ -196,6 +196,8 @@ type DockviewStore = {
     taskID?: string,
     title?: string,
   ) => void;
+  /** Read-only output panel for the repository dev script. */
+  addDevServerPanel: (groupId?: string) => void;
   selectedDiff: { path: string; content?: string } | null;
   setSelectedDiff: (diff: { path: string; content?: string } | null) => void;
   activeGroupId: string | null;

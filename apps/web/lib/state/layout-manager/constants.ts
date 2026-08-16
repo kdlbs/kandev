@@ -16,6 +16,13 @@ export const CENTER_GROUP = "group-center";
 export const RIGHT_TOP_GROUP = "group-right-top";
 export const RIGHT_BOTTOM_GROUP = "group-right-bottom";
 export const TERMINAL_DEFAULT_ID = "terminal-default";
+/**
+ * Read-only output panel for the repository dev script. It renders the dev
+ * process's buffered output rather than a PTY, so it deliberately carries no
+ * `terminalId` — that is what keeps `handleTerminalPanelClosed` from trying to
+ * park or destroy a user shell when the tab is closed.
+ */
+export const DEV_SERVER_PANEL_ID = "dev-server";
 export const SIDEBAR_LOCK = "no-drop-target" as const;
 
 /** Canonical single-instance panels supported by reusable layout profiles. */
@@ -44,6 +51,7 @@ export const KNOWN_PANEL_IDS = new Set([
   "pr-detail",
   "mr-detail",
   "todos",
+  DEV_SERVER_PANEL_ID,
 ]);
 
 /** Components whose panels are structural and should survive filterEphemeral,
@@ -119,6 +127,12 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id"> & { titleKey
     title: "Terminal",
     titleKey: "task:panelTerminal",
     params: { terminalId: "shell-default" },
+  },
+  [DEV_SERVER_PANEL_ID]: {
+    component: "terminal",
+    title: "Dev Server",
+    titleKey: "task:devServer",
+    params: { type: DEV_SERVER_PANEL_ID },
   },
   "pr-detail": { component: "pr-detail", title: "PR Details", titleKey: "task:panelPrDetails" },
   "mr-detail": {
