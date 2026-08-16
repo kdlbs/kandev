@@ -7,20 +7,53 @@ import type { ApiClient } from "../../helpers/api-client";
 
 /**
  * The dev script runs as a real OS process, so these assertions read the OS
- * rather than the DOM: the dev script writes a pid to a file and the spec
- * probes that pid with signal 0. Playwright and the backend share a process
- * namespace in both host and container runs, so the pid is meaningful here.
+ * rather than the DOM: the dev script writes a pid to a file and the spec reads
+ * that pid's state. Playwright and the backend share a process namespace in
+ * both host and container runs, so the pid is meaningful here.
  *
  * Guards the lifecycle contract from #2723: a dev server started from the task
  * UI must not outlive the task that started it.
+ *
+ * `kill(pid, 0)` is deliberately NOT the check. It reports existence, not
+ * liveness, and a killed process stays in the table as a zombie until its
+ * parent reaps it. A dev script's background child is reaped by init on a
+ * developer's machine but not inside the CI container, whose PID 1 does not
+ * reap orphans — so signal 0 called that child alive for a full minute after
+ * Kandev had killed it, and only in CI. The direct process never showed it,
+ * because agentctl's own `cmd.Wait()` reaps that one.
  */
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
+const HAS_PROCFS = existsSync("/proc/self/stat");
+
+type ProcessState = "gone" | "zombie" | { running: string };
+
+function processState(pid: number): ProcessState {
+  if (!HAS_PROCFS) {
+    // Non-Linux fallback. Its orphans are reaped by launchd/init, so the
+    // zombie window this guards against does not persist there.
+    try {
+      process.kill(pid, 0);
+      return { running: "unknown" };
+    } catch {
+      return "gone";
+    }
   }
+  let stat: string;
+  try {
+    stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+  } catch {
+    return "gone";
+  }
+  // `comm` is parenthesised and may itself contain spaces and parens, so the
+  // state field is located from the LAST ")" rather than by splitting.
+  const state = stat
+    .slice(stat.lastIndexOf(")") + 2)
+    .trim()
+    .split(/\s+/)[0];
+  return state === "Z" ? "zombie" : { running: state };
+}
+
+function isRunning(pid: number): boolean {
+  return typeof processState(pid) === "object";
 }
 
 function pidFilePath(prefix: string): string {
@@ -87,12 +120,14 @@ async function startDevProcess(apiClient: ApiClient, sessionId: string): Promise
 }
 
 async function expectProcessReaped(pid: number): Promise<void> {
+  // Reports the observed state, so a genuine failure says which process is
+  // still scheduled rather than only that the pid is still in the table.
   await expect
-    .poll(() => isAlive(pid), {
+    .poll(() => JSON.stringify(processState(pid)), {
       timeout: 60_000,
-      message: `dev process ${pid} outlived its task`,
+      message: `dev process ${pid} still running after its task ended`,
     })
-    .toBe(false);
+    .toMatch(/"gone"|"zombie"/);
 }
 
 test.describe("dev server process lifecycle", () => {
@@ -121,8 +156,8 @@ test.describe("dev server process lifecycle", () => {
     await startDevProcess(apiClient, sessionId);
     const parentPid = await readPidWhenWritten(parentPidFile);
     const childPid = await readPidWhenWritten(childPidFile);
-    expect(isAlive(parentPid)).toBe(true);
-    expect(isAlive(childPid)).toBe(true);
+    expect(isRunning(parentPid)).toBe(true);
+    expect(isRunning(childPid)).toBe(true);
 
     await apiClient.archiveTask(taskId);
 
@@ -141,7 +176,7 @@ test.describe("dev server process lifecycle", () => {
 
     await startDevProcess(apiClient, sessionId);
     const pid = await readPidWhenWritten(pidFile);
-    expect(isAlive(pid)).toBe(true);
+    expect(isRunning(pid)).toBe(true);
 
     await apiClient.deleteTask(taskId);
 
@@ -164,8 +199,8 @@ test.describe("dev server process lifecycle", () => {
     await startDevProcess(apiClient, sessionId);
     const parentPid = await readPidWhenWritten(parentPidFile);
     const childPid = await readPidWhenWritten(childPidFile);
-    expect(isAlive(parentPid)).toBe(true);
-    expect(isAlive(childPid)).toBe(true);
+    expect(isRunning(parentPid)).toBe(true);
+    expect(isRunning(childPid)).toBe(true);
 
     const processes = (await (
       await apiClient.rawRequest("GET", `/api/v1/task-sessions/${sessionId}/processes`)
