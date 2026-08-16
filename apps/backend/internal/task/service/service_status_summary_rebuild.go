@@ -180,6 +180,7 @@ func (s *Service) rebuildMissingSummary(
 	}
 	if accepted {
 		summaries[task.ID] = &next
+		s.publishReconciledSummary(ctx, task, next)
 		return
 	}
 	// A projector event may have won the race while this repair was running.

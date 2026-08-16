@@ -142,7 +142,7 @@ func (c statusSummaryQueuedPromptCounter) CountPendingByTaskIDs(_ context.Contex
 }
 
 func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
-	svc, _, repo := createTestService(t)
+	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 	createTaskWithoutRepositories(t, ctx, repo)
 
@@ -233,12 +233,19 @@ func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
 	if persisted[task.ID] == nil || persisted[task.ID].Revision != 1 {
 		t.Fatalf("persisted summary = %+v", persisted[task.ID])
 	}
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 || published[0].Type != events.TaskStatusSummaryUpdated {
+		t.Fatalf("missing-summary repair events = %+v, want one summary update", published)
+	}
 
 	if _, err := svc.ReconcileTaskStatusSummaries(ctx, []*models.Task{task}, sessions, pending, got); err != nil {
 		t.Fatalf("second ReconcileTaskStatusSummaries: %v", err)
 	}
 	if prReader.calls != 1 {
 		t.Fatalf("PR reader calls after existing summary = %d, want one", prReader.calls)
+	}
+	if published = eventBus.GetPublishedEvents(); len(published) != 1 {
+		t.Fatalf("events after no-op reconcile = %+v, want no duplicate", published)
 	}
 }
 
