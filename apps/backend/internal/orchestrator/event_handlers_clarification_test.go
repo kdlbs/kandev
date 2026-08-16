@@ -28,8 +28,8 @@ func (c *zeroClarificationCanceller) DetachSessionAndNotify(_ context.Context, s
 	return 0
 }
 
-func (c *zeroClarificationCanceller) ExpireSessionAndNotify(context.Context, string) int {
-	return 0
+func (c *zeroClarificationCanceller) ExpireSessionAndNotify(context.Context, string) (int, error) {
+	return 0, nil
 }
 
 type failingStartTurnService struct {
@@ -60,8 +60,8 @@ func (c *blockingClarificationCanceller) DetachSessionAndNotify(context.Context,
 	return 1
 }
 
-func (c *blockingClarificationCanceller) ExpireSessionAndNotify(context.Context, string) int {
-	return 0
+func (c *blockingClarificationCanceller) ExpireSessionAndNotify(context.Context, string) (int, error) {
+	return 0, nil
 }
 
 func TestHandleClarificationAnswered(t *testing.T) {

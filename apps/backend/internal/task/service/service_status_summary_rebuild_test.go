@@ -59,14 +59,18 @@ type vanishingStatusSummaryRepository struct {
 
 type failingStatusSummaryRepository struct {
 	repository.TaskStatusSummaryRepository
-	err error
+	err        error
+	failTaskID string
 }
 
 func (r *failingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
-	context.Context,
-	*statussummary.StoredTaskStatusSummary,
+	ctx context.Context,
+	stored *statussummary.StoredTaskStatusSummary,
 ) (bool, error) {
-	return false, r.err
+	if r.failTaskID == "" || stored.TaskID == r.failTaskID {
+		return false, r.err
+	}
+	return r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, stored)
 }
 
 func (r *vanishingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
@@ -382,6 +386,45 @@ func TestReconcileTaskStatusSummariesOmitsStaleSummaryOnRepairFailure(t *testing
 	}
 	if got[task.ID] != nil {
 		t.Fatalf("stale summary remained in response: %+v", got[task.ID])
+	}
+}
+
+func TestReconcileTaskStatusSummariesRebuildsUnrelatedMissingSummaryAfterRepairFailure(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-2", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+	}); err != nil {
+		t.Fatalf("CreateTask(task-2): %v", err)
+	}
+	repairErr := errors.New("task-1 summary write failed")
+	svc.statusSummaries = &failingStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		err:                         repairErr,
+		failTaskID:                  "task-1",
+	}
+	tasks := []*models.Task{
+		{ID: "task-1", WorkspaceID: "ws-1"},
+		{ID: "task-2", WorkspaceID: "ws-1"},
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		tasks,
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{"task-1": {Revision: 3, PendingAction: "clarification"}},
+	)
+
+	if !errors.Is(err, repairErr) {
+		t.Fatalf("ReconcileTaskStatusSummaries error = %v, want %v", err, repairErr)
+	}
+	if got["task-1"] != nil {
+		t.Fatalf("failed task summary remained: %+v", got["task-1"])
+	}
+	if got["task-2"] == nil {
+		t.Fatal("unrelated missing task summary was not rebuilt")
 	}
 }
 

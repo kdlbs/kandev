@@ -114,6 +114,7 @@ func (r *taskServiceStateRepository) UpdateTaskStateIfSessionState(
 type recordingClarificationCanceller struct {
 	sessions        []string
 	expiredSessions []string
+	expireErr       error
 }
 
 func (c *recordingClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) int {
@@ -121,9 +122,9 @@ func (c *recordingClarificationCanceller) DetachSessionAndNotify(_ context.Conte
 	return 1
 }
 
-func (c *recordingClarificationCanceller) ExpireSessionAndNotify(_ context.Context, sessionID string) int {
+func (c *recordingClarificationCanceller) ExpireSessionAndNotify(_ context.Context, sessionID string) (int, error) {
 	c.expiredSessions = append(c.expiredSessions, sessionID)
-	return 1
+	return 1, c.expireErr
 }
 
 type listTaskSessionsErrorRepo struct {
@@ -374,6 +375,17 @@ func TestUpdateTaskSessionStateExpiresClarificationsOnTerminalTransition(t *test
 			require.Equal(t, []string{"s1"}, canceller.expiredSessions)
 		})
 	}
+}
+
+func TestExpireClarificationWaitersReturnsPersistenceError(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	wantErr := errors.New("expiry write failed")
+	svc.clarificationCanceller = &recordingClarificationCanceller{expireErr: wantErr}
+
+	err := svc.expireClarificationWaiters(context.Background(), "s1")
+
+	require.ErrorIs(t, err, wantErr)
 }
 
 func TestUpdateTaskSessionState_EnabledClaudePublishesSettledBackground(t *testing.T) {

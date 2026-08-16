@@ -340,6 +340,43 @@ func TestCompleteActiveClarificationBundleRejectsSupersededTurn(t *testing.T) {
 	}
 }
 
+func TestCompleteActiveClarificationBundleRejectsTerminalSession(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 13, 30, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-terminal", "session-terminal")
+	createPendingActionTurn(t, repo, "task-terminal", "session-terminal", "turn-terminal", base, base)
+	createClarificationBundleMessage(
+		t, repo, "message-terminal", "task-terminal", "session-terminal", "turn-terminal",
+		"pending-terminal", "q1", base,
+	)
+	if err := repo.UpdateTaskSessionState(
+		ctx, "session-terminal", models.TaskSessionStateCancelled, "cancelled",
+	); err != nil {
+		t.Fatalf("cancel session: %v", err)
+	}
+
+	_, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-terminal",
+		"answered",
+		map[string]interface{}{"q1": map[string]interface{}{"question_id": "q1"}},
+	)
+	if err != nil {
+		t.Fatalf("CompleteActiveClarificationBundle: %v", err)
+	}
+	if claimed {
+		t.Fatal("terminal session clarification bundle was claimed")
+	}
+	message, err := repo.GetMessage(ctx, "message-terminal")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if message.Metadata["status"] != "pending" {
+		t.Fatalf("status = %v, want pending quarantine", message.Metadata["status"])
+	}
+}
+
 func TestLoadClaimedClarificationBundleUsesCurrentTurn(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -503,6 +540,51 @@ func TestRestoreActiveClarificationBundleAllowsRetryAfterDeliveryFailure(t *test
 	)
 	if err != nil || !claimed {
 		t.Fatalf("retry completion: claimed=%v err=%v", claimed, err)
+	}
+}
+
+func TestRestoreActiveClarificationBundleRejectsTerminalSession(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.August, 15, 13, 45, 0, 0, time.UTC)
+	seedPendingActionSession(t, repo, "task-terminal-restore", "session-terminal-restore")
+	createPendingActionTurn(
+		t, repo, "task-terminal-restore", "session-terminal-restore", "turn-terminal-restore", base, base,
+	)
+	createClarificationBundleMessage(
+		t, repo, "message-terminal-restore", "task-terminal-restore", "session-terminal-restore",
+		"turn-terminal-restore", "pending-terminal-restore", "q1", base,
+	)
+	claimedMessages, claimed, err := repo.CompleteActiveClarificationBundle(
+		ctx,
+		"pending-terminal-restore",
+		"answered",
+		map[string]interface{}{"q1": map[string]interface{}{"question_id": "q1"}},
+	)
+	if err != nil || !claimed {
+		t.Fatalf("complete before terminal transition: claimed=%v err=%v", claimed, err)
+	}
+	if err := repo.UpdateTaskSessionState(
+		ctx, "session-terminal-restore", models.TaskSessionStateCancelled, "cancelled",
+	); err != nil {
+		t.Fatalf("cancel session: %v", err)
+	}
+
+	_, restored, err := repo.RestoreActiveClarificationBundle(
+		ctx, "pending-terminal-restore", "answered", claimedMessages,
+	)
+	if err != nil {
+		t.Fatalf("RestoreActiveClarificationBundle: %v", err)
+	}
+	if restored {
+		t.Fatal("terminal session clarification bundle was restored to pending")
+	}
+	message, err := repo.GetMessage(ctx, "message-terminal-restore")
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if message.Metadata["status"] != "answered" {
+		t.Fatalf("status = %v, want answered quarantine", message.Metadata["status"])
 	}
 }
 

@@ -204,6 +204,87 @@ func TestPublishClarificationBundleUpdatesUsesFreshBoundedContext(t *testing.T) 
 	}
 }
 
+func TestPrimaryAnsweredEventUsesFreshBoundedContext(t *testing.T) {
+	h, _, eventBus, _ := setupTestHandler(t, nil)
+	pendingID, _ := h.store.CreateRequest(&Request{
+		SessionID: "session-primary",
+		TaskID:    "task-primary",
+		Questions: []Question{{ID: "q1", Prompt: "Continue?"}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	h.publishPrimaryAnsweredEvent(ctx, pendingID, nil, true, "cancelled")
+
+	if len(eventBus.publishHasDeadline) != 1 || !eventBus.publishHasDeadline[0] {
+		t.Fatalf("publication deadlines = %v, want one bounded context", eventBus.publishHasDeadline)
+	}
+	if len(eventBus.contextErrs) != 1 || eventBus.contextErrs[0] != nil {
+		t.Fatalf("publication context errors = %v, want fresh context", eventBus.contextErrs)
+	}
+}
+
+func TestStaleDismissedEventUsesFreshBoundedContext(t *testing.T) {
+	message := &taskmodels.Message{
+		ID: "message-stale", TaskID: "task-stale", TaskSessionID: "session-stale",
+		Metadata: map[string]any{
+			"pending_id": "pending-stale", "question_id": "q1",
+			"question": map[string]any{"id": "q1", "prompt": "Continue?"},
+		},
+	}
+	h, repo, eventBus, _ := setupTestHandler(t, map[string][]*taskmodels.Message{
+		"pending-stale": {message},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	h.publishStaleDismissedEvent(ctx, "pending-stale")
+
+	if !repo.findHasDeadline || repo.findContextErr != nil {
+		t.Fatalf("lookup context deadline=%v err=%v, want fresh bounded context",
+			repo.findHasDeadline, repo.findContextErr)
+	}
+	if len(eventBus.publishHasDeadline) != 1 || !eventBus.publishHasDeadline[0] {
+		t.Fatalf("publication deadlines = %v, want one bounded context", eventBus.publishHasDeadline)
+	}
+	if len(eventBus.contextErrs) != 1 || eventBus.contextErrs[0] != nil {
+		t.Fatalf("publication context errors = %v, want fresh context", eventBus.contextErrs)
+	}
+}
+
+func TestDetachedResumeResolutionUsesFreshBoundedContext(t *testing.T) {
+	message := &taskmodels.Message{
+		ID: "message-resume", TaskID: "task-resume", TaskSessionID: "session-resume",
+		Metadata: map[string]any{
+			"pending_id": "pending-resume", "question_id": "q1",
+			"question": map[string]any{"id": "q1", "prompt": "Continue?"},
+		},
+	}
+	h, repo, eventBus, _ := setupTestHandler(t, map[string][]*taskmodels.Message{
+		"pending-resume": {message},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := h.resumeDetachedClarification(ctx, "pending-resume", []Answer{{
+		QuestionID: "q1", SelectedOptions: []string{"yes"},
+	}}, false, "", []*taskmodels.Message{message})
+	if err != nil {
+		t.Fatalf("resume detached clarification: %v", err)
+	}
+
+	if !repo.findHasDeadline || repo.findContextErr != nil {
+		t.Fatalf("lookup context deadline=%v err=%v, want fresh bounded context",
+			repo.findHasDeadline, repo.findContextErr)
+	}
+	if len(eventBus.resumeHasDeadline) != 1 || !eventBus.resumeHasDeadline[0] {
+		t.Fatalf("resume deadlines = %v, want one bounded context", eventBus.resumeHasDeadline)
+	}
+	if len(eventBus.resumeContextErrs) != 1 || eventBus.resumeContextErrs[0] != nil {
+		t.Fatalf("resume context errors = %v, want fresh context", eventBus.resumeContextErrs)
+	}
+}
+
 func setupTestHandler(t *testing.T, msgs map[string][]*taskmodels.Message) (*Handlers, *stubMessageStore, *stubEventBus, *stubMessageCreator) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

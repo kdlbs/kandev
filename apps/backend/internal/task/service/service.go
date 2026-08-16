@@ -75,6 +75,12 @@ type TaskExecutionStopper interface {
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
 }
 
+// TerminalClarificationCanceller expires durable input requests after a task
+// service-owned terminal transition, such as archive cancellation.
+type TerminalClarificationCanceller interface {
+	ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error)
+}
+
 // TaskRowLivenessProber classifies an executors_running row's backing-process
 // liveness in a runtime-aware way (a local process check is never applied to a
 // remote/SSH row). It is optional and satisfied by the lifecycle adapter. When
@@ -305,6 +311,7 @@ type Service struct {
 	discoveryConfig                 RepositoryDiscoveryConfig
 	worktreeCleanup                 WorktreeCleanup
 	executionStopper                TaskExecutionStopper
+	clarificationCanceller          TerminalClarificationCanceller
 	rowLivenessProber               TaskRowLivenessProber
 	contextWindowResetter           func(context.Context, string) error
 	cleanupActivity                 TaskResourceCleanupActivityGate
@@ -482,6 +489,12 @@ func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) 
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
+}
+
+// SetClarificationCanceller wires terminal clarification cleanup for session
+// transitions owned by the task service.
+func (s *Service) SetClarificationCanceller(canceller TerminalClarificationCanceller) {
+	s.clarificationCanceller = canceller
 }
 
 // SetRowLivenessProber wires the runtime-aware executors_running liveness probe

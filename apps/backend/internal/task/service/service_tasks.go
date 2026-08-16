@@ -2034,6 +2034,19 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 	// can no longer consume a shared batch-wide budget and starve the
 	// events for sessions later in the loop.
 	detachedCtx := context.WithoutCancel(ctx)
+	if s.clarificationCanceller != nil {
+		for _, session := range cancelledSessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			if _, err := s.clarificationCanceller.ExpireSessionAndNotify(detachedCtx, session.ID); err != nil {
+				s.logger.Error("failed to expire clarification after archive cancellation; response claims remain quarantined",
+					zap.String("task_id", taskID),
+					zap.String("session_id", session.ID),
+					zap.Error(err))
+			}
+		}
+	}
 	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, models.SessionArchiveCancelReason)
 }
 

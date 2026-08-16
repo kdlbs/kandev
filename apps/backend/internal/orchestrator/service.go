@@ -359,30 +359,52 @@ func (s *Service) ClaimTaskTitleSession(ctx context.Context, taskID, sessionID s
 }
 
 type reservedPromptTurn struct {
-	id       string
-	done     chan struct{}
-	resolved sync.Once
-	accepted bool
+	id           string
+	done         chan struct{}
+	mu           sync.Mutex
+	resolved     bool
+	accepted     bool
+	afterResolve []func()
 }
 
 func newReservedPromptTurn(id string) *reservedPromptTurn {
 	return &reservedPromptTurn{id: id, done: make(chan struct{})}
 }
 
-func (r *reservedPromptTurn) resolve(accepted bool) {
-	r.resolved.Do(func() {
-		r.accepted = accepted
-		close(r.done)
-	})
+func (r *reservedPromptTurn) resolve(accepted bool) []func() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.resolved {
+		return nil
+	}
+	r.resolved = true
+	r.accepted = accepted
+	close(r.done)
+	callbacks := r.afterResolve
+	r.afterResolve = nil
+	return callbacks
 }
 
 func (r *reservedPromptTurn) wait(ctx context.Context) (bool, error) {
 	select {
 	case <-r.done:
-		return r.accepted, nil
+		r.mu.Lock()
+		accepted := r.accepted
+		r.mu.Unlock()
+		return accepted, nil
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
+}
+
+func (r *reservedPromptTurn) deferUntilResolved(callback func()) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.resolved {
+		return false
+	}
+	r.afterResolve = append(r.afterResolve, callback)
+	return true
 }
 
 // Service is the main orchestrator service
@@ -650,6 +672,9 @@ type Service struct {
 	// narrow interval after handleAgentReady releases its per-session guard
 	// and before it starts a deferred durable-lifecycle dispatch.
 	afterReadyLifecycleReservation func()
+	// agentReadyReservationWaitTimeout is a deterministic test seam. Zero uses
+	// the production timeout derived from the prompt dispatch budgets.
+	agentReadyReservationWaitTimeout time.Duration
 
 	// foregroundActivity tracks, per session, whether the open turn is actively
 	// generating in the foreground or only waiting on a spawned background task
@@ -1357,7 +1382,7 @@ func (s *Service) SetPromptReferenceExpander(e PromptReferenceExpander) {
 // turn detaches or its session becomes terminal.
 type ClarificationCanceller interface {
 	DetachSessionAndNotify(ctx context.Context, sessionID string) int
-	ExpireSessionAndNotify(ctx context.Context, sessionID string) int
+	ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error)
 }
 
 // SetClarificationCanceller sets the canceller for turn and terminal-session cleanup.
@@ -1572,7 +1597,10 @@ func (s *Service) resolveReservedPromptTurn(sessionID, turnID string, accepted b
 		return false
 	}
 	s.reservedPromptTurns.CompareAndDelete(sessionID, reservation)
-	reservation.resolve(accepted)
+	callbacks := reservation.resolve(accepted)
+	for _, callback := range callbacks {
+		go callback()
+	}
 	return true
 }
 

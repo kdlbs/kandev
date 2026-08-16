@@ -1007,7 +1007,12 @@ func (s *Service) updateTaskSessionStateWithHook(
 		onChanged()
 	}
 	if isTerminalSessionState(nextState) {
-		s.expireClarificationWaiters(ctx, sessionID)
+		if err := s.expireClarificationWaiters(ctx, sessionID); err != nil {
+			s.logger.Error("failed to expire clarification on terminal session; response claims remain quarantined",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 	// Work has resumed: a session entering STARTING/RUNNING clears the
 	// startup interruption marker and republishes the task so open clients
@@ -1151,7 +1156,12 @@ func (s *Service) transitionTaskSessionState(
 		onChanged()
 	}
 	if isTerminalSessionState(nextState) {
-		s.expireClarificationWaiters(ctx, sessionID)
+		if err := s.expireClarificationWaiters(ctx, sessionID); err != nil {
+			s.logger.Error("failed to expire clarification on strict terminal transition; response claims remain quarantined",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 	s.publishTaskSessionStateChanged(
 		ctx,
@@ -2337,15 +2347,17 @@ func (s *Service) detachClarificationWaiters(ctx context.Context, sessionID stri
 	}
 }
 
-func (s *Service) expireClarificationWaiters(ctx context.Context, sessionID string) {
+func (s *Service) expireClarificationWaiters(ctx context.Context, sessionID string) error {
 	if s.clarificationCanceller == nil || sessionID == "" {
-		return
+		return nil
 	}
-	if n := s.clarificationCanceller.ExpireSessionAndNotify(ctx, sessionID); n > 0 {
+	n, err := s.clarificationCanceller.ExpireSessionAndNotify(ctx, sessionID)
+	if n > 0 {
 		s.logger.Info("expired pending clarifications on terminal session",
 			zap.String("session_id", sessionID),
 			zap.Int("count", n))
 	}
+	return err
 }
 
 // sessionStateString renders a session's state for logging, returning "" when

@@ -688,8 +688,10 @@ func (h *Handlers) resumeDetachedClarification(
 	if h.detachedResumer == nil {
 		return errors.New("detached clarification resumer unavailable")
 	}
+	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
 
-	clarificationCtx, err := h.resolveClarificationEventContext(ctx, pendingID)
+	clarificationCtx, err := h.resolveClarificationEventContext(persistenceCtx, pendingID)
 	if err != nil {
 		return fmt.Errorf("resolve clarification fallback context: %w", err)
 	}
@@ -715,9 +717,7 @@ func (h *Handlers) resumeDetachedClarification(
 		Rejected:            rejected,
 		RejectReason:        rejectReason,
 	}
-	resumeCtx, cancel := clarificationPersistenceContext(ctx)
-	defer cancel()
-	if err := h.detachedResumer.ResumeDetachedClarification(resumeCtx, request); err != nil {
+	if err := h.detachedResumer.ResumeDetachedClarification(persistenceCtx, request); err != nil {
 		return fmt.Errorf("resume detached clarification: %w", err)
 	}
 
@@ -776,7 +776,9 @@ func (h *Handlers) publishStaleDismissedEvent(ctx context.Context, pendingID str
 	if h.eventBus == nil {
 		return
 	}
-	clarificationCtx, err := h.resolveClarificationEventContext(ctx, pendingID)
+	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
+	clarificationCtx, err := h.resolveClarificationEventContext(persistenceCtx, pendingID)
 	if err != nil || clarificationCtx.SessionID == "" || clarificationCtx.TaskID == "" {
 		h.logger.Warn("failed to resolve context for stale-dismissed clarification event",
 			zap.String("pending_id", pendingID),
@@ -788,7 +790,7 @@ func (h *Handlers) publishStaleDismissedEvent(ctx context.Context, pendingID str
 		"task_id":    clarificationCtx.TaskID,
 		"pending_id": pendingID,
 	}
-	if err := h.eventBus.Publish(ctx, events.ClarificationStaleDismissed, bus.NewEvent(
+	if err := h.eventBus.Publish(persistenceCtx, events.ClarificationStaleDismissed, bus.NewEvent(
 		events.ClarificationStaleDismissed,
 		"clarification-handlers",
 		eventData,
@@ -804,7 +806,9 @@ func (h *Handlers) publishPrimaryAnsweredEvent(ctx context.Context, pendingID st
 	if h.eventBus == nil {
 		return
 	}
-	clarificationCtx, err := h.resolveClarificationEventContext(ctx, pendingID)
+	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
+	clarificationCtx, err := h.resolveClarificationEventContext(persistenceCtx, pendingID)
 	if err != nil {
 		h.logger.Warn("failed to resolve context for primary clarification event",
 			zap.String("pending_id", pendingID),
@@ -829,7 +833,7 @@ func (h *Handlers) publishPrimaryAnsweredEvent(ctx context.Context, pendingID st
 		"rejected":      rejected,
 		"reject_reason": rejectReason,
 	}
-	if err := h.eventBus.Publish(ctx, events.ClarificationPrimaryAnswered, bus.NewEvent(
+	if err := h.eventBus.Publish(persistenceCtx, events.ClarificationPrimaryAnswered, bus.NewEvent(
 		events.ClarificationPrimaryAnswered,
 		"clarification-handlers",
 		eventData,

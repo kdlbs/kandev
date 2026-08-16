@@ -22,6 +22,9 @@ type stubMessageStore struct {
 	detachContextErr  error
 	expireHasDeadline bool
 	expireContextErr  error
+	expireErr         error
+	findHasDeadline   bool
+	findContextErr    error
 }
 
 func (s *stubMessageStore) GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error) {
@@ -36,7 +39,9 @@ func (s *stubMessageStore) FindMessageByPendingID(_ context.Context, pendingID s
 	return msgs[0], nil
 }
 
-func (s *stubMessageStore) FindMessagesByPendingID(_ context.Context, pendingID string) ([]*taskmodels.Message, error) {
+func (s *stubMessageStore) FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error) {
+	_, s.findHasDeadline = ctx.Deadline()
+	s.findContextErr = ctx.Err()
 	msgs, ok := s.messages[pendingID]
 	if !ok {
 		return nil, nil
@@ -94,6 +99,9 @@ func (s *stubMessageStore) ExpireActiveClarificationBundle(
 ) ([]*taskmodels.Message, error) {
 	_, s.expireHasDeadline = ctx.Deadline()
 	s.expireContextErr = ctx.Err()
+	if s.expireErr != nil {
+		return nil, s.expireErr
+	}
 	active, err := s.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -117,17 +125,20 @@ func (s *stubMessageStore) UpdateMessage(_ context.Context, m *taskmodels.Messag
 }
 
 type stubEventBus struct {
-	events            []*bus.Event
-	publishErr        error
-	contextErrs       []error
-	resumeRequests    []DetachedClarificationResume
-	resumeErr         error
-	resumeContextErrs []error
-	resumeHasDeadline []bool
-	beforeResume      func()
+	events             []*bus.Event
+	publishErr         error
+	contextErrs        []error
+	publishHasDeadline []bool
+	resumeRequests     []DetachedClarificationResume
+	resumeErr          error
+	resumeContextErrs  []error
+	resumeHasDeadline  []bool
+	beforeResume       func()
 }
 
 func (s *stubEventBus) Publish(ctx context.Context, _ string, ev *bus.Event) error {
+	_, hasDeadline := ctx.Deadline()
+	s.publishHasDeadline = append(s.publishHasDeadline, hasDeadline)
 	s.contextErrs = append(s.contextErrs, ctx.Err())
 	if s.publishErr != nil {
 		return s.publishErr
@@ -208,7 +219,10 @@ func TestCanceller_ExpireSessionAndNotify_MarksExpired(t *testing.T) {
 		},
 	}}
 
-	cancelled := c.ExpireSessionAndNotify(context.Background(), "s1")
+	cancelled, err := c.ExpireSessionAndNotify(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("expire clarification: %v", err)
+	}
 	if cancelled != 1 {
 		t.Fatalf("expected 1 cancelled, got %d", cancelled)
 	}
@@ -242,7 +256,9 @@ func TestCanceller_PersistenceUsesFreshBoundedContext(t *testing.T) {
 		c, repo, _ := newTestCanceller(t, map[string][]*taskmodels.Message{
 			"pending-1": {message},
 		})
-		c.ExpireSessionAndNotify(ctx, "s1")
+		if _, err := c.ExpireSessionAndNotify(ctx, "s1"); err != nil {
+			t.Fatalf("expire clarification: %v", err)
+		}
 		if !repo.activeHasDeadline || repo.activeContextErr != nil {
 			t.Fatalf("expiry lookup context deadline=%v err=%v, want fresh bounded context",
 				repo.activeHasDeadline, repo.activeContextErr)
@@ -252,6 +268,27 @@ func TestCanceller_PersistenceUsesFreshBoundedContext(t *testing.T) {
 				repo.expireHasDeadline, repo.expireContextErr)
 		}
 	})
+}
+
+func TestCanceller_ExpireSessionAndNotifyReturnsPersistenceError(t *testing.T) {
+	message := &taskmodels.Message{
+		ID: "m1", TaskSessionID: "s1",
+		Metadata: map[string]any{"status": "pending", "pending_id": "pending-1"},
+	}
+	c, repo, _ := newTestCanceller(t, map[string][]*taskmodels.Message{
+		"pending-1": {message},
+	})
+	wantErr := errors.New("expiry write failed")
+	repo.expireErr = wantErr
+
+	count, err := c.ExpireSessionAndNotify(context.Background(), "s1")
+
+	if count != 0 {
+		t.Fatalf("expired bundles = %d, want 0", count)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expiry error = %v, want %v", err, wantErr)
+	}
 }
 
 // TestCanceller_NoMessagesToUpdate confirms that a cancel with no pending
@@ -435,7 +472,7 @@ func TestCanceller_RepeatedExpiryIsNoOp(t *testing.T) {
 		t.Fatal("expected in-memory request to be created")
 	}
 
-	if got := c.ExpireSessionAndNotify(context.Background(), "s1"); got != 0 {
+	if got, err := c.ExpireSessionAndNotify(context.Background(), "s1"); err != nil || got != 0 {
 		t.Fatalf("repeated expiry count = %d, want 0", got)
 	}
 	if len(repo.updated) != 0 {

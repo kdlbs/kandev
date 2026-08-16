@@ -51,10 +51,25 @@ func (s *Service) ReconcileTaskStatusSummaries(
 	if s == nil || s.statusSummaries == nil || len(tasks) == 0 {
 		return summaries, nil
 	}
-	if err := s.reconcileExistingSummaries(ctx, tasks, sessionsByTask, pendingBySession, summaries); err != nil {
-		return summaries, err
+	failedTaskIDs, reconcileErr := s.reconcileExistingSummaries(
+		ctx, tasks, sessionsByTask, pendingBySession, summaries,
+	)
+	rebuildTasks := tasks
+	if len(failedTaskIDs) > 0 {
+		rebuildTasks = make([]*models.Task, 0, len(tasks)-len(failedTaskIDs))
+		for _, task := range tasks {
+			if task == nil {
+				continue
+			}
+			if _, failed := failedTaskIDs[task.ID]; !failed {
+				rebuildTasks = append(rebuildTasks, task)
+			}
+		}
 	}
-	return s.rebuildMissingSummaries(ctx, tasks, sessionsByTask, pendingBySession, summaries), nil
+	summaries = s.rebuildMissingSummaries(
+		ctx, rebuildTasks, sessionsByTask, pendingBySession, summaries,
+	)
+	return summaries, reconcileErr
 }
 
 func (s *Service) reconcileExistingSummaries(
@@ -63,8 +78,9 @@ func (s *Service) reconcileExistingSummaries(
 	sessionsByTask map[string][]*models.TaskSession,
 	pendingBySession map[string]models.TaskPendingAction,
 	summaries map[string]*statussummary.TaskStatusSummary,
-) error {
+) (map[string]struct{}, error) {
 	var reconcileErr error
+	failedTaskIDs := make(map[string]struct{})
 	for _, task := range tasks {
 		if task == nil || task.ID == "" || summaries[task.ID] == nil {
 			continue
@@ -79,6 +95,7 @@ func (s *Service) reconcileExistingSummaries(
 		)
 		if err != nil {
 			delete(summaries, task.ID)
+			failedTaskIDs[task.ID] = struct{}{}
 			s.logSummaryRepairFailure(task.ID, "reconcile", err)
 			reconcileErr = errors.Join(
 				reconcileErr,
@@ -92,7 +109,7 @@ func (s *Service) reconcileExistingSummaries(
 		}
 		summaries[task.ID] = reconciled
 	}
-	return reconcileErr
+	return failedTaskIDs, reconcileErr
 }
 
 func (s *Service) rebuildMissingSummaries(

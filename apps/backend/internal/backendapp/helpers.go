@@ -579,6 +579,7 @@ func registerRoutes(p routeParams) {
 	clarificationStore := clarification.NewStore(2 * time.Hour)
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.eventBus, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
+	p.taskSvc.SetClarificationCanceller(clarificationCanceller)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {

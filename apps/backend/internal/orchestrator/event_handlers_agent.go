@@ -484,16 +484,32 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		waitedForReservation = true
 		lock.Unlock()
 		guardLocked = false
-		waitCtx, cancel := context.WithTimeout(
-			context.WithoutCancel(ctx),
-			detachedClarificationDispatchTimeout+promptFailureCleanupTimeout,
-		)
+		waitTimeout := s.agentReadyReservationWaitTimeout
+		if waitTimeout <= 0 {
+			waitTimeout = detachedClarificationDispatchTimeout + promptFailureCleanupTimeout
+		}
+		waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), waitTimeout)
 		accepted, waitErr := reservation.wait(waitCtx)
 		cancel()
 		lock.Lock()
 		guardLocked = true
 		if waitErr != nil {
-			s.logger.Warn("agent.ready timed out waiting for reserved prompt dispatch",
+			if data.PromptGeneration == 0 {
+				s.logger.Warn("dropping generationless agent.ready after reserved prompt wait timed out",
+					zap.String("task_id", data.TaskID),
+					zap.String("session_id", data.SessionID),
+					zap.String("turn_id", reservation.id),
+					zap.Error(waitErr))
+				return
+			}
+			retryCtx := context.WithoutCancel(ctx)
+			deferred := reservation.deferUntilResolved(func() {
+				s.handleAgentReady(retryCtx, data)
+			})
+			if !deferred {
+				continue
+			}
+			s.logger.Warn("agent.ready timed out waiting for reserved prompt dispatch; deferred reconciliation until resolution",
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", data.SessionID),
 				zap.String("turn_id", reservation.id),

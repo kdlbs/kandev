@@ -857,6 +857,9 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 // publishMessageEvent publishes message events to the event bus.
 // Only true system-injected content (wrapped in <kandev-system> tags) is stripped
 // from the visible message content delivered to clients.
+// Ordinary persistence callers intentionally treat delivery as best effort
+// after their durable write succeeds. Synchronization-sensitive callers, such
+// as clarification bundle convergence, check and propagate the returned error.
 func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
 	if s.eventBus == nil {
 		s.logger.Warn("publishMessageEvent: eventBus is nil, skipping")

@@ -3,6 +3,8 @@ package clarification
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -48,7 +50,7 @@ func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) 
 	return c.publishChangedBundles(writeCtx, messages)
 }
 
-func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) int {
+func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) (int, error) {
 	// The initial read discovers bundle identities only. Each transition below
 	// rechecks that exact pending ID, current-turn ownership, and pending status
 	// inside one UPDATE serialized with answers and successor turns.
@@ -60,7 +62,7 @@ func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) 
 		c.logger.Warn("failed to load current clarification bundles for expiry",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return 0
+		return 0, fmt.Errorf("load current clarification bundles for expiry: %w", err)
 	}
 	pendingIDs := make(map[string]struct{})
 	for _, message := range messages {
@@ -69,6 +71,7 @@ func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) 
 		}
 	}
 	changedBundles := 0
+	var expiryErr error
 	for pendingID := range pendingIDs {
 		changed, expireErr := c.repo.ExpireActiveClarificationBundle(writeCtx, sessionID, pendingID)
 		if expireErr != nil {
@@ -76,6 +79,10 @@ func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) 
 				zap.String("session_id", sessionID),
 				zap.String("pending_id", pendingID),
 				zap.Error(expireErr))
+			expiryErr = errors.Join(
+				expiryErr,
+				fmt.Errorf("expire clarification bundle %s: %w", pendingID, expireErr),
+			)
 			continue
 		}
 		if len(changed) == 0 {
@@ -86,7 +93,7 @@ func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) 
 			c.publishMessageUpdated(writeCtx, message)
 		}
 	}
-	return changedBundles
+	return changedBundles, expiryErr
 }
 
 func (c *Canceller) publishChangedBundles(ctx context.Context, messages []*taskmodels.Message) int {
@@ -109,9 +116,7 @@ func (c *Canceller) DetachSessionAndNotify(ctx context.Context, sessionID string
 
 // ExpireSessionAndNotify cancels in-memory waiters and marks clarification
 // messages expired so the overlay closes and history shows a timed-out entry.
-// TODO: wire this into terminal teardown paths that should close the overlay
-// instead of preserving the deferred-answer UX.
-func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string) int {
+func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error) {
 	return c.expireSessionBundles(ctx, sessionID)
 }
 

@@ -34,6 +34,19 @@ type MockEventBus struct {
 	closed          bool
 }
 
+type recordingTaskClarificationCanceller struct {
+	sessions []string
+	err      error
+}
+
+func (c *recordingTaskClarificationCanceller) ExpireSessionAndNotify(
+	_ context.Context,
+	sessionID string,
+) (int, error) {
+	c.sessions = append(c.sessions, sessionID)
+	return 1, c.err
+}
+
 func NewMockEventBus() *MockEventBus {
 	return &MockEventBus{
 		publishedEvents: make([]*bus.Event, 0),
@@ -1969,6 +1982,8 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
 
+	clarifications := &recordingTaskClarificationCanceller{}
+	svc.SetClarificationCanceller(clarifications)
 	if err := svc.ArchiveTask(ctx, "task-1"); err != nil {
 		t.Fatalf("ArchiveTask: %v", err)
 	}
@@ -2011,6 +2026,9 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 	}
 	if session.State != models.TaskSessionStateCancelled {
 		t.Errorf("session state = %q, want CANCELLED", session.State)
+	}
+	if len(clarifications.sessions) != 1 || clarifications.sessions[0] != "session-running" {
+		t.Fatalf("expired clarification sessions = %v, want [session-running]", clarifications.sessions)
 	}
 }
 

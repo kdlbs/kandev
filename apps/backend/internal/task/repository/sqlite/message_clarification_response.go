@@ -309,6 +309,12 @@ func (r *Repository) loadRestorableClarificationBundle(
 		FROM task_session_messages m
 		WHERE %s = ?
 		  AND m.type = 'clarification_request'
+		  AND EXISTS (
+			SELECT 1
+			FROM task_sessions session_row
+			WHERE session_row.id = m.task_session_id
+			  AND session_row.state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
+		  )
 		  AND m.turn_id = (
 			SELECT turn_row.id
 			FROM task_session_turns turn_row
@@ -359,6 +365,12 @@ func (r *Repository) restoreClarificationMessages(
 		UPDATE task_session_messages
 		SET metadata = ?, updated_at = ?
 		WHERE id = ? AND %s = ?
+		  AND EXISTS (
+			SELECT 1
+			FROM task_sessions session_row
+			WHERE session_row.id = task_session_messages.task_session_id
+			  AND session_row.state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
+		  )
 		  AND turn_id = (
 			SELECT turn_row.id
 			FROM task_session_turns turn_row
@@ -422,6 +434,12 @@ func (r *Repository) claimActiveClarificationBundle(
 		WHERE %s = ?
 		  AND type = 'clarification_request'
 		  AND COALESCE(%s, '') IN ('', 'pending')
+		  AND EXISTS (
+			SELECT 1
+			FROM task_sessions session_row
+			WHERE session_row.id = task_session_messages.task_session_id
+			  AND session_row.state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
+		  )
 		  AND turn_id = (
 			SELECT turn_row.id
 			FROM task_session_turns turn_row
