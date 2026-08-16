@@ -495,7 +495,8 @@ export type RoutingErrorCode =
   | "agent_runtime_error"
   | "task_error"
   | "repo_error"
-  | "permission_denied_by_user";
+  | "permission_denied_by_user"
+  | "agent_transport_lost";
 
 export type TierMap = {
   frontier?: string;
@@ -658,20 +659,37 @@ export type OfficeRefetchTrigger = {
   timestamp: number;
 };
 
+/**
+ * Office collections that belong to one workspace, stored per workspace id
+ * rather than as a single current value.
+ *
+ * These used to be flat, which was safe only while the office route was the
+ * one thing that loaded them: entering the route overwrote whatever the
+ * previous workspace had left behind. Now that the data is loaded wherever
+ * an office workspace is active, two workspaces' worth of it can be in flight
+ * across a switch, and a flat field renders the wrong one in between.
+ * `routing` and `providerHealth` in this same slice were already keyed for
+ * the same reason.
+ *
+ * Read these through `selectors.ts` rather than indexing directly — the
+ * selectors resolve the active workspace and return stable empty values, so a
+ * component subscribing to a workspace with no entry does not re-render on
+ * every unrelated store write.
+ */
 export type OfficeSliceState = {
   office: {
-    agentProfiles: AgentProfile[];
+    agentProfilesByWorkspaceId: Record<string, AgentProfile[]>;
     skills: Skill[];
-    projects: Project[];
+    projectsByWorkspaceId: Record<string, Project[]>;
     approvals: Approval[];
     activity: ActivityEntry[];
     costSummary: CostSummary | null;
     budgetPolicies: BudgetPolicy[];
     routines: Routine[];
-    inboxItems: InboxItem[];
-    inboxCount: number;
+    inboxItemsByWorkspaceId: Record<string, InboxItem[]>;
+    inboxCountByWorkspaceId: Record<string, number>;
     runs: Run[];
-    dashboard: DashboardData | null;
+    dashboardByWorkspaceId: Record<string, DashboardData | null>;
     tasks: TasksState;
     meta: OfficeMeta | null;
     isLoading: boolean;
@@ -684,27 +702,27 @@ export type OfficeSliceState = {
 };
 
 export type OfficeSliceActions = {
-  setOfficeAgentProfiles: (agents: AgentProfile[]) => void;
-  addOfficeAgentProfile: (agent: AgentProfile) => void;
-  updateOfficeAgentProfile: (id: string, patch: Partial<AgentProfile>) => void;
-  removeOfficeAgentProfile: (id: string) => void;
+  setOfficeAgentProfiles: (workspaceId: string, agents: AgentProfile[]) => void;
+  addOfficeAgentProfile: (workspaceId: string, agent: AgentProfile) => void;
+  updateOfficeAgentProfile: (workspaceId: string, id: string, patch: Partial<AgentProfile>) => void;
+  removeOfficeAgentProfile: (workspaceId: string, id: string) => void;
   setSkills: (skills: Skill[]) => void;
   addSkill: (skill: Skill) => void;
   updateSkill: (id: string, patch: Partial<Skill>) => void;
   removeSkill: (id: string) => void;
-  setProjects: (projects: Project[]) => void;
-  addProject: (project: Project) => void;
-  updateProject: (id: string, patch: Partial<Project>) => void;
-  removeProject: (id: string) => void;
+  setProjects: (workspaceId: string, projects: Project[]) => void;
+  addProject: (workspaceId: string, project: Project) => void;
+  updateProject: (workspaceId: string, id: string, patch: Partial<Project>) => void;
+  removeProject: (workspaceId: string, id: string) => void;
   setApprovals: (approvals: Approval[]) => void;
   setActivity: (entries: ActivityEntry[]) => void;
   setCostSummary: (summary: CostSummary | null) => void;
   setBudgetPolicies: (policies: BudgetPolicy[]) => void;
   setRoutines: (routines: Routine[]) => void;
-  setInboxItems: (items: InboxItem[]) => void;
-  setInboxCount: (count: number) => void;
+  setInboxItems: (workspaceId: string, items: InboxItem[]) => void;
+  setInboxCount: (workspaceId: string, count: number) => void;
   setRuns: (runs: Run[]) => void;
-  setDashboard: (data: DashboardData | null) => void;
+  setDashboard: (workspaceId: string, data: DashboardData | null) => void;
   setTasks: (tasks: OfficeTask[]) => void;
   appendTasks: (tasks: OfficeTask[]) => void;
   patchTaskInStore: (taskId: string, patch: Partial<OfficeTask>) => void;

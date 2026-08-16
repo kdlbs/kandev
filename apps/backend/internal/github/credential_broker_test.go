@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 type fakeBrokerAuthorizer struct {
-	err        error
-	calls      int
-	sessionIDs []string
+	err                 error
+	calls               int
+	sessionIDs          []string
+	identityProviderIDs []string
 }
 
 type fakeBrokerInstallationProvider struct {
@@ -68,6 +71,14 @@ func (a *fakeBrokerAuthorizer) AuthorizeGitHubRepository(
 	a.calls++
 	a.sessionIDs = append(a.sessionIDs, sessionID)
 	return a.err
+}
+
+func (a *fakeBrokerAuthorizer) AuthorizeGitHubRepositoryWithIdentity(
+	ctx context.Context,
+	workspaceID, taskID, sessionID, repositoryID, owner, repo, providerID, parentProviderID string,
+) error {
+	a.identityProviderIDs = append(a.identityProviderIDs, providerID+"/"+parentProviderID)
+	return a.AuthorizeGitHubRepository(ctx, workspaceID, taskID, sessionID, repositoryID, owner, repo)
 }
 
 func newPATCredentialBroker(t *testing.T) (*CredentialBroker, *WorkspaceConnection, *fakeBrokerAuthorizer) {
@@ -178,6 +189,39 @@ func TestCredentialBrokerGenerationChangeRevokesLease(t *testing.T) {
 	_, err = broker.Resolve(context.Background(), brokerCredentialRequest(lease.Token))
 	if !errors.Is(err, ErrCredentialLeaseRevoked) {
 		t.Fatalf("error = %v, want revoked", err)
+	}
+}
+
+func TestCredentialBrokerRejectsDestinationLeaseForChangedWorkspaceConnection(t *testing.T) {
+	broker, connection, authorizer := newPATCredentialBroker(t)
+	binding := &taskmodels.ContributionDestinationCredentialBinding{
+		Source:               string(ConnectionSourcePAT),
+		Login:                "octocat",
+		CredentialGeneration: 7,
+	}
+	req := brokerLeaseRequest()
+	req.ProviderID = "200"
+	req.ParentProviderID = "100"
+	req.DestinationBinding = binding
+
+	lease, err := broker.Issue(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Issue with matching binding: %v", err)
+	}
+	if got := authorizer.identityProviderIDs; len(got) != 1 || got[0] != "200/100" {
+		t.Fatalf("issued identity checks = %v, want [200/100]", got)
+	}
+	connection.Login = "different-user"
+	connection.CredentialGeneration++
+
+	if _, err := broker.Issue(context.Background(), req); !errors.Is(err, ErrCredentialScopeDenied) {
+		t.Fatalf("Issue with changed connection error = %v, want scope denial", err)
+	}
+	redemption := brokerCredentialRequest(lease.Token)
+	redemption.ProviderID = "200"
+	redemption.ParentProviderID = "100"
+	if _, err := broker.Resolve(context.Background(), redemption); !errors.Is(err, ErrCredentialLeaseRevoked) {
+		t.Fatalf("Resolve with changed connection error = %v, want lease revoked", err)
 	}
 }
 

@@ -100,6 +100,8 @@ type AppNavSectionsProps = {
    * both rendered gave two identically labelled rows going to different places.
    */
   omitDestinations?: string[];
+  /** Optional workspace-scoped plugin actions for the current phone surface. */
+  workspaceActions?: ReactNode;
   controls: AppNavDialogControls;
 };
 
@@ -113,11 +115,13 @@ export function AppNavSections({
   onNavigate,
   omitSections = [],
   omitDestinations = [],
+  workspaceActions,
   controls,
 }: AppNavSectionsProps) {
   const omit = new Set(omitSections);
   return (
     <>
+      {workspaceActions}
       {!omit.has("primary") && (
         <PrimaryNavSection onNavigate={onNavigate} omitDestinations={omitDestinations} />
       )}

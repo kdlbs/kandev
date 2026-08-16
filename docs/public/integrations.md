@@ -122,6 +122,16 @@ path on desktop hover or focus and in a touch-accessible drawer on mobile.
   configuration. A separate broker-aware shim handles `gh`. The task receives neither the stored
   PAT nor an App private key. An executor-profile `GH_TOKEN` or `GITHUB_TOKEN` deliberately takes
   precedence for that task.
+
+For a managed **Improve Kandev** task, Kandev keeps the task attached to the canonical
+`kdlbs/kandev` repository. Before the first launch, the workspace automation connection resolves
+one exact writable fork as the task's contribution destination. Kandev stores that destination
+without credentials, adds a dedicated push remote, and issues one additional broker lease for the
+exact fork. The canonical `origin` remains the pull, issue, and pull-request target. A direct write
+connection does not need a fork. An App connection without direct write access cannot own an
+automatic personal fork, so managed fork preparation fails closed; the Improve Kandev issue-only
+option remains available.
+
 - **Inherit executor Git credentials** is the default for newly created workspaces and does not
   install Kandev's broker helper or `gh` shim. Local
   and Worktree tasks use credentials already visible to the host Git process (including SSH).

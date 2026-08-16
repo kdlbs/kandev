@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Locale } from "date-fns";
-import { IconAlertTriangle } from "@tabler/icons-react";
+import { IconAlertTriangle, IconGauge } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import type { GitHubRateLimitInfo, GitHubRateLimitSnapshot } from "@/lib/types/github";
 import { GitHubAccessHelp } from "./github-access-help";
@@ -75,6 +75,7 @@ export function GitHubRateLimitDisplay({
       label={t("github:showGithubApiLimits")}
       title={t("github:githubApiLimits")}
       description={t("github:currentGithubApiRateAndQuery")}
+      icon={<IconGauge className="h-4 w-4" data-testid="github-rate-limit-icon" />}
       content={
         snapshots.length > 0 ? (
           <RateLimitDetails snapshots={snapshots} exhausted={exhausted} />

@@ -20,6 +20,13 @@ Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset
 
 The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials before relying on Pull, Push, Rebase, Merge, or change-request creation.
 
+Managed Improve Kandev tasks are the exception to the ordinary single-remote push description. The
+canonical `origin` still identifies `kdlbs/kandev` for pulls, base comparisons, issue lookup, and
+the pull-request target. Before launch, Kandev prepares one exact fork remote for the task branch
+and configures Git to use it for pushes. Run ordinary **Push** or `git push`; do not rename `origin`
+or replace it with a fork. The PR workflow uses the canonical repository and an explicit
+`<fork-owner>:<branch>` head. Other tasks keep the normal `origin` push behavior.
+
 These UI operations enter through Kandev's `/ws` endpoint, which currently has no backend authentication. Anyone who can reach an unprotected backend can invoke destructive Git actions with the executor's permissions. Keep Kandev on loopback or behind an authenticated, origin-protected reverse proxy; see [WebSocket API](websocket-api.md).
 
 Credentials are resolved where `agentctl` runs. A host SSH agent, credential helper, `gh` login, or `az` login is not automatically available inside every Docker, SSH, or remote executor. Give the executor only the repository access it needs and test with a disposable branch. See [Executors](executors.md) for executor-specific credential handling.
@@ -66,7 +73,7 @@ All operations below run in the selected repository workspace.
 | UI operation | Effective Git behavior | Important consequence |
 |--------------|------------------------|-----------------------|
 | Pull | `git pull origin BRANCH`, optionally with `--rebase`. | Uses the current branch when any upstream exists. With no upstream it falls back to `origin/main`, then `origin/master`, then the current branch. It does not parse an upstream that points to a differently named remote branch. |
-| Push | `git push origin CURRENT_BRANCH`; adds `--set-upstream` when requested or no upstream exists. | Force Push uses `--force-with-lease`, not unconditional `--force`. It still rewrites remote history when the lease is valid. |
+| Push | `git push origin CURRENT_BRANCH`; adds `--set-upstream` when requested or no upstream exists. | Force Push uses `--force-with-lease`, not unconditional `--force`. It still rewrites remote history when the lease is valid. Managed Improve Kandev tasks use the branch's prepared fork push remote instead of `origin`. |
 | Rebase | Fetches `origin BASE`, then rebases onto `origin/BASE`. | Rewrites local commits. If conflict files are detected from Git output, Kandev attempts `git rebase --abort` automatically and returns the file list. |
 | Merge | Fetches `origin BASE`, then merges `origin/BASE`. | Conflicts are deliberately left in the worktree. Resolve and commit them, or use Abort Merge. |
 | Abort | Runs `git merge --abort` or `git rebase --abort`. | Fails when that operation is not in progress or the repository cannot be restored. |
@@ -106,17 +113,21 @@ Do not reset or amend commits already consumed by other users unless you intend 
 
 ## Create a pull request or merge request
 
-**Create PR** first runs:
+For an ordinary task, **Create PR** first runs:
 
 ```bash
 git push --set-upstream origin HEAD
 ```
 
+For a managed Improve Kandev task, the prepared branch push remote replaces
+`origin` for this push. Keep `origin` canonical and create the GitHub pull
+request with the explicit fork head shown below.
+
 It then selects a provider from the `origin` hostname:
 
 | Provider | Required runtime tools | Creation behavior |
 |----------|------------------------|-------------------|
-| GitHub | Authenticated `gh` CLI | `gh pr create` with title, body, current head, optional base, and optional `--draft`. |
+| GitHub | Authenticated `gh` CLI | `gh pr create` with title, body, current head, optional base, and optional `--draft`. Managed Improve Kandev uses `--repo kdlbs/kandev` and an explicit `<fork-owner>:<branch>` head. |
 | GitLab | Authenticated `glab` CLI or the active workspace's matching GitLab PAT | Reuses an existing open MR for the same source/target or creates one with title, description, current source, explicit or project-default target, and optional draft state. The configured GitLab origin must match the HTTPS or SSH `origin`. |
 | Azure Repos | Authenticated `az` CLI plus the `azure-devops` extension | `az repos pr create` with parsed organization, project, repository, source, optional target, and optional draft. |
 

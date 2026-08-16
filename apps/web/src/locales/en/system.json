@@ -231,7 +231,7 @@
   "restartUnsupportedHelp": "Automatic restart is not available in deploy previews, unmanaged terminal runs, or launch modes without a restart supervisor.",
   "restoreAction": "Restore",
   "restoreBody": "Restore <1>{{name}}</1> over the current database. After the staged copy is in place you will be asked to quit and relaunch Kandev so the new data is loaded fresh - the backend does not auto-restart.",
-  "restoreCompleteBody": "<0>{{name}}</0> has been written over the current database. Quit and relaunch Kandev to load the restored data - the running backend still holds connections to the previous version and will serve stale rows until you restart.",
+  "restoreCompleteBody": "<0>{{name}}</0> has been written over the current database. Restart Kandev before you continue. The database pool is closed until the restart. If automatic restart is unavailable, quit and relaunch Kandev manually.",
   "restoreCompleteTitle": "Restore complete",
   "restoreFailed": "Restore failed",
   "restorePlaceholder": "Type {{token}} to confirm",

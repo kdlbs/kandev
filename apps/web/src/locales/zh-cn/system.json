@@ -228,7 +228,7 @@
   "restartUnsupportedHelp": "在部署预览、非托管终端运行或不含重启监督程序的启动模式下，自动重启不可用。",
   "restoreAction": "恢复",
   "restoreBody": "将 <1>{{name}}</1> 覆盖到当前数据库。暂存副本就绪后，需要你退出并重新启动 Kandev 以加载新数据；后端不会自动重启。",
-  "restoreCompleteBody": "<0>{{name}}</0> 已写入当前数据库。请退出并重新启动 Kandev 以加载恢复的数据；正在运行的后端仍持有旧版本连接，重启前会提供过期行。",
+  "restoreCompleteBody": "<0>{{name}}</0> 已写入当前数据库。请先重启 Kandev，再继续操作。数据库连接池在重启前保持关闭。如果自动重启不可用，请手动退出并重新启动 Kandev。",
   "restoreCompleteTitle": "恢复完成",
   "restoreFailed": "恢复失败",
   "restorePlaceholder": "输入 {{token}} 以确认",

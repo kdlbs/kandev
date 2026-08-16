@@ -2,30 +2,118 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
 
-// CreateCostEvent records a new cost event.
+// ErrDuplicateUsageEvent is returned by CreateCostEvent when the row's
+// UsageEventID collides with an existing one. The real duplicate source is
+// not bus redelivery — neither the memory nor the NATS event bus redelivers
+// (see internal/events/bus/{memory,nats}.go) — it is the SAME underlying
+// completion frame reaching the publisher twice, e.g. a reconnecting WS
+// client replaying a buffered stream event (see
+// orchestrator.usageEventIDFor's doc comment for how the id is derived to
+// collide in exactly that case). Either way this must not double-count
+// cost; callers treat this as an idempotent no-op, not a failure, but still
+// get a distinct signal to attribute to writer health rather than to
+// "written".
+var ErrDuplicateUsageEvent = errors.New("duplicate usage_event_id")
+
+// usageEventIndexName is the partial unique index enforcing at most one row
+// per non-NULL usage_event_id (docs/specs/office/costs.md).
+const usageEventIndexName = "uniq_office_cost_usage_event"
+
+// sqliteUsageEventViolationMessage is the substring go-sqlite3 puts in a
+// UNIQUE-constraint error for this index. SQLite exposes no typed access to
+// the violated index's name, only the column ("UNIQUE constraint failed:
+// office_cost_events.usage_event_id"), which is unique to this index in
+// this table.
+const sqliteUsageEventViolationMessage = "UNIQUE constraint failed: office_cost_events.usage_event_id"
+
+// isUsageEventUniqueViolation reports whether err is a violation of
+// uniq_office_cost_usage_event specifically, not any unique violation. On
+// PostgreSQL it inspects the typed pgconn.PgError's constraint name; on
+// SQLite (no typed access to the constraint name) it matches the
+// column-list message documented above. Mirrors
+// internal/task/repository/sqlite/task_external_id.go's
+// isExternalIDUniqueViolation.
+func isUsageEventUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" && pgErr.ConstraintName == usageEventIndexName
+	}
+	return strings.Contains(err.Error(), sqliteUsageEventViolationMessage)
+}
+
+// CreateCostEvent records a new cost event. A UsageEventID collision
+// (redelivery of the same prompt-usage event) is reported as
+// ErrDuplicateUsageEvent rather than the raw driver error, so callers can
+// treat it as an idempotent no-op.
+//
+// Delegates to CreateCostEventTx using r.db as the executor; a caller that
+// needs this atomic with another write (e.g. the office cost subscriber's
+// session-usage rollup) should call the Tx variant directly with a shared
+// transaction instead.
 func (r *Repository) CreateCostEvent(ctx context.Context, event *models.CostEvent) error {
+	return r.CreateCostEventTx(ctx, nil, event)
+}
+
+// CreateCostEventTx is CreateCostEvent's transactional twin: executes
+// against tx when non-nil (falling back to r.db, the shared writer
+// connection, when tx is nil) so a caller can make this atomic with another
+// write in the same transaction — see BeginTx and
+// shared.SessionUsageWriterTx's doc comment for why (docs/specs/office/costs.md,
+// PR #2606 review).
+func (r *Repository) CreateCostEventTx(ctx context.Context, tx *sqlx.Tx, event *models.CostEvent) error {
 	if event.ID == "" {
 		event.ID = uuid.New().String()
 	}
 	event.CreatedAt = time.Now().UTC()
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	var exec interface {
+		ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+		Rebind(query string) string
+	}
+	if tx != nil {
+		exec = tx
+	} else {
+		exec = r.db
+	}
+
+	_, err := exec.ExecContext(ctx, exec.Rebind(`
 		INSERT INTO office_cost_events (
 			id, session_id, task_id, agent_profile_id, project_id,
-			model, provider, tokens_in, tokens_cached_in, tokens_out,
-			cost_subcents, estimated, occurred_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			model, provider, tokens_in, tokens_cached_in,
+			tokens_cached_read, tokens_cached_write, tokens_out,
+			cost_subcents, estimated, turn_id, usage_event_id, cost_source,
+			rate_input_per_million, rate_cached_read_per_million,
+			rate_cached_write_per_million, rate_output_per_million,
+			pricing_catalog_version, cost_contract_version,
+			occurred_at, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), event.ID, event.SessionID, event.TaskID, event.AgentProfileID,
 		event.ProjectID, event.Model, event.Provider, event.TokensIn,
-		event.TokensCachedIn, event.TokensOut, event.CostSubcents,
-		event.Estimated, event.OccurredAt, event.CreatedAt)
+		event.TokensCachedIn, event.TokensCachedRead, event.TokensCachedWrite,
+		event.TokensOut, event.CostSubcents, event.Estimated,
+		event.TurnID, event.UsageEventID, event.CostSource,
+		event.RateInputPerMillion, event.RateCachedReadPerMillion,
+		event.RateCachedWritePerMillion, event.RateOutputPerMillion,
+		event.PricingCatalogVersion, event.CostContractVersion,
+		event.OccurredAt, event.CreatedAt)
+	if err != nil && isUsageEventUniqueViolation(err) {
+		return ErrDuplicateUsageEvent
+	}
 	return err
 }
 

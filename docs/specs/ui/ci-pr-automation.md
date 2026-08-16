@@ -16,6 +16,10 @@ close. Users and task agents need automation controls that keep a linked PR
 moving throughout its lifecycle, configured independently per linked PR so a
 task with several open PRs does not force the same setting onto all of them.
 
+Task-to-PR associations survive restarts and archive/unarchive. Hard deletion
+removes task-owned associations and refresh watches; it is not contribution
+history. Decision: ADR-2026-08-13-hard-delete-task-contribution-links.
+
 Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-automation.md)
 (the task-level control plane for the five switches was superseded by per-PR
 scoping; see that ADR's Consequences section).

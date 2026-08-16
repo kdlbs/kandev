@@ -14,7 +14,7 @@ import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surfa
 import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
-import { workspaceHomeHref } from "@/components/app-sidebar/app-sidebar-workspace-navigation";
+import { workspaceHomeHref } from "@/lib/navigation/workspace-home";
 import { cn } from "@/lib/utils";
 
 type KanbanHeaderMobileProps = {

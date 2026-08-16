@@ -105,9 +105,12 @@ func seedSessionsWireFixture(d *testDataHost, n int) {
 		if i == 0 {
 			sessions[i].Metadata = map[string]any{"acp": map[string]any{"session_id": "acp-session-0"}}
 		}
+		linesAdded := int64(10 * (i + 1))
+		linesDeleted := int64(i + 1)
 		stats[i] = &analyticsmodels.SessionCodeStats{
-			SessionID:           id,
-			LinesAddedCommitted: int64(10 * (i + 1)),
+			SessionID:             id,
+			LinesAddedCommitted:   &linesAdded,
+			LinesDeletedCommitted: &linesDeleted,
 		}
 	}
 	d.tasks.sessionsByTask = map[string][]*taskmodels.TaskSession{"task-1": sessions}
@@ -156,6 +159,7 @@ func TestPluginHostData_Wire_SessionsRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stats, 1)
 	require.Equal(t, "session-0", stats[0].SessionID)
+	require.True(t, stats[0].CommittedLinesAvailable)
 	require.Equal(t, int64(10), stats[0].LinesAddedCommitted)
 }
 

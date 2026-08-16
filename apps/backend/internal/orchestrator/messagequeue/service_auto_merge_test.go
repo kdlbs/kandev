@@ -3,6 +3,7 @@ package messagequeue
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -69,19 +70,193 @@ func TestService_AutoMergeChainsThreeAdmissions(t *testing.T) {
 	}
 }
 
-func TestService_AutoMergeDoesNotBypassCapacity(t *testing.T) {
+func TestService_AutoMergeKeepsDifferentSenderSessionsSeparate(t *testing.T) {
+	svc := newAutoMergeTestService(t, 10)
+	sender := func(session string) map[string]interface{} {
+		return map[string]interface{}{
+			"sender_task_id": "sender-task", "sender_session_id": session,
+			"sender_session_name": "reviewer-" + session, "sender_task_title": "Sender task",
+		}
+	}
+	first, err := svc.QueueMessageWithMetadata(context.Background(), "session", "task", "first", "", QueuedByAgent, false, nil, sender("one"))
+	if err != nil {
+		t.Fatalf("queue first: %v", err)
+	}
+	// A different session of the same sender task is a different agent and
+	// execution context; its prompt must stay a separate queue entry.
+	second, err := svc.QueueMessageWithMetadata(context.Background(), "session", "task", "second", "", QueuedByAgent, false, nil, sender("two"))
+	if err != nil {
+		t.Fatalf("queue second: %v", err)
+	}
+	if second.ID == first.ID {
+		t.Fatal("different sender sessions must stay separate, got a fold")
+	}
+	status := svc.GetStatus(context.Background(), "session")
+	if status.Count != 2 {
+		t.Fatalf("status = %+v, want two separate entries", status)
+	}
+}
+
+func TestService_AutoMergeFoldsCompatibleAdmissionAtCapacity(t *testing.T) {
 	svc := newAutoMergeTestService(t, 1)
 	first, err := svc.QueueMessage(context.Background(), "session", "task", "first", "", QueuedByUser, false, nil)
 	if err != nil {
 		t.Fatalf("queue first: %v", err)
 	}
+	// A compatible message must fold into the tail instead of being rejected:
+	// the fold is the admission, so the queue never reports full for a message
+	// that would merge anyway.
+	second, err := svc.QueueMessage(context.Background(), "session", "task", "second", "", QueuedByUser, false, nil)
+	if err != nil {
+		t.Fatalf("compatible admission at capacity = %v, want fold", err)
+	}
+	if second.ID != first.ID || second.Content != "first\n\nsecond" {
+		t.Fatalf("second admission = %+v, want folded survivor %s", second, first.ID)
+	}
+	status := svc.GetStatus(context.Background(), "session")
+	if status.Count != 1 || status.Entries[0].ID != first.ID || status.Entries[0].Content != "first\n\nsecond" {
+		t.Fatalf("queue after full-queue fold: %+v", status)
+	}
+}
+
+func TestService_AutoMergeAtFullQueueRejectsIncompatibleAdmission(t *testing.T) {
+	svc := newAutoMergeTestService(t, 1)
+	if _, err := svc.QueueMessage(context.Background(), "session", "task", "first", "model-a", QueuedByUser, false, nil); err != nil {
+		t.Fatalf("queue first: %v", err)
+	}
+	second, err := svc.QueueMessage(context.Background(), "session", "task", "second", "model-b", QueuedByUser, false, nil)
+	if !errors.Is(err, ErrQueueFull) || second != nil {
+		t.Fatalf("incompatible full admission = %+v, err=%v, want queue full", second, err)
+	}
+}
+
+func TestService_AutoMergeDisabledAtFullQueueRejects(t *testing.T) {
+	svc := newAutoMergeTestService(t, 1)
+	svc.SetAutoMergeEnabled(false)
+	if _, err := svc.QueueMessage(context.Background(), "session", "task", "first", "", QueuedByUser, false, nil); err != nil {
+		t.Fatalf("queue first: %v", err)
+	}
 	second, err := svc.QueueMessage(context.Background(), "session", "task", "second", "", QueuedByUser, false, nil)
 	if !errors.Is(err, ErrQueueFull) || second != nil {
-		t.Fatalf("second admission = %+v, err=%v, want queue full", second, err)
+		t.Fatalf("disabled full admission = %+v, err=%v, want queue full", second, err)
+	}
+}
+
+func TestService_AutoMergeAtFullQueueSkipsAfterInsertHook(t *testing.T) {
+	svc := newAutoMergeTestService(t, 1)
+	if _, err := svc.QueueMessage(context.Background(), "session", "task", "first", "", QueuedByUser, false, nil); err != nil {
+		t.Fatalf("queue first: %v", err)
+	}
+	ran := false
+	second, err := svc.QueueMessageWithMetadataAfterInsert(
+		context.Background(), "session", "task", "second", "", QueuedByUser, false, nil, nil,
+		func(context.Context, *QueuedMessage) error { ran = true; return nil },
+	)
+	if !errors.Is(err, ErrQueueFull) || second != nil {
+		t.Fatalf("after-insert full admission = %+v, err=%v, want queue full", second, err)
+	}
+	if ran {
+		t.Fatal("after-insert hook ran for a rejected full-queue admission")
+	}
+}
+
+// autoMergeCandidateErrorRepository wraps a repository and fails every
+// full-queue candidate fold with the configured error.
+type autoMergeCandidateErrorRepository struct {
+	Repository
+	err error
+}
+
+func (r *autoMergeCandidateErrorRepository) AutoMergeCandidateIntoAbove(context.Context, *QueuedMessage) (*QueuedMessage, bool, error) {
+	return nil, false, r.err
+}
+
+// failNextInsertRepository fails the next N Insert calls with ErrQueueFull,
+// simulating a cross-process admission that observed a stale full count while
+// the underlying queue already drained.
+type failNextInsertRepository struct {
+	Repository
+	mu       sync.Mutex
+	failNext int
+}
+
+func (r *failNextInsertRepository) Insert(ctx context.Context, msg *QueuedMessage, maxPerSession int) error {
+	r.mu.Lock()
+	if r.failNext > 0 {
+		r.failNext--
+		r.mu.Unlock()
+		return ErrQueueFull
+	}
+	r.mu.Unlock()
+	return r.Repository.Insert(ctx, msg, maxPerSession)
+}
+
+func TestService_AutoMergeFullQueueRetriesInsertAfterFoldSkip(t *testing.T) {
+	repo := &failNextInsertRepository{Repository: NewMemoryRepository()}
+	svc := newAutoMergeTestServiceWithRepository(t, repo, 1)
+	if _, err := svc.QueueMessage(context.Background(), "session", "task", "first", "", QueuedByUser, false, nil); err != nil {
+		t.Fatalf("queue first: %v", err)
+	}
+	// A concurrent drain frees capacity between the failed insert and the
+	// fold scan: the fold sees an empty queue and skips, and admission must
+	// retry the ordinary insert instead of returning the stale ErrQueueFull.
+	if _, ok := svc.TakeQueued(context.Background(), "session"); !ok {
+		t.Fatal("drain first entry")
+	}
+	repo.mu.Lock()
+	repo.failNext = 1
+	repo.mu.Unlock()
+
+	second, err := svc.QueueMessage(context.Background(), "session", "task", "second", "", QueuedByUser, false, nil)
+	if err != nil {
+		t.Fatalf("admission after fold skip = %v, want insert retry to succeed", err)
+	}
+	if second == nil || second.Content != "second" {
+		t.Fatalf("queued entry = %+v, want the retried message", second)
+	}
+	status := svc.GetStatus(context.Background(), "session")
+	if status.Count != 1 || status.Entries[0].Content != "second" {
+		t.Fatalf("status = %+v, want the retried message queued", status)
+	}
+}
+
+func TestService_AutoMergeFullQueueCandidateMergeErrorDegradesToQueueFull(t *testing.T) {
+	wantErr := errors.New("automatic candidate merge unavailable")
+	repo := &autoMergeCandidateErrorRepository{Repository: NewMemoryRepository(), err: wantErr}
+	svc := newAutoMergeTestServiceWithRepository(t, repo, 1)
+	first, err := svc.QueueMessage(context.Background(), "session", "task", "first", "", QueuedByUser, false, nil)
+	if err != nil {
+		t.Fatalf("queue first: %v", err)
+	}
+	// The full-queue fold itself failed: admission must degrade to the
+	// original ErrQueueFull (never accept a message whose fold did not
+	// happen, and never surface the repository error).
+	second, err := svc.QueueMessage(context.Background(), "session", "task", "second", "", QueuedByUser, false, nil)
+	if !errors.Is(err, ErrQueueFull) || second != nil {
+		t.Fatalf("candidate merge error admission = %+v, err=%v, want queue full", second, err)
 	}
 	status := svc.GetStatus(context.Background(), "session")
 	if status.Count != 1 || status.Entries[0].ID != first.ID || status.Entries[0].Content != "first" {
-		t.Fatalf("queue changed after full admission: %+v", status)
+		t.Fatalf("queue changed after degraded full admission: %+v", status)
+	}
+}
+
+func TestService_AutoMergeFullQueueTaskInactiveSurfacesContract(t *testing.T) {
+	repo := &autoMergeCandidateErrorRepository{Repository: NewMemoryRepository(), err: ErrTaskInactive}
+	svc := newAutoMergeTestServiceWithRepository(t, repo, 1)
+	if _, err := svc.QueueMessage(context.Background(), "session", "task", "first", "", QueuedByUser, false, nil); err != nil {
+		t.Fatalf("queue first: %v", err)
+	}
+	// The full-queue fold's task guard failed (task archived/deleted between
+	// the failed insert and the fold): admission must surface ErrTaskInactive,
+	// not the stale ErrQueueFull.
+	second, err := svc.QueueMessage(context.Background(), "session", "task", "second", "", QueuedByUser, false, nil)
+	if !errors.Is(err, ErrTaskInactive) || second != nil {
+		t.Fatalf("task-inactive admission = %+v, err=%v, want ErrTaskInactive", second, err)
+	}
+	status := svc.GetStatus(context.Background(), "session")
+	if status.Count != 1 || status.Entries[0].Content != "first" {
+		t.Fatalf("queue changed after rejected admission: %+v", status)
 	}
 }
 

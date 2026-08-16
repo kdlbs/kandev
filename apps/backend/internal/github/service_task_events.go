@@ -66,14 +66,14 @@ func (s *Service) handleTaskUpdated(ctx context.Context, event *bus.Event) error
 	return nil
 }
 
-// handleTaskDeleted deletes PR watches when a task is hard-deleted.
+// handleTaskDeleted removes task-owned GitHub state when a task is hard-deleted.
 func (s *Service) handleTaskDeleted(ctx context.Context, event *bus.Event) error {
 	taskID, _ := taskIDAndArchivedFrom(event)
 	if taskID == "" {
 		return nil
 	}
 	s.revokeCredentialTask(taskID)
-	s.pruneWatchesForTask(ctx, taskID, "deleted")
+	s.pruneTaskOwnedStateForTask(ctx, taskID, "deleted")
 	return nil
 }
 
@@ -151,6 +151,17 @@ func (s *Service) revokeCredentialTask(taskID string) {
 	s.mu.Unlock()
 	if broker != nil {
 		broker.RevokeTask(taskID)
+	}
+}
+
+func (s *Service) pruneTaskOwnedStateForTask(ctx context.Context, taskID, reason string) {
+	n, err := s.store.DeleteTaskOwnedStateByTaskID(ctx, taskID)
+	if err != nil {
+		s.logger.Error("failed to delete task-owned GitHub state", zap.String("task_id", taskID), zap.String("reason", reason), zap.Error(err))
+		return
+	}
+	if n > 0 {
+		s.logger.Info("pruned task-owned GitHub state after task change", zap.String("task_id", taskID), zap.String("reason", reason), zap.Int64("deleted", n))
 	}
 }
 

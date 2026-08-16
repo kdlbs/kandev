@@ -417,4 +417,3 @@ func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, 
 	}
 	return true, nil
 }
-

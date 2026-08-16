@@ -22,6 +22,7 @@ func (r *Repository) runMigrations() {
 	r.migrateSchedulerColumns()
 	r.migrateFailureColumns()
 	r.migrateRunPayloadIndexes()
+	r.migrateCostEventContract()
 	if err := r.migrateTaskPriorityToText(); err != nil {
 		// Surface to stderr; this stage runs from initSchema which doesn't
 		// have a logger handle. The recreate is wrapped in a transaction
@@ -35,6 +36,42 @@ func (r *Repository) runMigrations() {
 	// Provider routing tables and replayable column migrations. Fresh
 	// schemas include the columns inline; ALTERs converge existing databases.
 	r.migrateProviderRouting()
+}
+
+// migrateCostEventContract adds the cache read/write split, turn
+// attribution, and cost-provenance columns to office_cost_events for
+// databases created before this contract (docs/specs/office/costs.md). Every
+// ALTER is nullable with no DEFAULT: a legacy row must read NULL, never 0,
+// because a merged tokens_cached_in cannot be decomposed and an unversioned
+// "0" would be indistinguishable from "no cache activity". Keep this column
+// set byte-identical to the inline CREATE TABLE in createCostTables so a
+// fresh database and a migrated one converge.
+func (r *Repository) migrateCostEventContract() {
+	r.migrate.Apply("office_cost_events.tokens_cached_read",
+		`ALTER TABLE office_cost_events ADD COLUMN tokens_cached_read INTEGER`)
+	r.migrate.Apply("office_cost_events.tokens_cached_write",
+		`ALTER TABLE office_cost_events ADD COLUMN tokens_cached_write INTEGER`)
+	r.migrate.Apply("office_cost_events.turn_id",
+		`ALTER TABLE office_cost_events ADD COLUMN turn_id TEXT`)
+	r.migrate.Apply("office_cost_events.usage_event_id",
+		`ALTER TABLE office_cost_events ADD COLUMN usage_event_id TEXT`)
+	r.migrate.Apply("office_cost_events.cost_source",
+		`ALTER TABLE office_cost_events ADD COLUMN cost_source TEXT`)
+	r.migrate.Apply("office_cost_events.rate_input_per_million",
+		`ALTER TABLE office_cost_events ADD COLUMN rate_input_per_million INTEGER`)
+	r.migrate.Apply("office_cost_events.rate_cached_read_per_million",
+		`ALTER TABLE office_cost_events ADD COLUMN rate_cached_read_per_million INTEGER`)
+	r.migrate.Apply("office_cost_events.rate_cached_write_per_million",
+		`ALTER TABLE office_cost_events ADD COLUMN rate_cached_write_per_million INTEGER`)
+	r.migrate.Apply("office_cost_events.rate_output_per_million",
+		`ALTER TABLE office_cost_events ADD COLUMN rate_output_per_million INTEGER`)
+	r.migrate.Apply("office_cost_events.pricing_catalog_version",
+		`ALTER TABLE office_cost_events ADD COLUMN pricing_catalog_version TEXT`)
+	r.migrate.Apply("office_cost_events.cost_contract_version",
+		`ALTER TABLE office_cost_events ADD COLUMN cost_contract_version INTEGER`)
+	r.migrate.Apply("uniq_office_cost_usage_event",
+		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_office_cost_usage_event
+			ON office_cost_events(usage_event_id) WHERE usage_event_id IS NOT NULL`)
 }
 
 func (r *Repository) migrateRunPayloadIndexes() {

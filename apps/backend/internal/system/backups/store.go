@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/system/jobs"
 )
@@ -35,48 +36,57 @@ const RestoreConfirmToken = "RESTORE"
 // errRestoreConfirm is exported so handlers can map it to HTTP 400.
 var errRestoreConfirm = errors.New("restore requires confirm=RESTORE")
 
+var errRestoreUnsupported = errors.New("restore is only supported for SQLite")
+
 // ErrInvalidName is returned for filenames that contain path separators,
 // "..", or absolute prefixes.
 var ErrInvalidName = errors.New("invalid backup name")
 
-// Service owns access to the <data-dir>/backups directory and exposes the
-// list/create/restore/delete/download API.
+// Service owns access to the backups directory beside the configured database
+// file and exposes the list/create/restore/delete/download API.
 //
 // Restore intentionally does not attempt to re-exec the backend: the staged
 // DB file is written in place and the user is told (via the frontend dialog)
-// to quit and relaunch Kandev to load the restored data. The previous
-// syscall.Exec approach was brittle under desktop launchers and `make dev`
-// watchers, and left the web UI disconnected from a fresh backend.
+// to quit and relaunch Kandev to load the restored data. Before replacing the
+// file, restore quiesces scheduling, active executions, and database-backed
+// workers, checkpoints and closes the SQLite pool, then replaces the main
+// database and sidecars with rollback protection. The previous syscall.Exec
+// approach was brittle under desktop launchers and `make dev` watchers, and
+// left the web UI disconnected from a fresh backend.
 type Service struct {
-	dataDir string
-	pool    *db.Pool
-	jobs    *jobs.Tracker
-	log     *logger.Logger
+	databasePath string
+	pool         *db.Pool
+	jobs         *jobs.Tracker
+	log          *logger.Logger
+
+	// RestoreQuiesce stops scheduling, active executions, and database-backed
+	// workers before restore closes the shared database pool. Wired by the
+	// backend composition root; tests may leave it nil.
+	RestoreQuiesce func() error
+
+	// OrchestratorShutdown is the legacy reset/restore hook. Restore uses it
+	// only when RestoreQuiesce is not wired.
+	OrchestratorShutdown func()
 
 	// failWritesForTest, when true, causes Restore's staged-write step to
-	// fail before kandev.db is touched. Only set by tests.
+	// fail before the configured database file is touched. Only set by tests.
 	failWritesForTest bool
 }
 
-// NewService constructs a Service. The backups directory under dataDir is
-// created lazily by methods that need it.
-func NewService(dataDir string, pool *db.Pool, tracker *jobs.Tracker, log *logger.Logger) *Service {
+// NewService constructs a Service. The backups directory beside databasePath
+// is created lazily by methods that need it.
+func NewService(databasePath string, pool *db.Pool, tracker *jobs.Tracker, log *logger.Logger) *Service {
 	return &Service{
-		dataDir: dataDir,
-		pool:    pool,
-		jobs:    tracker,
-		log:     log,
+		databasePath: databasePath,
+		pool:         pool,
+		jobs:         tracker,
+		log:          log,
 	}
 }
 
-// backupsDir returns the absolute path to the snapshots directory.
+// backupsDir returns the snapshots directory beside the configured database.
 func (s *Service) backupsDir() string {
-	return filepath.Join(s.dataDir, "backups")
-}
-
-// dbPath returns the absolute path to the live SQLite database file.
-func (s *Service) dbPath() string {
-	return filepath.Join(s.dataDir, "kandev.db")
+	return filepath.Join(filepath.Dir(s.databasePath), "backups")
 }
 
 // ensureBackupsDir mkdirs the backups directory.
@@ -84,7 +94,7 @@ func (s *Service) ensureBackupsDir() error {
 	return os.MkdirAll(s.backupsDir(), 0o755)
 }
 
-// List enumerates the snapshots in <data-dir>/backups, classifying each
+// List enumerates the snapshots in the sibling backups directory, classifying each
 // .db file as auto or manual. Non-.db files and unrecognised prefixes are
 // skipped silently. Always returns a non-nil slice.
 func (s *Service) List() ([]Snapshot, error) {
@@ -206,6 +216,9 @@ func (s *Service) Restore(ctx context.Context, name, confirm string) (string, er
 	if confirm != RestoreConfirmToken {
 		return "", errRestoreConfirm
 	}
+	if err := s.ensureSQLiteRestore(); err != nil {
+		return "", err
+	}
 	abs, err := s.resolveSnapshotPath(name)
 	if err != nil {
 		return "", err
@@ -220,14 +233,26 @@ func (s *Service) runRestore(_ context.Context, snapshotPath string) (map[string
 	if _, err := os.Stat(snapshotPath); err != nil {
 		return nil, fmt.Errorf("snapshot not found: %w", err)
 	}
-	stagedPath := s.dbPath() + ".new"
+	stagedPath := s.databasePath + ".new"
 	if err := s.writeStagedRestore(snapshotPath, stagedPath); err != nil {
 		_ = os.Remove(stagedPath)
 		return nil, err
 	}
-	if err := os.Rename(stagedPath, s.dbPath()); err != nil {
+	if s.RestoreQuiesce != nil {
+		if err := s.RestoreQuiesce(); err != nil {
+			_ = os.Remove(stagedPath)
+			return nil, fmt.Errorf("quiesce database for restore: %w", err)
+		}
+	} else if s.OrchestratorShutdown != nil {
+		s.OrchestratorShutdown()
+	}
+	if err := s.quiesceDatabase(); err != nil {
 		_ = os.Remove(stagedPath)
-		return nil, fmt.Errorf("atomic rename failed: %w", err)
+		return nil, err
+	}
+	if err := s.replaceDatabase(stagedPath); err != nil {
+		_ = os.Remove(stagedPath)
+		return nil, err
 	}
 	// Intentionally no auto-restart. The frontend dialog reads
 	// restart_required from the job result and prompts the user to quit and
@@ -236,6 +261,120 @@ func (s *Service) runRestore(_ context.Context, snapshotPath string) (map[string
 		"restored_from":    filepath.Base(snapshotPath),
 		"restart_required": true,
 	}, nil
+}
+
+func (s *Service) ensureSQLiteRestore() error {
+	if s.pool == nil || s.pool.Writer() == nil {
+		return nil
+	}
+	driver := s.pool.Writer().DriverName()
+	if driver != dialect.SQLite3 {
+		return fmt.Errorf("%w: %s driver", errRestoreUnsupported, driver)
+	}
+	return nil
+}
+
+// quiesceDatabase flushes pending SQLite WAL frames and closes the shared
+// pool before the configured database file is replaced. Closing the pool is
+// intentional: the frontend receives restart_required and must relaunch the
+// backend before it accepts database-backed work again.
+func (s *Service) quiesceDatabase() error {
+	if err := s.ensureSQLiteRestore(); err != nil {
+		return err
+	}
+	if s.pool == nil || s.pool.Writer() == nil {
+		return nil
+	}
+	writer := s.pool.Writer()
+	var busy, logFrames, checkpointed int
+	if err := writer.QueryRowx("PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logFrames, &checkpointed); err != nil {
+		return fmt.Errorf("checkpoint sqlite WAL: %w", err)
+	}
+	if busy != 0 {
+		return fmt.Errorf("checkpoint sqlite WAL: busy (%d frames remain)", logFrames-checkpointed)
+	}
+	if err := s.pool.Close(); err != nil {
+		return fmt.Errorf("close database pool: %w", err)
+	}
+	return nil
+}
+
+type restoreOriginalFile struct {
+	livePath       string
+	quarantinePath string
+}
+
+// replaceDatabase quarantines the live database and its sidecars before
+// installing the staged file. If installation fails, every quarantined file
+// is moved back before the error is returned. The quarantine is in the same
+// directory so each rename is atomic on the same filesystem.
+func (s *Service) replaceDatabase(stagedPath string) error {
+	return s.replaceDatabaseWith(stagedPath, os.Rename)
+}
+
+func (s *Service) replaceDatabaseWith(stagedPath string, rename func(string, string) error) error {
+	quarantineBase, err := createRestoreQuarantine(filepath.Dir(s.databasePath), filepath.Base(s.databasePath))
+	if err != nil {
+		return fmt.Errorf("create restore quarantine: %w", err)
+	}
+
+	originals := []restoreOriginalFile{
+		{livePath: s.databasePath, quarantinePath: quarantineBase},
+		{livePath: s.databasePath + "-wal", quarantinePath: quarantineBase + "-wal"},
+		{livePath: s.databasePath + "-shm", quarantinePath: quarantineBase + "-shm"},
+	}
+	moved := make([]restoreOriginalFile, 0, len(originals))
+	rollback := func(cause error) error {
+		var rollbackErrs []error
+		for i := len(moved) - 1; i >= 0; i-- {
+			original := moved[i]
+			if err := rename(original.quarantinePath, original.livePath); err != nil {
+				rollbackErrs = append(rollbackErrs, fmt.Errorf("restore %s: %w", original.livePath, err))
+			}
+		}
+		return errors.Join(cause, errors.Join(rollbackErrs...))
+	}
+
+	for _, original := range originals {
+		if _, err := os.Lstat(original.livePath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return rollback(fmt.Errorf("inspect %s: %w", original.livePath, err))
+		}
+		if err := rename(original.livePath, original.quarantinePath); err != nil {
+			return rollback(fmt.Errorf("quarantine %s: %w", original.livePath, err))
+		}
+		moved = append(moved, original)
+	}
+
+	if err := rename(stagedPath, s.databasePath); err != nil {
+		return rollback(fmt.Errorf("atomic rename failed: %w", err))
+	}
+
+	for _, original := range moved {
+		if err := os.Remove(original.quarantinePath); err != nil && !errors.Is(err, os.ErrNotExist) && s.log != nil {
+			s.log.Warn("backups: failed to remove quarantined database file",
+				zap.String("path", original.quarantinePath), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+func createRestoreQuarantine(dir, base string) (string, error) {
+	f, err := os.CreateTemp(dir, "."+base+".restore-*")
+	if err != nil {
+		return "", err
+	}
+	path := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := os.Remove(path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // writeStagedRestore copies snapshotPath to stagedPath. Honors
@@ -304,7 +443,7 @@ func (s *Service) OpenForDownload(name string) (*os.File, int64, error) {
 // separators, no "..", no absolute prefix), confirms it matches a
 // recognised snapshot prefix (so unrelated files dropped into the backups
 // directory cannot be restored/downloaded/deleted), and that it resolves
-// inside the backups directory. Returns the absolute path.
+// inside the backups directory. Returns the joined path.
 func (s *Service) resolveSnapshotPath(name string) (string, error) {
 	if name == "" || name == "." || name == ".." {
 		return "", ErrInvalidName

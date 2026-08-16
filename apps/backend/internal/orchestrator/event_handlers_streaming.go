@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -15,10 +16,17 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const sessionModelConfigKey = "model"
+
+// usageEventIDNamespace seeds the deterministic UUID usageEventIDFor derives
+// for a prompt-usage completion. Arbitrary but fixed — any stable value
+// works since it only needs to be consistent across process restarts, never
+// shared with another namespace.
+var usageEventIDNamespace = uuid.MustParse("2f6a6f8c-6c1b-4b8a-9e3e-7a6d2c5b9f10")
 
 // handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
 func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
@@ -74,6 +82,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			terminalCompleteStream = true
 		}
 	} else if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		// Keep the message side suppressed for completed executions, but do not
+		// discard a late subagent frame before its durable context is recorded.
+		// This guard runs before the event-type switch below, so handler-level
+		// recording alone would not cover the production dispatch path.
+		if eventType == agentEventToolCall || eventType == agentEventToolUpdate {
+			s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
+		}
 		return
 	}
 
@@ -101,7 +116,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
 
-	case "tool_update":
+	case agentEventToolUpdate:
 		s.handleToolUpdateEvent(ctx, payload)
 
 	case agentEventComplete:
@@ -197,6 +212,74 @@ func (s *Service) foregroundIdleOwnsCurrentPrompt(payload *lifecycle.AgentStream
 	return false
 }
 
+// streamEventIsStalePrompt proves that a generation-bearing stream event came
+// from a prompt that no longer owns the execution. Generation-zero providers
+// do not expose enough identity to make that determination, so their terminal
+// events use the normal settlement path.
+func (s *Service) streamEventIsStalePrompt(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil || payload.Data.PromptGeneration == 0 {
+		return false
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	if !ok {
+		return false
+	}
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
+	return !generationOwner.OwnsPromptGeneration(
+		payload.SessionID, executionID, payload.Data.PromptGeneration,
+	)
+}
+
+func (s *Service) completeTurnForStreamEvent(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	capturedTurnIDs ...string,
+) {
+	if payload == nil {
+		return
+	}
+	var capturedTurnID string
+	if len(capturedTurnIDs) > 0 {
+		capturedTurnID = capturedTurnIDs[0]
+	}
+	if capturedTurnID != "" {
+		// A durable turn ID is authoritative. If the event is stale and an
+		// accepted successor exists, preserve that successor while settling
+		// the predecessor; otherwise close only the captured turn so a late
+		// completion cannot sweep an unrelated active turn.
+		stale := s.streamEventIsStalePrompt(payload)
+		successorTurnID := s.acceptedDispatchSuccessorTurn(payload.SessionID)
+		if successorTurnID != "" && successorTurnID != capturedTurnID {
+			stale = true
+		}
+		if stale && s.acceptedDispatchInFlight(payload.SessionID) {
+			s.completeTurnForTaskSessionWithSuccessorPolicy(ctx, payload.TaskID, payload.SessionID, true)
+			return
+		}
+		if err := s.completeTurnForTaskSessionCheckedOwned(ctx, payload.TaskID, payload.SessionID, capturedTurnID); err != nil {
+			s.logger.Warn("failed to complete stream event's captured turn",
+				zap.String("session_id", payload.SessionID),
+				zap.String("turn_id", capturedTurnID),
+				zap.Error(err))
+		}
+		if successorTurnID == capturedTurnID {
+			s.clearAcceptedQueuedDispatch(payload.SessionID)
+		}
+		return
+	}
+	s.completeTurnForTaskSessionWithSuccessorPolicy(
+		ctx,
+		payload.TaskID,
+		payload.SessionID,
+		s.streamEventIsStalePrompt(payload),
+	)
+}
+
 // handleAgentErrorEvent handles agentEventError events by creating an error message and completing the turn.
 func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	taskID := payload.TaskID
@@ -225,7 +308,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 				zap.Error(err))
 		}
 	}
-	s.completeTurnForTaskSession(ctx, taskID, sessionID)
+	s.completeTurnForStreamEvent(ctx, payload)
 }
 
 // handleSessionStatusEvent handles session_status events by storing resume token and creating a status message.
@@ -314,9 +397,20 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		s.logger.Warn("missing session_id for tool_call",
 			zap.String("task_id", payload.TaskID),
 			zap.String("tool_call_id", payload.Data.ToolCallID))
+		// A recognized subagent_task frame with no session id is exactly the
+		// AC-2 identity-skip case (skipped_no_identity++): this guard predates
+		// the subagent-context feature and exists to protect message
+		// creation, so it must not silently swallow that counter too.
+		s.recordSubagentContextFromFrame(ctx, payload, "")
 		return
 	}
 	if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		// A late-arriving frame for an already-completed execution is
+		// correctly dropped for message purposes (see the guard's own
+		// contract), but it can be the ONLY frame that ever recognizes and
+		// settles this subagent — dropping it here too would permanently
+		// omit the row's status/token/duration data (AC-1, AC-11).
+		s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		return
 	}
 
@@ -349,6 +443,11 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		// the task to REVIEW) leaves session=RUNNING with task=REVIEW.
 		s.setSessionRunningForExecution(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID)
 	}
+	// Recording a subagent-context observation must never itself start a
+	// turn as a side effect (that would mutate durable state purely to label
+	// a telemetry row) — use the non-creating lookup here even though
+	// message creation above may have legitimately started one already.
+	s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 
 	ownership := toolOwnershipForeground
 	if payload.Data.ParentToolCallID != "" {
@@ -525,9 +624,17 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		s.logger.Warn("missing session_id for tool_update",
 			zap.String("task_id", payload.TaskID),
 			zap.String("tool_call_id", payload.Data.ToolCallID))
+		// See the matching comment in handleToolCallEvent: this guard
+		// predates the subagent-context feature and must not silently
+		// swallow the AC-2 skipped_no_identity counter.
+		s.recordSubagentContextFromFrame(ctx, payload, "")
 		return
 	}
 	if s.shouldDropCompletedExecutionStreamEvent(payload) {
+		// See the matching guard in handleToolCallEvent: a dropped update can
+		// be the subagent's final terminal frame, and must still settle the
+		// durable row even though the message side is correctly ignored.
+		s.recordSubagentContextFromFrame(ctx, payload, s.nonCreatingActiveTurnID(ctx, payload.SessionID))
 		return
 	}
 	ownership := s.resolveToolUpdateOwnership(payload)
@@ -564,10 +671,6 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 // Split out of handleToolUpdateEvent to keep that function within the
 // package's function-length limits; no behavior change.
 func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	if s.messageCreator == nil {
-		return
-	}
-
 	// Determine message type from normalized payload for fallback creation
 	msgType := toolKindToMessageType(payload.Data.Normalized)
 	status := payload.Data.ToolStatus
@@ -591,34 +694,45 @@ func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecyc
 			// update-only reconciliation and cannot wake a settled session.
 			turnID = ""
 		}
-	} else {
+	} else if s.messageCreator != nil {
+		// Only message creation needs a turn to attach a fallback-created
+		// card to, which is why this branch alone may lazily start one.
+		// Recording subagent context must never create a turn merely to
+		// label a row — see nonCreatingActiveTurnID.
 		turnID = s.getActiveTurnID(payload.SessionID)
-	}
-	fallbackMsgType := msgType
-	if terminal && turnID == "" {
-		// A late terminal update can update its existing card, but must not
-		// create a message (and implicitly a turn) after the turn settled.
-		fallbackMsgType = ""
+	} else {
+		turnID = s.nonCreatingActiveTurnID(ctx, payload.SessionID)
 	}
 
-	if err := s.messageCreator.UpdateToolCallMessage(
-		ctx,
-		payload.TaskID,
-		payload.Data.ToolCallID,
-		payload.Data.ParentToolCallID, // Pass parent for subagent nesting
-		status,
-		"", // result - no longer used, tool results in NormalizedPayload
-		payload.SessionID,
-		payload.Data.ToolTitle,  // Include title from update event
-		turnID,                  // Turn ID for fallback creation
-		fallbackMsgType,         // Empty for settled terminal reconciliations
-		payload.Data.Normalized, // Pass normalized tool data for message metadata
-	); err != nil {
-		s.logger.Warn("failed to update tool call message",
-			zap.String("task_id", payload.TaskID),
-			zap.String("tool_call_id", payload.Data.ToolCallID),
-			zap.Error(err))
+	// Message persistence is optional (see SetMessageCreator); turn-id
+	// resolution and subagent-context recording below must not depend on it.
+	if s.messageCreator != nil {
+		fallbackMsgType := msgType
+		if terminal && turnID == "" {
+			// A late terminal update can update its existing card, but must not
+			// create a message (and implicitly a turn) after the turn settled.
+			fallbackMsgType = ""
+		}
+		if err := s.messageCreator.UpdateToolCallMessage(
+			ctx,
+			payload.TaskID,
+			payload.Data.ToolCallID,
+			payload.Data.ParentToolCallID, // Pass parent for subagent nesting
+			status,
+			"", // result - no longer used, tool results in NormalizedPayload
+			payload.SessionID,
+			payload.Data.ToolTitle,  // Include title from update event
+			turnID,                  // Turn ID for fallback creation
+			fallbackMsgType,         // Empty for settled terminal reconciliations
+			payload.Data.Normalized, // Pass normalized tool data for message metadata
+		); err != nil {
+			s.logger.Warn("failed to update tool call message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("tool_call_id", payload.Data.ToolCallID),
+				zap.Error(err))
+		}
 	}
+	s.recordSubagentContextFromFrame(ctx, payload, turnID)
 
 	// Terminal updates only wake an async turn that was established by prior
 	// substantive output. A standalone terminal reconciliation belongs to the
@@ -766,6 +880,59 @@ func isTerminalToolStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+// recordSubagentContextFromFrame persists a durable relational record of a
+// subagent (Task tool) invocation when this frame's normalized payload is a
+// recognized subagent_task. No-op when subagentContexts is unwired, when the
+// frame isn't a subagent_task, or when the normalizer hasn't yet attached the
+// typed payload (the initial tool_call for Claude/OpenCode carries none —
+// recognition happens on a later tool_call_update, see AC-1a). turnID is
+// whatever the call site already resolved; this helper never re-derives one.
+//
+// payload.SessionID is the Kandev task session id despite the
+// agentSessionID-shaped naming downstream: messageCreatorAdapter passes the
+// same value into CreateMessageRequest.TaskSessionID
+// (internal/backendapp/adapters.go:879).
+func (s *Service) recordSubagentContextFromFrame(ctx context.Context, payload *lifecycle.AgentStreamEventPayload, turnID string) {
+	if s.subagentContexts == nil || payload == nil || payload.Data == nil {
+		return
+	}
+	normalized := payload.Data.Normalized
+	if normalized == nil || normalized.Kind() != streams.ToolKindSubagentTask {
+		return
+	}
+	subagentTask := normalized.SubagentTask()
+	if subagentTask == nil {
+		return
+	}
+	s.subagentContexts.RecordSubagentContext(ctx, taskservice.RecordSubagentContextRequest{
+		TaskSessionID:    payload.SessionID,
+		TaskID:           payload.TaskID,
+		TurnID:           turnID,
+		ToolCallID:       payload.Data.ToolCallID,
+		ParentToolCallID: payload.Data.ParentToolCallID,
+		ExecutionID:      payload.ExecutionID,
+		ToolStatus:       payload.Data.ToolStatus,
+		Payload:          subagentTask,
+		ObservedAt:       time.Now().UTC(),
+	})
+}
+
+// nonCreatingActiveTurnID resolves sessionID's active turn without ever
+// starting one — unlike getActiveTurnID, whose doc comment explains it
+// lazily starts a turn "even in edge cases like resumed sessions". Every
+// caller here uses the result only to label a subagent-context row, never to
+// attach a message, so recording an observation must never itself mutate
+// state by creating a durable turn as a side effect. A lookup error is
+// treated as "no turn known", matching the fail-closed pattern already used
+// for terminal tool updates below.
+func (s *Service) nonCreatingActiveTurnID(ctx context.Context, sessionID string) string {
+	turnID, err := s.peekActiveTurnID(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	return turnID
 }
 
 func (s *Service) shouldDropCompletedExecutionStreamEvent(payload *lifecycle.AgentStreamEventPayload) bool {
@@ -1328,6 +1495,164 @@ func (s *Service) terminalExecutionMarker(sessionID, executionID string) (termin
 	return marker, true
 }
 
+type readyTurnMark struct {
+	turnID    string
+	expiresAt time.Time
+}
+
+func readyTurnKey(sessionID, executionID string, promptGeneration uint64) string {
+	return fmt.Sprintf("%s\x00%s\x00%d", sessionID, executionID, promptGeneration)
+}
+
+// readyTurnZeroGenKey is deliberately generation-less: promptGeneration==0
+// means the transport carries no generation tracking at all (see
+// finishPromptCompletion / claimPromptCompletion's early return), so every
+// completion on this (session, execution) shares the same identity and must
+// be threaded through the FIFO queue in s.readyTurnMarksZeroGen instead of
+// the single-slot s.readyTurnMarks map.
+func readyTurnZeroGenKey(sessionID, executionID string) string {
+	return fmt.Sprintf("%s\x00%s", sessionID, executionID)
+}
+
+// markReadyTurn records the turn ID handleAgentReady confirmed for
+// (sessionID, executionID, promptGeneration), just before completeTurnForSession
+// closes it and removes it from activeTurns. handleCompleteEventMarkState
+// (lifecycle package) publishes agent.ready and closes the turn before the
+// complete-stream frame for the same completion is published, on EVERY
+// transport, including promptGeneration==0 (generation-less) completions —
+// so this mark is required there too, not skippable. Because generation-less
+// completions share one key per (session, execution) with no generation to
+// disambiguate them, they queue FIFO in readyTurnMarksZeroGen instead of the
+// single-slot readyTurnMarks map: ready and complete-stream for the same
+// completion are published strictly in that order per execution, so pending
+// marks and pending completions correlate 1:1 in arrival order.
+//
+// This ordering is airtight on the default in-memory event bus, where
+// Publish delivers to a subject's subscriber synchronously before returning
+// (see internal/events/bus/memory.go). It is best-effort, not guaranteed, on
+// a NATS-backed bus (opt-in via cfg.NATS.URL): AgentReady and the
+// agent.stream.* wildcard are different subjects, and this in-memory map is
+// per-process. The durable TurnID on the completion payload closes that
+// cross-subject/cross-instance gap; this mark remains a compatibility fallback
+// for older producers and completion paths without a captured ID.
+func (s *Service) markReadyTurn(sessionID, executionID string, promptGeneration uint64, turnID string) {
+	if sessionID == "" || executionID == "" || turnID == "" {
+		return
+	}
+	expiresAt := time.Now().Add(completedExecutionRetention)
+	if promptGeneration == 0 {
+		s.pushZeroGenReadyTurnMark(sessionID, executionID, readyTurnMark{turnID: turnID, expiresAt: expiresAt})
+		return
+	}
+	key := readyTurnKey(sessionID, executionID, promptGeneration)
+	s.readyTurnMarks.Store(key, readyTurnMark{turnID: turnID, expiresAt: expiresAt})
+	time.AfterFunc(completedExecutionRetention, func() {
+		s.deleteReadyTurnMarkIfExpired(key, expiresAt)
+	})
+}
+
+// takeReadyTurnMark consumes (and removes) the turn ID markReadyTurn recorded
+// for this completion, if any. A miss is expected whenever the completion
+// never went through handleAgentReady's synchronous ready path (or the mark
+// already expired); the caller falls back to a live lookup or a terminal-
+// execution snapshot in that case.
+func (s *Service) takeReadyTurnMark(sessionID, executionID string, promptGeneration uint64) (string, bool) {
+	if sessionID == "" || executionID == "" {
+		return "", false
+	}
+	if promptGeneration == 0 {
+		return s.popZeroGenReadyTurnMark(sessionID, executionID)
+	}
+	key := readyTurnKey(sessionID, executionID, promptGeneration)
+	value, ok := s.readyTurnMarks.LoadAndDelete(key)
+	if !ok {
+		return "", false
+	}
+	mark, ok := value.(readyTurnMark)
+	if !ok || time.Now().After(mark.expiresAt) {
+		return "", false
+	}
+	return mark.turnID, true
+}
+
+func (s *Service) deleteReadyTurnMarkIfExpired(key string, expiresAt time.Time) {
+	value, ok := s.readyTurnMarks.Load(key)
+	if !ok {
+		return
+	}
+	current, ok := value.(readyTurnMark)
+	if !ok || !current.expiresAt.After(expiresAt) {
+		s.readyTurnMarks.Delete(key)
+	}
+}
+
+// pushZeroGenReadyTurnMark appends a generation-less ready-turn mark to the
+// FIFO queue for (sessionID, executionID). Guarded by
+// readyTurnMarksZeroGenMu: sync.Map has no atomic append, and multiple
+// pending marks for the same key are the expected case here (unlike the
+// generation-keyed map, where each key holds at most one).
+func (s *Service) pushZeroGenReadyTurnMark(sessionID, executionID string, mark readyTurnMark) {
+	key := readyTurnZeroGenKey(sessionID, executionID)
+	s.readyTurnMarksZeroGenMu.Lock()
+	if s.readyTurnMarksZeroGen == nil {
+		s.readyTurnMarksZeroGen = make(map[string][]readyTurnMark)
+	}
+	s.readyTurnMarksZeroGen[key] = append(s.readyTurnMarksZeroGen[key], mark)
+	s.readyTurnMarksZeroGenMu.Unlock()
+	time.AfterFunc(completedExecutionRetention, func() {
+		s.pruneExpiredZeroGenReadyTurnMarks(key)
+	})
+}
+
+// popZeroGenReadyTurnMark consumes the oldest live mark queued for
+// (sessionID, executionID), discarding any expired entries ahead of it.
+func (s *Service) popZeroGenReadyTurnMark(sessionID, executionID string) (string, bool) {
+	key := readyTurnZeroGenKey(sessionID, executionID)
+	s.readyTurnMarksZeroGenMu.Lock()
+	defer s.readyTurnMarksZeroGenMu.Unlock()
+	queue := s.readyTurnMarksZeroGen[key]
+	now := time.Now()
+	for len(queue) > 0 {
+		mark := queue[0]
+		queue = queue[1:]
+		if now.After(mark.expiresAt) {
+			continue
+		}
+		if len(queue) == 0 {
+			delete(s.readyTurnMarksZeroGen, key)
+		} else {
+			s.readyTurnMarksZeroGen[key] = queue
+		}
+		return mark.turnID, true
+	}
+	delete(s.readyTurnMarksZeroGen, key)
+	return "", false
+}
+
+// pruneExpiredZeroGenReadyTurnMarks drops expired entries from the front of
+// (sessionID+executionID)'s queue so an unconsumed mark cannot grow the map
+// unbounded, mirroring completedExecutions' expiry pattern.
+func (s *Service) pruneExpiredZeroGenReadyTurnMarks(key string) {
+	s.readyTurnMarksZeroGenMu.Lock()
+	defer s.readyTurnMarksZeroGenMu.Unlock()
+	queue := s.readyTurnMarksZeroGen[key]
+	if len(queue) == 0 {
+		return
+	}
+	now := time.Now()
+	kept := queue[:0]
+	for _, mark := range queue {
+		if now.Before(mark.expiresAt) {
+			kept = append(kept, mark)
+		}
+	}
+	if len(kept) == 0 {
+		delete(s.readyTurnMarksZeroGen, key)
+		return
+	}
+	s.readyTurnMarksZeroGen[key] = kept
+}
+
 func (s *Service) currentTurnIDForSession(ctx context.Context, sessionID string) string {
 	if sessionID == "" {
 		return ""
@@ -1867,35 +2192,66 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 		s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID)
 	}
 
-	s.publishPromptUsage(ctx, payload, session)
+	// The lifecycle completion payload carries the durable turn captured before
+	// AgentReady can admit a successor prompt. Older producers do not include
+	// it, so retain the generation-keyed (or generation-less FIFO) ready mark as
+	// a compatibility fallback. A miss also means this completion never went
+	// through handleAgentReady's ready path (e.g. an error/interrupt that
+	// completed the execution directly), so fall back to whichever snapshot the
+	// branch has: terminalMarker.turnID (captured by markTerminalExecution at
+	// agent.completed) for terminal completions, or a live active-turn lookup
+	// for non-terminal ones.
+	completionTurnID := payload.Data.TurnID
+	if completionTurnID == "" {
+		var ok bool
+		completionTurnID, ok = s.takeReadyTurnMark(payload.SessionID, payload.ExecutionID, payload.Data.PromptGeneration)
+		if !ok {
+			if terminalCompleteStream {
+				completionTurnID = terminalMarker.turnID
+			} else {
+				completionTurnID = s.currentTurnIDForSession(ctx, payload.SessionID)
+			}
+		}
+	}
+	s.publishPromptUsage(ctx, payload, session, completionTurnID)
 
 	if terminalCompleteStream {
-		s.saveAgentTextForTurn(ctx, payload, terminalMarker.turnID)
-		s.publishAgentPlanForTurn(ctx, payload, terminalMarker.turnID, false)
-		s.persistTurnPromptMetadataForTurn(ctx, payload, session, terminalMarker.turnID)
-		if terminalMarker.turnID != "" {
-			s.publishAgentTurnCompleteForTurn(ctx, payload, terminalMarker.turnID)
+		terminalTurnID := terminalMarker.turnID
+		if payload.Data.TurnID != "" {
+			terminalTurnID = payload.Data.TurnID
+		}
+		s.saveAgentTextForTurn(ctx, payload, terminalTurnID)
+		s.publishAgentPlanForTurn(ctx, payload, terminalTurnID, false)
+		s.persistTurnPromptMetadataForTurn(ctx, payload, session, terminalTurnID)
+		if terminalTurnID != "" {
+			s.publishAgentTurnCompleteForTurn(ctx, payload, terminalTurnID)
 		}
 		s.detachClarificationWaiters(ctx, payload.SessionID)
 		s.logger.Debug("complete stream from terminal execution flushed final data; skipping active turn and runtime reconciliation",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
 			zap.String("agent_execution_id", payload.ExecutionID),
-			zap.String("turn_id", terminalMarker.turnID))
+			zap.String("turn_id", terminalTurnID))
 		return
 	}
 
-	s.saveAgentTextIfPresent(ctx, payload)
-	s.publishAgentPlanIfPresent(ctx, payload)
-	s.persistTurnPromptMetadata(ctx, payload, session)
-	s.completeTurnForTaskSession(ctx, payload.TaskID, payload.SessionID)
+	if completionTurnID != "" {
+		s.saveAgentTextForTurn(ctx, payload, completionTurnID)
+		s.publishAgentPlanForTurn(ctx, payload, completionTurnID, false)
+		s.persistTurnPromptMetadataForTurn(ctx, payload, session, completionTurnID)
+	} else {
+		s.saveAgentTextIfPresent(ctx, payload)
+		s.publishAgentPlanIfPresent(ctx, payload)
+		s.persistTurnPromptMetadata(ctx, payload, session)
+	}
+	s.completeTurnForStreamEvent(ctx, payload, completionTurnID)
 
 	// Publish agent turn message event so the office comment bridge can
 	// auto-post the agent's response as a task comment. Published here
 	// (not in saveAgentTextIfPresent) because for streaming agents the
 	// text is drained by message_chunk events and Data.Text is empty at
 	// complete time.
-	s.publishAgentTurnComplete(ctx, payload)
+	s.publishAgentTurnCompleteForTurn(ctx, payload, completionTurnID)
 
 	// Detach any pending clarifications so WaitForResponse unblocks while the
 	// overlay stays interactive for a deferred answer via the event fallback path.
@@ -2133,15 +2489,49 @@ func (s *Service) publishAgentPlanForTurn(ctx context.Context, payload *lifecycl
 	}
 }
 
-// publishPromptUsage broadcasts prompt token usage to the WebSocket for the frontend.
-// Model and agent type (CLI engine slug) come from payload first; when absent
-// (which is the common case — CurrentModelID only travels on session_models
-// frames) we fall back to the session's AgentProfileSnapshot, populated at
-// session creation and refreshed by persistSessionModel on ACP model updates.
+// usageEventIDFor derives the office cost subscriber's idempotency key from
+// immutable upstream identity — session, execution, and prompt generation —
+// instead of minting a fresh random value on every call. A minted-per-call
+// key can only dedup literal redelivery of the identical *bus.Event object,
+// which neither event bus provides (see internal/events/bus/{memory,nats}.go
+// — the memory bus delivers once synchronously with no retry, and the NATS
+// bus is plain core pub/sub, not JetStream). The real duplicate source is
+// the SAME underlying completion frame reaching publishPromptUsage twice —
+// e.g. a reconnecting WS client replaying a buffered stream event.
+//
+// promptGeneration==0 means this completion carries no generation tracking
+// at all (see claimPromptCompletion's early return in the lifecycle
+// package); deriving a key from (session, execution, 0) there would collide
+// across genuinely distinct turns on a generation-less transport and
+// silently under-count cost, which is worse than the duplicate-row bug this
+// fixes. Fall back to a random id in that narrow case — unchanged from
+// prior behavior there.
+func usageEventIDFor(sessionID, executionID string, promptGeneration uint64) string {
+	if sessionID == "" || executionID == "" || promptGeneration == 0 {
+		return uuid.New().String()
+	}
+	name := fmt.Sprintf("%s\x00%s\x00%d", sessionID, executionID, promptGeneration)
+	return uuid.NewSHA1(usageEventIDNamespace, []byte(name)).String()
+}
+
+// publishPromptUsage broadcasts prompt token usage to the WebSocket for the
+// frontend and to the office cost subscriber. Model and agent type (CLI
+// engine slug) come from payload first; when absent (which is the common
+// case — CurrentModelID only travels on session_models frames) we fall back
+// to the session's AgentProfileSnapshot, populated at session creation and
+// refreshed by persistSessionModel on ACP model updates.
+//
+// turnID is resolved by the caller (handleCompleteStreamEvent), not here:
+// the terminal-execution snapshot and the live active-turn lookup are both
+// call-site concerns. usageEventID is derived here, once, at the single
+// publish site by usageEventIDFor — that is what makes it a stable
+// idempotency key across a republished frame; a downstream consumer
+// deriving its own would defeat the point.
 func (s *Service) publishPromptUsage(
 	ctx context.Context,
 	payload *lifecycle.AgentStreamEventPayload,
 	session *models.TaskSession,
+	turnID string,
 ) {
 	sessionID := payload.SessionID
 	if sessionID == "" || s.eventBus == nil || payload.Data.Usage == nil {
@@ -2158,6 +2548,10 @@ func (s *Service) publishPromptUsage(
 		Model:     model,
 		Usage:     payload.Data.Usage,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		TurnID:    turnID,
+		UsageEventID: usageEventIDFor(
+			sessionID, payload.ExecutionID, payload.Data.PromptGeneration,
+		),
 	}
 	subject := events.BuildSessionPromptUsageSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionPromptUsageUpdated, "orchestrator", eventPayload))
@@ -2271,6 +2665,7 @@ func promptUsageMetadata(usage *streams.PromptUsage) map[string]interface{} {
 		"thought_tokens":                  usage.ThoughtTokens,
 		"total_tokens":                    usage.TotalTokens,
 		"provider_reported_cost_subcents": usage.ProviderReportedCostSubcents,
+		"provider_reported_cost_present":  usage.ProviderReportedCostPresent,
 		"estimated":                       usage.Estimated,
 	}
 }

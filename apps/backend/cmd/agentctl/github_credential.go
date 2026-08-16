@@ -17,14 +17,16 @@ import (
 )
 
 type githubBrokerResolveRequest struct {
-	Lease        string `json:"lease"`
-	TaskID       string `json:"task_id"`
-	SessionID    string `json:"session_id"`
-	RepositoryID string `json:"repository_id"`
-	Owner        string `json:"owner"`
-	Repo         string `json:"repo"`
-	Host         string `json:"host"`
-	Path         string `json:"path,omitempty"`
+	Lease            string `json:"lease"`
+	TaskID           string `json:"task_id"`
+	SessionID        string `json:"session_id"`
+	RepositoryID     string `json:"repository_id"`
+	Owner            string `json:"owner"`
+	Repo             string `json:"repo"`
+	Host             string `json:"host"`
+	Path             string `json:"path,omitempty"`
+	ProviderID       string `json:"provider_id,omitempty"`
+	ParentProviderID string `json:"parent_provider_id,omitempty"`
 }
 
 type githubBrokerCredential struct {
@@ -235,8 +237,8 @@ func readGitCredentialInput(input io.Reader) (map[string]string, error) {
 }
 
 // gitCredentialRequestForInput validates the Git credential helper request
-// against its issued lease scope, then carries the exact requested repository
-// path through to the broker. Git uses owner/repo fields on this compatibility
+// against its issued lease scope, then carries the issued repository path
+// through to the broker. Git uses owner/repo fields on this compatibility
 // endpoint, so Repo retains any provider namespace after the first segment.
 func gitCredentialRequestForInput(input map[string]string, scope githubBrokerResolveRequest) (githubBrokerResolveRequest, error) {
 	protocol := strings.TrimSpace(input["protocol"])
@@ -256,9 +258,14 @@ func gitCredentialRequestForInput(input map[string]string, scope githubBrokerRes
 		return githubBrokerResolveRequest{}, fmt.Errorf("git repository does not match credential lease scope")
 	}
 	if scope.Path != "" {
-		if path != scope.Path {
+		// The scope path comes from a clone URL and keeps its ".git" suffix,
+		// while the gh CLI shim asks for a bare "/<owner>/<repo>". Compare the
+		// canonical spelling so both reach the same lease. The broker compares
+		// the same way, so the exact issued path is what travels onward.
+		if githubauth.CanonicalCredentialPath(path) != githubauth.CanonicalCredentialPath(scope.Path) {
 			return githubBrokerResolveRequest{}, fmt.Errorf("git repository does not match credential lease scope")
 		}
+		path = scope.Path
 	} else {
 		legacyPath := strings.TrimSuffix(strings.Trim(path, "/"), ".git")
 		owner, repo, found := strings.Cut(legacyPath, "/")

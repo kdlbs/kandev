@@ -85,10 +85,12 @@ function StatusBadge({ status }: { status: string }) {
 
 function UserRow({
   user,
+  isLastActiveAdmin,
   onToggleRole,
   onToggleStatus,
 }: {
   user: AuthUser;
+  isLastActiveAdmin: boolean;
   onToggleRole: (user: AuthUser) => void;
   onToggleStatus: (user: AuthUser) => void;
 }) {
@@ -116,6 +118,7 @@ function UserRow({
             variant="ghost"
             className="cursor-pointer"
             onClick={() => onToggleRole(user)}
+            disabled={isLastActiveAdmin}
             data-testid="users-table-toggle-role"
           >
             {/* Two whole-word variants get their own keys rather than
@@ -128,6 +131,7 @@ function UserRow({
             variant="ghost"
             className="cursor-pointer text-destructive"
             onClick={() => onToggleStatus(user)}
+            disabled={isLastActiveAdmin}
             data-testid="users-table-toggle-status"
           >
             {isDisabled ? t("system:usersEnable") : t("system:usersDisable")}
@@ -203,6 +207,10 @@ function UsersTableList({
   onToggleStatus: (u: AuthUser) => void;
 }) {
   const { t } = useTranslation();
+  // Mirrors the backend last-admin guard (ensureAnotherAdmin): an active
+  // admin cannot be demoted or disabled when no other active admin exists,
+  // so those toggles are greyed out on that row.
+  const activeAdminCount = users.filter((u) => u.role === "admin" && u.status === "active").length;
   return (
     <Table data-testid="users-table">
       <TableHeader>
@@ -215,14 +223,19 @@ function UsersTableList({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {users.map((user) => (
-          <UserRow
-            key={user.id}
-            user={user}
-            onToggleRole={onToggleRole}
-            onToggleStatus={onToggleStatus}
-          />
-        ))}
+        {users.map((user) => {
+          const isLastActiveAdmin =
+            user.role === "admin" && user.status === "active" && activeAdminCount === 1;
+          return (
+            <UserRow
+              key={user.id}
+              user={user}
+              isLastActiveAdmin={isLastActiveAdmin}
+              onToggleRole={onToggleRole}
+              onToggleStatus={onToggleStatus}
+            />
+          );
+        })}
       </TableBody>
     </Table>
   );

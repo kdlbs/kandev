@@ -26,13 +26,7 @@ import { ActivityPageClient } from "@/app/office/workspace/activity/activity-pag
 import { CostsPageClient } from "@/app/office/workspace/costs/costs-page-client";
 import { SkillsPageClient } from "@/app/office/workspace/skills/skills-page-client";
 import { fetchUserSettings, listWorkspaces } from "@/lib/api";
-import {
-  getInbox,
-  getMeta,
-  getOnboardingState,
-  listAgentProfiles,
-  listProjects,
-} from "@/lib/api/domains/office-api";
+import { getOnboardingState } from "@/lib/api/domains/office-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import {
@@ -210,13 +204,11 @@ function useOfficeRouteBootstrap(
     setBootstrap({ complete: false, onboardingComplete: null });
 
     async function loadBootstrapState() {
-      const [onboardingResponse, workspacesResponse, userSettingsResponse, metaResponse] =
-        await Promise.all([
-          getOnboardingState({ cache: "no-store" }).catch(() => ({ completed: true })),
-          listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-          fetchUserSettings({ cache: "no-store" }).catch(() => null),
-          getMeta({ cache: "no-store" }).catch(() => null),
-        ]);
+      const [onboardingResponse, workspacesResponse, userSettingsResponse] = await Promise.all([
+        getOnboardingState({ cache: "no-store" }).catch(() => ({ completed: true })),
+        listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+        fetchUserSettings({ cache: "no-store" }).catch(() => null),
+      ]);
       if (cancelled) return;
 
       const onboardingComplete = onboardingResponse.completed;
@@ -244,31 +236,10 @@ function useOfficeRouteBootstrap(
           workspaceId: activeWorkspaceId,
         },
       });
-      store.getState().setMeta(metaResponse);
-
-      if (!activeWorkspaceId) {
-        store.getState().setOfficeAgentProfiles([]);
-        store.getState().setProjects([]);
-        store.getState().setInboxItems([]);
-        store.getState().setInboxCount(0);
-        setBootstrap({ complete: true, onboardingComplete });
-        return;
-      }
-
-      const [agentsResponse, projectsResponse, inboxResponse] = await Promise.all([
-        listAgentProfiles(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ agents: [] })),
-        listProjects(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ projects: [] })),
-        getInbox(activeWorkspaceId, { cache: "no-store" }).catch(() => ({
-          items: [],
-          total_count: 0,
-        })),
-      ]);
-      if (cancelled) return;
-
-      store.getState().setOfficeAgentProfiles(agentsResponse.agents);
-      store.getState().setProjects(projectsResponse.projects);
-      store.getState().setInboxItems(inboxResponse.items);
-      store.getState().setInboxCount(inboxResponse.total_count);
+      // Data loading is not this bootstrap's job: agents, projects, inbox and
+      // meta follow the active workspace via `useOfficeWorkspaceData`, mounted
+      // in the always-present `AppSidebar`. Setting the active workspace above
+      // is what triggers that load.
       setBootstrap({ complete: true, onboardingComplete });
     }
 

@@ -179,7 +179,62 @@ func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, session
 			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession,
 		)
 		if err != nil {
-			return err
+			if errors.Is(err, ErrQueueFull) && autoMergeEnabled && afterInsert == nil {
+				// A full queue must still accept a message that would fold into
+				// the tail: admission-time auto-merge runs after a successful
+				// insert, so at capacity it could never fire. Fold the
+				// candidate directly — the fold is the admission. The
+				// afterInsert hook is excluded because it claims staged
+				// attachments against a persisted source row, which this path
+				// never creates.
+				candidate := &QueuedMessage{
+					SessionID:   sessionID,
+					TaskID:      taskID,
+					Content:     content,
+					Model:       model,
+					PlanMode:    planMode,
+					Attachments: attachments,
+					Metadata:    copyMessageMetadata(metadata, 0),
+					QueuedBy:    userID,
+				}
+				merged, didMerge, mergeErr := s.repo.AutoMergeCandidateIntoAbove(admittedCtx, candidate)
+				switch {
+				case mergeErr != nil:
+					if errors.Is(mergeErr, ErrTaskInactive) {
+						// The task was archived or deleted while the admission
+						// was in flight; surface the inactive-task contract
+						// instead of a misleading queue-full rejection.
+						return mergeErr
+					}
+					s.logger.Error("automatic merge into full queue failed; preserving queue full rejection",
+						zap.String("session_id", sessionID),
+						zap.Error(mergeErr))
+					return err
+				case didMerge && merged != nil:
+					s.logger.Info("automatically merged queued entry into full tail",
+						zap.String("session_id", sessionID),
+						zap.String("surviving_entry_id", merged.ID))
+					queued = merged
+					return nil
+				default:
+					// The fold skipped because the tail is absent or changed —
+					// a concurrent drain freed capacity (or a concurrent fold or
+					// drain moved the tail) between the failed insert and the
+					// fold scan. Retry the ordinary insert once under the held
+					// admission lock: it succeeds now that capacity is free, and
+					// still returns ErrQueueFull when another writer keeps the
+					// cap occupied. Without this retry a stale ErrQueueFull
+					// would drop a message that is admissible at fold time.
+					source, err = s.insertQueueMessageWithMetadata(
+						admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession,
+					)
+					if err != nil {
+						return err
+					}
+				}
+			} else {
+				return err
+			}
 		}
 		if afterInsert != nil {
 			if err := afterInsert(admittedCtx, source); err != nil {

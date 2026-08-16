@@ -14,5 +14,10 @@ export async function installFixturePlugin(page: Page): Promise<void> {
   await page.getByTestId("install-plugin-tab-upload").click();
   await page.getByTestId("install-plugin-file-input").setInputFiles(PACKAGE_PATH);
   await page.getByTestId("install-plugin-upload-submit").click();
+  // The plugin row is inserted before the UI bundle finishes loading. The
+  // controlled dialog closes only after loadPlugins resolves, so use that
+  // transition as the fixture's readiness boundary before navigating to a
+  // surface that consumes the plugin's registrations.
+  await expect(page.getByTestId("install-plugin-dialog")).toBeHidden({ timeout: 30_000 });
   await expect(page.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 30_000 });
 }

@@ -50,6 +50,7 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
 import { dwell } from "../../helpers/causal-waits";
+import { MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "@/lib/navigation/plugin-footer-budget";
 
 const PLUGIN_ID = "kandev-plugin-e2e";
 const NAV_ITEM_ID = "e2e-hello";
@@ -771,5 +772,102 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toBeVisible({
       timeout: 15_000,
     });
+  });
+
+  test("registers a sidebar-footer-section item as a footer icon, not a rail row", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+
+    const footerButton = testPage.getByTestId(
+      `sidebar-plugin:${PLUGIN_ID}:e2e-insights-tools-button`,
+    );
+    await expect(footerButton).toBeVisible({ timeout: 15_000 });
+    await expect(footerButton).toHaveAttribute("aria-label", "E2E Insights Tools");
+    await footerButton.click();
+    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
+
+    // Moves, does not add: the same item never also renders in the rail.
+    await expect(testPage.getByTestId("plugin-nav-item-e2e-insights-tools")).toHaveCount(0);
+  });
+
+  test("routes the over-budget sidebar-footer item through the overflow menu, hidden until opened", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    // The fixture registers 4 sidebar-footer items, in registration order:
+    // e2e-insights-tools (id/label "E2E Insights Tools"), then
+    // -2/-3/-4 ("E2E Overflow Item 2/3/4"). Deliberately one more than the
+    // desktop footer's exported MAX_INLINE_PLUGIN_FOOTER_ITEMS budget, so
+    // this single install drives the real overflow trigger/menu with the
+    // actual Radix DropdownMenu (spec.md#Capacity-and-overflow,
+    // spec.md#The-guarantee). Unit coverage in app-sidebar-footer.test.tsx
+    // mocks DropdownMenu as a pass-through, so it cannot prove the real
+    // component opens on click or hides its content while closed; this is
+    // the test that does.
+    //
+    // Per spec.md#Capacity-and-overflow, conformance tests derive their
+    // expectations from the exported constant rather than hard-coding the
+    // digits — which item lands inline vs. in the overflow menu is computed
+    // below from MAX_INLINE_PLUGIN_FOOTER_ITEMS, not hard-coded as 3/4.
+    const fixtureItemIds = [
+      "e2e-insights-tools",
+      "e2e-insights-tools-2",
+      "e2e-insights-tools-3",
+      "e2e-insights-tools-4",
+    ];
+    const fixtureItemLabels: Record<string, string> = {
+      "e2e-insights-tools": "E2E Insights Tools",
+      "e2e-insights-tools-2": "E2E Overflow Item 2",
+      "e2e-insights-tools-3": "E2E Overflow Item 3",
+      "e2e-insights-tools-4": "E2E Overflow Item 4",
+    };
+    const inlineIds = fixtureItemIds.slice(0, MAX_INLINE_PLUGIN_FOOTER_ITEMS);
+    const overflowIds = fixtureItemIds.slice(MAX_INLINE_PLUGIN_FOOTER_ITEMS);
+    // The fixture must register more items than the budget for this test to
+    // exercise the overflow menu at all — fail loudly here rather than
+    // silently degrading to an all-inline run if the budget is ever raised
+    // to meet or exceed the fixture's fixed item count.
+    expect(overflowIds.length).toBeGreaterThan(0);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+
+    for (const id of inlineIds) {
+      await expect(testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:${id}-button`)).toBeVisible({
+        timeout: 15_000,
+      });
+    }
+
+    const overBudgetId = overflowIds[0];
+    const overBudgetTestId = `sidebar-plugin:${PLUGIN_ID}:${overBudgetId}-button`;
+    const overflowTrigger = testPage.getByTestId("sidebar-plugin-overflow-button");
+    await expect(overflowTrigger).toBeVisible();
+
+    // Closed-menu guarantee: the over-budget item's button carries the same
+    // testid an inline button would use (spec.md#Rendered-identity), so it
+    // must be entirely absent from the DOM while the menu is closed, not
+    // merely hidden — a real DropdownMenu unmounts its content when closed.
+    await expect(testPage.getByTestId(overBudgetTestId)).toHaveCount(0);
+
+    await overflowTrigger.click();
+
+    const menuItem = testPage.getByTestId(overBudgetTestId);
+    await expect(menuItem).toBeVisible();
+    await expect(menuItem).toHaveText(fixtureItemLabels[overBudgetId]);
+    await menuItem.click();
+    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
   });
 });

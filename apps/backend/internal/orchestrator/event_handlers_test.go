@@ -42,6 +42,7 @@ import (
 type mockStepGetter struct {
 	steps                  map[string]*wfmodels.WorkflowStep // stepID -> step
 	workflowAgentProfileID string                            // returned by GetWorkflowMeta
+	workflowAgentProfiles  []string                          // optional profiles returned per call
 	workflowPrompts        map[string]string                 // workflowID -> prompt
 	workflowMetaCalls      int                               // GetWorkflowMeta invocations
 	workflowMetaErr        error                             // optional error from GetWorkflowMeta
@@ -90,6 +91,7 @@ func (m *mockStepGetter) GetPreviousStepByPosition(_ context.Context, workflowID
 func (m *mockStepGetter) GetWorkflowMeta(_ context.Context, workflowID string) (WorkflowMeta, error) {
 	m.workflowMetaMu.Lock()
 	m.workflowMetaCalls++
+	callNumber := m.workflowMetaCalls
 	delay := m.workflowMetaDelay
 	m.workflowMetaMu.Unlock()
 	if delay > 0 {
@@ -102,8 +104,12 @@ func (m *mockStepGetter) GetWorkflowMeta(_ context.Context, workflowID string) (
 	if m.workflowPrompts != nil {
 		prompt = m.workflowPrompts[workflowID]
 	}
+	profileID := m.workflowAgentProfileID
+	if callNumber <= len(m.workflowAgentProfiles) {
+		profileID = m.workflowAgentProfiles[callNumber-1]
+	}
 	return WorkflowMeta{
-		AgentProfileID: m.workflowAgentProfileID,
+		AgentProfileID: profileID,
 		Prompt:         prompt,
 	}, nil
 }
@@ -244,6 +250,10 @@ func (m *mockTaskRepo) UpdateTaskStateIfSessionState(
 type mockAgentManager struct {
 	isPassthrough  bool
 	isAgentRunning bool
+	// getGitLogFunc, when non-nil, overrides GetGitLog. Lets tests model a
+	// commit reconcile sweep (or archive capture) observing new commits, or
+	// simulate the agent process being gone (nil, nil).
+	getGitLogFunc func(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error)
 	// isAgentRunningFn, when non-nil, overrides isAgentRunning for
 	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
 	// (e.g. stream disconnect between PromptAgent call and queue write).
@@ -653,7 +663,10 @@ func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, session
 	}
 	return "", fmt.Errorf("no execution found")
 }
-func (m *mockAgentManager) GetGitLog(_ context.Context, _, _ string, _ int, _ string) (*client.GitLogResult, error) {
+func (m *mockAgentManager) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error) {
+	if m.getGitLogFunc != nil {
+		return m.getGitLogFunc(ctx, sessionID, baseCommit, limit, targetBranch)
+	}
 	return nil, nil
 }
 func (m *mockAgentManager) GetCumulativeDiff(_ context.Context, _, _ string) (*client.CumulativeDiffResult, error) {

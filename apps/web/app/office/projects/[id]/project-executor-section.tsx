@@ -97,6 +97,25 @@ function ContainerFields({
   );
 }
 
+function buildConfig(input: {
+  executorType: string;
+  image: string;
+  memoryMb: string;
+  cpuCores: string;
+  isContainer: boolean;
+}): Record<string, unknown> {
+  const config: Record<string, unknown> = {};
+  if (input.executorType) config.type = input.executorType;
+  if (input.image) config.image = input.image;
+  if (input.isContainer && (input.memoryMb || input.cpuCores)) {
+    const limits: Record<string, number> = {};
+    if (input.memoryMb) limits.memory_mb = parseInt(input.memoryMb, 10);
+    if (input.cpuCores) limits.cpu_cores = parseInt(input.cpuCores, 10);
+    config.resource_limits = limits;
+  }
+  return config;
+}
+
 export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps) {
   const { t } = useTranslation();
   const updateProjectStore = useAppStore((s) => s.updateProject);
@@ -118,17 +137,9 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const newConfig: Record<string, unknown> = {};
-      if (executorType) newConfig.type = executorType;
-      if (image) newConfig.image = image;
-      if (isContainer && (memoryMb || cpuCores)) {
-        const limits: Record<string, number> = {};
-        if (memoryMb) limits.memory_mb = parseInt(memoryMb, 10);
-        if (cpuCores) limits.cpu_cores = parseInt(cpuCores, 10);
-        newConfig.resource_limits = limits;
-      }
+      const newConfig = buildConfig({ executorType, image, memoryMb, cpuCores, isContainer });
       await updateProject(project.id, { executorConfig: newConfig });
-      updateProjectStore(project.id, { executorConfig: newConfig });
+      updateProjectStore(project.workspaceId, project.id, { executorConfig: newConfig });
       setDirty(false);
       toast.success(t("office:executorConfigurationSaved"));
     } catch (err) {
@@ -138,7 +149,16 @@ export function ProjectExecutorSection({ project }: ProjectExecutorSectionProps)
     } finally {
       setSaving(false);
     }
-  }, [executorType, image, memoryMb, cpuCores, isContainer, project.id, updateProjectStore]);
+  }, [
+    executorType,
+    image,
+    memoryMb,
+    cpuCores,
+    isContainer,
+    project.id,
+    updateProjectStore,
+    project.workspaceId,
+  ]);
 
   return (
     <div className="space-y-3">

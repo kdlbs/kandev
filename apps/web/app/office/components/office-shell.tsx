@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { IconBoxMultiple, IconInbox, IconRobot, IconSitemap } from "@tabler/icons-react";
 import { AppSidebarNavItem } from "@/components/app-sidebar/app-sidebar-nav-item";
 import { OfficeNavigationSection } from "@/components/app-sidebar/sections/office-navigation-section";
+import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import { PageShell } from "@/components/page-shell";
 import { usePathname } from "@/lib/routing/client-router";
 // Route -> catalog key, not route -> title. The map is module scope, so a `t()`
@@ -61,10 +62,18 @@ const OFFICE_SHEET_DESTINATIONS = [
  * destinations that live in the sidebar's other sections. Without this, office
  * navigation exists only in the `hidden md:block` sidebar.
  */
-function OfficePageNav() {
+function OfficePageNav({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2 [&_a]:min-h-10 [&_a]:text-sm [&_svg]:h-4 [&_svg]:w-4">
+      <AppSidebarWorkspacePicker
+        triggerClassName="h-11 w-full"
+        contentClassName="w-72"
+        triggerTestId="mobile-office-workspace-trigger"
+        chevronTestId="mobile-office-workspace-trigger-chevron"
+        itemTestIdPrefix="mobile-office-workspace-item"
+        onActionComplete={onClose}
+      />
       <OfficeNavigationSection collapsed={false} section="work" />
       <div className="flex flex-col gap-0.5">
         {OFFICE_SHEET_DESTINATIONS.map(({ icon, labelKey, href }) => (
@@ -110,7 +119,7 @@ export function OfficeShell({
       backLabel=""
       topbarTestId="office-topbar"
       className="gap-2 bg-background px-4"
-      pageNav={<OfficePageNav />}
+      pageNav={(onClose) => <OfficePageNav onClose={onClose} />}
       scroll="none"
       // The manifest's Tasks row goes to kanban. Office's own Tasks row above it
       // goes to /office/tasks, and two rows labelled "Tasks" leading to

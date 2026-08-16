@@ -231,7 +231,7 @@ test.describe("Workflow automation", () => {
     // explicit budget as the assertions above — on the default expect timeout
     // it loses the race under a loaded 14-shard run while passing locally.
     await expect(session.taskInSection("Plan Mode Workflow Task", "Turn Finished")).toBeVisible({
-      timeout: 15_000,
+      timeout: 60_000,
     });
   });
 

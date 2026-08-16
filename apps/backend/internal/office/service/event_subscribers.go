@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -117,21 +116,26 @@ type AgentLifecycleData struct {
 }
 
 type PromptUsageData struct {
-	TaskID    string      `json:"task_id"`
-	SessionID string      `json:"session_id"`
-	AgentID   string      `json:"agent_id"`
-	AgentType string      `json:"agent_type"`
-	Model     string      `json:"model"`
-	Provider  string      `json:"provider"`
-	Usage     UsageTokens `json:"usage"`
+	TaskID       string      `json:"task_id"`
+	SessionID    string      `json:"session_id"`
+	AgentID      string      `json:"agent_id"`
+	AgentType    string      `json:"agent_type"`
+	Model        string      `json:"model"`
+	Provider     string      `json:"provider"`
+	Usage        UsageTokens `json:"usage"`
+	TurnID       string      `json:"turn_id,omitempty"`
+	UsageEventID string      `json:"usage_event_id,omitempty"`
 }
 
 // UsageTokens mirrors streams.PromptUsage on the wire. All counts are int64
 // to match the stream type and to handle workspaces that accumulate over a
 // million tokens. ProviderReportedCostSubcents is forwarded from claude-acp's
-// usage_update.cost.amount (USD float * 10000); when > 0 the subscriber uses
-// it directly and skips the models.dev lookup. Estimated is true when the
-// adapter synthesised tokens (codex-acp cumulative-delta inference).
+// usage_update.cost.amount (USD float * 10000); when
+// ProviderReportedCostPresent is true (including an explicit zero), the
+// subscriber uses it directly and skips the models.dev lookup. The legacy
+// positive-value check remains in the resolver for older events. Estimated is
+// true when the adapter synthesised tokens (codex-acp cumulative-delta
+// inference).
 type UsageTokens struct {
 	InputTokens                  int64 `json:"input_tokens"`
 	OutputTokens                 int64 `json:"output_tokens"`
@@ -140,6 +144,7 @@ type UsageTokens struct {
 	ThoughtTokens                int64 `json:"thought_tokens,omitempty"`
 	TotalTokens                  int64 `json:"total_tokens,omitempty"`
 	ProviderReportedCostSubcents int64 `json:"provider_reported_cost_subcents,omitempty"`
+	ProviderReportedCostPresent  bool  `json:"provider_reported_cost_present,omitempty"`
 	Estimated                    bool  `json:"estimated,omitempty"`
 }
 
@@ -521,58 +526,65 @@ func (s *Service) tryPostStartFallback(
 }
 
 // handlePromptUsage records a cost event from a session/prompt usage
-// update. Cost resolution follows the three-layer order from
-// docs/specs/office-costs/spec.md:
+// update. Cost resolution follows the two-layer order from
+// docs/specs/office/costs.md, and CostSource on the row records which
+// layer actually produced the dollar amount (see resolveCostForUsage in
+// prompt_usage_cost.go — distinct from Estimated, a token-synthesis flag):
 //
 //  1. Provider-reported cost (Layer A) — claude-acp emits exact USD per
 //     turn on usage_update.cost.amount; the adapter forwards this as
-//     ProviderReportedCostSubcents. When > 0 the row is recorded
-//     verbatim and pricing lookup is skipped. This is the only accurate
+//     ProviderReportedCostSubcents plus a presence bit. When present (even
+//     when zero), the row is recorded verbatim and pricing lookup is skipped.
+//     This is the only accurate
 //     path for claude-acp, whose model identifiers are logical aliases
 //     (default / sonnet / haiku) with no real-name mapping.
 //  2. models.dev (Layer B) — when tokens are reported but no cost,
 //     normalize the model id and look up pricing. On miss the row
-//     records cost_subcents=0 with estimated=true.
+//     records cost_subcents=0 with cost_source=unpriced; Estimated tracks
+//     data.Usage.Estimated verbatim on this path, not hardcoded true.
 //
-// After insert the session totals (tokens_in / tokens_cached_in / tokens_out /
-// cost_subcents) are incremented on task_sessions, and any applicable budget
-// policy is evaluated. Estimated rows count toward budget totals at face value.
+// buildCostEvent (prompt_usage_cost.go) also records the cache read/write
+// split (NULL when Usage.Estimated — see its doc comment) and turn_id /
+// usage_event_id threaded from the publish site. The ledger insert and the
+// task_sessions rollup increment (tokens_in / tokens_cached_in / tokens_out /
+// cost_subcents) are written atomically by recordCostEventAndRollup — see its
+// doc comment for why non-atomic writes here are a real defect, not a
+// theoretical one — and any applicable budget policy is evaluated afterward.
+// Estimated rows count toward budget totals at face value. Every early
+// return and the insert path record a writer-health metric (cost_metrics.go)
+// so a silently-stopped writer is observable.
 func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[PromptUsageData](event)
-	if err != nil || data.TaskID == "" || data.SessionID == "" {
+	if err != nil {
+		s.recordCostEventDropped(costDropReasonDecodeError, "")
+		return nil
+	}
+	if data.TaskID == "" || data.SessionID == "" {
+		s.recordCostEventDropped(costDropReasonMissingIDs, data.TaskID)
 		return nil
 	}
 	fields, err := s.repo.GetTaskExecutionFields(ctx, data.TaskID)
 	if err != nil {
+		s.recordCostEventDropped(costDropReasonTaskFieldsError, data.TaskID)
 		return nil
 	}
 
-	costSubcents, estimated := s.resolveCostForUsage(ctx, *data)
+	resolution := s.resolveCostForUsage(ctx, *data)
 	provider := resolveProvider(*data)
-	tokensCachedIn := data.Usage.CachedReadTokens + data.Usage.CachedWriteTokens
+	costEvent := buildCostEvent(*data, fields, s.projectIDForTask(ctx, data.TaskID), provider, resolution)
 
-	costEvent := &models.CostEvent{
-		SessionID:      data.SessionID,
-		TaskID:         data.TaskID,
-		AgentProfileID: fields.AssigneeAgentProfileID,
-		ProjectID:      s.projectIDForTask(ctx, data.TaskID),
-		Model:          data.Model,
-		Provider:       provider,
-		TokensIn:       data.Usage.InputTokens,
-		TokensCachedIn: tokensCachedIn,
-		TokensOut:      data.Usage.OutputTokens,
-		CostSubcents:   costSubcents,
-		Estimated:      estimated,
-		OccurredAt:     time.Now().UTC(),
-	}
-	if err := s.repo.CreateCostEvent(ctx, costEvent); err != nil {
+	if err := s.recordCostEventAndRollup(
+		ctx, costEvent, data.SessionID,
+		data.Usage.InputTokens, costEvent.TokensCachedIn, data.Usage.OutputTokens, resolution.costSubcents,
+	); err != nil {
+		if errors.Is(err, sqlite.ErrDuplicateUsageEvent) {
+			s.recordCostEventDropped(costDropReasonDuplicate, data.TaskID)
+			return nil
+		}
+		s.recordCostEventDropped(costDropReasonInsertError, data.TaskID)
 		return err
 	}
-
-	s.incrementSessionUsageTotals(
-		ctx, data.SessionID,
-		data.Usage.InputTokens, tokensCachedIn, data.Usage.OutputTokens, costSubcents,
-	)
+	s.recordCostEventWritten(string(resolution.source), provider)
 
 	if fields.WorkspaceID != "" {
 		if err := s.CheckBudget(
@@ -585,37 +597,59 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 	return nil
 }
 
-// resolveCostForUsage applies the Layer A / Layer B lookup. Returns
-// (costSubcents, estimated). Layer A wins when the adapter forwarded a
-// non-zero provider-reported cost (claude-acp's usage_update.cost.amount).
-// Layer B (models.dev) is queried when a PricingLookup is wired; on miss
-// or when no PricingLookup is configured the row records 0/estimated.
-func (s *Service) resolveCostForUsage(
-	ctx context.Context, data PromptUsageData,
-) (int64, bool) {
-	if data.Usage.ProviderReportedCostSubcents > 0 {
-		return data.Usage.ProviderReportedCostSubcents, data.Usage.Estimated
-	}
-	if s.pricingLookup == nil || data.Model == "" {
-		return 0, true
-	}
-	pricing, ok := s.pricingLookup.LookupForModel(ctx, data.Model)
+// recordCostEventAndRollup inserts costEvent and increments the
+// task_sessions rollup atomically when the wired sessionUsageWriter
+// supports it (shared.SessionUsageWriterTx) — every production wiring does
+// (backendapp's SetSessionUsageWriter(repos.Task)).
+//
+// Atomicity matters because of how this card's own usage_event_id
+// idempotency guard interacts with a partial failure: without a shared
+// transaction, a rollup-increment failure after a successful ledger insert
+// was logged and swallowed, and a later redelivery of the same completion
+// (see ErrDuplicateUsageEvent's doc comment for why redelivery is real, not
+// hypothetical) would hit the unique index and be dropped as a duplicate
+// before the rollup ever got a second chance — task_sessions permanently
+// behind office_cost_events with no recovery path (PR #2606 review). Wrapping
+// both writes in one transaction closes that: any failure, including the
+// rollup increment, rolls back the ledger insert too, so nothing is
+// committed and a redelivered completion with the same usage_event_id
+// retries the whole operation cleanly instead of colliding with a
+// half-landed row.
+//
+// Falls back to the pre-existing non-atomic two-step write when the wired
+// writer doesn't implement SessionUsageWriterTx (e.g. a simplified test
+// double that doesn't need transactional coupling, or sessionUsageWriter
+// left unset).
+func (s *Service) recordCostEventAndRollup(
+	ctx context.Context, costEvent *models.CostEvent, sessionID string,
+	tokensIn, tokensCachedIn, tokensOut, costSubcents int64,
+) error {
+	txWriter, ok := s.sessionUsageWriter.(shared.SessionUsageWriterTx)
 	if !ok {
-		return 0, true
+		if err := s.repo.CreateCostEvent(ctx, costEvent); err != nil {
+			return err
+		}
+		s.incrementSessionUsageTotals(ctx, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents)
+		return nil
 	}
-	cost := costs.CalculateCostSubcents(
-		data.Usage.InputTokens,
-		data.Usage.CachedReadTokens,
-		data.Usage.CachedWriteTokens,
-		data.Usage.OutputTokens,
-		costs.ModelPricing{
-			InputPerMillion:       pricing.InputPerMillion,
-			CachedReadPerMillion:  pricing.CachedReadPerMillion,
-			CachedWritePerMillion: pricing.CachedWritePerMillion,
-			OutputPerMillion:      pricing.OutputPerMillion,
-		},
-	)
-	return cost, data.Usage.Estimated
+
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.CreateCostEventTx(ctx, tx, costEvent); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := txWriter.IncrementTaskSessionUsageTx(
+		ctx, tx, sessionID, tokensIn, tokensCachedIn, tokensOut, costSubcents,
+	); err != nil {
+		_ = tx.Rollback()
+		s.logger.Warn("increment task_session usage failed, rolled back cost event insert",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return err
+	}
+	return tx.Commit()
 }
 
 // resolveProvider derives the provider id for the cost row. AgentType

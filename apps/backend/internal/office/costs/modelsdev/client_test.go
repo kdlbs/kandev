@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/costs/modelsdev"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // sampleDataset mimics the models.dev /api.json shape: provider keys
@@ -36,6 +37,18 @@ const sampleDataset = `{
   "google": {
     "models": {
       "gemini-2.5-pro": {"cost": {"input": 1.25, "output": 10.0, "cache_read": 0.31, "cache_write": 1.56}}
+    }
+  }
+}`
+
+// altDataset prices claude-opus-4-7 differently from sampleDataset (20/100
+// vs 15/75 USD per million input/output). Used only by the
+// LookupForModelWithVersion concurrency test to make a mismatched
+// (pricing, version) pairing observable.
+const altDataset = `{
+  "anthropic": {
+    "models": {
+      "claude-opus-4-7": {"cost": {"input": 20.0, "output": 100.0, "cache_read": 2.0, "cache_write": 25.0}}
     }
   }
 }`
@@ -113,6 +126,202 @@ func TestClient_Lookup(t *testing.T) {
 	// Unknown model.
 	if _, ok := c.LookupForModel(context.Background(), "claude-unknown-99"); ok {
 		t.Error("expected miss on unknown model")
+	}
+}
+
+// CatalogVersion implements shared.PricingCatalogVersioner: "" before
+// anything has loaded, and a non-empty RFC3339 timestamp once the cache
+// has warmed from disk or refreshed from the network — models.dev's
+// dataset carries no version field of its own, so the writer needs this
+// "as-of" signal to attribute a models_dev_list-priced row.
+func TestClient_CatalogVersion(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	c, _ := newTestClient(t, cachePath)
+
+	if v := c.CatalogVersion(); v != "" {
+		t.Fatalf("CatalogVersion before any load = %q, want empty", v)
+	}
+
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	v := c.CatalogVersion()
+	if v == "" {
+		t.Fatal("CatalogVersion after refresh = empty, want a timestamp")
+	}
+	if _, err := time.Parse(time.RFC3339, v); err != nil {
+		t.Errorf("CatalogVersion = %q, not RFC3339: %v", v, err)
+	}
+}
+
+// LookupForModelWithVersion implements shared.PricingLookupWithVersion:
+// pricing matches LookupForModel and version matches CatalogVersion for the
+// same warm cache state, and both are zero-valued together on a miss.
+func TestClient_LookupForModelWithVersion(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	c, _ := newTestClient(t, cachePath)
+
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	wantPricing, ok := c.LookupForModel(context.Background(), "claude-opus-4-7")
+	if !ok {
+		t.Fatal("expected hit on claude-opus-4-7")
+	}
+	wantVersion := c.CatalogVersion()
+
+	pricing, version, ok := c.LookupForModelWithVersion(context.Background(), "claude-opus-4-7")
+	if !ok {
+		t.Fatal("expected hit on claude-opus-4-7")
+	}
+	if pricing != wantPricing {
+		t.Errorf("LookupForModelWithVersion pricing = %+v, want %+v", pricing, wantPricing)
+	}
+	if version != wantVersion {
+		t.Errorf("LookupForModelWithVersion version = %q, want %q", version, wantVersion)
+	}
+
+	if pricing, version, ok := c.LookupForModelWithVersion(context.Background(), "claude-unknown-99"); ok || pricing != (shared.ModelPricing{}) || version != "" {
+		t.Errorf("expected miss on unknown model, got pricing=%+v version=%q ok=%v", pricing, version, ok)
+	}
+}
+
+// TestClient_LookupForModelWithVersion_ConsistentUnderConcurrentRefresh is
+// the regression test for the P1 "cost provenance lies" race: reading
+// pricing and CatalogVersion via two independent lock acquisitions (as
+// resolveCostForUsage did before this fix) lets a concurrent Refresh land
+// in between and pair one catalogue's rates with a different catalogue's
+// version identifier on the stored row. LookupForModelWithVersion must
+// return the two from one atomic snapshot, so every observed pairing is one
+// of the two catalogues actually served — never a hybrid.
+//
+// CatalogVersion has one-second resolution (it's RFC3339, by design — see
+// its doc comment), so the base and alt refreshes are separated by a real
+// sleep to guarantee distinguishable version strings; a tight refresh loop
+// within the same wall-clock second would produce identical version labels
+// for genuinely different catalogues and make this test unable to tell them
+// apart. Reader goroutines hammer LookupForModelWithVersion continuously
+// through the single base-to-alt transition, which is where the race
+// window this test targets actually lives.
+func TestClient_LookupForModelWithVersion_ConsistentUnderConcurrentRefresh(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+
+	var useAltDataset atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if useAltDataset.Load() {
+			_, _ = w.Write([]byte(altDataset))
+			return
+		}
+		_, _ = w.Write([]byte(sampleDataset))
+	}))
+	t.Cleanup(srv.Close)
+
+	log := logger.Default()
+	c := modelsdev.New(modelsdev.Config{
+		CachePath:  cachePath,
+		URL:        srv.URL,
+		TTL:        time.Hour,
+		HTTPClient: srv.Client(),
+	}, log)
+
+	ctx := context.Background()
+	if err := c.Refresh(ctx); err != nil {
+		t.Fatalf("initial refresh: %v", err)
+	}
+	basePricing, baseVersion, ok := c.LookupForModelWithVersion(ctx, "claude-opus-4-7")
+	if !ok {
+		t.Fatal("expected hit on claude-opus-4-7 after initial refresh")
+	}
+
+	// Guarantee the alt refresh lands in a different RFC3339 second than the
+	// base refresh above, so the two version strings are distinguishable.
+	time.Sleep(1100 * time.Millisecond)
+
+	stop := make(chan struct{})
+	var mismatches atomic.Int64
+
+	// altPricing/altVersion are set once by the main goroutine after the alt
+	// refresh below, and read concurrently by the reader goroutines started
+	// just above it; guarded by altMu (not plain vars) so that sharing is
+	// race-detector-clean, independent of the LookupForModelWithVersion
+	// atomicity this test is actually exercising.
+	var altMu sync.Mutex
+	var altPricing shared.ModelPricing
+	var altVersion string
+	getAlt := func() (shared.ModelPricing, string) {
+		altMu.Lock()
+		defer altMu.Unlock()
+		return altPricing, altVersion
+	}
+
+	const readers = 8
+	var readersWG sync.WaitGroup
+	readersWG.Add(readers)
+	for i := 0; i < readers; i++ {
+		go func() {
+			defer readersWG.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				pricing, version, ok := c.LookupForModelWithVersion(ctx, "claude-opus-4-7")
+				if !ok {
+					continue
+				}
+				wantAltPricing, wantAltVersion := getAlt()
+				switch version {
+				case baseVersion:
+					if pricing != basePricing {
+						mismatches.Add(1)
+					}
+				case wantAltVersion:
+					if wantAltVersion != "" && pricing != wantAltPricing {
+						mismatches.Add(1)
+					}
+				default:
+					// Neither known version yet (e.g. read raced ahead of the
+					// alt refresh completing) — not itself a mismatch, skip.
+				}
+			}
+		}()
+	}
+
+	// Perform the single base->alt transition while readers are hammering
+	// the lookup concurrently — this Refresh call is exactly the race
+	// window the pre-fix two-lock pattern could straddle.
+	useAltDataset.Store(true)
+	if err := c.Refresh(ctx); err != nil {
+		t.Fatalf("alt refresh: %v", err)
+	}
+	newAltPricing, newAltVersion, ok := c.LookupForModelWithVersion(ctx, "claude-opus-4-7")
+	if !ok {
+		t.Fatal("expected hit on claude-opus-4-7 after alt refresh")
+	}
+	if newAltPricing == basePricing {
+		t.Fatal("test setup bug: altDataset must price claude-opus-4-7 differently from sampleDataset")
+	}
+	if newAltVersion == baseVersion {
+		t.Fatal("test setup bug: the alt refresh must produce a different catalogue version")
+	}
+	altMu.Lock()
+	altPricing, altVersion = newAltPricing, newAltVersion
+	altMu.Unlock()
+
+	// Let readers keep hammering briefly against the now-settled alt state
+	// before stopping, so the alt-version branch above gets real coverage.
+	time.Sleep(50 * time.Millisecond)
+	close(stop)
+	readersWG.Wait()
+
+	if mismatches.Load() > 0 {
+		t.Fatalf("observed %d mismatched (pricing, version) pairings — LookupForModelWithVersion is not atomic", mismatches.Load())
 	}
 }
 

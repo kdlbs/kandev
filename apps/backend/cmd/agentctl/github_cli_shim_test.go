@@ -260,6 +260,42 @@ func TestGitHubCLIShimSelectsRepositoryLease(t *testing.T) {
 	}
 }
 
+func TestGitHubCLIShimAcceptsShortRepositoryPathForGitHubLease(t *testing.T) {
+	var got githubBrokerResolveRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		_, _ = io.WriteString(w, `{"username":"x-access-token","password":"backend-token"}`)
+	}))
+	t.Cleanup(server.Close)
+	env := githubCredentialTestEnv(server.URL)
+	env["PATH"] = "/shim:/usr/bin"
+	env["GH_REPO"] = "acme/backend"
+	env[envGitHubCredentialScopes] = `[
+		{"lease":"backend-lease","task_id":"task-1","session_id":"session-1","repository_id":"repo-2","owner":"acme","repo":"backend","host":"github.com","path":"/acme/backend.git","provider_id":"github"}
+	]`
+	var childToken string
+	err := runGitHubCLIShim(
+		context.Background(), []string{"pr", "list"}, strings.NewReader(""), io.Discard, io.Discard,
+		lookupEnv(env), func() []string { return envMap(env) }, server.Client(), "/shim",
+		func(string, string) (string, error) { return "/usr/bin/gh", nil },
+		func(_ context.Context, _ string, _ []string, childEnv []string, _ io.Reader, _, _ io.Writer) error {
+			childToken = envValue(childEnv, "GH_TOKEN")
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("runGitHubCLIShim() error = %v", err)
+	}
+	if got.Path != "/acme/backend.git" {
+		t.Fatalf("broker path = %q, want canonical GitHub clone path", got.Path)
+	}
+	if childToken != "backend-token" {
+		t.Fatalf("child GH_TOKEN = %q, want backend-token", childToken)
+	}
+}
+
 func TestParseGitHubCLIRepository(t *testing.T) {
 	tests := []struct {
 		name        string

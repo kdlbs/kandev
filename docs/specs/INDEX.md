@@ -51,6 +51,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — agent tools](plugins/agent-tools.md) | draft |
 | [plugins — Voice extraction host prerequisites](plugins/voice-extraction-host.md) | shipped |
 | [plugins — Voice Mode leaves core](plugins/voice-extraction.md) | shipped |
+| [plugin-nav-sidebar-footer](plugin-nav-sidebar-footer/spec.md) | draft |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
@@ -107,6 +108,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [autopilot-mode](tasks/autopilot-mode.md) | draft |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
+| [task-step-transition-ledger](workflow/task-step-transition-ledger/spec.md) | draft |
 | [conditional-session-settings](workflow-session-settings/spec.md) | approved |
 | [prevent-agent-autostart-on-open](prevent-agent-autostart-on-open/spec.md) | draft |
 | [workflow-duplication](workflow-duplication/spec.md) | draft |
@@ -154,6 +156,7 @@ Per-workspace credentials and triage triggers for external services.
 | [creation](workspaces/creation.md) | building |
 | [deletion](workspaces/deletion.md) | shipped |
 | [local-repositories](workspaces/local-repositories.md) | shipped |
+| [worktree-branch-templates](workspaces/worktree-branch-templates.md) | building |
 | [repository-secrets](workspaces/repository-secrets.md) | shipped |
 | [secret-scope-transfer](workspaces/secret-scope-transfer.md) | shipped |
 
@@ -174,6 +177,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
 | [github-saved-query-defaults](ui/github-saved-query-defaults.md) | shipped |
+| [pr-detail-header-width](pr-detail-header-width/spec.md) | shipped |
 | [pr-task-status-summary](ui/pr-task-status-summary.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
@@ -193,6 +197,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [sidebar-queued-prompt-count](ui/sidebar-queued-prompt-count.md) | shipped |
 | [session-tab-delete-feedback](ui/session-tab-delete-feedback.md) | shipped |
 | [message-favorite-star-mobile-size](ui/message-favorite-star-mobile-size.md) | shipped |
+| [message-metadata-overflow](ui/message-metadata-overflow.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [subagent-observability](ui/subagent-observability.md) | building |
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
@@ -258,7 +263,10 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [agent-resume-runtime-recovery](agent-resume-runtime-recovery/spec.md) | shipped |
 | [agent-stall-recovery](agent-stall-recovery/spec.md) | approved |
 | [mcp-session-observability](mcp-session-observability/spec.md) | approved |
+| [subagent-context-persistence](subagent-context-persistence/spec.md) | draft |
 | [auth](auth/spec.md) | building |
+| [auth — self-actions guard](auth/self-actions-guard.md) | shipped |
+| [auth — trusted proxies](auth/trusted-proxies.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
 | [improve-kandev](improve-kandev/spec.md) | building |
