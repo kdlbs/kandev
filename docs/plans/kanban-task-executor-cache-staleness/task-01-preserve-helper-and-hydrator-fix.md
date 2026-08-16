@@ -137,4 +137,3 @@ incoming`.
 Files changed: `apps/web/lib/kanban/map-task.ts`, `apps/web/lib/kanban/map-task.test.ts`,
 `apps/web/lib/state/hydration/hydrator.ts`, `apps/web/lib/state/hydration/hydrator.test.ts`
 (tests moved out), `apps/web/lib/state/hydration/hydrator-kanban-tasks.test.ts` (new).
-

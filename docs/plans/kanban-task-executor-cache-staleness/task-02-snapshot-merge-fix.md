@@ -110,4 +110,3 @@ preserve, in `apps/web/hooks/domains/kanban/use-all-workflow-snapshots.ts`.
 
 Files changed: `apps/web/hooks/domains/kanban/use-all-workflow-snapshots.ts`,
 `apps/web/hooks/domains/kanban/use-all-workflow-snapshots.test.ts`.
-
