@@ -673,10 +673,11 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 
 	// On destructive stop reasons (task/session deleted/archived), clean up
 	// the kandev-managed per-container session dir so we don't leak GBs of
-	// agent state on disk. Plain stops preserve the dir so resume re-attaches
-	// to the same agent state, mirroring the Sprites preserve-on-stop rule.
+	// agent state on disk. Plain stops and stale execution cleanup preserve the
+	// dir because a resume may re-attach to the same container and its bind
+	// mounts.
 	teardownContainer := shouldTeardownDockerContainer(instance.StopReason)
-	if teardownContainer && r.kandevHomeDir != "" && instance.InstanceID != "" {
+	if shouldRunExecutorCleanup(instance.StopReason) && r.kandevHomeDir != "" && instance.InstanceID != "" {
 		CleanupAgentSessionDir(InstanceSessionRoot(r.kandevHomeDir, instance.InstanceID), r.logger)
 	}
 
@@ -736,10 +737,10 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 }
 
 // shouldTeardownDockerContainer extends terminal cleanup with stale execution
-// cleanup for Docker only. A stale Docker execution owns a local container and
-// per-instance session dir that become untracked before retry/resume launches a
-// replacement. Sprites intentionally keep stale sandboxes; see
-// shouldRunExecutorCleanup for that shared runtime policy.
+// cleanup for Docker only. Stale cleanup must stop the old container before a
+// retry/resume launch, but its per-instance session dir must remain available
+// because the stopped container still references its bind mounts. Destructive
+// task/session lifecycle reasons own removal; see shouldRunExecutorCleanup.
 func shouldTeardownDockerContainer(reason string) bool {
 	if shouldRunExecutorCleanup(reason) {
 		return true

@@ -57,6 +57,36 @@ describe("useWorkspaceContentSearch request lifecycle", () => {
     expect(result.current.isSearching).toBe(false);
   });
 
+  it("publishes matches before retry polling completes", async () => {
+    const results = [
+      {
+        repository_name: "web",
+        path: "src/cached-content-target.ts",
+        line: 180,
+        column: 1,
+        preview: "cached marker",
+        match_ranges: [{ start: 0, end: 13 }],
+      },
+    ];
+    mockSearchWorkspaceContent.mockResolvedValue({ results });
+    const { result } = renderHook(() =>
+      useWorkspaceContentSearch({
+        enabled: true,
+        query: "cached marker",
+        sessionId: "session-1",
+      }),
+    );
+
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+
+    expect(mockSearchWorkspaceContent).toHaveBeenCalledTimes(1);
+    expect(result.current.results).toEqual(results);
+    expect(result.current.isSearching).toBe(true);
+
+    await act(async () => vi.runAllTimersAsync());
+    expect(result.current.isSearching).toBe(false);
+  });
+
   it("clears the previous query results while the next search is pending", async () => {
     const previousResults = [
       {

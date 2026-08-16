@@ -264,6 +264,7 @@ func TestDockerStopInstance_PreservesSessionDirOnPlainStop(t *testing.T) {
 		{reason: "stopped via API", expectExists: true},
 		{reason: "agent crashed", expectExists: true},
 		{reason: "user requested", expectExists: true},
+		{reason: stopReasonStaleExecutionCleanup, expectExists: true},
 		{reason: "task archived", expectExists: false},
 		{reason: "task deleted", expectExists: false},
 		{reason: "session archived", expectExists: false},
