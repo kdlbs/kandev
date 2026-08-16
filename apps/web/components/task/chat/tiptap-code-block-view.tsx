@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 const CODE_LANGUAGES: Array<{ value: string; label?: string; labelKey?: string }> = [
   { value: "", labelKey: "task:codeLanguagePlain" },
   { value: "javascript", label: "JavaScript" },
+  // i18n-exempt: programming language names are not translated.
   { value: "typescript", label: "TypeScript" },
   { value: "python", label: "Python" },
   { value: "go", label: "Go" },

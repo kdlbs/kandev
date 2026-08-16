@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CHAT_PANEL_FALLBACK_LABEL, resolveChatPanelTitle } from "./dockview-panel-content";
+import { resolveChatPanelTitle } from "./dockview-panel-content";
 
 /**
  * Regression: the generic "chat" placeholder dockview panel used to fall back
@@ -15,15 +15,15 @@ describe("resolveChatPanelTitle", () => {
   });
 
   it("falls back to the generic 'Agent' label when null", () => {
-    expect(resolveChatPanelTitle(null)).toBe(CHAT_PANEL_FALLBACK_LABEL);
+    expect(resolveChatPanelTitle(null)).toBe("Agent");
   });
 
   it("falls back to the generic 'Agent' label when undefined", () => {
-    expect(resolveChatPanelTitle(undefined)).toBe(CHAT_PANEL_FALLBACK_LABEL);
+    expect(resolveChatPanelTitle(undefined)).toBe("Agent");
   });
 
   it("falls back to the generic 'Agent' label when the agent label is empty", () => {
-    expect(resolveChatPanelTitle("")).toBe(CHAT_PANEL_FALLBACK_LABEL);
+    expect(resolveChatPanelTitle("")).toBe("Agent");
   });
 
   it("uses the agent label verbatim — does not coerce or relabel valid names", () => {

@@ -350,5 +350,6 @@
   "mrChipDrawerClose": "Close merge request status",
   "gitlabRejectedAssociation": "GitLab rejected the association.",
   "taskCreatedMrNotLinked": "Task created, but merge request was not linked",
-  "taskCreatedMrNotLinkedDescription": "Open the task and use Link GitLab merge request to retry. {{error}}"
+  "taskCreatedMrNotLinkedDescription": "Open the task and use Link GitLab merge request to retry. {{error}}",
+  "memberSearchFailed": "Member search failed"
 }

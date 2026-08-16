@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { isTerminalToolCallStatus, normalizeToolCallStatus } from "@/lib/utils/tool-call-status";
 import type { ShellExecOutputSummary } from "../types";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type ShellOutputDisclosureProps = {
   sessionId: string;
@@ -20,9 +21,9 @@ type ShellOutputDisclosureProps = {
 
 function formatOutputSize(summary: ShellExecOutputSummary | undefined) {
   const bytes = (summary?.stdout_bytes ?? 0) + (summary?.stderr_bytes ?? 0);
-  if (bytes === 0) return "Output";
-  if (bytes < 1024) return `Output · ${bytes} B`;
-  return `Output · ${(bytes / 1024).toFixed(bytes < 10_240 ? 1 : 0)} KB`;
+  if (bytes === 0) return t("task:output");
+  if (bytes < 1024) return `${t("task:output")} · ${bytes} B`;
+  return `${t("task:output")} · ${(bytes / 1024).toFixed(bytes < 10_240 ? 1 : 0)} KB`;
 }
 
 function OutputTranscript({ output }: { output: ShellCommandOutput }) {

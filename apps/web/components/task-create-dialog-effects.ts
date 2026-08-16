@@ -554,7 +554,7 @@ export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
     }
     const parsed = parseGitHubAnyUrl(trimmed);
     if (!parsed) {
-      setGitHubUrlError("Invalid GitHub URL - expected github.com/owner/repo or .../pull/123");
+      setGitHubUrlError(t("task:invalidGitHubUrl"));
       return;
     }
     setGitHubUrlError(null);

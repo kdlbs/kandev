@@ -29,9 +29,10 @@ function formatStatusLabel(
   ended: boolean,
   endReason: string | undefined,
 ) {
-  if (!ended) return "watching";
-  if (status === "cancelled" || endReason === "session_restart") return "ended (session restart)";
-  return "ended";
+  if (!ended) return t("task:monitorStatusWatching");
+  if (status === "cancelled" || endReason === "session_restart")
+    return t("task:monitorStatusEndedSessionRestart");
+  return t("task:monitorStatusEnded");
 }
 
 type MonitorViewModel = {

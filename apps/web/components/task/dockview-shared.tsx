@@ -318,7 +318,8 @@ function ChangesContent({ panelId }: { panelId: string }) {
   const totalCount = fileCount + commits.length;
 
   useEffect(() => {
-    const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";
+    const title =
+      totalCount > 0 ? `${t("task:panelChanges")} (${totalCount})` : t("task:panelChanges");
     setPanelTitle(panelId, title);
   }, [totalCount, panelId]);
 

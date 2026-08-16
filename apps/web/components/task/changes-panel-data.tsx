@@ -42,6 +42,7 @@ import {
 } from "./changes-panel-helpers";
 import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
+import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
 import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
 import {
@@ -155,18 +156,19 @@ function usePerRepoCallbacks(
   vcsDialogs: ReturnType<typeof useVcsDialogs>,
   gitHandlers: ReturnType<typeof useChangesGitHandlers>,
 ) {
+  const { t } = useTranslation();
   return useMemo(
     () => ({
       onRepoStageAll: (repo: string) => {
         gitHandlers.handleGitOperation(
           () => git.stage(undefined, repo),
-          repo ? `Stage all (${repo})` : "Stage all",
+          gitOperationLabel(t, "task:stageAll", repo),
         );
       },
       onRepoUnstageAll: (repo: string) => {
         gitHandlers.handleGitOperation(
           () => git.unstage(undefined, repo),
-          repo ? `Unstage all (${repo})` : "Unstage all",
+          gitOperationLabel(t, "task:unstageAll", repo),
         );
       },
       onRepoCommit: (repo: string) => vcsDialogs.openCommitDialog(repo),

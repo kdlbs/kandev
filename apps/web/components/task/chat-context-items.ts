@@ -75,7 +75,7 @@ function buildPlanContextItem(params: BuildContextItemsParams): ContextItem | nu
   return {
     kind: "plan",
     id: PLAN_CONTEXT_PATH,
-    label: "Plan",
+    label: t("task:panelPlan"),
     taskId: taskId ?? undefined,
     pinned: planFile?.pinned,
     onRemove: sid ? () => removeContextFile(sid, PLAN_CONTEXT_PATH) : undefined,

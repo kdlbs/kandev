@@ -118,5 +118,8 @@
   "workspaceNotFound": "Ŵōŕķśƥàćē ńōţ ƒōũńď",
   "workspaceSettings": "Ŵōŕķśƥàćē Śēţţĩńĝś",
   "worktreeBranchTemplate": "Ŵōŕķţŕēē Ɓŕàńćĥ Ţēḿƥĺàţē",
-  "worktreeSync": "Ŵōŕķţŕēē Śŷńć"
+  "worktreeSync": "Ŵōŕķţŕēē Śŷńć",
+  "enterRepositoryName": "Ēńţēŕ à ŕēƥōśĩţōŕŷ ńàḿē.",
+  "chooseDifferentRepositoryName": "Ćĥōōśē à ďĩƒƒēŕēńţ ŕēƥōśĩţōŕŷ ńàḿē.",
+  "repositoryNameMustBeOneFolder": "Ţĥē ŕēƥōśĩţōŕŷ ńàḿē ḿũśţ ƀē ōńē ƒōĺďēŕ ńàḿē."
 }

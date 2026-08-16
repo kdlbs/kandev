@@ -17,6 +17,7 @@ const DEPENDENCY_DIRECTORIES = [
   ".tox",
   ".nox",
   "__pypackages__",
+  // i18n-exempt: dependency directory name on disk.
   "Pods",
   ".gradle",
 ] as const;

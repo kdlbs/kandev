@@ -28,10 +28,8 @@ import { TerminalPanel } from "./terminal-panel";
 import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
 
-export const CHAT_PANEL_FALLBACK_LABEL = "Agent";
-
 export function resolveChatPanelTitle(agentLabel: string | null | undefined): string {
-  return agentLabel || CHAT_PANEL_FALLBACK_LABEL;
+  return agentLabel || t("task:panelAgent");
 }
 
 function useChatSessionTitle(panelId: string, sessionId: string | null) {
@@ -138,7 +136,8 @@ function ChangesContent({ panelId }: { panelId: string }) {
   const totalCount = useSessionChangesCount(activeSessionId);
 
   useEffect(() => {
-    const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";
+    const title =
+      totalCount > 0 ? `${t("task:panelChanges")} (${totalCount})` : t("task:panelChanges");
     setPanelTitle(panelId, title);
   }, [totalCount, panelId]);
 

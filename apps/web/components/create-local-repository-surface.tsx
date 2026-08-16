@@ -32,16 +32,17 @@ import { createDirectory } from "@/lib/api/domains/fs-api";
 import type { Repository } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { t } from "@/lib/i18n";
 
 // The returned strings are never rendered: the only caller uses this as a
 // boolean gate (`!nameError`), so they stay English rather than becoming dead
 // catalog entries.
 export function validateLocalRepositoryName(name: string): string | null {
   const trimmed = name.trim();
-  if (!trimmed) return "Enter a repository name.";
-  if (trimmed === "." || trimmed === "..") return "Choose a different repository name.";
+  if (!trimmed) return t("workspaces:enterRepositoryName");
+  if (trimmed === "." || trimmed === "..") return t("workspaces:chooseDifferentRepositoryName");
   if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("\0")) {
-    return "The repository name must be one folder name.";
+    return t("workspaces:repositoryNameMustBeOneFolder");
   }
   return null;
 }
