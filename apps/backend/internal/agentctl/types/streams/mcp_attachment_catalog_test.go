@@ -8,7 +8,7 @@ import (
 )
 
 func TestMCPAttachmentCatalogNormalizesEntriesBeforeStorage(t *testing.T) {
-	tools := make([]map[string]string, MaxMCPAttachmentTools+1)
+	tools := make([]map[string]string, MaxMCPAttachmentTools+2)
 	for i := range tools {
 		tools[i] = map[string]string{
 			"name":        string(rune('z' - i%26)),
@@ -18,6 +18,7 @@ func TestMCPAttachmentCatalogNormalizesEntriesBeforeStorage(t *testing.T) {
 	tools[0] = map[string]string{"name": "", "description": "ignored"}
 	tools[1] = map[string]string{"name": "alpha", "description": strings.Repeat("界", 600)}
 	tools[2] = map[string]string{"name": "beta", "description": "second"}
+	tools[len(tools)-1] = map[string]string{"name": "aardvark", "description": "late but sorted first"}
 
 	history := MCPAttachmentHistory{}
 	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-1"})
@@ -59,6 +60,17 @@ func TestMCPAttachmentCatalogNormalizesEntriesBeforeStorage(t *testing.T) {
 	if alpha == nil {
 		t.Fatal("stored catalog did not contain alpha")
 	}
+	var aardvark map[string]any
+	for _, value := range stored {
+		entry := value.(map[string]any)
+		if entry["name"] == "aardvark" {
+			aardvark = entry
+			break
+		}
+	}
+	if aardvark == nil {
+		t.Fatal("stored catalog did not retain the alphabetically first late entry")
+	}
 	description, ok := alpha["description"].(string)
 	if !ok || len(description) > MaxMCPToolDescriptionBytes || !utf8.ValidString(description) {
 		t.Fatalf("description was not safely bounded: bytes=%d valid=%v", len(description), utf8.ValidString(description))
@@ -68,6 +80,9 @@ func TestMCPAttachmentCatalogNormalizesEntriesBeforeStorage(t *testing.T) {
 		if entry["name"] == "" {
 			t.Fatal("empty tool name was stored")
 		}
+	}
+	if len(history.Current.Evidence) != 1 || len(history.Current.Evidence[0].Tools) != 0 {
+		t.Fatalf("evidence retained tool summaries: %+v", history.Current.Evidence)
 	}
 }
 

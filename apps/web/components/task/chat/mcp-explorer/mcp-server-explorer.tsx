@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -19,6 +19,7 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@kandev/ui/drawer";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { MCPAttachmentServer } from "@/lib/state/slices/session-runtime/types";
 import { cn } from "@/lib/utils";
@@ -125,11 +126,13 @@ export function McpServerExplorer({
   trigger: ReactNode;
   servers: MCPAttachmentServer[];
 }) {
+  const { t } = useTranslation();
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const usesTouchSurface = isMobile || !isFinePointer;
   const [open, setOpen] = useState(false);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
+  const wasOpenRef = useRef(false);
   const fallbackSelection = useMemo(() => selectMcpServerName(servers), [servers]);
   const currentSelection = useMemo(
     () => selectMcpServerName(servers, selectedName),
@@ -141,7 +144,12 @@ export function McpServerExplorer({
   }, [servers]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
     setSelectedName(fallbackSelection);
     setMobileDetail(false);
   }, [fallbackSelection, open]);
@@ -182,7 +190,12 @@ export function McpServerExplorer({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DialogTrigger asChild>{trigger}</DialogTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t("task:showMcpConnectionStatus")}</TooltipContent>
+      </Tooltip>
       <DialogContent
         data-testid="mcp-server-explorer"
         enterConfirms={false}

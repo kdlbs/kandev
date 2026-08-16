@@ -47,9 +47,16 @@ test("mobile MCP explorer uses a full-height list-to-detail drawer", async ({
     timeout: 30_000,
   });
   const detailScroll = drawer.getByTestId("mcp-server-detail-scroll");
+  const maxScrollTop = await detailScroll.evaluate(
+    (element) => element.scrollHeight - element.clientHeight,
+  );
+  expect(maxScrollTop).toBeGreaterThan(0);
+  const initialScrollTop = await detailScroll.evaluate((element) => element.scrollTop);
+  await detailScroll.hover();
+  await testPage.mouse.wheel(0, Math.min(400, maxScrollTop));
   await expect
-    .poll(() => detailScroll.evaluate((element) => element.scrollHeight > element.clientHeight))
-    .toBe(true);
+    .poll(() => detailScroll.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(initialScrollTop);
   const back = detail.getByRole("button", { name: "Back to servers" });
   await expect(back).toBeVisible();
   const backBox = await back.boundingBox();

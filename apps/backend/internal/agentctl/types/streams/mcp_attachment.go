@@ -211,12 +211,18 @@ func (h *MCPAttachmentHistory) Apply(evidence MCPAttachmentEvidence) bool {
 	if h.Current.AttemptID == "" || evidence.AttemptID == "" || evidence.AttemptID != h.Current.AttemptID {
 		return false
 	}
-	evidence = sanitizeMCPAttachmentEvidence(evidence)
+	var catalogTruncated bool
+	evidence, catalogTruncated = sanitizeMCPAttachmentEvidence(evidence)
 	if evidence.OccurredAt.IsZero() {
 		evidence.OccurredAt = time.Now().UTC()
 	}
 	h.Current.UpdatedAt = evidence.OccurredAt
-	h.Current.Evidence = appendBoundedMCPAttachmentEvidence(h.Current.Evidence, evidence)
+	storedEvidence := evidence
+	// Tool summaries belong in the current server projection. Keeping them out
+	// of every evidence event preserves the bounded timeline when tools/list is
+	// observed more than once.
+	storedEvidence.Tools = nil
+	h.Current.Evidence = appendBoundedMCPAttachmentEvidence(h.Current.Evidence, storedEvidence)
 	if evidence.ServerName == "" {
 		if evidence.Kind == MCPAttachmentEvidenceExplicitError {
 			h.Current.SessionError = evidence.Summary
@@ -229,7 +235,7 @@ func (h *MCPAttachmentHistory) Apply(evidence MCPAttachmentEvidence) bool {
 		h.Current.Servers = append(h.Current.Servers, MCPServerAttachment{Name: evidence.ServerName, Status: MCPAttachmentStatusUnknown})
 		index = len(h.Current.Servers) - 1
 	}
-	h.Current.Servers[index].applyEvidence(evidence)
+	h.Current.Servers[index].applyEvidence(evidence, catalogTruncated)
 	return true
 }
 
@@ -247,12 +253,12 @@ func (h MCPAttachmentHistory) Valid() bool {
 	return h.Version == MCPAttachmentSchemaVersion && h.Current.AttemptID != ""
 }
 
-func (s *MCPServerAttachment) applyEvidence(evidence MCPAttachmentEvidence) {
-	s.applyEvidenceDetails(evidence)
+func (s *MCPServerAttachment) applyEvidence(evidence MCPAttachmentEvidence, catalogTruncated bool) {
+	s.applyEvidenceDetails(evidence, catalogTruncated)
 	s.applyEvidenceStatus(evidence)
 }
 
-func (s *MCPServerAttachment) applyEvidenceDetails(evidence MCPAttachmentEvidence) {
+func (s *MCPServerAttachment) applyEvidenceDetails(evidence MCPAttachmentEvidence, catalogTruncated bool) {
 	if evidence.Source != "" {
 		s.Source = evidence.Source
 	}
@@ -267,7 +273,11 @@ func (s *MCPServerAttachment) applyEvidenceDetails(evidence MCPAttachmentEvidenc
 	}
 	if evidence.Kind == MCPAttachmentEvidenceToolsListObserved {
 		s.ToolCount = evidence.ToolCount
-		s.Tools, s.ToolCatalogTruncated = NormalizeMCPToolCatalog(evidence.Tools, evidence.ToolCount)
+		// Apply sanitizes evidence before projecting it, so do not normalize the
+		// same catalog again here. Copy the bounded slice to keep the projection
+		// independent of the event value.
+		s.Tools = append([]MCPToolSummary(nil), evidence.Tools...)
+		s.ToolCatalogTruncated = catalogTruncated
 	}
 	if evidence.ReasonCode != "" {
 		s.ReasonCode = evidence.ReasonCode
@@ -288,12 +298,14 @@ func NormalizeMCPToolCatalog(tools []MCPToolSummary, totalToolCount int) ([]MCPT
 		}
 		tool.Description = truncateMCPToolDescription(tool.Description)
 		normalized = append(normalized, tool)
-		if len(normalized) == MaxMCPAttachmentTools {
-			break
-		}
 	}
 	sort.Slice(normalized, func(i, j int) bool { return normalized[i].Name < normalized[j].Name })
-	return normalized, totalToolCount > len(normalized)
+	truncated := totalToolCount > len(normalized)
+	if len(normalized) > MaxMCPAttachmentTools {
+		normalized = append([]MCPToolSummary(nil), normalized[:MaxMCPAttachmentTools]...)
+		truncated = true
+	}
+	return normalized, truncated
 }
 
 func truncateMCPToolDescription(description string) string {
@@ -393,17 +405,18 @@ func appendBoundedMCPAttachmentEvidence(existing []MCPAttachmentEvidence, eviden
 	return existing
 }
 
-func sanitizeMCPAttachmentEvidence(evidence MCPAttachmentEvidence) MCPAttachmentEvidence {
+func sanitizeMCPAttachmentEvidence(evidence MCPAttachmentEvidence) (MCPAttachmentEvidence, bool) {
+	var catalogTruncated bool
 	if evidence.Transport == "stdio" {
 		evidence.Target = SanitizeMCPStdioTarget(evidence.Target)
 	} else if evidence.Target != "" {
 		evidence.Target = SanitizeMCPNetworkTarget(evidence.Target)
 	}
 	if evidence.Kind == MCPAttachmentEvidenceToolsListObserved {
-		evidence.Tools, _ = NormalizeMCPToolCatalog(evidence.Tools, evidence.ToolCount)
+		evidence.Tools, catalogTruncated = NormalizeMCPToolCatalog(evidence.Tools, evidence.ToolCount)
 	}
 	evidence.Summary = SanitizeMCPErrorSummary(evidence.Summary)
-	return evidence
+	return evidence, catalogTruncated
 }
 
 var (

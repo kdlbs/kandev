@@ -62,9 +62,11 @@ function McpToolCatalog({
       )}
       {catalogState === "loaded" && (
         <>
-          <p className="text-xs text-muted-foreground">
-            {t("task:mcpStoredToolCount", { count: counts.stored })}
-          </p>
+          {counts.truncated && (
+            <p className="text-xs text-muted-foreground">
+              {t("task:mcpStoredToolCount", { count: counts.stored })}
+            </p>
+          )}
           {server.tools && server.tools.length > 0 ? (
             <div className="space-y-2">
               {server.tools.map((tool) => (

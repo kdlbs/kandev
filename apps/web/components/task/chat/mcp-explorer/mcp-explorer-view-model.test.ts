@@ -7,6 +7,7 @@ import {
   buildMcpExplorerServers,
   getMcpCatalogState,
   getMcpToolCounts,
+  isKandevMcpServer,
   mcpStatusLabelKey,
   selectMcpServerName,
 } from "./mcp-explorer-view-model";
@@ -60,5 +61,11 @@ describe("MCP explorer view model", () => {
     expect(
       getMcpCatalogState(server({ name: "filesystem", source: "profile", status: "delivered" })),
     ).toBe("unavailable");
+  });
+
+  it("identifies only the backend-owned Kandev server", () => {
+    expect(isKandevMcpServer(server({ name: "kandev", source: "kandev" }))).toBe(true);
+    expect(isKandevMcpServer(server({ name: "kandev", source: "profile" }))).toBe(false);
+    expect(isKandevMcpServer(server({ name: "filesystem", source: "profile" }))).toBe(false);
   });
 });

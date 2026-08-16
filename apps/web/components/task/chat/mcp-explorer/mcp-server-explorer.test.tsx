@@ -1,7 +1,15 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import type {
+  MCPAttachmentHistory,
+  MCPAttachmentServer,
+} from "@/lib/state/slices/session-runtime/types";
 import { McpIndicator } from "./mcp-indicator";
+
+const testCopy = vi.hoisted(() => ({
+  thirdPartyCatalogUnavailable: "Kandev does not inspect tools from this server.",
+}));
+const MCP_STATUS_TRIGGER_TEST_ID = "mcp-status-trigger";
 
 const responsiveMock = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "desktop",
@@ -30,8 +38,8 @@ vi.mock("react-i18next", () => ({
         "task:mcpStatusActive": "Active",
         "task:mcpStatusDelivered": "Delivered, connection unverified",
         "task:mcpToolCatalog": "Tool catalog",
-        "task:mcpToolCatalogUnavailable": "Tool catalog unavailable",
-        "task:mcpThirdPartyCatalogUnavailable": "Kandev does not inspect this server's tools.",
+        "task:mcpToolCatalogUnavailable": "The Kandev tool catalog is unavailable.",
+        "task:mcpThirdPartyCatalogUnavailable": testCopy.thirdPartyCatalogUnavailable,
         "task:mcpToolCount": `Tools: ${values?.count ?? 0}`,
         "task:mcpStoredToolCount": `Showing ${values?.count ?? 0}`,
         "task:mcpNoTools": "No tools were reported.",
@@ -173,6 +181,23 @@ const attachmentHistory: MCPAttachmentHistory = {
   },
 };
 
+function historyForServers(servers: MCPAttachmentServer[]): MCPAttachmentHistory {
+  return {
+    ...attachmentHistory,
+    current: { ...attachmentHistory.current, servers },
+  };
+}
+
+function renderOpenExplorer(servers: MCPAttachmentServer[]) {
+  render(
+    <McpIndicator
+      mcpServers={servers.map((server) => server.name)}
+      attachmentHistory={historyForServers(servers)}
+    />,
+  );
+  fireEvent.click(screen.getByTestId(MCP_STATUS_TRIGGER_TEST_ID));
+}
+
 afterEach(() => cleanup());
 
 beforeEach(() => {
@@ -185,15 +210,80 @@ describe("MCP server explorer", () => {
       <McpIndicator mcpServers={["kandev", "filesystem"]} attachmentHistory={attachmentHistory} />,
     );
 
-    fireEvent.click(screen.getByTestId("mcp-status-trigger"));
+    fireEvent.click(screen.getByTestId(MCP_STATUS_TRIGGER_TEST_ID));
     expect(screen.getByRole("dialog").getAttribute("data-testid")).toBe("mcp-server-explorer");
     expect(screen.getByText("create_task_kandev")).toBeTruthy();
     fireEvent.click(screen.getByTestId("mcp-server-row-filesystem"));
-    expect(screen.getByText("Kandev does not inspect this server's tools.")).toBeTruthy();
+    expect(screen.getByText(testCopy.thirdPartyCatalogUnavailable)).toBeTruthy();
     expect(screen.queryByText("Create a task")).toBeNull();
 
     fireEvent.click(screen.getByTestId("mcp-explorer-close"));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("keeps the selected server while live attachment evidence updates", () => {
+    const { rerender } = render(
+      <McpIndicator mcpServers={["kandev", "filesystem"]} attachmentHistory={attachmentHistory} />,
+    );
+
+    fireEvent.click(screen.getByTestId(MCP_STATUS_TRIGGER_TEST_ID));
+    fireEvent.click(screen.getByTestId("mcp-server-row-filesystem"));
+    expect(screen.getByText(testCopy.thirdPartyCatalogUnavailable)).toBeTruthy();
+
+    const updatedHistory: MCPAttachmentHistory = {
+      ...attachmentHistory,
+      current: {
+        ...attachmentHistory.current,
+        servers: attachmentHistory.current.servers?.map((server) =>
+          server.name === "filesystem" ? { ...server, status: "connected" } : server,
+        ),
+      },
+    };
+    rerender(
+      <McpIndicator mcpServers={["kandev", "filesystem"]} attachmentHistory={updatedHistory} />,
+    );
+
+    expect(screen.getByText(testCopy.thirdPartyCatalogUnavailable)).toBeTruthy();
+  });
+
+  it("explains an unloaded Kandev catalog", () => {
+    renderOpenExplorer([{ name: "kandev", source: "kandev", status: "unknown" }]);
+    expect(screen.getByText("The tool catalog is not loaded yet.")).toBeTruthy();
+  });
+
+  it("explains an unavailable Kandev catalog", () => {
+    renderOpenExplorer([{ name: "kandev", source: "kandev", status: "failed" }]);
+    expect(screen.getByText("The Kandev tool catalog is unavailable.")).toBeTruthy();
+  });
+
+  it("explains an empty Kandev catalog", () => {
+    renderOpenExplorer([
+      {
+        name: "kandev",
+        source: "kandev",
+        status: "active",
+        tools_listed_at: "2026-08-16T00:01:00Z",
+        tools: [],
+        tool_count: 0,
+      },
+    ]);
+    expect(screen.getByText("No tools were reported.")).toBeTruthy();
+  });
+
+  it("explains a truncated Kandev catalog", () => {
+    renderOpenExplorer([
+      {
+        name: "kandev",
+        source: "kandev",
+        status: "active",
+        tools_listed_at: "2026-08-16T00:01:00Z",
+        tools: [{ name: "create_task_kandev", description: "Create a task" }],
+        tool_count: 129,
+        tool_catalog_truncated: true,
+      },
+    ]);
+    expect(screen.getByText("Showing 1")).toBeTruthy();
+    expect(screen.getByText("Only the first tools are shown.")).toBeTruthy();
   });
 
   it("uses a phone list-to-detail flow with a visible Back control", () => {
@@ -202,7 +292,7 @@ describe("MCP server explorer", () => {
       <McpIndicator mcpServers={["kandev", "filesystem"]} attachmentHistory={attachmentHistory} />,
     );
 
-    fireEvent.click(screen.getByTestId("mcp-status-trigger"));
+    fireEvent.click(screen.getByTestId(MCP_STATUS_TRIGGER_TEST_ID));
     expect(screen.getByTestId("mcp-server-list")).toBeTruthy();
     fireEvent.click(screen.getByTestId("mcp-server-row-kandev"));
     expect(screen.getByTestId("mcp-server-detail")).toBeTruthy();

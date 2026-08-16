@@ -740,7 +740,7 @@
   "mcpTarget": "Target",
   "mcpConnectionId": "Connection ID",
   "mcpLastObserved": "Tools last observed",
-  "mcpToolCatalogTruncated_one": "The catalog is truncated. Total tool: {{count}}.",
+  "mcpToolCatalogTruncated_one": "The catalog is truncated. Total tools: {{count}}.",
   "mcpToolCatalogTruncated_other": "The catalog is truncated. Total tools: {{count}}.",
   "mcpToolCatalogNotLoaded": "The tool catalog is not loaded yet.",
   "mcpNoServers": "No MCP servers are configured.",

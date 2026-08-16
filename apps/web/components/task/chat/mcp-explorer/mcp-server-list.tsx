@@ -1,6 +1,6 @@
 "use client";
 
-import { IconCircleCheck, IconCircleX } from "@tabler/icons-react";
+import { IconCircle, IconCircleCheck, IconCircleX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import type { MCPAttachmentServer } from "@/lib/state/slices/session-runtime/types";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,28 @@ const STATUS_DOT_CLASS: Record<MCPAttachmentServer["status"], string> = {
   unknown: "bg-muted-foreground/50",
 };
 
+function mcpStatusIcon(status: MCPAttachmentServer["status"]) {
+  switch (status) {
+    case "failed":
+      return IconCircleX;
+    case "active":
+      return IconCircleCheck;
+    default:
+      return IconCircle;
+  }
+}
+
+function mcpStatusIconClass(status: MCPAttachmentServer["status"]) {
+  switch (status) {
+    case "failed":
+      return "text-destructive";
+    case "active":
+      return "text-emerald-500";
+    default:
+      return "text-muted-foreground";
+  }
+}
+
 export function McpServerList({
   servers,
   selectedName,
@@ -29,7 +51,7 @@ export function McpServerList({
   const { t } = useTranslation();
 
   return (
-    <div data-testid="mcp-server-list" className="min-h-0 overflow-y-auto">
+    <div data-testid="mcp-server-list" className="h-full min-h-0 overflow-y-auto">
       <div className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {t("task:mcpServerList")}
       </div>
@@ -39,7 +61,7 @@ export function McpServerList({
         <div className="space-y-1">
           {servers.map((server) => {
             const selected = server.name === selectedName;
-            const StatusIcon = server.status === "failed" ? IconCircleX : IconCircleCheck;
+            const StatusIcon = mcpStatusIcon(server.status);
             return (
               <Button
                 key={server.name}
@@ -59,10 +81,7 @@ export function McpServerList({
                 />
                 <span className="min-w-0 flex-1 truncate">{server.name}</span>
                 <StatusIcon
-                  className={cn(
-                    "h-3.5 w-3.5 shrink-0",
-                    server.status === "failed" ? "text-destructive" : "text-muted-foreground",
-                  )}
+                  className={cn("h-3.5 w-3.5 shrink-0", mcpStatusIconClass(server.status))}
                   aria-hidden="true"
                 />
                 <span className="sr-only">{t(mcpStatusLabelKey(server.status))}</span>
