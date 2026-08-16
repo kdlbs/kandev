@@ -299,8 +299,7 @@ func (s *Server) observeMCPToolsList(connectionID string, tools []mcp.Tool) {
 	for _, tool := range tools {
 		summaries = append(summaries, streams.MCPToolSummary{Name: tool.Name, Description: tool.Description})
 	}
-	normalized, _ := streams.NormalizeMCPToolCatalog(summaries, len(tools))
-	s.observeMCPConnectionWithTools(connectionID, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", normalized)
+	s.observeMCPConnectionWithTools(connectionID, streams.MCPAttachmentEvidenceToolsListObserved, len(tools), "", summaries)
 }
 
 func (s *Server) observeMCPConnectionWithTools(
@@ -366,6 +365,12 @@ func (s *Server) reportMCPConnectionWithTools(
 	summary string,
 	tools []streams.MCPToolSummary,
 ) {
+	if kind == streams.MCPAttachmentEvidenceToolsListObserved {
+		// Bound summaries at the publication boundary before the callback can
+		// expose evidence to the agent update stream. Apply repeats the bound as
+		// a defense for any other evidence producer.
+		tools, _ = streams.NormalizeMCPToolCatalog(tools, toolCount)
+	}
 	reporter(streams.MCPAttachmentEvidence{
 		AttemptID:    attempt.AttemptID,
 		ServerName:   "kandev",
