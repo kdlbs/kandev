@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { workspaceSettingsTabSpec, type WorkspaceSettingsTab } from "./workspace-settings-shell";
+import { SETTINGS_TYPOGRAPHY } from "../settings-typography";
 
 /**
  * The heading every workspace settings tab opens with.
@@ -36,13 +37,13 @@ export function WorkspaceSectionHeader({
       data-testid={`workspace-section-header-${tab}`}
     >
       <div className="min-w-0">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
+        <h2 className={SETTINGS_TYPOGRAPHY.sectionTitle}>
           <Icon className="h-5 w-5 shrink-0" />
           {t(labelKey)}
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        <p className={SETTINGS_TYPOGRAPHY.sectionDescription}>{description}</p>
       </div>
-      {action}
+      {action && <div className="w-full shrink-0 md:w-auto">{action}</div>}
     </div>
   );
 }

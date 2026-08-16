@@ -41,7 +41,7 @@ test.describe("Settings manual save", () => {
       await apiClient.saveUserSettings({ app_status_bar_enabled: true });
       await testPage.goto(APPEARANCE_PATH);
       await expect(
-        testPage.getByRole("heading", { name: "Appearance", exact: true }),
+        testPage.getByRole("heading", { level: 2, name: "Appearance", exact: true }),
       ).toBeVisible();
 
       const layout = testPage.getByTestId("changes-panel-layout-select");

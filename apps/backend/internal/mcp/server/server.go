@@ -934,6 +934,7 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("title", mcp.MaxLength(service.TaskTitleMaxLength), mcp.Description("New concise task title (maximum 60 characters)")),
 			mcp.WithString("description", mcp.Description("New description")),
 			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
+			mcp.WithString("deferred_launch_prompt", mcp.Description("Replace the prompt a not-yet-started task will launch with. Only valid for a task created with blocked_by (+ start_agent), whose launch is still waiting on its dependencies — use it to refresh a brief that went stale while the chain ran. Rejected once the task has started; send new context with message_task_kandev instead. When this is rejected, no other field in the same call is applied.")),
 		),
 		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),
 	)
@@ -972,7 +973,7 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("message_task_kandev",
-			mcp.WithDescription(`Send a prompt to an existing Kandev task session; this coordinates Kandev sessions, not native subagents. Use delivery_mode="queued" (default) for information that can wait, delivery_mode="interrupt" for urgent replacement work on a running direct child, and stop_task_kandev for halt-only work. Non-parent interrupt requests fail; if cancellation cannot be confirmed, the prompt remains queued. Pass reply_to_question_id when answering an autopilot child question. Returns "queued", "sent", or "started".`),
+			mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question. Returns "queued", "sent", or "started".`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
 			mcp.WithString("session_id", mcp.Description("Optional target session ID (must belong to task_id). Omit to message the task's primary session. Required when messaging a sibling session on your OWN task (task_id may then be your own task ID) — e.g. a session you spawned with spawn_session_kandev.")),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
@@ -987,7 +988,7 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("stop_task_kandev",
-			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; it does not send a prompt or start a replacement turn. For stop-and-steer work, use message_task_kandev with delivery_mode="interrupt". Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, task records, descendants, and queued messages are preserved.`),
+			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; self, sibling, parent, grandparent, unrelated, and cross-workspace requests fail. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev with a new prompt to restart in the same workspace.`),
 			mcp.WithReadOnlyHintAnnotation(false),
 			mcp.WithDestructiveHintAnnotation(true),
 			mcp.WithIdempotentHintAnnotation(true),

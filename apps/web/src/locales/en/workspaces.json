@@ -118,5 +118,8 @@
   "workspaceNotFound": "Workspace not found",
   "workspaceSettings": "Workspace Settings",
   "worktreeBranchTemplate": "Worktree Branch Template",
-  "worktreeSync": "Worktree Sync"
+  "worktreeSync": "Worktree Sync",
+  "enterRepositoryName": "Enter a repository name.",
+  "chooseDifferentRepositoryName": "Choose a different repository name.",
+  "repositoryNameMustBeOneFolder": "The repository name must be one folder name."
 }

@@ -170,7 +170,9 @@ const coordinatorTaskControlSection = " Optional: session_id, delivery_mode. " +
 	"if immediate cancel-and-dispatch cannot be confirmed safely, the message remains queued. " +
 	"For halt-only work, use stop_task_kandev.\n" +
 	"- stop_task_kandev: Halt all live sessions observed for a direct child, with no prompt and no replacement turn. " +
-	"Only the target task's direct parent may call it. Required params: task_id."
+	"Only the target task's direct parent may call it. Required params: task_id. " +
+	"A stopped session is CANCELLED and cannot be resumed, so message_task_kandev will not restart it: " +
+	"use spawn_session_kandev to put the task back to work."
 
 // taskTitleSection is included only for task sessions whose task metadata says
 // the provisional title still needs an agent-generated replacement. It ends in

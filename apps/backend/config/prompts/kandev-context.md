@@ -24,7 +24,7 @@ Available tools:
 - list_workflows_kandev: List workflows in a workspace.
 - list_tasks_kandev: List tasks in a workflow.
 - create_task_kandev: Create user-requested persistent Kandev-tracked work. Use parent_id="self" for a current-task subtask; its context is inherited unless explicitly overridden.
-- update_task_kandev: Update a task.
+- update_task_kandev: Update a task, including a deferred launch prompt for blocked work that has not started.
 - spawn_session_kandev: Start an additional Kandev session/tab without creating a task. Use only when the user explicitly requests one.
 - message_task_kandev: Send a prompt to an existing Kandev task session.{coordinator_task_control_section}
 - list_task_sessions_kandev: List a task's sessions and their IDs.

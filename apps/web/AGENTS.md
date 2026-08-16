@@ -234,19 +234,19 @@ stays an allowlist because a repo-wide error breaks every unrelated PR that adds
 a label — what made the first attempt unmergeable. **Append a path in the same PR
 that adds it or externalizes it** (`lib/sidebar` is one still off the list).
 Never delete an entry to make a build pass; `check-guard-allowlist.mjs` rejects
-that unless the file is gone. Use `pnpm run lint:i18n <path>` to preview the
-guard on a path not yet on the list.
+that unless the file is gone. `pnpm run lint:i18n <path>` previews the guard on a
+path not yet listed.
 
 `pnpm run i18n:ratchet` guards all new/changed lines independently of that
 allowlist; untouched literals are not reported.
 
-The rule sees JSX literals but misses `confirm()` and plain `.ts` helper copy; it
-also skips SCREAMING_CASE constants, so review config tables by eye. `i18n:check`
-gates key/catalog drift, `<Trans>` indices, inline plurals, module-scope `t()`, and
-the **pseudo-locale** (Settings → General → Appearance) completeness check. It
-needs **Node 24**. Full guide:
-[`docs/i18n.md`](../../docs/i18n.md); spec:
-[`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
+The rule sees only JSX literals. What it cannot inspect — SCREAMING_CASE tables,
+plain `.ts` helpers, parameter defaults, toast/setter arguments — is gated by
+`scripts/check-nonjsx-copy.mjs` on the same allowlist, run by `i18n:check` and
+the ratchet; silence a legitimate one with `// i18n-exempt: <reason>` (required).
+`i18n:check` also gates key/catalog drift, `<Trans>` indices, inline plurals,
+module-scope `t()`, and the **pseudo-locale** check. Needs **Node 24**. Guide:
+[`docs/i18n.md`](../../docs/i18n.md); spec [`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
 
 ## Markdown safety
 

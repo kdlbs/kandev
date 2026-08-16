@@ -14,6 +14,7 @@ import {
 } from "@kandev/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import type { ModeEntry } from "@/lib/types/http";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 
 type ModeComboboxProps = {
   value: string;
@@ -40,7 +41,7 @@ export function ModeCombobox({ value, onChange, modes, currentModeId }: ModeComb
           role="combobox"
           aria-expanded={open}
           data-testid="profile-mode-select"
-          className="w-full justify-between font-normal cursor-pointer"
+          className={settingsControlClassName("w-full justify-between font-normal cursor-pointer")}
         >
           <span className="flex items-center gap-2 truncate">
             {activeMode?.name ?? selected}

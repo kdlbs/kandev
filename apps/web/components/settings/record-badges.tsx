@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 // Shared so the three cannot drift apart in size or shape; only the colour
 // differs between them.
-const BADGE_BASE = "shrink-0 border px-1 py-0.5 text-[9px] font-medium leading-none";
+const BADGE_BASE = "shrink-0 border px-1 py-0.5 text-[10px] font-medium leading-none";
 const BADGE_INFO = "rounded border-primary/35 bg-primary/10 text-primary";
 const BADGE_WARN = "rounded border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
 /**
@@ -30,10 +30,8 @@ export const BADGE_OK_COLORS =
 /** The workspace new tasks and commands act on. */
 export function ActiveWorkspaceBadge() {
   const { t } = useTranslation();
-  // Keeps its pill shape and slightly larger type: it predates the others and
-  // the workspace list and switcher already draw it this way.
   return (
-    <span className={cn(BADGE_BASE, BADGE_INFO, "rounded-full px-1.5 text-[10px]")}>
+    <span className={cn(BADGE_BASE, BADGE_INFO, "rounded-full px-1.5")}>
       {t("sidebar:activeWorkspaceBadge")}
     </span>
   );

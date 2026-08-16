@@ -763,6 +763,10 @@ func TestMessageTask_DescriptionExplainsQueueInterruptAndStop(t *testing.T) {
 	assert.Contains(t, description, "stop_task_kandev")
 	assert.Contains(t, description, "prompt remains queued")
 	assert.Contains(t, description, "reply_to_question_id")
+	// Terminal sessions and the session_id-less defaulting rule are both
+	// documented, so a caller does not have to discover either by trial.
+	assert.Contains(t, description, "spawn_session_kandev")
+	assert.Contains(t, description, "primary session is used")
 }
 
 func TestMessageTask_MissingTaskID_ReturnsError(t *testing.T) {
@@ -824,6 +828,11 @@ func TestStopTask_ToolSchemaIsMinimalAndDescriptionIsAccurate(t *testing.T) {
 		"not_running",
 		"message_task_kandev",
 		`delivery_mode="interrupt"`,
+		// The recovery path. A parent that stops a wedged child then tries to
+		// restart it hits "session is CANCELLED — cannot send message" and has
+		// nowhere to go unless this tool says which tool gives it a new session.
+		"spawn_session_kandev",
+		"cannot be resumed",
 	} {
 		assert.Contains(t, description, phrase)
 	}

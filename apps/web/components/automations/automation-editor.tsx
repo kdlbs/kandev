@@ -51,6 +51,7 @@ type AutomationEditorProps = {
 // verbatim, and it is compared with `===` in useAutoPromptUpdate to decide
 // whether the user has edited it. Both make it protocol, not copy — the same
 // call the Jira (#2177), Linear (#2179) and Sentry (#2182) migrations made.
+// i18n-exempt: persisted prompt, sent to the agent and compared with ===. See the comment above.
 const DEFAULT_PROMPT = "Run scheduled automation.\n\nTrigger: {{trigger.type}}";
 
 const defaultForm: FormState = {

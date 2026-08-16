@@ -69,6 +69,48 @@ func TestBuildRecoveryActions_ResumeCorruptedWithoutToken(t *testing.T) {
 	}
 }
 
+func TestCreateRecoveryStatusMessage_ManagedRuntimeNpmUsesOneRetryAction(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-npm", "s-npm", "step1")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:         "t-npm",
+		SessionID:      "s-npm",
+		ErrorMessage:   "managed npm runtime failed to prepare",
+		FailureCode:    "managed_runtime_npm_resolution",
+		FailureDetails: "npm error code ETARGET\nnpm error notarget No matching version found",
+	})
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("expected one recovery message, got %d", len(mc.sessionMessages))
+	}
+	meta := mc.sessionMessages[0].metadata
+	if meta["failure_kind"] != "managed_runtime_npm_resolution" {
+		t.Fatalf("failure_kind = %#v", meta["failure_kind"])
+	}
+	if meta["error_output"] != "npm error code ETARGET\nnpm error notarget No matching version found" {
+		t.Fatalf("error_output = %#v", meta["error_output"])
+	}
+	actions, ok := meta["actions"].([]map[string]interface{})
+	if !ok || len(actions) != 1 {
+		t.Fatalf("actions = %#v, want one action", meta["actions"])
+	}
+	if actions[0]["test_id"] != "managed-runtime-npm-retry-button" {
+		t.Fatalf("action test_id = %#v", actions[0]["test_id"])
+	}
+	if _, ok := actions[0]["tooltip"]; ok {
+		t.Fatal("managed runtime recovery action must not carry an untranslated tooltip")
+	}
+	payload := actions[0]["params"].(map[string]interface{})["payload"].(map[string]interface{})
+	if payload["action"] != "runtime_retry" {
+		t.Fatalf("action payload = %#v", payload)
+	}
+}
+
 func TestCreateRecoveryStatusMessage_ResumeCorrupted(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

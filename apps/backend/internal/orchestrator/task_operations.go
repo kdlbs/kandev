@@ -395,6 +395,14 @@ func (s *Service) StartCreatedSession(
 		return nil, errOfficeTaskStartRequiresScheduler
 	}
 
+	// Reserve any pending "start it later" intent for the rest of this start.
+	// Taken here rather than just before the launch: everything below persists
+	// session state this start owns, and a gate that claims the intent during
+	// that work launches its own session alongside it. Deferred release covers
+	// every failure path; see deferredLaunchClaim.
+	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
+	defer launchClaim.releaseIfHeld(ctx)
+
 	// Use agent profile from request, fall back to session's stored value.
 	effectiveProfileID := agentProfileID
 	if effectiveProfileID == "" {
@@ -562,6 +570,9 @@ func (s *Service) StartCreatedSession(
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
 	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
 	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive, autoStart, attachments)
+
+	// The agent is running, so the reservation becomes a consumption.
+	launchClaim.consume(ctx)
 
 	// Ensure a PR watch exists so the poller can detect PRs created by the agent.
 	// PrepareTaskSession may have already created one, but if that goroutine failed
@@ -828,6 +839,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		zap.Bool("auto_start", autoStart),
 		zap.Int("attachments", len(attachments)))
 
+	// Reserve any pending "start it later" intent for the whole of this start,
+	// taken before the session is prepared rather than just before the launch:
+	// the gate only needs the intent to still be there, so any window in which
+	// this start has already created a session is a window that ends in two.
+	// The deferred release covers every failure path, including the early
+	// returns just below.
+	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
+	defer launchClaim.releaseIfHeld(ctx)
+
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine office task status: %w", err)
@@ -1045,6 +1065,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
+
+	// The agent is running, so the reservation becomes a consumption.
+	launchClaim.consume(ctx)
 
 	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.

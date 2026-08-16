@@ -11,6 +11,7 @@ import {
 import { panelTitle } from "./panel-title";
 
 /** Canonical English, because `normalizePanel` produces a stored LayoutState. */
+// i18n-exempt: canonical English persisted in saved layouts, compared when restoring.
 const TERMINAL_CANONICAL_TITLE = canonicalPanelTitle(TERMINAL_DEFAULT_ID) ?? "Terminal";
 
 // Dockview serialized grid node types (internal format)

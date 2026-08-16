@@ -568,5 +568,18 @@
   "workspaceGithubAccess": "Ŵōŕķśƥàćē ĜĩţĤũƀ àććēśś",
   "workspaceGithubConnectionRemoved": "Ŵōŕķśƥàćē ĜĩţĤũƀ ćōńńēćţĩōń ŕēḿōvēď",
   "workspaceGithubIdentity": "Ŵōŕķśƥàćē ĜĩţĤũƀ ĩďēńţĩţŷ",
-  "yourReviewIsRequested": "Ŷōũŕ ŕēvĩēŵ ĩś ŕēqũēśţēď"
+  "yourReviewIsRequested": "Ŷōũŕ ŕēvĩēŵ ĩś ŕēqũēśţēď",
+  "timeAgoJustNow": "ĵũśţ ńōŵ",
+  "timeAgoMinutes_one": "{{count}}ḿ àĝō",
+  "timeAgoMinutes_other": "{{count}}ḿ àĝō",
+  "timeAgoHours_one": "{{count}}ĥ àĝō",
+  "timeAgoHours_other": "{{count}}ĥ àĝō",
+  "timeAgoDays_one": "{{count}}ď àĝō",
+  "timeAgoDays_other": "{{count}}ď àĝō",
+  "timeAgoWeeks_one": "{{count}}ŵ àĝō",
+  "timeAgoWeeks_other": "{{count}}ŵ àĝō",
+  "timeAgoMonths_one": "{{count}}ḿō àĝō",
+  "timeAgoMonths_other": "{{count}}ḿō àĝō",
+  "timeAgoYears_one": "{{count}}ŷ àĝō",
+  "timeAgoYears_other": "{{count}}ŷ àĝō"
 }

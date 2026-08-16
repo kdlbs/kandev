@@ -1,6 +1,7 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskPlan, TaskPlanRevision } from "@/lib/types/http";
 
+// i18n-exempt: diagnostic thrown to the caller, never rendered.
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
 
 /**
@@ -35,6 +36,7 @@ export async function createTaskPlan(
   }
   const response = await client.request("task.plan.create", {
     task_id: taskId,
+    // i18n-exempt: canonical English persisted as the plan title. See the comment below.
     // Canonical English on purpose: the backend persists this into
     // `task_plans.title` / `task_plan_revisions.title`, so a localized default
     // would freeze whichever locale created the plan into the stored record.

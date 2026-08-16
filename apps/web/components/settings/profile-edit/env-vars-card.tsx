@@ -3,12 +3,17 @@
 import { useCallback, useId, useState } from "react";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { ProfileEnvVar } from "@/lib/types/http";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 import { useTranslation } from "react-i18next";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 
@@ -70,7 +75,7 @@ function ValueOrSecretInput({
   return (
     <Select value={row.secretId} onValueChange={(v) => onUpdate(index, "secretId", v)}>
       <SelectTrigger
-        className="flex-[3] text-xs"
+        className={settingsControlClassName("flex-[3]")}
         data-settings-dirty={!baselineRow || row.secretId !== baselineRow.secretId}
       >
         <SelectValue placeholder={t("executors:selectSecret")} />
@@ -121,7 +126,7 @@ function EnvVarRowComponent({
       />
       <Select value={row.mode} onValueChange={(v) => onUpdate(index, "mode", v)}>
         <SelectTrigger
-          className="w-[100px] text-xs"
+          className={settingsControlClassName("w-[100px]")}
           data-settings-dirty={!baselineRow || row.mode !== baselineRow.mode}
         >
           <SelectValue />
@@ -184,7 +189,11 @@ function DraftValueInput({
   }
   return (
     <Select value={draft.secretId} onValueChange={(v) => setDraft((d) => ({ ...d, secretId: v }))}>
-      <SelectTrigger id={valueId} className="text-xs" data-testid="env-var-new-secret-select">
+      <SelectTrigger
+        id={valueId}
+        className={settingsControlClassName()}
+        data-testid="env-var-new-secret-select"
+      >
         <SelectValue placeholder={t("executors:selectSecret")} />
       </SelectTrigger>
       <SelectContent>
@@ -237,11 +246,9 @@ function EnvVarAddForm({
   };
 
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+    <div className="flex flex-col gap-2 md:flex-row md:items-end">
       <div className="flex-[2] space-y-1">
-        <Label className="text-xs" htmlFor={keyId}>
-          {t("executors:key")}
-        </Label>
+        <SettingsFieldLabel htmlFor={keyId}>{t("executors:key")}</SettingsFieldLabel>
         <Input
           id={keyId}
           value={draft.key}
@@ -253,16 +260,14 @@ function EnvVarAddForm({
         />
       </div>
       <div className="space-y-1">
-        <Label className="text-xs" htmlFor={modeId}>
-          {t("executors:mode")}
-        </Label>
+        <SettingsFieldLabel htmlFor={modeId}>{t("executors:mode")}</SettingsFieldLabel>
         <Select
           value={draft.mode}
           onValueChange={(v) =>
             setDraft((d) => ({ ...d, mode: v as "value" | "secret", value: "", secretId: "" }))
           }
         >
-          <SelectTrigger id={modeId} className="w-[100px] text-xs">
+          <SelectTrigger id={modeId} className={settingsControlClassName("w-[100px]")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -272,9 +277,9 @@ function EnvVarAddForm({
         </Select>
       </div>
       <div className="flex-[3] space-y-1">
-        <Label className="text-xs" htmlFor={valueId}>
+        <SettingsFieldLabel htmlFor={valueId}>
           {draft.mode === "value" ? t("executors:value") : t("executors:secret")}
-        </Label>
+        </SettingsFieldLabel>
         <DraftValueInput
           draft={draft}
           valueId={valueId}
@@ -289,7 +294,7 @@ function EnvVarAddForm({
         size="sm"
         onClick={commit}
         disabled={isAddDisabled}
-        className="cursor-pointer"
+        className={settingsActionClassName("cursor-pointer")}
         data-testid="env-var-add-button"
       >
         <IconPlus className="h-3.5 w-3.5 mr-1" />
@@ -373,21 +378,17 @@ export function EnvVarsCard(props: EnvVarsFieldProps) {
       discoveryTargetId={props.discoveryTargetId}
       data-testid="env-vars-card"
     >
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <CardTitle>{t("executors:environmentVariables")}</CardTitle>
-            <CardDescription>
-              {t("executors:injectedIntoTheExecutionEnvironmentUse")}
-            </CardDescription>
-          </div>
-          {props.rows.length > 0 && (
+      <SettingsCardHeader
+        title={t("executors:environmentVariables")}
+        description={t("executors:injectedIntoTheExecutionEnvironmentUse")}
+        actions={
+          props.rows.length > 0 ? (
             <span className="text-[10px] text-muted-foreground" data-testid="env-vars-count">
               {t("executors:envVarsConfiguredCount", { count: props.rows.length })}
             </span>
-          )}
-        </div>
-      </CardHeader>
+          ) : undefined
+        }
+      />
       <CardContent>
         <EnvVarsFieldBody {...props} />
       </CardContent>

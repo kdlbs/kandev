@@ -5,8 +5,9 @@ import { IdChip, KandevBody, KandevRow, KeyValueRow, ListItemRow, SummaryDot } f
 import { pickArray, pickNumber, pickString } from "./parse";
 import type { KandevRenderer } from "./types";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
-const DEFAULT_TITLE = "Walkthrough";
+// i18n-exempt: prefix matched against the agent's raw tool result, not copy.
 const RESULT_JSON_PREFIX = "Walkthrough saved:";
 
 type WalkthroughStepLike = Record<string, unknown>;
@@ -39,7 +40,7 @@ function resultPayload(result: unknown): unknown {
 
 function titleFrom(args: unknown, result: unknown): string {
   const payload = resultPayload(result);
-  return pickString(payload, "title") ?? pickString(args, "title") ?? DEFAULT_TITLE;
+  return pickString(payload, "title") ?? pickString(args, "title") ?? t("common:walkthrough");
 }
 
 function stepsFrom(args: unknown, result: unknown): WalkthroughStepLike[] {

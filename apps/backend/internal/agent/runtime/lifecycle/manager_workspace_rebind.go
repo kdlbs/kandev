@@ -145,7 +145,7 @@ func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentE
 		return fmt.Errorf("create ACP session in rebound workspace: %w", err)
 	}
 	execution.ACPSessionID = newSessionID
-	execution.sessionInitialized = true
+	execution.setSessionInitialized(true)
 	execution.resumeContextInjected = false
 	execution.needsResumeContext = m.historyManager != nil &&
 		m.historyManager.HasHistory(execution.SessionID)

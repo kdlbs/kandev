@@ -39,6 +39,7 @@ import { TaskMRLinkDialog } from "./task-mr-link-dialog";
 import { MRAutomationControls } from "./mr-automation-controls";
 import { MRCIPopover } from "./mr-ci-popover";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import type { ReviewPanelOptions } from "@/lib/state/dockview-panel-actions";
 import { reviewItemId } from "@/components/task/review-selection";
 import { mrTaskKey } from "./mr-detail-panel";
 import { useTranslation } from "react-i18next";
@@ -86,7 +87,7 @@ export function openMobileMRReview(
 }
 
 export function openDesktopMRReview(
-  addMRPanel: (mrKey: string) => void,
+  addMRPanel: (mrKey: string, opts?: ReviewPanelOptions) => void,
   mr: TaskMR,
   schedule: (callback: FrameRequestCallback) => number = requestAnimationFrame,
 ) {

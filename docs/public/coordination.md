@@ -159,9 +159,12 @@ After at least one accepted stop, Kandev attempts to move a regular, unarchived,
 
 Stopping preserves the task record, worktrees, environments, commits, descendants, and existing queued messages. It sends no prompt, creates no replacement turn, and does not create a durable pause: a later user or workflow action can start the task again.
 
+A cancelled session is terminal, so `message_task_kandev` cannot restart the child through it. To put a stopped child back to work, call `spawn_session_kandev` with the new prompt: it creates a fresh session on the same task and workspace, preserving the worktree and history.
+
 Additional messaging boundaries:
 
 - A task cannot message its own primary session through the default route, and a session cannot message itself.
+- The default route targets the primary session, falling back to the newest session that can still take a message when the primary is cancelled or failed. A session named by `session_id` is never redirected.
 - Normal targeted messages can cross workspaces when the sender has the exact task ID. Session spawning cannot.
 - Sender metadata and content become part of the target conversation. Do not send secrets.
 - Use bounded requests with the repository, branch, expected result, and reply target instead of treating messages as shared memory.

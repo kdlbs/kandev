@@ -180,6 +180,10 @@ func TestFormatKandevContext_CoordinatorTaskControlsFollowCapability(t *testing.
 	taskMode := FormatKandevContext("task-abc", "session-xyz", false)
 	assert.Contains(t, taskMode, `delivery_mode="interrupt"`)
 	assert.Contains(t, taskMode, "stop_task_kandev")
+	// A parent that stops a wedged child then tries to message it hits a
+	// terminal session. The injected block, not trial and error, has to be
+	// where it learns which tool restarts the task.
+	assert.Contains(t, taskMode, "spawn_session_kandev to put the task back to work")
 
 	for _, mode := range []string{"office", "config"} {
 		t.Run(mode, func(t *testing.T) {
