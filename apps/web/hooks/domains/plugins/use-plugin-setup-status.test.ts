@@ -107,6 +107,16 @@ describe("usePluginSetupStatus", () => {
     expect(result.current.size).toBe(0);
   });
 
+  it("does not treat a stored null as configured", async () => {
+    // Narrower than the host's checkRequiredKeys on purpose: the key is
+    // present, but the plugin would receive nothing.
+    getPluginConfig.mockResolvedValue({ api_token: null });
+    const plugins = [plugin({ config_schema: schema() })];
+    const { result } = renderHook(() => usePluginSetupStatus(plugins));
+
+    await waitFor(() => expect(result.current.has("acme")).toBe(true));
+  });
+
   it("does not treat a blank stored string as configured", async () => {
     getPluginConfig.mockResolvedValue({ api_token: "   " });
     const plugins = [plugin({ config_schema: schema() })];

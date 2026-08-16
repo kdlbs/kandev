@@ -13,16 +13,21 @@ type SetupProbe = {
 };
 
 /**
- * Whether a stored config value satisfies a required field. This mirrors the
- * host's own rule (checkRequiredKeys in internal/plugins/config.go): the key
- * being present is what satisfies `required`, whatever its type. So a stored
- * `false` counts as configured, and a required boolean that was never saved
- * does not — the host rejects that config, and the plugin's Host.GetConfig
- * sees no synthesized value.
+ * Whether a stored config value satisfies a required field.
  *
- * The empty-string case cannot come from the settings form (it omits blank
- * inputs rather than storing ""), but a hand-edited config file can carry
- * one, and a blank is not a value anyone set on purpose.
+ * The host's checkRequiredKeys (internal/plugins/config.go) accepts any
+ * present key, whatever its value. This is deliberately narrower on one point:
+ * a key present but empty (`null`, `""`, or blank) counts as unset here. The
+ * badge answers "is there something the operator still has to fill in", not
+ * "would the host reject this config", and a plugin handed an empty required
+ * token is broken in a way worth pointing at. The host draws the same
+ * distinction in isZeroConfigValue, which treats nil and "" as unset.
+ *
+ * Everything else follows the host: a stored `false` is configured, and a
+ * required boolean that was never saved is not.
+ *
+ * The blank cases cannot come from the settings form, which omits empty inputs
+ * rather than storing them, but a hand-edited config file can carry one.
  */
 function isConfigured(value: unknown): boolean {
   if (value === undefined || value === null) return false;

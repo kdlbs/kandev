@@ -62,7 +62,7 @@ export function PluginRow({
   return (
     <div
       data-testid={`plugin-row-${plugin.id}`}
-      className="group relative rounded-lg border border-border/70 bg-background p-4 space-y-3 transition-colors hover:border-border hover:bg-muted"
+      className="group relative rounded-lg border border-border/70 bg-background p-4 transition-colors hover:border-border hover:bg-muted"
     >
       <Link
         href={`/settings/plugins/${encodeURIComponent(plugin.id)}`}
@@ -70,48 +70,56 @@ export function PluginRow({
         data-testid={`plugin-row-link-${plugin.id}`}
         className="absolute inset-0 rounded-lg cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <PluginRowIdentity plugin={plugin} needsSetup={needsSetup} />
+      {/*
+        The spacing lives on this inner wrapper, not on the card. `space-y-*`
+        compiles to a margin on every child bar the last, and with the overlay
+        link as a card child that margin shortened it by one gap, leaving the
+        bottom strip of the card unclickable.
+      */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <PluginRowIdentity plugin={plugin} needsSetup={needsSetup} />
 
-        <div className="flex items-center gap-2 shrink-0">
-          <PluginRowActions
-            plugin={plugin}
-            busy={busy}
-            update={update}
-            canEnable={canEnable}
-            canDisable={canDisable}
-            onEnable={onEnable}
-            onDisable={onDisable}
-            onUninstall={onUninstall}
-            onUpdate={onUpdate}
-          />
-          <IconChevronRight
-            aria-hidden
-            className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
-          />
+          <div className="flex items-center gap-2 shrink-0">
+            <PluginRowActions
+              plugin={plugin}
+              busy={busy}
+              update={update}
+              canEnable={canEnable}
+              canDisable={canDisable}
+              onEnable={onEnable}
+              onDisable={onDisable}
+              onUninstall={onUninstall}
+              onUpdate={onUpdate}
+            />
+            <IconChevronRight
+              aria-hidden
+              className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+            />
+          </div>
         </div>
+
+        {plugin.description && (
+          <div className="text-xs text-muted-foreground">{plugin.description}</div>
+        )}
+        <PluginErrorDiagnostic plugin={plugin} />
+        {plugin.categories.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {plugin.categories.map((category) => (
+              <Badge key={category} variant="secondary" className="text-[11px]">
+                {category}
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        <PluginAutoUpdateRow
+          plugin={plugin}
+          autoUpdateDefault={autoUpdateDefault}
+          busy={autoUpdateBusy}
+          onSetAutoUpdate={onSetAutoUpdate}
+        />
       </div>
-
-      {plugin.description && (
-        <div className="text-xs text-muted-foreground">{plugin.description}</div>
-      )}
-      <PluginErrorDiagnostic plugin={plugin} />
-      {plugin.categories.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {plugin.categories.map((category) => (
-            <Badge key={category} variant="secondary" className="text-[11px]">
-              {category}
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      <PluginAutoUpdateRow
-        plugin={plugin}
-        autoUpdateDefault={autoUpdateDefault}
-        busy={autoUpdateBusy}
-        onSetAutoUpdate={onSetAutoUpdate}
-      />
     </div>
   );
 }
