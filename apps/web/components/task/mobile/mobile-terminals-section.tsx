@@ -17,9 +17,15 @@ type CloseHandlerArgs = {
   environmentId: string | null;
   terminals: Terminal[];
   destroyTerminal: (id: string) => Promise<boolean>;
+  addTerminal: () => void;
 };
 
-function useTerminalCloseHandler({ environmentId, terminals, destroyTerminal }: CloseHandlerArgs) {
+function useTerminalCloseHandler({
+  environmentId,
+  terminals,
+  destroyTerminal,
+  addTerminal,
+}: CloseHandlerArgs) {
   const [pendingClose, setPendingClose] = useState<Terminal | null>(null);
 
   const closeTerminal = useCallback(
@@ -27,10 +33,11 @@ function useTerminalCloseHandler({ environmentId, terminals, destroyTerminal }: 
       const succeeded = await destroyTerminal(terminal.id);
       if (succeeded && environmentId && terminals.length <= 1) {
         releaseAutoCreatedEnvironment(environmentId);
+        addTerminal();
       }
       return succeeded;
     },
-    [destroyTerminal, environmentId, terminals.length],
+    [destroyTerminal, environmentId, terminals.length, addTerminal],
   );
 
   const handleConfirmClose = useCallback(() => {
@@ -81,6 +88,7 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
     environmentId,
     terminals,
     destroyTerminal,
+    addTerminal,
   });
 
   const isShellRunning = useCallback(

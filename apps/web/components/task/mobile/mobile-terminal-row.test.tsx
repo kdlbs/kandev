@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MobileTerminalsPicker } from "./mobile-terminals-section";
 
 const mockDestroyTerminal = vi.fn();
+const mockAddTerminal = vi.fn();
 const mockRemoveTerminal = vi.fn();
 const mockReleaseAutoCreatedEnvironment = vi.fn();
 const mockStopUserShell = vi.fn();
@@ -21,7 +22,7 @@ const terminal = {
 const mobileContext = {
   terminals: [terminal],
   terminalTabValue: terminal.id,
-  addTerminal: vi.fn(),
+  addTerminal: mockAddTerminal,
   removeTerminal: mockRemoveTerminal,
   destroyTerminal: mockDestroyTerminal,
   environmentId: "env-1",
@@ -132,6 +133,7 @@ describe("mobile terminal close feedback", () => {
 
     await waitFor(() => expect(mockDestroyTerminal).toHaveBeenCalledWith(terminal.id));
     expect(mockReleaseAutoCreatedEnvironment).not.toHaveBeenCalled();
+    expect(mockAddTerminal).not.toHaveBeenCalled();
     expect(mockRemoveTerminal).not.toHaveBeenCalled();
     expect(mockStopUserShell).not.toHaveBeenCalled();
   });
@@ -149,6 +151,10 @@ describe("mobile terminal close feedback", () => {
 
     await waitFor(() => expect(mockReleaseAutoCreatedEnvironment).toHaveBeenCalledWith("env-1"));
     expect(mockDestroyTerminal).toHaveBeenCalledWith(terminal.id);
+    expect(mockAddTerminal).toHaveBeenCalledTimes(1);
+    expect(mockReleaseAutoCreatedEnvironment.mock.invocationCallOrder[0]).toBeLessThan(
+      mockAddTerminal.mock.invocationCallOrder[0],
+    );
     expect(mockRemoveTerminal).not.toHaveBeenCalled();
     expect(mockStopUserShell).not.toHaveBeenCalled();
   });
