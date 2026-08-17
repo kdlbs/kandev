@@ -1108,7 +1108,9 @@ func (s *Service) detectPRForWatchOnce(
 	// fires WHILE FindPRByBranch is running wins over our post-fetch
 	// classification — see Service.markRepoAsMissing for the rationale.
 	repoErrGen := s.repoErrorGenSnapshot()
-	pr, err := findPRByBranchInForkNetwork(ctx, resolved.Client, watch.Owner, watch.Repo, watch.Branch)
+	pr, err := s.findPRByBranchInForkNetwork(
+		ctx, resolved.Client, resolved.CacheScope, watch.Owner, watch.Repo, watch.Branch,
+	)
 	if err != nil && isRepoNotResolvableErr(err) {
 		s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
 		// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)

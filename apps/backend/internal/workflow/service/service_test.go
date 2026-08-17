@@ -19,7 +19,10 @@ import (
 	"github.com/kandev/kandev/internal/workflow/repository"
 )
 
-func setupTestService(t *testing.T) (*Service, *sqlx.DB) {
+// setupTestService builds a Service against an in-memory SQLite DB. Callers
+// needing to observe log output (e.g. via a zaptest observer core) may pass a
+// logOverride; otherwise a quiet default logger is used.
+func setupTestService(t *testing.T, logOverride ...*logger.Logger) (*Service, *sqlx.DB) {
 	rawDB, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
 	// Pin the pool to one connection: every connection to an in-memory SQLite
@@ -41,8 +44,14 @@ func setupTestService(t *testing.T) (*Service, *sqlx.DB) {
 	repo, err := repository.NewWithDB(sqlxDB, sqlxDB, nil)
 	require.NoError(t, err)
 
-	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
-	svc := NewService(repo, log)
+	log := logOverride
+	var svcLogger *logger.Logger
+	if len(log) > 0 {
+		svcLogger = log[0]
+	} else {
+		svcLogger, _ = logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	}
+	svc := NewService(repo, svcLogger)
 	t.Cleanup(func() { _ = svc.Close() })
 	return svc, sqlxDB
 }
@@ -57,6 +66,10 @@ func insertWorkflow(t *testing.T, db *sqlx.DB, id, name string) {
 type mockWorkflowProvider struct {
 	workflows        []*taskmodels.Workflow
 	getWorkflowCalls int
+	// forceUpdateWorkflowErr, when set, makes UpdateWorkflow fail without
+	// mutating state - used to test that a rebind Warn never fires for a
+	// change that was not actually persisted.
+	forceUpdateWorkflowErr error
 }
 
 func (m *mockWorkflowProvider) ListWorkflows(_ context.Context, workspaceID string, includeHidden bool) ([]*taskmodels.Workflow, error) {
@@ -98,6 +111,9 @@ func (m *mockWorkflowProvider) CreateWorkflow(_ context.Context, workspaceID, na
 }
 
 func (m *mockWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskmodels.Workflow) error {
+	if m.forceUpdateWorkflowErr != nil {
+		return m.forceUpdateWorkflowErr
+	}
 	for i, wf := range m.workflows {
 		if wf.ID == workflow.ID {
 			m.workflows[i] = workflow
@@ -919,7 +935,7 @@ func TestImportWorkflows(t *testing.T) {
 		svc, _, _ := setupTestServiceWithProvider(t)
 		ctx := context.Background()
 
-		matcher := func(agentName, model, mode string) string {
+		matcher := func(agentName, model, mode, _ string) string {
 			if agentName == "Claude Code" && model == "opus" {
 				return "matched-prof-1"
 			}

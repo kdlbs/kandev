@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-07-21
-updated: 2026-08-08
+updated: 2026-08-17
 owner: kandev
 ---
 
@@ -15,6 +15,7 @@ Users discuss external work items in agent chat, but plain ticket keys and pull-
 
 - Task chat and Quick Chat support a `#` entity-reference trigger in their shared TipTap composer. Passthrough, task creation, comments, plans, Office text inputs, and other editors remain unchanged.
 - Typing `#` at the start of a text block or after whitespace opens a search menu directly above the composer. Its rendered bottom edge stays anchored to the composer even when only a short result set is visible. A `#` inside another token or a code block remains literal text.
+- A trigger starts only when the user enters a new `#` character. Pasted, dropped, restored, or programmatically inserted text remains literal and does not open the menu.
 - After the user types at least one query character, search covers the active workspace's connected, searchable sources:
   - Jira tickets;
   - Linear issues;
@@ -28,7 +29,10 @@ Users discuss external work items in agent chat, but plain ticket keys and pull-
 - Search is debounced, cancels or ignores stale requests, and caps work per provider and configured workspace/project scope. Each connected provider continues examining available in-scope results until it finds the requested number of matches, has no more results, reaches a search bound, or the request is canceled. One disconnected, slow, rate-limited, or failing provider never hides successful results from other providers.
 - Cancellation of a superseded search is a normal client outcome. The backend
   does not report it as an internal server failure.
-- Arrow Up and Arrow Down move the active result. Tab or Enter selects it. Pointer or touch selection has the same behavior. Escape closes the menu without changing or sending the draft.
+- Arrow Up and Arrow Down move the active result. Tab or Enter selects it. Pointer or touch selection has the same behavior.
+- Escape closes the menu without changing or sending the draft. Continued input in the dismissed range cannot reopen it. A new valid `#` entry can open it again.
+- A space immediately after a bare `#` closes the menu and leaves the text literal. Spaces after a query character remain part of a multi-word search.
+- If no result is selectable, Enter follows the configured composer behavior. The menu closes when the cursor leaves the trigger range.
 - Selection replaces only the active `#query` range with an inline reference chip, appends a trailing space, keeps focus in the composer, and never submits or queues the message.
 - A chip displays a stable key when one exists (for example `#ENG-123` or `#123`) and otherwise a concise title. It retains a title snapshot and source label for disambiguation.
 - Submitted references remain clickable in sent user messages through a canonical HTTP(S) URL whose origin matches the workspace's validated provider configuration.
@@ -126,7 +130,13 @@ Message responses and queue entries expose the validated array through `metadata
 4. **Results** — one or more provider groups contain selectable results; partial provider failures may also be shown non-disruptively.
 5. **Empty** — all successful providers returned no hits and no request is in flight.
 
-Typing updates Primed/Searching/Results/Empty. Escape, moving outside the trigger range, selection, session change, or composer unmount returns to Closed. A response whose query generation is no longer current has no state transition.
+Only direct entry of a valid `#` moves Closed to Primed. Paste, drop, draft restore, history recall, and programmatic content changes keep the menu Closed.
+
+Typing updates Primed/Searching/Results/Empty. Escape dismisses the active trigger and returns to Closed. Later input in that range cannot reopen it.
+
+Moving outside the trigger range, entering space after a bare `#`, selection, session change, or composer unmount returns to Closed. A new valid `#` can start a new trigger.
+
+A response whose query generation is no longer current has no state transition.
 
 ## Permissions
 
@@ -159,6 +169,11 @@ Typing updates Primed/Searching/Results/Empty. Escape, moving outside the trigge
 ## Scenarios
 
 - **GIVEN** task chat in workspace A with connected Jira and GitHub providers, **WHEN** the user types `#auth`, **THEN** the menu above the composer shows grouped workspace-A Jira and GitHub hits without Kandev tasks or workspace-B results.
+- **GIVEN** a draft that contains `#2730 explicit profile overridden`, **WHEN** the user pastes the draft into task chat, **THEN** the text remains literal and no entity-reference menu or search request starts.
+- **GIVEN** a closed menu after pasted, restored, or programmatically inserted hash text, **WHEN** the user types a new valid `#auth` trigger, **THEN** the menu opens for the new trigger.
+- **GIVEN** an open entity-reference menu, **WHEN** the user presses Escape and continues to type in the same range, **THEN** the draft stays unchanged and the menu stays closed.
+- **GIVEN** a primed menu for a bare `#`, **WHEN** the user types a space, **THEN** the menu closes and the literal `# ` remains in the draft.
+- **GIVEN** an active multi-word query and no selectable result, **WHEN** the user presses Enter, **THEN** the composer follows its configured Enter behavior and the menu does not stay active outside the trigger range.
 - **GIVEN** a search returns only one short result group, **WHEN** the menu renders, **THEN** its bottom edge remains directly anchored to the composer instead of reserving unused menu height.
 - **GIVEN** GitLab is not configured or cannot search the active workspace, **WHEN** another source returns results, **THEN** the menu omits GitLab rather than showing an unavailable GitLab section.
 - **GIVEN** Quick Chat and a matching Linear issue, **WHEN** the user presses Arrow Down and Tab, **THEN** the active range becomes one inline reference chip, focus stays in the composer, and no message is sent.
@@ -196,7 +211,11 @@ Typing updates Primed/Searching/Results/Empty. Escape, moving outside the trigge
 - Raw provider query-language syntax, advanced filters, user-controlled result pagination, or a full-screen global search page.
 - Implementing the plugin manifest contribution, workspace permission/grant, Kandev-to-plugin search RPC, or loading plugin-provided sources in this release. The normalized registry and DTO MUST remain transport-neutral so a later plugin bridge can implement the same provider contract without changing composer/message formats. Search-provider contribution is distinct from the plugin-to-Kandev Host data API and its `api_read` capabilities.
 - Cross-workspace search.
+- Changing the Enter or Tab selection behavior when a result is selectable.
+- Removing spaces from valid multi-word work-item searches.
 
-## Implementation plan
+## Implementation plans
 
-[Backend failure containment](../../plans/backend-failure-containment/plan.md)
+- [Entity reference composer](../../plans/entity-reference-composer/plan.md)
+- [Backend failure containment](../../plans/backend-failure-containment/plan.md)
+- [Entity reference trigger lifecycle](../../plans/entity-reference-trigger-lifecycle/plan.md)

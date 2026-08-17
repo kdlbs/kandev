@@ -77,6 +77,7 @@ export type TaskLike = {
   metadata?: Record<string, unknown> | null;
   archived_at?: string | null;
   status_summary?: TaskStatusSummary | null;
+  status_summary_invalidated?: boolean;
 };
 
 export type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";

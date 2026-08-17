@@ -7,11 +7,13 @@ import {
   taskId as toTaskId,
   type Message,
   type TaskSession,
+  type Turn,
 } from "@/lib/types/http";
 import { useSessionPendingInput, useTaskPendingInput } from "./use-task-pending-input";
 
 const PRIMARY_SESSION_ID = "session-primary";
 const SECONDARY_SESSION_ID = "session-secondary";
+const BASE_TIMESTAMP = "2026-05-02T00:00:00Z";
 
 function message(overrides: Partial<Message>): Message {
   return {
@@ -21,7 +23,7 @@ function message(overrides: Partial<Message>): Message {
     author_type: "agent",
     content: "",
     type: "message",
-    created_at: "2026-05-02T00:00:00Z",
+    created_at: BASE_TIMESTAMP,
     ...overrides,
   };
 }
@@ -31,8 +33,8 @@ function session(id: string, state: TaskSession["state"]): TaskSession {
     id: toSessionId(id),
     task_id: toTaskId("task-1"),
     state,
-    started_at: "2026-05-02T00:00:00Z",
-    updated_at: "2026-05-02T00:00:00Z",
+    started_at: BASE_TIMESTAMP,
+    updated_at: BASE_TIMESTAMP,
   };
 }
 
@@ -40,12 +42,34 @@ function sessionWithPendingAction(id: string, action: "clarification" | "permiss
   return Object.assign(session(id, "WAITING_FOR_INPUT"), { pending_action: action });
 }
 
-function wrapper(messagesBySession: Record<string, Message[]> = {}, sessions: TaskSession[] = []) {
+function turn(id: string, sessionId: string, startedAt: string): Turn {
+  return {
+    id,
+    session_id: toSessionId(sessionId),
+    task_id: toTaskId("task-1"),
+    started_at: startedAt,
+    created_at: startedAt,
+    updated_at: startedAt,
+  };
+}
+
+function wrapper(
+  messagesBySession: Record<string, Message[]> = {},
+  sessions: TaskSession[] = [],
+  turnsBySession: Record<string, Turn[]> = {},
+) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <StateProvider
         initialState={{
           messages: { bySession: messagesBySession, metaBySession: {} },
+          turns: {
+            bySession: turnsBySession,
+            activeBySession: {},
+            loadedBySession: {},
+            reconcileEpochBySession: {},
+            settledBoundaryBySession: {},
+          },
           taskSessions: {
             items: Object.fromEntries(sessions.map((item) => [item.id, item])),
           },
@@ -169,6 +193,128 @@ describe("useTaskPendingInput", () => {
   });
 });
 
+describe("useTaskPendingInput pending clarification turn authority", () => {
+  it("preserves pending clarification while session state authority is still loading", () => {
+    const olderTurn = turn("turn-older", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
+    const newestTurn = turn("turn-newest", PRIMARY_SESSION_ID, "2026-05-02T00:01:00Z");
+    const { result } = renderHook(
+      () => useTaskPendingInput(PRIMARY_SESSION_ID, { taskId: "task-1" }),
+      {
+        wrapper: wrapper(
+          {
+            [PRIMARY_SESSION_ID]: [
+              message({
+                id: "question-before-session-hydration",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: olderTurn.id,
+                type: "clarification_request",
+                metadata: { status: "pending" },
+              }),
+            ],
+          },
+          [],
+          { [PRIMARY_SESSION_ID]: [olderTurn, newestTurn] },
+        ),
+      },
+    );
+
+    expect(result.current).toEqual({ clarification: true, permission: false });
+  });
+
+  it("ignores a detached pending clarification from an older durable turn", () => {
+    const oldTurn = turn("turn-old", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
+    const currentTurn = turn("turn-current", PRIMARY_SESSION_ID, "2026-05-02T00:01:00Z");
+    const { result } = renderHook(
+      () => useTaskPendingInput(PRIMARY_SESSION_ID, { taskId: "task-1" }),
+      {
+        wrapper: wrapper(
+          {
+            [PRIMARY_SESSION_ID]: [
+              message({
+                id: "detached-old-question",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: oldTurn.id,
+                type: "clarification_request",
+                metadata: { status: "pending", agent_disconnected: true },
+              }),
+              message({
+                id: "newer-turn-message",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: currentTurn.id,
+              }),
+            ],
+          },
+          [session(PRIMARY_SESSION_ID, "RUNNING")],
+          { [PRIMARY_SESSION_ID]: [oldTurn, currentTurn] },
+        ),
+      },
+    );
+
+    expect(result.current).toEqual({ clarification: false, permission: false });
+  });
+});
+
+describe("useTaskPendingInput clean clarification turn authority", () => {
+  it("suppresses a visible predecessor when the session projection is explicitly clean", () => {
+    const visiblePredecessor = turn("turn-visible-predecessor", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
+    const cleanSession = Object.assign(session(PRIMARY_SESSION_ID, "RUNNING"), {
+      pending_action: null,
+    });
+    const { result } = renderHook(
+      () => useTaskPendingInput(PRIMARY_SESSION_ID, { taskId: "task-1" }),
+      {
+        wrapper: wrapper(
+          {
+            [PRIMARY_SESSION_ID]: [
+              message({
+                id: "stale-predecessor-question",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: visiblePredecessor.id,
+                type: "clarification_request",
+                metadata: { status: "pending" },
+              }),
+            ],
+          },
+          [cleanSession],
+          { [PRIMARY_SESSION_ID]: [visiblePredecessor] },
+        ),
+      },
+    );
+
+    expect(result.current).toEqual({ clarification: false, permission: false });
+  });
+
+  it("quarantines pending clarification history for a terminal primary session", () => {
+    const completedTurn = turn("turn-completed", PRIMARY_SESSION_ID, BASE_TIMESTAMP);
+    const { result } = renderHook(
+      () =>
+        useTaskPendingInput(PRIMARY_SESSION_ID, {
+          primarySessionState: "COMPLETED",
+          primarySessionPendingAction: "clarification",
+        }),
+      {
+        wrapper: wrapper(
+          {
+            [PRIMARY_SESSION_ID]: [
+              message({
+                id: "stale-completed-question",
+                session_id: toSessionId(PRIMARY_SESSION_ID),
+                turn_id: completedTurn.id,
+                type: "clarification_request",
+                metadata: { status: "pending" },
+              }),
+            ],
+          },
+          [],
+          { [PRIMARY_SESSION_ID]: [completedTurn] },
+        ),
+      },
+    );
+
+    expect(result.current).toEqual({ clarification: false, permission: false });
+  });
+});
+
 describe("useSessionPendingInput", () => {
   it("returns both flags false when sessionId is null", () => {
     const { result } = renderHook(() => useSessionPendingInput(null), { wrapper: wrapper() });
@@ -197,6 +343,33 @@ describe("useSessionPendingInput", () => {
         sessionWithPendingAction(SECONDARY_SESSION_ID, "permission"),
       ]),
     });
+    expect(result.current).toEqual({ clarification: false, permission: false });
+  });
+
+  it("quarantines pending clarification history for a cancelled session", () => {
+    const cancelledTurn = turn("turn-cancelled", SECONDARY_SESSION_ID, BASE_TIMESTAMP);
+    const { result } = renderHook(() => useSessionPendingInput(SECONDARY_SESSION_ID), {
+      wrapper: wrapper(
+        {
+          [SECONDARY_SESSION_ID]: [
+            message({
+              id: "stale-cancelled-question",
+              session_id: toSessionId(SECONDARY_SESSION_ID),
+              turn_id: cancelledTurn.id,
+              type: "clarification_request",
+              metadata: { status: "pending" },
+            }),
+          ],
+        },
+        [
+          Object.assign(session(SECONDARY_SESSION_ID, "CANCELLED"), {
+            pending_action: "clarification" as const,
+          }),
+        ],
+        { [SECONDARY_SESSION_ID]: [cancelledTurn] },
+      ),
+    });
+
     expect(result.current).toEqual({ clarification: false, permission: false });
   });
 });

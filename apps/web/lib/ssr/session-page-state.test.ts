@@ -153,6 +153,10 @@ describe("fetchSessionDataForTask initial hydration", () => {
     expect(hydratedState.turns.bySession[session.id]?.[0]?.metadata).toEqual({
       runtime_config_snapshot: runtimeConfigSnapshot,
     });
+    // SSR-hydrated turn lists are complete snapshots: the session must be
+    // marked loaded so turn-derived UI never mistakes WS-seeded live turns
+    // for the full history or re-fetches unnecessarily.
+    expect(hydratedState.turns.loadedBySession[session.id]).toBe(true);
   });
 
   it("hydrates the persisted model selector before the first render", async () => {

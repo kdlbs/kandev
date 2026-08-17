@@ -3,201 +3,140 @@ package clarification
 
 import (
 	"context"
-	"time"
+	"errors"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/events"
-	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
+
+type clarificationBundlePublisher interface {
+	PublishClarificationBundleUpdates(context.Context, []*taskmodels.Message) error
+}
 
 // Canceller wraps Store with message-update side effects.
 // When the agent's turn completes, it cancels pending clarifications
 // and marks the database messages with agent_disconnected metadata.
 type Canceller struct {
-	store    *Store
-	repo     messageStore
-	eventBus EventBus
-	logger   *logger.Logger
+	store     *Store
+	repo      cancellationMessageStore
+	publisher clarificationBundlePublisher
+	logger    *logger.Logger
 }
 
 // NewCanceller creates a Canceller.
-func NewCanceller(store *Store, repo messageStore, eventBus EventBus, log *logger.Logger) *Canceller {
+func NewCanceller(
+	store *Store,
+	repo cancellationMessageStore,
+	publisher clarificationBundlePublisher,
+	log *logger.Logger,
+) *Canceller {
 	return &Canceller{
-		store:    store,
-		repo:     repo,
-		eventBus: eventBus,
-		logger:   log.WithFields(zap.String("component", "clarification-canceller")),
+		store:     store,
+		repo:      repo,
+		publisher: publisher,
+		logger:    log.WithFields(zap.String("component", "clarification-canceller")),
 	}
 }
 
-// isTerminalStatus returns true for statuses that should not be overwritten.
-func isTerminalStatus(status string) bool {
-	switch status {
-	case string(StatusAnswered), string(StatusExpired), string(StatusRejected), string(StatusCancelled):
-		return true
+func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) (int, error) {
+	// Draining live waiters and durable detachment are separate concerns. The
+	// repository owns the atomic current-turn/status claim for persisted rows.
+	c.store.CancelSession(sessionID)
+	writeCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
+	messages, err := c.repo.DetachActiveClarificationMessagesBySessionID(writeCtx, sessionID)
+	if err != nil {
+		c.logger.Error("failed to detach current clarification bundles",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return 0, fmt.Errorf("detach current clarification bundles: %w", err)
 	}
-	return false
+	return c.publishChangedBundles(writeCtx, messages), nil
 }
 
-// markMessagesDetached unblocks WaitForResponse and keeps the clarification
-// interactive: status stays pending and agent_disconnected is set so the UI
-// can route a late answer through the event fallback path.
-func (c *Canceller) markMessagesDetached(ctx context.Context, msgs []*taskmodels.Message, pendingID string) {
-	writeCtx := context.WithoutCancel(ctx)
-	for _, msg := range msgs {
-		if msg.Metadata == nil {
-			msg.Metadata = map[string]any{}
+func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) (int, error) {
+	// The initial read discovers bundle identities only. Each transition below
+	// rechecks that exact pending ID, current-turn ownership, and pending status
+	// inside one UPDATE serialized with answers and successor turns.
+	c.store.CancelSession(sessionID)
+	writeCtx, cancel := clarificationPersistenceContextPreservingDeadline(ctx)
+	defer cancel()
+	messages, err := c.repo.FindActiveClarificationMessagesBySessionID(writeCtx, sessionID)
+	if err != nil {
+		c.logger.Warn("failed to load current clarification bundles for expiry",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return 0, fmt.Errorf("load current clarification bundles for expiry: %w", err)
+	}
+	pendingIDs := make(map[string]struct{})
+	for _, message := range messages {
+		if pendingID := stringFromMetadata(message.Metadata, "pending_id"); pendingID != "" {
+			pendingIDs[pendingID] = struct{}{}
 		}
-		if current, _ := msg.Metadata["status"].(string); isTerminalStatus(current) {
-			continue
-		}
-		msg.Metadata["agent_disconnected"] = true
-		if err := c.repo.UpdateMessage(writeCtx, msg); err != nil {
-			c.logger.Warn("failed to update message with detached status",
+	}
+	changedBundles := 0
+	var expiryErr error
+	// Bundle expiry is intentionally best effort, not all-or-nothing. A bundle
+	// that commits stays terminal even if a sibling write fails; the joined
+	// error tells the caller to retry, and that retry only sees bundles still
+	// pending under the repository's guarded transition.
+	for pendingID := range pendingIDs {
+		changed, expireErr := c.repo.ExpireActiveClarificationBundle(writeCtx, sessionID, pendingID)
+		if expireErr != nil {
+			c.logger.Warn("failed to expire current clarification bundle",
+				zap.String("session_id", sessionID),
 				zap.String("pending_id", pendingID),
-				zap.String("message_id", msg.ID),
-				zap.Error(err))
+				zap.Error(expireErr))
+			expiryErr = errors.Join(
+				expiryErr,
+				fmt.Errorf("expire clarification bundle %s: %w", pendingID, expireErr),
+			)
 			continue
 		}
-		c.publishMessageUpdated(writeCtx, msg)
+		if len(changed) == 0 {
+			continue
+		}
+		changedBundles++
+		c.publishBundleUpdates(writeCtx, changed)
 	}
+	return changedBundles, expiryErr
 }
 
-// markMessagesExpired updates the given messages to status=expired and publishes
-// a message.updated event for each one. It is idempotent: already-terminal
-// messages are skipped.
-func (c *Canceller) markMessagesExpired(ctx context.Context, msgs []*taskmodels.Message, pendingID string) {
-	writeCtx := context.WithoutCancel(ctx)
-	for _, msg := range msgs {
-		if msg.Metadata == nil {
-			msg.Metadata = map[string]any{}
+func (c *Canceller) publishChangedBundles(ctx context.Context, messages []*taskmodels.Message) int {
+	bundles := make(map[string]struct{})
+	for _, message := range messages {
+		if pendingID := stringFromMetadata(message.Metadata, "pending_id"); pendingID != "" {
+			bundles[pendingID] = struct{}{}
 		}
-		if current, _ := msg.Metadata["status"].(string); isTerminalStatus(current) {
-			continue
-		}
-		msg.Metadata["agent_disconnected"] = true
-		msg.Metadata["status"] = string(StatusExpired)
-		if err := c.repo.UpdateMessage(writeCtx, msg); err != nil {
-			c.logger.Warn("failed to update message with expired status",
-				zap.String("pending_id", pendingID),
-				zap.String("message_id", msg.ID),
-				zap.Error(err))
-			continue
-		}
-		c.publishMessageUpdated(writeCtx, msg)
 	}
-}
-
-func (c *Canceller) detachSessionBundles(ctx context.Context, sessionID string) int {
-	pendingIDs := c.store.CancelSession(sessionID)
-
-	handled := make(map[string]bool, len(pendingIDs))
-	for _, id := range pendingIDs {
-		msgs, err := c.repo.FindMessagesByPendingID(ctx, id)
-		if err != nil || len(msgs) == 0 {
-			c.logger.Debug("messages not found for detached clarification",
-				zap.String("pending_id", id),
-				zap.Error(err))
-			continue
-		}
-		c.markMessagesDetached(ctx, msgs, id)
-		handled[id] = true
-	}
-
-	msgs, err := c.repo.FindPendingClarificationMessagesBySessionID(ctx, sessionID)
-	if err != nil || len(msgs) == 0 {
-		return len(pendingIDs)
-	}
-
-	byPendingID := make(map[string][]*taskmodels.Message)
-	for _, msg := range msgs {
-		pid := stringFromMetadata(msg.Metadata, "pending_id")
-		if pid == "" || handled[pid] {
-			continue
-		}
-		byPendingID[pid] = append(byPendingID[pid], msg)
-	}
-	for pid, bundle := range byPendingID {
-		c.markMessagesDetached(ctx, bundle, pid)
-	}
-	return len(pendingIDs) + len(byPendingID)
+	c.publishBundleUpdates(ctx, messages)
+	return len(bundles)
 }
 
 // DetachSessionAndNotify cancels in-memory WaitForResponse waiters for a session
 // and marks DB clarification messages as pending with agent_disconnected=true.
-// The overlay stays interactive; a late answer uses the event fallback path.
-func (c *Canceller) DetachSessionAndNotify(ctx context.Context, sessionID string) int {
+// The overlay stays interactive; a late answer uses the acknowledged resume fallback path.
+func (c *Canceller) DetachSessionAndNotify(ctx context.Context, sessionID string) (int, error) {
 	return c.detachSessionBundles(ctx, sessionID)
 }
 
 // ExpireSessionAndNotify cancels in-memory waiters and marks clarification
 // messages expired so the overlay closes and history shows a timed-out entry.
-// TODO: wire this into terminal teardown paths that should close the overlay
-// instead of preserving the deferred-answer UX.
-func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string) int {
-	pendingIDs := c.store.CancelSession(sessionID)
-
-	handled := make(map[string]bool, len(pendingIDs))
-	for _, id := range pendingIDs {
-		msgs, err := c.repo.FindMessagesByPendingID(ctx, id)
-		if err != nil || len(msgs) == 0 {
-			continue
-		}
-		c.markMessagesExpired(ctx, msgs, id)
-		handled[id] = true
-	}
-
-	msgs, err := c.repo.FindPendingClarificationMessagesBySessionID(ctx, sessionID)
-	if err != nil || len(msgs) == 0 {
-		return len(pendingIDs)
-	}
-
-	byPendingID := make(map[string][]*taskmodels.Message)
-	for _, msg := range msgs {
-		pid := stringFromMetadata(msg.Metadata, "pending_id")
-		if pid == "" || handled[pid] {
-			continue
-		}
-		byPendingID[pid] = append(byPendingID[pid], msg)
-	}
-	for pid, bundle := range byPendingID {
-		c.markMessagesExpired(ctx, bundle, pid)
-	}
-	return len(pendingIDs) + len(byPendingID)
+func (c *Canceller) ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error) {
+	return c.expireSessionBundles(ctx, sessionID)
 }
 
-// publishMessageUpdated publishes a message.updated event to the event bus.
-func (c *Canceller) publishMessageUpdated(ctx context.Context, msg *taskmodels.Message) {
-	if c.eventBus == nil {
+// publishBundleUpdates routes committed rows through the task service so every
+// message event carries the authoritative pending-action projection.
+func (c *Canceller) publishBundleUpdates(ctx context.Context, messages []*taskmodels.Message) {
+	if c.publisher == nil || len(messages) == 0 {
 		return
 	}
-
-	msgType := string(msg.Type)
-	if msgType == "" {
-		msgType = "message"
-	}
-
-	data := map[string]any{
-		"message_id":     msg.ID,
-		"session_id":     msg.TaskSessionID,
-		"task_id":        msg.TaskID,
-		"turn_id":        msg.TurnID,
-		"author_type":    string(msg.AuthorType),
-		"author_id":      msg.AuthorID,
-		"content":        msg.Content,
-		"type":           msgType,
-		"requests_input": msg.RequestsInput,
-		"created_at":     msg.CreatedAt.Format(time.RFC3339),
-		"updated_at":     msg.UpdatedAt.Format(time.RFC3339Nano),
-		"metadata":       msg.Metadata,
-	}
-
-	event := bus.NewEvent(events.MessageUpdated, "clarification-canceller", data)
-	if err := c.eventBus.Publish(ctx, events.MessageUpdated, event); err != nil {
-		c.logger.Warn("failed to publish message.updated event",
-			zap.String("message_id", msg.ID),
+	if err := c.publisher.PublishClarificationBundleUpdates(ctx, messages); err != nil {
+		c.logger.Warn("failed to publish clarification bundle updates",
+			zap.Int("message_count", len(messages)),
 			zap.Error(err))
 	}
 }

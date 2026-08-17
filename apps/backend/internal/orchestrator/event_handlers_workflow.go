@@ -2,9 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +28,8 @@ import (
 )
 
 type turnCompletionCause string
+
+var errDeferredMoveAlreadyApplied = errors.New("deferred move already applied")
 
 type taskMetadataKeyRemover interface {
 	RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
@@ -2151,9 +2155,9 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 // for the source step and on_enter for the target step. Bypasses
 // task.Service.MoveTask (and the task.moved event) so the orchestrator's async
 // task.moved handler doesn't run a second processStepExitAndEnter for the same
-// transition. The message queue is left intact — any user-supplied prompt
-// already queued by handleMoveTask is delivered by the on_enter path or by
-// drainQueuedMessageForPromptableSession.
+// transition. The move hand-off prompt is correlated by MoveID and removed
+// only when the move is already complete or rejected; unrelated queued
+// messages remain available for the normal drain path.
 func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string, session *models.TaskSession, move *messagequeue.PendingMove) {
 	// reinsertPendingMove restores the move so a future agent.ready can retry.
 	// Used on early failure paths (load errors, config issues) where the state
@@ -2175,6 +2179,9 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		reinsertPendingMove()
 		return
 	}
+	if move.MoveID == "" {
+		move.MoveID = legacyPendingMoveID(sessionID, move)
+	}
 
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
@@ -2186,12 +2193,21 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	}
 	fromStepID := task.WorkflowStepID
 	if fromStepID == move.WorkflowStepID {
-		// Step already matches — nothing to transition. Just leave the queued
-		// prompt for the natural drain path. Don't reinsert: the move is
-		// effectively complete since the task is already at the target step.
+		if err := s.workflowStore.MarkDeferredMoveApplied(ctx, taskID, move.MoveID); errors.Is(err, errDeferredMoveAlreadyApplied) {
+			s.logger.Info("dropping already-applied pending move at current target",
+				zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
+		} else if err != nil {
+			s.logger.Error("failed to record pending move at current target",
+				zap.String("task_id", taskID), zap.String("move_id", move.MoveID), zap.Error(err))
+			reinsertPendingMove()
+			return
+		}
+		// Step already matches. The move is complete, so consume its hand-off
+		// prompt before the natural drain path handles unrelated messages.
 		s.logger.Info("pending move target equals current step; skipping transition",
 			zap.String("task_id", taskID),
 			zap.String("step_id", fromStepID))
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
 		s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
 		return
 	}
@@ -2218,14 +2234,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		// misdelivered to the source step's agent on a future turn (it was
 		// authored for the move's *target* step) — mirrors the cleanup done on
 		// the ApplyTransition failure path below.
-		if s.messageQueue != nil {
-			if _, ok := s.messageQueue.TakeQueued(ctx, sessionID); ok {
-				s.publishQueueStatusEvent(ctx, sessionID)
-				s.logger.Warn("dropped hand-off prompt after pending-move workflow mismatch",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID))
-			}
-		}
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
 		return
 	}
 
@@ -2247,7 +2256,11 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		deferredMoveAttribution.SessionID = move.SenderSessionID
 	}
 	deferredMoveCtx := steptelemetry.WithAttribution(ctx, deferredMoveAttribution)
-	if err := s.workflowStore.ApplyTransition(deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, engine.TriggerOnEnter); err != nil {
+	if err := s.workflowStore.ApplyDeferredMoveTransition(deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, move.MoveID); errors.Is(err, errDeferredMoveAlreadyApplied) {
+		s.logger.Info("dropping already-applied pending move", zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
+		return
+	} else if err != nil {
 		s.logger.Error("failed to apply pending move transition",
 			zap.String("task_id", taskID),
 			zap.Error(err))
@@ -2256,14 +2269,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		// drained the queue won't run, and handleAgentReady has already returned.
 		// Drop the orphan so it can't be misdelivered to the source step's agent
 		// on a future turn (it was authored for the move's *target* step).
-		if s.messageQueue != nil {
-			if _, ok := s.messageQueue.TakeQueued(ctx, sessionID); ok {
-				s.publishQueueStatusEvent(ctx, sessionID)
-				s.logger.Warn("dropped hand-off prompt after pending-move transition failure",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID))
-			}
-		}
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
 		return
 	}
 
@@ -2301,6 +2307,45 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// it's safe to defer the rest.
 	taskDescription := task.Description
 	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
+}
+
+func legacyPendingMoveID(sessionID string, move *messagequeue.PendingMove) string {
+	identity := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%s",
+		sessionID, move.TaskID, move.WorkflowID, move.WorkflowStepID, move.Position,
+		move.QueuedAt.UTC().Format(time.RFC3339Nano), move.Actor, move.SenderSessionID)
+	sum := sha256.Sum256([]byte(identity))
+	return fmt.Sprintf("legacy-%x", sum[:])
+}
+
+func (s *Service) removePendingMoveHandoffPrompt(ctx context.Context, sessionID, taskID, moveID string) {
+	if s.messageQueue == nil {
+		return
+	}
+	for _, entry := range s.messageQueue.GetStatus(ctx, sessionID).Entries {
+		if entry.TaskID != taskID || entry.QueuedBy != messagequeue.QueuedByMoveTask {
+			continue
+		}
+		entryMoveID, _ := entry.Metadata[messagequeue.MetadataDeferredMoveID].(string)
+		matches := entryMoveID == moveID
+		if entryMoveID == "" && strings.HasPrefix(moveID, "legacy-") {
+			matches = true
+		}
+		if !matches {
+			continue
+		}
+		_, removed, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entry.ID)
+		if err != nil {
+			s.logger.Warn("failed to remove stale pending-move hand-off prompt",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			return
+		}
+		if removed {
+			s.publishQueueStatusEvent(ctx, sessionID)
+			s.logger.Warn("dropped stale pending-move hand-off prompt",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("move_id", moveID))
+		}
+		return
+	}
 }
 
 func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromStepID, toStepID string) {
@@ -2531,6 +2576,38 @@ func workflowMessageMetadata(planMode bool, origin workflowMessageOrigin, refere
 	return meta
 }
 
+func (s *Service) resolveAutoStartPromptContext(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (bool, *models.Task, bool, error) {
+	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
+	if err != nil {
+		return false, nil, false, fmt.Errorf("resolve MCP mode for workflow auto-start: %w", err)
+	}
+	if isOfficeTask {
+		return true, nil, false, nil
+	}
+
+	taskForPrompt, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return false, nil, false, fmt.Errorf("load task for autopilot prompt: %w", err)
+	}
+	if session.State != models.TaskSessionStateCreated {
+		return false, taskForPrompt, false, nil
+	}
+
+	configMode, _ := session.Metadata["config_mode"].(bool)
+	if configMode {
+		return false, taskForPrompt, false, nil
+	}
+	titleOwner, err := s.ClaimTaskTitleSession(ctx, taskID, session.ID)
+	if err != nil {
+		return false, nil, false, fmt.Errorf("claim task title for workflow auto-start: %w", err)
+	}
+	return false, taskForPrompt, titleOwner, nil
+}
+
 // handleCreatedAutoStartLaunchFailure preserves a workflow prompt when the
 // created-session launch loses a concurrent-start race. The prompt was already
 // recorded in chat history, so queueing it is the only way to deliver it after
@@ -2622,31 +2699,17 @@ func (s *Service) autoStartStepPrompt(
 	titleOwner := false
 	isOfficeTask := false
 	var taskForPrompt *models.Task
-	if session.State == models.TaskSessionStateCreated {
-		var officeErr error
-		isOfficeTask, officeErr = s.lookupOfficeTask(ctx, taskID)
-		if officeErr != nil {
+	needsRuntimeContext := session.State == models.TaskSessionStateCreated ||
+		(step != nil && step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext))
+	if needsRuntimeContext {
+		var contextErr error
+		isOfficeTask, taskForPrompt, titleOwner, contextErr = s.resolveAutoStartPromptContext(ctx, taskID, session)
+		if contextErr != nil {
 			requeueTaken()
-			return fmt.Errorf("resolve MCP mode for workflow auto-start: %w", officeErr)
-		}
-		if !isOfficeTask {
-			taskForPrompt, officeErr = s.repo.GetTask(ctx, taskID)
-			if officeErr != nil {
-				requeueTaken()
-				return fmt.Errorf("load task for autopilot prompt: %w", officeErr)
-			}
-		}
-		configMode, _ := session.Metadata["config_mode"].(bool)
-		if !configMode && !isOfficeTask {
-			var claimErr error
-			titleOwner, claimErr = s.ClaimTaskTitleSession(ctx, taskID, sessionID)
-			if claimErr != nil {
-				requeueTaken()
-				return fmt.Errorf("claim task title for workflow auto-start: %w", claimErr)
-			}
+			return contextErr
 		}
 	}
-	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (agentPrompt != "" || len(attachments) > 0) {
+	if (session.State == models.TaskSessionStateCreated || step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext)) && !session.IsPassthrough && (agentPrompt != "" || len(attachments) > 0) {
 		configMode, _ := session.Metadata["config_mode"].(bool)
 		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
 		referenceContext := EntityReferenceContext(references)
@@ -2690,7 +2753,7 @@ func (s *Service) autoStartStepPrompt(
 
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		_, err := s.PromptTask(ctx, taskID, sessionID, agentPrompt, "", planMode, attachments, false)
+		_, err := s.PromptTask(ctx, taskID, sessionID, recordedPrompt, "", planMode, attachments, false)
 		if err == nil {
 			return nil
 		}
@@ -2707,7 +2770,7 @@ func (s *Service) autoStartStepPrompt(
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName))
 			return s.fallbackFreshLaunchOnMissingExecution(
-				ctx, taskID, sessionID, agentPrompt, planMode, takenMsg, attachments, references,
+				ctx, taskID, sessionID, recordedPrompt, planMode, takenMsg, attachments, references,
 			)
 		}
 

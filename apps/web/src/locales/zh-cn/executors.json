@@ -266,7 +266,6 @@
   "portableConfigBundleGeneric": "智能体配置（{{id}}）",
   "portableConfigBundleMockSettings": "复制模拟智能体设置",
   "portableConfigBundleOpenCodeConfig": "复制 OpenCode 配置",
-  "portableConfigDescription": "把选定的智能体设置复制到新建或重置的环境中；这些设置可能包含密钥或命令。",
   "portableConfigFileMapping": "{{source}} 到 {{target}}",
   "portableConfigInfoCopyTiming": "Kandev 只在全新建置或环境重置时原样复制选定的文件。新的复制可能覆盖已存在的目标文件。热恢复会保留现有环境。",
   "portableConfigInfoErrors": "缺失或无法读取的可选文件会被跳过并给出警告，不会阻止启动。这些文件可能包含密钥或环境变量值。",
