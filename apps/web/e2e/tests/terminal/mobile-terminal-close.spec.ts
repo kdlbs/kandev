@@ -7,6 +7,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { switchToTerminalPanel, waitForShellReady } from "./mobile-terminal-helpers";
 import { pauseNextTerminalDestroy } from "./terminal-close-pause";
+import { readTerminalHostBuffer } from "./terminal-test-helpers";
 
 async function seedTaskWithSession(
   testPage: Page,
@@ -29,13 +30,6 @@ async function seedTaskWithSession(
   await session.waitForLoad();
   await session.waitForChatIdle();
   return session;
-}
-
-async function readTerminalHostBuffer(host: Locator): Promise<string> {
-  return host.evaluate((element) => {
-    type XtermHost = HTMLElement & { __xtermReadBuffer?: () => string };
-    return (element as XtermHost).__xtermReadBuffer?.() ?? "";
-  });
 }
 
 function terminalSlot(testPage: Page, terminalId: string): Locator {

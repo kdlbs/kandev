@@ -3,13 +3,14 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import type { Locator, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import {
   snapshotPersistedLayouts,
   waitForPersistedLayoutChange,
 } from "../../helpers/dockview-persistence";
 import { dwell } from "../../helpers/causal-waits";
 import { pauseNextTerminalDestroy } from "./terminal-close-pause";
+import { readTerminalHostBuffer } from "./terminal-test-helpers";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -69,13 +70,6 @@ async function clickNewTerminalInPlusMenu(page: Page, session: SessionPage) {
   // that click is swallowed and leaves the dropdown closed. Wait for the
   // captured portal to detach so callers can safely reopen the menu.
   await expect(menu).toHaveCount(0);
-}
-
-async function readTerminalHostBuffer(host: Locator): Promise<string> {
-  return host.evaluate((element) => {
-    type XtermHost = HTMLElement & { __xtermReadBuffer?: () => string };
-    return (element as XtermHost).__xtermReadBuffer?.() ?? "";
-  });
 }
 
 test.describe("Terminals — dockview UI", () => {
