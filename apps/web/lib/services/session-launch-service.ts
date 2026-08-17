@@ -23,6 +23,7 @@ export type LaunchSessionRequest = {
   intent?: SessionIntent;
   session_id?: string;
   agent_profile_id?: string;
+  profile_explicit?: boolean;
   executor_id?: string;
   executor_profile_id?: string;
   prompt?: string;
@@ -40,6 +41,7 @@ export type LaunchSessionResponse = {
   task_id: string;
   session_id?: string;
   agent_execution_id?: string;
+  agent_profile_id?: string;
   state: string;
   worktree_path?: string;
   worktree_branch?: string;

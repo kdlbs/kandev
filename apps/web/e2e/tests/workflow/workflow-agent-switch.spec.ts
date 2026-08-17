@@ -555,6 +555,85 @@ test.describe("Workflow agent profile switching", () => {
     });
   });
 
+  test("manual New Agent picker overrides the pinned workflow profile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { profileA, profileB } = await createProfiles(apiClient);
+
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Manual Profile Picker");
+    const step1 = await apiClient.createWorkflowStep(workflow.id, "Step1", 0, {
+      is_start_step: true,
+    });
+    await apiClient.createWorkflowStep(workflow.id, "Done", 1);
+    await apiClient.updateWorkflowStep(step1.id, {
+      agent_profile_id: profileA.id,
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Manual Profile Picker Task",
+      profileA.id,
+      {
+        workflow_id: workflow.id,
+        workflow_step_id: step1.id,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const initialSessions = await pollSessions(apiClient, task.id, 1, 60_000);
+    const profileASession = initialSessions.find((item) => item.agent_profile_id === profileA.id);
+    expect(profileASession).toBeDefined();
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.openNewSessionDialog();
+
+    const dialog = session.newSessionDialog();
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    const selector = dialog.getByTestId("agent-profile-selector");
+    await expect(selector).toBeVisible({ timeout: 10_000 });
+    await selector.click();
+
+    const listbox = testPage.getByRole("listbox");
+    await expect(listbox.getByRole("option", { name: profileB.name, exact: false })).toBeVisible({
+      timeout: 10_000,
+    });
+    await listbox.getByRole("option", { name: profileB.name, exact: false }).click();
+    await expect(selector).toContainText(profileB.name);
+
+    await session.newSessionPromptInput().fill("/e2e:simple-message");
+    await session.newSessionStartButton().click();
+    await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+
+    let profileBSessionId = "";
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          profileBSessionId =
+            sessions.find(
+              (item) => item.id !== profileASession!.id && item.agent_profile_id === profileB.id,
+            )?.id ?? "";
+          return profileBSessionId;
+        },
+        { timeout: 60_000, message: "manual New Agent launch did not use profile B" },
+      )
+      .toBeTruthy();
+
+    const finalSessions = await pollSessions(apiClient, task.id, 2, 60_000);
+    const profileBSession = finalSessions.find((item) => item.id === profileBSessionId);
+    expect(profileBSession?.agent_profile_id).toBe(profileB.id);
+
+    const profileBTab = session.sessionTabBySessionId(profileBSessionId);
+    await expect(profileBTab).toBeVisible({ timeout: 30_000 });
+    await expect(profileBTab).toContainText(profileB.name);
+  });
+
   /**
    * Verifies the switchSessionForStep WS event fix: when a task is manually moved
    * to a step with a different agent profile, the new session is created and

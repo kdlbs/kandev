@@ -40,6 +40,7 @@ type LaunchSessionRequest struct {
 	Intent            SessionIntent `json:"intent,omitempty"`
 	SessionID         string        `json:"session_id,omitempty"`
 	AgentProfileID    string        `json:"agent_profile_id,omitempty"`
+	ProfileExplicit   bool          `json:"profile_explicit,omitempty"`
 	ExecutorID        string        `json:"executor_id,omitempty"`
 	ExecutorProfileID string        `json:"executor_profile_id,omitempty"`
 	Prompt            string        `json:"prompt,omitempty"`
@@ -248,7 +249,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, req.AutoStart, req.Attachments,
-		startTaskOptions{SpawnOrigin: req.SpawnOrigin},
+		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
 	)
 	if err != nil {
 		return nil, err
