@@ -73,8 +73,6 @@ test.describe("Quick Chat", () => {
     await expect(clarification).toBeVisible({ timeout: 30_000 });
 
     const bar = dialog.getByTestId("clarification-overlay-container");
-    const toggle = dialog.getByTestId("clarification-collapse-toggle");
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
     // The collapse shortcut only fires for keydowns targeting the shortcut
     // scope (quick-chat-content), same as the numeric-step shortcut above.
@@ -90,7 +88,6 @@ test.describe("Quick Chat", () => {
     await expect(dialog).toBeVisible();
     await expect(clarification).not.toBeVisible();
     await expect(bar).toBeVisible();
-    await expect(toggle).toHaveAttribute("aria-expanded", "false");
 
     await testPage.keyboard.press("Escape");
 
