@@ -7,7 +7,11 @@ import type {
 import { isInputCapableSessionState } from "./task-pending-input";
 
 export type PendingClarificationScope = {
-  /** Undefined means turn history is unavailable; null means loaded legacy history has no turns. */
+  /**
+   * Undefined means turn history is not loaded, so pendingAction gates the fallback.
+   * Null means history is loaded but has no durable turns, so all messages are hidden.
+   * A string scopes detection to that exact turn. An empty object disables detection.
+   */
   currentTurnId?: string | null;
   pendingAction?: TaskPendingAction | null;
 };

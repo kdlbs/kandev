@@ -56,6 +56,9 @@ func (s *Service) createTurn(
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
+	if session == nil {
+		return nil, fmt.Errorf("task session %s not found", sessionID)
+	}
 	unlock := s.lockWorkspaceSources(session.TaskID)
 	defer unlock()
 

@@ -257,7 +257,24 @@ func (s *Service) reconcileExistingSummary(
 	if current != nil && current.PendingAction == pendingAction {
 		return current, nil
 	}
+	s.logSummaryReconcileExhaustion(task.ID, current)
 	return current, errors.New("exhausted compare-and-set retries")
+}
+
+func (s *Service) logSummaryReconcileExhaustion(
+	taskID string,
+	current *statussummary.TaskStatusSummary,
+) {
+	if s.logger != nil {
+		lastRevision := uint64(0)
+		if current != nil {
+			lastRevision = current.Revision
+		}
+		s.logger.Warn("task status summary compare-and-set retries exhausted",
+			zap.String("task_id", taskID),
+			zap.Int("attempts", maxSummaryReconcileAttempts),
+			zap.Uint64("last_revision", lastRevision))
+	}
 }
 
 const summaryReconcileInitialRetryDelay = time.Millisecond

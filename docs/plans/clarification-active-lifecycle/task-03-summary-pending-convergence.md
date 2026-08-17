@@ -112,3 +112,6 @@ actual files, then update task/plan status.
 - Fresh Codex review propagates existing-summary repair failures, deletes the failed stale row from the
   response map, and makes task-list and boot assembly use that partial authoritative result. Focused
   coverage plus the full task-service, handler, and backend-app suites passed.
+- Delayed Claude review adds a structured warning at compare-and-set exhaustion with the task ID,
+  configured attempt count, and last observed revision. The existing exhaustion regression now asserts
+  that observability contract.

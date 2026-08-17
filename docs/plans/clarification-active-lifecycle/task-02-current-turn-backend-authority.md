@@ -191,3 +191,6 @@ blockers/risks, and update task/plan status.
 - Fresh Claude review turns the pre-existing expiry scaffold into shipped behavior: any accepted
   completed, failed, or cancelled session transition expires its current-turn pending bundles. Focused
   coverage and the full clarification and orchestrator suites passed.
+- Delayed CodeRabbit review guards the anomalous `(nil, nil)` session-repository result before turn
+  admission dereferences it. `ReserveTurn` now returns an error instead of panicking, with a focused
+  regression.

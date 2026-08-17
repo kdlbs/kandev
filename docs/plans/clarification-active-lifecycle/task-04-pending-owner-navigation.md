@@ -135,3 +135,5 @@ update task/plan status.
 - `cd apps/web && pnpm run i18n:check` passed; existing real-locale parity warnings remain advisory.
 - Follow-up Vitest passed 79 tests across processed-message and pending-clarification suites; web lint,
   typecheck, i18n check, and i18n ratchet passed.
+- Delayed Claude review documents the three-state `currentTurnId` scope contract and explicitly calls
+  out that an empty scope disables detection, preventing future callers from silently misusing it.

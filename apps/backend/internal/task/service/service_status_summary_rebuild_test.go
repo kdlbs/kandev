@@ -6,6 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -590,6 +595,12 @@ func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testin
 
 func TestReconcileTaskStatusSummariesKeepsAuthoritativeRowAfterCASExhaustion(t *testing.T) {
 	svc, _, repo := createTestService(t)
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, logErr := commonlogger.NewFromZap(zap.New(core))
+	if logErr != nil {
+		t.Fatalf("create logger: %v", logErr)
+	}
+	svc.logger = log
 	stored := statussummary.TaskStatusSummary{Revision: 4, QueuedPromptCount: 9}
 	exhausting := &exhaustingStatusSummaryRepository{
 		TaskStatusSummaryRepository: repo,
@@ -625,6 +636,14 @@ func TestReconcileTaskStatusSummariesKeepsAuthoritativeRowAfterCASExhaustion(t *
 	}
 	if exhausting.compareCalls != maxSummaryReconcileAttempts {
 		t.Fatalf("compare calls = %d, want %d", exhausting.compareCalls, maxSummaryReconcileAttempts)
+	}
+	entries := logs.FilterMessage("task status summary compare-and-set retries exhausted").All()
+	if len(entries) != 1 {
+		t.Fatalf("CAS exhaustion warning count = %d, want 1", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["task_id"] != "task-1" || fields["attempts"] != int64(maxSummaryReconcileAttempts) {
+		t.Fatalf("CAS exhaustion warning fields = %#v", fields)
 	}
 }
 

@@ -88,6 +88,15 @@ func TestReconcileUnpublishedPromptTurnsRequiresTurnRepository(t *testing.T) {
 	}
 }
 
+func TestReserveTurnRejectsNilSessionResult(t *testing.T) {
+	svc := &Service{sessions: nilTaskSessionRepo{}}
+
+	turn, err := svc.ReserveTurn(context.Background(), "missing-session", nil)
+	if err == nil {
+		t.Fatalf("ReserveTurn = %#v, nil; want missing-session error", turn)
+	}
+}
+
 func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

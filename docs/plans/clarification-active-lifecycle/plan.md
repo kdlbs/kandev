@@ -422,6 +422,11 @@ All locally available task gates passed; environment-gated parity also passed in
   accepted, surfaces bus failure, then clears only reservation metadata under session authority even if
   a fast provider completed the turn during publication. Focused regressions and the full task,
   integration, backend-composition, and orchestrator suites pass.
+- Delayed CodeRabbit and Claude follow-up makes anomalous nil session loads fail turn reservation without
+  a panic, documents all three pending-clarification scope states (including the empty-object trap), and
+  emits a structured warning with task, attempt count, and last revision when summary reconciliation
+  exhausts its compare-and-set retry budget. Focused backend tests and focused frontend formatting/lint
+  pass.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---
