@@ -7,7 +7,6 @@ import { useTranslation } from "react-i18next";
 import { ClarificationInputOverlay } from "./clarification-input-overlay";
 import { ResizeHandle } from "./resize-handle";
 import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
-import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
 
 type ClarificationPanelSectionProps = {
@@ -78,11 +77,6 @@ export function ClarificationPanelSection({
   useEffect(() => {
     resetHeight();
   }, [pendingId, resetHeight]);
-
-  // While this panel is expanded and pending, tell an ancestor dialog (Quick
-  // Chat) to swallow Escape instead of closing over it, so the first Escape
-  // collapses the panel like it does in the non-modal task chat panel.
-  useClarificationEscapeGuard(pending && !collapsed);
 
   if (!pending) return null;
 

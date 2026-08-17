@@ -95,6 +95,49 @@ test.describe("Quick Chat", () => {
     await expect(dialog).not.toBeVisible();
   });
 
+  test("Escape collapses the clarification panel with focus left in the composer after sending", async ({
+    testPage,
+  }) => {
+    const dialog = await openQuickChatWithAgent(testPage);
+    await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");
+
+    const clarification = dialog.getByTestId("clarification-overlay");
+    await expect(clarification).toBeVisible({ timeout: 30_000 });
+
+    // Focus the composer directly instead of an inert part of the message
+    // list: this is the ordinary post-send state, and the composer is an
+    // editable target the collapse shortcut must still claim Escape for.
+    const editor = dialog.locator(".tiptap.ProseMirror");
+    await editor.click();
+    await expect(editor).toBeFocused();
+
+    await testPage.keyboard.press("Escape");
+
+    await expect(dialog).toBeVisible();
+    await expect(clarification).not.toBeVisible();
+    await expect(dialog.getByTestId("clarification-overlay-container")).toBeVisible();
+  });
+
+  test("Escape closes the modal immediately when focus is outside the clarification's shortcut scope", async ({
+    testPage,
+  }) => {
+    const dialog = await openQuickChatWithAgent(testPage);
+    await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");
+
+    const clarification = dialog.getByTestId("clarification-overlay");
+    await expect(clarification).toBeVisible({ timeout: 30_000 });
+
+    // The tab bar sits outside quick-chat-content (the clarification's
+    // shortcut scope), e.g. the resize handles or a mouse-focused tab.
+    await dialog.getByTestId("quick-chat-tab").first().focus();
+
+    await testPage.keyboard.press("Escape");
+
+    // A pending, still-expanded clarification does not block Escape here: the
+    // guard predicate only claims Escape for keydowns inside its scope.
+    await expect(dialog).not.toBeVisible();
+  });
+
   test("offers configuration chat in setup and hides it once one exists", async ({
     testPage,
     apiClient,

@@ -11,6 +11,7 @@ import type {
   ClarificationQuestion,
 } from "@/lib/types/http";
 import { useClarificationGroup } from "@/hooks/domains/session/use-clarification-group";
+import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 import {
   ClarificationCarouselNav,
   ClarificationCustomInput,
@@ -182,6 +183,23 @@ function useResolveCallback(
   }, [submitState, onResolved]);
 }
 
+// Tells an ancestor dialog (Quick Chat) whether this widget will actually act
+// on a given Escape keydown, so the dialog never swallows an Escape that
+// nothing here is going to handle. Mirrors CarouselKeyboardShortcuts's own
+// gate exactly (enabled, in-scope target, no modifier) instead of a
+// separately-derived approximation that could drift out of sync with it.
+function useEscapeGuardRegistration(
+  handledHere: boolean,
+  shortcutScopeRef: RefObject<HTMLElement | null>,
+) {
+  const testEscapeGuard = useCallback(
+    (event: KeyboardEvent) =>
+      handledHere && isWithinScope(event.target, shortcutScopeRef) && !shouldIgnoreEscape(event),
+    [handledHere, shortcutScopeRef],
+  );
+  useClarificationEscapeGuard(testEscapeGuard);
+}
+
 type CarouselShortcutArgs = {
   enabled: boolean;
   scopeRef: RefObject<HTMLElement | null>;
@@ -212,6 +230,21 @@ function shouldIgnoreShortcut(e: KeyboardEvent): boolean {
   return e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
 }
 
+// Escape does not insert a character, so unlike the other shortcuts it must
+// still collapse the panel while focus is in the composer or another
+// editable control -- the ordinary state right after sending the message
+// that triggered the clarification. Only an actual modifier combo blocks it.
+function shouldIgnoreEscape(e: KeyboardEvent): boolean {
+  return e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
+}
+
+function isWithinScope(
+  target: EventTarget | null,
+  scopeRef: RefObject<HTMLElement | null>,
+): boolean {
+  return target instanceof Node && Boolean(scopeRef.current?.contains(target));
+}
+
 // tryHandleMetaEnter returns true when the event was Cmd/Ctrl+Enter, so the
 // caller can short-circuit. When focus is inside the custom-text input it
 // returns true *without* invoking onSubmit — the input's own keydown handler
@@ -233,14 +266,15 @@ function CarouselKeyboardShortcuts(args: CarouselShortcutArgs) {
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.target instanceof Node) || !scopeRef.current?.contains(e.target)) return;
+      if (!isWithinScope(e.target, scopeRef)) return;
       if (tryHandleMetaEnter(e, canSubmit, onSubmit)) return;
-      if (shouldIgnoreShortcut(e)) return;
       if (e.key === "Escape") {
+        if (shouldIgnoreEscape(e)) return;
         e.preventDefault();
         onDismiss();
         return;
       }
+      if (shouldIgnoreShortcut(e)) return;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         onPrev();
@@ -479,6 +513,7 @@ export function ClarificationInputOverlay({
     [messages],
   );
   const group = useClarificationGroup(sortedMessages);
+  const isSubmitting = group.submitState === "submitting";
   const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
   const [rawActiveIndex, setActiveIndex] = useState(0);
   // Clamp the active index to the current bundle size so late-arriving
@@ -503,8 +538,12 @@ export function ClarificationInputOverlay({
     if (allAnswered) void submitCollected();
   }, [allAnswered, submitCollected]);
 
+  useEscapeGuardRegistration(
+    keyboardShortcutsEnabled && !isSubmitting && sortedMessages.length > 0,
+    shortcutScopeRef,
+  );
+
   if (sortedMessages.length === 0) return null;
-  const isSubmitting = group.submitState === "submitting";
 
   return (
     <div className="relative" data-testid="clarification-overlay">

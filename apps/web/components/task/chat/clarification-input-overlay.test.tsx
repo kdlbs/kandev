@@ -2,6 +2,10 @@ import { createRef } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, cleanup, fireEvent, screen } from "@testing-library/react";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import {
+  ClarificationEscapeGuardProvider,
+  type ClarificationEscapeGuardEntry,
+} from "@/hooks/use-clarification-escape-guard";
 import { ClarificationInputOverlay } from "./clarification-input-overlay";
 
 vi.mock("@/lib/config", () => ({
@@ -117,6 +121,95 @@ describe("ClarificationInputOverlay — Escape key", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+});
+
+function fakeEscape(target: EventTarget): KeyboardEvent {
+  return {
+    key: "Escape",
+    target,
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+  } as unknown as KeyboardEvent;
+}
+
+function renderOverlayWithGuard(messages: Message[]) {
+  const scopeRef = createRef<HTMLDivElement>();
+  const outsideRef = createRef<HTMLButtonElement>();
+  const composerRef = createRef<HTMLInputElement>();
+  const onDismiss = vi.fn();
+  // A holder object, not a reassigned `let`, so TS doesn't narrow the read
+  // in getGuard() to the initializer's type across the closure boundary.
+  const holder: { entry: ClarificationEscapeGuardEntry } = { entry: null };
+  render(
+    <ClarificationEscapeGuardProvider
+      value={(entry) => {
+        holder.entry = entry;
+      }}
+    >
+      {/* Stands in for the Quick Chat tab bar / resize handles: rendered
+          inside the dialog but outside the clarification's shortcut scope. */}
+      <button ref={outsideRef} type="button">
+        outside
+      </button>
+      <div ref={scopeRef} tabIndex={-1}>
+        {/* Stands in for the message composer: an editable control inside
+            the shortcut scope, which is where focus ordinarily sits right
+            after sending the message that triggered the clarification. */}
+        <input ref={composerRef} />
+        <ClarificationInputOverlay
+          messages={messages}
+          onResolved={vi.fn()}
+          onDismiss={onDismiss}
+          shortcutScopeRef={scopeRef}
+        />
+      </div>
+    </ClarificationEscapeGuardProvider>,
+  );
+  return { scopeRef, outsideRef, composerRef, onDismiss, getGuard: () => holder.entry };
+}
+
+describe("ClarificationInputOverlay — Escape guard predicate (F1 regression)", () => {
+  it("handles Escape while focus is in the composer (editable, in-scope) -- the ordinary post-send state", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, onDismiss, getGuard } = renderOverlayWithGuard(messages);
+
+    expect(getGuard()?.test(fakeEscape(composerRef.current!))).toBe(true);
+
+    fireEvent.keyDown(composerRef.current!, { key: "Escape" });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not claim Escape when the target is outside the shortcut scope (e.g. the tab bar)", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { outsideRef, onDismiss, getGuard } = renderOverlayWithGuard(messages);
+
+    expect(getGuard()?.test(fakeEscape(outsideRef.current!))).toBe(false);
+
+    fireEvent.keyDown(outsideRef.current!, { key: "Escape" });
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("does not claim Escape while submitting", () => {
+    // Never resolves, so submitState stays "submitting" for the rest of the
+    // test instead of racing a real fetch's microtask resolution.
+    fetchMock.mockImplementationOnce(() => new Promise(() => {}));
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, getGuard } = renderOverlayWithGuard(messages);
+
+    fireEvent.click(screen.getByTestId("clarification-option"));
+
+    expect(getGuard()?.test(fakeEscape(composerRef.current!))).toBe(false);
+  });
+
+  it("does not claim Escape held with a modifier", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, getGuard } = renderOverlayWithGuard(messages);
+
+    const modified = { ...fakeEscape(composerRef.current!), metaKey: true } as KeyboardEvent;
+    expect(getGuard()?.test(modified)).toBe(false);
   });
 });
 
