@@ -68,7 +68,7 @@ type taskAccessAuthorizer interface {
 // structurally by the same MessageCreator implementation the REST handlers
 // already use.
 type clarificationMessageUpdater interface {
-	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *Answer) error
+	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer *Answer) error
 }
 
 // Resolver implements ResolveBundle
@@ -336,7 +336,7 @@ func (r *Resolver) applyMessageUpdates(ctx context.Context, pendingID, sessionID
 			}
 			answer = &a
 		}
-		if err := r.messages.UpdateClarificationMessage(writeCtx, sessionID, pendingID, qid, status, answer); err != nil {
+		if err := r.messages.UpdateClarificationMessage(writeCtx, sessionID, pendingID, msg.ID, qid, status, answer); err != nil {
 			r.logger.Warn("failed to apply winning clarification resolution to message",
 				zap.String("pending_id", pendingID), zap.String("question_id", qid), zap.String("message_id", msg.ID), zap.Error(err))
 			return err

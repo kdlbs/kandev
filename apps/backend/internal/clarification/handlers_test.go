@@ -20,6 +20,7 @@ import (
 type stubMessageCreator struct {
 	updates []struct {
 		pendingID  string
+		messageID  string
 		questionID string
 		status     string
 	}
@@ -38,13 +39,14 @@ func (s *stubMessageCreator) CreateClarificationRequestMessages(
 }
 
 func (s *stubMessageCreator) UpdateClarificationMessage(
-	_ context.Context, _, pendingID, questionID, status string, _ *Answer,
+	_ context.Context, _, pendingID, messageID, questionID, status string, _ *Answer,
 ) error {
 	s.updates = append(s.updates, struct {
 		pendingID  string
+		messageID  string
 		questionID string
 		status     string
-	}{pendingID, questionID, status})
+	}{pendingID, messageID, questionID, status})
 	return nil
 }
 
@@ -344,6 +346,59 @@ func TestHttpRespond_UnknownPendingID_404(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d (body=%s)", rec.Code, rec.Body.String())
 	}
+}
+
+// TestHttpRespond_ResponseEnvelope_NeverOmitsKeys proves M6a/N3a rule 4 holds
+// on the REST envelope too, not just the resolutions-row serializer: an
+// answered response must still emit "rejected"/"reject_reason", and a
+// rejected response must still emit "answers" as [], rather than silently
+// dropping them via clarification.Response's own `omitempty` tags.
+func TestHttpRespond_ResponseEnvelope_NeverOmitsKeys(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{
+		"pending-8":  {clarificationMessage("m1", "pending-8", "q1", 0, "First?", "opt1")},
+		"pending-9":  {clarificationMessage("m2", "pending-9", "q1", 0, "First?", "opt1")},
+		"pending-10": {clarificationMessage("m3", "pending-10", "q1", 0, "First?", "opt1")},
+	}
+	h, _, _, _ := setupTestHandler(t, msgs)
+
+	answered := runRespond(t, h, "pending-8", RespondBody{
+		Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"opt1"}}},
+	})
+	assertResponseEnvelopeKeys(t, answered, []string{"rejected", "reject_reason", "answers"})
+
+	rejected := runRespond(t, h, "pending-9", RespondBody{Rejected: true, RejectReason: "no thanks"})
+	assertResponseEnvelopeKeys(t, rejected, []string{"answers", "rejected", "reject_reason"})
+
+	cancelled := runCancel(t, h, "pending-10")
+	assertResponseEnvelopeKeys(t, cancelled, []string{"answers", "rejected", "reject_reason"})
+}
+
+// assertResponseEnvelopeKeys decodes the "response" field of a respond/cancel
+// 200 envelope as a raw JSON map and fails if any of wantKeys is absent —
+// catching the omitempty leak that a plain-struct unmarshal into typed Go
+// fields would mask (a missing key and a zero value are indistinguishable
+// once unmarshalled into a struct).
+func assertResponseEnvelopeKeys(t *testing.T, rec *httptest.ResponseRecorder, wantKeys []string) {
+	t.Helper()
+	var body struct {
+		Response map[string]json.RawMessage `json:"response"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v (body=%s)", err, rec.Body.String())
+	}
+	for _, key := range wantKeys {
+		if _, ok := body.Response[key]; !ok {
+			t.Errorf("response envelope missing key %q, got keys %v (body=%s)", key, mapKeys(body.Response), rec.Body.String())
+		}
+	}
+}
+
+func mapKeys(m map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // TestHttpCancelRequest_NoInMemoryEntry_StillSucceeds proves X2: cancelling

@@ -302,8 +302,8 @@ func TestRegisterHandlers_ClarificationQuestionToolsOnlyWhenBothDepsSet(t *testi
 // mirroring backendapp's messageCreatorAdapter for tests.
 type svcMessageUpdater struct{ svc *service.Service }
 
-func (s *svcMessageUpdater) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *clarification.Answer) error {
-	return s.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
+func (s *svcMessageUpdater) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer *clarification.Answer) error {
+	return s.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, messageID, questionID, status, answer)
 }
 
 func newTestResolver(t *testing.T, store *clarification.Store, repo *sqliterepo.Repository, svc *service.Service) *clarification.Resolver {

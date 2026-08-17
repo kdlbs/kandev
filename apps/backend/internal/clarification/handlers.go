@@ -3,6 +3,7 @@ package clarification
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -47,10 +48,11 @@ type MessageCreator interface {
 	// scrolls to the bottom of the group. Returns the created message IDs in the
 	// same order as the input questions.
 	CreateClarificationRequestMessages(ctx context.Context, taskID, sessionID, pendingID string, questions []Question, clarificationContext string) ([]string, error)
-	// UpdateClarificationMessage updates the per-question clarification message's
-	// status (and stores the matching answer if any) for a (pending_id, question_id)
-	// pair within the session.
-	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *Answer) error
+	// UpdateClarificationMessage updates one clarification message's status
+	// (and stores the matching answer if any). messageID identifies the
+	// exact message row — required because a bundle can contain multiple
+	// messages sharing the same (possibly empty) question_id (R9a).
+	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer *Answer) error
 }
 
 // EventBus interface for publishing events.
@@ -308,11 +310,18 @@ func (h *Handlers) httpCancelRequest(c *gin.Context) {
 func (h *Handlers) writeResolutionResult(c *gin.Context, pendingID string, res *Resolution, claimed bool, err error) {
 	switch {
 	case err == nil:
+		serialized, serErr := SerializeResponse(res.Response)
+		if serErr != nil {
+			h.logger.Error("failed to serialize clarification response",
+				zap.String("pending_id", pendingID), zap.Error(serErr))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": serErr.Error()})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success":  true,
 			"claimed":  claimed,
 			"status":   res.Status,
-			"response": res.Response,
+			"response": json.RawMessage(serialized),
 			"resume":   res.Resume,
 		})
 	case errors.Is(err, ErrBundleNotFound):

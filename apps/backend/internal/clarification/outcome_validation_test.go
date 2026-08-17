@@ -1,6 +1,7 @@
 package clarification
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -223,7 +224,13 @@ func TestNormalizeAnswered_TrimsWhitespace(t *testing.T) {
 // core promise: two semantically identical submissions in different caller
 // order, with a stray reject_reason on one of them (M6, discarded on the
 // answered path), produce byte-identical answers/rejected/reject_reason
-// payloads once serialized.
+// payloads once serialized — even when they are NOT byte-identical overall,
+// because responded_at legitimately differs (the spec explicitly forbids
+// proving this by freezing the clock: two real submissions never share a
+// wall-clock timestamp). pending_id and responded_at are the two fields the
+// server sets independently of caller input, so this test excludes exactly
+// those two before comparing, rather than relying on them coincidentally
+// matching.
 func TestNormalizeAnswered_ByteIdenticalForEquivalentSubmissions(t *testing.T) {
 	questions := twoQuestionBundle()
 	_, a := buildOutcomeResponse("pending-1", questions, Outcome{
@@ -238,7 +245,11 @@ func TestNormalizeAnswered_ByteIdenticalForEquivalentSubmissions(t *testing.T) {
 			{QuestionID: "q1", SelectedOptions: []string{"opt-a", "opt-b"}},
 		},
 		RejectReason: "stray, should be discarded per M6",
-	}, fixedNow())
+	}, fixedNow().Add(37*time.Second))
+
+	if a.RespondedAt.Equal(b.RespondedAt) {
+		t.Fatalf("test setup bug: a and b must have different responded_at, both got %v", a.RespondedAt)
+	}
 
 	sa, err := SerializeResponse(a)
 	if err != nil {
@@ -248,7 +259,32 @@ func TestNormalizeAnswered_ByteIdenticalForEquivalentSubmissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SerializeResponse(b): %v", err)
 	}
-	if sa != sb {
-		t.Fatalf("expected byte-identical answer payloads:\na=%s\nb=%s", sa, sb)
+	if sa == sb {
+		t.Fatalf("a and b have different responded_at, so the full payloads must NOT be byte-identical (a stale assertion here would mask a bug that made responded_at stop varying):\na=%s\nb=%s", sa, sb)
 	}
+
+	fa := stripServerSetFields(t, sa)
+	fb := stripServerSetFields(t, sb)
+	if fa != fb {
+		t.Fatalf("expected byte-identical answers/rejected/reject_reason once pending_id/responded_at are excluded:\na=%s\nb=%s", fa, fb)
+	}
+}
+
+// stripServerSetFields removes the two fields SerializeResponse sets from
+// server-side state (pending_id, responded_at) rather than from caller
+// input, and re-serializes the rest with json.Marshal's deterministic
+// alphabetical key ordering for a stable comparison.
+func stripServerSetFields(t *testing.T, serialized string) string {
+	t.Helper()
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(serialized), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	delete(m, "pending_id")
+	delete(m, "responded_at")
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(out)
 }

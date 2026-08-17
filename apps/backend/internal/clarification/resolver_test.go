@@ -64,12 +64,12 @@ type stubResolverMessageUpdater struct {
 }
 
 type resolverUpdateCall struct {
-	sessionID, pendingID, questionID, status string
-	answer                                   *Answer
+	sessionID, pendingID, messageID, questionID, status string
+	answer                                              *Answer
 }
 
-func (u *stubResolverMessageUpdater) UpdateClarificationMessage(_ context.Context, sessionID, pendingID, questionID, status string, answer *Answer) error {
-	u.calls = append(u.calls, resolverUpdateCall{sessionID, pendingID, questionID, status, answer})
+func (u *stubResolverMessageUpdater) UpdateClarificationMessage(_ context.Context, sessionID, pendingID, messageID, questionID, status string, answer *Answer) error {
+	u.calls = append(u.calls, resolverUpdateCall{sessionID, pendingID, messageID, questionID, status, answer})
 	if u.failOnQ != "" && questionID == u.failOnQ {
 		if u.failErr != nil {
 			return u.failErr
@@ -306,6 +306,50 @@ func TestResolveBundle_Rejected_NoWaiter_AlwaysNotApplicable(t *testing.T) {
 	}
 }
 
+// TestResolveBundle_Rejected_L16Bundle_UpdatesEveryMessageByOwnID proves
+// R9a end to end for an L16 bundle (no question_id anywhere): rejecting it
+// must reach every message in D2 order, each identified by its own unique
+// messageID rather than the shared empty question_id — the collision that
+// previously left every message but the first stuck at "pending" forever.
+func TestResolveBundle_Rejected_L16Bundle_UpdatesEveryMessageByOwnID(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{
+		"p1": {
+			questionMessage("m1", "s1", "p1", "", 0),
+			questionMessage("m2", "s1", "p1", "", 1),
+			questionMessage("m3", "s1", "p1", "", 2),
+		},
+	}
+	f := newResolverFixture(t, msgs)
+
+	res, claimed, err := f.resolver.ResolveBundle(context.Background(), "p1", Outcome{Rejected: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !claimed {
+		t.Fatalf("expected claimed=true")
+	}
+	if res.Status != taskmodels.ClarificationResolutionStatusRejected {
+		t.Fatalf("expected status=rejected, got %q", res.Status)
+	}
+	if len(f.messages.calls) != 3 {
+		t.Fatalf("expected all 3 messages to be updated, got %d calls: %+v", len(f.messages.calls), f.messages.calls)
+	}
+	wantIDs := []string{"m1", "m2", "m3"}
+	seen := make(map[string]bool, 3)
+	for i, call := range f.messages.calls {
+		if call.messageID != wantIDs[i] {
+			t.Errorf("call %d: messageID = %q, want %q (D2 order)", i, call.messageID, wantIDs[i])
+		}
+		if call.status != taskmodels.ClarificationResolutionStatusRejected {
+			t.Errorf("call %d: status = %q, want rejected", i, call.status)
+		}
+		if seen[call.messageID] {
+			t.Fatalf("messageID %q updated more than once; a shared empty question_id must not collapse distinct messages onto one call", call.messageID)
+		}
+		seen[call.messageID] = true
+	}
+}
+
 // TestResolveBundle_Cancelled_ResumeNotApplicable proves X4: a winning
 // cancel resumes not_applicable.
 func TestResolveBundle_Cancelled_ResumeNotApplicable(t *testing.T) {
@@ -384,6 +428,44 @@ func TestResolveBundle_PartialApplicationFailure_ReturnsPartialApplicationError(
 	}
 	if len(f.resolutions.resumeUpdates) != 1 || f.resolutions.resumeUpdates[0].resume != taskmodels.ClarificationResolutionResumeFailed {
 		t.Fatalf("expected resume=failed to be persisted, got %+v", f.resolutions.resumeUpdates)
+	}
+}
+
+// TestResolveBundle_PartialApplicationFailure_StopsAtFirstFailure_MiddleQuestion
+// strengthens R5a coverage: with 3 questions and the failure on the MIDDLE
+// one, only q1 and q2 are ever applied — q3 must never be attempted. The
+// sibling test above fails only on the LAST question, which cannot
+// distinguish "stop at first failure" from "apply everything, then report
+// whichever error happened last."
+func TestResolveBundle_PartialApplicationFailure_StopsAtFirstFailure_MiddleQuestion(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{
+		"p1": {
+			questionMessage("m1", "s1", "p1", "q1", 0),
+			questionMessage("m2", "s1", "p1", "q2", 1),
+			questionMessage("m3", "s1", "p1", "q3", 2),
+		},
+	}
+	f := newResolverFixture(t, msgs)
+	f.messages.failOnQ = "q2"
+
+	res, claimed, err := f.resolver.ResolveBundle(context.Background(), "p1", Outcome{
+		Answers: []Answer{{QuestionID: "q1"}, {QuestionID: "q2"}, {QuestionID: "q3"}},
+	})
+	if err == nil || !IsPartialApplicationError(err) {
+		t.Fatalf("expected a partial application error, got %v", err)
+	}
+	if !claimed {
+		t.Fatalf("expected claimed=true: the row was inserted even though application failed")
+	}
+	if res != nil {
+		t.Fatalf("expected a nil Resolution on failure, got %+v", res)
+	}
+	if len(f.messages.calls) != 2 {
+		t.Fatalf("expected exactly 2 calls (q1 applied, q2 failed, q3 never attempted), got %d: %+v",
+			len(f.messages.calls), f.messages.calls)
+	}
+	if f.messages.calls[0].questionID != "q1" || f.messages.calls[1].questionID != "q2" {
+		t.Fatalf("expected calls in D2 order [q1, q2], got %+v", f.messages.calls)
 	}
 }
 

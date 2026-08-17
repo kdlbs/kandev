@@ -708,11 +708,20 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	return nil
 }
 
-// UpdateClarificationMessageForQuestion updates a single clarification message
-// (identified by pending_id + question_id) with the new status and the answer
-// payload. Used by both single- and multi-question clarification bundles since
-// each question lives in its own chat message.
-func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, sessionID, pendingID, questionID, status string, answer interface{}) error {
+// UpdateClarificationMessageForQuestion updates a single clarification
+// message, identified by its own messageID, with the new status and the
+// answer payload. Used by both single- and multi-question clarification
+// bundles since each question lives in its own chat message.
+//
+// The lookup key is messageID, not (pending_id, question_id): a bundle can
+// legitimately contain multiple messages sharing the same empty question_id
+// (an L16 bundle), and a compound-key lookup collapses them all onto the
+// same earliest row, so a rejection loop over such a bundle would silently
+// re-update only the first message and leave the rest "pending" forever
+// (R9a). pendingID/questionID are still verified against the fetched
+// message's own metadata as a defensive ownership check, and kept for
+// logging.
+func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer interface{}) error {
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
@@ -720,7 +729,7 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 	var err error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.messages.FindMessageByPendingIDAndQuestion(ctx, sessionID, pendingID, questionID)
+		message, err = s.messages.GetMessage(ctx, messageID)
 		if err == nil {
 			break
 		}
@@ -733,6 +742,7 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 			s.logger.Debug("clarification message not found, retrying",
 				zap.String("session_id", sessionID),
 				zap.String("pending_id", pendingID),
+				zap.String("message_id", messageID),
 				zap.String("question_id", questionID),
 				zap.Int("attempt", attempt+1),
 				zap.Int("max_retries", maxRetries))
@@ -744,10 +754,18 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 		s.logger.Warn("clarification message not found for update after retries",
 			zap.String("session_id", sessionID),
 			zap.String("pending_id", pendingID),
+			zap.String("message_id", messageID),
 			zap.String("question_id", questionID),
 			zap.Int("retries", maxRetries),
 			zap.Error(err))
 		return err
+	}
+
+	if message.TaskSessionID != sessionID {
+		return fmt.Errorf("clarification message %q belongs to session %q, not %q", messageID, message.TaskSessionID, sessionID)
+	}
+	if pid, _ := message.Metadata["pending_id"].(string); pid != pendingID {
+		return fmt.Errorf("clarification message %q belongs to pending_id %q, not %q", messageID, pid, pendingID)
 	}
 
 	if message.Metadata == nil {

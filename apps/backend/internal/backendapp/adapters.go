@@ -1038,10 +1038,11 @@ func (a *messageCreatorAdapter) rollbackPartialBundle(ctx context.Context, ids [
 	}
 }
 
-// UpdateClarificationMessage updates a clarification message's status and answer
-// for a specific (pending_id, question_id) pair within the session.
-func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *clarification.Answer) error {
-	return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
+// UpdateClarificationMessage updates a clarification message's status and
+// answer. messageID identifies the exact row (R9a); pendingID/questionID are
+// carried through for the service layer's ownership check and logging.
+func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, messageID, questionID, status string, answer *clarification.Answer) error {
+	return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, messageID, questionID, status, answer)
 }
 
 // CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.
