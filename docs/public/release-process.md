@@ -1,11 +1,15 @@
 ---
 title: "Release Process"
-description: "Run and verify Kandev's version, runtime, desktop, container, npm, GitHub, updater, and Homebrew release automation."
+description: "Run and verify Kandev's version, runtime, desktop, container, npm, GitHub, updater, Homebrew, and Scoop release automation."
 ---
 
 # Release Process
 
-Kandev uses one semantic version across the Git tag, native runtime bundles, desktop app, npm packages, GitHub release, container images, and Homebrew formula. Publish through the manual **Release** GitHub Actions workflow; do not update channels independently.
+This how-to guide is for maintainers who run and verify a Stable release. Its
+Stable targets are the Git tag, runtime bundles, desktop app, npm packages,
+GitHub Release, container images, Homebrew formula, and Scoop bucket.
+
+Kandev uses one semantic version across the Git tag, native runtime bundles, desktop app, npm packages, GitHub release, container images, Homebrew formula, and Scoop bucket. Publish through the manual **Release** GitHub Actions workflow; do not update channels independently.
 
 ## Quick path
 
@@ -22,7 +26,7 @@ The workflow has four mutually exclusive operating modes:
 | ------------------ | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Normal release     | `bump=patch`, `minor`, or `major` | Creates and merges a release PR, tags its merge, builds, and publishes                                                                              |
 | Dry run            | `dry_run=true`                    | Computes the next version and exercises CLI package/lock plus changelog generation in the runner; no PR, tag, artifact build, or publication        |
-| Desktop validation | `desktop_validation_only=true`    | Builds web, five runtime bundles, and five desktop targets from the selected commit; no PR, tag, GitHub release, GHCR, npm, or Homebrew publication |
+| Desktop validation | `desktop_validation_only=true`    | Builds web, five runtime bundles, and five desktop targets from the selected commit; no PR, tag, GitHub release, GHCR, npm, Homebrew, or Scoop publication |
 | Backfill           | `backfill_tag=vX.Y.Z`             | Rebuilds and repairs channels for the latest existing release tag without creating a version or tag                                                 |
 
 `dry_run` and desktop validation are not release candidates. Backfill cannot be combined with either and accepts only the latest exact SemVer tag after version manifests are checked for agreement.
@@ -33,8 +37,37 @@ The workflow has four mutually exclusive operating modes:
 2. Confirm required checks are green on `main` and no release or release PR is active.
 3. Confirm merged PR titles/commits use the conventional categories consumed by `cliff.toml`. The workflow generates `CHANGELOG.md` and release notes.
 4. Verify platform-sensitive launcher, agentctl, container, and desktop changes on affected targets.
-5. Check GitHub/GHCR access, npm trusted publishing, the release-tag GPG key, the Homebrew deploy key, and any configured desktop signing/notarization secrets.
+5. Check GitHub/GHCR access, npm trusted publishing, `RELEASE_PR_BYPASS_TOKEN`, signing keys, and configured desktop signing or notarization secrets.
 6. Update public docs for behavior that is about to ship.
+
+## Configure the release PR bypass
+
+Normal releases use a fine-grained personal access token only for the privileged release PR merge. The normal `GITHUB_TOKEN` creates the branch and PR.
+
+The token owner must remain an organization administrator. The current `main` ruleset grants that role an always-allowed bypass.
+
+1. Sign in to the organization administrator account that will own the token.
+2. Open **Settings > Developer settings > Personal access tokens > Fine-grained tokens**.
+3. Select **Generate new token**.
+4. Enter a clear name, such as `kandev-release-pr-bypass`.
+5. Set an expiration date that follows the organization policy.
+6. Select `kdlbs` as the resource owner.
+7. Under **Repository access**, select **Only select repositories**.
+8. Select only the `kandev` repository.
+9. Under **Repository permissions**, set **Contents: Read and write**.
+10. Leave all other optional permissions set to **No access**.
+11. Generate the token and complete organization approval when GitHub requires it.
+12. Copy the token before you leave the page.
+
+Add the token to the protected `release` environment:
+
+```bash
+gh secret set RELEASE_PR_BYPASS_TOKEN --env release --repo kdlbs/kandev
+```
+
+Record the token owner and expiration date in the maintainer credential inventory. Rotate the secret before expiration or an owner-role change.
+
+CAUTION: Never store this token as a repository-wide secret. The token owner can bypass the `main` ruleset.
 
 Normal releases require a dedicated release-tag signing identity and a GitHub Environment named `release`. Restrict that environment to deployments from `main`, but do not configure required reviewers: any maintainer authorized to dispatch the workflow and access the environment may start a normal release. Store the ASCII-armored private key as the environment secret `RELEASE_GPG_PRIVATE_KEY`, its optional passphrase as the environment secret `RELEASE_GPG_PASSPHRASE`, and the exact full fingerprint as the required environment variable `RELEASE_GPG_FINGERPRINT`. Before changing version files or creating the release PR, the workflow rejects a missing, multi-key, or secret-material public-key attachment and requires its sole primary fingerprint to match `RELEASE_GPG_FINGERPRINT`. After the release PR merges, it revalidates the public key from the merged revision, imports the private key, and requires that key to match both the merged key and `RELEASE_GPG_FINGERPRINT`. Do not define this signing material as repository-wide configuration.
 
@@ -59,15 +92,16 @@ Use dry run to validate version/changelog preparation. Use desktop validation to
 Normal mode performs these stages:
 
 1. **Preflight and prepare version.** Compute the next version from packages and tags, then verify that the committed public key matches the `release` environment fingerprint before changing release files. Update the CLI package/lock, desktop package and Tauri/Cargo manifests, and `CHANGELOG.md`.
-2. **Merge and tag.** Open a release branch and PR, squash-merge it, then revalidate the public key from the merged revision before importing the protected signing key. The workflow requires the imported key's full fingerprint to exactly match that merged key and `RELEASE_GPG_FINGERPRINT`, adopts that key's name and email as the tagger identity, and locally verifies the GPG-signed `vX.Y.Z` tag before pushing it.
+2. **Merge and tag.** Open a release branch and PR. Use the protected administrator token to squash-merge the exact head without queue or CI latency. Select GitHub's reported merge commit, then revalidate the public key before importing the protected signing key. Verify the signed `vX.Y.Z` tag locally before the push.
 3. **Build web and runtimes.** Build the SPA and five runtime targets: Linux x64/arm64, macOS x64/arm64, and Windows x64. Each archive contains `kandev`, the host `agentctl`, and required remote agentctl helpers; the workflow produces an adjacent checksum for each archive.
 4. **Build desktop.** Embed the matching runtime and package the same five platform/architecture targets into macOS, Linux, and Windows installer formats.
 5. **Build containers.** Publish amd64/arm64 base manifests, enforce the universal-image size gate, then publish multi-architecture universal images.
 6. **Publish GitHub Release.** Attach runtime archives, checksums, desktop artifacts, notes, and the updater feed when eligible.
 7. **Publish npm.** Use OIDC trusted publishing for five `@kdlbs/runtime-*` packages first, then the `kandev` launcher. Existing versions are skipped; the main package is not published after a runtime-package failure.
-8. **Update Homebrew.** Push the formula update to `kdlbs/homebrew-kandev` using release checksums and the deploy key. The generated formula records `X.Y.Z` explicitly; platform archive suffixes such as `x64` are not version identifiers.
+8. **Update Homebrew.** Push the formula update to `kdlbs/homebrew-kandev` using release checksums and its deploy key. The generated formula records `X.Y.Z` explicitly; platform archive suffixes such as `x64` are not version identifiers.
+9. **Update Scoop.** Push `bucket/kandev.json` to `kdlbs/scoop-kandev` using the Windows tarball checksum and its separate deploy key. The manifest records the exact Stable version, release URL, and SHA-256 value.
 
-GHCR images are built before the GitHub Release. npm and Homebrew start only after the GitHub Release and may run in parallel. A late failure can therefore leave some channels complete and others missing.
+GHCR images are built before the GitHub Release. npm, Homebrew, and Scoop start only after the GitHub Release and may run in parallel. A late failure can therefore leave some channels complete and others missing.
 
 Base image tags include `X.Y.Z`, `vX.Y.Z`, `sha-*`, and `latest`. Universal tags include `X.Y.Z-universal`, `vX.Y.Z-universal`, and the floating `universal`. The weekly universal rebuild updates only floating/dated weekly tags, never a version-specific release tag.
 
@@ -83,14 +117,14 @@ share that immutable version, so an installed build identifies its source commit
 Nightlies are best-effort daily snapshots. A new one appears only when `main` has changed since the
 latest Stable release, so some days may have no new Nightly. A Nightly never moves npm's `latest`
 tag and does not publish a Git tag, GitHub Release, Homebrew formula, Desktop updater build or feed,
-or container tag. See [CLI installation](cli.md#npm-nightly) to try Nightly or return to Stable.
+or container tag. It never updates the Scoop bucket. See [CLI installation](cli.md#npm-nightly) to try Nightly or return to Stable.
 
 <details>
 <summary>Signing, verification, and partial-release recovery</summary>
 
 ## Signing and updater behavior
 
-npm uses GitHub OIDC trusted publishers; there is no `NPM_TOKEN` release path. The main `kandev` package and all five `@kdlbs/runtime-*` packages publish provenance attestations. Homebrew requires its repository deploy key.
+npm uses GitHub OIDC trusted publishers; there is no `NPM_TOKEN` release path. The main `kandev` package and all five `@kdlbs/runtime-*` packages publish provenance attestations. Homebrew and Scoop each require a separate repository deploy key. Store the Scoop private key as the `SCOOP_BUCKET_DEPLOY_KEY` repository secret; do not reuse the Homebrew key.
 
 Release-tag signing applies to future normal releases only. Backfills reuse the existing tag, and historical unsigned tags are not recreated or moved.
 
@@ -106,6 +140,7 @@ After publication, verify:
 - GitHub notes, five runtime archives, checksums, expected desktop installers, and conditional `latest.json`;
 - all five runtime npm packages plus `kandev`, including a clean `npx kandev@latest`;
 - Homebrew install/upgrade, a `Cellar/kandev/X.Y.Z` install path, and `kandev --version`;
+- Scoop install/update, the manifest version and hash, and `kandev --version`;
 - GHCR base and universal images on amd64 and arm64, including their immutable version tags;
 - desktop launch on affected platforms and signed/notarized status where configured;
 - backend health, a minimal task, agentctl startup, and Updates-screen behavior;
@@ -152,7 +187,7 @@ git push origin vX.Y.Z
 
 Before pushing, confirm that `git tag -v` reports the full `RELEASE_GPG_FINGERPRINT` recorded with `.github/release-signing-key.asc`. An arbitrary clone cannot recover by pushing alone because the locally created tag existed only on the failed ephemeral runner.
 
-Use `backfill_tag` only for the latest release when shipped source is correct and the failure is missing artifacts or a recoverable publication step. Backfill checks out application source from the tag, validates all version manifests, and uses the current workflow's control-plane helpers to rebuild or reconcile GitHub Release, GHCR, npm, desktop/updater, and Homebrew channels. Existing npm versions are not overwritten.
+Use `backfill_tag` only for the latest release when shipped source is correct and the failure is missing artifacts or a recoverable publication step. Backfill checks out application source from the tag, validates all version manifests, and uses the current workflow's control-plane helpers to rebuild or reconcile GitHub Release, GHCR, npm, desktop/updater, Homebrew, and Scoop channels. Existing npm versions are not overwritten.
 
 Publish a new patch instead when code is defective, an immutable npm package or version-specific image is wrong, manifests disagree, or repair would require changing tagged source. Never delete/reuse a published tag or move an npm version as a routine fix.
 

@@ -106,5 +106,14 @@
   "viewLabel": "檢視：{{name}}",
   "whatsNew": "新功能",
   "work": "工作",
-  "workspaceFallback": "工作區"
+  "workspaceFallback": "工作區",
+  "wipQueuePosition": "{{step}} 佇列中的第 {{position}} 項，共 {{total}} 項",
+  "taskPreferences": "側邊欄任務偏好設定",
+  "views": "側邊欄檢視",
+  "failedToLoadArchivedTasks": "載入已歸檔任務失敗",
+  "failedToSyncSidebarTaskPrefs": "同步側邊欄任務偏好失敗",
+  "failedToSyncSidebarViews": "同步側邊欄檢視失敗",
+  "morePluginItems": "更多外掛項",
+  "newViewNumbered": "新檢視 {{suffix}}",
+  "untitledView": "未命名檢視"
 }

@@ -118,5 +118,13 @@
   "workspaceNotFound": "未找到工作區",
   "workspaceSettings": "工作區設定",
   "worktreeBranchTemplate": "工作樹分支模板",
-  "worktreeSync": "工作樹同步"
+  "worktreeSync": "工作樹同步",
+  "chooseDifferentRepositoryName": "請另選一個儲存庫名稱。",
+  "enterRepositoryName": "請輸入儲存庫名稱。",
+  "repositoryNameMustBeOneFolder": "儲存庫名稱必須是單個目錄名。",
+  "sourceChooseAFolder": "請選擇一個目錄。",
+  "sourceChooseRepoAndBranch": "請選擇一個儲存庫和基線分支。",
+  "sourceEnterValidRemoteUrl": "請輸入有效的遠端儲存庫 URL 和基線分支。",
+  "sourceFolderAlreadySelected": "該目錄已被選擇。",
+  "sourceRepoBranchAlreadySelected": "該儲存庫和分支已被選擇。"
 }

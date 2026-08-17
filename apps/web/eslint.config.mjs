@@ -5,7 +5,7 @@ import sonarjs from "eslint-plugin-sonarjs";
 import unusedImports from "eslint-plugin-unused-imports";
 import i18next from "eslint-plugin-i18next";
 import tseslint from "typescript-eslint";
-import { i18nGuardFiles, noLiteralStringOptions } from "./eslint.i18n.options.mjs";
+import { noLiteralStringOptions } from "./eslint.i18n.options.mjs";
 import {
   e2eSleepGuardFiles,
   e2eSleepPlugin,
@@ -56,17 +56,33 @@ const eslintConfig = defineConfig([
       ],
     },
   },
-  // Hardcoded user-facing strings. An ERROR, but only on the allowlist in
-  // eslint.i18n.options.mjs — the paths that render user-facing copy, which is
-  // where a regression is real. A repo-wide error would break every unrelated PR
-  // that lands a literal; a warning would let listed paths drift back. A PR
-  // appends to `i18nGuardFiles` when it adds such a path or externalizes one
-  // still off the list — `lib/sidebar` is one the screen sweep did not cover.
+  // Hardcoded user-facing strings. An ERROR, REPO-WIDE.
+  //
+  // This was scoped to `i18nGuardFiles` while the migration was in flight: a
+  // repo-wide error would have broken every unrelated PR that landed a literal
+  // in un-migrated code, which is what made the first attempt unmergeable. That
+  // reason has expired. Measured across all 2560 source files the rule reports
+  // ZERO violations, so widening it costs nothing today and permanently removes
+  // "the file was not on the list" as a way for copy to ship untranslated.
+  //
+  // `i18nGuardFiles` is kept: it is the migration's record, the scope
+  // `pnpm run lint:i18n` previews, and a ratchet `check-guard-allowlist.mjs`
+  // still enforces. It is no longer what bounds this rule.
   {
-    files: i18nGuardFiles,
+    files: ["**/*.ts", "**/*.tsx"],
     // Test files build fixtures out of literal strings on purpose; guarding them
-    // would force every `label="Tasks"` in a test through the catalog.
-    ignores: ["**/*.test.ts", "**/*.test.tsx", "e2e/**"],
+    // would force every `label="Tasks"` in a test through the catalog. The
+    // `*.test-helpers` / `*.test-utils` pair are imported only by tests and are
+    // the same class.
+    ignores: [
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/*.test-helpers.ts",
+      "**/*.test-helpers.tsx",
+      "**/*.test-utils.ts",
+      "**/*.test-utils.tsx",
+      "e2e/**",
+    ],
     plugins: { i18next },
     rules: { "i18next/no-literal-string": ["error", noLiteralStringOptions] },
   },

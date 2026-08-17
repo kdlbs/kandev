@@ -121,5 +121,10 @@
   "worktreeSync": "Ŵōŕķţŕēē Śŷńć",
   "enterRepositoryName": "Ēńţēŕ à ŕēƥōśĩţōŕŷ ńàḿē.",
   "chooseDifferentRepositoryName": "Ćĥōōśē à ďĩƒƒēŕēńţ ŕēƥōśĩţōŕŷ ńàḿē.",
-  "repositoryNameMustBeOneFolder": "Ţĥē ŕēƥōśĩţōŕŷ ńàḿē ḿũśţ ƀē ōńē ƒōĺďēŕ ńàḿē."
+  "repositoryNameMustBeOneFolder": "Ţĥē ŕēƥōśĩţōŕŷ ńàḿē ḿũśţ ƀē ōńē ƒōĺďēŕ ńàḿē.",
+  "sourceChooseAFolder": "Ćĥōōśē à ƒōĺďēŕ.",
+  "sourceChooseRepoAndBranch": "Ćĥōōśē à ŕēƥōśĩţōŕŷ àńď ƀàśē ƀŕàńćĥ.",
+  "sourceEnterValidRemoteUrl": "Ēńţēŕ à vàĺĩď ŕēḿōţē ŕēƥōśĩţōŕŷ ŨŔĹ àńď ƀàśē ƀŕàńćĥ.",
+  "sourceFolderAlreadySelected": "Ţĥĩś ƒōĺďēŕ ĩś àĺŕēàďŷ śēĺēćţēď.",
+  "sourceRepoBranchAlreadySelected": "Ţĥĩś ŕēƥōśĩţōŕŷ àńď ƀŕàńćĥ àŕē àĺŕēàďŷ śēĺēćţēď."
 }

@@ -127,6 +127,24 @@ change makes a saved option value unsupported, Kandev removes that value after
 a successful resolution; a failed resolution keeps the draft unchanged so you
 can retry it.
 
+### Host probes and executor model catalogs
+
+The model list shown while editing a profile comes from a host probe. It is an
+editing hint, not a launch gate. A profile remains selectable when its saved
+model is missing from that host list.
+
+At task launch, the selected executor's ACP catalog is authoritative. Kandev
+sends the requested model only when the executor advertises it. If it does
+not, Kandev uses an advertised fallback when available, or sends no model
+request and continues with the agent's current or default model. Kandev stores
+one warning in task chat with the requested model and the effective model when
+known. The warning also identifies the agent and executor and asks you to
+check credentials, copied configuration, and the agent version.
+
+The saved profile model is not changed. Optional portable configuration can
+copy selected allowlisted files into a remote executor, but it cannot guarantee
+that the host and executor expose the same model catalog.
+
 ### Monitor capability and subscription status
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.

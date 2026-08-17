@@ -75,6 +75,12 @@ type TaskExecutionStopper interface {
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
 }
 
+// TerminalClarificationCanceller expires durable input requests after a task
+// service-owned terminal transition, such as archive cancellation.
+type TerminalClarificationCanceller interface {
+	ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error)
+}
+
 // TaskRowLivenessProber classifies an executors_running row's backing-process
 // liveness in a runtime-aware way (a local process check is never applied to a
 // remote/SSH row). It is optional and satisfied by the lifecycle adapter. When
@@ -298,12 +304,14 @@ type Service struct {
 	subagentContexts                repository.SubagentContextRepository
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
+	statusSummaryProjector          TaskStatusSummaryEventProjector
 	queuedPromptCounter             QueuedPromptCounter
 	eventBus                        bus.EventBus
 	logger                          *logger.Logger
 	discoveryConfig                 RepositoryDiscoveryConfig
 	worktreeCleanup                 WorktreeCleanup
 	executionStopper                TaskExecutionStopper
+	clarificationCanceller          TerminalClarificationCanceller
 	rowLivenessProber               TaskRowLivenessProber
 	contextWindowResetter           func(context.Context, string) error
 	cleanupActivity                 TaskResourceCleanupActivityGate
@@ -371,6 +379,12 @@ type Service struct {
 	// within this backend process only — this backend is single-process per
 	// SQLite database, so that is the complete threat model today.
 	repoResolveMu sync.Mutex
+	// pendingActionProjectionMu guards the durable-generation logical clock
+	// shared by REST snapshots and semantic message events. Revisions are
+	// reserved before each repository read so delayed results stay ordered.
+	pendingActionProjectionMu       sync.Mutex
+	pendingActionProjectionEpoch    string
+	pendingActionProjectionSequence uint64
 }
 
 // SetAttachmentService wires the file-backed prompt attachment owner into the
@@ -433,6 +447,9 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		branchFetcher:         newBranchFetcher(log.Zap()),
 		lastTaskActivity:      make(map[string]v1.ForegroundActivity),
 		lastTaskSubagentCount: make(map[string]int),
+		// Focused service tests do not run backend composition. Production
+		// replaces this fallback with a database-allocated generation.
+		pendingActionProjectionEpoch: "1",
 	}
 }
 
@@ -481,6 +498,12 @@ func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) 
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
+}
+
+// SetClarificationCanceller wires terminal clarification cleanup for session
+// transitions owned by the task service.
+func (s *Service) SetClarificationCanceller(canceller TerminalClarificationCanceller) {
+	s.clarificationCanceller = canceller
 }
 
 // SetRowLivenessProber wires the runtime-aware executors_running liveness probe

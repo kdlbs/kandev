@@ -487,8 +487,7 @@
   "previewSound": "Preview sound",
   "profileForTasksCreatedByAgents": "Profile for Tasks Created by Agents",
   "programming": "Programming",
-  "profileFallbackWillBeUsed": "Start model {{model}} is no longer available; fallback {{fallback}} will be used.",
-  "profileStartModelUnavailable": "Start model {{model}} is no longer available; change it in the agent profile.",
+  "profileStartModelNotAdvertisedOnHost": "The host probe did not advertise {{model}}. The selected executor will decide the model at launch.",
   "promptAdd": "Add prompt",
   "promptContentPlaceholder": "Prompt content",
   "promptCreateFailed": "Couldn't create prompt",
@@ -726,5 +725,8 @@
   "noValidDestinations": "No valid destinations available.",
   "transferFailed": "Could not copy or move the secret.",
   "destinationGlobal": "Global",
-  "secretNameTooLong": "Name must be at most 100 bytes."
+  "secretNameTooLong": "Name must be at most 100 bytes.",
+  "keyValueAddItem": "Add Item",
+  "keyValueKeyPlaceholder": "Key",
+  "keyValueValuePlaceholder": "Value"
 }

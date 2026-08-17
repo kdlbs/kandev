@@ -207,6 +207,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		AuthMethods:             event.AuthMethods,
 		CurrentModelID:          event.CurrentModelID,
 		FallbackModel:           event.FallbackModel,
+		ModelSelectionWarning:   event.ModelSelectionWarning,
 		SessionModels:           event.SessionModels,
 		ConfigOptions:           event.ConfigOptions,
 		ConfigBaselineCandidate: event.ConfigBaselineCandidate,

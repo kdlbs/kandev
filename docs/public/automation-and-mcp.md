@@ -220,6 +220,18 @@ Only success resolves a link. A predecessor that fails or is cancelled leaves
 its dependents blocked with a reason naming it, and Kandev does not retry it or
 drop the link on its own.
 
+Starting a chain step by any other means consumes its recorded start, so the
+gate cannot fire a second session on a task that is already running. A start
+that fails keeps the intent, and preparing a workspace without launching an
+agent does not consume it.
+
+While a step is still waiting, `update_task_kandev` accepts
+`deferred_launch_prompt` to replace the prompt it will launch with. Use it when
+the brief written at creation time has gone stale. The rest of the recorded
+launch (agent profile, executor) is preserved. Once the task has started the
+update is rejected, because nothing would read the new prompt; send the new
+context with `message_task_kandev` instead.
+
 ### Autopilot tasks and MCP profiles
 
 Task creation accepts one optional boolean:
@@ -341,6 +353,8 @@ authoritative for every call. The existing automation request and response
 payloads are unchanged.
 
 `spawn_session_kandev` creates a named sibling session on the current task by default and can target another task in the same workspace. `message_task_kandev` can address a task's primary session or an explicit session ID: a running agent receives queued input, an idle/created session can be started, and a failed or cancelled session rejects the message.
+
+Without `session_id` the message goes to the task's primary session. If that primary is cancelled or failed, Kandev falls back to the newest session on the task that can still take a message, so a task with a live session stays reachable after its primary was stopped. A session named explicitly by `session_id` is never redirected. When every session is terminal the call fails and names `spawn_session_kandev`, which is the way to give the task a new session.
 
 A same-task message requires the sibling's session ID. Normal messages can cross workspaces when the sender knows the full task ID. Delivery to a running session is queued by default. When a direct child must abandon its current approach and receive replacement work now, its parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; another sender receives a hard error rather than a silent downgrade, and a request that cannot dispatch safely remains queued.
 

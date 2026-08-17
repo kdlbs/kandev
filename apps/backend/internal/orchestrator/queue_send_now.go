@@ -475,7 +475,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	}
 
 	_, err := s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
-		claim.Dispatch.PlanMode, attachments, false, claim.Dispatch.ID, false, nil)
+		claim.Dispatch.PlanMode, attachments, false, promptTaskOptions{claimEntryID: claim.Dispatch.ID})
 	return err
 }
 

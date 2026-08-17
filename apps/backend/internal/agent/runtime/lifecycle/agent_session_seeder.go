@@ -64,6 +64,9 @@ func SessionDirHostPath(kandevHomeDir, instanceID, sessionDirTemplate string) st
 		return ""
 	}
 	rel := strings.TrimPrefix(sessionDirTemplate, "{home}/")
+	if sessionDirTemplate == "{home}" {
+		rel = "."
+	}
 	return filepath.Join(root, rel)
 }
 
@@ -78,14 +81,7 @@ type localFileUploader struct {
 }
 
 func (u localFileUploader) WriteFile(_ context.Context, path string, data []byte, mode os.FileMode) error {
-	cleanPath, err := containedPath(u.root, path)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(cleanPath), 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(cleanPath), err)
-	}
-	return os.WriteFile(cleanPath, data, mode)
+	return writeFileWithinRoot(u.root, path, data, mode)
 }
 
 // containedPath returns a cleaned absolute path guaranteed to be inside root,
@@ -108,8 +104,8 @@ func containedPath(root, path string) (string, error) {
 }
 
 // SeedAgentSessionDir copies the agent's RemoteAuth.SourceFiles from the host
-// home into a per-container session dir, populating just the auth-relevant
-// files (typically auth.json + config.toml). Stale per-host state — codex's
+// home into a per-container session dir. Optional configuration bundles are
+// copied only when selectedIDs is provided. Stale per-host state — codex's
 // state.db with absolute macOS paths, sessions/ subdirectories, lock files —
 // is intentionally NOT copied; the agent rebuilds them inside the container
 // with container-local Linux paths.
@@ -122,6 +118,22 @@ func SeedAgentSessionDir(
 	ag agents.Agent,
 	instanceSessionRoot string,
 	log *logger.Logger,
+	selectedIDs ...[]string,
+) error {
+	var selected []string
+	if len(selectedIDs) > 0 {
+		selected = selectedIDs[0]
+	}
+	return seedAgentSessionDir(ctx, ag, instanceSessionRoot, log, selected, nil)
+}
+
+func seedAgentSessionDir(
+	ctx context.Context,
+	ag agents.Agent,
+	instanceSessionRoot string,
+	log *logger.Logger,
+	selectedIDs []string,
+	onWarnings func([]PortableConfigWarning),
 ) error {
 	if ag == nil || instanceSessionRoot == "" {
 		return nil
@@ -134,33 +146,52 @@ func SeedAgentSessionDir(
 		return fmt.Errorf("mkdir %s: %w", instanceSessionRoot, err)
 	}
 
+	authErr := seedAgentAuthFiles(ctx, ag, instanceSessionRoot, log)
+	if authErr != nil && log != nil {
+		log.Warn("failed to seed agent authentication files; continuing with configuration bundles", zap.Error(authErr))
+	}
+	if len(selectedIDs) > 0 {
+		warnings := UploadPortableConfigBundles(
+			ctx, localFileUploader{root: instanceSessionRoot}, ag, selectedIDs, instanceSessionRoot, log,
+		)
+		if onWarnings != nil {
+			onWarnings(warnings)
+		}
+	}
+	return authErr
+}
+
+func seedAgentAuthFiles(ctx context.Context, ag agents.Agent, instanceSessionRoot string, log *logger.Logger) error {
 	auth := ag.RemoteAuth()
 	if auth == nil {
 		return nil
 	}
-	hostOS := runtime.GOOS
-	methods := make([]remoteauth.Method, 0, len(auth.Methods))
-	for _, m := range auth.Methods {
-		if m.Type != authMethodTypeFiles || len(m.SourceFiles) == 0 {
+	methods := authMethodsForHost(auth.Methods, runtime.GOOS)
+	if len(methods) == 0 {
+		return nil
+	}
+	return UploadCredentialFiles(ctx, localFileUploader{root: instanceSessionRoot}, methods, instanceSessionRoot, log)
+}
+
+func authMethodsForHost(methods []agents.RemoteAuthMethod, hostOS string) []remoteauth.Method {
+	selected := make([]remoteauth.Method, 0, len(methods))
+	for _, method := range methods {
+		if method.Type != authMethodTypeFiles || len(method.SourceFiles) == 0 {
 			continue
 		}
 		// Resolve the OS-specific source list into a flat one keyed by host
 		// OS, falling back to "linux" for cross-platform agents.
-		srcs := selectAuthSourceFiles(m, hostOS)
-		if len(srcs) == 0 {
+		sources := selectAuthSourceFiles(method, hostOS)
+		if len(sources) == 0 {
 			continue
 		}
-		methods = append(methods, remoteauth.Method{
-			Type:         m.Type,
-			SourceFiles:  srcs,
-			TargetRelDir: m.TargetRelDir,
+		selected = append(selected, remoteauth.Method{
+			Type:         method.Type,
+			SourceFiles:  sources,
+			TargetRelDir: method.TargetRelDir,
 		})
 	}
-	if len(methods) == 0 {
-		return nil
-	}
-
-	return UploadCredentialFiles(ctx, localFileUploader{root: instanceSessionRoot}, methods, instanceSessionRoot, log)
+	return selected
 }
 
 // selectAuthSourceFiles picks the SourceFiles list to use for the host OS,

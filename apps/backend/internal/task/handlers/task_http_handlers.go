@@ -233,11 +233,12 @@ func buildTaskDTOsWithSessionInfo(
 		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
 	}
 	if summaryErr == nil && pendingErr == nil {
-		statusSummaries, err = svc.HydrateMissingTaskStatusSummaries(
+		reconciledSummaries, reconcileErr := svc.ReconcileTaskStatusSummaries(
 			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
 		)
-		if err != nil {
-			log.Warn("failed to repair missing task status summaries", zap.Error(err))
+		statusSummaries = reconciledSummaries
+		if reconcileErr != nil {
+			log.Warn("failed to reconcile task status summaries", zap.Error(reconcileErr))
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary.
@@ -286,7 +287,7 @@ func buildTaskDTOsWithSessionInfo(
 		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
-		taskDTO.StatusSummary = statusSummaries[task.ID]
+		dto.EnrichTaskStatusSummary(&taskDTO, task.ID, statusSummaries)
 		if taskDTO.StatusSummary != nil {
 			switch {
 			case queuedErr != nil:
@@ -415,19 +416,33 @@ func pendingActionPtr(
 	return &value
 }
 
+func pendingActionRevisionPtr(
+	sessionID string,
+	revisionsBySession map[string]models.PendingActionRevision,
+) *models.PendingActionRevision {
+	revision, ok := revisionsBySession[sessionID]
+	if !ok {
+		return nil
+	}
+	return &revision
+}
+
 func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskSession) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
-	if !isInputCapableSession(session) {
-		return result
-	}
-	actions, err := h.service.GetPendingActionsForSessions(ctx, []string{session.ID})
+	actions, revisions, err := h.service.GetPendingActionProjectionsForSessions(
+		ctx,
+		[]string{session.ID},
+	)
 	if err != nil {
 		h.logger.Warn("get task session pending action failed",
 			zap.String("session_id", session.ID), zap.Error(err))
 		return result
 	}
-	result.PendingAction = pendingActionPtr(&session.ID, actions)
+	if isInputCapableSession(session) {
+		result.PendingAction = pendingActionPtr(&session.ID, actions)
+	}
+	result.PendingActionRevision = pendingActionRevisionPtr(session.ID, revisions)
 	return result
 }
 
@@ -457,24 +472,15 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return
 	}
-	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(
-		ctx,
-		h.service,
-		map[string][]*models.TaskSession{c.Param("id"): sessions},
-	)
-	if pendingErr != nil {
-		h.logger.Warn("get task session pending actions failed", zap.Error(pendingErr))
-		pendingActionsBySession = map[string]models.TaskPendingAction{}
+	sessionDTOs, projectionErr := h.taskSessionSummariesWithPendingActions(ctx, sessions)
+	if projectionErr != nil {
+		h.logger.Error("get task session pending actions failed", zap.Error(projectionErr))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load task session pending actions"})
+		return
 	}
-	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
-	ids := make([]string, 0, len(sessions))
-	for _, session := range sessions {
-		summary := dto.FromTaskSessionSummary(session)
-		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
-		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
-		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
-		sessionDTOs = append(sessionDTOs, summary)
-		ids = append(ids, session.ID)
+	ids := make([]string, 0, len(sessionDTOs))
+	for _, summary := range sessionDTOs {
+		ids = append(ids, summary.ID)
 	}
 	// Resolve the per-session tool_call counts so the frontend can render
 	// the "ran N commands" segment without fetching every session's full

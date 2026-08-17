@@ -33,6 +33,7 @@ export type SegmentTitle = {
  * Integration slugs are NOT listed: those come from `WORKSPACE_INTEGRATIONS`
  * below, the same table the command palette and the route list read.
  */
+// i18n-exempt: brand names and initialisms, spelled the same in every locale.
 const SEGMENT_LABEL_OVERRIDES: Record<string, string> = {
   mcp: "MCP",
   ui: "UI",

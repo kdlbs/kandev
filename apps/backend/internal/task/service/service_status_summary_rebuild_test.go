@@ -2,10 +2,18 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -43,6 +51,140 @@ type statusSummaryQueuedPromptCounter struct {
 	counts map[string]int
 }
 
+type rejectingStatusSummaryRepository struct {
+	repository.TaskStatusSummaryRepository
+	competing statussummary.StoredTaskStatusSummary
+	rejected  bool
+}
+
+type cancelingRejectStatusSummaryRepository struct {
+	repository.TaskStatusSummaryRepository
+	summary      *statussummary.TaskStatusSummary
+	cancel       context.CancelFunc
+	compareCalls int
+}
+
+type exhaustingStatusSummaryRepository struct {
+	repository.TaskStatusSummaryRepository
+	summary      statussummary.TaskStatusSummary
+	compareCalls int
+}
+
+type vanishingStatusSummaryRepository struct {
+	repository.TaskStatusSummaryRepository
+	compareCalls int
+}
+
+type failingStatusSummaryRepository struct {
+	repository.TaskStatusSummaryRepository
+	err        error
+	failTaskID string
+}
+
+func (r *failingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
+	ctx context.Context,
+	stored *statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	if r.failTaskID == "" || stored.TaskID == r.failTaskID {
+		return false, r.err
+	}
+	return r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, stored)
+}
+
+func (r *vanishingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
+	ctx context.Context,
+	stored *statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	r.compareCalls++
+	if r.compareCalls == 1 {
+		return false, nil
+	}
+	return r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, stored)
+}
+
+func (r *vanishingStatusSummaryRepository) LoadTaskStatusSummaries(
+	context.Context,
+	[]string,
+) (map[string]*statussummary.TaskStatusSummary, error) {
+	return map[string]*statussummary.TaskStatusSummary{}, nil
+}
+
+type authoritativePendingMessageRepository struct {
+	repository.MessageRepository
+	actions map[string]models.TaskPendingAction
+	calls   int
+}
+
+type statusSummarySessionRepository struct {
+	repository.SessionRepository
+	sessions []*models.TaskSession
+	calls    int
+}
+
+func (r *statusSummarySessionRepository) ListTaskSessions(
+	context.Context,
+	string,
+) ([]*models.TaskSession, error) {
+	r.calls++
+	return r.sessions, nil
+}
+
+func (r *authoritativePendingMessageRepository) GetPendingActionsBySessionIDs(
+	context.Context,
+	[]string,
+) (map[string]models.TaskPendingAction, error) {
+	r.calls++
+	return r.actions, nil
+}
+
+func (r *rejectingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
+	ctx context.Context,
+	stored *statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	if !r.rejected {
+		r.rejected = true
+		if _, err := r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, &r.competing); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	return r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, stored)
+}
+
+func (r *cancelingRejectStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
+	context.Context,
+	*statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	r.compareCalls++
+	if r.compareCalls == 1 {
+		r.cancel()
+	}
+	return false, nil
+}
+
+func (r *cancelingRejectStatusSummaryRepository) LoadTaskStatusSummaries(
+	context.Context,
+	[]string,
+) (map[string]*statussummary.TaskStatusSummary, error) {
+	return map[string]*statussummary.TaskStatusSummary{"task-1": r.summary}, nil
+}
+
+func (r *exhaustingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
+	context.Context,
+	*statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	r.compareCalls++
+	return false, nil
+}
+
+func (r *exhaustingStatusSummaryRepository) LoadTaskStatusSummaries(
+	context.Context,
+	[]string,
+) (map[string]*statussummary.TaskStatusSummary, error) {
+	summary := r.summary
+	return map[string]*statussummary.TaskStatusSummary{"task-1": &summary}, nil
+}
+
 func (c statusSummaryQueuedPromptCounter) CountPendingByTaskIDs(_ context.Context, taskIDs []string) (map[string]int, error) {
 	out := make(map[string]int, len(taskIDs))
 	for _, id := range taskIDs {
@@ -51,8 +193,8 @@ func (c statusSummaryQueuedPromptCounter) CountPendingByTaskIDs(_ context.Contex
 	return out, nil
 }
 
-func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) {
-	svc, _, repo := createTestService(t)
+func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 	createTaskWithoutRepositories(t, ctx, repo)
 
@@ -101,11 +243,11 @@ func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) 
 	sessions := map[string][]*models.TaskSession{task.ID: {session}}
 	pending := map[string]models.TaskPendingAction{session.ID: models.TaskPendingActionPermission}
 
-	got, err := svc.HydrateMissingTaskStatusSummaries(
+	got, err := svc.ReconcileTaskStatusSummaries(
 		ctx, []*models.Task{task}, sessions, pending, map[string]*statussummary.TaskStatusSummary{},
 	)
 	if err != nil {
-		t.Fatalf("HydrateMissingTaskStatusSummaries: %v", err)
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
 	}
 	summary := got[task.ID]
 	if summary == nil {
@@ -143,18 +285,25 @@ func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) 
 	if persisted[task.ID] == nil || persisted[task.ID].Revision != 1 {
 		t.Fatalf("persisted summary = %+v", persisted[task.ID])
 	}
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 || published[0].Type != events.TaskStatusSummaryUpdated {
+		t.Fatalf("missing-summary repair events = %+v, want one summary update", published)
+	}
 
-	if _, err := svc.HydrateMissingTaskStatusSummaries(ctx, []*models.Task{task}, sessions, pending, got); err != nil {
-		t.Fatalf("second HydrateMissingTaskStatusSummaries: %v", err)
+	if _, err := svc.ReconcileTaskStatusSummaries(ctx, []*models.Task{task}, sessions, pending, got); err != nil {
+		t.Fatalf("second ReconcileTaskStatusSummaries: %v", err)
 	}
 	if prReader.calls != 1 {
 		t.Fatalf("PR reader calls after existing summary = %d, want one", prReader.calls)
+	}
+	if published = eventBus.GetPublishedEvents(); len(published) != 1 {
+		t.Fatalf("events after no-op reconcile = %+v, want no duplicate", published)
 	}
 }
 
 // The rebuild path is what runs after a restart, so it is where a stale record
 // used to come back. A session whose error was cleared must rebuild clean.
-func TestHydrateMissingTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) {
+func TestReconcileTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	createTaskWithoutRepositories(t, ctx, repo)
@@ -180,7 +329,7 @@ func TestHydrateMissingTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) 
 
 	svc.statusSummaries = repo
 	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
-	got, err := svc.HydrateMissingTaskStatusSummaries(
+	got, err := svc.ReconcileTaskStatusSummaries(
 		ctx,
 		[]*models.Task{task},
 		map[string][]*models.TaskSession{task.ID: {stored}},
@@ -188,7 +337,7 @@ func TestHydrateMissingTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) 
 		map[string]*statussummary.TaskStatusSummary{},
 	)
 	if err != nil {
-		t.Fatalf("HydrateMissingTaskStatusSummaries: %v", err)
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
 	}
 	summary := got[task.ID]
 	if summary == nil {
@@ -196,5 +345,395 @@ func TestHydrateMissingTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) 
 	}
 	if summary.ActiveError != nil {
 		t.Fatalf("active error = %+v, want a cleared record to stay invisible", summary.ActiveError)
+	}
+}
+
+func TestReconcileTaskStatusSummariesRepairsExistingPendingOnly(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	svc.statusSummaries = repo
+
+	storedAt := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	stored := statussummary.TaskStatusSummary{
+		Revision:            7,
+		UpdatedAt:           storedAt,
+		PrimarySession:      &statussummary.PrimarySessionSummary{ID: "primary-1", State: "RUNNING"},
+		ForegroundActivity:  "generating",
+		ActiveSubagentCount: 2,
+		PendingAction:       string(models.TaskPendingActionClarification),
+		Git:                 &statussummary.GitSummary{ChangedFiles: 4, Ahead: 1},
+		QueuedPromptCount:   3,
+	}
+	accepted, err := repo.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
+		TaskID:      "task-1",
+		WorkspaceID: "ws-1",
+		Summary:     stored,
+	})
+	if err != nil || !accepted {
+		t.Fatalf("seed task status summary: accepted=%v err=%v", accepted, err)
+	}
+	eventBus.ClearEvents()
+
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{"task-1": &stored},
+	)
+	if err != nil {
+		t.Fatalf("repair existing pending state: %v", err)
+	}
+	repaired := got[task.ID]
+	if repaired == nil || repaired.PendingAction != "" || repaired.Revision != 8 {
+		t.Fatalf("repaired existing summary = %+v", repaired)
+	}
+	if repaired.PrimarySession == nil || repaired.PrimarySession.ID != "primary-1" ||
+		repaired.ForegroundActivity != "generating" || repaired.ActiveSubagentCount != 2 ||
+		repaired.Git == nil || repaired.Git.ChangedFiles != 4 || repaired.QueuedPromptCount != 3 {
+		t.Fatalf("unrelated summary fields changed: %+v", repaired)
+	}
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 || published[0].Type != events.TaskStatusSummaryUpdated {
+		t.Fatalf("repair events = %+v, want one complete summary update", published)
+	}
+
+	eventBus.ClearEvents()
+	if _, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		got,
+	); err != nil {
+		t.Fatalf("repeat existing pending repair: %v", err)
+	}
+	if len(eventBus.GetPublishedEvents()) != 0 {
+		t.Fatalf("no-op repair published events = %+v", eventBus.GetPublishedEvents())
+	}
+}
+
+func TestReconcileTaskStatusSummariesInvalidatesStaleSummaryOnRepairFailure(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	repairErr := errors.New("status summary write failed")
+	svc.statusSummaries = &failingStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		err:                         repairErr,
+	}
+	stored := &statussummary.TaskStatusSummary{Revision: 4}
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: task.ID,
+		State:  models.TaskSessionStateWaitingForInput,
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		context.Background(),
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{task.ID: {session}},
+		map[string]models.TaskPendingAction{
+			session.ID: models.TaskPendingActionClarification,
+		},
+		map[string]*statussummary.TaskStatusSummary{task.ID: stored},
+	)
+
+	if !errors.Is(err, repairErr) {
+		t.Fatalf("ReconcileTaskStatusSummaries error = %v, want %v", err, repairErr)
+	}
+	if summary, exists := got[task.ID]; !exists || summary != nil {
+		t.Fatalf("stale summary = %+v, present=%v; want explicit invalidation", summary, exists)
+	}
+}
+
+func TestReconcileTaskStatusSummariesRebuildsUnrelatedMissingSummaryAfterRepairFailure(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-2", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+	}); err != nil {
+		t.Fatalf("CreateTask(task-2): %v", err)
+	}
+	repairErr := errors.New("task-1 summary write failed")
+	svc.statusSummaries = &failingStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		err:                         repairErr,
+		failTaskID:                  "task-1",
+	}
+	tasks := []*models.Task{
+		{ID: "task-1", WorkspaceID: "ws-1"},
+		{ID: "task-2", WorkspaceID: "ws-1"},
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		tasks,
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{"task-1": {Revision: 3, PendingAction: "clarification"}},
+	)
+
+	if !errors.Is(err, repairErr) {
+		t.Fatalf("ReconcileTaskStatusSummaries error = %v, want %v", err, repairErr)
+	}
+	if summary, exists := got["task-1"]; !exists || summary != nil {
+		t.Fatalf("failed task summary = %+v, present=%v; want explicit invalidation", summary, exists)
+	}
+	if got["task-2"] == nil {
+		t.Fatal("unrelated missing task summary was not rebuilt")
+	}
+}
+
+func TestReconcileTaskStatusSummariesReReadsPendingAfterCASRejection(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	stored := statussummary.TaskStatusSummary{
+		Revision:      4,
+		PendingAction: string(models.TaskPendingActionClarification),
+	}
+	accepted, err := repo.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
+		TaskID: "task-1", WorkspaceID: "ws-1", Summary: stored,
+	})
+	if err != nil || !accepted {
+		t.Fatalf("seed task status summary: accepted=%v err=%v", accepted, err)
+	}
+	svc.statusSummaries = &rejectingStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		competing: statussummary.StoredTaskStatusSummary{
+			TaskID:      "task-1",
+			WorkspaceID: "ws-1",
+			Summary: statussummary.TaskStatusSummary{
+				Revision:          5,
+				PendingAction:     string(models.TaskPendingActionClarification),
+				QueuedPromptCount: 9,
+			},
+		},
+	}
+	pendingMessages := &authoritativePendingMessageRepository{
+		MessageRepository: repo,
+		actions: map[string]models.TaskPendingAction{
+			"session-1": models.TaskPendingActionClarification,
+		},
+	}
+	svc.messages = pendingMessages
+
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: task.ID,
+		State:  models.TaskSessionStateWaitingForInput,
+	}
+	sessionRepo := &statusSummarySessionRepository{
+		SessionRepository: repo,
+		sessions:          []*models.TaskSession{session},
+	}
+	svc.sessions = sessionRepo
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{task.ID: {session}},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{"task-1": &stored},
+	)
+	if err != nil {
+		t.Fatalf("reconcile after CAS rejection: %v", err)
+	}
+	repaired := got[task.ID]
+	if repaired == nil || repaired.Revision != 5 ||
+		repaired.PendingAction != string(models.TaskPendingActionClarification) || repaired.QueuedPromptCount != 9 {
+		t.Fatalf("summary after CAS rejection = %+v", repaired)
+	}
+	if pendingMessages.calls != 1 {
+		t.Fatalf("authoritative pending reads = %d, want 1", pendingMessages.calls)
+	}
+	if sessionRepo.calls != 1 {
+		t.Fatalf("authoritative session reads = %d, want 1", sessionRepo.calls)
+	}
+}
+
+func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	stored := &statussummary.TaskStatusSummary{
+		Revision:      4,
+		PendingAction: string(models.TaskPendingActionClarification),
+	}
+	rejecting := &cancelingRejectStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		summary: &statussummary.TaskStatusSummary{
+			Revision:      5,
+			PendingAction: string(models.TaskPendingActionClarification),
+		},
+		cancel: cancel,
+	}
+	svc.statusSummaries = rejecting
+	svc.sessions = &statusSummarySessionRepository{
+		SessionRepository: repo,
+		sessions: []*models.TaskSession{{
+			ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateCompleted,
+		}},
+	}
+	svc.messages = &authoritativePendingMessageRepository{MessageRepository: repo}
+
+	_, err := svc.reconcileExistingSummary(
+		ctx,
+		&models.Task{ID: "task-1", WorkspaceID: "ws-1"},
+		stored,
+		"",
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("reconcileExistingSummary error = %v, want context canceled", err)
+	}
+	if rejecting.compareCalls != 1 {
+		t.Fatalf("compare calls after cancellation = %d, want 1", rejecting.compareCalls)
+	}
+}
+
+func TestReconcileTaskStatusSummariesMarksStaleRowInvalidAfterCASExhaustion(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, logErr := commonlogger.NewFromZap(zap.New(core))
+	if logErr != nil {
+		t.Fatalf("create logger: %v", logErr)
+	}
+	svc.logger = log
+	stored := statussummary.TaskStatusSummary{Revision: 4, QueuedPromptCount: 9}
+	exhausting := &exhaustingStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		summary:                     stored,
+	}
+	svc.statusSummaries = exhausting
+	session := &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput,
+	}
+	svc.sessions = &statusSummarySessionRepository{
+		SessionRepository: repo,
+		sessions:          []*models.TaskSession{session},
+	}
+	svc.messages = &authoritativePendingMessageRepository{
+		MessageRepository: repo,
+		actions: map[string]models.TaskPendingAction{
+			"session-1": models.TaskPendingActionClarification,
+		},
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		context.Background(),
+		[]*models.Task{{ID: "task-1", WorkspaceID: "ws-1"}},
+		map[string][]*models.TaskSession{"task-1": {session}},
+		map[string]models.TaskPendingAction{"session-1": models.TaskPendingActionClarification},
+		map[string]*statussummary.TaskStatusSummary{"task-1": &stored},
+	)
+	if err == nil {
+		t.Fatal("CAS exhaustion error = nil")
+	}
+	if summary, exists := got["task-1"]; !exists || summary != nil {
+		t.Fatalf("summary after CAS exhaustion = %+v, present=%v; want explicit invalidation", summary, exists)
+	}
+	if exhausting.compareCalls != maxSummaryReconcileAttempts {
+		t.Fatalf("compare calls = %d, want %d", exhausting.compareCalls, maxSummaryReconcileAttempts)
+	}
+	entries := logs.FilterMessage("task status summary compare-and-set retries exhausted").All()
+	if len(entries) != 1 {
+		t.Fatalf("CAS exhaustion warning count = %d, want 1", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["task_id"] != "task-1" || fields["attempts"] != int64(maxSummaryReconcileAttempts) {
+		t.Fatalf("CAS exhaustion warning fields = %#v", fields)
+	}
+}
+
+func TestReconcileTaskStatusSummariesReReadsSessionStateAfterCASRejection(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	stored := statussummary.TaskStatusSummary{Revision: 4}
+	accepted, err := repo.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
+		TaskID: "task-1", WorkspaceID: "ws-1", Summary: stored,
+	})
+	if err != nil || !accepted {
+		t.Fatalf("seed task status summary: accepted=%v err=%v", accepted, err)
+	}
+	svc.statusSummaries = &rejectingStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		competing: statussummary.StoredTaskStatusSummary{
+			TaskID:      "task-1",
+			WorkspaceID: "ws-1",
+			Summary: statussummary.TaskStatusSummary{
+				Revision:      5,
+				PendingAction: string(models.TaskPendingActionClarification),
+			},
+		},
+	}
+	pendingMessages := &authoritativePendingMessageRepository{
+		MessageRepository: repo,
+		actions: map[string]models.TaskPendingAction{
+			"session-1": models.TaskPendingActionClarification,
+		},
+	}
+	svc.messages = pendingMessages
+	sessionRepo := &statusSummarySessionRepository{
+		SessionRepository: repo,
+		sessions: []*models.TaskSession{{
+			ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateCompleted,
+		}},
+	}
+	svc.sessions = sessionRepo
+	staleSession := &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput,
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{{ID: "task-1", WorkspaceID: "ws-1"}},
+		map[string][]*models.TaskSession{"task-1": {staleSession}},
+		map[string]models.TaskPendingAction{
+			"session-1": models.TaskPendingActionClarification,
+		},
+		map[string]*statussummary.TaskStatusSummary{"task-1": &stored},
+	)
+	if err != nil {
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
+	}
+	repaired := got["task-1"]
+	if repaired == nil || repaired.Revision != 6 || repaired.PendingAction != "" {
+		t.Fatalf("summary after session-state refresh = %+v, want revision 6 without pending", repaired)
+	}
+	if pendingMessages.calls != 1 || sessionRepo.calls != 1 {
+		t.Fatalf("retry refresh calls: pending=%d sessions=%d, want 1 each", pendingMessages.calls, sessionRepo.calls)
+	}
+}
+
+func TestReconcileTaskStatusSummariesRebuildsSummaryThatVanishesDuringRetry(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	vanishing := &vanishingStatusSummaryRepository{TaskStatusSummaryRepository: repo}
+	svc.statusSummaries = vanishing
+	stored := &statussummary.TaskStatusSummary{
+		Revision:      4,
+		PendingAction: string(models.TaskPendingActionClarification),
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{{ID: "task-1", WorkspaceID: "ws-1"}},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{"task-1": stored},
+	)
+	if err != nil {
+		t.Fatalf("ReconcileTaskStatusSummaries: %v", err)
+	}
+	rebuilt := got["task-1"]
+	if rebuilt == nil || rebuilt == stored || rebuilt.Revision != 1 || rebuilt.PendingAction != "" {
+		t.Fatalf("summary after vanished retry = %+v, want rebuilt revision 1", rebuilt)
+	}
+	if vanishing.compareCalls != 2 {
+		t.Fatalf("compare calls = %d, want reconcile plus rebuild", vanishing.compareCalls)
 	}
 }

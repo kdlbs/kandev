@@ -147,11 +147,11 @@ describe("useAgentProfileOptions enabled filter", () => {
   });
 });
 
-describe("useAgentProfileOptions no-silent-model-fallback gating", () => {
-  it("blocks a profile whose start model is gone (strict mode)", () => {
+describe("useAgentProfileOptions executor-authoritative model hint", () => {
+  it("keeps a profile whose start model is absent from the host probe selectable", () => {
     const option = renderOptions([profileOption({ model: GONE_MODEL })]);
-    expect(option.getAttribute(DATA_DISABLED)).toBe("true");
-    expect(option.getAttribute("data-reason")).toContain(GONE_MODEL);
+    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+    expect(screen.getByTitle(/claude-gone/)).not.toBeNull();
   });
 
   it("keeps a profile with an available start model selectable", () => {
@@ -164,27 +164,26 @@ describe("useAgentProfileOptions no-silent-model-fallback gating", () => {
     expect(option.getAttribute(DATA_DISABLED)).toBeNull();
   });
 
-  it("keeps a gone-model profile with a fallback selectable and warns", () => {
+  it("keeps a gone-model profile with a fallback selectable", () => {
     const option = renderOptions([profileOption({ model: GONE_MODEL, fallback_model: "gpt-5" })]);
     expect(option.getAttribute(DATA_DISABLED)).toBeNull();
     expect(option.getAttribute("data-reason")).toBeNull();
 
-    // The amber warning icon carries the fallback note.
-    expect(screen.getByTitle(/gpt-5/)).not.toBeNull();
+    expect(screen.getByTitle(/claude-gone/)).not.toBeNull();
   });
 
-  it("blocks a profile whose fallback model is also gone (both-gone)", () => {
+  it("keeps a profile selectable when both saved models are absent from the host probe", () => {
     const option = renderOptions([
       profileOption({ model: GONE_MODEL, fallback_model: "other-gone" }),
     ]);
-    expect(option.getAttribute(DATA_DISABLED)).toBe("true");
-    expect(option.getAttribute("data-reason")).toContain(GONE_MODEL);
+    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+    expect(screen.getByTitle(/claude-gone/)).not.toBeNull();
   });
 
-  it("keeps a gone-model profile with auto-fallback selectable without a warning", () => {
+  it("keeps auto-fallback profiles selectable and shows the host probe hint", () => {
     const option = renderOptions([profileOption({ model: GONE_MODEL, auto_fallback: true })]);
     expect(option.getAttribute(DATA_DISABLED)).toBeNull();
-    expect(screen.queryByTitle(/claude-gone/)).toBeNull();
+    expect(screen.getByTitle(/claude-gone/)).not.toBeNull();
   });
 
   it("does not gate when the agent model list is unknown (probe not landed)", () => {

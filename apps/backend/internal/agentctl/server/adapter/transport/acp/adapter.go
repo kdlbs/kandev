@@ -533,6 +533,49 @@ func (a *Adapter) GetSessionID() string {
 	return a.sessionID
 }
 
+// GetSessionModelState returns the latest session model snapshot while holding
+// the adapter lock. The snapshot is used in the synchronous session response;
+// the normal session_models stream event remains the long-lived cache update.
+func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if len(a.availableModels) == 0 && len(a.availableConfigOptions) == 0 {
+		return nil
+	}
+	return &streams.SessionModelState{
+		CurrentModelID: currentModelFromConfig(a.availableConfigOptions),
+		Models:         cloneSessionModels(convertSessionModels(a.availableModels)),
+		ConfigOptions:  cloneConfigOptions(a.availableConfigOptions),
+	}
+}
+
+func cloneSessionModels(models []streams.SessionModelInfo) []streams.SessionModelInfo {
+	if len(models) == 0 {
+		return nil
+	}
+	cloned := append([]streams.SessionModelInfo(nil), models...)
+	for i, model := range cloned {
+		if model.Meta != nil {
+			cloned[i].Meta = make(map[string]any, len(model.Meta))
+			for key, value := range model.Meta {
+				cloned[i].Meta[key] = value
+			}
+		}
+	}
+	return cloned
+}
+
+func cloneConfigOptions(options []streams.ConfigOption) []streams.ConfigOption {
+	if len(options) == 0 {
+		return nil
+	}
+	cloned := append([]streams.ConfigOption(nil), options...)
+	for i, option := range cloned {
+		cloned[i].Options = append([]streams.ConfigOptionValue(nil), option.Options...)
+	}
+	return cloned
+}
+
 // GetOperationID returns the current operation/turn ID.
 // ACP protocol doesn't have explicit turn/operation IDs, so this returns empty string.
 func (a *Adapter) GetOperationID() string {

@@ -19,6 +19,7 @@ name: release
 #   9. publish-release   — create GH release with runtime + desktop assets and release notes
 #  10. publish-npm       — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
 #  11. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
+#  12. update-scoop-bucket — push updated bucket/kandev.json to kdlbs/scoop-kandev
 #
 # npm publishing uses Trusted Publishers (OIDC) — no NPM_TOKEN required.
 # Each package (kandev + 5 @kdlbs/runtime-* packages) must have this workflow
@@ -26,6 +27,7 @@ name: release
 #
 # Required repository secret for public releases:
 #   HOMEBREW_TAP_DEPLOY_KEY — SSH private key for kdlbs/homebrew-kandev deploy key
+#   SCOOP_BUCKET_DEPLOY_KEY — SSH private key for kdlbs/scoop-kandev deploy key
 # Required configuration in the `release` environment:
 #   RELEASE_GPG_PRIVATE_KEY — secret containing the ASCII-armored release tag signing key
 #   RELEASE_GPG_FINGERPRINT — variable containing the key's full fingerprint
@@ -404,7 +406,8 @@ jobs:
           pnpm -C apps install --no-frozen-lockfile
           git-cliff --tag "$TAG" -o CHANGELOG.md
 
-      - name: Create release PR + squash-merge
+      - name: Create release PR
+        id: release_pr
         if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -413,9 +416,9 @@ jobs:
         run: |
           set -euo pipefail
           # main is protected by a ruleset that requires PRs, so we go through
-          # a release branch + auto-merged PR rather than pushing directly.
+          # a release branch and administrator-merged PR instead of pushing directly.
           BRANCH="release/$TAG"
-          MSG="release: $NEXT"
+          MSG="release: publish $NEXT"
 
           git checkout -b "$BRANCH"
           git add apps/cli/package.json apps/desktop/package.json apps/desktop/src-tauri/Cargo.lock apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/tauri.conf.json CHANGELOG.md apps/pnpm-lock.yaml
@@ -428,22 +431,70 @@ jobs:
           git push origin --delete "$BRANCH" 2>/dev/null || true
           git push -u origin "$BRANCH"
 
-          gh pr create \
+          HEAD_SHA="$(git rev-parse HEAD)"
+          PR_URL="$(gh pr create \
             --title "$MSG" \
             --body "Automated release: \`$NEXT\`" \
             --head "$BRANCH" \
-            --base main
-          # Immediate squash-merge. This relies on main's ruleset requiring
-          # only "PR required" with no status checks. If status checks are
-          # added to the ruleset later, this needs to switch to `--auto` +
-          # polling for merge completion before the tag steps below.
-          gh pr merge "$BRANCH" --squash --delete-branch --subject "$MSG" --body ""
+            --base main)"
+          echo "url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Merge release PR with administrator token
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_BYPASS_TOKEN }}
+          PR_URL: ${{ steps.release_pr.outputs.url }}
+          EXPECTED_HEAD: ${{ steps.release_pr.outputs.head }}
+          MSG: "release: publish ${{ steps.compute.outputs.version }}"
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "RELEASE_PR_BYPASS_TOKEN is required in the release environment." >&2
+            exit 1
+          fi
+          gh pr merge "$PR_URL" \
+            --admin \
+            --squash \
+            --match-head-commit "$EXPECTED_HEAD" \
+            --subject "$MSG" \
+            --body ""
+
+      - name: Select merged release commit
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ steps.release_pr.outputs.url }}
+          EXPECTED_HEAD: ${{ steps.release_pr.outputs.head }}
+        run: |
+          set -euo pipefail
+          PR_JSON="$(gh pr view "$PR_URL" --json state,mergedAt,mergeCommit,headRefOid)"
+          PR_STATE="$(jq -r '.state' <<<"$PR_JSON")"
+          MERGED_AT="$(jq -r '.mergedAt // empty' <<<"$PR_JSON")"
+          PR_HEAD="$(jq -r '.headRefOid' <<<"$PR_JSON")"
+          MERGE_COMMIT="$(jq -r '.mergeCommit.oid // empty' <<<"$PR_JSON")"
+
+          if [ "$PR_STATE" != "MERGED" ] || [ -z "$MERGED_AT" ]; then
+            echo "The release pull request did not merge." >&2
+            exit 1
+          fi
+          if [ "$PR_HEAD" != "$EXPECTED_HEAD" ]; then
+            echo "The merged release pull request head does not match the expected commit." >&2
+            exit 1
+          fi
+          if ! [[ "$MERGE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The release pull request did not report a valid merge commit." >&2
+            exit 1
+          fi
 
           # Pull the squashed commit into local main. The signing key is not
           # imported until all repository-controlled release work is complete.
           git fetch origin main
-          git checkout main
-          git reset --hard origin/main
+          if ! git merge-base --is-ancestor "$MERGE_COMMIT" origin/main; then
+            echo "The reported release merge commit is not on origin/main." >&2
+            exit 1
+          fi
+          git checkout --detach "$MERGE_COMMIT"
 
       - name: Validate merged release signing public key
         id: merged_release_gpg
@@ -2155,5 +2206,47 @@ jobs:
           HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
           bash scripts/release/update-homebrew-tap.sh \
+            "${{ needs.prepare.outputs.version }}" \
+            "${{ needs.prepare.outputs.tag }}"
+
+  update-scoop-bucket:
+    name: Update Scoop bucket
+    needs: [prepare, publish-release]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # Backfill application artifacts come from the selected tag, but the
+          # publication helper must come from the current workflow revision.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Require Scoop bucket deploy key
+        env:
+          SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SCOOP_BUCKET_DEPLOY_KEY" ]; then
+            echo "::error::SCOOP_BUCKET_DEPLOY_KEY is required to publish the Scoop bucket." >&2
+            exit 1
+          fi
+
+      - name: Update Scoop bucket
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+        run: |
+          bash scripts/release/update-scoop-bucket.sh \
             "${{ needs.prepare.outputs.version }}" \
             "${{ needs.prepare.outputs.tag }}"

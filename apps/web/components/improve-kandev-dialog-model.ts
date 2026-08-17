@@ -1,5 +1,6 @@
 import type { ImproveKandevBootstrapResponse } from "@/lib/api/domains/improve-kandev-api";
 import type { WorkflowStep } from "@/lib/types/http";
+import { t } from "@/lib/i18n";
 
 export const IMPROVE_KANDEV_SKIP_INTRO_KEY = "kandev.improveKandev.skipIntro";
 
@@ -8,6 +9,8 @@ export const IMPROVE_KANDEV_SKIP_INTRO_KEY = "kandev.improveKandev.skipIntro";
  * `improveWorkspaceName` in the backend bootstrap handler; the frontend uses it
  * to recognize the workspace for New Task routing.
  */
+// i18n-exempt: matched by value against `improveWorkspaceName` in the backend
+// bootstrap handler to recognize the workspace; translating it breaks routing.
 export const IMPROVE_KANDEV_WORKSPACE_NAME = "Improve Kandev";
 
 export type ImproveKandevKind = "bug" | "feature" | "issue";
@@ -22,15 +25,14 @@ export type ContributorAccessMessageKey =
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-const STEP_DESCRIPTIONS: Record<string, string> = {
-  improve:
-    "Agent reads the report, explores the codebase, and implements the change with TDD. Runs make fmt, typecheck, test, lint, then commits.",
-  test: "Agent boots a secondary kandev instance with make dev and tells you what to verify. You confirm the change works in the running app.",
-  pr: "Agent runs the pr skill: pushes the branch and opens a pull request to kdlbs/kandev for the maintainers to review.",
-  "open-issue":
-    "Agent gathers every required field from the repository template, confirms the public draft with you, and publishes the GitHub issue.",
-  "open issue":
-    "Agent gathers every required field from the repository template, confirms the public draft with you, and publishes the GitHub issue.",
+// Catalog keys. Module scope, so `t()` here would pin the descriptions to the
+// boot locale; `describeStep` resolves them per call.
+const STEP_DESCRIPTION_KEYS: Record<string, string> = {
+  improve: "common:improveStepImprove",
+  test: "common:improveStepTest",
+  pr: "common:improveStepPr",
+  "open-issue": "common:improveStepOpenIssue",
+  "open issue": "common:improveStepOpenIssue",
 };
 
 export type ImproveKandevReadyState = {
@@ -70,8 +72,12 @@ export function contributorAccessMessage(
   return "common:improveKandevExecutorForkAtPr";
 }
 
+/** Resolved per call: the dialog re-renders on a locale switch and follows. */
 export function getImproveKandevStepDescription(step: Pick<WorkflowStep, "id" | "name">): string {
-  return STEP_DESCRIPTIONS[step.id] ?? STEP_DESCRIPTIONS[step.name.toLowerCase()] ?? step.name;
+  const key = STEP_DESCRIPTION_KEYS[step.id] ?? STEP_DESCRIPTION_KEYS[step.name.toLowerCase()];
+  // No key means a workflow step this dialog does not describe; its name is
+  // user/backend data and stays verbatim.
+  return key ? t(key) : step.name;
 }
 
 export function writeImproveKandevSkipIntro(

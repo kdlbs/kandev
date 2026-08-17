@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   agentProfiles: [] as AgentProfileOption[],
   repositoriesByWorkspaceId: {} as Record<string, Repository[]>,
   messagesBySession: {} as Record<string, unknown[]>,
+  turnsBySession: {} as Record<string, unknown[]>,
   setActiveSession: vi.fn(),
 }));
 
@@ -26,6 +27,7 @@ vi.mock("@/components/state-provider", () => ({
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
       repositories: { itemsByWorkspaceId: mocks.repositoriesByWorkspaceId },
       messages: { bySession: mocks.messagesBySession },
+      turns: { bySession: mocks.turnsBySession },
       executors: { items: [] },
       setActiveSession: mocks.setActiveSession,
     }),
@@ -121,6 +123,7 @@ beforeEach(() => {
   ];
   mocks.repositoriesByWorkspaceId = {};
   mocks.messagesBySession = {};
+  mocks.turnsBySession = {};
   mocks.setActiveSession.mockReset();
 });
 

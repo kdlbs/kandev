@@ -109,5 +109,11 @@
   "work": "工作",
   "workspaceFallback": "工作区",
   "taskPreferences": "侧边栏任务偏好设置",
-  "views": "侧边栏视图"
+  "views": "侧边栏视图",
+  "failedToLoadArchivedTasks": "加载已归档任务失败",
+  "failedToSyncSidebarTaskPrefs": "同步侧边栏任务偏好失败",
+  "failedToSyncSidebarViews": "同步侧边栏视图失败",
+  "morePluginItems": "更多插件项",
+  "newViewNumbered": "新视图 {{suffix}}",
+  "untitledView": "未命名视图"
 }

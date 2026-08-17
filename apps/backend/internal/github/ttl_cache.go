@@ -324,6 +324,18 @@ func newRepoErrorCache() *ttlCache {
 	return c
 }
 
+// newForkParentCache backs Service.forkParentRepositoryForLookup. Whether a
+// repository is a fork, and of what, effectively never changes, but the lookup
+// runs once per searching PR watch per sync cycle — a constant answer re-fetched
+// dozens of times a minute. 10 minutes matches the negative repo cache, so a
+// repository that genuinely becomes a fork is picked up within the same window
+// the rest of the repo-identity caching already tolerates.
+func newForkParentCache() *ttlCache {
+	c := newTTLCache()
+	c.ttl = 10 * time.Minute
+	return c
+}
+
 // repoErrorCacheKey is the case-insensitive (owner, repo) key for
 // Service.repoErrorCache. GitHub's repository names are case-insensitive
 // at the API surface, so "NBCUDTC/Bff" and "nbcudtc/bff" reach the same

@@ -235,8 +235,8 @@ func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.
 	return nil, false
 }
 
-// seedSessionDir copies the agent's auth files (auth.json / config.toml /
-// etc.) into the per-container session dir. Replaces the older pattern of
+// seedSessionDir copies the agent's auth files and selected configuration
+// bundles into the per-container session dir. Replaces the older pattern of
 // bind-mounting the host's whole ~/.<agent>, which leaked absolute host
 // paths into agent state DBs and broke resume on codex.
 func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreateRequest) {
@@ -244,7 +244,17 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 		return
 	}
 	instanceRoot := InstanceSessionRoot(r.kandevHomeDir, req.InstanceID)
-	if err := SeedAgentSessionDir(ctx, req.AgentConfig, instanceRoot, r.logger); err != nil {
+	selectedBundles := selectedPortableConfigBundleIDs(req.Metadata)
+	if err := seedAgentSessionDir(
+		ctx,
+		req.AgentConfig,
+		instanceRoot,
+		r.logger,
+		selectedBundles,
+		func(warnings []PortableConfigWarning) {
+			reportPortableConfigWarnings(req.OnProgress, warnings)
+		},
+	); err != nil {
 		r.logger.Warn("failed to seed agent session dir (continuing)",
 			zap.String("instance_id", req.InstanceID),
 			zap.String("agent_id", req.AgentConfig.ID()),
@@ -663,10 +673,11 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 
 	// On destructive stop reasons (task/session deleted/archived), clean up
 	// the kandev-managed per-container session dir so we don't leak GBs of
-	// agent state on disk. Plain stops preserve the dir so resume re-attaches
-	// to the same agent state, mirroring the Sprites preserve-on-stop rule.
+	// agent state on disk. Plain stops and stale execution cleanup preserve the
+	// dir because a resume may re-attach to the same container and its bind
+	// mounts.
 	teardownContainer := shouldTeardownDockerContainer(instance.StopReason)
-	if teardownContainer && r.kandevHomeDir != "" && instance.InstanceID != "" {
+	if shouldRunExecutorCleanup(instance.StopReason) && r.kandevHomeDir != "" && instance.InstanceID != "" {
 		CleanupAgentSessionDir(InstanceSessionRoot(r.kandevHomeDir, instance.InstanceID), r.logger)
 	}
 
@@ -726,10 +737,10 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 }
 
 // shouldTeardownDockerContainer extends terminal cleanup with stale execution
-// cleanup for Docker only. A stale Docker execution owns a local container and
-// per-instance session dir that become untracked before retry/resume launches a
-// replacement. Sprites intentionally keep stale sandboxes; see
-// shouldRunExecutorCleanup for that shared runtime policy.
+// cleanup for Docker only. Stale cleanup must stop the old container before a
+// retry/resume launch, but its per-instance session dir must remain available
+// because the stopped container still references its bind mounts. Destructive
+// task/session lifecycle reasons own removal; see shouldRunExecutorCleanup.
 func shouldTeardownDockerContainer(reason string) bool {
 	if shouldRunExecutorCleanup(reason) {
 		return true

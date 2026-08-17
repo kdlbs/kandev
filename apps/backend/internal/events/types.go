@@ -267,11 +267,12 @@ const (
 
 // Event types for ACP capabilities and models
 const (
-	AgentCapabilitiesUpdated    = "agent_capabilities.updated"     // Agent capabilities received
-	SessionModelsUpdated        = "session_models.updated"         // Session models received
-	SessionModelFallbackUpdated = "session_model_fallback.updated" // Session started on the profile's fallback model
-	SessionInfoUpdated          = "session_info.updated"           // ACP session info received
-	SessionMCPStatusUpdated     = "session_mcp_status.updated"     // MCP attachment evidence changed
+	AgentCapabilitiesUpdated            = "agent_capabilities.updated"              // Agent capabilities received
+	SessionModelsUpdated                = "session_models.updated"                  // Session models received
+	SessionModelFallbackUpdated         = "session_model_fallback.updated"          // Session started on the profile's fallback model
+	SessionModelSelectionWarningUpdated = "session_model_selection_warning.updated" // Executor-authoritative model decision warning
+	SessionInfoUpdated                  = "session_info.updated"                    // ACP session info received
+	SessionMCPStatusUpdated             = "session_mcp_status.updated"              // MCP attachment evidence changed
 )
 
 // Event types for session todos (ACP plan entries)
@@ -484,6 +485,18 @@ func BuildSessionModelFallbackSubject(sessionID string) string {
 // for all session fallback-model events.
 func BuildSessionModelFallbackWildcardSubject() string {
 	return SessionModelFallbackUpdated + ".*"
+}
+
+// BuildSessionModelSelectionWarningSubject creates a session-specific model
+// selection warning subject.
+func BuildSessionModelSelectionWarningSubject(sessionID string) string {
+	return SessionModelSelectionWarningUpdated + "." + sessionID
+}
+
+// BuildSessionModelSelectionWarningWildcardSubject creates a wildcard
+// subscription for model selection warnings.
+func BuildSessionModelSelectionWarningWildcardSubject() string {
+	return SessionModelSelectionWarningUpdated + ".*"
 }
 
 // BuildSessionMCPStatusSubject creates a session-specific MCP status subject.
