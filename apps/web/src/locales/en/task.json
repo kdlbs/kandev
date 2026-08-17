@@ -463,6 +463,7 @@
   "failedToArchiveTask": "Failed to archive task",
   "failedToChangeCompareBranch": "Failed to change compare branch",
   "failedToChangeModel": "Failed to change model",
+  "failedToCloseTerminal": "Failed to close terminal",
   "failedToDeleteDocument": "Failed to delete document",
   "failedToDeleteLayout": "Failed to delete layout",
   "failedToDiscardChanges": "Failed to discard changes",

@@ -5,12 +5,12 @@ import { getSessionStorage } from "@/lib/local-storage";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { stopProcess } from "@/lib/api";
 import {
-  destroyUserShell,
   resumeUserShell,
   renameUserShell,
   createUserShell,
 } from "@/lib/api/domains/user-shell-api";
 import { useUserShells } from "./use-user-shells";
+import { useTerminalDestroy } from "./use-terminal-destroy";
 import {
   appendTerminalIfMissing,
   buildParkedTerminals,
@@ -47,7 +47,7 @@ interface UseTerminalsReturn {
   handleRunCommand: (script: RepositoryScript) => void;
   renameTerminal: (id: string, name: string | null) => Promise<void>;
   resumeTerminal: (id: string) => Promise<void>;
-  destroyTerminal: (id: string) => Promise<void>;
+  destroyTerminal: (id: string) => Promise<boolean>;
   isStoppingDev: boolean;
   devProcessId: string | undefined;
   devOutput: string;
@@ -194,29 +194,36 @@ type RemoveTerminalOpts = {
    */
   getActiveTab: () => string | undefined;
   sessionId: string | null;
+  terminals: Terminal[];
   setTerminals: Dispatch<SetStateAction<Terminal[]>>;
   setRightPanelActiveTab: (sessionId: string, tabId: string) => void;
 };
 
-function useRemoveTerminal({
+export function useRemoveTerminal({
   getActiveTab,
   sessionId,
+  terminals,
   setTerminals,
   setRightPanelActiveTab,
 }: RemoveTerminalOpts) {
+  const terminalsRef = useRef(terminals);
+  terminalsRef.current = terminals;
+
   return useCallback(
     (id: string) => {
+      const currentTerminals = terminalsRef.current;
+      const indexToRemove = currentTerminals.findIndex((terminal) => terminal.id === id);
+      if (indexToRemove === -1) return;
+
       const activeTab = getActiveTab();
-      setTerminals((prev) => {
-        const indexToRemove = prev.findIndex((t) => t.id === id);
-        if (indexToRemove === -1) return prev;
-        if (activeTab === id && sessionId) {
-          const nextTerminals = prev.filter((_, i) => i !== indexToRemove);
-          const next = indexToRemove > 0 ? prev[indexToRemove - 1] : nextTerminals[0];
-          if (next) setRightPanelActiveTab(sessionId, next.id);
-        }
-        return prev.filter((t) => t.id !== id);
-      });
+      const nextTerminals = currentTerminals.filter((_, index) => index !== indexToRemove);
+      terminalsRef.current = nextTerminals;
+      setTerminals((previous) => previous.filter((terminal) => terminal.id !== id));
+
+      if (activeTab === id && sessionId) {
+        const next = indexToRemove > 0 ? currentTerminals[indexToRemove - 1] : nextTerminals[0];
+        if (next) setRightPanelActiveTab(sessionId, next.id);
+      }
     },
     [getActiveTab, sessionId, setRightPanelActiveTab, setTerminals],
   );
@@ -272,38 +279,18 @@ function useCloseDevTab({
 }
 
 type CloseTabOpts = {
-  environmentId: string | null;
-  taskID: string | null;
-  removeTerminal: (id: string) => void;
-  removeUserShellStore: (environmentId: string, terminalId: string) => void;
+  destroyTerminal: (terminalId: string) => Promise<boolean>;
 };
 
-/**
- * X-button close. Destroys the shell (PTY stopped, DB row removed). The local
- * tab is removed only AFTER the backend call resolves — that way a transient
- * failure (network, backend 500) leaves the tab on the strip rather than
- * disappearing into thin air. The next `user_shell.list` poll then reflects
- * whatever state the backend actually settled on.
- */
-function useCloseTab({
-  environmentId,
-  taskID,
-  removeTerminal,
-  removeUserShellStore,
-}: CloseTabOpts) {
+/** X-button close. Removes local UI immediately, then destroys the shell in the background. */
+function useCloseTab({ destroyTerminal }: CloseTabOpts) {
   return useCallback(
     (event: MouseEvent, terminalId: string) => {
       event.preventDefault();
       event.stopPropagation();
-      if (!environmentId) return;
-      destroyUserShell(environmentId, terminalId, taskID ?? undefined)
-        .then(() => {
-          removeUserShellStore(environmentId, terminalId);
-          removeTerminal(terminalId);
-        })
-        .catch((error) => console.error("Failed to destroy terminal:", error));
+      void destroyTerminal(terminalId);
     },
-    [environmentId, taskID, removeTerminal, removeUserShellStore],
+    [destroyTerminal],
   );
 }
 
@@ -315,16 +302,12 @@ type ManagedTerminalActionsOpts = {
     terminalId: string,
     patch: { customName?: string | null; state?: "open" | "parked" },
   ) => void;
-  removeUserShellStore: (environmentId: string, terminalId: string) => void;
-  removeTerminal: (id: string) => void;
 };
 
 function useManagedTerminalActions({
   environmentId,
   taskID,
   updateUserShell,
-  removeUserShellStore,
-  removeTerminal,
 }: ManagedTerminalActionsOpts) {
   const renameTerminal = useCallback(
     async (id: string, name: string | null) => {
@@ -354,21 +337,7 @@ function useManagedTerminalActions({
     [environmentId, taskID, updateUserShell],
   );
 
-  const destroyTerminal = useCallback(
-    async (id: string) => {
-      if (!environmentId) return;
-      try {
-        await destroyUserShell(environmentId, id, taskID ?? undefined);
-        removeUserShellStore(environmentId, id);
-        removeTerminal(id);
-      } catch (error) {
-        console.error("Failed to destroy terminal:", error);
-      }
-    },
-    [environmentId, taskID, removeUserShellStore, removeTerminal],
-  );
-
-  return { renameTerminal, resumeTerminal, destroyTerminal };
+  return { renameTerminal, resumeTerminal };
 }
 
 type TerminalActionsOptions = {
@@ -419,6 +388,7 @@ function useTerminalActions({
   const removeTerminal = useRemoveTerminal({
     getActiveTab,
     sessionId,
+    terminals,
     setTerminals,
     setRightPanelActiveTab,
   });
@@ -454,19 +424,25 @@ function useTerminalActions({
     [environmentId, sessionId, setRightPanelActiveTab, setTerminals],
   );
 
-  const handleCloseTab = useCloseTab({
+  const handleTerminalDestroyed = useCallback(
+    (terminalId: string) => {
+      if (!environmentId) return;
+      removeUserShellStore(environmentId, terminalId);
+      removeTerminal(terminalId);
+    },
+    [environmentId, removeTerminal, removeUserShellStore],
+  );
+  const { destroyTerminal } = useTerminalDestroy({
     environmentId,
-    taskID,
-    removeTerminal,
-    removeUserShellStore,
+    taskId: taskID,
+    onDestroyed: handleTerminalDestroyed,
   });
+  const handleCloseTab = useCloseTab({ destroyTerminal });
 
-  const { renameTerminal, resumeTerminal, destroyTerminal } = useManagedTerminalActions({
+  const { renameTerminal, resumeTerminal } = useManagedTerminalActions({
     environmentId,
     taskID,
     updateUserShell,
-    removeUserShellStore,
-    removeTerminal,
   });
 
   return {
