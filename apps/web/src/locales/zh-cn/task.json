@@ -1250,6 +1250,7 @@
   "startAgent2": "启动智能体",
   "composerStartAgentHint": "发送消息将自动启动智能体。",
   "startDevServerPreview": "启动开发服务器预览",
+  "stopDevServerPreview": "停止开发服务器预览",
   "startFreshSession": "开始全新会话",
   "startPlanMode": "启动计划模式",
   "startTask": "启动任务",

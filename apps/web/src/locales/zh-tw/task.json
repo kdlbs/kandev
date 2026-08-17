@@ -1245,6 +1245,7 @@
   "startAgent": "啟動代理程式",
   "startAgent2": "啟動代理程式",
   "startDevServerPreview": "啟動開發伺服器預覽",
+  "stopDevServerPreview": "停止開發伺服器預覽",
   "startFreshSession": "開始全新工作階段",
   "startPlanMode": "啟動計劃模式",
   "startTask": "啟動任務",
