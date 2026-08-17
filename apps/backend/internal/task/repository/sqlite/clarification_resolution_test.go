@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -80,6 +81,63 @@ func TestInsertClarificationResolution_SecondCallerLoses(t *testing.T) {
 	}
 	if stored.Status != models.ClarificationResolutionStatusAnswered {
 		t.Fatalf("stored.Status = %q, want the winner's answered (row must not be overwritten)", stored.Status)
+	}
+}
+
+// TestInsertClarificationResolution_ConcurrentGoroutines_ExactlyOneWinner
+// proves R3 with real concurrent goroutines racing the same *sql.DB, so
+// default `go test ./...` (not just a `-race` run) exercises the two-callers-
+// same-row race: SQLite's ON CONFLICT DO NOTHING resolves the conflict
+// inside the database, not via any in-process mutex, so this must hold even
+// when goroutines truly overlap rather than merely being called back to back
+// as TestInsertClarificationResolution_SecondCallerLoses does.
+func TestInsertClarificationResolution_ConcurrentGoroutines_ExactlyOneWinner(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-C1R", "sess-C1R", "turn-C1R")
+
+	const callers = 8
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	claimedCount := 0
+	results := make([]bool, callers)
+	errs := make([]error, callers)
+
+	start := make(chan struct{})
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			res := newTestClarificationResolution("pending-C1R", "sess-C1R", "task-C1R")
+			claimed, _, err := repo.InsertClarificationResolution(ctx, res)
+			results[i] = claimed
+			errs[i] = err
+			if claimed {
+				mu.Lock()
+				claimedCount++
+				mu.Unlock()
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("caller %d: unexpected error: %v", i, err)
+		}
+	}
+	if claimedCount != 1 {
+		t.Fatalf("claimedCount = %d, want exactly 1 winner among %d concurrent callers: %+v", claimedCount, callers, results)
+	}
+
+	got, err := repo.GetClarificationResolution(ctx, "pending-C1R")
+	if err != nil {
+		t.Fatalf("GetClarificationResolution: %v", err)
+	}
+	if got.Status != models.ClarificationResolutionStatusAnswered {
+		t.Errorf("got.Status = %q, want answered (the single winner's row)", got.Status)
 	}
 }
 

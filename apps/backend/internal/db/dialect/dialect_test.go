@@ -80,6 +80,17 @@ func TestExcludeConfigModePredicate(t *testing.T) {
 	}
 }
 
+func TestExcludeTruthyMetadataPredicate(t *testing.T) {
+	got := ExcludeTruthyMetadataPredicate(SQLite3, "m.metadata", "parent_question")
+	if got != "json_extract(m.metadata, '$.parent_question') IS NOT 1" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = ExcludeTruthyMetadataPredicate(PGX, "m.metadata", "parent_question")
+	if got != "COALESCE(m.metadata::jsonb->>'parent_question', '') NOT IN ('true', '1')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestDurationMs(t *testing.T) {
 	got := DurationMs(SQLite3, "completed_at", "started_at")
 	if got != "(julianday(completed_at) - julianday(started_at)) * 86400000" {

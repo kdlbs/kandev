@@ -158,6 +158,89 @@ func TestResolveBundle_NotFound_UnresolvableTaskID(t *testing.T) {
 	}
 }
 
+// parentQuestionMessage builds a durable message shaped like the autopilot
+// parent-question protocol's own record (parent_question.go's
+// parentQuestionMetadata): same status/pending_id metadata keys as an
+// ordinary bundle message, plus the parent_question marker.
+func parentQuestionMessage(id, sessionID, pendingID, questionID string) *taskmodels.Message {
+	msg := questionMessage(id, sessionID, pendingID, questionID, 0)
+	msg.Metadata[taskmodels.MetaKeyParentQuestion] = true
+	return msg
+}
+
+// TestResolveBundle_NotFound_ParentQuestionBundle proves the Review round 2
+// fix: a bundle belonging to the autopilot parent-question protocol must
+// never be claimable through the shared ResolveBundle path (REST or MCP),
+// since that protocol has its own ownership-gated resolution channel
+// (message_task_kandev's reply_to_question_id, validateParentQuestionOwnership)
+// and letting ResolveBundle claim it would let any workspace-authorized
+// caller answer a running autopilot agent's question to its parent.
+func TestResolveBundle_NotFound_ParentQuestionBundle(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{"p1": {parentQuestionMessage("m1", "s1", "p1", "q1")}}
+	f := newResolverFixture(t, msgs)
+
+	_, _, err := f.resolver.ResolveBundle(context.Background(), "p1", Outcome{Rejected: true})
+	if !errors.Is(err, ErrBundleNotFound) {
+		t.Fatalf("expected ErrBundleNotFound, got %v", err)
+	}
+	if len(f.messages.calls) != 0 {
+		t.Fatalf("expected no message updates, got %+v", f.messages.calls)
+	}
+}
+
+// TestAuthorizeBundleAccess_NotFound_ParentQuestionBundle proves the same
+// exclusion holds for the REST read path (GET /:id, GET /:id/wait), which
+// authorizes through AuthorizeBundleAccess rather than ResolveBundle.
+func TestAuthorizeBundleAccess_NotFound_ParentQuestionBundle(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{"p1": {parentQuestionMessage("m1", "s1", "p1", "q1")}}
+	f := newResolverFixture(t, msgs)
+
+	_, _, err := f.resolver.AuthorizeBundleAccess(context.Background(), "p1")
+	if !errors.Is(err, ErrBundleNotFound) {
+		t.Fatalf("expected ErrBundleNotFound, got %v", err)
+	}
+}
+
+// nestedOnlyIDQuestionMessage builds a message whose question_id lives only
+// in the nested metadata.question.id shape, with no flat metadata.question_id
+// key at all — the asymmetric shape bundle_question.go's
+// questionFromMessageMetadataFull already falls back for.
+func nestedOnlyIDQuestionMessage(id, sessionID, pendingID, questionID string) *taskmodels.Message {
+	msg := questionMessage(id, sessionID, pendingID, questionID, 0)
+	delete(msg.Metadata, "question_id")
+	return msg
+}
+
+// TestResolveBundle_WinningAnswer_NestedOnlyQuestionID proves the Review
+// round 2 fix: applyMessageUpdates must resolve a message's question_id via
+// the same nested metadata.question.id fallback questionFromMessageMetadataFull
+// already implements (used to build the expected-answer set N6a validates
+// against), not a flat-only lookup. Before the fix this message's
+// applyMessageUpdates lookup computed qid="" while the expected-answer set
+// (built from the same nested fallback) used "q1", so answersByID[""] never
+// matched and the bundle failed R5/R5a with a permanent partial-application
+// lockout instead of applying cleanly.
+func TestResolveBundle_WinningAnswer_NestedOnlyQuestionID(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{"p1": {nestedOnlyIDQuestionMessage("m1", "s1", "p1", "q1")}}
+	f := newResolverFixture(t, msgs)
+
+	res, claimed, err := f.resolver.ResolveBundle(context.Background(), "p1", Outcome{
+		Answers: []Answer{{QuestionID: "q1", SelectedOptions: nil, CustomText: "answer text"}},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !claimed {
+		t.Fatalf("expected claimed=true")
+	}
+	if res.Status != taskmodels.ClarificationResolutionStatusAnswered {
+		t.Fatalf("expected status=answered, got %q", res.Status)
+	}
+	if len(f.messages.calls) != 1 || f.messages.calls[0].questionID != "q1" {
+		t.Fatalf("expected exactly one update with questionID=q1 (via nested fallback), got %+v", f.messages.calls)
+	}
+}
+
 // TestResolveBundle_ValidationError_PropagatesBeforeClaim proves N8c: an
 // invalid outcome fails validation and never reaches the claim insert.
 func TestResolveBundle_ValidationError_PropagatesBeforeClaim(t *testing.T) {
@@ -528,6 +611,83 @@ func TestResolveBundle_Cancel_ClosesCancelChOnLoss(t *testing.T) {
 	case <-pending.CancelCh:
 	default:
 		t.Fatalf("expected a losing cancel to still close CancelCh")
+	}
+}
+
+// TestResolveBundle_LosingCancel_AfterPartialApplication_ReleasesWaiterWithoutMutatingWinner
+// proves X3a end to end: after a winning answer's per-question application
+// fails partway (R5/R5a stops before ever reaching delivery), the bundle is
+// claimed but its in-memory waiter is still live and blocked. A losing
+// cancel that arrives afterward must release that waiter by closing
+// CancelCh, and must do nothing else: the response it returns carries the
+// winner's own status/resume (not a cancelled one, and not the winner's
+// stale "pending" resume either, since applyWinningResolution already
+// persisted resume=failed), and it applies no further message update and
+// publishes no further event.
+func TestResolveBundle_LosingCancel_AfterPartialApplication_ReleasesWaiterWithoutMutatingWinner(t *testing.T) {
+	msgs := map[string][]*taskmodels.Message{
+		"p1": {
+			questionMessage("m1", "s1", "p1", "q1", 0),
+			questionMessage("m2", "s1", "p1", "q2", 1),
+		},
+	}
+	f := newResolverFixture(t, msgs)
+	f.messages.failOnQ = "q2"
+	pendingID, _ := f.store.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{ID: "q1"}, {ID: "q2"}}})
+	msgs[pendingID] = msgs["p1"]
+	delete(msgs, "p1")
+	for _, m := range msgs[pendingID] {
+		m.Metadata["pending_id"] = pendingID
+	}
+
+	// The winning answer claims the row, applies q1, then fails on q2 (R5a)
+	// before ever reaching delivery, so the waiter is never responded to.
+	_, claimed, err := f.resolver.ResolveBundle(context.Background(), pendingID, Outcome{
+		Answers: []Answer{{QuestionID: "q1"}, {QuestionID: "q2"}},
+	})
+	if err == nil || !IsPartialApplicationError(err) {
+		t.Fatalf("expected a partial application error, got %v", err)
+	}
+	if !claimed {
+		t.Fatalf("expected claimed=true: the row was inserted even though application failed")
+	}
+
+	pending, ok := f.store.pending[pendingID]
+	if !ok {
+		t.Fatalf("expected the in-memory entry to still exist (the waiter was never delivered to)")
+	}
+	callsBefore := len(f.messages.calls)
+	eventsBefore := len(f.eventBus.events)
+	winnerRow := *f.resolutions.rows[pendingID]
+	if winnerRow.Resume != taskmodels.ClarificationResolutionResumeFailed {
+		t.Fatalf("expected the winner's row to already carry resume=failed from R5, got %q", winnerRow.Resume)
+	}
+
+	res, cancelClaimed, err := f.resolver.ResolveBundle(context.Background(), pendingID, Outcome{Cancel: true})
+	if err != nil {
+		t.Fatalf("unexpected error on losing cancel: %v", err)
+	}
+	if cancelClaimed {
+		t.Fatalf("expected the cancel to lose the claim (R2)")
+	}
+
+	select {
+	case <-pending.CancelCh:
+	default:
+		t.Fatalf("expected the losing cancel to close CancelCh and release the blocked waiter")
+	}
+
+	if res.Status != winnerRow.Status {
+		t.Fatalf("expected the loser's response to carry the winner's status %q, got %q", winnerRow.Status, res.Status)
+	}
+	if res.Resume != winnerRow.Resume {
+		t.Fatalf("expected the loser's response to carry the winner's resume %q (not a cancelled one), got %q", winnerRow.Resume, res.Resume)
+	}
+	if len(f.messages.calls) != callsBefore {
+		t.Fatalf("expected the losing cancel to modify no messages, got %d new calls", len(f.messages.calls)-callsBefore)
+	}
+	if len(f.eventBus.events) != eventsBefore {
+		t.Fatalf("expected the losing cancel to publish no event, got %d new events", len(f.eventBus.events)-eventsBefore)
 	}
 }
 

@@ -39,6 +39,33 @@ func TestPostgresListUnresolvedClarificationBundlesScansAggregateCreatedAt(t *te
 	}
 }
 
+// TestPostgresListUnresolvedClarificationBundlesExcludesParentQuestion
+// proves the parent-question exclusion (dialect.ExcludeTruthyMetadataPredicate)
+// on the Postgres branch, where a jsonb boolean reads back as text ("true")
+// rather than SQLite's integer 1 — the SQLite-only run never exercises that
+// comparison.
+func TestPostgresListUnresolvedClarificationBundlesExcludesParentQuestion(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	seedBundleTask(t, repo, "task-pg-pq", "")
+	seedBundleSession(t, repo, "sess-pg-pq", "task-pg-pq")
+	seedBundleTurn(t, repo, "turn-pg-pq", "sess-pg-pq", "task-pg-pq")
+	insertParentQuestionMessage(t, repo, "msg-pg-pq", "sess-pg-pq", "task-pg-pq", "turn-pg-pq", "pending-pg-pq", "q1", "pending", time.Now().UTC())
+
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 0 {
+		t.Fatalf("bundles = %+v, want none (parent-question bundle excluded)", page.Bundles)
+	}
+}
+
 // TestPostgresListUnresolvedClarificationBundlesCursorPagination proves L9/D6
 // cursor pagination against a real MIN() aggregate comparison on Postgres,
 // where the bound time.Time cursor arg is compared to a jsonb-derived

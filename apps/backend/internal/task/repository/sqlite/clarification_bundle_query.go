@@ -81,9 +81,22 @@ func clarificationBundleWhereClause(opts models.ListClarificationBundlesOptions)
 // clarificationBundleQuery assembles the bundle-grouping subquery (D4a both
 // conjuncts via has_pending and the NOT EXISTS resolution check) joined to
 // its visibility-checked task row.
+//
+// It also excludes any message carrying the autopilot parent-question
+// marker (models.MetaKeyParentQuestion, "parent_question.go"). That
+// protocol's durable records share this table's message type and its
+// status/pending_id metadata keys with an ordinary clarification bundle,
+// but they are resolved exclusively through message_task_kandev's
+// reply_to_question_id path, gated on the direct-parent ownership check in
+// validateParentQuestionOwnership. Admitting them here would let any
+// workspace-authorized external caller list and answer a running autopilot
+// agent's question to its parent, bypassing that ownership check and the
+// parent-only interaction boundary the spec's S2 relies on (Review round 2
+// finding).
 func clarificationBundleQuery(drv, whereExtra string) string {
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
 	statusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
+	notParentQuestion := dialect.ExcludeTruthyMetadataPredicate(drv, "m.metadata", "parent_question")
 	return fmt.Sprintf(`
 		SELECT b.pending_id, b.session_id, b.task_id, b.created_at
 		FROM (
@@ -96,6 +109,7 @@ func clarificationBundleQuery(drv, whereExtra string) string {
 			FROM task_session_messages m
 			JOIN task_sessions ts ON ts.id = m.task_session_id
 			WHERE m.type = 'clarification_request'
+			  AND %[5]s
 			GROUP BY %[1]s, m.task_session_id
 		) b
 		JOIN tasks t ON t.id = b.task_id
@@ -104,7 +118,7 @@ func clarificationBundleQuery(drv, whereExtra string) string {
 		  %[4]s
 		ORDER BY b.created_at ASC, b.pending_id ASC
 		LIMIT ?
-	`, pendingIDExpr, statusExpr, clarificationTerminalStatusesSQL, whereExtra)
+	`, pendingIDExpr, statusExpr, clarificationTerminalStatusesSQL, whereExtra, notParentQuestion)
 }
 
 // scanClarificationBundleRows scans the bundle rows. The created_at column

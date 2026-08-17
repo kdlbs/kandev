@@ -479,6 +479,51 @@ func TestHandleAnswerQuestion_UnknownPendingID_NotFound(t *testing.T) {
 	require.Equal(t, "clarification request not found", ep.Message)
 }
 
+// sessionDeletingResolutionStore wraps a real repository and deletes the
+// bundle's task_sessions row immediately before delegating the claim insert,
+// simulating M8a's race against the real database: the session vanishes
+// after resolveIdentity has already read the bundle's durable messages but
+// before InsertClarificationResolution attempts its session_id foreign key.
+type sessionDeletingResolutionStore struct {
+	repo      *sqliterepo.Repository
+	sessionID string
+}
+
+func (s *sessionDeletingResolutionStore) InsertClarificationResolution(ctx context.Context, res *models.ClarificationResolution) (bool, *models.ClarificationResolution, error) {
+	if err := s.repo.DeleteTaskSession(ctx, s.sessionID); err != nil {
+		return false, nil, err
+	}
+	return s.repo.InsertClarificationResolution(ctx, res)
+}
+
+func (s *sessionDeletingResolutionStore) UpdateClarificationResolutionResume(ctx context.Context, pendingID, resume string) error {
+	return s.repo.UpdateClarificationResolutionResume(ctx, pendingID, resume)
+}
+
+// TestHandleAnswerQuestion_M8a_SessionDeletedBetweenIdentityAndClaim_NotFound
+// proves M8a against the real database, not an injected error: when the
+// bundle's task_sessions row is deleted after identity resolution has
+// already read its durable messages but before the claim's
+// InsertClarificationResolution runs, the insert's session_id foreign key
+// genuinely fails (a real SQLite FK violation), and ResolveBundle maps that
+// failure to the same 404 as any other not-found bundle.
+func TestHandleAnswerQuestion_M8a_SessionDeletedBetweenIdentityAndClaim_NotFound(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	_, sessionID := seedBundle(t, ctx, svc, repo, "pending-m8a-1")
+
+	store := clarification.NewStore(time.Minute)
+	resolver := clarification.NewResolver(store, &sessionDeletingResolutionStore{repo: repo, sessionID: sessionID}, repo, &svcMessageUpdater{svc: svc}, svc, nil, testLogger(t))
+	h := &Handlers{taskSvc: svc, clarificationResolver: resolver, clarificationBundles: repo, logger: testLogger(t)}
+
+	resp, err := h.handleAnswerQuestion(ctx, makeWSMessage(t, ws.ActionMCPAnswerQuestion, map[string]interface{}{
+		"pending_id": "pending-m8a-1",
+		"rejected":   true,
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeNotFound)
+}
+
 func TestHandleAnswerQuestion_MissingPendingID_ValidationError(t *testing.T) {
 	h := &Handlers{logger: testLogger(t)}
 	resp, err := h.handleAnswerQuestion(context.Background(), makeWSMessage(t, ws.ActionMCPAnswerQuestion, map[string]interface{}{

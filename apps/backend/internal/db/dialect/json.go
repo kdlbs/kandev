@@ -32,21 +32,31 @@ func JSONSet(driver, col, path, value string) string {
 	return fmt.Sprintf("json_set(%s, '$.%s', '%s')", col, path, value)
 }
 
+// ExcludeTruthyMetadataPredicate returns a WHERE-clause fragment excluding
+// rows whose col JSON has a truthy boolean value at key. SQLite's
+// json_extract maps a JSON boolean to an integer (1/0); Postgres's ->>
+// operator returns jsonb through text, so a boolean there reads back as the
+// string "true"/"false" — the two dialects need different truthy
+// comparisons for the same semantic check.
+//
+//	SQLite:   json_extract(col, '$.key') IS NOT 1
+//	Postgres: COALESCE(col::jsonb->>'key', '') NOT IN ('true', '1')
+func ExcludeTruthyMetadataPredicate(driver, col, key string) string {
+	if IsPostgres(driver) {
+		// Repository writes always marshal metadata as JSON; dirty Postgres
+		// rows with malformed JSON should fail loudly instead of being
+		// silently skipped.
+		return fmt.Sprintf("COALESCE(%s, '') NOT IN ('true', '1')", JSONExtract(driver, col, key))
+	}
+	return fmt.Sprintf("%s IS NOT 1", JSONExtract(driver, col, key))
+}
+
 // ExcludeConfigModePredicate returns a WHERE-clause fragment excluding rows
 // whose col JSON has a truthy "config_mode" key — office config-mode tasks
 // are internal bookkeeping, not user-visible work items, so every task-scoped
 // read that should match kandev's normal task-list semantics (the Host data
 // API's Tasks/Sessions/CodeStats readers, the task list/search endpoints)
 // applies this against the tasks table's metadata column.
-//
-//	SQLite:   json_extract(col, '$.config_mode') IS NOT 1
-//	Postgres: COALESCE(col::jsonb->>'config_mode', '') NOT IN ('true', '1')
 func ExcludeConfigModePredicate(driver, col string) string {
-	if IsPostgres(driver) {
-		// Repository writes always marshal metadata as JSON; dirty Postgres
-		// rows with malformed JSON should fail loudly instead of being
-		// silently skipped.
-		return fmt.Sprintf("COALESCE(%s, '') NOT IN ('true', '1')", JSONExtract(driver, col, "config_mode"))
-	}
-	return fmt.Sprintf("%s IS NOT 1", JSONExtract(driver, col, "config_mode"))
+	return ExcludeTruthyMetadataPredicate(driver, col, "config_mode")
 }

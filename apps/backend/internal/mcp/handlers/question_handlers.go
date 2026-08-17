@@ -122,7 +122,7 @@ func (h *Handlers) handleListPendingQuestions(ctx context.Context, msg *ws.Messa
 // bypasses the workspace filter entirely; a scoped caller is limited to the
 // workspace set service.Service.ListWorkspaces already resolves for them.
 func (h *Handlers) resolveBundleVisibility(ctx context.Context, opts *models.ListClarificationBundlesOptions) error {
-	if callerUnscoped(ctx) {
+	if !callerScoped(ctx) {
 		opts.Unscoped = true
 		return nil
 	}
@@ -302,9 +302,10 @@ func resolvedByFromContext(ctx context.Context) string {
 	return identity.UserID
 }
 
-// callerUnscoped reports whether ctx carries no per-user scoping, per
-// resolvedByFromContext's own definition of "unscoped": visibility is then
-// satisfied unconditionally (L1c).
-func callerUnscoped(ctx context.Context) bool {
-	return resolvedByFromContext(ctx) == ""
+// callerScoped reports whether ctx carries per-user scoping, per
+// resolvedByFromContext's own definition (mirrors the "scoped" terminology of
+// task/service's callerScope): when false, visibility is satisfied
+// unconditionally (L1c).
+func callerScoped(ctx context.Context) bool {
+	return resolvedByFromContext(ctx) != ""
 }

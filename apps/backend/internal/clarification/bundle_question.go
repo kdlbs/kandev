@@ -99,7 +99,7 @@ func effectiveMessageStatus(msg *taskmodels.Message) string {
 }
 
 func questionFromMessageMetadataFull(meta map[string]any) Question {
-	q := Question{ID: stringFromMetadata(meta, metaQuestionIDKey)}
+	q := Question{ID: questionIDFromMetadata(meta)}
 	qData, ok := meta[metaQuestionKey].(map[string]any)
 	if !ok {
 		return q
@@ -110,13 +110,28 @@ func questionFromMessageMetadataFull(meta map[string]any) Question {
 	if v, ok := qData["title"].(string); ok {
 		q.Title = v
 	}
-	if q.ID == "" {
-		if v, ok := qData["id"].(string); ok {
-			q.ID = v
-		}
-	}
 	q.Options = optionsFromQuestionData(qData)
 	return q
+}
+
+// questionIDFromMetadata resolves a message's question_id, falling back to
+// the nested metadata.question.id when the flat metadata.question_id key is
+// absent or empty (L16). Every reader of a message's question_id — building
+// the Question/QuestionStatus list (list_pending_questions_kandev, N6a's
+// expected-answer set) and resolver.go's applyMessageUpdates, which matches
+// a winning outcome's per-question answers by this same id — SHALL go
+// through this one function, so the two paths cannot compute different ids
+// for the same message and silently disagree again.
+func questionIDFromMetadata(meta map[string]any) string {
+	if id := stringFromMetadata(meta, metaQuestionIDKey); id != "" {
+		return id
+	}
+	if qData, ok := meta[metaQuestionKey].(map[string]any); ok {
+		if v, ok := qData["id"].(string); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // optionsFromQuestionData reads a question's `options` array as stored by

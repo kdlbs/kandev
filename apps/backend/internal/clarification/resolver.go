@@ -151,8 +151,10 @@ func (r *Resolver) ResolveBundle(ctx context.Context, pendingID string, outcome 
 }
 
 // resolveIdentity is step 1 (M5, M5a): read the bundle's durable messages
-// and derive session_id/task_id. A bundle with no messages, or one whose
-// task_id cannot be resolved from either source, is not-found.
+// and derive session_id/task_id. A bundle with no messages, one whose
+// task_id cannot be resolved from either source, or one belonging to the
+// separate autopilot parent-question protocol (isParentQuestionBundle) is
+// not-found.
 func (r *Resolver) resolveIdentity(ctx context.Context, pendingID string) ([]*taskmodels.Message, string, string, error) {
 	msgs, err := r.repo.FindMessagesByPendingID(ctx, pendingID)
 	if err != nil {
@@ -161,11 +163,35 @@ func (r *Resolver) resolveIdentity(ctx context.Context, pendingID string) ([]*ta
 	if len(msgs) == 0 {
 		return nil, "", "", ErrBundleNotFound
 	}
+	if isParentQuestionBundle(msgs) {
+		return nil, "", "", ErrBundleNotFound
+	}
 	sessionID, taskID, ok := r.resolveBundleTaskID(ctx, msgs)
 	if !ok {
 		return nil, "", "", ErrBundleNotFound // M5a
 	}
 	return msgs, sessionID, taskID, nil
+}
+
+// isParentQuestionBundle reports whether any message in the bundle carries
+// the autopilot parent-question marker (models.MetaKeyParentQuestion,
+// parent_question.go's parentQuestionMetadata). Those records share this
+// bundle's message type and status/pending_id metadata keys, but they
+// belong to a separate, ownership-gated resolution channel
+// (message_task_kandev's reply_to_question_id, validateParentQuestionOwnership)
+// that ResolveBundle and AuthorizeBundleAccess must never claim or read —
+// doing so would let any workspace-authorized caller (REST or the external
+// answer_question_kandev/list_pending_questions_kandev MCP tools) resolve a
+// running autopilot agent's question to its parent, bypassing that
+// ownership check and the parent-only interaction boundary the spec's S2
+// relies on.
+func isParentQuestionBundle(msgs []*taskmodels.Message) bool {
+	for _, m := range msgs {
+		if marker, _ := m.Metadata[taskmodels.MetaKeyParentQuestion].(bool); marker {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveBundleTaskID implements M5: session_id is always present on the
@@ -327,7 +353,7 @@ func (r *Resolver) applyMessageUpdates(ctx context.Context, pendingID, sessionID
 
 	writeCtx := context.WithoutCancel(ctx)
 	for _, msg := range ordered {
-		qid := stringFromMetadata(msg.Metadata, metaQuestionIDKey)
+		qid := questionIDFromMetadata(msg.Metadata)
 		var answer *Answer
 		if status == taskmodels.ClarificationResolutionStatusAnswered {
 			a, ok := answersByID[qid]

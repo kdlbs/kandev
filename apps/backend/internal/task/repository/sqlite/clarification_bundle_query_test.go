@@ -80,6 +80,40 @@ func unscopedOpts(limit int) models.ListClarificationBundlesOptions {
 	return models.ListClarificationBundlesOptions{Unscoped: true, Limit: limit}
 }
 
+// insertParentQuestionMessage inserts one clarification_request message
+// shaped like the autopilot parent-question protocol's own record
+// (parent_question.go's parentQuestionMetadata): same message type, same
+// status/pending_id metadata keys as an ordinary bundle, plus the
+// parent_question marker.
+func insertParentQuestionMessage(t *testing.T, repo *Repository, id, sessionID, messageTaskID, turnID, pendingID, questionID, status string, ts time.Time) {
+	t.Helper()
+	meta := map[string]interface{}{
+		"pending_id":      pendingID,
+		"question_id":     questionID,
+		"parent_question": true,
+		"question": map[string]interface{}{
+			"id":     questionID,
+			"title":  "title",
+			"prompt": "prompt",
+		},
+	}
+	if status != "" {
+		meta["status"] = status
+	}
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+	_, err = repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_session_messages
+			(id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at)
+		VALUES (?, ?, ?, ?, 'agent', '', 'q', 1, 'clarification_request', ?, ?)
+	`), id, sessionID, messageTaskID, turnID, string(metaJSON), ts)
+	if err != nil {
+		t.Fatalf("insert parent-question message %s: %v", id, err)
+	}
+}
+
 func TestListUnresolvedClarificationBundles_ReturnsPendingBundle(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -186,6 +220,30 @@ func TestListUnresolvedClarificationBundles_IncludesMixedStatusBundle(t *testing
 	}
 	if len(page.Bundles) != 1 || page.Bundles[0].PendingID != "pending-B5" {
 		t.Fatalf("bundles = %+v, want exactly pending-B5", page.Bundles)
+	}
+}
+
+// TestListUnresolvedClarificationBundles_ExcludesParentQuestionBundle covers
+// the autopilot parent-question protocol (parent_question.go): its durable
+// records share this table's type and status/pending_id metadata shape with
+// an ordinary bundle, but they belong to a separate, parent-only resolution
+// channel and must never surface through the external listing (Review round
+// 2 finding: workspace-authorized callers could otherwise discover and
+// answer a running autopilot agent's question to its parent).
+func TestListUnresolvedClarificationBundles_ExcludesParentQuestionBundle(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedBundleTask(t, repo, "task-PQ1", "")
+	seedBundleSession(t, repo, "sess-PQ1", "task-PQ1")
+	seedBundleTurn(t, repo, "turn-PQ1", "sess-PQ1", "task-PQ1")
+	insertParentQuestionMessage(t, repo, "msg-PQ1", "sess-PQ1", "task-PQ1", "turn-PQ1", "pending-PQ1", "q1", "pending", time.Now().UTC())
+
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, unscopedOpts(50))
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 0 {
+		t.Fatalf("bundles = %+v, want none (parent-question bundle excluded)", page.Bundles)
 	}
 }
 
@@ -393,5 +451,68 @@ func TestListUnresolvedClarificationBundles_OrderingAndCursorPagination(t *testi
 	}
 	if secondPage.HasMore {
 		t.Fatalf("second page HasMore = true, want false (exhausted)")
+	}
+}
+
+// TestListUnresolvedClarificationBundles_ScopedVisibilityAcrossWorkspacesFillsLimit
+// covers L1a: a scoped caller whose visible set spans two workspaces, with
+// more matching bundles across those workspaces than the requested limit,
+// must still get a full page rather than a short one. Disjunct 3's
+// `t.workspace_id IN (?, ?)` runs inside the same bundle-grouping subquery as
+// every other predicate (L1a's "all inside the single bundle query"); a
+// query that instead filtered per-workspace as a post-query step, or that
+// double-counted rows across the two workspaces before applying LIMIT, would
+// return fewer than limit bundles despite more existing.
+func TestListUnresolvedClarificationBundles_ScopedVisibilityAcrossWorkspacesFillsLimit(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-L1a-A", Name: "A"}); err != nil {
+		t.Fatalf("create workspace A: %v", err)
+	}
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-L1a-B", Name: "B"}); err != nil {
+		t.Fatalf("create workspace B: %v", err)
+	}
+
+	base := time.Now().UTC()
+	seedBundleTask(t, repo, "task-L1a-A1", "ws-L1a-A")
+	seedBundleSession(t, repo, "sess-L1a-A1", "task-L1a-A1")
+	seedBundleTurn(t, repo, "turn-L1a-A1", "sess-L1a-A1", "task-L1a-A1")
+	insertClarificationMessage(t, repo, "msg-L1a-A1", "sess-L1a-A1", "task-L1a-A1", "turn-L1a-A1", "pending-L1a-A1", "q1", "pending", 0, base)
+
+	seedBundleTask(t, repo, "task-L1a-A2", "ws-L1a-A")
+	seedBundleSession(t, repo, "sess-L1a-A2", "task-L1a-A2")
+	seedBundleTurn(t, repo, "turn-L1a-A2", "sess-L1a-A2", "task-L1a-A2")
+	insertClarificationMessage(t, repo, "msg-L1a-A2", "sess-L1a-A2", "task-L1a-A2", "turn-L1a-A2", "pending-L1a-A2", "q1", "pending", 0, base.Add(time.Second))
+
+	seedBundleTask(t, repo, "task-L1a-B1", "ws-L1a-B")
+	seedBundleSession(t, repo, "sess-L1a-B1", "task-L1a-B1")
+	seedBundleTurn(t, repo, "turn-L1a-B1", "sess-L1a-B1", "task-L1a-B1")
+	insertClarificationMessage(t, repo, "msg-L1a-B1", "sess-L1a-B1", "task-L1a-B1", "turn-L1a-B1", "pending-L1a-B1", "q1", "pending", 0, base.Add(2*time.Second))
+
+	seedBundleTask(t, repo, "task-L1a-B2", "ws-L1a-B")
+	seedBundleSession(t, repo, "sess-L1a-B2", "task-L1a-B2")
+	seedBundleTurn(t, repo, "turn-L1a-B2", "sess-L1a-B2", "task-L1a-B2")
+	insertClarificationMessage(t, repo, "msg-L1a-B2", "sess-L1a-B2", "task-L1a-B2", "turn-L1a-B2", "pending-L1a-B2", "q1", "pending", 0, base.Add(3*time.Second))
+
+	opts := models.ListClarificationBundlesOptions{
+		Unscoped:            false,
+		VisibleWorkspaceIDs: []string{"ws-L1a-A", "ws-L1a-B"},
+		Limit:               3,
+	}
+	page, err := repo.ListUnresolvedClarificationBundles(ctx, opts)
+	if err != nil {
+		t.Fatalf("ListUnresolvedClarificationBundles: %v", err)
+	}
+	if len(page.Bundles) != 3 {
+		t.Fatalf("page.Bundles = %d, want a full page of 3 (4 bundles exist across the two visible workspaces)", len(page.Bundles))
+	}
+	if !page.HasMore {
+		t.Fatalf("page.HasMore = false, want true (a 4th bundle remains)")
+	}
+	want := []string{"pending-L1a-A1", "pending-L1a-A2", "pending-L1a-B1"}
+	for i, id := range want {
+		if page.Bundles[i].PendingID != id {
+			t.Errorf("page.Bundles[%d].PendingID = %q, want %q", i, page.Bundles[i].PendingID, id)
+		}
 	}
 }
