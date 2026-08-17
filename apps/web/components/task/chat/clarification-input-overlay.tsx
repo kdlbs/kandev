@@ -512,7 +512,7 @@ export function ClarificationInputOverlay({
         className="flex min-h-11 items-center justify-between gap-3 px-4"
         data-testid="clarification-overlay-header"
       >
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0" />
           {total > 1 && (
             <ClarificationStepper
@@ -526,7 +526,7 @@ export function ClarificationInputOverlay({
           {total > 1 && (
             <span
               data-testid="clarification-group-progress"
-              className="text-xs text-muted-foreground"
+              className="min-w-0 truncate text-xs text-muted-foreground"
             >
               {group.answeredCount} of {group.total} answered
             </span>

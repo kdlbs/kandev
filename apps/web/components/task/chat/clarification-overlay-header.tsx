@@ -63,7 +63,7 @@ export function ClarificationHeaderActions({
 }: ClarificationHeaderActionsProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex shrink-0 items-center gap-2">
       {total > 1 && (
         <KeyboardShortcutTooltip
           shortcut={SHORTCUTS.SUBMIT}
