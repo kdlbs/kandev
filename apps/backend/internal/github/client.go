@@ -37,7 +37,7 @@ func parseMergeOutcome(body []byte) (MergeOutcome, error) {
 
 func normalizeMergeOutcome(status string) (MergeOutcome, error) {
 	switch status {
-	case "merged":
+	case string(MergeOutcomeMerged):
 		return MergeOutcomeMerged, nil
 	case "pending", "queued":
 		return MergeOutcomeQueued, nil
