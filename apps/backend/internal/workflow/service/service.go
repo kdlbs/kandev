@@ -753,6 +753,13 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 // preserve a disabled-but-still-matching binding instead of treating
 // disablement as a rebind.
 func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, posToID map[int]string, existingProfileID string) *models.WorkflowStep {
+	return s.stepFromPortableWithMatcher(workflowID, sp, posToID, s.matchProfile, existingProfileID)
+}
+
+// stepFromPortableWithMatcher lets workflow sync use a matcher that preserves
+// profile IDs embedded in existing review actions while imports use the normal
+// matcher directly.
+func (s *Service) stepFromPortableWithMatcher(workflowID string, sp models.StepPortable, posToID map[int]string, matchProfile models.AgentProfileMatcher, existingProfileID string) *models.WorkflowStep {
 	step := &models.WorkflowStep{
 		ID:                         posToID[sp.Position],
 		WorkflowID:                 workflowID,
@@ -760,7 +767,7 @@ func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, po
 		Position:                   sp.Position,
 		Color:                      sp.Color,
 		Prompt:                     sp.Prompt,
-		Events:                     models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), s.matchProfile),
+		Events:                     models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), matchProfile),
 		IsStartStep:                sp.IsStartStep,
 		ShowInCommandPanel:         sp.ShowInCommandPanel,
 		AllowManualMove:            sp.AllowManualMove,
@@ -770,8 +777,8 @@ func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, po
 		WIPLimit:                   sp.WIPLimit,
 		PullFromStepID:             sp.PullFromStepID(posToID),
 	}
-	if sp.AgentProfile != nil && s.matchProfile != nil {
-		step.AgentProfileID = s.matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode, existingProfileID)
+	if sp.AgentProfile != nil && matchProfile != nil {
+		step.AgentProfileID = matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode, existingProfileID)
 	}
 	return step
 }
