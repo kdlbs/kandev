@@ -4,14 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	schedulercron "github.com/kandev/kandev/internal/scheduler/cron"
 )
 
 const defaultSchedulerCheckInterval = 30 * time.Second
@@ -133,7 +132,7 @@ func (cs *CronScheduler) shouldFire(t *AutomationTrigger, now time.Time) bool {
 		anchor = *t.LastEvaluatedAt
 	}
 
-	next, err := nextCronFire(cfg.CronExpression, cfg.Timezone, anchor)
+	next, err := schedulercron.NextScheduleTime(cfg.CronExpression, cfg.Timezone, anchor)
 	if err != nil {
 		cs.logger.Debug("unparseable cron expression",
 			zap.String("trigger_id", t.ID),
@@ -159,13 +158,6 @@ func (cs *CronScheduler) fire(ctx context.Context, t *AutomationTrigger, now tim
 	}
 }
 
-// cronParser accepts the standard 5-field cron syntax plus the named
-// descriptors (@hourly, @daily, @weekly, @monthly, @yearly) and @every
-// interval shorthand that the automation UI exposes as presets.
-var cronParser = cron.NewParser(
-	cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
-)
-
 // nextCronFire computes the next time the given cron expression fires strictly
 // after `after`, interpreted in the given timezone. An empty timezone means
 // UTC, so scheduling is deterministic regardless of the host's local clock.
@@ -174,33 +166,5 @@ var cronParser = cron.NewParser(
 // daily schedule always fires at 09:00 local, whether that is 13:00 or 14:00
 // UTC). The @every interval shorthand is timezone-independent by nature.
 func nextCronFire(expr, timezone string, after time.Time) (time.Time, error) {
-	expr = strings.TrimSpace(expr)
-	if expr == "" {
-		return time.Time{}, fmt.Errorf("empty cron expression")
-	}
-
-	// Bind the schedule to its timezone. @every is a pure interval and the
-	// parser rejects a CRON_TZ prefix on it, so only wall-clock schedules get
-	// the prefix. An expression that already carries its own TZ/CRON_TZ prefix
-	// is left untouched.
-	if !strings.HasPrefix(expr, "@every") && !hasCronTZPrefix(expr) {
-		tz := timezone
-		if tz == "" {
-			tz = "UTC"
-		}
-		if _, err := time.LoadLocation(tz); err != nil {
-			return time.Time{}, fmt.Errorf("invalid timezone %q: %w", tz, err)
-		}
-		expr = "CRON_TZ=" + tz + " " + expr
-	}
-
-	schedule, err := cronParser.Parse(expr)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("parse cron expression: %w", err)
-	}
-	return schedule.Next(after), nil
-}
-
-func hasCronTZPrefix(expr string) bool {
-	return strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=")
+	return schedulercron.NextScheduleTime(expr, timezone, after)
 }
