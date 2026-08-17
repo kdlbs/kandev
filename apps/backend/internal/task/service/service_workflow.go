@@ -555,12 +555,20 @@ func (s *Service) MoveTaskWithOptions(
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
 	if stepChanged {
 		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
-		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
 		historySessionID := opts.StepHistorySessionID
 		if historySessionID == "" {
 			historySessionID = sessionID
 		}
 		s.recordManualStepTransition(ctx, historySessionID, oldStepID, workflowStepID, opts.StepHistoryTrigger, opts.StepHistoryActor)
+		s.pullNextTaskOnVacate(ctx, oldStepID, task.ID)
+		s.pullTasksFromNewFeederWork(ctx, workflowID, workflowStepID)
+		if refreshed, err := s.tasks.GetTask(ctx, task.ID); err != nil {
+			s.logger.Warn("failed to refresh task after feeder pull",
+				zap.String("task_id", task.ID), zap.Error(err))
+		} else if refreshed != nil {
+			refreshed.Repositories = task.Repositories
+			task = refreshed
+		}
 	}
 
 	s.logger.Info("task moved",
@@ -573,10 +581,10 @@ func (s *Service) MoveTaskWithOptions(
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {
-		step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+		step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 		if err != nil {
 			s.logger.Warn("failed to get workflow step for MoveTask response",
-				zap.String("workflow_step_id", workflowStepID),
+				zap.String("workflow_step_id", task.WorkflowStepID),
 				zap.Error(err))
 			// Don't fail the operation, just log and continue
 		} else {
