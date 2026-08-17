@@ -191,6 +191,11 @@ export type TaskSessionState =
 
 export type TaskPendingAction = "clarification" | "permission";
 
+export type TaskPendingActionRevision = {
+  epoch: string;
+  sequence: number;
+};
+
 /**
  * Fine-grained busy substate of a session (see ADR-0049). Distinguishes
  * a foreground turn that is actively generating from one that is idle, held open
@@ -380,6 +385,8 @@ export type Task = ActiveSubagentCountFields & {
   // isFromOfficeProjection in the Go task repo for the canonical rule.
   is_from_office?: boolean;
   status_summary?: TaskStatusSummary | null;
+  /** Explicitly clears a cached status summary. Omission keeps partial-response semantics. */
+  status_summary_invalidated?: boolean;
 };
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.
@@ -488,6 +495,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   supports_steering?: boolean;
   /** Compact pending-input projection used when this session's messages are unloaded. */
   pending_action?: TaskPendingAction | null;
+  /** Cross-channel logical clock for pending_action snapshots. */
+  pending_action_revision?: TaskPendingActionRevision;
   error_message?: string;
   metadata?: Record<string, unknown> | null;
   agent_profile_snapshot?: Record<string, unknown> | null;

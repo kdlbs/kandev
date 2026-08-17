@@ -605,6 +605,72 @@ func TestProjectorRetainsStoredDomainsUntilTheirFirstObservation(t *testing.T) {
 	}
 }
 
+func TestProjectorStaleDismissedClearsRestoredPendingAction(t *testing.T) {
+	store := newProjectorTestStore()
+	storedAt := time.Date(2026, 8, 1, 17, 59, 0, 0, time.UTC)
+	store.rows["task-stale-dismiss-restart"] = &StoredTaskStatusSummary{
+		TaskID:      "task-stale-dismiss-restart",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision:      8,
+			UpdatedAt:     storedAt,
+			PendingAction: pendingClarification,
+		},
+	}
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		Now:   func() time.Time { return storedAt.Add(time.Minute) },
+	})
+
+	err := projector.HandleEvent(context.Background(), bus.NewEvent(
+		events.ClarificationStaleDismissed,
+		"test",
+		map[string]interface{}{
+			"task_id":      "task-stale-dismiss-restart",
+			"workspace_id": "workspace-1",
+			"session_id":   "session-stale-dismiss-restart",
+		},
+	))
+	if err != nil {
+		t.Fatalf("project stale dismissal after restart: %v", err)
+	}
+
+	got := store.summary("task-stale-dismiss-restart")
+	if got == nil || got.PendingAction != "" || got.Revision != 9 {
+		t.Fatalf("summary after stale dismissal = %+v, want empty pending action at revision 9", got)
+	}
+}
+
+func TestProjectorStaleDismissedKeepsDifferentPendingClarification(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-stale-dismiss-current"
+	const sessionID = "session-stale-dismiss-current"
+
+	publishSessionState(t, eventBus, taskID, sessionID, nil)
+	publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+		"task_id":        taskID,
+		"workspace_id":   "workspace-1",
+		"session_id":     sessionID,
+		"type":           messageTypeClarificationRequest,
+		"requests_input": true,
+		"metadata": map[string]interface{}{
+			"status":     statusPending,
+			"pending_id": "pending-current",
+		},
+	})
+	publishProjectorEvent(t, eventBus, events.ClarificationStaleDismissed, events.ClarificationStaleDismissed, map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": "workspace-1",
+		"session_id":   sessionID,
+		"pending_id":   "pending-older",
+	})
+
+	got := store.summary(taskID)
+	if got == nil || got.PendingAction != pendingClarification {
+		t.Fatalf("pending action after different stale dismissal = %+v, want clarification", got)
+	}
+}
+
 func TestProjectorKeepsPRsWithTheSameRepositoryDistinct(t *testing.T) {
 	_, store, eventBus, _, _ := newProjectorTest(t)
 	const taskID = "task-pr-identity"

@@ -4,6 +4,10 @@ import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
 import { buildTurnActions } from "./turn-actions";
+import {
+  buildTaskSessionProjectionActions,
+  mergePendingActionProjection,
+} from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
 import {
   migrateEnvKeyedData,
@@ -141,6 +145,7 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
   const routeIsStale =
     existingRouteGeneration !== undefined &&
     (incomingRouteGeneration === undefined || incomingRouteGeneration < existingRouteGeneration);
+  const pendingAction = mergePendingActionProjection(existing, incoming);
   return {
     ...existing,
     ...incoming,
@@ -160,6 +165,7 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
           downstream_acp_session_id: existing.downstream_acp_session_id,
         }
       : {}),
+    ...pendingAction,
     agent_profile_snapshot: incoming.agent_profile_snapshot ?? existing.agent_profile_snapshot,
     worktree_id: incoming.worktree_id ?? existing.worktree_id,
     worktree_path: incoming.worktree_path ?? existing.worktree_path,
@@ -628,6 +634,7 @@ export const createSessionSlice: StateCreator<
   ...buildMessageActions(set),
   ...buildTurnActions(set),
   ...buildTaskSessionActions(set),
+  ...buildTaskSessionProjectionActions(set),
   setSessionAgentctlStatus: (sessionId, status) =>
     set((draft) => {
       draft.sessionAgentctl.itemsBySessionId[sessionId] = status;

@@ -284,6 +284,10 @@ func (s *Server) registerConfigTaskTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_task_kandev",
 			mcp.WithDescription("Delete a task permanently."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(false),
+			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
 		),
 		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
@@ -291,6 +295,10 @@ func (s *Server) registerConfigTaskTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("archive_task_kandev",
 			mcp.WithDescription("Archive a task."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
 		),
 		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),

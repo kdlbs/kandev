@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"time"
 
@@ -856,11 +857,75 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 // publishMessageEvent publishes message events to the event bus.
 // Only true system-injected content (wrapped in <kandev-system> tags) is stripped
 // from the visible message content delivered to clients.
-func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) {
+// Ordinary persistence callers intentionally treat delivery as best effort
+// after their durable write succeeds. Synchronization-sensitive callers, such
+// as clarification bundle convergence, check and propagate the returned error.
+func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
 	if s.eventBus == nil {
 		s.logger.Warn("publishMessageEvent: eventBus is nil, skipping")
+		return errors.New("event bus is unavailable")
+	}
+	event := newMessageEvent(eventType, message)
+	s.addMessagePendingAction(ctx, eventType, message, event)
+	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+		s.logger.Error("failed to publish message event",
+			zap.String("event_type", eventType),
+			zap.String("message_id", message.ID),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (s *Service) addMessagePendingAction(
+	ctx context.Context,
+	eventType string,
+	message *models.Message,
+	event *bus.Event,
+) {
+	if s.messages == nil ||
+		!messageEventChangesPendingAction(eventType, message) ||
+		message.TaskSessionID == "" {
 		return
 	}
+	actions, revisions, err := s.GetPendingActionProjectionsForSessions(
+		ctx,
+		[]string{message.TaskSessionID},
+	)
+	if err != nil {
+		s.logger.Warn("failed to project pending action for message event",
+			zap.String("event_type", eventType),
+			zap.String("message_id", message.ID),
+			zap.Error(err))
+		return
+	}
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		return
+	}
+	if action, ok := actions[message.TaskSessionID]; ok {
+		data["pending_action"] = string(action)
+	} else {
+		data["pending_action"] = nil
+	}
+	data["pending_action_revision"] = revisions[message.TaskSessionID]
+}
+
+func messageEventChangesPendingAction(eventType string, message *models.Message) bool {
+	switch eventType {
+	case events.MessageAdded, events.MessageDeleted:
+		// Adding or deleting any message can establish or remove the message
+		// evidence that makes an unpublished successor turn authoritative.
+		return true
+	case events.MessageUpdated:
+		return message.Type == models.MessageTypeClarificationRequest ||
+			message.Type == models.MessageTypePermissionRequest
+	default:
+		return false
+	}
+}
+
+func newMessageEvent(eventType string, message *models.Message) *bus.Event {
 
 	messageType := string(message.Type)
 	if messageType == "" {
@@ -906,14 +971,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		data["metadata"] = meta
 	}
 
-	event := bus.NewEvent(eventType, "task-service", data)
-
-	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
-		s.logger.Error("failed to publish message event",
-			zap.String("event_type", eventType),
-			zap.String("message_id", message.ID),
-			zap.Error(err))
-	}
+	return bus.NewEvent(eventType, "task-service", data)
 }
 
 func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, repository *models.Repository) {

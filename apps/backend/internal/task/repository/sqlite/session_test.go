@@ -2052,6 +2052,108 @@ func TestGetActiveTurnBySessionIDPicksNewestOpenTurn(t *testing.T) {
 	}
 }
 
+func TestGetActiveTurnBySessionIDUsesDeterministicTieBreak(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-turn-tie"
+	const sessionID = "session-turn-tie"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+
+	startedAt := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	createdAt := startedAt.Add(time.Minute)
+	for _, id := range []string{"turn-tie-z", "turn-tie-a"} {
+		if err := repo.CreateTurn(ctx, &models.Turn{
+			ID: id, TaskSessionID: sessionID, TaskID: taskID,
+			StartedAt: startedAt, CreatedAt: createdAt,
+		}); err != nil {
+			t.Fatalf("CreateTurn(%s): %v", id, err)
+		}
+	}
+
+	active, err := repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID: %v", err)
+	}
+	if active.ID != "turn-tie-z" {
+		t.Fatalf("GetActiveTurnBySessionID = %q, want turn-tie-z", active.ID)
+	}
+
+	listed, err := repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	wantOrder := []string{"turn-tie-a", "turn-tie-z"}
+	if len(listed) != len(wantOrder) {
+		t.Fatalf("ListTurnsBySession returned %d turns, want %d", len(listed), len(wantOrder))
+	}
+	for index, wantID := range wantOrder {
+		if listed[index].ID != wantID {
+			t.Fatalf("ListTurnsBySession[%d] = %q, want %q", index, listed[index].ID, wantID)
+		}
+	}
+}
+
+func TestTurnReadsHideEmptyUnpublishedReservationUntilMessageEvidence(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-turn-reserved"
+	const sessionID = "session-turn-reserved"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	base := time.Date(2026, 8, 15, 18, 0, 0, 0, time.UTC)
+	for _, turn := range []*models.Turn{
+		{ID: "turn-accepted", TaskSessionID: sessionID, TaskID: taskID, StartedAt: base},
+		{
+			ID: "turn-unpublished", TaskSessionID: sessionID, TaskID: taskID,
+			StartedAt: base.Add(time.Minute),
+			Metadata: map[string]interface{}{
+				models.TurnMetaKeyPromptDispatchPending:   true,
+				models.TurnMetaKeyPromptDispatchAttempted: true,
+			},
+		},
+	} {
+		if err := repo.CreateTurn(ctx, turn); err != nil {
+			t.Fatalf("CreateTurn(%s): %v", turn.ID, err)
+		}
+	}
+
+	active, err := repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID: %v", err)
+	}
+	if active.ID != "turn-unpublished" {
+		t.Fatalf("active turn = %q, want attempted reservation", active.ID)
+	}
+	listed, err := repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "turn-accepted" {
+		t.Fatalf("listed turns = %#v, want only accepted predecessor", listed)
+	}
+
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "message-reserved-output", TaskSessionID: sessionID, TaskID: taskID,
+		TurnID: "turn-unpublished", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeMessage, Content: "accepted output", CreatedAt: base.Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	active, err = repo.GetActiveTurnBySessionID(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetActiveTurnBySessionID after output: %v", err)
+	}
+	if active.ID != "turn-unpublished" {
+		t.Fatalf("active turn after output = %q, want ambiguous accepted reservation", active.ID)
+	}
+	listed, err = repo.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("ListTurnsBySession after output: %v", err)
+	}
+	if len(listed) != 2 || listed[1].ID != "turn-unpublished" {
+		t.Fatalf("listed turns after output = %#v, want reservation restored", listed)
+	}
+}
+
 func TestUpdateTurnWritesCompletionAndMetadata(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -2098,6 +2200,48 @@ func TestUpdateTurnWritesCompletionAndMetadata(t *testing.T) {
 	}
 	if got.Metadata != nil {
 		t.Errorf("Metadata = %#v, want nil after being cleared", got.Metadata)
+	}
+}
+
+func TestUpdateTurnRejectsSnapshotStaleBehindMetadataPatch(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForTurns(t, repo, "task-turn-stale", "session-turn-stale")
+	turn := &models.Turn{
+		ID: "turn-stale", TaskSessionID: "session-turn-stale", TaskID: "task-turn-stale",
+		Metadata: map[string]interface{}{"initial": true},
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	stale, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(stale snapshot): %v", err)
+	}
+	updated, _, _, err := repo.UpdateActiveTurnMetadata(
+		ctx,
+		turn.TaskSessionID,
+		turn.ID,
+		map[string]interface{}{models.TurnMetaKeyPromptDispatchAttempted: true},
+		nil,
+	)
+	if err != nil || !updated {
+		t.Fatalf("UpdateActiveTurnMetadata: updated=%v err=%v", updated, err)
+	}
+	stale.Metadata["prompt_usage"] = map[string]interface{}{"input_tokens": float64(1)}
+
+	if err := repo.UpdateTurn(ctx, stale); err == nil {
+		t.Fatal("UpdateTurn accepted a stale full metadata snapshot")
+	}
+	persisted, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(persisted): %v", err)
+	}
+	if attempted, _ := persisted.Metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool); !attempted {
+		t.Fatalf("stale update dropped dispatch-attempt marker: %#v", persisted.Metadata)
+	}
+	if _, exists := persisted.Metadata["prompt_usage"]; exists {
+		t.Fatalf("stale update committed prompt metadata: %#v", persisted.Metadata)
 	}
 }
 

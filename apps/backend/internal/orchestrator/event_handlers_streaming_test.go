@@ -112,12 +112,22 @@ func (r *taskServiceStateRepository) UpdateTaskStateIfSessionState(
 }
 
 type recordingClarificationCanceller struct {
-	sessions []string
+	sessions              []string
+	expiredSessions       []string
+	expireContextDeadline []bool
+	expireErr             error
 }
 
-func (c *recordingClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) int {
+func (c *recordingClarificationCanceller) DetachSessionAndNotify(_ context.Context, sessionID string) (int, error) {
 	c.sessions = append(c.sessions, sessionID)
-	return 1
+	return 1, nil
+}
+
+func (c *recordingClarificationCanceller) ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error) {
+	c.expiredSessions = append(c.expiredSessions, sessionID)
+	_, hasDeadline := ctx.Deadline()
+	c.expireContextDeadline = append(c.expireContextDeadline, hasDeadline)
+	return 1, c.expireErr
 }
 
 type listTaskSessionsErrorRepo struct {
@@ -349,6 +359,39 @@ func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
 	require.Equal(t, session.UpdatedAt.UTC().Format(time.RFC3339Nano), data["updated_at"])
 }
 
+func TestUpdateTaskSessionStateExpiresClarificationsOnTerminalTransition(t *testing.T) {
+	for _, terminalState := range []models.TaskSessionState{
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+	} {
+		t.Run(string(terminalState), func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+			canceller := &recordingClarificationCanceller{}
+			svc.clarificationCanceller = canceller
+
+			svc.updateTaskSessionState(ctx, "t1", "s1", terminalState, "", false)
+
+			require.Equal(t, []string{"s1"}, canceller.expiredSessions)
+			require.Equal(t, []bool{true}, canceller.expireContextDeadline)
+		})
+	}
+}
+
+func TestExpireClarificationWaitersReturnsPersistenceError(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	wantErr := errors.New("expiry write failed")
+	svc.clarificationCanceller = &recordingClarificationCanceller{expireErr: wantErr}
+
+	err := svc.expireClarificationWaiters(context.Background(), "s1")
+
+	require.ErrorIs(t, err, wantErr)
+}
+
 func TestUpdateTaskSessionState_EnabledClaudePublishesSettledBackground(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -385,6 +428,8 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	eb := &recordingEventBus{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.eventBus = eb
+	canceller := &recordingClarificationCanceller{}
+	svc.clarificationCanceller = canceller
 
 	changed, finalState, err := svc.transitionTaskSessionState(
 		ctx,
@@ -400,6 +445,8 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	require.Equal(t, models.TaskSessionStateCancelled, finalState)
 	require.Len(t, eb.events, 1)
 	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
+	require.Equal(t, []string{"s1"}, canceller.expiredSessions)
+	require.Equal(t, []bool{true}, canceller.expireContextDeadline)
 }
 
 func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {

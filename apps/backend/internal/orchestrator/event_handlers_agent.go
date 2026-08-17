@@ -20,6 +20,30 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+type reservedPromptCallbackContextKey struct{}
+
+// agentReadyDetachedContext ignores transient event-delivery cancellation but
+// preserves shutdown cancellation for service-owned deferred callbacks.
+func agentReadyDetachedContext(ctx context.Context) context.Context {
+	if owned, _ := ctx.Value(reservedPromptCallbackContextKey{}).(bool); owned {
+		return ctx
+	}
+	return context.WithoutCancel(ctx)
+}
+
+func reservedPromptCallbackContext(
+	ownerCtx context.Context,
+	retryCtx context.Context,
+) (context.Context, context.CancelFunc) {
+	callbackCtx, cancel := context.WithCancel(retryCtx)
+	stopOwnerCancellation := context.AfterFunc(ownerCtx, cancel)
+	callbackCtx = context.WithValue(callbackCtx, reservedPromptCallbackContextKey{}, true)
+	return callbackCtx, func() {
+		stopOwnerCancellation()
+		cancel()
+	}
+}
+
 // handleAgentRunning handles agent running events (user sent input in passthrough mode)
 // This is called when the user sends input to the agent, indicating a new turn started.
 func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEventData) {
@@ -452,27 +476,90 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			lock.Unlock()
 		}
 	}()
-	for s.isCancelInFlight(data.SessionID) {
-		// The cancellation owner temporarily releases this mutex while the
-		// lifecycle manager waits for terminal stream frames. Do not complete
-		// the still-running turn in that window, but also do not discard this
-		// ready event: if cancellation fails, it is the event that must finish
-		// the unchanged turn and drain its queue.
+	waitedForReservation := false
+	for {
+		for s.isCancelInFlight(data.SessionID) {
+			// The cancellation owner temporarily releases this mutex while the
+			// lifecycle manager waits for terminal stream frames. Do not complete
+			// the still-running turn in that window, but also do not discard this
+			// ready event: if cancellation fails, it is the event that must finish
+			// the unchanged turn and drain its queue.
+			lock.Unlock()
+			guardLocked = false
+			if err := s.waitForCancelInFlight(agentReadyDetachedContext(ctx), data.SessionID); err != nil {
+				// A cancellation error does not make this ready event stale. The
+				// owner may have failed before mutating session/turn state; once the
+				// operation is gone, re-read both below and let this event settle its
+				// captured turn. Returning here would strand the turn and any queued
+				// peer message with no future ready event to drain it.
+				s.logger.Warn("cancellation failed while agent.ready was waiting; re-evaluating the captured turn",
+					zap.String("task_id", data.TaskID),
+					zap.String("session_id", data.SessionID),
+					zap.Error(err))
+			}
+			lock.Lock()
+			guardLocked = true
+		}
+
+		reservation := s.reservedPromptTurn(data.SessionID)
+		if reservation == nil {
+			break
+		}
+		waitedForReservation = true
 		lock.Unlock()
 		guardLocked = false
-		if err := s.waitForCancelInFlight(context.WithoutCancel(ctx), data.SessionID); err != nil {
-			// A cancellation error does not make this ready event stale. The
-			// owner may have failed before mutating session/turn state; once the
-			// operation is gone, re-read both below and let this event settle its
-			// captured turn. Returning here would strand the turn and any queued
-			// peer message with no future ready event to drain it.
-			s.logger.Warn("cancellation failed while agent.ready was waiting; re-evaluating the captured turn",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.SessionID),
-				zap.Error(err))
+		waitTimeout := s.agentReadyReservationWaitTimeout
+		if waitTimeout <= 0 {
+			waitTimeout = detachedClarificationDispatchTimeout + promptFailureCleanupTimeout
 		}
+		waitCtx, cancel := context.WithTimeout(agentReadyDetachedContext(ctx), waitTimeout)
+		accepted, waitErr := reservation.wait(waitCtx)
+		cancel()
 		lock.Lock()
 		guardLocked = true
+		if waitErr != nil {
+			if data.PromptGeneration == 0 {
+				s.logger.Warn("dropping generationless agent.ready after reserved prompt wait timed out",
+					zap.String("task_id", data.TaskID),
+					zap.String("session_id", data.SessionID),
+					zap.String("turn_id", reservation.id),
+					zap.Error(waitErr))
+				return
+			}
+			// A later reservation may outlive this callback invocation. Preserve
+			// request values, then attach the lifecycle owner again when it runs.
+			retryCtx := context.WithoutCancel(ctx)
+			deferred := s.deferReservedPromptCallback(reservation, func(ownerCtx context.Context) {
+				callbackCtx, cancelCallback := reservedPromptCallbackContext(ownerCtx, retryCtx)
+				defer cancelCallback()
+				s.handleAgentReady(callbackCtx, data)
+			})
+			if !deferred {
+				continue
+			}
+			s.logger.Warn("agent.ready timed out waiting for reserved prompt dispatch; deferred reconciliation until resolution",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("turn_id", reservation.id),
+				zap.Error(waitErr))
+			return
+		}
+		if !accepted {
+			s.logger.Debug("revalidating agent.ready after overlapping prompt reservation rolled back",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("turn_id", reservation.id))
+		}
+	}
+	if waitedForReservation {
+		ctx = agentReadyDetachedContext(ctx)
+		if data.PromptGeneration == 0 {
+			s.logger.Debug("ignoring generationless agent.ready that overlapped a prompt reservation",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID))
+			return
+		}
+		turnAtEventFire, turnSnapshotErr = s.peekActiveTurnID(ctx, data.SessionID)
 	}
 
 	// Re-validate now that the guard is held: a concurrent interrupt (or
@@ -756,7 +843,11 @@ func (s *Service) executeQueuedMessageWithReservation(
 	afterClaim := s.queuedLifecycleAfterClaim(promptCtx, queuedMsg, attachments, lifecyclePrompt)
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
-		claimEntryID, lifecyclePrompt, afterClaim)
+		promptTaskOptions{
+			claimEntryID:    claimEntryID,
+			lifecyclePrompt: lifecyclePrompt,
+			afterClaim:      afterClaim,
+		})
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg,
 		lifecyclePrompt, userMessageRecorded, err,

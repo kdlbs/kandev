@@ -1044,6 +1044,47 @@ func (a *messageCreatorAdapter) UpdateClarificationMessage(ctx context.Context, 
 	return a.svc.UpdateClarificationMessageForQuestion(ctx, sessionID, pendingID, questionID, status, answer)
 }
 
+func (a *messageCreatorAdapter) CompleteActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+) ([]*models.Message, bool, error) {
+	return a.svc.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
+}
+
+func (a *messageCreatorAdapter) FinalizeClarificationResponseDelivery(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return a.svc.FinalizeClarificationResponseDelivery(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
+func (a *messageCreatorAdapter) RestoreActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return a.svc.RestoreActiveClarificationBundle(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
+func (a *messageCreatorAdapter) PublishClarificationBundleUpdates(
+	ctx context.Context,
+	messages []*models.Message,
+) error {
+	return a.svc.PublishClarificationBundleUpdates(ctx, messages)
+}
+
 // CreateAgentMessageStreaming creates a new agent message with a pre-generated ID.
 // This is used for real-time streaming where content arrives incrementally.
 func (a *messageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error {

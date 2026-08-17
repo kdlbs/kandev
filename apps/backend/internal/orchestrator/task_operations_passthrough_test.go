@@ -195,3 +195,35 @@ func TestPromptTask_PassthroughWriteFailureRevertsSession(t *testing.T) {
 		t.Errorf("MarkPassthroughRunning should fire once before the write; got %d call(s)", markCount)
 	}
 }
+
+func TestPromptTask_PassthroughWriteFailureRevertsSessionAfterCallerCancellation(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	agentMgr := &mockAgentManager{
+		isPassthrough:  true,
+		isAgentRunning: true,
+		passthroughStdinFunc: func(context.Context, string, string) error {
+			cancel()
+			return errors.New("interactive runner disconnected")
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	_, err := svc.PromptTask(ctx, "task1", "session1", "anything", "", false, nil, false)
+	if err == nil {
+		t.Fatal("expected error from PromptTask when PTY write fails")
+	}
+
+	updated, getErr := repo.GetTaskSession(context.Background(), "session1")
+	if getErr != nil {
+		t.Fatalf("failed to reload session: %v", getErr)
+	}
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Errorf("expected session reverted to WAITING_FOR_INPUT, got %q", updated.State)
+	}
+}
