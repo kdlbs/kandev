@@ -551,3 +551,89 @@ func TestApplySyncedWorkflows_RebindingStepAgentProfileLogsWarning(t *testing.T)
 	assert.Len(t, logs.FilterMessage("workflow sync rebinding step's agent profile").All(), 1,
 		"an unchanged profile must not log another warning")
 }
+
+// TestApplySyncedWorkflows_RebindWarningDoesNotFireOnFailedUpdate covers
+// R1-F1: the rebind Warn must only fire once the change is actually
+// persisted. It forces the step's UpdateStep write to fail (via PRAGMA
+// query_only, which makes every write on this connection fail while reads —
+// like the ListStepsByWorkflow that already ran — keep working) and asserts
+// no Warn is logged for a rebind that never landed.
+func TestApplySyncedWorkflows_RebindWarningDoesNotFireOnFailedUpdate(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+
+	svc, db := setupTestService(t, log)
+	provider := &mockWorkflowProvider{}
+	svc.SetWorkflowProvider(provider)
+	ops := newMockSyncOps(provider)
+	svc.SetSyncWorkflowOps(ops)
+
+	ctx := context.Background()
+	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
+	createStep(t, svc, &models.WorkflowStep{
+		ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true,
+		AgentProfileID: "profile-old",
+	})
+
+	pw := portableWorkflow("Dev Flow", "Todo")
+	pw.Steps[0].AgentProfile = &models.AgentProfilePortable{AgentName: "Claude", Model: "opus[1m]", Mode: "auto"}
+	files := []SyncFileExport{{Path: "flows/dev.yml", Export: exportOf(pw)}}
+	svc.SetAgentProfileFuncs(nil, func(string, string, string) string { return "profile-new" })
+
+	_, err = db.Exec("PRAGMA query_only = ON")
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = db.Exec("PRAGMA query_only = OFF") })
+
+	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
+	require.NoError(t, err)
+	require.Len(t, result.Warnings, 1, "the failed step write surfaces a warning")
+	assert.Contains(t, result.Warnings[0], "Todo")
+	assert.Empty(t, result.Updated, "a step update that failed to persist must not be reported as applied")
+	assert.Empty(t, logs.FilterMessage("workflow sync rebinding step's agent profile").All(),
+		"a rebind Warn must never fire for a change that was not actually persisted")
+}
+
+// TestApplySyncedWorkflows_RebindingWorkflowAgentProfileLogsWarning covers
+// R1-F2: the workflow-level AgentProfileID (the fallback steps with no
+// profile of their own resolve to) is rebound by the same matcher and must
+// be logged just like a step-level rebind.
+func TestApplySyncedWorkflows_RebindingWorkflowAgentProfileLogsWarning(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+
+	svc, provider, _ := setupSyncServiceWithLogger(t, log)
+	ctx := context.Background()
+	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
+	wf.AgentProfileID = "profile-old"
+	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
+
+	pw := portableWorkflow("Dev Flow", "Todo")
+	pw.AgentProfile = &models.AgentProfilePortable{AgentName: "Claude", Model: "opus[1m]", Mode: "auto"}
+	files := []SyncFileExport{{Path: "flows/dev.yml", Export: exportOf(pw)}}
+
+	svc.SetAgentProfileFuncs(nil, func(string, string, string) string { return "profile-new" })
+	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Dev Flow"}, result.Updated)
+
+	got, err := provider.GetWorkflow(ctx, wf.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "profile-new", got.AgentProfileID)
+
+	entries := logs.FilterMessage("workflow sync rebinding workflow's agent profile").All()
+	require.Len(t, entries, 1, "workflow-level rebind must be logged exactly once")
+	fields := entries[0].ContextMap()
+	assert.Equal(t, "wf-1", fields["workflow_id"])
+	assert.Equal(t, "Dev Flow", fields["workflow_name"])
+	assert.Equal(t, "profile-old", fields["old_agent_profile_id"])
+	assert.Equal(t, "profile-new", fields["new_agent_profile_id"])
+
+	// A second sync resolving to the same profile must not warn again.
+	result, err = svc.ApplySyncedWorkflows(ctx, "ws-1", files)
+	require.NoError(t, err)
+	assert.Empty(t, result.Updated, "no drift means nothing is rewritten")
+	assert.Len(t, logs.FilterMessage("workflow sync rebinding workflow's agent profile").All(), 1,
+		"an unchanged profile must not log another warning")
+}

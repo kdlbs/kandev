@@ -174,21 +174,17 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 	}
 	for _, sp := range pw.Steps {
 		step := s.stepFromPortable(wf.ID, sp, posToID)
+		var rebinding bool
+		var oldProfileID, existingID string
 		if existing, ok := existingByName[sp.Name]; ok {
 			step.CreatedAt = existing.CreatedAt
 			step.StageType = existing.StageType // not carried by the portable format
 			if stepMatchesDefinition(existing, step) {
 				continue
 			}
-			if existing.AgentProfileID != "" && existing.AgentProfileID != step.AgentProfileID {
-				s.logger.Warn("workflow sync rebinding step's agent profile",
-					zap.String("workflow_id", wf.ID),
-					zap.String("workflow_name", wf.Name),
-					zap.String("step_id", existing.ID),
-					zap.String("step_name", sp.Name),
-					zap.String("old_agent_profile_id", existing.AgentProfileID),
-					zap.String("new_agent_profile_id", step.AgentProfileID))
-			}
+			rebinding = existing.AgentProfileID != "" && existing.AgentProfileID != step.AgentProfileID
+			oldProfileID = existing.AgentProfileID
+			existingID = existing.ID
 			err = s.repo.UpdateStep(ctx, step)
 		} else {
 			err = s.repo.CreateStep(ctx, step)
@@ -196,6 +192,15 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		if err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to apply step %q: %v", wf.Name, sp.Name, err))
 			return
+		}
+		if rebinding {
+			s.logger.Warn("workflow sync rebinding step's agent profile",
+				zap.String("workflow_id", wf.ID),
+				zap.String("workflow_name", wf.Name),
+				zap.String("step_id", existingID),
+				zap.String("step_name", sp.Name),
+				zap.String("old_agent_profile_id", oldProfileID),
+				zap.String("new_agent_profile_id", step.AgentProfileID))
 		}
 		changed = true
 	}
@@ -282,10 +287,22 @@ func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workfl
 	if wf.Description == pw.Description && wf.Prompt == pw.Prompt && wf.AgentProfileID == profileID {
 		return false, nil
 	}
+	oldProfileID := wf.AgentProfileID
+	rebinding := oldProfileID != "" && oldProfileID != profileID
 	wf.Description = pw.Description
 	wf.Prompt = pw.Prompt
 	wf.AgentProfileID = profileID
-	return true, s.workflowProvider.UpdateWorkflow(ctx, wf)
+	if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
+		return true, err
+	}
+	if rebinding {
+		s.logger.Warn("workflow sync rebinding workflow's agent profile",
+			zap.String("workflow_id", wf.ID),
+			zap.String("workflow_name", wf.Name),
+			zap.String("old_agent_profile_id", oldProfileID),
+			zap.String("new_agent_profile_id", profileID))
+	}
+	return true, nil
 }
 
 // ReleaseSyncedWorkflows converts every GitHub-sourced workflow in the

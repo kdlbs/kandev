@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/stretchr/testify/require"
 
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
@@ -73,7 +74,9 @@ func TestBuildAgentProfileMatcher_DuplicateDoesNotStealBinding(t *testing.T) {
 	agentID := createMatcherTestAgent(t, repos)
 
 	source := createMatcherTestProfile(t, repos, agentID, "Claude", "opus[1m]", "auto")
-	_ = createMatcherTestProfile(t, repos, agentID, "Claude", "opus[1m]", "auto") // the "Copy"
+	copyProfile := createMatcherTestProfile(t, repos, agentID, "Claude", "opus[1m]", "auto") // the "Copy"
+	require.True(t, source.CreatedAt.Before(copyProfile.CreatedAt),
+		"precondition: the copy must be strictly newer than the source, or this test stops proving the regression")
 
 	match := buildAgentProfileMatcher(repos, testLogger(t))
 	got := match("Claude", "opus[1m]", "auto")
