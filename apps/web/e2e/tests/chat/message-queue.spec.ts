@@ -2,7 +2,7 @@ import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import {
@@ -101,7 +101,7 @@ test.describe("Quick chat queue", () => {
         timeout: 15_000,
       },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     await typeWhileBusy(testPage, editor, "hello world");
     await testPage.keyboard.press(`${modifier}+Enter`);
@@ -142,7 +142,7 @@ test.describe("Quick chat queue", () => {
         timeout: 15_000,
       },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     // Before typing, only the cancel button should be visible (no send button).
     const submitBtn = dialog.getByTestId("submit-message-button");
@@ -225,7 +225,7 @@ test.describe("Task session queue", () => {
     apiClient,
     seedData,
   }) => {
-    const session = await seedFullQueueTask(
+    const { session } = await seedFullQueueTask(
       testPage,
       apiClient,
       seedData,
@@ -271,6 +271,35 @@ test.describe("Task session queue", () => {
     await expect(entries.nth(2)).toHaveText("separate fourth");
   });
 
+  test("automatic merge accepts a compatible message into a full queue", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { taskId, sessionId, session } = await seedFullQueueTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Full queue auto merge",
+    );
+
+    // The queue is at capacity (10 separate rows, auto-merge off per spec
+    // isolation). Enabling automatic merge must fold the next compatible
+    // message into the tail instead of rejecting it as "queue full".
+    await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
+    await apiClient.queueMessage(taskId, sessionId, "folded while full");
+
+    const chat = session.activeChat();
+    const chip = chat.getByTestId("queue-chip");
+    await expect(chip).toBeVisible({ timeout: 10_000 });
+    await chip.click();
+    const panel = chat.getByTestId("queued-ghost-list");
+    const entries = panel.getByTestId("queue-entry-text");
+    await expect(entries).toHaveCount(10);
+    await expect(entries.last()).toContainText("Queued item 10");
+    await expect(entries.last()).toContainText("folded while full");
+  });
+
   test("queue message via submit button on task session page", async ({
     testPage,
     apiClient,
@@ -288,7 +317,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy.
     await session.sendMessage("/slow 5s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     // Type a message while agent is busy.
     const editor = testPage.locator(".tiptap.ProseMirror").first();
@@ -382,7 +411,7 @@ test.describe("Task session queue", () => {
     );
     await session.sendMessage("/slow 30s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     const editor = testPage.locator(".tiptap.ProseMirror").first();
     await queueMessagesWhileBusy(testPage, editor, ["bulk first", "bulk second", "bulk third"]);
@@ -431,7 +460,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy.
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     // Type a short message while agent is busy and queue it.
     const editor = testPage.locator(".tiptap.ProseMirror").first();
@@ -464,20 +493,20 @@ test.describe("Task session queue", () => {
       el.dispatchEvent(new Event("change", { bubbles: true }));
     }, longText);
 
-    // Allow layout to settle after content change.
-    await testPage.waitForTimeout(300);
-
     // Verify the textarea has a constrained max-height and is scrollable.
-    const metrics = await textarea.evaluate((el: HTMLTextAreaElement) => ({
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-      maxHeight: getComputedStyle(el).maxHeight,
-      overflowY: getComputedStyle(el).overflowY,
-    }));
-
-    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
-    expect(metrics.maxHeight).toBe("200px");
-    expect(metrics.overflowY).toBe("auto");
+    // The auto-grow effect re-measures after React commits the new value, so
+    // poll the metrics rather than sampling them once behind a fixed settle.
+    await expect
+      .poll(
+        async () =>
+          textarea.evaluate((el: HTMLTextAreaElement) => ({
+            scrollable: el.scrollHeight > el.clientHeight,
+            maxHeight: getComputedStyle(el).maxHeight,
+            overflowY: getComputedStyle(el).overflowY,
+          })),
+        { timeout: 5_000 },
+      )
+      .toEqual({ scrollable: true, maxHeight: "200px", overflowY: "auto" });
   });
 
   test("merges a queued message into the message above it", async ({
@@ -492,7 +521,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy while we queue two messages.
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     const editor = testPage.locator(".tiptap.ProseMirror").first();
     await typeWhileBusy(testPage, editor, "first message");
@@ -539,7 +568,7 @@ test.describe("Task session queue", () => {
     // Send a slow command to keep the agent busy.
     await session.sendMessage("/slow 5s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     // In plan mode with no typed text, only the cancel button should be visible.
     // The auto-added plan context should NOT cause the send button to appear.
@@ -592,7 +621,7 @@ test.describe("Queue affordance", () => {
     await expect(testPage.getByRole("status", { name: /Agent is (starting|running)/ })).toBeVisible(
       { timeout: 15_000 },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     await typeWhileBusy(testPage, editor, "first queued");
     await testPage.keyboard.press(`${modifier}+Enter`);
@@ -629,7 +658,7 @@ test.describe("Queue affordance", () => {
     await expect(testPage.getByRole("status", { name: /Agent is (starting|running)/ })).toBeVisible(
       { timeout: 15_000 },
     );
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(dialog);
 
     await typeWhileBusy(testPage, editor, "queued for esc");
     await testPage.keyboard.press(`${modifier}+Enter`);
@@ -659,7 +688,7 @@ test.describe("Queue affordance", () => {
 
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
+    await waitForComposerQueueMode(testPage);
 
     const editor = testPage.locator(".tiptap.ProseMirror").first();
     await typeWhileBusy(testPage, editor, "to be cleared");

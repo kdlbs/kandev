@@ -192,6 +192,7 @@ func buildLifecycleLaunchRequest(
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
 		StartAgent:                    req.StartAgent,
+		TurnID:                        req.TurnID,
 		WorkspacePath:                 workspacePath,
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
@@ -221,6 +222,7 @@ func buildLifecycleLaunchRequest(
 		CheckoutBranch:                req.CheckoutBranch,
 		PRNumber:                      req.PRNumber,
 		RemoteContribution:            req.RemoteContribution,
+		ContributionDestination:       req.ContributionDestination,
 		WorktreeBranchPrefix:          req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate:        req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:          req.WorktreeBranchTicket,
@@ -270,26 +272,27 @@ func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchS
 	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repos))
 	for _, r := range repos {
 		specs = append(specs, lifecycle.RepoLaunchSpec{
-			RepositoryID:           r.RepositoryID,
-			RepositoryPath:         r.RepositoryPath,
-			RepositoryURL:          r.RepositoryURL,
-			RepoName:               r.RepoName,
-			BaseBranch:             r.BaseBranch,
-			DefaultBranch:          r.DefaultBranch,
-			CheckoutBranch:         r.CheckoutBranch,
-			PRNumber:               r.PRNumber,
-			RemoteContribution:     r.RemoteContribution,
-			WorktreeID:             r.WorktreeID,
-			WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: r.WorktreeBranchTemplate,
-			WorktreeBranchTicket:   r.WorktreeBranchTicket,
-			PullBeforeWorktree:     r.PullBeforeWorktree,
-			RemoteSyncHandled:      r.RemoteSyncHandled,
-			RepoSetupScript:        r.RepoSetupScript,
-			RepoCleanupScript:      r.RepoCleanupScript,
-			CopyFiles:              r.CopyFiles,
-			BranchSlug:             r.BranchSlug,
-			BranchIdentitySlug:     r.BranchIdentitySlug,
+			RepositoryID:            r.RepositoryID,
+			RepositoryPath:          r.RepositoryPath,
+			RepositoryURL:           r.RepositoryURL,
+			RepoName:                r.RepoName,
+			BaseBranch:              r.BaseBranch,
+			DefaultBranch:           r.DefaultBranch,
+			CheckoutBranch:          r.CheckoutBranch,
+			PRNumber:                r.PRNumber,
+			RemoteContribution:      r.RemoteContribution,
+			ContributionDestination: r.ContributionDestination,
+			WorktreeID:              r.WorktreeID,
+			WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
+			WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
+			WorktreeBranchTicket:    r.WorktreeBranchTicket,
+			PullBeforeWorktree:      r.PullBeforeWorktree,
+			RemoteSyncHandled:       r.RemoteSyncHandled,
+			RepoSetupScript:         r.RepoSetupScript,
+			RepoCleanupScript:       r.RepoCleanupScript,
+			CopyFiles:               r.CopyFiles,
+			BranchSlug:              r.BranchSlug,
+			BranchIdentitySlug:      r.BranchIdentitySlug,
 		})
 	}
 	return specs
@@ -318,6 +321,10 @@ func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecyc
 // SetExecutionDescription updates the task description in an existing execution's metadata.
 func (a *lifecycleAdapter) SetExecutionDescription(ctx context.Context, agentExecutionID string, description string) error {
 	return a.mgr.SetExecutionDescription(ctx, agentExecutionID, description)
+}
+
+func (a *lifecycleAdapter) SetPromptTurnID(ctx context.Context, agentExecutionID, turnID string) error {
+	return a.mgr.SetPromptTurnID(ctx, agentExecutionID, turnID)
 }
 
 // RequiresCloneURL implements executor.ExecutorTypeCapabilities by delegating to
@@ -755,8 +762,13 @@ func wrapGitHubTaskIssueStoreError(err error) error {
 }
 
 // ProcessOnTurnStart forwards to the orchestrator service.
-func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error {
+func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error) {
 	return w.svc.ProcessOnTurnStart(ctx, taskID, sessionID)
+}
+
+// QueueUserPrompt forwards a prompt that must wait for workflow admission.
+func (w *orchestratorWrapper) QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error {
+	return w.svc.QueueUserPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
 }
 
 // StepRequiresCompletionSignal forwards to the orchestrator service.
@@ -775,6 +787,16 @@ func (w *orchestratorWrapper) SteerEligible(sessionID string, state models.TaskS
 
 func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
 	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
+}
+
+// subagentContextAdapter adapts the task service to the
+// orchestrator.SubagentContextRecorder interface.
+type subagentContextAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *subagentContextAdapter) RecordSubagentContext(ctx context.Context, req taskservice.RecordSubagentContextRequest) {
+	a.svc.RecordSubagentContext(ctx, req)
 }
 
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface

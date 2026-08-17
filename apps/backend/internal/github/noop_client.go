@@ -33,6 +33,10 @@ func (c *NoopClient) FindPRByBranch(context.Context, string, string, string) (*P
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) FindPRByHead(context.Context, string, string, string, string, string) (*PR, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) ListAuthoredPRs(context.Context, string, string) ([]*PR, error) {
 	return nil, ErrNoClient
 }
@@ -59,6 +63,18 @@ func (c *NoopClient) ListAccessibleRepos(context.Context, string, int) ([]GitHub
 
 func (c *NoopClient) HasRepositoryAccess(context.Context, string, string) (bool, error) {
 	return false, ErrNoClient
+}
+
+func (c *NoopClient) GetRepository(context.Context, string, string) (*GitHubRepository, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) ListRepositoryForks(context.Context, string, string) ([]*GitHubRepository, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) CreateFork(context.Context, string, string) (*GitHubRepository, error) {
+	return nil, ErrNoClient
 }
 
 func (c *NoopClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {

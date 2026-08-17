@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import Link from "@/components/routing/app-link";
 import {
   IconAlertTriangle,
@@ -28,6 +29,7 @@ import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agent
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
 import { AgentProfilesSubList } from "@/components/settings/agents/agent-profiles-section";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
+import { CustomTUIMcpCard } from "@/components/settings/custom-tui-mcp-card";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
 import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import {
@@ -53,8 +55,8 @@ type InstalledAgentsSectionProps = {
   resolveRuntimeUpdate: (name: string) => RuntimeUpdate | undefined;
   installJobs: Record<string, InstallJob>;
   updateJobs: Record<string, AgentUpdateJob>;
-  previewUpdate: (name: string) => Promise<AgentUpdatePreview>;
-  startUpdate: (name: string) => Promise<AgentUpdateJob>;
+  previewUpdate: (name: string, targetVersion?: string) => Promise<AgentUpdatePreview>;
+  startUpdate: (name: string, targetVersion: string) => Promise<AgentUpdateJob>;
   setTuiDialogOpen: (open: boolean) => void;
   handleRescan: () => Promise<void>;
 };
@@ -72,32 +74,29 @@ function InstalledAgentsHeader({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
       <div>
         <h3 className="text-lg font-semibold">{t("agents:installedAgents")}</h3>
         <p className="text-sm text-muted-foreground">{t("agents:installedAgentsDescription")}</p>
       </div>
-      <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+      <div className="flex w-full flex-wrap gap-2 md:w-auto" data-testid="installed-agents-actions">
         <Button
           variant="outline"
           size="sm"
           onClick={onOpenShell}
-          className="cursor-pointer"
+          className="h-11 cursor-pointer md:h-6"
           data-testid="open-host-shell"
         >
           <IconTerminal2 className="h-4 w-4 mr-2" />
           {t("agents:terminal")}
-        </Button>
-        <Button variant="outline" size="sm" onClick={onOpenTuiDialog} className="cursor-pointer">
-          <IconPlus className="h-4 w-4 mr-2" />
-          {t("agents:addTuiAgent")}
         </Button>
         <Button
           variant="outline"
           size="sm"
           onClick={onRescan}
           disabled={rescanning}
-          className="cursor-pointer"
+          className="h-11 cursor-pointer md:h-6"
+          data-testid="rescan-agents-button"
         >
           {rescanning ? (
             <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -105,6 +104,16 @@ function InstalledAgentsHeader({
             <IconRefresh className="h-4 w-4 mr-2" />
           )}
           {t("agents:rescan")}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onOpenTuiDialog}
+          className="h-11 cursor-pointer md:h-6"
+          data-testid="new-agent-button"
+        >
+          <IconPlus className="h-4 w-4 mr-2" />
+          {t("agents:addTuiAgent")}
         </Button>
       </div>
     </div>
@@ -235,6 +244,7 @@ function InstalledAgentsSection({
               savedAgent={savedAgentsByName.get(agent.name)}
               agentName={agent.name}
             />
+            <CustomTUIMcpCard agent={savedAgentsByName.get(agent.name)} />
           </InstalledAgentCard>
         ))}
       </div>
@@ -289,6 +299,7 @@ function useAgentPageState() {
     display_name: string;
     model?: string;
     command: string;
+    mcp_strategy?: string;
   }) => {
     await createCustomTUIAgent(data);
     const [discoveryResp, agentsResp, availableResp] = await Promise.all([
@@ -358,7 +369,12 @@ export default function AgentsSettingsPage() {
         </div>
         {/* The page's primary action: everything else on this page manages what
             is already installed. */}
-        <Button size="sm" className="cursor-pointer" asChild data-testid="install-agents-button">
+        <Button
+          size="sm"
+          className={settingsActionClassName("cursor-pointer")}
+          asChild
+          data-testid="install-agents-button"
+        >
           <Link href={AGENTS_BROWSE_SETTINGS_HREF}>
             <IconDownload className="h-4 w-4 mr-2" />
             {t("agents:installAgents")}

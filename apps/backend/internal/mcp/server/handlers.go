@@ -262,6 +262,9 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 		if state := req.GetString("state", ""); state != "" {
 			payload["state"] = state
 		}
+		if launchPrompt := req.GetString("deferred_launch_prompt", ""); launchPrompt != "" {
+			payload["deferred_launch_prompt"] = launchPrompt
+		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil

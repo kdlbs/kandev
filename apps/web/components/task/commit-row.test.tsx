@@ -90,4 +90,14 @@ describe("CommitRow", () => {
     expect(screen.getByText("Local checkout commit")).toBeTruthy();
     expect(screen.queryByTitle("Local commit (not yet pushed)")).toBeNull();
   });
+
+  it("exposes current PR provenance through a stable marker and violet styling", () => {
+    render(<CommitRow commit={{ ...remoteCommit(), presentation: "current_pr" }} isLatest />);
+
+    const marker = screen.getByTestId("commit-provenance");
+    expect(marker.getAttribute("data-commit-provenance")).toBe("current_pr");
+    expect(marker.getAttribute("title")).toBe("Current PR commit");
+    expect(marker.querySelector("svg")?.getAttribute("class")).toContain("text-violet-500");
+    expect(screen.getByText("Current PR commit")).toBeTruthy();
+  });
 });

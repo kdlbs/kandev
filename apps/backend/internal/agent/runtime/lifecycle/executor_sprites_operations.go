@@ -312,6 +312,13 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (stri
 		}
 		script += contributionScript
 	}
+	if destination, ok := req.ContributionDestinations[""]; ok {
+		destinationScript, err := scriptengine.ContributionDestinationSetupScript(&destination)
+		if err != nil {
+			return "", err
+		}
+		script += destinationScript
+	}
 
 	installScripts := r.collectAgentInstallScripts(req)
 
@@ -442,15 +449,16 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
 		),
-		McpServers:          req.McpServers,
-		McpMode:             req.McpMode,
-		McpProviders:        req.McpProviders,
-		McpProfile:          req.McpProfile,
-		RequiresProcessKill: requiresProcessKillFromReq(req),
-		StripEnv:            stripEnvFromReq(req),
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions: req.RemoteContributions,
-		Env:                 cloneStringMap(req.Env),
+		McpServers:               req.McpServers,
+		McpMode:                  req.McpMode,
+		McpProviders:             req.McpProviders,
+		McpProfile:               req.McpProfile,
+		RequiresProcessKill:      requiresProcessKillFromReq(req),
+		StripEnv:                 stripEnvFromReq(req),
+		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:      req.RemoteContributions,
+		ContributionDestinations: req.ContributionDestinations,
+		Env:                      cloneStringMap(req.Env),
 	}
 }
 

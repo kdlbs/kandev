@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { waitForSessionDone } from "../../helpers/session";
+import { dwell } from "../../helpers/causal-waits";
 
 /** Minimal git helper for E2E tests - runs git commands in the test repository. */
 class GitHelper {
@@ -284,8 +285,12 @@ test.describe("Changes panel focus behavior", () => {
       timeout: 15_000,
     });
 
-    // Wait a bit for any async auto-activate to fire
-    await testPage.waitForTimeout(2_000);
+    await dwell(
+      testPage,
+      2_000,
+      "negative-assertion",
+      "the assertion below is that the changes tab does not steal activation; an auto-activate that must never happen publishes nothing, so the only way to give a regression room to fire is to let its window elapse",
+    );
 
     await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
 

@@ -9,8 +9,9 @@ import (
 func TestLoadEffectiveSessionRuntimeConfigMergesInPrecedenceOrder(t *testing.T) {
 	session := &TaskSession{
 		AgentProfileSnapshot: map[string]interface{}{
-			"model": "profile-model",
-			"mode":  "profile-mode",
+			"agent_id": "provider-agent",
+			"model":    "profile-model",
+			"mode":     "profile-mode",
 			"config_options": map[string]string{
 				"profile_only":      "profile",
 				"provider_replaced": "profile-value",
@@ -23,6 +24,7 @@ func TestLoadEffectiveSessionRuntimeConfigMergesInPrecedenceOrder(t *testing.T) 
 				ConfigOptions: map[string]string{
 					"model":             "provider-model",
 					"mode":              "provider-mode",
+					"agent":             "provider-agent",
 					"provider_replaced": "provider-value",
 					"provider_only":     "provider",
 				},
@@ -50,6 +52,26 @@ func TestLoadEffectiveSessionRuntimeConfigMergesInPrecedenceOrder(t *testing.T) 
 		"provider_only":     "provider",
 		"override_only":     "override",
 	}, got.ConfigOptions)
+}
+
+func TestLoadEffectiveSessionRuntimeConfigPreservesProviderAgentOption(t *testing.T) {
+	session := &TaskSession{
+		AgentProfileSnapshot: map[string]interface{}{
+			"agent_id": "claude",
+			"config_options": map[string]string{
+				"agent": "build",
+			},
+		},
+		Metadata: map[string]interface{}{
+			SessionMetaKeyRuntimeConfig: SessionRuntimeConfig{
+				ConfigOptions: map[string]string{"agent": "build"},
+			},
+		},
+	}
+
+	got, ok := LoadEffectiveSessionRuntimeConfig(session)
+	require.True(t, ok)
+	require.Equal(t, map[string]string{"agent": "build"}, got.ConfigOptions)
 }
 
 func TestLoadEffectiveSessionRuntimeConfigReturnsIndependentOptions(t *testing.T) {

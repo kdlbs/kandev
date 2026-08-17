@@ -218,7 +218,60 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
     expect(img.src).toBe(`data:image/png;base64,${PNG_BASE64}`);
     expect(trigger.className).toContain("cursor-pointer");
   });
+});
 
+describe("QueuedGhostMessage queued attachment sources", () => {
+  it("renders staged image descriptors through the authenticated content URL", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          attachments: [
+            {
+              type: "image",
+              attachment_id: "attachment-staged-1",
+              mime_type: "image/png",
+              name: "diagram.png",
+            },
+          ],
+        })}
+        canEdit
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL }));
+
+    expect(screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT).getAttribute("src")).toContain(
+      "/api/v1/attachments/attachment-staged-1/content",
+    );
+  });
+
+  it("does not render a broken image when an image has no source", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          content: "",
+          attachments: [
+            {
+              type: "image",
+              mime_type: "image/png",
+              name: "missing.png",
+            },
+          ],
+        })}
+        canEdit
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: OPEN_ATTACHMENT_1_LABEL })).toBeNull();
+    expect(screen.getByText("missing.png")).toBeTruthy();
+  });
+});
+
+describe("QueuedGhostMessage attachment thumbnails", () => {
   it("renders a file chip for non-image (resource) attachments", () => {
     render(
       <QueuedGhostMessage

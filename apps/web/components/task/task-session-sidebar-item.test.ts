@@ -110,4 +110,15 @@ describe("buildSidebarItem", () => {
 
     expect(item.queuedCount).toBeUndefined();
   });
+
+  it("carries WIP queue status separately from queued prompts", () => {
+    const wipQueue = { position: 2, total: 4, destinationTitle: "Review" };
+    const item = buildSidebarItem(task(), {
+      ...emptyContext(),
+      wipQueueByTaskId: new Map([["t1", wipQueue]]),
+    });
+
+    expect(item.wipQueue).toEqual(wipQueue);
+    expect(item.queuedCount).toBeUndefined();
+  });
 });

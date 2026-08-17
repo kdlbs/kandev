@@ -5,6 +5,7 @@ import { useCommentsStore, type PRFeedbackComment } from "@/lib/state/slices/com
 import { useToast } from "@/components/toast-provider";
 import { getMRCommits, getMRFeedback, getMRFiles } from "@/lib/api/domains/gitlab-api";
 import type { GitLabMRCommit, GitLabMRFeedback, GitLabMRFile } from "@/lib/types/gitlab";
+import { t } from "@/lib/i18n";
 
 type State = {
   feedback: GitLabMRFeedback | null;
@@ -96,7 +97,7 @@ export function useMRFeedback(
             .map((result) =>
               result.reason instanceof Error
                 ? result.reason.message
-                : "GitLab rejected the request",
+                : t("gitlab:gitlabRejectedTheRequest"),
             );
           dispatch({
             type: "loaded",
@@ -111,7 +112,7 @@ export function useMRFeedback(
         if (requestGeneration.current === generation) {
           dispatch({
             type: "failed",
-            error: error instanceof Error ? error.message : "Failed to load merge request",
+            error: error instanceof Error ? error.message : t("gitlab:failedToLoadMergeRequest"),
           });
         }
       });
@@ -143,7 +144,7 @@ export function useAddMRFeedbackAsContext(sessionId: string, projectPath: string
         content,
       };
       addComment(comment);
-      toast({ description: "Added merge request feedback to task context", variant: "success" });
+      toast({ description: t("gitlab:addedMrFeedbackToTaskContext"), variant: "success" });
     },
     [addComment, mrIid, projectPath, sessionId, toast],
   );

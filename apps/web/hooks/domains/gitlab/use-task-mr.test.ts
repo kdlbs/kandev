@@ -209,6 +209,42 @@ describe("useWorkspaceMRs", () => {
   });
 });
 
+// AC13: pins the existing full-clear behaviour that AC12 requires callers
+// (tasks-page-client.tsx) to route around by never invoking the hook with
+// null while a workspace is active. Kept to a single renderHook tree so
+// every read/write shares one store instance (each StateProvider mount owns
+// its own store).
+describe("useWorkspaceMRs, full clear on null", () => {
+  beforeEach(() => {
+    listWorkspaceTaskMRsMock.mockReset();
+  });
+
+  it("clears every workspace's cached MRs when called with null (AC13)", async () => {
+    listWorkspaceTaskMRsMock.mockResolvedValue({ task_mrs: {} });
+
+    const { result, rerender } = renderHook(
+      ({ ws }: { ws: string | null }) => {
+        useWorkspaceMRs(ws);
+        const setTaskMRs = useAppStore((s) => s.setTaskMRs);
+        const byWorkspaceId = useAppStore((s) => s.taskMRs.byWorkspaceId);
+        return { setTaskMRs, byWorkspaceId };
+      },
+      { wrapper, initialProps: { ws: "ws-c" as string | null } },
+    );
+    await waitFor(() => expect(result.current.byWorkspaceId["ws-c"]).toEqual({}));
+
+    act(() => {
+      result.current.setTaskMRs("ws-a", { "task-a": [makeMR({ id: "a", task_id: "task-a" })] });
+      result.current.setTaskMRs("ws-b", { "task-b": [makeMR({ id: "b", task_id: "task-b" })] });
+    });
+    expect(Object.keys(result.current.byWorkspaceId).sort()).toEqual(["ws-a", "ws-b", "ws-c"]);
+
+    rerender({ ws: null });
+
+    expect(result.current.byWorkspaceId).toEqual({});
+  });
+});
+
 describe("useWorkspaceMRs cleanup", () => {
   it("ignores workspace A's deferred fetch after its loader unmounts and B loads", async () => {
     let resolveWorkspaceA: (v: { task_mrs: Record<string, TaskMR[]> }) => void = () => {};

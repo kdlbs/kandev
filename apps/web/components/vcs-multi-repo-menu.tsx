@@ -123,6 +123,8 @@ function PerRepoActionItem({
   disabled,
   pushDisabled,
   pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
   blockedRepositoryName,
   repoDisplayName,
   callbacks,
@@ -133,6 +135,8 @@ function PerRepoActionItem({
   disabled: boolean;
   pushDisabled: boolean;
   pullDisabled: boolean;
+  pushDisabledReason: string | undefined;
+  pullDisabledReason: string | undefined;
   blockedRepositoryName: string | undefined;
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
@@ -148,12 +152,18 @@ function PerRepoActionItem({
     pushDisabled,
     pullDisabled,
   );
+  let actionDisabledReason: string | undefined;
+  if (actionBlocked) {
+    actionDisabledReason = PUSH_ACTIONS.includes(action.key)
+      ? (pushDisabledReason ?? t("task:divergedActionsUnavailable"))
+      : (pullDisabledReason ?? t("task:divergedActionsUnavailable"));
+  }
   return (
     <DropdownMenuItem
       className={ITEM_CLASS}
       onClick={() => action.invoke(repo, callbacks)}
       disabled={disabled || actionBlocked || action.disabledFor(status)}
-      title={actionBlocked ? t("task:providerHistoryUnavailable") : undefined}
+      title={actionDisabledReason}
     >
       <span className="flex-1 truncate">{label}</span>
       <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -227,6 +237,8 @@ function PerRepoActionSub({
   disabled,
   pushDisabled,
   pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
   blockedRepositoryName,
   hideBlockedContribution,
   repoNames,
@@ -238,6 +250,8 @@ function PerRepoActionSub({
   disabled: boolean;
   pushDisabled: boolean;
   pullDisabled: boolean;
+  pushDisabledReason?: string;
+  pullDisabledReason?: string;
   blockedRepositoryName: string | undefined;
   hideBlockedContribution: boolean;
   repoNames: string[];
@@ -274,6 +288,8 @@ function PerRepoActionSub({
               disabled={disabled}
               pushDisabled={pushDisabled}
               pullDisabled={pullDisabled}
+              pushDisabledReason={pushDisabledReason}
+              pullDisabledReason={pullDisabledReason}
               blockedRepositoryName={blockedRepositoryName}
               repoDisplayName={repoDisplayName}
               callbacks={callbacks}
@@ -300,6 +316,8 @@ function MultiRepoVcsDropdown({
   perRepoStatus,
   pushDisabled,
   pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
   showContributionResolution,
   replaceDisabled,
   useDisabled,
@@ -314,6 +332,8 @@ function MultiRepoVcsDropdown({
   perRepoStatus: PerRepoStatus[];
   pushDisabled: boolean;
   pullDisabled: boolean;
+  pushDisabledReason?: string;
+  pullDisabledReason?: string;
   showContributionResolution: boolean;
   replaceDisabled: boolean;
   useDisabled: boolean;
@@ -338,6 +358,8 @@ function MultiRepoVcsDropdown({
             disabled={disabled}
             pushDisabled={pushDisabled}
             pullDisabled={pullDisabled}
+            pushDisabledReason={pushDisabledReason}
+            pullDisabledReason={pullDisabledReason}
             blockedRepositoryName={blockedRepositoryName}
             hideBlockedContribution={showContributionResolution}
             repoNames={repoNames}
@@ -399,6 +421,8 @@ export function MultiRepoVcsButton({
   perRepoStatus,
   pushDisabled,
   pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
   showContributionResolution,
   replaceDisabled,
   useDisabled,
@@ -416,6 +440,8 @@ export function MultiRepoVcsButton({
   perRepoStatus: PerRepoStatus[];
   pushDisabled: boolean;
   pullDisabled: boolean;
+  pushDisabledReason?: string;
+  pullDisabledReason?: string;
   showContributionResolution: boolean;
   replaceDisabled: boolean;
   useDisabled: boolean;
@@ -459,6 +485,8 @@ export function MultiRepoVcsButton({
               perRepoStatus={perRepoStatus}
               pushDisabled={pushDisabled}
               pullDisabled={pullDisabled}
+              pushDisabledReason={pushDisabledReason}
+              pullDisabledReason={pullDisabledReason}
               showContributionResolution={showContributionResolution}
               replaceDisabled={replaceDisabled}
               useDisabled={useDisabled}

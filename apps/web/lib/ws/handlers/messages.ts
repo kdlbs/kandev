@@ -45,6 +45,36 @@ function toMessage(payload: MessagePayload): MessageUpdate {
   };
 }
 
+function isTerminalToolStatus(status: unknown): boolean {
+  return (
+    status === "complete" ||
+    status === "error" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "success"
+  );
+}
+
+function settleMessageForCompletedTurn(
+  store: StoreApi<AppState>,
+  message: MessageUpdate,
+): MessageUpdate {
+  if (message.type === "permission_request" || !message.turn_id) return message;
+
+  const turn = store
+    .getState()
+    .turns?.bySession[message.session_id]?.find((candidate) => candidate.id === message.turn_id);
+  if (!turn?.completed_at) return message;
+
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  if (!metadata?.tool_call_id || isTerminalToolStatus(metadata.status)) return message;
+
+  return {
+    ...message,
+    metadata: { ...metadata, status: "complete" },
+  };
+}
+
 function messageKey(payload: MessagePayload): string {
   return `${payload.session_id}:${payload.message_id}`;
 }
@@ -98,7 +128,7 @@ export function createMessageUpdateScheduler(
     for (const payload of updates) {
       if (!payload.session_id || !payload.message_id) continue;
       if (isOlderThanCurrentSnapshot(store, payload)) continue;
-      store.getState().updateMessage(toMessage(payload));
+      store.getState().updateMessage(settleMessageForCompletedTurn(store, toMessage(payload)));
     }
   };
 
@@ -135,7 +165,7 @@ export function createMessagesHandlerRegistration(
       const payload = message.payload;
       if (!payload.session_id) return;
       scheduler.flush();
-      store.getState().addMessage(toMessage(payload));
+      store.getState().addMessage(settleMessageForCompletedTurn(store, toMessage(payload)));
     },
     "session.message.updated": (message) => {
       scheduler.enqueue(message.payload);

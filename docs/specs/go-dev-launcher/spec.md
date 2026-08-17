@@ -104,6 +104,19 @@ require the launcher health token — Vite is not a Kandev process and does not 
 If either child exits, the launcher shuts the whole tree down and exits with the child's
 code, matching current behavior.
 
+### Startup output advertises network addresses
+
+The startup banner for `dev`, `start`, and `run` prints the localhost backend URL and
+then one `network:` URL for each unique non-loopback, non-link-local host address on the machine. This
+includes addresses from local-network and Tailscale interfaces so that a user running
+Kandev on a remote VM can identify an address to open from another machine.
+
+The banner lists IPv4 addresses before IPv6 addresses, omits link-local addresses, and
+wraps IPv6 hosts in brackets. Network-address discovery is best effort: if the host
+cannot enumerate its interfaces, the launcher still starts and prints the localhost
+URL. When `KANDEV_SERVER_HOST` restricts the backend to loopback or specific addresses,
+the banner omits unreachable interface addresses and only advertises matching binds.
+
 ### Backend restart from the UI still rebuilds
 
 The restart supervisor (ADR 0019) writes a launch manifest and listens on a control
@@ -187,6 +200,7 @@ them: building and serving the web app (Vite), the published npm shim, and repo 
 | Either child exits | Shut down the tree; exit with that child's code, or 0 if it was signalled. |
 | `pnpm` missing | Surface the spawn error rather than hanging on the readiness probe. |
 | Ctrl-C | Whole tree terminates, including on Windows, without winjob. |
+| Network interface enumeration fails | Continue startup and omit `network:` lines; keep the localhost URL. |
 
 ## Persistence guarantees
 
@@ -196,3 +210,18 @@ them: building and serving the web app (Vite), the published npm shim, and repo 
   never prune other backup families.
 - The supervisor manifest and control socket live under
   `<KANDEV_HOME_DIR>/supervisor/` at mode `0600`, unchanged from `start`.
+
+## Scenarios
+
+- **GIVEN** a host with non-loopback LAN and Tailscale IPv4 addresses, **WHEN** the
+  `dev`, `start`, or `run` launcher prints its startup banner, **THEN** it prints one
+  `network:` URL for each address using the backend port.
+- **GIVEN** a host with duplicate addresses, loopback addresses, or link-local
+  addresses, **WHEN** the startup banner is printed, **THEN** duplicate, loopback, and
+  link-local addresses are omitted.
+- **GIVEN** a host with an IPv6 address, **WHEN** the startup banner is printed, **THEN**
+  the address is rendered as `http://[<address>]:<port>`.
+- **GIVEN** interface enumeration returns an error, **WHEN** the launcher starts,
+  **THEN** it continues startup and prints the localhost URL without a `network:` line.
+- **GIVEN** `KANDEV_SERVER_HOST` is a loopback or specific bind address, **WHEN** the
+  startup banner is printed, **THEN** it omits unrelated network addresses.

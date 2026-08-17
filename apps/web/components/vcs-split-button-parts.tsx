@@ -87,6 +87,8 @@ type SingleRepoVcsButtonProps = {
   aheadCount: number;
   pushDisabled: boolean;
   pullDisabled: boolean;
+  pushDisabledReason?: string;
+  pullDisabledReason?: string;
   showContributionResolution: boolean;
   replaceDisabled: boolean;
   useDisabled: boolean;
@@ -115,6 +117,8 @@ function SingleRepoVcsButton({
   aheadCount,
   pushDisabled,
   pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
   showContributionResolution,
   replaceDisabled,
   useDisabled,
@@ -180,6 +184,8 @@ function SingleRepoVcsButton({
           aheadCount={aheadCount}
           pushDisabled={pushDisabled}
           pullDisabled={pullDisabled}
+          pushDisabledReason={pushDisabledReason}
+          pullDisabledReason={pullDisabledReason}
           showContributionResolution={showContributionResolution}
           replaceDisabled={replaceDisabled}
           useDisabled={useDisabled}
@@ -198,7 +204,7 @@ function SingleRepoVcsButton({
   );
 }
 
-type VcsSplitButtonCallbacks = {
+export type VcsSplitButtonCallbacks = {
   onCommit: (repo?: string) => void;
   onPR: (repo?: string) => void;
   onPull: (repo?: string) => void;
@@ -209,6 +215,20 @@ type VcsSplitButtonCallbacks = {
   onUseContribution: (repo?: string) => void;
   onViewContribution: (repo?: string) => void;
 };
+
+export function buildSingleRepoContributionCallbacks(
+  callbacks: Pick<
+    VcsSplitButtonCallbacks,
+    "onReplaceContribution" | "onUseContribution" | "onViewContribution"
+  >,
+  blockedRepositoryName?: string,
+) {
+  return {
+    onReplaceContribution: () => callbacks.onReplaceContribution(blockedRepositoryName),
+    onUseContribution: () => callbacks.onUseContribution(blockedRepositoryName),
+    onViewContribution: () => callbacks.onViewContribution(blockedRepositoryName),
+  };
+}
 
 type VcsSplitButtonContentProps = {
   isMultiRepo: boolean;
@@ -222,6 +242,8 @@ type VcsSplitButtonContentProps = {
   aheadCount: number;
   pushDisabled: boolean;
   pullDisabled: boolean;
+  pushDisabledReason?: string;
+  pullDisabledReason?: string;
   showContributionResolution: boolean;
   replaceDisabled: boolean;
   useDisabled: boolean;
@@ -273,6 +295,8 @@ function MultiRepoVcsContent({
   perRepoStatus,
   pushDisabled,
   pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
   showContributionResolution,
   replaceDisabled,
   useDisabled,
@@ -294,6 +318,8 @@ function MultiRepoVcsContent({
   | "perRepoStatus"
   | "pushDisabled"
   | "pullDisabled"
+  | "pushDisabledReason"
+  | "pullDisabledReason"
   | "showContributionResolution"
   | "replaceDisabled"
   | "useDisabled"
@@ -328,6 +354,8 @@ function MultiRepoVcsContent({
         perRepoStatus={perRepoStatus}
         pushDisabled={pushDisabled}
         pullDisabled={pullDisabled}
+        pushDisabledReason={pushDisabledReason}
+        pullDisabledReason={pullDisabledReason}
         showContributionResolution={showContributionResolution}
         replaceDisabled={replaceDisabled}
         useDisabled={useDisabled}
@@ -357,6 +385,8 @@ export function VcsSplitButtonContent({
   aheadCount,
   pushDisabled,
   pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
   showContributionResolution,
   replaceDisabled,
   useDisabled,
@@ -385,6 +415,8 @@ export function VcsSplitButtonContent({
         perRepoStatus={perRepoStatus}
         pushDisabled={pushDisabled}
         pullDisabled={pullDisabled}
+        pushDisabledReason={pushDisabledReason}
+        pullDisabledReason={pullDisabledReason}
         showContributionResolution={showContributionResolution}
         replaceDisabled={replaceDisabled}
         useDisabled={useDisabled}
@@ -399,6 +431,11 @@ export function VcsSplitButtonContent({
     );
   }
 
+  const singleRepoContributionCallbacks = buildSingleRepoContributionCallbacks(
+    callbacks,
+    blockedRepositoryName,
+  );
+
   return (
     <>
       <SingleRepoVcsButton
@@ -412,6 +449,8 @@ export function VcsSplitButtonContent({
         aheadCount={aheadCount}
         pushDisabled={pushDisabled}
         pullDisabled={pullDisabled}
+        pushDisabledReason={pushDisabledReason}
+        pullDisabledReason={pullDisabledReason}
         showContributionResolution={showContributionResolution}
         replaceDisabled={replaceDisabled}
         useDisabled={useDisabled}
@@ -421,9 +460,9 @@ export function VcsSplitButtonContent({
         onPR={() => callbacks.onPR()}
         onPull={() => callbacks.onPull()}
         onPush={(force) => callbacks.onPush(force)}
-        onReplaceContribution={() => callbacks.onReplaceContribution()}
-        onUseContribution={() => callbacks.onUseContribution()}
-        onViewPRVersion={() => callbacks.onViewContribution()}
+        onReplaceContribution={singleRepoContributionCallbacks.onReplaceContribution}
+        onUseContribution={singleRepoContributionCallbacks.onUseContribution}
+        onViewPRVersion={singleRepoContributionCallbacks.onViewContribution}
         prNumber={prNumber}
         onRebase={() => callbacks.onRebase()}
         onMerge={() => callbacks.onMerge()}

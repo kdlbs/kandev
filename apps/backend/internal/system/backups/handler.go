@@ -75,7 +75,7 @@ func HandleRestore(svc *Service) gin.HandlerFunc {
 		_ = c.ShouldBindJSON(&body)
 		id, err := svc.Restore(c.Request.Context(), name, body.Confirm)
 		if err != nil {
-			if errors.Is(err, errRestoreConfirm) {
+			if errors.Is(err, errRestoreConfirm) || errors.Is(err, errRestoreUnsupported) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}

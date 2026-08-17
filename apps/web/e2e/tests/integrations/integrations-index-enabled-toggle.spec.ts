@@ -3,7 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 // Covers docs/specs/integrations/enable-disable-toggle.md's index-page slider
 // scenarios: every integration row has a working slider, toggling it never
 // navigates, and the toggle stays in sync with that integration's own
-// settings page (the shared install-wide `useXEnabled` state).
+// settings page (the shared per-workspace `useXEnabled` state).
 test.describe("integrations index page enable/disable sliders", () => {
   test("every integration row has a slider, toggling it does not navigate, and it stays in sync with the own-page slider", async ({
     testPage,

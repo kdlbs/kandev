@@ -28,6 +28,7 @@ import { useTaskListingView } from "@/hooks/use-task-listing-view";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
+import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
@@ -527,6 +528,10 @@ export function TasksPageClient(props: TasksPageClientProps) {
   );
   useWorkflowSnapshot(s.activeWorkflowId);
   useWorkspacePRs(showTaskDetails ? s.activeWorkspaceId : null);
+  // Unconditional, unlike useWorkspacePRs above: useWorkspaceMRs(null) clears
+  // every workspace's cached MRs, not just this page's, and the sidebar (also
+  // mounted here) reads that same cache — see spec "Hydration ownership".
+  useWorkspaceMRs(s.activeWorkspaceId);
   useForegroundRefresh(() => s.fetchTasks(true), Boolean(s.activeWorkspaceId), s.activeWorkspaceId);
   const { handleSortChange, handleGroupChange } = useTasksListPreferenceSync({
     tasksListSort: s.tasksListSort,

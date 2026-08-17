@@ -41,6 +41,7 @@ func runDev(ctx context.Context, opts Options) int {
 		return 1
 	}
 	env := backendEnv(cfg.ports, cfg.logLevel, resolveConsoleLogLevel(opts), opts.Debug, healthToken, cfg.extra)
+	env = upsertEnv(env, backendPIDFileEnv, filepath.Join(devKandevHome(cfg.repoRoot), "supervisor", "backend.pid"))
 	backend, dumpLogs, err := launchBackendFn(backendLaunchConfig{
 		Command:    "make",
 		Args:       []string{"-C", "apps/backend", "dev"},

@@ -231,6 +231,7 @@ function ExecutorCreatePageContent() {
   // own. Translating it would make an executor's stored name depend on the
   // locale it happened to be created in. The Select labels beside it are copy
   // and do go through `t()`.
+  // i18n-exempt: seeded executor name is persisted user data. See the comment above.
   const [name, setName] = useState(() =>
     initialType === "remote_docker" ? "Remote Docker" : "Local Docker",
   );

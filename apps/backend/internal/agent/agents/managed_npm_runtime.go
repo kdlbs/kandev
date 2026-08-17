@@ -1,8 +1,7 @@
 package agents
 
 import (
-	"crypto/sha512"
-	"encoding/hex"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
 // ManagedNPMRuntimeSpec defines a built-in npm-distributed ACP runtime.
@@ -13,36 +12,66 @@ type ManagedNPMRuntimeSpec struct {
 	ACPArgs []string
 }
 
-// ExecutionCacheKey returns npm's deterministic _npx execution-tree key for
-// this trusted package spec. npm derives it from the full package string using
-// SHA-512 and the first 16 lowercase hexadecimal characters.
-func (s ManagedNPMRuntimeSpec) ExecutionCacheKey() string {
-	digest := sha512.Sum512([]byte(s.Package))
-	return hex.EncodeToString(digest[:])[:16]
+// PackageSpec returns the trusted package name or exact package@version spec.
+func (s ManagedNPMRuntimeSpec) PackageSpec(version string) string {
+	if version == "" {
+		return s.Package
+	}
+	return s.Package + "@" + version
 }
 
-// CachedACPCommand returns the normal launch command. The package is
-// intentionally unversioned and prefer-offline lets npm reuse a suitable
-// execution-cache entry while still fetching when the cache is empty.
-func (s ManagedNPMRuntimeSpec) CachedACPCommand() Command {
-	args := []string{"npx", "--yes", "--prefer-offline", s.Package}
+// ExecutionCacheKey returns npm's deterministic _npx execution-tree key for
+// this trusted package spec. npm derives it from the full package string using
+// SHA-512 and the first 16 lowercase hexadecimal characters. The optional
+// argument preserves the unversioned legacy key when omitted.
+func (s ManagedNPMRuntimeSpec) ExecutionCacheKey(versions ...string) string {
+	return managedruntime.NpxExecutionCacheKey(s.PackageSpec(firstVersion(versions)))
+}
+
+// ACPCommand returns the normal launch command for the exact version when one
+// is supplied. An empty version keeps the legacy unversioned behavior.
+func (s ManagedNPMRuntimeSpec) ACPCommand(version string) Command {
+	return s.ACPCommandWithNpmPreference(version, false)
+}
+
+// ACPCommandWithNpmPreference builds a managed runtime launch command. The
+// package spec and ACP arguments remain trusted agent metadata; recovery only
+// changes npm's metadata freshness preference.
+func (s ManagedNPMRuntimeSpec) ACPCommandWithNpmPreference(version string, preferOnline bool) Command {
+	preference := "--prefer-offline"
+	if preferOnline {
+		preference = "--prefer-online"
+	}
+	args := []string{"npx", "--yes", preference, s.PackageSpec(version)}
 	args = append(args, s.ACPArgs...)
 	return NewCommand(args...)
 }
 
-// CacheUpdateCommand returns the explicit cache-refresh command. npm exec
-// installs the built-in unversioned package with online freshness before
-// running a no-op under the prepared execution environment.
-func (s ManagedNPMRuntimeSpec) CacheUpdateCommand() Command {
+// CachedACPCommand returns the legacy unversioned launch command.
+func (s ManagedNPMRuntimeSpec) CachedACPCommand() Command {
+	return s.ACPCommand("")
+}
+
+// CacheUpdateCommand returns the explicit cache preparation command. The
+// optional version makes npm prepare one deterministic package@version tree.
+func (s ManagedNPMRuntimeSpec) CacheUpdateCommand(versions ...string) Command {
+	packageSpec := s.PackageSpec(firstVersion(versions))
 	return NewCommand(
 		"npm",
 		"exec",
 		"--yes",
 		"--prefer-online",
-		"--package="+s.Package,
+		"--package="+packageSpec,
 		"--",
 		"node",
 		"-e",
 		"",
 	)
+}
+
+func firstVersion(versions []string) string {
+	if len(versions) == 0 {
+		return ""
+	}
+	return versions[0]
 }

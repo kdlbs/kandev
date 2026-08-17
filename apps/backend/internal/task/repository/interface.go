@@ -74,6 +74,11 @@ type TaskRepository interface {
 	// by metadata key (not integration name) so this layer stays agnostic of
 	// which integrations exist.
 	CountOpenWatcherCreatedTasks(ctx context.Context, metadataKey, watchID string) (int, error)
+	// SetTaskMetadataKeyIfPresent rewrites one metadata key only while that
+	// key is still present, reporting whether the write landed. The CAS
+	// counterpart to an atomic remove: an editor must never re-create a key a
+	// concurrent claim just consumed.
+	SetTaskMetadataKeyIfPresent(ctx context.Context, taskID, key string, value interface{}) (bool, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	// UpdateTaskStateIfSessionState atomically transitions task state only while
 	// the named session remains in expectedSessionState and the task is not
@@ -223,6 +228,15 @@ type AttachmentRepository interface {
 // TurnRepository handles conversation turn persistence.
 type TurnRepository interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
+	// CreateTurnWithStepStamp creates turn atomically with the
+	// workflow-step-at-start stamp: it reads the task's current step and
+	// inserts the turn row in the same transaction, taking the same lock
+	// readTaskStepInTx takes for step moves, so the stamp reflects a state
+	// serialized against concurrent movers of the same task rather than a
+	// plain unlocked read taken before the insert. A task-step read failure
+	// (missing task, transient error) degrades to an unstamped turn rather
+	// than failing turn creation. Returns whether the stamp was applied.
+	CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (stamped bool, err error)
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
@@ -310,7 +324,7 @@ type GitSnapshotRepository interface {
 	GetLatestGitSnapshotsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]*models.GitSnapshot, error)
 	GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error)
-	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
+	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error)
 	GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error)
 	GetLatestSessionCommit(ctx context.Context, sessionID string) (*models.SessionCommit, error)
 	DeleteSessionCommit(ctx context.Context, id string) error
@@ -480,4 +494,16 @@ type PlanRepository interface {
 	// single transaction. Pass a non-nil coalesceLatestID to merge into an existing revision;
 	// otherwise a new revision is appended with revision_number computed inside the tx.
 	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string) error
+}
+
+// SubagentContextRepository persists the durable, queryable record of a
+// subagent (Task tool) invocation. See
+// docs/specs/subagent-context-persistence/spec.md.
+type SubagentContextRepository interface {
+	// UpsertSubagentContext inserts or merges one subagent invocation row,
+	// keyed on (task_session_id, tool_call_id). A single atomic statement —
+	// no read-then-write.
+	UpsertSubagentContext(ctx context.Context, sc *models.SubagentContext) error
+	ListSubagentContextsBySession(ctx context.Context, sessionID string) ([]*models.SubagentContext, error)
+	ListSubagentContextsByTurn(ctx context.Context, turnID string) ([]*models.SubagentContext, error)
 }

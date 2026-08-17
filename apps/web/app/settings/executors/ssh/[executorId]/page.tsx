@@ -144,12 +144,12 @@ function SSHExecutorHeader({ executorName }: { executorName: string }) {
   const router = useRouter();
   return (
     <>
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <IconTerminal2 className="h-5 w-5 text-muted-foreground" />
-            <h2 className="text-2xl font-bold">{executorName}</h2>
-            <Badge variant="outline" className="text-xs">
+            <h2 className="min-w-0 break-words text-2xl font-bold">{executorName}</h2>
+            <Badge variant="outline" className="text-[10px]">
               {getExecutorLabel("ssh")}
             </Badge>
           </div>
@@ -161,7 +161,7 @@ function SSHExecutorHeader({ executorName }: { executorName: string }) {
           variant="outline"
           size="sm"
           onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="cursor-pointer"
+          className="min-h-11 w-full cursor-pointer text-sm md:min-h-7 md:w-auto md:text-xs"
         >
           {t("executors:backToExecutors")}
         </Button>

@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
@@ -171,6 +172,25 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 		if cmdPart == "--model" {
 			t.Errorf("PreviewAgentCommand() should not emit --model, got %v", result.Command)
 		}
+	}
+}
+
+func TestController_PreviewAgentCommandUsesActiveManagedRuntimeVersion(t *testing.T) {
+	agent := agents.NewOpenCodeACP()
+	controller := newTestController(map[string]agents.Agent{agent.ID(): agent})
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values[agent.ID()+"\x00opencode-ai"] = managedruntime.Selection{
+		Package: "opencode-ai",
+		Version: "1.18.5",
+	}
+	controller.SetManagedRuntimeSelectionStore(selectionStore)
+
+	result, err := controller.PreviewAgentCommand(context.Background(), agent.ID(), CommandPreviewRequest{})
+	if err != nil {
+		t.Fatalf("PreviewAgentCommand() error = %v", err)
+	}
+	if !slices.Contains(result.Command, "opencode-ai@1.18.5") {
+		t.Fatalf("preview command = %v, want exact active version", result.Command)
 	}
 }
 

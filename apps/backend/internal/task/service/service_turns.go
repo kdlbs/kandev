@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -41,15 +42,19 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 		TaskSessionID: sessionID,
 		TaskID:        session.TaskID,
 		StartedAt:     time.Now().UTC(),
-		Metadata:      runtimeConfigSnapshotMetadata(session),
+		Metadata:      turnStartRuntimeMetadata(session),
 		CreatedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
 	}
 
-	if err := s.turns.CreateTurn(ctx, turn); err != nil {
+	stamped, err := s.turns.CreateTurnWithStepStamp(ctx, turn)
+	if err != nil {
 		s.logger.Error("failed to create turn", zap.Error(err))
 		return nil, err
 	}
+	// Recorded only once the turn is durably persisted — the counter's
+	// "turns created" framing must not count a turn CreateTurn rejected.
+	steptelemetry.RecordTurnStamp(s.logger, stamped)
 
 	// had_output is only meaningful on turn.completed; omit it from turn.started.
 	s.publishTurnEvent(events.TurnStarted, turn, nil)
@@ -76,14 +81,32 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 		TaskID:        session.TaskID,
 		StartedAt:     now,
 		CompletedAt:   &now,
-		Metadata:      runtimeConfigSnapshotMetadata(session),
+		Metadata:      turnStartRuntimeMetadata(session),
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	if err := s.turns.CreateTurn(ctx, turn); err != nil {
+	stamped, err := s.turns.CreateTurnWithStepStamp(ctx, turn)
+	if err != nil {
 		return nil, fmt.Errorf("failed to create completed turn: %w", err)
 	}
+	// Recorded only once the turn is durably persisted — the counter's
+	// "turns created" framing must not count a turn CreateTurn rejected.
+	steptelemetry.RecordTurnStamp(s.logger, stamped)
 	return turn, nil
+}
+
+// turnStartRuntimeMetadata composes the turn's immutable start-of-turn
+// runtime-config-snapshot metadata. The workflow-step-at-start stamp is
+// added separately by CreateTurnWithStepStamp, which reads the task's
+// current step inside the same transaction as the turn insert — see that
+// method's doc comment for why the read can no longer happen here, ahead of
+// and unlocked against the insert.
+func turnStartRuntimeMetadata(session *models.TaskSession) map[string]interface{} {
+	metadata := runtimeConfigSnapshotMetadata(session)
+	if metadata == nil {
+		return map[string]interface{}{}
+	}
+	return metadata
 }
 
 func runtimeConfigSnapshotMetadata(session *models.TaskSession) map[string]interface{} {

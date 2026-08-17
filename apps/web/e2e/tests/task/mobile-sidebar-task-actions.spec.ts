@@ -139,6 +139,15 @@ test.describe("Mobile sidebar task actions", () => {
     const dialog = testPage.getByRole("alertdialog");
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveClass(/font-sans/);
+    const header = dialog.locator('[data-slot="alert-dialog-header"]');
+    await expect
+      .poll(async () =>
+        header.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return { justifyItems: style.justifyItems, textAlign: style.textAlign };
+        }),
+      )
+      .toEqual({ justifyItems: "start", textAlign: "left" });
     await expect(dialog.locator('[data-slot="alert-dialog-description"]')).toHaveClass(/text-sm/);
     await dialog.evaluate(async (element) => {
       await Promise.all(

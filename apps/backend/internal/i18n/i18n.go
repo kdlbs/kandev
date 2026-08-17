@@ -46,6 +46,8 @@ var supportedLocales = map[string]bool{
 	"en":     true,
 	"pt-pt":  true,
 	"zh-cn":  true,
+	"zh-tw":  true,
+	"zh-hk":  true,
 	"pseudo": true,
 }
 

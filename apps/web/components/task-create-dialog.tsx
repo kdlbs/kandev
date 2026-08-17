@@ -16,13 +16,13 @@ import {
   DialogPromptSection,
 } from "@/components/task-create-dialog-form-body";
 import { CreateModeSelectors } from "@/components/task-create-dialog-create-mode-selectors";
-import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
 import {
   AgentSelector,
   ExecutorProfileSelector,
   InlineTaskName,
 } from "@/components/task-create-dialog-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
+import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
 import type {
   DialogFormBodyProps,
   TaskCreateDialogProps,
@@ -111,13 +111,6 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onComposerSubmit={props.onComposerSubmit}
       />
       <CreateModeAgentSelectors {...props} />
-      {isCreateMode && !isTaskStarted && (
-        <TaskCreateDependencies
-          value={fs.blockedBy}
-          onChange={fs.setBlockedBy}
-          disabled={props.isCreatingSession}
-        />
-      )}
       {props.bottomSlot}
     </>
   );
@@ -189,6 +182,13 @@ function DialogFormBody(props: DialogFormBodyProps) {
         onWorkflowChange={props.onWorkflowChange}
         agentProfiles={props.agentProfiles}
         workflowLocked={props.workflowLocked}
+      />
+      <TaskCreateAdvancedSettings
+        isCreateMode={isCreateMode}
+        isTaskStarted={isTaskStarted}
+        blockedBy={props.fs.blockedBy}
+        onBlockedByChange={props.fs.setBlockedBy}
+        dependenciesDisabled={props.isCreatingSession}
       />
     </div>
   );

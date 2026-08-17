@@ -33,6 +33,15 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
     if (!dialogBox) throw new Error("delete confirmation dialog has no layout box");
     expect(dialogBox.width).toBeGreaterThanOrEqual(480);
     await expect(dialog).toHaveClass(/font-sans/);
+    const deleteHeader = dialog.locator('[data-slot="alert-dialog-header"]');
+    await expect
+      .poll(async () =>
+        deleteHeader.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return { justifyItems: style.justifyItems, textAlign: style.textAlign };
+        }),
+      )
+      .toEqual({ justifyItems: "start", textAlign: "left" });
 
     // URL must not have changed (no navigation to /tasks/:id and no ?taskId=)
     expect(testPage.url()).toBe(startUrl);
@@ -65,6 +74,15 @@ test.describe("Kanban card actions menu — delete/archive does not navigate", (
     if (!dialogBox) throw new Error("archive confirmation dialog has no layout box");
     expect(dialogBox.width).toBeGreaterThanOrEqual(480);
     await expect(dialog).toHaveClass(/font-sans/);
+    const archiveHeader = dialog.locator('[data-slot="alert-dialog-header"]');
+    await expect
+      .poll(async () =>
+        archiveHeader.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return { justifyItems: style.justifyItems, textAlign: style.textAlign };
+        }),
+      )
+      .toEqual({ justifyItems: "start", textAlign: "left" });
 
     expect(testPage.url()).toBe(startUrl);
   });

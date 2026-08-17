@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -33,6 +34,23 @@ type Registry struct {
 	loaded bool
 	mu     sync.RWMutex
 	logger *logger.Logger
+	// managedRuntimeSelections supplies exact versions to host-local provider
+	// recovery probes. It is wired after the settings store is available.
+	managedRuntimeSelections managedruntime.SelectionReader
+}
+
+// SetManagedRuntimeSelectionStore wires the install-wide exact-version reader
+// used by host-local managed-runtime recovery probes.
+func (r *Registry) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.managedRuntimeSelections = store
+}
+
+func (r *Registry) managedRuntimeSelectionReader() managedruntime.SelectionReader {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.managedRuntimeSelections
 }
 
 // NewRegistry creates a new agent registry

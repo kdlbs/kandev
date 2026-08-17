@@ -94,6 +94,7 @@ function parseMaxInflightTasks(raw: string): number | null | "invalid" {
 // `status`, `created`), operators and a project key — and the string is
 // persisted on the watch and sent upstream verbatim. Translating any of it would
 // produce a query Jira rejects.
+// i18n-exempt: JQL is Jira's query language, not prose.
 const DEFAULT_JQL = `project = PROJ AND status = "Open" ORDER BY created DESC`;
 
 function makeEmptyForm(workspaceId: string): FormState {

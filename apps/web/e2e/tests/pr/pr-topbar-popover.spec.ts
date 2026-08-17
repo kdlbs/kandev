@@ -3,6 +3,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Locator, Page } from "@playwright/test";
+import { dwell } from "../../helpers/causal-waits";
 
 const OWNER = "acme";
 const REPO = "demo";
@@ -408,7 +409,12 @@ test.describe("PR top-bar CI popover", () => {
 
     // Past the 150ms close delay the popover must still be open and its buttons
     // clickable.
-    await testPage.waitForTimeout(600);
+    await dwell(
+      testPage,
+      600,
+      "product-timer",
+      "outlasts our own 150ms hover-intent close delay; the assertion is that the popover is still there afterwards, and a close that must not happen publishes nothing to wait on",
+    );
     await expect(popover).toBeVisible();
     await expect(openButton).toBeVisible();
     await expect(session.prWorkflowAddContextButton("Lint")).toBeEnabled();
@@ -464,7 +470,12 @@ test.describe("PR top-bar CI popover", () => {
 
     // Past the 150ms close delay the popover must still be open and interactive,
     // not merely mounted — parity with the topbar test.
-    await testPage.waitForTimeout(600);
+    await dwell(
+      testPage,
+      600,
+      "product-timer",
+      "outlasts our own 150ms hover-intent close delay; the assertion is that the popover survives the gap crossing, and a close that must not happen publishes nothing to wait on",
+    );
     await expect(popover).toBeVisible();
     await expect(openButton).toBeVisible();
     await expect(popover.getByTestId("pr-workflow-add-context").first()).toBeEnabled();

@@ -99,6 +99,9 @@ func (m *mockRepository) CountOpenWatcherCreatedTasks(_ context.Context, _, _ st
 func (m *mockRepository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
 	return nil
 }
+func (m *mockRepository) SetTaskMetadataKeyIfPresent(context.Context, string, string, interface{}) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) UpdateTaskStateIfSessionState(
 	_ context.Context, _, _ string, _ models.TaskSessionState, _ v1.TaskState,
 ) (v1.TaskState, bool, error) {
@@ -253,6 +256,9 @@ func (m *mockRepository) DeleteMessage(ctx context.Context, id string) error {
 }
 func (m *mockRepository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 	return nil
+}
+func (m *mockRepository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
+	return false, nil
 }
 func (m *mockRepository) GetTurn(ctx context.Context, id string) (*models.Turn, error) {
 	return nil, nil
@@ -532,8 +538,8 @@ func (m *mockRepository) GetGitSnapshotsBySession(ctx context.Context, sessionID
 }
 
 // Session Commit operations
-func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error {
-	return nil
+func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error) {
+	return true, nil
 }
 func (m *mockRepository) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
 	return nil, nil

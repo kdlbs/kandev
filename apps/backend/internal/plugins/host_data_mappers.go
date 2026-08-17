@@ -225,12 +225,22 @@ func messageModelToDTO(m *taskmodels.Message) pluginsdk.Message {
 	}
 }
 
+// sessionCodeStatsModelToDTO converts the internal analytics model - which
+// represents "capture wasn't active yet for this session" as a nil
+// LinesAddedCommitted/LinesDeletedCommitted pair - into the public plugin
+// SDK's DTO, which represents the same fact as CommittedLinesAvailable ==
+// false with both fields reading 0 (see pluginsdk.SessionCodeStats' doc for
+// why the SDK doesn't use pointers here).
 func sessionCodeStatsModelToDTO(s *analyticsmodels.SessionCodeStats) pluginsdk.SessionCodeStats {
-	return pluginsdk.SessionCodeStats{
+	dto := pluginsdk.SessionCodeStats{
 		SessionID:               s.SessionID,
-		LinesAddedCommitted:     s.LinesAddedCommitted,
-		LinesDeletedCommitted:   s.LinesDeletedCommitted,
 		LinesAddedPeakPending:   s.LinesAddedPeakPending,
 		LinesDeletedPeakPending: s.LinesDeletedPeakPending,
 	}
+	if s.LinesAddedCommitted != nil && s.LinesDeletedCommitted != nil {
+		dto.LinesAddedCommitted = *s.LinesAddedCommitted
+		dto.LinesDeletedCommitted = *s.LinesDeletedCommitted
+		dto.CommittedLinesAvailable = true
+	}
+	return dto
 }

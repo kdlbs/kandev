@@ -283,7 +283,7 @@ type WorkflowSectionProps = {
   workflowLocked?: boolean;
 };
 
-export const WorkflowSection = memo(function WorkflowSection({
+function renderWorkflowSection({
   isCreateMode,
   isTaskStarted,
   workflows: allWorkflows,
@@ -351,6 +351,11 @@ export const WorkflowSection = memo(function WorkflowSection({
   }
 
   return null;
+}
+
+export const WorkflowSection = memo(function WorkflowSection(workflowProps: WorkflowSectionProps) {
+  if (!workflowProps.isCreateMode || workflowProps.isTaskStarted) return null;
+  return renderWorkflowSection(workflowProps);
 });
 
 export type DialogPromptSectionProps = {

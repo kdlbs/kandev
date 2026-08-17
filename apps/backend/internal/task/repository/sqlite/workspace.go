@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -189,6 +190,15 @@ func (r *Repository) deleteWorkspaceCascade(
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Lock the workspace row BEFORE inventorying its tasks: task creation
+	// takes the same lock, so a task created after this point either commits
+	// before the inventory (and is purged with the rest) or blocks until the
+	// cascade commits, when the workspace is gone and its insert fails. An
+	// unlocked inventory could miss a task created mid-cascade and leave its
+	// queued messages orphaned after the task rows are deleted.
+	if err := r.lockWorkspaceRowInTx(ctx, tx, id); err != nil {
+		return nil, nil, err
+	}
 	if expectedName != nil {
 		if err := r.confirmWorkspaceNameForCascadeDelete(ctx, tx, id, *expectedName); err != nil {
 			return nil, nil, err
@@ -201,6 +211,23 @@ func (r *Repository) deleteWorkspaceCascade(
 	workflows, err := r.listWorkspaceCascadeDeleteWorkflows(ctx, tx, id)
 	if err != nil {
 		return nil, nil, err
+	}
+	// Establish the global lock order task-row -> queue-session before
+	// purging the queues: lifecycle admission takes the task row first and
+	// then the session lock, so taking session locks first here would invert
+	// the order and deadlock the two on Postgres. Guard every affected task
+	// row in stable sorted id order, WITHOUT reordering the inventory returned
+	// to the caller (listWorkspaceCascadeDeleteTasks orders created_at ASC,
+	// id ASC and the service consumes that order).
+	lockIDs := make([]string, len(tasks))
+	for i, task := range tasks {
+		lockIDs[i] = task.ID
+	}
+	sort.Strings(lockIDs)
+	for _, taskID := range lockIDs {
+		if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
+			return nil, nil, fmt.Errorf("guard cascade task row %s: %w", taskID, err)
+		}
 	}
 	if err := r.purgeWorkspaceTaskQueuesInTx(ctx, tx, tasks); err != nil {
 		return nil, nil, err
@@ -255,7 +282,13 @@ func (r *Repository) deleteWorkspaceCascade(
 
 func (r *Repository) purgeWorkspaceTaskQueuesInTx(ctx context.Context, tx *sqlx.Tx, tasks []*models.Task) error {
 	for _, task := range tasks {
-		if err := r.purgeTaskQueueInTx(ctx, tx, task.ID); err != nil {
+		// The tasks still exist at this point (deletion happens later in the
+		// cascade), so the authoritative session set is discoverable now.
+		sessions, err := r.taskQueueSessionsInTx(ctx, tx, task.ID)
+		if err != nil {
+			return fmt.Errorf("task queue sessions for cascade task %s: %w", task.ID, err)
+		}
+		if err := r.purgeTaskQueueInTx(ctx, tx, task.ID, sessions); err != nil {
 			return fmt.Errorf("purge task queue for workspace cascade task %s: %w", task.ID, err)
 		}
 	}

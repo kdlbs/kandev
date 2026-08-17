@@ -235,8 +235,11 @@ type seedRunRequest struct {
 	ErrorMessage   string  `json:"error_message,omitempty"`
 	IdempotencyKey string  `json:"idempotency_key,omitempty"`
 	RequestedAt    *string `json:"requested_at,omitempty"`
-	ClaimedAt      *string `json:"claimed_at,omitempty"`
-	FinishedAt     *string `json:"finished_at,omitempty"`
+	// ScheduledRetryAt keeps a seeded queued run out of the live dispatcher
+	// until the E2E test explicitly changes its status.
+	ScheduledRetryAt *string `json:"scheduled_retry_at,omitempty"`
+	ClaimedAt        *string `json:"claimed_at,omitempty"`
+	FinishedAt       *string `json:"finished_at,omitempty"`
 }
 
 // seedRunHandler creates an office_runs row directly so the
@@ -288,20 +291,31 @@ func createSeededRun(
 	c *gin.Context, repo *officesqlite.Repository, log *logger.Logger, req seedRunRequest,
 ) (string, bool) {
 	ctx := c.Request.Context()
+	var scheduledRetryAt *time.Time
+	if req.ScheduledRetryAt != nil && *req.ScheduledRetryAt != "" {
+		t, err := time.Parse(time.RFC3339, *req.ScheduledRetryAt)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "scheduled_retry_at must be RFC3339"})
+			return "", false
+		}
+		t = t.UTC()
+		scheduledRetryAt = &t
+	}
 	var idemPtr *string
 	if req.IdempotencyKey != "" {
 		v := req.IdempotencyKey
 		idemPtr = &v
 	}
 	run := &officemodels.Run{
-		ID:             uuid.New().String(),
-		AgentProfileID: req.AgentProfileID,
-		Reason:         req.Reason,
-		Payload:        buildSeededRunPayload(req.TaskID, req.SessionID, req.CommentID, req.RoutineID),
-		Status:         "queued",
-		CoalescedCount: 1,
-		IdempotencyKey: idemPtr,
-		ErrorMessage:   req.ErrorMessage,
+		ID:               uuid.New().String(),
+		AgentProfileID:   req.AgentProfileID,
+		Reason:           req.Reason,
+		Payload:          buildSeededRunPayload(req.TaskID, req.SessionID, req.CommentID, req.RoutineID),
+		Status:           "queued",
+		CoalescedCount:   1,
+		IdempotencyKey:   idemPtr,
+		ScheduledRetryAt: scheduledRetryAt,
+		ErrorMessage:     req.ErrorMessage,
 	}
 	if err := repo.CreateRun(ctx, run); err != nil {
 		log.Error("test harness: create run failed", zap.Error(err))

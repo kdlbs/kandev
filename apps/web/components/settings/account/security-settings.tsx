@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
-import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Spinner } from "@kandev/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
@@ -19,6 +19,8 @@ import {
 import { SettingsCard } from "@/components/settings/settings-card";
 import { ACCOUNT_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/account";
 import { formatDateTime } from "@/lib/i18n/formats";
+import { SettingsCardHeader } from "@/components/settings/settings-card-header";
+import { SettingsErrorText, SettingsFieldLabel } from "@/components/settings/settings-typography";
 
 function ChangePasswordCard() {
   const { t } = useTranslation();
@@ -50,17 +52,19 @@ function ChangePasswordCard() {
       discoveryTargetId={ACCOUNT_SETTINGS_TARGETS.password}
       data-testid="account-security-password-card"
     >
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <IconKey className="h-4 w-4" /> {t("account:password")}
-        </CardTitle>
-      </CardHeader>
+      <SettingsCardHeader
+        title={
+          <span className="flex items-center gap-2">
+            <IconKey className="h-4 w-4" /> {t("account:password")}
+          </span>
+        }
+      />
       <CardContent>
         <form className="flex flex-col gap-3 max-w-sm" onSubmit={(e) => void onSubmit(e)}>
           <div className="flex flex-col gap-1">
-            <label htmlFor="account-current-password" className="text-xs text-muted-foreground">
+            <SettingsFieldLabel htmlFor="account-current-password">
               {t("account:currentPassword")}
-            </label>
+            </SettingsFieldLabel>
             <Input
               id="account-current-password"
               data-testid="account-current-password"
@@ -70,9 +74,9 @@ function ChangePasswordCard() {
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label htmlFor="account-new-password" className="text-xs text-muted-foreground">
+            <SettingsFieldLabel htmlFor="account-new-password">
               {t("account:newPassword")}
-            </label>
+            </SettingsFieldLabel>
             <Input
               id="account-new-password"
               data-testid="account-new-password"
@@ -83,9 +87,7 @@ function ChangePasswordCard() {
             />
           </div>
           {error && (
-            <p className="text-xs text-destructive" data-testid="account-password-error">
-              {error}
-            </p>
+            <SettingsErrorText data-testid="account-password-error">{error}</SettingsErrorText>
           )}
           {success && (
             <p className="text-xs text-muted-foreground" data-testid="account-password-success">
@@ -144,16 +146,16 @@ function SessionsCard() {
       discoveryTargetId={ACCOUNT_SETTINGS_TARGETS.sessions}
       data-testid="account-sessions-card"
     >
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <IconDevices className="h-4 w-4" /> {t("account:activeSessions")}
-        </CardTitle>
-      </CardHeader>
+      <SettingsCardHeader
+        title={
+          <span className="flex items-center gap-2">
+            <IconDevices className="h-4 w-4" /> {t("account:activeSessions")}
+          </span>
+        }
+      />
       <CardContent className="space-y-3">
         {error && (
-          <p className="text-xs text-destructive" data-testid="account-sessions-error">
-            {error}
-          </p>
+          <SettingsErrorText data-testid="account-sessions-error">{error}</SettingsErrorText>
         )}
         {!loaded && !error && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">

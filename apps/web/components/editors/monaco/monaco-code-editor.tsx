@@ -15,6 +15,7 @@ import { MonacoEditorToolbar } from "./monaco-editor-toolbar";
 import { useMonacoEditorComments } from "./use-monaco-editor-state";
 import { useMonacoEditorLsp, useMonacoDiffDecorations } from "./use-monaco-editor-lsp";
 import { useMonacoWalkthroughRange } from "./use-monaco-walkthrough-range";
+import { useMonacoCursorNavigation } from "./use-monaco-cursor-navigation";
 import { initMonacoThemes } from "./monaco-init";
 import { useTranslation } from "react-i18next";
 
@@ -150,6 +151,13 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     contentRef,
     editorRef: state.editorRef,
     editorReady: state.editorInstance !== null,
+  });
+  useMonacoCursorNavigation({
+    editor: state.editorInstance,
+    path,
+    worktreePath,
+    repo,
+    sessionId,
   });
   const { diffStats } = useMonacoDiffDecorations({
     originalContent,

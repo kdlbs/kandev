@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-08-04
-updated: 2026-08-12
+updated: 2026-08-13
 owner: product
 ---
 
@@ -56,6 +56,16 @@ Kandev must preserve both versions and ask for user intent before one version re
 - The Changes panel uses provider evidence only from a pull request whose repository and normalized
   head branch match the live checkout. Historical pull requests remain available in Review, but they
   do not affect Changes after the checkout moves to another branch.
+- Provider commit history is optional enrichment for the Changes panel. Kandev shares identical
+  provider reads across Changes consumers and retries one failed read. If the retry fails, the panel
+  keeps the checkout history and does not show a provider-history warning.
+- Kandev reconciles provider and checkout commits by SHA. Shared commits keep the normal commit
+  marker. Provider-only commits use the current-PR color and label. Checkout-only commits in a
+  confirmed divergence use a separate local-checkout color and label. The accessible label carries
+  the same meaning as the color.
+- Provider-only commits appear newest first with the rest of the commit history. A complete provider
+  history that contains local HEAD proves a provider-ahead relation even when no upstream is
+  configured. Kandev does not offer Pull until the checkout has a configured upstream.
 - When the provider history no longer contains local HEAD, the Changes panel keeps the task version as
   the primary version. A yellow warning icon in the Changes toolbar opens the available version
   actions; the panel body does not repeat the warning. The current provider history remains collapsed
@@ -74,15 +84,17 @@ Kandev must preserve both versions and ask for user intent before one version re
 - Kandev exposes no replacement action through agent MCP tools or automatic Git operations. Generic
   contribution force-push requests remain rejected. Direct terminal commands remain outside this UI
   approval boundary.
-- A provider-ahead history that still contains local HEAD is a safe fast-forward case: the UI may offer
-  Pull, but must not label the existing local commits as unpushed work. A local-ahead history whose
-  tracked upstream equals the provider head may offer a normal Push for exactly `remote_ahead` commits.
+- After equal heads are classified as aligned, a complete provider-ahead history that still contains
+  local HEAD is a safe fast-forward case: the UI may offer Pull, but must not label the existing
+  local commits as unpushed work. A local-ahead history whose tracked upstream equals the provider
+  head may offer a normal Push for exactly `remote_ahead` commits.
 
 Decisions:
 [ADR-2026-08-04-remote-contribution-bindings](../../decisions/2026-08-04-remote-contribution-bindings.md),
 [ADR-2026-08-10-remote-contribution-head-drift](../../decisions/2026-08-10-remote-contribution-head-drift.md),
+[ADR-2026-08-12-local-first-contribution-replacement](../../decisions/2026-08-12-local-first-contribution-replacement.md),
 and
-[ADR-2026-08-12-local-first-contribution-replacement](../../decisions/2026-08-12-local-first-contribution-replacement.md).
+[ADR-2026-08-13-provider-history-changes-enrichment](../../decisions/2026-08-13-provider-history-changes-enrichment.md).
 
 ## Data model
 
@@ -173,7 +185,7 @@ recovery branch name after a successful reset. Neither action appears in the age
 | Provider rejects the leased replacement                                                      | The task version remains unchanged. Kandev shows the provider or Git error.                                                              |
 | The user selects **Use PR version** with local file changes                                  | Kandev does not reset the checkout. It asks the user to commit or discard the file changes first.                                        |
 | The user selects **Use PR version** and the fetch does not match the confirmed provider head | Kandev does not create a recovery branch or reset the checkout. It refreshes the provider state.                                         |
-| Current provider commits cannot be loaded                                                    | Kandev does not assert that a rewrite occurred. It shows the provider error and derives Push/Pull only from available upstream evidence. |
+| Current provider commits cannot be loaded                                                    | Kandev retries once, keeps the checkout history without a warning, and derives remote actions only from sufficient evidence.             |
 | Effective Git credentials cannot dry-run a push to the source branch                         | The task remains durable, but the session does not start and exposes an actionable credential/collaboration error.                       |
 | Contribution binding is missing, malformed, or an unknown version                            | Runtime preparation and managed source-scope issuance fail closed.                                                                       |
 | Agent attempts a normal create-PR action                                                     | Kandev reuses the existing association and does not open a second remote change.                                                         |
@@ -294,12 +306,20 @@ AND the maintainer creates commits on top
 WHEN Kandev computes Git status
 THEN Push reports only the commits absent from the upstream and the provider commits are not duplicated
 
-### Avoid guessing when provider history is unavailable
+### Keep Changes usable when provider history is unavailable
 
 GIVEN Kandev cannot load the current provider commit list
 WHEN the Changes panel renders the checkout
-THEN it reports that provider history is unavailable, does not claim the branch was rewritten, and
-does not compare commits by message or patch similarity
+THEN it retries the provider read once and keeps the local checkout history without a warning
+AND it does not claim the branch was rewritten or compare commits by message or patch similarity
+
+### Distinguish commits when the provider is ahead
+
+GIVEN a complete provider history contains local HEAD and one newer provider commit
+WHEN the Changes panel reconciles the commit lists
+THEN it shows the provider-only commit first within its repository with the current-PR color and accessible label
+AND it keeps shared commits neutral and does not mark them as local work to push
+AND it does not offer Pull when the checkout has no configured upstream
 
 ### Preserve ordinary repository creation
 

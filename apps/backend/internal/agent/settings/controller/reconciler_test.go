@@ -3,7 +3,9 @@ package controller
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -62,16 +64,41 @@ func newFakeStore() *fakeStore {
 	}
 }
 
+// copyAgent deep-copies an agent so the fake store behaves like a real one:
+// callers get a snapshot, not a handle on stored state.
+//
+// This matters more than it looks. When Get returned the stored pointer and
+// UpdateAgent was a no-op, a controller could mutate a nested field, never
+// persist it, and every assertion still passed — the test was reading the same
+// struct it had just written through. That masked UpdateAgent silently dropping
+// the tui_config column. Round-tripping through JSON forces writes to go through
+// UpdateAgent to be observable, the same as SQL.
+func copyAgent(a *models.Agent) *models.Agent {
+	if a == nil {
+		return nil
+	}
+	data, err := json.Marshal(a)
+	if err != nil {
+		panic("fakeStore: marshal agent: " + err.Error())
+	}
+	var out models.Agent
+	if err := json.Unmarshal(data, &out); err != nil {
+		panic("fakeStore: unmarshal agent: " + err.Error())
+	}
+	return &out
+}
+
 func (f *fakeStore) CreateAgent(_ context.Context, a *models.Agent) error {
 	f.nextAgentID++
 	a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
-	f.agents[a.ID] = a
-	f.byName[a.Name] = a
+	stored := copyAgent(a)
+	f.agents[a.ID] = stored
+	f.byName[a.Name] = stored
 	return nil
 }
 
 func (f *fakeStore) GetAgent(_ context.Context, id string) (*models.Agent, error) {
-	return f.agents[id], nil
+	return copyAgent(f.agents[id]), nil
 }
 
 func (f *fakeStore) GetAgentByName(_ context.Context, name string) (*models.Agent, error) {
@@ -79,13 +106,28 @@ func (f *fakeStore) GetAgentByName(_ context.Context, name string) (*models.Agen
 		return nil, f.getByNameErr
 	}
 	if a, ok := f.byName[name]; ok {
-		return a, nil
+		return copyAgent(a), nil
 	}
 	return nil, sql.ErrNoRows
 }
 
-func (f *fakeStore) UpdateAgent(context.Context, *models.Agent) error { return nil }
-func (f *fakeStore) DeleteAgent(context.Context, string) error        { return nil }
+func (f *fakeStore) UpdateAgent(_ context.Context, a *models.Agent) error {
+	existing, ok := f.agents[a.ID]
+	if !ok {
+		return fmt.Errorf("agent not found: %s", a.ID)
+	}
+	stored := copyAgent(a)
+	// Mirror the real store's column list so the fake cannot accept a write the
+	// database would reject or ignore.
+	existing.WorkspaceID = stored.WorkspaceID
+	existing.SupportsMCP = stored.SupportsMCP
+	existing.MCPConfigPath = stored.MCPConfigPath
+	existing.TUIConfig = stored.TUIConfig
+	f.byName[existing.Name] = existing
+	return nil
+}
+
+func (f *fakeStore) DeleteAgent(context.Context, string) error { return nil }
 
 func (f *fakeStore) ListAgents(_ context.Context) ([]*models.Agent, error) {
 	if f.listAgentsErr != nil {

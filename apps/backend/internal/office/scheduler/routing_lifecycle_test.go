@@ -111,3 +111,25 @@ func TestHandlePostStartFailure_NonFallbackFailureEscalates(t *testing.T) {
 		t.Fatal("ambiguous runtime failure must not be handled by the routing path (escalate)")
 	}
 }
+
+func TestHandlePostStartFailure_TransportLostEscalates(t *testing.T) {
+	repo := newTestRepoSched(t)
+	ss := buildScheduler(t, repo, newFakeTaskStarter())
+	run := seedRoutedRun(t, repo)
+
+	handled, err := ss.HandlePostStartFailure(
+		context.Background(), run, makeAgent(), "peer disconnected before response", nil)
+	if err != nil {
+		t.Fatalf("HandlePostStartFailure: %v", err)
+	}
+	if handled {
+		t.Fatal("post-start transport loss must escalate instead of entering launch retry routing")
+	}
+	got, err := repo.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.RoutingBlockedStatus != nil || got.ScheduledRetryAt != nil {
+		t.Fatalf("post-start transport loss changed routing state: block=%v retry=%v", got.RoutingBlockedStatus, got.ScheduledRetryAt)
+	}
+}

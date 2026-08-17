@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
 import { ApiClient } from "../helpers/api-client";
+import { dwell } from "../helpers/causal-waits";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
 import type { WorkflowStep } from "../../lib/types/http";
@@ -16,6 +17,9 @@ const DEFAULT_SIDEBAR_VIEW = {
   group: "repository",
   collapsed_groups: [],
 };
+
+const AGENT_PROFILE_READY_TIMEOUT_MS = 30_000;
+const AGENT_PROFILE_READY_POLL_MS = 250;
 
 export type SeedData = {
   workspaceId: string;
@@ -31,6 +35,61 @@ export type SeedData = {
   /** Executor profile ID for the worktree executor — use to create tasks with git worktree isolation. */
   worktreeExecutorProfileId: string;
 };
+
+async function waitForSeedAgentProfile(
+  apiClient: ApiClient,
+  backend: BackendContext,
+  profileId: string,
+): Promise<string> {
+  const deadline = Date.now() + AGENT_PROFILE_READY_TIMEOUT_MS;
+  let lastObservation = "no response";
+
+  while (Date.now() < deadline) {
+    try {
+      await backend.ensureReady();
+      const { agents } = await apiClient.listAgents();
+      const profiles = agents.flatMap((agent) => agent.profiles ?? []);
+      const profile = profiles.find((candidate) => candidate.id === profileId);
+
+      if (profile && profile.enabled !== false) return profile.id;
+
+      if (profile) {
+        await apiClient.updateAgentProfile(profileId, { enabled: true });
+        return profile.id;
+      }
+
+      // Profile-mode tests intentionally restart the same database with the
+      // production registry. Its orphan reconciler soft-deletes the E2E mock
+      // profile because mock-agent is disabled there. When the E2E profile is
+      // restored, create a fresh disposable profile instead of waiting for a
+      // user-deleted row that the backend correctly will not resurrect.
+      const agent = agents.find((candidate) => candidate.name === "mock-agent") ?? agents[0];
+      if (agent) {
+        const replacement = await apiClient.createAgentProfile(agent.id, "mock-fast", {
+          model: "mock-fast",
+        });
+        return replacement.id;
+      }
+
+      lastObservation =
+        `seed profile ${profileId} was not returned by /api/v1/agents ` +
+        `(available profiles: ${profiles.map((candidate) => candidate.id).join(", ") || "none"})`;
+    } catch (error) {
+      lastObservation = error instanceof Error ? error.message : String(error);
+    }
+
+    await dwell(
+      AGENT_PROFILE_READY_POLL_MS,
+      "poll-interval",
+      "agent profile readiness has no event notification",
+    );
+  }
+
+  throw new Error(
+    `E2E backend did not expose enabled seed agent profile ${profileId} within ` +
+      `${AGENT_PROFILE_READY_TIMEOUT_MS}ms (${lastObservation})`,
+  );
+}
 
 export const test = backendFixture.extend<
   {
@@ -73,7 +132,11 @@ export const test = backendFixture.extend<
           lastText = await probe.text();
           break;
         }
-        await new Promise((r) => setTimeout(r, 250));
+        await dwell(
+          250,
+          "poll-interval",
+          "sampling interval for the mock-harness health probe above; the backend is still booting and there is no page, let alone a socket, to receive a ready signal on",
+        );
       }
       if (lastStatus === 404) {
         throw new Error(
@@ -139,7 +202,11 @@ export const test = backendFixture.extend<
         lastAgentCount = agents.length;
         agentProfileId = agents[0]?.profiles[0]?.id;
         if (agentProfileId) break;
-        await new Promise((r) => setTimeout(r, 250));
+        await dwell(
+          250,
+          "poll-interval",
+          "sampling interval for the seeded-agent-profile poll above; seeding is asynchronous backend work read back over HTTP, with no page in this fixture",
+        );
       }
       if (!agentProfileId) {
         throw new Error(
@@ -180,6 +247,15 @@ export const test = backendFixture.extend<
   // may have written during previous tests.
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
     await backend.ensureReady();
+    // A suite-level test may restart the worker backend after the worker-scoped
+    // seed fixture ran. Health only proves that the listener is serving; it does
+    // not prove that the persisted seed profile is present and enabled for the
+    // task-create dialog. Re-establish that invariant before opening a page.
+    seedData.agentProfileId = await waitForSeedAgentProfile(
+      apiClient,
+      backend,
+      seedData.agentProfileId,
+    );
     // Clean up tasks, test-created workflows, and extra agent profiles from
     // previous tests in this worker. Keep the seeded workflow and the seed
     // agent profile so the worker-scoped seedData fixture remains valid.

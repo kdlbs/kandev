@@ -65,7 +65,12 @@ describe("buildSettingsInitialStateForRoute", () => {
       expect(state.userSettings?.workspaceId).toBe("ws-2");
     });
 
-    it("falls back to user settings when cookie has an office workspace", () => {
+    it("keeps an office workspace active when the cookie names one", () => {
+      // Settings used to prefer a kanban workspace here. Harmless while chrome
+      // came from the pathname — /settings is not an /office route, so it
+      // rendered kanban chrome regardless — but the chrome now follows the
+      // active workspace, so preferring kanban would switch an Office user's
+      // workspace as a side effect of opening Settings.
       document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=ws-office; path=/`;
 
       const state = buildState({
@@ -76,8 +81,8 @@ describe("buildSettingsInitialStateForRoute", () => {
         userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-kanban") }),
       });
 
-      expect(state.workspaces?.activeId).toBe("ws-kanban");
-      expect(state.userSettings?.workspaceId).toBe("ws-kanban");
+      expect(state.workspaces?.activeId).toBe("ws-office");
+      expect(state.userSettings?.workspaceId).toBe("ws-office");
     });
   });
 

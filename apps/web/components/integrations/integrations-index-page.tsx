@@ -15,10 +15,12 @@ import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
+import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { useTranslation } from "react-i18next";
 import { useDraftedIntegrationEnabled } from "@/components/integrations/use-drafted-integration-enabled";
 import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav";
 import { AzureDevOpsEnabledControl } from "@/components/azure-devops/azure-devops-enabled-control";
+import type { IntegrationEnabledControlProps } from "@/components/integrations/integration-enabled-control-props";
 import { GitHubEnabledControl } from "@/components/github/github-enabled-control";
 import { GitLabEnabledControl } from "@/components/gitlab/gitlab-enabled-control";
 import { JiraEnabledControl } from "@/components/jira/jira-enabled-control";
@@ -76,7 +78,10 @@ const INTEGRATIONS: Array<{
 // Each row's slider is a per-integration hook wrapper (rules of hooks forbid
 // picking a hook dynamically by slug), so the map below selects the right
 // *component* — every component calls exactly one hook unconditionally.
-const ENABLED_CONTROL_BY_SLUG: Record<IntegrationSlug, ComponentType> = {
+const ENABLED_CONTROL_BY_SLUG: Record<
+  IntegrationSlug,
+  ComponentType<IntegrationEnabledControlProps>
+> = {
   "azure-devops": AzureDevOpsEnabledControl,
   github: GitHubEnabledControl,
   gitlab: GitLabEnabledControl,
@@ -130,10 +135,17 @@ export function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProp
 
   return (
     <div className="space-y-6">
-      <WorkspaceSectionHeader
-        tab="integrations"
-        description={t("settings:connectKandevToThirdPartyServices")}
-      />
+      {workspaceId ? (
+        <WorkspaceSectionHeader
+          tab="integrations"
+          description={t("settings:connectKandevToThirdPartyServices")}
+        />
+      ) : (
+        <SettingsPageHeader
+          title={t("common:integrations")}
+          description={t("settings:connectKandevToThirdPartyServices")}
+        />
+      )}
       <Separator />
       <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {INTEGRATIONS.map(({ slug, label, descriptionKey, Icon }) => {
@@ -155,7 +167,7 @@ export function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProp
                     <span className="truncate">{label}</span>
                   </Link>
                   <div className="shrink-0">
-                    <EnabledControl />
+                    <EnabledControl workspaceId={workspaceId} />
                   </div>
                 </div>
                 <Link href={href} className="text-sm text-muted-foreground cursor-pointer">

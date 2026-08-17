@@ -11,6 +11,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestSSHResolvePrepareScriptUsesWorkspaceProviders(t *testing.T) {
@@ -44,6 +45,33 @@ func TestSSHResolvePrepareScriptUsesWorkspaceProviders(t *testing.T) {
 	}
 	if strings.Contains(script, "agentctl --") || strings.Contains(script, "chmod +x /usr/local/bin/agentctl") {
 		t.Fatalf("SSH prepare script must not start or install a duplicate agentctl:\n%s", script)
+	}
+}
+
+func TestSSHResolvePrepareScriptUsesRemoteWorkspaceForContributionDestination(t *testing.T) {
+	destination := models.ContributionDestination{
+		Version:  models.ContributionDestinationVersion,
+		Provider: models.ContributionDestinationProviderGitHub,
+		SourceRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "kdlbs/kandev", ProviderID: "100", RemoteURL: "https://github.com/kdlbs/kandev.git",
+		},
+		TargetRepository: models.ContributionDestinationRepository{
+			Host: "github.com", Path: "alice/kandev", ProviderID: "200", RemoteURL: "https://github.com/alice/kandev.git",
+		},
+	}
+
+	script, err := (&SSHExecutor{}).resolvePrepareScript(&ExecutorCreateRequest{
+		Metadata:                 map[string]interface{}{"repository_clone_url": "https://github.com/kdlbs/kandev.git"},
+		ContributionDestinations: map[string]models.ContributionDestination{"": destination},
+	}, "/remote/task", "/remote/bin/agentctl")
+	if err != nil {
+		t.Fatalf("resolvePrepareScript() error = %v", err)
+	}
+	if !strings.Contains(script, "cd '/remote/task'") {
+		t.Fatalf("destination setup did not use remote workspace:\n%s", script)
+	}
+	if strings.Contains(script, "cd '/workspace'") {
+		t.Fatalf("destination setup used the local default workspace:\n%s", script)
 	}
 }
 

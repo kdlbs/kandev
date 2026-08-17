@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { dwell } from "../../helpers/causal-waits";
 
 // Task dependencies: a peer "B cannot start until A finishes" relationship,
 // separate from the parent/child subtask hierarchy. These specs cover the
@@ -48,7 +49,11 @@ async function expectStaysUnstarted(
   const deadline = Date.now() + 6_000;
   while (Date.now() < deadline) {
     expect(await sessionCount(apiClient, taskId), `${label} must not be started`).toBe(0);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await dwell(
+      500,
+      "poll-interval",
+      "sampling interval for the window above, not a settle: the assertion is that nothing starts during it, so the loop keeps sampling rather than awaiting one event",
+    );
   }
 }
 

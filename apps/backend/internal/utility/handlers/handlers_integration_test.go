@@ -11,11 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/gin-gonic/gin"
-
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
-	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // statefulHostStub is a goroutine-safe stub that models the real probe
@@ -28,6 +25,22 @@ type statefulHostStub struct {
 	caps         map[string]hostutility.AgentCapabilities
 	nextRefresh  map[string]hostutility.AgentCapabilities
 	refreshCalls int
+
+	// promptResult/promptErr drive the sessionless execution path; when both
+	// are unset the stub reports a trivially successful run.
+	promptResult *hostutility.PromptResult
+	promptErr    error
+	// prompts records every (agentType, model, mode, prompt) tuple forwarded
+	// to the host utility, so a test can assert what was actually executed.
+	prompts []hostPrompt
+}
+
+// hostPrompt is one recorded ExecutePrompt invocation.
+type hostPrompt struct {
+	agentType string
+	model     string
+	mode      string
+	prompt    string
 }
 
 func newStatefulHostStub() *statefulHostStub {
@@ -37,8 +50,20 @@ func newStatefulHostStub() *statefulHostStub {
 	}
 }
 
-func (h *statefulHostStub) ExecutePrompt(_ context.Context, _, _, _, _ string) (*hostutility.PromptResult, error) {
-	return nil, nil
+func (h *statefulHostStub) ExecutePrompt(
+	_ context.Context, agentType, model, mode, prompt string,
+) (*hostutility.PromptResult, error) {
+	h.mu.Lock()
+	h.prompts = append(h.prompts, hostPrompt{agentType: agentType, model: model, mode: mode, prompt: prompt})
+	result, err := h.promptResult, h.promptErr
+	h.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if result != nil {
+		return result, nil
+	}
+	return &hostutility.PromptResult{}, nil
 }
 
 func (h *statefulHostStub) Get(agentType string) (hostutility.AgentCapabilities, bool) {
@@ -60,24 +85,12 @@ func (h *statefulHostStub) Refresh(_ context.Context, agentType string) (hostuti
 	return next, nil
 }
 
+// newIntegrationServer returns a live server with every utility route wired to
+// a real controller over the in-memory fake store (see newUtilityFixture), so
+// the inference-agents tests below and the CRUD/execute tests share one stack.
 func newIntegrationServer(t *testing.T, agents []lifecycle.InferenceAgentInfo, host *statefulHostStub) *httptest.Server {
 	t.Helper()
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
-
-	// Register only the two routes under test directly. RegisterRoutes
-	// requires a real Controller (full service stack); for integration
-	// against the inference-agents surface we only need these two.
-	h := &Handlers{
-		executor:     &stubInferenceExecutor{agents: agents},
-		hostExecutor: host,
-		logger:       log,
-	}
-	r.GET("/api/v1/utility/inference-agents", h.httpListInferenceAgents)
-	r.POST("/api/v1/utility/inference-agents/:id/refresh", h.httpRefreshInferenceAgent)
-
-	return httptest.NewServer(r)
+	return newUtilityFixture(t, utilityFixtureOptions{agents: agents, host: host}).server
 }
 
 func getJSON(t *testing.T, url string) (int, http.Header, map[string]any) {

@@ -47,6 +47,10 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		return nil, err
 	}
 	cfg := ia.InferenceConfig()
+	command, err := m.resolveInferenceCommand(ctx, profile.AgentID, ia, agents.Command{})
+	if err != nil {
+		return nil, err
+	}
 	resolved := m.resolveModel(profile.AgentID, profile.Model, ia)
 	autoApprove := profile.AutoApprove
 	req := &agentctlutil.PromptRequest{
@@ -56,7 +60,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		Mode:                   profile.Mode,
 		AutoApprovePermissions: &autoApprove,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command: cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
+			Command: command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, CommandPrefix: prefix,
 		},
 	}
@@ -171,8 +175,12 @@ func (m *Manager) resolveModelConfigFlight(
 	if cfg == nil || !cfg.Supported {
 		return nil, errors.New("inference config not available")
 	}
+	command, err := m.resolveInferenceCommand(probeCtx, agentType, ia, agents.Command{})
+	if err != nil {
+		return nil, err
+	}
 
-	probeReq := buildProbeRequest(inst, ia, req.Refresh, agents.Command{})
+	probeReq := buildProbeRequest(inst, ia, req.Refresh, command)
 	probeReq.Model = req.Model
 	probeReq.Mode = req.Mode
 	probeReq.ConfigOptions = cloneStringMap(req.ConfigOptions)
@@ -241,16 +249,40 @@ func (m *Manager) RefreshWithCommand(
 	agentType string,
 	command agents.Command,
 ) (AgentCapabilities, error) {
+	caps, err := m.ProbeWithCommand(ctx, agentType, command)
+	if err != nil {
+		return AgentCapabilities{}, err
+	}
+	if caps.Status == StatusOK {
+		m.PublishCapabilities(agentType, caps)
+	}
+	return caps, nil
+}
+
+// ProbeWithCommand runs a trusted command override without changing the live
+// capability cache. Runtime activation uses this boundary before persistence.
+func (m *Manager) ProbeWithCommand(
+	ctx context.Context,
+	agentType string,
+	command agents.Command,
+) (AgentCapabilities, error) {
 	m.invalidateModelConfigCache(agentType)
 	inst, ia, err := m.getInstance(ctx, agentType)
 	if err != nil {
 		return AgentCapabilities{}, err
 	}
 	caps := m.probeWithCommand(ctx, inst, ia, true, command)
-	if caps.Status == StatusOK {
-		m.cache.set(caps)
-	}
 	return caps, nil
+}
+
+// PublishCapabilities makes a successful candidate the live catalogue. The
+// caller is responsible for persisting the active selection first.
+func (m *Manager) PublishCapabilities(agentType string, caps AgentCapabilities) {
+	if caps.Status != StatusOK {
+		return
+	}
+	m.invalidateModelConfigCache(agentType)
+	m.cache.set(caps)
 }
 
 // ExecutePrompt runs a sessionless utility prompt against the warm instance
@@ -281,6 +313,10 @@ func (m *Manager) ExecutePromptWithMCP(
 		return nil, err
 	}
 	cfg := ia.InferenceConfig()
+	command, err := m.resolveInferenceCommand(ctx, agentType, ia, agents.Command{})
+	if err != nil {
+		return nil, err
+	}
 
 	resolved := m.resolveModel(agentType, model, ia)
 
@@ -290,7 +326,7 @@ func (m *Manager) ExecutePromptWithMCP(
 		Model:   resolved,
 		Mode:    mode,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command:   cfg.Command.Args(),
+			Command:   command.Args(),
 			ModelFlag: cfg.ModelFlag.Args(),
 			WorkDir:   inst.workDir,
 			Env:       agents.RuntimeEnvFor(ia),

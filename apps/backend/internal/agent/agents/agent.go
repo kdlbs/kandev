@@ -117,10 +117,33 @@ type LoginAgent interface {
 }
 
 // IsPassthroughOnly returns true if the agent only supports passthrough mode
-// and should not have interactive MCP tools (e.g. ask_user_question) registered.
+// (a raw CLI under a PTY, no ACP protocol mode). It governs execution mode —
+// notably seeding the agent's default profile as CLI passthrough — and is true
+// for every TUI agent regardless of MCP configuration.
+//
+// For "should interactive MCP tools be registered?", use
+// SupportsInteractiveMCPTools instead. The two questions used to share this one
+// predicate, which is why a custom TUI agent could never get ask_user_question.
 func IsPassthroughOnly(a Agent) bool {
 	_, ok := a.(*TUIAgent)
 	return ok
+}
+
+// SupportsInteractiveMCPTools reports whether interactive MCP tools (notably
+// ask_user_question) should be registered for the agent's session.
+//
+// A TUI agent with no MCP injection strategy is a plain terminal tool that
+// never speaks MCP: registering a tool it cannot call just means a question
+// that hangs forever. A TUI agent *with* a strategy wraps a real MCP-capable
+// CLI that kandev points at the per-session server, so it should get the same
+// tools as the built-in claude-acp agent running in passthrough mode. Every
+// non-TUI agent supports them.
+func SupportsInteractiveMCPTools(a Agent) bool {
+	tui, ok := a.(*TUIAgent)
+	if !ok {
+		return true
+	}
+	return tui.MCPStrategy() != nil
 }
 
 // LogoVariant selects light or dark logo.
@@ -176,6 +199,9 @@ type CommandOptions struct {
 	// standalone CLI was found in the execution environment. Such agents emit
 	// the native binary (e.g. "copilot --acp") instead of "npx -y <pkg>".
 	PreferNativeBinary bool
+	// ManagedRuntimeVersion is an internal exact version override for trusted
+	// managed npm ACP runtimes. Empty preserves the legacy unversioned command.
+	ManagedRuntimeVersion string
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
@@ -433,6 +459,32 @@ type RemoteAuthMethod struct {
 	// env var is resolved. Used to bootstrap credential files from env vars.
 	// Only meaningful for type="env". Can reference the env var by name.
 	SetupScript string `json:"setup_script,omitempty"`
+}
+
+// PortableConfigAgent is an optional capability for agents that have a small,
+// explicitly allowlisted set of user configuration files that can be copied
+// into an isolated executor. It is intentionally separate from RemoteAuth.
+type PortableConfigAgent interface {
+	PortableConfig() *PortableConfig
+}
+
+// PortableConfig declares safe configuration bundles for an agent.
+type PortableConfig struct {
+	Bundles []PortableConfigBundle `json:"bundles"`
+}
+
+// PortableConfigBundle is one stable, user-selectable configuration unit.
+type PortableConfigBundle struct {
+	ID    string               `json:"id"`
+	Label string               `json:"label"`
+	Files []PortableConfigFile `json:"files"`
+}
+
+// PortableConfigFile maps an OS-specific host path relative to the host home
+// directory to a relative path below the executor user's home directory.
+type PortableConfigFile struct {
+	SourcePaths map[string]string `json:"source_paths"`
+	TargetPath  string            `json:"target_path"`
 }
 
 // Command is a domain value type representing a CLI command with arguments.

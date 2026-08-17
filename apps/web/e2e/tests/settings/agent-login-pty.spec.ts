@@ -135,11 +135,18 @@ test.describe("agent login PTY", () => {
   });
 });
 
+/**
+ * Poll a flag these specs maintain themselves until it flips.
+ *
+ * What is being waited on is a local variable that a WebSocket listener writes,
+ * not a page, a response or a store, so none of the transport primitives in
+ * `helpers/causal-waits.ts` applies. `expect.poll` is the right tool anyway: it
+ * owns the interval and the deadline, so the hand-rolled 50ms sleep goes with
+ * the loop, and a timeout reports the label through Playwright rather than as a
+ * bare thrown Error.
+ */
 async function waitFor(check: () => boolean, timeoutMs: number, label: string) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (check()) return;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  throw new Error(`Timed out waiting for ${label}`);
+  await expect
+    .poll(check, { timeout: timeoutMs, message: `Timed out waiting for ${label}` })
+    .toBe(true);
 }

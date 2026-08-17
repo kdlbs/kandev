@@ -147,6 +147,28 @@ func (s *Service) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber
 	return s.store.UpdatePRWatchPRNumber(ctx, id, prNumber)
 }
 
+// UpdatePRWatchRepository updates a watch's provider repository identity after
+// PR discovery. This keeps future status polling on the repository that owns
+// the PR rather than the repository used to discover the branch.
+func (s *Service) UpdatePRWatchRepository(ctx context.Context, id, owner, repo string) error {
+	return s.store.UpdatePRWatchRepository(ctx, id, owner, repo)
+}
+
+func (s *Service) rebindPRWatchRepository(ctx context.Context, watch *PRWatch, pr *PR) error {
+	if watch == nil || pr == nil || strings.TrimSpace(pr.RepoOwner) == "" || strings.TrimSpace(pr.RepoName) == "" {
+		return nil
+	}
+	if sameRepositoryIdentity(watch.Owner, watch.Repo, pr.RepoOwner, pr.RepoName) {
+		return nil
+	}
+	if err := s.store.UpdatePRWatchRepository(ctx, watch.ID, pr.RepoOwner, pr.RepoName); err != nil {
+		return fmt.Errorf("update PR watch repository: %w", err)
+	}
+	watch.Owner = pr.RepoOwner
+	watch.Repo = pr.RepoName
+	return nil
+}
+
 // ResetPRWatch atomically resets a watch's branch and clears its pr_number so
 // the poller re-searches for a PR on the new branch. See Store.ResetPRWatch.
 func (s *Service) ResetPRWatch(ctx context.Context, id, branch string) error {
@@ -1086,7 +1108,7 @@ func (s *Service) detectPRForWatchOnce(
 	// fires WHILE FindPRByBranch is running wins over our post-fetch
 	// classification — see Service.markRepoAsMissing for the rationale.
 	repoErrGen := s.repoErrorGenSnapshot()
-	pr, err := resolved.Client.FindPRByBranch(ctx, watch.Owner, watch.Repo, watch.Branch)
+	pr, err := findPRByBranchInForkNetwork(ctx, resolved.Client, watch.Owner, watch.Repo, watch.Branch)
 	if err != nil && isRepoNotResolvableErr(err) {
 		s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
 		// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)
@@ -1113,6 +1135,9 @@ func (s *Service) detectPRForWatchOnce(
 	}
 	if err != nil || pr == nil {
 		return nil, err
+	}
+	if rebindErr := s.rebindPRWatchRepository(ctx, watch, pr); rebindErr != nil {
+		return nil, rebindErr
 	}
 	if err := s.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); err != nil {
 		s.logger.Error("failed to update PR watch number during sync",

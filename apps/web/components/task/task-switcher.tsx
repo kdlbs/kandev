@@ -117,7 +117,12 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
     return (
       <>
         {loadErrorNotice}
-        <div className="px-3 py-3 text-xs text-muted-foreground">{t("sidebar:noTasksYet")}</div>
+        <div
+          data-slot="task-switcher-empty-state"
+          className="px-3 py-3 text-xs text-muted-foreground"
+        >
+          {t("sidebar:noTasksYet")}
+        </div>
       </>
     );
   }

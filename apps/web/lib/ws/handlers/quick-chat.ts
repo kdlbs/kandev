@@ -3,6 +3,9 @@ import type { AppState } from "@/lib/state/store";
 import type { QuickChatSession } from "@/lib/state/slices/ui/types";
 import type { TaskEventPayload } from "@/lib/types/backend";
 
+// i18n-exempt: wire value. The backend sends this exact title for an untitled
+// quick chat and the check below compares it with `!==` to tell a real,
+// user-chosen title apart from the placeholder.
 const QUICK_CHAT_PLACEHOLDER_TITLE = "Quick Chat";
 
 function readMetadataString(

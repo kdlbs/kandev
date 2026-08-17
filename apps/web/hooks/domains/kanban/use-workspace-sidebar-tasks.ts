@@ -9,9 +9,11 @@ import {
 } from "@/components/task/task-session-sidebar-aggregate";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import { getDestinationQueue, type WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
   workflows: TaskMoveWorkflow[];
+  wipQueueByTaskId: Map<string, WipQueueStatus>;
   isLoading: boolean;
   archivedError: string | null;
   retryArchivedTasks: () => void;
@@ -119,6 +121,32 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     );
   }, [aggregated.allTasks, archived.tasks, needsArchivedTasks, workspaceId]);
 
+  const wipQueueByTaskId = useMemo(() => {
+    const result = new Map<string, WipQueueStatus>();
+    const activeTasks = allTasks.filter((task) => task.isArchived !== true);
+    const destinationStepIds = new Set(
+      activeTasks
+        .map((task) => task.queuedForStepId)
+        .filter((stepId): stepId is string => !!stepId),
+    );
+    for (const stepId of destinationStepIds) {
+      for (const entry of getDestinationQueue(activeTasks, stepId)) {
+        const task = entry.task;
+        const stepTitle =
+          aggregated.stepsByWorkflowId[task._workflowId]?.find((step) => step.id === stepId)
+            ?.title ??
+          aggregated.allSteps.find((step) => step.id === stepId)?.title ??
+          stepId;
+        result.set(task.id, {
+          position: entry.position,
+          total: entry.total,
+          destinationTitle: stepTitle,
+        });
+      }
+    }
+    return result;
+  }, [allTasks, aggregated.allSteps, aggregated.stepsByWorkflowId]);
+
   const workspaceWorkflows = useMemo<TaskMoveWorkflow[]>(
     () => filteredWorkflows.map((w) => ({ id: w.id, name: w.name, hidden: w.hidden })),
     [filteredWorkflows],
@@ -132,6 +160,7 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   return {
     ...aggregated,
     allTasks,
+    wipQueueByTaskId,
     workflows: workspaceWorkflows,
     isLoading,
     archivedError: archived.error,

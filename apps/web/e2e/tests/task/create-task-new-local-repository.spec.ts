@@ -4,10 +4,20 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 
 useRegularMode();
+
+// The two backend calls this flow actually waits on. `initialize-local` creates
+// the repository on disk and registers it; the workspace-scoped branches read is
+// what fills the branch chip, and until it lands `hasAllBranches` is false and
+// every submit button in the footer stays disabled. Asserting on the buttons
+// instead of on these two responses is what made this spec flaky: it waited
+// 30s for `submit-start-agent` to enable and never learned why it did not.
+const INITIALIZE_LOCAL_PATH = /\/repositories\/initialize-local$/;
+const WORKSPACE_BRANCHES_PATH = /^\/api\/v1\/workspaces\/[^/]+\/branches$/;
 
 type PersistedRepository = {
   id: string;
@@ -70,7 +80,14 @@ async function createRepository(page: Page, name: string, targetPath: string): P
   await page.getByRole("textbox", { name: "Parent directory" }).fill(path.dirname(targetPath));
   await page.getByRole("textbox", { name: "Repository name" }).fill(name);
   await expect(page.getByTitle(targetPath)).toBeVisible();
+  // Armed before the click: a 201 here is the cause, the dialog closing is the
+  // effect. A rejected create now fails naming the response it never saw,
+  // rather than as an anonymous "dialog stayed open" timeout.
+  const created = waitForHttp(page, "POST", INITIALIZE_LOCAL_PATH, {
+    predicate: (response) => response.status() === 201,
+  });
   await page.getByRole("button", { name: "Create repository" }).click();
+  await created;
   await expect(page.getByTestId("create-local-repository-dialog")).not.toBeVisible();
 }
 
@@ -150,12 +167,17 @@ test.describe("Create task with a new local repository", () => {
     await expect(testPage.getByTestId("create-local-repository-dialog")).toContainText(
       /will switch to/i,
     );
+    // Armed before the create: selecting the freshly registered repository
+    // triggers this read, and the branch chip cannot enable until it returns.
+    const branchesLoaded = waitForHttp(testPage, "GET", WORKSPACE_BRANCHES_PATH);
     await createRepository(testPage, repositoryName, repositoryPath);
     expect(fs.statSync(path.dirname(repositoryPath)).isDirectory()).toBe(true);
 
     await expect(testPage.getByTestId("repo-chip-trigger")).toContainText(repositoryName);
+    await branchesLoaded;
+    // No budget from here on: the cause has landed, so anything left is a render.
     const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
-    await expect(branchSelector).toBeEnabled({ timeout: 10_000 });
+    await expect(branchSelector).toBeEnabled();
     await branchSelector.click();
     const mainOption = testPage.getByRole("option", { name: /^main\b/ }).first();
     await expect(mainOption).toBeVisible();
@@ -164,7 +186,7 @@ test.describe("Create task with a new local repository", () => {
     await expect(testPage.getByTestId("executor-profile-selector")).toContainText(
       directExecutor!.name,
     );
-    await expect(testPage.getByTestId("submit-start-agent")).toBeEnabled({ timeout: 30_000 });
+    await expect(testPage.getByTestId("submit-start-agent")).toBeEnabled();
     await testPage.getByTestId("submit-start-agent").click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 

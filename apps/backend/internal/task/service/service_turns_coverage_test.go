@@ -273,7 +273,7 @@ func TestGitSnapshotAndCommitReads(t *testing.T) {
 		t.Fatalf("latest snapshot = %q, want %q", gotLatest.ID, latest.ID)
 	}
 
-	if err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
+	if _, err := repo.CreateSessionCommit(ctx, &models.SessionCommit{
 		ID: "commit-1", SessionID: "sess-msg", CommitSHA: "sha-1", CommitMessage: "first",
 		CommittedAt: time.Now().UTC(),
 	}); err != nil {

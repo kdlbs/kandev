@@ -7,11 +7,8 @@ import { removeRecentTask } from "@/lib/recent-tasks";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { toKanbanTask } from "@/lib/kanban/map-task";
 import { preserveOmittedDependencyFields } from "@/lib/ws/handlers/task-dependencies";
-import { isNewerStatusSummary } from "@/lib/task-status-summary";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
-import { softNavigate } from "@/lib/routing/client-router";
-import { isTaskDetailPath, linkToTaskOverview, normalizePathname } from "@/lib/links";
 import {
   clearPinnedSessionIfOverridden,
   shouldPreservePinnedSessionForTask,
@@ -25,6 +22,16 @@ import {
   type KanbanTask,
   type TaskEventPayload,
 } from "@/lib/ws/handlers/task-archive-cache";
+import {
+  clearDeletedTaskWalkthrough,
+  clearRemovedTaskSelection,
+  redirectAwayFromRemovedTask,
+  removedTaskRedirectHref,
+} from "@/lib/ws/handlers/task-lifecycle-side-effects";
+import {
+  removeArchivedTaskFromCache,
+  updateTaskStatusSummaryInBothKanbans,
+} from "@/lib/ws/handlers/task-status-summary";
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 function hasPayloadField(payload: TaskEventPayload, field: keyof TaskEventPayload): boolean {
@@ -320,139 +327,11 @@ function upsertArchivedTaskInCache(
   };
 }
 
-function removeArchivedTaskFromCache(state: AppState, taskId: string): AppState {
-  if (!state.sidebarArchivedTasks) return state;
-  const revisions = state.sidebarArchivedTasks.revisionByWorkspaceId ?? {};
-  const changedWorkspaceIds = Object.entries(state.sidebarArchivedTasks.itemsByWorkspaceId)
-    .filter(([, tasks]) => tasks.some((task) => task.id === taskId))
-    .map(([workspaceId]) => workspaceId);
-  if (changedWorkspaceIds.length === 0) return state;
-  return {
-    ...state,
-    sidebarArchivedTasks: {
-      ...state.sidebarArchivedTasks,
-      itemsByWorkspaceId: Object.fromEntries(
-        Object.entries(state.sidebarArchivedTasks.itemsByWorkspaceId).map(
-          ([workspaceId, tasks]) => [workspaceId, tasks.filter((task) => task.id !== taskId)],
-        ),
-      ),
-      revisionByWorkspaceId: {
-        ...revisions,
-        ...Object.fromEntries(
-          changedWorkspaceIds.map((workspaceId) => [
-            workspaceId,
-            (revisions[workspaceId] ?? 0) + 1,
-          ]),
-        ),
-      },
-    },
-  };
-}
-
-function clearRemovedTaskSelection(state: AppState, taskId: string): AppState {
-  let next = state;
-  if (next.tasks.activeTaskId === taskId) {
-    next = {
-      ...next,
-      tasks: {
-        ...next.tasks,
-        activeTaskId: null,
-        activeSessionId: null,
-        pinnedSessionId: null,
-      },
-    };
-  }
-  if (next.tasks.lastSessionByTaskId[taskId]) {
-    const { [taskId]: _, ...rest } = next.tasks.lastSessionByTaskId;
-    next = { ...next, tasks: { ...next.tasks, lastSessionByTaskId: rest } };
-  }
-  return next;
-}
-
-function clearDeletedTaskWalkthrough(state: AppState, taskId: string): AppState {
-  if (!state.walkthroughs?.byTaskId) return state;
-  if (!(taskId in state.walkthroughs.byTaskId)) return state;
-  const { [taskId]: _removedWalkthrough, ...byTaskId } = state.walkthroughs.byTaskId;
-  const { [taskId]: _removedStep, ...activeStepByTaskId } = state.walkthroughs.activeStepByTaskId;
-  const { [taskId]: _removedLastSeen, ...lastSeenUpdatedAtByTaskId } =
-    state.walkthroughs.lastSeenUpdatedAtByTaskId;
-  return {
-    ...state,
-    walkthroughs: {
-      ...state.walkthroughs,
-      byTaskId,
-      activeStepByTaskId,
-      lastSeenUpdatedAtByTaskId,
-    },
-  };
-}
-
-function removedTaskRedirectHref(pathname: string, taskId: string): string | null {
-  if (isTaskDetailPath(pathname, taskId)) return linkToTaskOverview();
-  const normalized = normalizePathname(pathname);
-  return normalized === `/office/tasks/${taskId}` ? "/office/tasks" : null;
-}
-
-/**
- * Soft-redirect away from a removed task's page. Only fires when the user is
- * currently parked on that task's route, so a background removal of some other
- * task never yanks the user elsewhere.
- */
-function redirectAwayFromRemovedTask(taskId: string): void {
-  if (typeof window === "undefined") return;
-  const href = removedTaskRedirectHref(window.location.pathname, taskId);
-  if (!href) return;
-  softNavigate(href, "replace");
-}
-
 type TaskUpdatedMessage = Parameters<NonNullable<WsHandlers["task.updated"]>>[0];
 type TaskCreatedMessage = Parameters<NonNullable<WsHandlers["task.created"]>>[0];
 type TaskStateChangedMessage = Parameters<NonNullable<WsHandlers["task.state_changed"]>>[0];
-type TaskStatusSummaryUpdatedMessage = Parameters<
-  NonNullable<WsHandlers["task.status_summary.updated"]>
->[0];
 type TaskUpsertMessage = TaskCreatedMessage | TaskStateChangedMessage;
 type TaskUpsertAction = "task.created" | "task.state_changed";
-
-function updateTaskStatusSummaryInBothKanbans(
-  state: AppState,
-  message: TaskStatusSummaryUpdatedMessage,
-): AppState {
-  const { task_id: taskId, status_summary: nextSummary } = message.payload;
-  const shouldReplace = (task: KanbanTask): boolean =>
-    isNewerStatusSummary(nextSummary, task.statusSummary);
-  const updateTask = (task: KanbanTask): KanbanTask =>
-    shouldReplace(task) ? { ...task, statusSummary: nextSummary } : task;
-
-  let next = state;
-  if (state.kanban.tasks.some((task) => task.id === taskId && shouldReplace(task))) {
-    next = {
-      ...next,
-      kanban: {
-        ...next.kanban,
-        tasks: next.kanban.tasks.map((task) => (task.id === taskId ? updateTask(task) : task)),
-      },
-    };
-  }
-
-  const snapshots = Object.entries(next.kanbanMulti.snapshots);
-  const changedSnapshots = snapshots.filter(([, snapshot]) =>
-    snapshot.tasks.some((task) => task.id === taskId && shouldReplace(task)),
-  );
-  if (changedSnapshots.length === 0) return next;
-
-  const nextSnapshots = { ...next.kanbanMulti.snapshots };
-  for (const [workflowId, snapshot] of changedSnapshots) {
-    nextSnapshots[workflowId] = {
-      ...snapshot,
-      tasks: snapshot.tasks.map((task) => (task.id === taskId ? updateTask(task) : task)),
-    };
-  }
-  return {
-    ...next,
-    kanbanMulti: { ...next.kanbanMulti, snapshots: nextSnapshots },
-  };
-}
 
 type TaskUpdatedCacheContext = {
   state: AppState;

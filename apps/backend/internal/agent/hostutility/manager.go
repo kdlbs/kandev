@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
@@ -54,14 +55,15 @@ type Manager struct {
 	cache         *cache
 	modelCache    *modelConfigCache
 
-	mu                sync.RWMutex
-	instances         map[string]*instance // keyed by agent type
-	createGroup       singleflight.Group
-	modelGroup        singleflight.Group
-	modelGenerationMu sync.Mutex
-	modelGenerations  map[string]uint64
-	startCancel       context.CancelFunc
-	stopped           bool
+	mu                       sync.RWMutex
+	instances                map[string]*instance // keyed by agent type
+	createGroup              singleflight.Group
+	modelGroup               singleflight.Group
+	modelGenerationMu        sync.Mutex
+	modelGenerations         map[string]uint64
+	managedRuntimeSelections managedruntime.SelectionReader
+	startCancel              context.CancelFunc
+	stopped                  bool
 }
 
 // SetProfileResolver wires the profile eligibility and launch-policy reader.
@@ -103,6 +105,12 @@ func NewManager(
 // SetAuthToken sets the per-launch auth token for authenticating instance clients.
 func (m *Manager) SetAuthToken(token string) {
 	m.authToken = token
+}
+
+// SetManagedRuntimeSelectionStore wires the install-wide exact-version
+// resolver used by every host-local managed-runtime command path.
+func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
+	m.managedRuntimeSelections = store
 }
 
 func (m *Manager) SetTemporaryArtifactRegistry(registry *tempartifacts.Registry) {
@@ -623,8 +631,12 @@ func (m *Manager) probeWithCommand(
 ) AgentCapabilities {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
+	resolvedCommand, err := m.resolveInferenceCommand(probeCtx, inst.agentType, ia, command)
+	if err != nil {
+		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
+	}
 
-	req := buildProbeRequest(inst, ia, refresh, command)
+	req := buildProbeRequest(inst, ia, refresh, resolvedCommand)
 	resp, err := inst.client.Probe(probeCtx, req)
 	now := time.Now()
 	if err != nil {
@@ -674,6 +686,41 @@ func (m *Manager) probeWithCommand(
 		caps.Commands = append(caps.Commands, Command{Name: c.Name, Description: c.Description})
 	}
 	return caps
+}
+
+// resolveInferenceCommand selects the trusted exact host version for ordinary
+// probes and prompts. A non-empty override is reserved for candidate probes.
+func (m *Manager) resolveInferenceCommand(
+	ctx context.Context,
+	agentType string,
+	ia agents.InferenceAgent,
+	override agents.Command,
+) (agents.Command, error) {
+	if !override.IsEmpty() {
+		return override, nil
+	}
+	cfg := ia.InferenceConfig()
+	if cfg == nil || !cfg.Supported {
+		return agents.Command{}, errors.New("inference config not available")
+	}
+	command := cfg.Command
+	ag, ok := ia.(agents.Agent)
+	if !ok || m.managedRuntimeSelections == nil {
+		return command, nil
+	}
+	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return command, nil
+	}
+	spec := managed.ManagedNPMRuntime()
+	selection, found, err := m.managedRuntimeSelections.Get(ctx, agentType, spec.Package)
+	if err != nil {
+		return agents.Command{}, fmt.Errorf("resolve active managed runtime version for %s: %w", agentType, err)
+	}
+	if !found || selection.Package != spec.Package {
+		return command, nil
+	}
+	return spec.ACPCommand(selection.Version), nil
 }
 
 const modelConfigResolveTimeout = 60 * time.Second

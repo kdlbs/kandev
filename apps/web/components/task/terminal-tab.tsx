@@ -16,6 +16,7 @@ import { CloseTerminalConfirmDialog } from "./close-terminal-confirm-dialog";
 import { TabRenameInput } from "./tab-rename-input";
 import { markTerminalPanelTerminateClose } from "./dockview-layout-setup";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 /**
  * Custom dockview tab for terminal panels.
@@ -56,7 +57,7 @@ function pickDisplayName(
   fallback: string,
 ): string {
   if (shell?.customName && shell.customName !== "") return shell.customName;
-  if (shell?.kind === "ordinary") return "Terminal";
+  if (shell?.kind === "ordinary") return t("task:panelTerminal");
   if (shell?.label) return shell.label;
   return fallback;
 }

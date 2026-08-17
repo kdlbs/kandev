@@ -24,7 +24,7 @@ import (
 // agent type. Kept as a function seam so this package does not import
 // the heavyweight registry/agents packages — the wire-up site (see
 // registry.Provide) injects a concrete resolver at boot.
-type CommandResolver func(providerID string) (argv []string, env map[string]string, ok bool)
+type CommandResolver func(ctx context.Context, providerID string) (argv []string, env map[string]string, ok bool)
 
 // ACPProbe is a cheap availability check that spawns the agent's ACP
 // binary, performs a single JSON-RPC `initialize` round-trip, and tears
@@ -76,7 +76,9 @@ func (p *ACPProbe) Probe(ctx context.Context, in ProbeInput) *Error {
 			Stderr:     "acp-probe: no command resolver wired",
 		})
 	}
-	argv, env, ok := p.resolver(in.ProviderID)
+	pCtx, cancel := context.WithTimeout(ctx, p.timeout)
+	defer cancel()
+	argv, env, ok := p.resolver(pCtx, in.ProviderID)
 	if !ok || len(argv) == 0 {
 		return Classify(Input{
 			Phase:      PhaseAuthCheck,
@@ -84,9 +86,6 @@ func (p *ACPProbe) Probe(ctx context.Context, in ProbeInput) *Error {
 			Stderr:     "acp-probe: provider has no resolvable command",
 		})
 	}
-
-	pCtx, cancel := context.WithTimeout(ctx, p.timeout)
-	defer cancel()
 
 	cmd := exec.CommandContext(pCtx, argv[0], argv[1:]...)
 	if len(env) > 0 {

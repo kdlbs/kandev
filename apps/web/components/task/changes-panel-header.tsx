@@ -353,9 +353,11 @@ export function PullDropdown({
   onRepoRebase,
   onRepoMerge,
   repoDisplayName,
+  pullDisabledReason,
 }: {
   behindCount: number;
   pullDisabled?: boolean;
+  pullDisabledReason?: string;
   isLoading: boolean;
   loadingOperation: string | null;
   /** Always non-empty (single-repo includes the empty-name entry). */
@@ -399,7 +401,9 @@ export function PullDropdown({
             {pullButton}
           </span>
         </TooltipTrigger>
-        <TooltipContent>{t("task:providerHistoryUnavailable")}</TooltipContent>
+        <TooltipContent>
+          {pullDisabledReason ?? t("task:divergedActionsUnavailable")}
+        </TooltipContent>
       </Tooltip>
     );
   }
@@ -414,6 +418,7 @@ export function PullDropdown({
           onRepoRebase={onRepoRebase}
           onRepoMerge={onRepoMerge}
           pullDisabled={pullDisabled}
+          pullDisabledReason={pullDisabledReason}
           repoDisplayName={repoDisplayName}
         />
       </DropdownMenuContent>
@@ -511,6 +516,7 @@ type ChangesPanelHeaderProps = {
   baseBranchByRepo?: Record<string, string>;
   behindCount: number;
   pullDisabled?: boolean;
+  pullDisabledReason?: string;
   isLoading: boolean;
   loadingOperation: string | null;
   onOpenDiffAll?: () => void;
@@ -547,6 +553,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
     baseBranchByRepo,
     behindCount,
     pullDisabled,
+    pullDisabledReason,
     isLoading,
     loadingOperation,
     onOpenDiffAll,
@@ -609,6 +616,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
           <PullDropdown
             behindCount={behindCount}
             pullDisabled={pullDisabled}
+            pullDisabledReason={pullDisabledReason}
             isLoading={isLoading}
             loadingOperation={loadingOperation}
             repoNames={repoNames}

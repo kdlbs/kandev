@@ -55,7 +55,12 @@ type AgentExecution struct {
 	FinishedAt           *time.Time
 	ExitCode             *int
 	ErrorMessage         string
-	ProviderError        *streams.ProviderError
+	// FailureCode and FailureDetails carry a bounded, structured startup
+	// diagnostic to the orchestrator. They remain separate from the generic
+	// error message so user-facing recovery can choose a stable presentation.
+	FailureCode    string
+	FailureDetails string
+	ProviderError  *streams.ProviderError
 	// metadata is unexported on purpose: it is touched from the launch, prompt
 	// and stop paths concurrently, so all access must go through the metadataMu
 	// helpers in execution_metadata.go.
@@ -78,7 +83,12 @@ type AgentExecution struct {
 	// out a generation that was merely admitted (not yet dispatched — its buffers
 	// are still being reset) or already completed.
 	dispatchedPromptGeneration uint64
-	promptLifecycleMu          sync.Mutex
+	// promptTurnID is the durable Kandev turn bound to the currently
+	// dispatched prompt. It is snapshotted onto terminal AgentEvents before
+	// AgentReady is published, so a queued successor cannot overwrite the
+	// completion's attribution while its stream frame is in flight.
+	promptTurnID      string
+	promptLifecycleMu sync.Mutex
 
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
@@ -107,8 +117,12 @@ type AgentExecution struct {
 	IsPassthrough bool
 
 	// Passthrough mode info (CLI passthrough without ACP)
-	PassthroughProcessID string    // Process ID in the interactive runner (empty if not in passthrough mode)
-	PassthroughStartedAt time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
+	// passthroughLifecycleMu serializes process replacement paths. A workflow
+	// context reset and a delayed exit auto-restart must not both replace the
+	// same PTY, or the execution can point at the wrong process.
+	passthroughLifecycleMu sync.Mutex
+	PassthroughProcessID   string    // Process ID in the interactive runner (empty if not in passthrough mode)
+	PassthroughStartedAt   time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
 	// passthroughLaunchUsedResume is true if the current passthrough process was
 	// launched via ResumePassthroughSession with the resume flag attached. The
 	// fast-fail handler reads this to decide whether to retry once with a fresh
@@ -160,7 +174,8 @@ type AgentExecution struct {
 
 	// sessionInitialized is set to true after InitializeAndPrompt completes successfully.
 	// Used to distinguish launch-phase failures from normal prompt failures.
-	sessionInitialized bool
+	sessionInitialized   bool
+	sessionInitializedMu sync.RWMutex
 
 	// Available commands from the agent (for slash command menu)
 	availableCommands   []streams.AvailableCommand
@@ -207,6 +222,26 @@ type AgentExecution struct {
 	// Session-level trace span for grouping all operations under one trace
 	sessionSpan   trace.Span
 	sessionSpanMu sync.RWMutex
+
+	// Startup attempts are generation-bearing so callbacks from the first
+	// process cannot fail a replacement process after npm recovery starts.
+	// This state has its own mutex because stream setup can run while
+	// promptLifecycleMu is held by workspace rebind waiting for readiness.
+	startupAttemptGeneration uint64
+	startupRecoveryStarted   bool
+	startupLifecycleMu       sync.Mutex
+}
+
+func (e *AgentExecution) isSessionInitialized() bool {
+	e.sessionInitializedMu.RLock()
+	defer e.sessionInitializedMu.RUnlock()
+	return e.sessionInitialized
+}
+
+func (e *AgentExecution) setSessionInitialized(value bool) {
+	e.sessionInitializedMu.Lock()
+	e.sessionInitialized = value
+	e.sessionInitializedMu.Unlock()
 }
 
 type activeTopLevelTool struct {
@@ -291,16 +326,101 @@ func (e *AgentExecution) officeProfileID() string {
 
 // PromptCompletionSignal carries the result from a complete event or disconnect.
 type PromptCompletionSignal struct {
-	StopReason       string
-	IsError          bool
-	Error            string
-	PromptGeneration uint64
+	StopReason        string
+	IsError           bool
+	Error             string
+	PromptGeneration  uint64
+	StartupGeneration uint64
 }
 
 func (e *AgentExecution) promptGenerationSnapshot() uint64 {
 	e.promptLifecycleMu.Lock()
 	defer e.promptLifecycleMu.Unlock()
 	return e.promptGeneration
+}
+
+// beginStartupAttempt starts a generation for a new ACP process. Generation
+// zero is reserved for executions that predate startup tracking.
+func (e *AgentExecution) beginStartupAttempt() uint64 {
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	e.startupAttemptGeneration++
+	e.startupRecoveryStarted = false
+	return e.startupAttemptGeneration
+}
+
+// beginStartupRecovery advances the startup generation exactly once. The
+// caller uses the returned generation when wiring the replacement streams.
+func (e *AgentExecution) beginStartupRecovery() (uint64, bool) {
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	if e.startupRecoveryStarted {
+		return e.startupAttemptGeneration, false
+	}
+	e.startupRecoveryStarted = true
+	e.startupAttemptGeneration++
+	return e.startupAttemptGeneration, true
+}
+
+func (e *AgentExecution) finishStartupRecovery() {
+	e.startupLifecycleMu.Lock()
+	e.startupRecoveryStarted = false
+	e.startupLifecycleMu.Unlock()
+}
+
+func (e *AgentExecution) startupAttemptSnapshot() uint64 {
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	return e.startupAttemptGeneration
+}
+
+func (e *AgentExecution) acceptsStartupAttempt(generation uint64) bool {
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	return e.startupAttemptGeneration == generation
+}
+
+// signalPromptCompletionForStartupGeneration claims the current startup
+// generation and enqueues its completion signal as one ownership operation.
+// A stream can finish its generation check just before recovery advances the
+// execution, so checking and sending under the same mutex prevents an old
+// stream from publishing into the replacement prompt's channel.
+func (e *AgentExecution) signalPromptCompletionForStartupGeneration(
+	startupGeneration uint64,
+	signal PromptCompletionSignal,
+) bool {
+	if e == nil {
+		return false
+	}
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	if e.startupAttemptGeneration != startupGeneration {
+		return false
+	}
+	signal.StartupGeneration = startupGeneration
+	select {
+	case e.promptDoneCh <- signal:
+	default:
+	}
+	return true
+}
+
+func (e *AgentExecution) promptTurnIDSnapshot() string {
+	if e == nil {
+		return ""
+	}
+	e.promptLifecycleMu.Lock()
+	defer e.promptLifecycleMu.Unlock()
+	return e.promptTurnID
+}
+
+func (e *AgentExecution) setPromptTurnID(turnID string) {
+	if e == nil {
+		return
+	}
+	e.promptLifecycleMu.Lock()
+	e.promptTurnID = turnID
+	e.promptLifecycleMu.Unlock()
 }
 
 // GetAgentCtlClient returns the agentctl client for this execution
@@ -575,24 +695,25 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
-	RepositoryID           string
-	RepositoryPath         string
-	RepositoryURL          string // Clone URL for remote executors that need to clone
-	RepoName               string // Repository name used as subdirectory inside TaskDirName
-	BaseBranch             string
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string
-	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
-	WorktreeBranchPrefix   string
-	WorktreeBranchTemplate string
-	WorktreeBranchTicket   string
-	PullBeforeWorktree     bool
-	RemoteSyncHandled      bool
-	RepoSetupScript        string // Repository-level setup script (optional)
-	RepoCleanupScript      string // Repository-level cleanup script (optional)
-	CopyFiles              string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
+	RepositoryID            string
+	RepositoryPath          string
+	RepositoryURL           string // Clone URL for remote executors that need to clone
+	RepoName                string // Repository name used as subdirectory inside TaskDirName
+	BaseBranch              string
+	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch          string
+	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
+	WorktreeBranchPrefix    string
+	WorktreeBranchTemplate  string
+	WorktreeBranchTicket    string
+	PullBeforeWorktree      bool
+	RemoteSyncHandled       bool
+	RepoSetupScript         string // Repository-level setup script (optional)
+	RepoCleanupScript       string // Repository-level cleanup script (optional)
+	CopyFiles               string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
+	ContributionDestination *models.ContributionDestination
 	// BranchSlug, when set, suffixes the worktree directory as
 	// {RepoName}-{BranchSlug} so multi-branch tasks (same repo, multiple
 	// branches) don't collide.
@@ -656,6 +777,7 @@ type LaunchRequest struct {
 	// backward-compatible behavior by using AgentProfileID.
 	ExecutionProfileID string
 	StartAgent         bool                // Transfer launch activity through initial startup/prompt
+	TurnID             string              // Durable Kandev turn for the initial prompt, when present
 	WorkspacePath      string              // Host path to workspace (original repository path)
 	TaskDescription    string              // Task description to send via ACP prompt
 	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
@@ -708,20 +830,21 @@ type LaunchRequest struct {
 	CopyFiles string
 
 	// Worktree configuration
-	UseWorktree            bool   // Whether to use a Git worktree for isolation
-	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID           string // Repository ID for worktree tracking
-	RepositoryPath         string // Path to the main repository (for worktree creation)
-	BaseBranch             string // Base branch for the worktree (e.g., "main")
-	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	RemoteContribution     *models.RemoteContribution
-	WorktreeBranchPrefix   string // Branch prefix for worktree branches
-	WorktreeBranchTemplate string // Branch name template for worktree branches
-	WorktreeBranchTicket   string // External ticket value for branch templates
-	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
-	RemoteSyncHandled      bool   // Authenticated provider refresh already completed
+	UseWorktree             bool   // Whether to use a Git worktree for isolation
+	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID            string // Repository ID for worktree tracking
+	RepositoryPath          string // Path to the main repository (for worktree creation)
+	BaseBranch              string // Base branch for the worktree (e.g., "main")
+	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution      *models.RemoteContribution
+	WorktreeBranchPrefix    string // Branch prefix for worktree branches
+	WorktreeBranchTemplate  string // Branch name template for worktree branches
+	WorktreeBranchTicket    string // External ticket value for branch templates
+	PullBeforeWorktree      bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled       bool   // Authenticated provider refresh already completed
+	ContributionDestination *models.ContributionDestination
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -755,23 +878,24 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		return nil
 	}
 	return []RepoLaunchSpec{{
-		RepositoryID:           r.RepositoryID,
-		RepositoryPath:         r.RepositoryPath,
-		RepoName:               r.RepoName,
-		BaseBranch:             r.BaseBranch,
-		DefaultBranch:          r.DefaultBranch,
-		CheckoutBranch:         r.CheckoutBranch,
-		PRNumber:               r.PRNumber,
-		RemoteContribution:     r.RemoteContribution,
-		WorktreeID:             r.WorktreeID,
-		WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: r.WorktreeBranchTemplate,
-		WorktreeBranchTicket:   r.WorktreeBranchTicket,
-		PullBeforeWorktree:     r.PullBeforeWorktree,
-		RemoteSyncHandled:      r.RemoteSyncHandled,
-		CopyFiles:              r.CopyFiles,
-		BranchSlug:             r.BranchSlug,
-		BranchIdentitySlug:     r.BranchIdentitySlug,
+		RepositoryID:            r.RepositoryID,
+		RepositoryPath:          r.RepositoryPath,
+		RepoName:                r.RepoName,
+		BaseBranch:              r.BaseBranch,
+		DefaultBranch:           r.DefaultBranch,
+		CheckoutBranch:          r.CheckoutBranch,
+		PRNumber:                r.PRNumber,
+		RemoteContribution:      r.RemoteContribution,
+		ContributionDestination: r.ContributionDestination,
+		WorktreeID:              r.WorktreeID,
+		WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
+		WorktreeBranchTemplate:  r.WorktreeBranchTemplate,
+		WorktreeBranchTicket:    r.WorktreeBranchTicket,
+		PullBeforeWorktree:      r.PullBeforeWorktree,
+		RemoteSyncHandled:       r.RemoteSyncHandled,
+		CopyFiles:               r.CopyFiles,
+		BranchSlug:              r.BranchSlug,
+		BranchIdentitySlug:      r.BranchIdentitySlug,
 	}}
 }
 

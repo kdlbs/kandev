@@ -80,6 +80,55 @@ func (m *Manager) materializeRemoteContribution(ctx context.Context, repoPath st
 	return remoteName, remoteRef, nil
 }
 
+func (m *Manager) configureContributionDestination(
+	ctx context.Context,
+	repoPath, worktreePath, branch string,
+	destination *models.ContributionDestination,
+) error {
+	if destination == nil {
+		return nil
+	}
+	if err := destination.Validate(); err != nil {
+		return fmt.Errorf("validate contribution destination: %w", err)
+	}
+	remoteName := destination.ContributionRemoteName()
+	if err := m.ensureContributionRemote(ctx, repoPath, remoteName, destination.TargetRepository.RemoteURL); err != nil {
+		return fmt.Errorf("configure contribution destination remote: %w", err)
+	}
+	pushURL := m.newNonInteractiveGitCmd(ctx, repoPath, "config", "--get-all", "remote."+remoteName+".pushurl")
+	configured, readErr := runGitCmdOutput(ctx, pushURL)
+	if readErr == nil && !contributionDestinationPushURLsMatch(string(configured), destination.TargetRepository.RemoteURL) {
+		return fmt.Errorf("contribution destination push URL does not match the validated target")
+	}
+	if readErr != nil {
+		setPushURL := m.newNonInteractiveGitCmd(ctx, repoPath, "config", "--add", "remote."+remoteName+".pushurl", destination.TargetRepository.RemoteURL)
+		if err := runGitCmd(ctx, setPushURL); err != nil {
+			return fmt.Errorf("set contribution destination push URL: %w", err)
+		}
+	}
+	if branch == "" {
+		return nil
+	}
+	setPushRemote := m.newNonInteractiveGitCmd(ctx, worktreePath, "config", "branch."+branch+".pushRemote", remoteName)
+	if err := runGitCmd(ctx, setPushRemote); err != nil {
+		return fmt.Errorf("set contribution destination push remote: %w", err)
+	}
+	return nil
+}
+
+func contributionDestinationPushURLsMatch(configured, target string) bool {
+	urls := strings.Split(strings.TrimSpace(configured), "\n")
+	if len(urls) == 0 || (len(urls) == 1 && urls[0] == "") {
+		return false
+	}
+	for _, configuredURL := range urls {
+		if strings.TrimSpace(configuredURL) != target {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *Manager) validateContributionAncestor(ctx context.Context, repoPath, expectedSHA, descendantRef string) error {
 	cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "merge-base", "--is-ancestor", expectedSHA, descendantRef)
 	if err := runGitCmd(ctx, cmd); err != nil {

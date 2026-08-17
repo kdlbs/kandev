@@ -9,6 +9,11 @@ type SnapshotTask = {
   position: number;
   state: "IN_PROGRESS";
   parentTaskId?: string;
+  statusSummary?: {
+    revision: number;
+    updated_at: string;
+    primary_session?: { id: string; state: "RUNNING" | "WAITING_FOR_INPUT" };
+  };
 };
 type MockState = {
   connection: { status: string };
@@ -36,7 +41,9 @@ type MockState = {
 const WORKFLOW_ID = "wf-A";
 const WORKSPACE_ID = "ws-A";
 const STEP_ID = "step-1";
+const LIVE_STEP_ID = "step-2";
 const PARENT_TASK_ID = "parent-task";
+const LIVE_PLACEMENT_TASK_ID = "task-with-live-placement";
 
 const mocks = vi.hoisted(() => ({
   clearKanbanMulti: vi.fn(),
@@ -172,6 +179,126 @@ describe("useAllWorkflowSnapshots in-flight websocket tasks", () => {
           ],
         }),
       ),
+    );
+  });
+
+  it("keeps a newer live status summary when an older snapshot finishes later", async () => {
+    resetState();
+    let resolveFetch: (value: unknown) => void = () => {};
+    mocks.fetchWorkflowSnapshot.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
+    await waitFor(() =>
+      expect(mocks.fetchWorkflowSnapshot).toHaveBeenCalledWith(WORKFLOW_ID, expect.anything()),
+    );
+
+    setLightweightSnapshot({
+      id: "task-with-live-status",
+      workflowStepId: STEP_ID,
+      title: "Live status",
+      position: 0,
+      state: "IN_PROGRESS",
+      statusSummary: {
+        revision: 4,
+        updated_at: "2026-08-13T00:00:04Z",
+        primary_session: { id: "session-1", state: "WAITING_FOR_INPUT" },
+      },
+    });
+    resolveFetch({
+      steps: [{ id: STEP_ID, name: "Doing", color: null, position: 0 }],
+      tasks: [
+        {
+          id: "task-with-live-status",
+          workflow_step_id: STEP_ID,
+          title: "Live status",
+          position: 0,
+          state: "IN_PROGRESS",
+          status_summary: {
+            revision: 3,
+            updated_at: "2026-08-13T00:00:03Z",
+            primary_session: { id: "session-1", state: "RUNNING" },
+          },
+        },
+      ],
+    });
+
+    await waitFor(() => expect(mocks.setWorkflowSnapshot).toHaveBeenCalled());
+    expect(mocks.setWorkflowSnapshot).toHaveBeenCalledWith(
+      WORKFLOW_ID,
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({
+            id: "task-with-live-status",
+            statusSummary: expect.objectContaining({ revision: 4 }),
+          }),
+        ],
+      }),
+    );
+  });
+});
+
+describe("useAllWorkflowSnapshots live task placement", () => {
+  it("keeps a newer live task placement when an older snapshot finishes later", async () => {
+    resetState();
+    let resolveFetch: (value: unknown) => void = () => {};
+    mocks.fetchWorkflowSnapshot.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    setLightweightSnapshot({
+      id: LIVE_PLACEMENT_TASK_ID,
+      workflowStepId: STEP_ID,
+      title: "Live placement",
+      position: 0,
+      state: "IN_PROGRESS",
+    });
+
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
+    await waitFor(() =>
+      expect(mocks.fetchWorkflowSnapshot).toHaveBeenCalledWith(WORKFLOW_ID, expect.anything()),
+    );
+
+    setLightweightSnapshot({
+      id: LIVE_PLACEMENT_TASK_ID,
+      workflowStepId: LIVE_STEP_ID,
+      title: "Live placement",
+      position: 2,
+      state: "IN_PROGRESS",
+    });
+    resolveFetch({
+      steps: [
+        { id: STEP_ID, name: "Doing", color: null, position: 0 },
+        { id: LIVE_STEP_ID, name: "Done", color: null, position: 1 },
+      ],
+      tasks: [
+        {
+          id: LIVE_PLACEMENT_TASK_ID,
+          workflow_step_id: STEP_ID,
+          title: "Live placement",
+          position: 0,
+          state: "IN_PROGRESS",
+        },
+      ],
+    });
+
+    await waitFor(() => expect(mocks.setWorkflowSnapshot).toHaveBeenCalled());
+    expect(mocks.setWorkflowSnapshot).toHaveBeenCalledWith(
+      WORKFLOW_ID,
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({
+            id: LIVE_PLACEMENT_TASK_ID,
+            workflowStepId: LIVE_STEP_ID,
+            position: 2,
+          }),
+        ],
+      }),
     );
   });
 });

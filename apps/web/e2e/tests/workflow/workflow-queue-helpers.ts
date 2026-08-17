@@ -30,7 +30,7 @@ export async function seedQueuedWorkflowMessageScenario(
     `${name} Task`,
     seedData.agentProfileId,
     {
-      description: 'e2e:delay(8000)\ne2e:message("initial response")',
+      description: 'e2e:delay(20000)\ne2e:message("initial response")',
       workflow_id: workflow.id,
       workflow_step_id: sourceStep.id,
       repository_ids: [seedData.repositoryId],
@@ -46,7 +46,7 @@ export async function seedQueuedWorkflowMessageScenario(
   // on the client receiving the state over WS, and under the WS-subscribe race the
   // client can miss it when its subscription registers after the transition fans
   // out; the backend session state is the source of truth and avoids that race.
-  // The e2e:delay(8000) keeps the first turn busy long enough to observe a STARTING
+  // The e2e:delay(20000) keeps the first turn busy long enough to observe a STARTING
   // or RUNNING state (the mock agent can jump STARTING->WAITING_FOR_INPUT without
   // ever surfacing RUNNING, so accept either busy state).
   await expect
@@ -85,15 +85,22 @@ export async function expectDeliveredWorkflowMessage(
   await expect
     .poll(
       async () => {
-        const { messages } = await apiClient.listSessionMessages(sessionId);
-        return messages.some(
+        const [queue, { messages }] = await Promise.all([
+          apiClient.getQueueStatus(sessionId),
+          apiClient.listSessionMessages(sessionId),
+        ]);
+        const workflowMessageExists = messages.some(
           (message) =>
             message.author_type === "user" &&
             message.metadata?.workflow_message === true &&
             message.metadata?.workflow_step_name === WORKFLOW_REVIEW_STEP,
         );
+        const workflowResponseExists = messages.some((message) =>
+          message.content.includes("workflow queued response"),
+        );
+        return workflowMessageExists && workflowResponseExists && queue.count === 0;
       },
-      { timeout: 30_000 },
+      { timeout: 30_000, message: "Waiting for the queued workflow message to be delivered" },
     )
     .toBe(true);
 

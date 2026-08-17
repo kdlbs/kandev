@@ -18,6 +18,82 @@ function isBootHydratedSnapshot(snapshot: WorkflowSnapshotData | undefined): boo
   return !!snapshot && snapshot.isPlaceholder !== true;
 }
 
+function hasNewerLivePlacement(existing: KanbanTask, fetchStart: KanbanTask | undefined): boolean {
+  return (
+    fetchStart !== undefined &&
+    (existing.workflowId !== fetchStart.workflowId ||
+      existing.workflowStepId !== fetchStart.workflowStepId ||
+      existing.position !== fetchStart.position)
+  );
+}
+
+function mergeFetchedTask(
+  mapped: KanbanTask,
+  existing: KanbanTask,
+  fetchStart: KanbanTask | undefined,
+): KanbanTask {
+  if (hasNewerLivePlacement(existing, fetchStart)) {
+    // A live task.updated/task.moved event arrived after this request
+    // started. Keep the newer placement instead of moving the card
+    // back to the location captured by the older snapshot response.
+    mapped.workflowId = existing.workflowId;
+    mapped.workflowStepId = existing.workflowStepId;
+    mapped.position = existing.position;
+  }
+
+  // Multiple mounted surfaces can refresh the same workflow at once.
+  // A response that started before a live WS status update may finish
+  // afterwards, so do not let an older snapshot roll the status
+  // projection back to a lower revision.
+  const existingRevision = existing.statusSummary?.revision;
+  const mappedRevision = mapped.statusSummary?.revision;
+  if (existingRevision !== undefined && existingRevision > (mappedRevision ?? -1)) {
+    mapped.statusSummary = existing.statusSummary;
+  }
+  // An equal revision can still carry a newer queued-prompt count. Preserve
+  // the freshest status projection while keeping the revision guard above.
+  mapped.statusSummary = pickFreshestStatusSummary(mapped.statusSummary, existing.statusSummary);
+  mapped.primarySessionId = mapped.primarySessionId || existing.primarySessionId;
+  mapped.primarySessionState = mapped.primarySessionState || existing.primarySessionState;
+  // Autopilot is immutable after creation. Keep the cached value when
+  // an older or partial snapshot does not include the field.
+  mapped.autopilot = mapped.autopilot ?? existing.autopilot;
+  return mapped;
+}
+
+function mergeSnapshotTasks(
+  snapshotTasks: Task[],
+  stepIds: Set<string>,
+  snapshotAtFetchStart: WorkflowSnapshotData | undefined,
+  existingSnapshot: WorkflowSnapshotData | undefined,
+): KanbanTask[] {
+  const taskIdsAtFetchStart = new Set((snapshotAtFetchStart?.tasks ?? []).map((t) => t.id));
+  const existingById = new Map((existingSnapshot?.tasks ?? []).map((t) => [t.id, t]));
+  const fetchStartById = new Map(
+    (snapshotAtFetchStart?.tasks ?? []).map((task) => [task.id, task]),
+  );
+
+  const tasks = snapshotTasks
+    .filter((task) => !task.is_ephemeral)
+    .map((task) => {
+      const mapped = mapSnapshotTask(task, stepIds);
+      if (!mapped) return null;
+      const existing = existingById.get(mapped.id);
+      return existing ? mergeFetchedTask(mapped, existing, fetchStartById.get(mapped.id)) : mapped;
+    })
+    .filter((t): t is KanbanTask => t !== null);
+  const snapshotTaskIds = new Set(tasks.map((t) => t.id));
+  const preserveExistingPlaceholderTasks = snapshotAtFetchStart?.isPlaceholder === true;
+  const inFlightCreatedTasks = (existingSnapshot?.tasks ?? []).filter(
+    (task) =>
+      (preserveExistingPlaceholderTasks || !taskIdsAtFetchStart.has(task.id)) &&
+      !snapshotTaskIds.has(task.id) &&
+      stepIds.has(task.workflowStepId),
+  );
+
+  return [...tasks, ...inFlightCreatedTasks];
+}
+
 async function fetchAndWriteSnapshot(
   wf: Workflow,
   store: StoreApi<AppState>,
@@ -27,7 +103,6 @@ async function fetchAndWriteSnapshot(
 ): Promise<void> {
   try {
     const snapshotAtFetchStart = store.getState().kanbanMulti.snapshots[wf.id];
-    const taskIdsAtFetchStart = new Set((snapshotAtFetchStart?.tasks ?? []).map((t) => t.id));
     const snapshot = await fetchWorkflowSnapshot(wf.id, { cache: "no-store" });
     if (
       fetchGenRef.current !== myGen ||
@@ -53,51 +128,19 @@ async function fetchAndWriteSnapshot(
     }));
     const stepIds = new Set(steps.map((s) => s.id));
 
-    // Preserve runtime fields (e.g., primarySessionId) from existing snapshot
-    // tasks when the fresh API response omits them (backend uses omitempty).
     const existingSnapshot = store.getState().kanbanMulti.snapshots[wf.id];
-    const existingById = new Map((existingSnapshot?.tasks ?? []).map((t) => [t.id, t]));
-
-    const tasks: KanbanTask[] = snapshot.tasks
-      .filter((task) => !task.is_ephemeral)
-      .map((task) => {
-        const mapped = mapSnapshotTask(task, stepIds);
-        if (!mapped) return null;
-        const existing = existingById.get(mapped.id);
-        if (existing) {
-          mapped.primarySessionId = mapped.primarySessionId || existing.primarySessionId;
-          mapped.primarySessionState = mapped.primarySessionState || existing.primarySessionState;
-          // Autopilot is immutable after creation. Keep the cached value when
-          // an older or partial snapshot does not include the field.
-          mapped.autopilot = mapped.autopilot ?? existing.autopilot;
-          // This response was issued before it landed, so its status summary can
-          // be older than a `task.status_summary.updated` delta already applied
-          // to the cache. Taking it unconditionally regresses the row, and a
-          // settled task emits no further deltas to repair it. An equal revision
-          // still wins: the response re-stamps `queued_prompt_count` outside the
-          // revision (see pickFreshestStatusSummary).
-          mapped.statusSummary = pickFreshestStatusSummary(
-            mapped.statusSummary,
-            existing.statusSummary,
-          );
-        }
-        return mapped;
-      })
-      .filter((t): t is KanbanTask => t !== null);
-    const snapshotTaskIds = new Set(tasks.map((t) => t.id));
-    const preserveExistingPlaceholderTasks = snapshotAtFetchStart?.isPlaceholder === true;
-    const inFlightCreatedTasks = (existingSnapshot?.tasks ?? []).filter(
-      (task) =>
-        (preserveExistingPlaceholderTasks || !taskIdsAtFetchStart.has(task.id)) &&
-        !snapshotTaskIds.has(task.id) &&
-        stepIds.has(task.workflowStepId),
+    const tasks = mergeSnapshotTasks(
+      snapshot.tasks,
+      stepIds,
+      snapshotAtFetchStart,
+      existingSnapshot,
     );
 
     const workflowSnapshot = {
       workflowId: wf.id,
       workflowName: wf.name,
       steps,
-      tasks: [...tasks, ...inFlightCreatedTasks],
+      tasks,
     };
     store.getState().setWorkflowSnapshot(wf.id, workflowSnapshot);
     const activeKanban = store.getState().kanban;

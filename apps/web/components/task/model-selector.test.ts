@@ -281,6 +281,41 @@ describe("hasCompleteDynamicConfig", () => {
     expect(hydrated).toBe(false);
   });
 
+  it("treats a legacy agent identity key as satisfied without an ACP option", () => {
+    const session = makeSession({
+      metadata: {
+        runtime_config: { config_options: { agent: "claude", model: flatModelId } },
+      },
+      agent_profile_snapshot: { agent_id: "claude" },
+    });
+    expect(requiredConfigKeys(session, noAgents)).toEqual(["agent", "model"]);
+
+    const hydrated = hasCompleteDynamicConfig(
+      session,
+      { currentModelId: flatModelId, models: flatModelEntries(), configOptions: [] },
+      noAgents,
+    );
+
+    expect(hydrated).toBe(true);
+  });
+
+  it("keeps a provider-defined agent option required", () => {
+    const session = makeSession({
+      metadata: {
+        runtime_config: { config_options: { agent: "build", model: flatModelId } },
+      },
+      agent_profile_snapshot: { agent_id: "claude" },
+    });
+
+    const hydrated = hasCompleteDynamicConfig(
+      session,
+      { currentModelId: flatModelId, models: flatModelEntries(), configOptions: [] },
+      noAgents,
+    );
+
+    expect(hydrated).toBe(false);
+  });
+
   it("is hydrated when there are no required config keys", () => {
     expect(hasCompleteDynamicConfig(makeSession(), undefined, noAgents)).toBe(true);
   });

@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
@@ -28,8 +29,24 @@ type handlerRuntimeUpdater struct {
 	once    sync.Once
 }
 
+type handlerSelectionStore struct {
+	selection managedruntime.Selection
+}
+
+func (s handlerSelectionStore) Get(
+	context.Context,
+	string,
+	string,
+) (managedruntime.Selection, bool, error) {
+	return s.selection, true, nil
+}
+
+func (handlerSelectionStore) Save(context.Context, string, string, string) error {
+	return nil
+}
+
 func (u *handlerRuntimeUpdater) CurrentCapabilities(string) (hostutility.AgentCapabilities, bool) {
-	return hostutility.AgentCapabilities{AgentVersion: "1.0.0"}, true
+	return hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"}, true
 }
 
 func (u *handlerRuntimeUpdater) ResolveTarget(context.Context, string) (string, error) {
@@ -140,6 +157,13 @@ func updateRequest(method, path string) *http.Request {
 	return request
 }
 
+func updateJSONRequest(method, path, body string) *http.Request {
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(httpmw.InterimSettingsInterlockHeader, "test-interlock")
+	return request
+}
+
 func TestAgentUpdatePreviewEndpointIsReadOnly(t *testing.T) {
 	router, _, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
 	response := httptest.NewRecorder()
@@ -171,7 +195,11 @@ func TestAgentUpdatePreviewEndpointIsReadOnly(t *testing.T) {
 func TestAgentUpdateEndpointsAcceptAndRetainJobs(t *testing.T) {
 	router, _, completed := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, updateRequest(http.MethodPost, "/api/v1/agent-update/claude-acp"))
+	router.ServeHTTP(response, updateJSONRequest(
+		http.MethodPost,
+		"/api/v1/agent-update/claude-acp",
+		`{"target_version":"1.1.0"}`,
+	))
 	if response.Code != http.StatusAccepted {
 		t.Fatalf("POST status = %d, body = %s", response.Code, response.Body.String())
 	}
@@ -209,6 +237,38 @@ func TestAgentUpdateEndpointsAcceptAndRetainJobs(t *testing.T) {
 	}
 }
 
+func TestAgentUpdateEndpointDoesNotCreateAlreadyActiveHealthyJob(t *testing.T) {
+	router, ctrl, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
+	selectionStore := handlerSelectionStore{selection: managedruntime.Selection{
+		Package: "@agentclientprotocol/claude-agent-acp",
+		Version: "1.0.0",
+	}}
+	ctrl.SetManagedRuntimeSelectionStore(selectionStore)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, updateJSONRequest(
+		http.MethodPost,
+		"/api/v1/agent-update/claude-acp",
+		`{"target_version":"1.0.0"}`,
+	))
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("POST status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var result dto.AgentUpdateJobDTO
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode no-op response: %v", err)
+	}
+	if result.JobID != "" || result.Operation != string(managedruntime.OperationUpToDate) {
+		t.Fatalf("no-op response = %#v, want terminal up_to_date without job ID", result)
+	}
+
+	jobs := httptest.NewRecorder()
+	router.ServeHTTP(jobs, updateRequest(http.MethodGet, "/api/v1/agent-update/jobs"))
+	if jobs.Code != http.StatusOK || !strings.Contains(jobs.Body.String(), `"jobs":[]`) {
+		t.Fatalf("no-op jobs response = %d %s", jobs.Code, jobs.Body.String())
+	}
+}
+
 func TestAgentUpdateEndpointReturnsMaintenanceConflict(t *testing.T) {
 	updater := &handlerRuntimeUpdater{
 		started: make(chan struct{}),
@@ -223,9 +283,10 @@ func TestAgentUpdateEndpointReturnsMaintenanceConflict(t *testing.T) {
 		}
 	})
 	updateResponse := httptest.NewRecorder()
-	router.ServeHTTP(updateResponse, updateRequest(
+	router.ServeHTTP(updateResponse, updateJSONRequest(
 		http.MethodPost,
 		"/api/v1/agent-update/claude-acp",
+		`{"target_version":"1.1.0"}`,
 	))
 	if updateResponse.Code != http.StatusAccepted {
 		t.Fatalf("update status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
@@ -283,5 +344,20 @@ func TestAgentUpdateEndpointRejectsUnmanagedAgentAndMissingJob(t *testing.T) {
 	))
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("missing status = %d, body = %s", missing.Code, missing.Body.String())
+	}
+}
+
+func TestAgentUpdateEndpointRequiresExactTargetVersion(t *testing.T) {
+	router, _, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
+	for _, body := range []string{"", `{}`, `{"target_version":"latest"}`} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, updateJSONRequest(
+			http.MethodPost,
+			"/api/v1/agent-update/claude-acp",
+			body,
+		))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body %q status = %d, want 400: %s", body, response.Code, response.Body.String())
+		}
 	}
 }

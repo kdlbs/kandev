@@ -107,7 +107,7 @@ To recover capacity in one session, expand its queue chip in the task workbench.
 | --- | --- |
 | `data/kandev.db`, `-wal`, `-shm` | Default SQLite database and transient WAL files |
 | `data/master.key` | Owner-only AES-256 key used to decrypt secrets stored in the database; a database copy without the matching key cannot recover those secret values |
-| `data/backups/` | SQLite manual, pre-upgrade, and pre-reset snapshots |
+| `data/backups/` | SQLite snapshots when the database uses the default path |
 | `tasks/` and legacy `worktrees/` | Managed Git worktrees and per-task files; may contain uncommitted or untracked work |
 | `repos/` | Kandev-managed source clones |
 | `sessions/`, `quick-chat/`, `agent-sessions/` | Session history, ephemeral workspaces, and isolated agent homes when used |
@@ -117,7 +117,7 @@ To recover capacity in one session, expand its queue chip in the task workbench.
 
 Database snapshots do not contain Git worktrees, clones, the master key, service metadata, or provider-side objects. Native agent and `gh` login files also normally live in the service user's home outside `~/.kandev` (for example `~/.codex` and `~/.config/gh`). The official container instead sets `HOME=/data/home`, so those CLI credentials live on its mounted volume.
 
-The supported SQLite layout for the System database and restore pages is the derived `<home>/data/kandev.db`. `database.path` can point the persistence layer elsewhere, but the current System page still derives its displayed path, WAL path, and restore destination from `<home>/data/kandev.db`. Treat a custom SQLite path as operator-managed: back it up and restore it with SQLite-aware tooling while Kandev is stopped.
+The System Database and Backups pages use the configured SQLite file path. They use `backups/` under the parent directory of that file. The default remains `<home>/data/kandev.db` with snapshots in `<home>/data/backups/`. A custom path can place the database and snapshots outside the Kandev home. Kandev does not move snapshots from another directory automatically.
 
 ## Storage maintenance
 
@@ -231,7 +231,7 @@ the Kandev service first provides the clearest maintenance boundary.
 
 SQLite is the default and is appropriate for a desktop, CLI, service, or single-replica container installation. Kandev uses one writer connection and a read pool in WAL mode. Only one Kandev backend should own the file.
 
-Open **Settings > System > Database** to see database size, WAL size, schema version, path, and the newest modification time among regular entries in `data/backups`. That timestamp is a filesystem hint, not proof of a valid snapshot: an unrelated or temporary file in the directory can affect it. SQLite exposes three maintenance actions:
+Open **Settings > System > Database** to see database size, WAL size, schema version, path, and the newest modification time among regular entries in the sibling `backups/` directory. That timestamp is a filesystem hint, not proof of a valid snapshot: an unrelated or temporary file in the directory can affect it. SQLite exposes three maintenance actions:
 
 - **Optimize** runs `PRAGMA optimize`. It is quick and updates planner statistics.
 - **Vacuum** runs `VACUUM`, compacts the file, and reports bytes reclaimed. It can need substantial temporary disk and can block writes, so run it during a quiet period.
@@ -307,12 +307,12 @@ Adapt the source for a custom `--home-dir`. This archive still does not include 
 
 ### Restore a System snapshot
 
-The supported UI flow applies to the default SQLite path:
+The UI flow applies to the configured SQLite path:
 
 1. Stop or finish active agent sessions and preserve unpushed work.
 2. Open **Settings > System > Backups**, choose **Restore**, type `RESTORE`, and confirm.
-3. Kandev copies the selected snapshot to `data/kandev.db.new` and atomically renames it over `data/kandev.db`.
-4. Quit and relaunch Kandev immediately. The running backend retains connections to the old database inode and can otherwise serve or write stale state.
+3. Kandev stops scheduling, active executions, and database-backed workers. It copies the selected snapshot to `<configured-database-path>.new`, validates the SQLite checkpoint result, and closes the pool. It then quarantines the configured database and its `-wal`/`-shm` sidecars before installing the staged file. If installation fails, Kandev restores the quarantined files.
+4. Click **Restart Kandev** in the success dialog. If automatic restart is unavailable, quit and relaunch Kandev manually. The backend must restart before database-backed work resumes.
 5. Check `/health`, **System > Status**, database schema version, secrets, and representative tasks.
 
 Restore does not roll back worktrees or remote/provider state. A database may therefore refer to files, containers, pull requests, or credentials from a different point in time. Reconcile them before restarting automation.
@@ -337,7 +337,7 @@ Restart one backend, allow schema initialization to complete, then validate it a
 In **Settings > System > Database**, click **Factory reset**, type `RESET`, and confirm. This is SQLite-only. The job:
 
 1. stops the orchestrator;
-2. creates `data/backups/kandev-pre-reset-<unix>.db`;
+2. creates `<database-dir>/backups/kandev-pre-reset-<unix>.db` beside the configured SQLite file;
 3. drops every SQLite user table while retaining `kandev_meta`;
 4. removes managed `worktrees/`, `repos/`, `sessions/`, `tasks/`, and `quick-chat/` trees;
 5. requires a manual quit and relaunch.
@@ -374,7 +374,7 @@ When reporting an incident, record timestamp/timezone, Kandev version and commit
 
 ## Disk use and environment cleanup
 
-**Settings > System > Status** walks `data`, worktrees, repositories, sessions, tasks, quick chat, and backups. Results are cached for two hours; **Refresh** forces a new single-flight walk. Permission failures appear as warnings. The displayed total intentionally counts `data/backups` both inside the `data` row and again as the separate `backups` row, so use filesystem or volume metrics for quota enforcement.
+**Settings > System > Status** walks `data`, worktrees, repositories, sessions, tasks, quick chat, and the default `data/backups` directory. Results are cached for two hours; **Refresh** forces a new single-flight walk. Permission failures appear as warnings. Backup files outside the resolved home are not included in the total. The displayed total intentionally counts `data/backups` both inside the `data` row and again as the separate `backups` row, so use filesystem or volume metrics for quota enforcement.
 
 Archiving or deleting a task stops active sessions and starts durable asynchronous cleanup. Depending on executor, cleanup can delete a managed worktree and its local branch, remove a container, destroy a Sprite, reap a host-local agent's process tree, or attempt to stop the remote SSH controller and remove only its per-session runtime directory. Failed cleanup remains retryable across a backend restart. Kandev does not sweep arbitrary files from the shared temporary directory during archive or delete. SSH process/session cleanup is best-effort when the connection is failing, and the task directory always remains for deliberate, audited cleanup; there is no automatic sweeper for it today. The task can disappear from the UI before cleanup finishes.
 

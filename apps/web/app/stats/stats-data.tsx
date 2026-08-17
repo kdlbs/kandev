@@ -22,6 +22,7 @@ import {
   type TaskStatsResponse,
 } from "@/lib/api/domains/stats-api";
 import type { RangeKey } from "./stats-utils";
+import { t } from "@/lib/i18n";
 
 export type SectionStatus<T> =
   | { kind: "loading" }
@@ -51,7 +52,7 @@ const INITIAL_SECTIONS: StatsSections = {
 };
 
 function errorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : "Failed to load section";
+  return e instanceof Error ? e.message : t("stats:failedToLoadSection");
 }
 
 export function useStatsSections(workspaceId: string | undefined, range: RangeKey): StatsSections {

@@ -45,7 +45,7 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
   // Get the answer summary for display
   const getAnswerSummary = () => {
     const response = metadata.response;
-    if (!response) return "No selection";
+    if (!response) return t("task:clarificationNoSelection");
 
     const parts: string[] = [];
 
@@ -64,7 +64,7 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
       parts.push(`"${response.custom_text}"`);
     }
 
-    return parts.length > 0 ? parts.join(", ") : "No selection";
+    return parts.length > 0 ? parts.join(", ") : t("task:clarificationNoSelection");
   };
 
   return (

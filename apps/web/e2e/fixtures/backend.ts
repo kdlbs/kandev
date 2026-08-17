@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { BackendFixtureEnvOverrides, createScopedEnvUse } from "./backend-env";
 import { E2E_DOCKER_SCOPE } from "./docker-probe";
+import { dwell } from "../helpers/causal-waits";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -123,7 +124,11 @@ export async function waitForHealth(
       } catch {
         // not ready yet
       }
-      await new Promise((r) => setTimeout(r, HEALTH_POLL_MS));
+      await dwell(
+        HEALTH_POLL_MS,
+        "poll-interval",
+        "sampling interval for the backend health probe; the process is still starting, so there is nothing to subscribe to and the only signal is the port answering",
+      );
     }
     throw new Error(`Service did not become healthy at ${url} within ${timeoutMs}ms`);
   } finally {
@@ -150,7 +155,11 @@ async function waitForPortFree(port: number, timeoutMs = 10_000): Promise<void> 
       sock.once("error", () => resolve(true)); // ECONNREFUSED → port is free
     });
     if (free) return;
-    await new Promise((r) => setTimeout(r, 100));
+    await dwell(
+      100,
+      "poll-interval",
+      "sampling interval while waiting for the previous backend to release its port; the OS publishes nothing when a socket is finally freed",
+    );
   }
   // Timeout expired — proceed anyway; the new process will fail-fast if the
   // port is still held and waitForHealth will surface the error.

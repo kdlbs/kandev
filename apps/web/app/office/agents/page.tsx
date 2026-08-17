@@ -14,5 +14,5 @@ export default async function AgentsPage() {
     agents = res.agents ?? [];
   }
 
-  return <AgentsPageClient initialAgents={agents} />;
+  return <AgentsPageClient initialAgents={agents} initialWorkspaceId={workspaceId} />;
 }

@@ -934,6 +934,7 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("title", mcp.MaxLength(service.TaskTitleMaxLength), mcp.Description("New concise task title (maximum 60 characters)")),
 			mcp.WithString("description", mcp.Description("New description")),
 			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
+			mcp.WithString("deferred_launch_prompt", mcp.Description("Replace the prompt a not-yet-started task will launch with. Only valid for a task created with blocked_by (+ start_agent), whose launch is still waiting on its dependencies — use it to refresh a brief that went stale while the chain ran. Rejected once the task has started; send new context with message_task_kandev instead. When this is rejected, no other field in the same call is applied.")),
 		),
 		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),
 	)
@@ -977,7 +978,9 @@ Behaviour by session state:
 - Running/starting: queued delivery waits for turn-end; interrupt delivery follows the direct-parent behavior and safe fallback above.
 - Idle (waiting for input or completed): the message is sent immediately as a new turn (delivery_mode has no effect).
 - Created (not yet started): the agent is started with this message as its first prompt (delivery_mode has no effect).
-- Failed/cancelled: an error is returned (use create_task_kandev to start fresh).
+- Failed/cancelled: an error is returned. Those states are terminal and cannot be resumed — use spawn_session_kandev to start a new session on the task.
+
+Session defaulting when session_id is omitted: the task's primary session is used. If the primary is terminal (cancelled/failed) the newest session that can still take a message is used instead, so a task with a live session stays reachable. If every session is terminal, the error says so and names spawn_session_kandev.
 
 For an autopilot child question, pass reply_to_question_id with the question_id
 from the child message. The direct parent answer is recorded against that
@@ -1004,7 +1007,9 @@ This is halt-only: it does not send a prompt or start a replacement turn. For ur
 
 For every accepted live execution, Kandev first marks its session CANCELLED, then schedules graceful runtime teardown. An eligible active, unarchived, non-Office task is also moved to REVIEW through the normal guarded transition; other task states are preserved. Runtime teardown continues asynchronously, so status="stopped" confirms logical cancellation and scheduled teardown, not process exit.
 
-If the child has no live execution, the call succeeds idempotently with status="not_running" and changes no task or session state. Worktrees, environments, commits, task records, descendants, and queued messages are preserved.`),
+If the child has no live execution, the call succeeds idempotently with status="not_running" and changes no task or session state. Worktrees, environments, commits, task records, descendants, and queued messages are preserved.
+
+Recovery: a CANCELLED session is terminal and cannot be resumed, so message_task_kandev against it fails. To put the task back to work after stopping it, call spawn_session_kandev with the new prompt — it starts a fresh session in the same workspace, keeping the worktree and history. (Its sessions are otherwise unaffected: use list_task_sessions_kandev if you need to check what is still live.)`),
 			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The direct child task's full UUID (not a truncated prefix)")),
 		),
 		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),

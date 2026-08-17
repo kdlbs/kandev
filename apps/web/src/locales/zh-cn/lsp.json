@@ -69,7 +69,7 @@
   "stopping": "正在停止",
   "stoppingLanguageServer": "正在停止语言服务器",
   "taskExecutorUnsupported": "此任务执行器不支持语言服务器",
-  "thisMayTakeAMoment": "这可能需要一点时间...",
+  "thisMayTakeAMoment": "这可能需要一点时间…",
   "tooManyLanguageServers": "活动的语言服务器过多",
   "unavailable": "不可用",
   "waitingForInitializeResponse": "正在等待语言服务器响应 LSP 初始化请求。",

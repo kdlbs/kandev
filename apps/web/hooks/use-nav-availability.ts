@@ -14,16 +14,30 @@ import { useLinearEnabled } from "@/hooks/domains/linear/use-linear-enabled";
 import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav";
 import type { AvailabilityMap } from "@/lib/navigation/types";
 import type { GitHubStatus } from "@/lib/types/github";
+import { t } from "@/lib/i18n";
+
+/**
+ * The workspace the backend resolves when a request names none: the oldest by
+ * creation time. Ties (or an empty list) give null, which reads the unscoped
+ * toggle exactly as before.
+ */
+function oldestWorkspace(items: ReadonlyArray<{ id: string; created_at?: string }>): string | null {
+  let oldest: { id: string; created_at?: string } | null = null;
+  for (const item of items) {
+    if (!oldest || (item.created_at ?? "") < (oldest.created_at ?? "")) oldest = item;
+  }
+  return oldest?.id ?? null;
+}
 
 /** Human-readable status label for a not-yet-connected integration destination. */
 function getStatusLabel(loading: boolean | undefined): string {
-  return loading ? "Checking" : "Setup";
+  return loading ? t("common:checking") : t("task:setup");
 }
 
 /** Derives the GitHub nav destination's ready/label pair from its auth status. */
 export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading: boolean) {
-  if (status?.authenticated) return { ready: true, label: "Connected" };
-  if (status?.token_configured) return { ready: true, label: "Configured" };
+  if (status?.authenticated) return { ready: true, label: t("common:connected") };
+  if (status?.token_configured) return { ready: true, label: t("common:configured") };
   return { ready: false, label: getStatusLabel(loading) };
 }
 
@@ -77,6 +91,14 @@ export function useNavAvailability(): AvailabilityMap {
   // when another workspace is configured. Fall back to null so the backend's
   // default-workspace resolution applies instead.
   const scopedWorkspaceId = activeWorkspaceExists ? activeWorkspaceId : null;
+  // The toggles are browser-local, so a null id has no backend to resolve it:
+  // it would read the unscoped key while the probes above answer for whichever
+  // workspace the backend picked, and the two could then disagree about the
+  // same integration. Mirror the backend's tie-breaker instead
+  // (`workspacescope.ResolveMigrationTarget`: oldest workspace by creation),
+  // which with the usual single surviving workspace is exactly it.
+  const oldestWorkspaceId = useAppStore((s) => oldestWorkspace(s.workspaces.items));
+  const toggleWorkspaceId = scopedWorkspaceId ?? oldestWorkspaceId;
   const { status, loading } = useGitHubStatus();
   const gitlabConfigured = useGitLabAvailable();
   const jiraConfigured = useJiraAuthed(scopedWorkspaceId);
@@ -84,11 +106,13 @@ export function useNavAvailability(): AvailabilityMap {
   const azureDevOpsConfigured = useAzureDevOpsAvailable(scopedWorkspaceId);
   const githubConfigured = getGitHubIntegrationStatus(status, loading).ready;
 
-  const { enabled: azureDevOpsEnabled } = useAzureDevOpsEnabled();
-  const { enabled: githubEnabled } = useGitHubEnabled();
-  const { enabled: gitlabEnabled } = useGitLabEnabled();
-  const { enabled: jiraEnabled } = useJiraEnabled();
-  const { enabled: linearEnabled } = useLinearEnabled();
+  // The toggles are per-workspace too: a workspace that has GitHub turned off
+  // must not hide it from the nav while another workspace is active.
+  const { enabled: azureDevOpsEnabled } = useAzureDevOpsEnabled(toggleWorkspaceId);
+  const { enabled: githubEnabled } = useGitHubEnabled(toggleWorkspaceId);
+  const { enabled: gitlabEnabled } = useGitLabEnabled(toggleWorkspaceId);
+  const { enabled: jiraEnabled } = useJiraEnabled(toggleWorkspaceId);
+  const { enabled: linearEnabled } = useLinearEnabled(toggleWorkspaceId);
 
   const { hideDisabled } = useHideDisabledIntegrationsInNav();
   const visible = (configured: boolean, enabled: boolean) =>

@@ -14,11 +14,12 @@ import (
 
 // Agent event type string constants.
 const (
-	agentEventComplete  = "complete"
-	agentEventCompleted = "completed"
-	agentEventError     = "error"
-	agentEventToolCall  = "tool_call"
-	agentEventFailed    = "failed"
+	agentEventComplete   = "complete"
+	agentEventCompleted  = "completed"
+	agentEventError      = "error"
+	agentEventToolCall   = "tool_call"
+	agentEventToolUpdate = "tool_update"
+	agentEventFailed     = "failed"
 )
 
 // toolKindToMessageType maps the normalized tool kind to a frontend message type.

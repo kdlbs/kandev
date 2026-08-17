@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getRunAttempts } from "@/lib/api/domains/office-runs-api";
 import type { RouteAttempt } from "@/lib/state/slices/office/types";
+import { t } from "@/lib/i18n";
 
 export type UseRunAttemptsResult = {
   attempts: RouteAttempt[];
@@ -32,7 +33,7 @@ export function useRunAttempts(runId: string | null): UseRunAttemptsResult {
       setRunAttempts(runId, res.attempts ?? []);
       setFetched(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load route attempts");
+      setError(e instanceof Error ? e.message : t("office:failedToLoadRouteAttempts"));
     } finally {
       setIsLoading(false);
     }

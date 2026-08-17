@@ -1,6 +1,7 @@
 package github
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,39 @@ import (
 	"sync"
 	"testing"
 )
+
+func TestTokenClientFetchRateLimitSeedsAllBuckets(t *testing.T) {
+	client, requests := newRecordingPATServer(t, map[string]string{
+		"/rate_limit": `{"resources":{
+			"core":{"limit":5000,"remaining":4321,"reset":2000000000},
+			"graphql":{"limit":5000,"remaining":4900,"reset":2000000000},
+			"search":{"limit":30,"remaining":25,"reset":2000000000}
+		}}`,
+	})
+	tracker := NewRateTracker(nil, nil)
+	client.WithRateTracker(tracker)
+
+	if err := client.FetchRateLimit(context.Background()); err != nil {
+		t.Fatalf("FetchRateLimit: %v", err)
+	}
+	if len(*requests) != 1 || (*requests)[0].Method != http.MethodGet || (*requests)[0].Path != "/rate_limit" {
+		t.Fatalf("requests = %+v, want one GET /rate_limit", *requests)
+	}
+
+	for resource, wantRemaining := range map[Resource]int{
+		ResourceCore:    4321,
+		ResourceGraphQL: 4900,
+		ResourceSearch:  25,
+	} {
+		snapshot, ok := tracker.Snapshot(resource)
+		if !ok {
+			t.Fatalf("missing %s rate-limit snapshot", resource)
+		}
+		if snapshot.Remaining != wantRemaining {
+			t.Errorf("%s remaining = %d, want %d", resource, snapshot.Remaining, wantRemaining)
+		}
+	}
+}
 
 // patRequest records what a PATClient actually put on the wire so a test can
 // assert method, path, query, headers and body rather than only the decoded

@@ -46,6 +46,7 @@ import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-man
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
+import { useTranslation } from "react-i18next";
 
 // ---------------------------------------------------------------------------
 // PORTAL SLOT — generic dockview component that adopts a persistent portal
@@ -304,6 +305,7 @@ function DiffViewerContent({
 }
 
 function ChangesContent({ panelId }: { panelId: string }) {
+  const { t } = useTranslation();
   const addDiffViewerPanel = useDockviewStore((s) => s.addDiffViewerPanel);
   const addFileDiffPanel = useDockviewStore((s) => s.addFileDiffPanel);
   const addCommitDetailPanel = useDockviewStore((s) => s.addCommitDetailPanel);
@@ -318,9 +320,10 @@ function ChangesContent({ panelId }: { panelId: string }) {
   const totalCount = fileCount + commits.length;
 
   useEffect(() => {
-    const title = totalCount > 0 ? `Changes (${totalCount})` : "Changes";
+    const title =
+      totalCount > 0 ? `${t("task:panelChanges")} (${totalCount})` : t("task:panelChanges");
     setPanelTitle(panelId, title);
-  }, [totalCount, panelId]);
+  }, [totalCount, panelId, t]);
 
   const handleEditFile = useCallback(
     (path: string, repo?: string) => openFile(path, repo),

@@ -76,10 +76,11 @@ function FontGroupOptions() {
             </Badge>
           )}
         </SelectLabel>
-        {/* Preset labels are font family names — data, never translated. */}
+        {/* Preset labels are font family names - data, never translated. The
+            one entry naming no typeface carries `labelKey` instead. */}
         {(FONT_GROUPS[category] ?? []).map((preset) => (
           <SelectItem key={preset.value} value={preset.value}>
-            {preset.label}
+            {preset.labelKey ? t(preset.labelKey) : preset.label}
           </SelectItem>
         ))}
       </SelectGroup>

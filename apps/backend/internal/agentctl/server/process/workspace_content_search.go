@@ -61,6 +61,12 @@ func (m *Manager) SearchWorkspaceContent(
 	if query == "" {
 		return response, nil
 	}
+	// Repository materialization can add sibling worktrees after the manager
+	// starts. Reconcile before taking the tracker snapshot so a search cannot
+	// permanently return a partial repository graph from that startup race.
+	if err := m.RescanRepositories(ctx, ""); err != nil {
+		return nil, err
+	}
 
 	for _, tracker := range m.contentSearchTrackers() {
 		if err := ctx.Err(); err != nil {

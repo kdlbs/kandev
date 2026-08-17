@@ -740,8 +740,11 @@ func pickRejectOption(options []map[string]interface{}) string {
 	return ""
 }
 
-// handleGitCommitCreated handles git commit events by forwarding them to the frontend.
-// In the live model, commits are not persisted to DB - they're only captured at archive time.
+// handleGitCommitCreated persists the commit (see persistSessionCommit) and
+// forwards it to the frontend. This is the primary write path for
+// task_session_commits: it fires on every commit agentctl observes, unlike
+// archive capture which only ran once per task and needed the agent process
+// still alive to succeed.
 func (s *Service) handleGitCommitCreated(ctx context.Context, data watcher.GitEventData) {
 	if data.Commit == nil {
 		s.logger.Debug("missing commit data for git commit event",
@@ -752,6 +755,18 @@ func (s *Service) handleGitCommitCreated(ctx context.Context, data watcher.GitEv
 	s.logger.Debug("handling git commit created",
 		zap.String("task_id", data.TaskID),
 		zap.String("commit_sha", data.Commit.CommitSHA))
+
+	s.persistSessionCommit(ctx, data.SessionID, commitCaptureTriggerLive, &models.SessionCommit{
+		CommitSHA:     data.Commit.CommitSHA,
+		ParentSHA:     data.Commit.ParentSHA,
+		AuthorName:    data.Commit.AuthorName,
+		AuthorEmail:   data.Commit.AuthorEmail,
+		CommitMessage: data.Commit.Message,
+		CommittedAt:   parseCommitTime(data.Commit.CommittedAt),
+		FilesChanged:  data.Commit.FilesChanged,
+		Insertions:    data.Commit.Insertions,
+		Deletions:     data.Commit.Deletions,
+	})
 
 	// Forward commit_created event to WebSocket subject for frontend real-time updates
 	if s.eventBus != nil {

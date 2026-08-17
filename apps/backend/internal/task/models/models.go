@@ -95,6 +95,18 @@ const (
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
 	MetaKeyDeferredLaunch    = "deferred_launch"
+	// MetaKeyQueuedMoveExitPending identifies a queued manual move whose
+	// source-step on_exit side effect is not yet complete. Its value records the
+	// source step so recovery can resume the work after a restart.
+	MetaKeyQueuedMoveExitPending = "queued_move_exit_pending"
+	// MetaKeyQueuedMoveExitCompleted is durable evidence that the source-step
+	// on_exit side effect for a queued manual move finished. Promotion must not
+	// enter the destination until this marker exists.
+	MetaKeyQueuedMoveExitCompleted = "queued_move_exit_completed"
+	// MetaKeyQueuePromotionPending is a one-shot token for destination entry
+	// after queue promotion. It prevents duplicate task.queue_promoted events
+	// from repeating on_enter or auto-start behavior.
+	MetaKeyQueuePromotionPending = "queue_promotion_pending"
 	// DeferredLaunchStartWhenUnblockedKey marks a deferred launch intent as
 	// belonging to a task dependency chain rather than to WIP overflow. The
 	// record itself is identical; the flag lets dependency resolution recognise
@@ -246,6 +258,10 @@ type GitCredentialSnapshot struct {
 // configuration attributed to one prompt/response turn.
 const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 
+// TurnMetaKeyWorkflowStepIDAtStart records the workflow step the turn's task
+// was in when the turn started. Absent when the task held no step.
+const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
+
 // SessionRuntimeConfig is persisted as provider state or explicit overrides.
 // On resume, explicit values take precedence over the latest provider snapshot
 // so delayed provider events cannot replace user intent.
@@ -297,7 +313,7 @@ func LoadEffectiveSessionRuntimeConfig(session *TaskSession) (SessionRuntimeConf
 	if overrides, ok := LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
 		mergeSessionRuntimeConfig(&effective, overrides)
 	}
-	effective.ConfigOptions = cleanRuntimeConfigOptions(effective.ConfigOptions)
+	effective.ConfigOptions = cleanRuntimeConfigOptions(effective.ConfigOptions, session)
 	return effective, !effective.IsZero()
 }
 
@@ -334,17 +350,33 @@ func mergeSessionRuntimeConfig(target *SessionRuntimeConfig, source SessionRunti
 	}
 }
 
-func cleanRuntimeConfigOptions(options map[string]string) map[string]string {
+func cleanRuntimeConfigOptions(options map[string]string, session *TaskSession) map[string]string {
 	if len(options) == 0 {
 		return nil
 	}
 	cleaned := maps.Clone(options)
+	// Model and mode are carried as top-level fields. Other keys are provider-defined.
 	delete(cleaned, "model")
 	delete(cleaned, "mode")
+	if isLegacyAgentIdentity(session, cleaned["agent"]) {
+		delete(cleaned, "agent")
+	}
 	if len(cleaned) == 0 {
 		return nil
 	}
 	return cleaned
+}
+
+func isLegacyAgentIdentity(session *TaskSession, value string) bool {
+	if session == nil || value == "" || session.AgentProfileSnapshot == nil {
+		return false
+	}
+	for _, key := range []string{"agent_id", "agent_name"} {
+		if StringFromAny(session.AgentProfileSnapshot[key]) == value {
+			return true
+		}
+	}
+	return false
 }
 
 // SessionOriginalEffectiveConfiguration is the immutable configuration a task
@@ -445,6 +477,8 @@ type LastAgentError struct {
 	OccurredAt       time.Time  `json:"occurred_at"`
 	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
 	RemediationURL   string     `json:"remediation_url,omitempty"`
+	Code             string     `json:"code,omitempty"`
+	Details          string     `json:"details,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 

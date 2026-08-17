@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
 import type { AutomationRun } from "@/lib/types/automation";
 import { isOpenRun, statusDotClass, statusLabelKey } from "./run-status";
+import { t } from "@/lib/i18n";
 
 /**
  * What the run actually said, in priority order. An error outranks the summary
@@ -14,8 +15,8 @@ import { isOpenRun, statusDotClass, statusLabelKey } from "./run-status";
 export function outcomeText(run: AutomationRun): string {
   if (run.error_message) return run.error_message;
   if (run.summary) return run.summary;
-  if (isOpenRun(run.status)) return "Still running - no report yet.";
-  return "No report recorded.";
+  if (isOpenRun(run.status)) return t("automations:runStillRunningNoReport");
+  return t("automations:runNoReportRecorded");
 }
 
 type RunFeedItemProps = {

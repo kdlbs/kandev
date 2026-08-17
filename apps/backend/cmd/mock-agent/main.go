@@ -315,6 +315,12 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleOverloaded(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
+	// Same rationale as /overloaded above: /transport-lost must also surface a
+	// real prompt-time ACP error, so it is intercepted here rather than routed
+	// through handlePrompt's emitter.
+	if resp, err, handled := a.handleTransportLost(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}
 	handlePrompt(e, prompt, a.model)
 	if promptCtx.Err() != nil {
@@ -425,6 +431,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	delete(a.commandsEmitted, req.SessionId)
 	a.mu.Unlock()
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
+	_ = os.Remove(transportLostCounterPath(req.SessionId))
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -496,6 +503,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
 		{Name: toolKeyError, Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
+		{Name: "transport-lost", Description: "Simulate an ACP transport disconnect (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
 		{Name: "crash", Description: "Simulate agent crash"},
 		{Name: "all", Description: "Demonstrate all message types"},

@@ -351,6 +351,22 @@ func (r *sqliteRepository) Close() error {
 	return r.db.Close()
 }
 
+// marshalTUIConfig renders a TUI config for the nullable tui_config column.
+// Shared by CreateAgent and UpdateAgent so the two writers cannot drift — the
+// column being absent from one of them is exactly how an editable field was
+// lost on save.
+func marshalTUIConfig(cfg *models.TUIConfigJSON) (*string, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal tui_config: %w", err)
+	}
+	s := string(data)
+	return &s, nil
+}
+
 func (r *sqliteRepository) CreateAgent(ctx context.Context, agent *models.Agent) error {
 	if agent.ID == "" {
 		agent.ID = uuid.New().String()
@@ -358,16 +374,11 @@ func (r *sqliteRepository) CreateAgent(ctx context.Context, agent *models.Agent)
 	now := time.Now().UTC()
 	agent.CreatedAt = now
 	agent.UpdatedAt = now
-	var tuiConfigJSON *string
-	if agent.TUIConfig != nil {
-		data, err := json.Marshal(agent.TUIConfig)
-		if err != nil {
-			return fmt.Errorf("failed to marshal tui_config: %w", err)
-		}
-		s := string(data)
-		tuiConfigJSON = &s
+	tuiConfigJSON, err := marshalTUIConfig(agent.TUIConfig)
+	if err != nil {
+		return err
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO agents (id, name, workspace_id, supports_mcp, mcp_config_path, tui_config, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`), agent.ID, agent.Name, agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, tuiConfigJSON, agent.CreatedAt, agent.UpdatedAt)
@@ -392,10 +403,18 @@ func (r *sqliteRepository) GetAgentByName(ctx context.Context, name string) (*mo
 
 func (r *sqliteRepository) UpdateAgent(ctx context.Context, agent *models.Agent) error {
 	agent.UpdatedAt = time.Now().UTC()
+	// tui_config is written here as well as in CreateAgent: a custom TUI agent's
+	// MCP strategy is editable after creation, and omitting the column silently
+	// discarded that edit — the row kept supports_mcp while the strategy it was
+	// derived from reverted on the next boot.
+	tuiConfigJSON, err := marshalTUIConfig(agent.TUIConfig)
+	if err != nil {
+		return err
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE agents SET workspace_id = ?, supports_mcp = ?, mcp_config_path = ?, updated_at = ?
+		UPDATE agents SET workspace_id = ?, supports_mcp = ?, mcp_config_path = ?, tui_config = ?, updated_at = ?
 		WHERE id = ?
-	`), agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, agent.UpdatedAt, agent.ID)
+	`), agent.WorkspaceID, dialect.BoolToInt(agent.SupportsMCP), agent.MCPConfigPath, tuiConfigJSON, agent.UpdatedAt, agent.ID)
 	if err != nil {
 		return err
 	}

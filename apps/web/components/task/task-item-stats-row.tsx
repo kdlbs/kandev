@@ -1,12 +1,13 @@
 "use client";
 
-import { IconMail } from "@tabler/icons-react";
+import { IconClockHour4, IconMail } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { isDebugUI } from "@/lib/config";
 import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 /** Debug-overlay-only poll-mode legend. Labels resolve through `t()` so the
  * pseudo-locale stays complete; the row itself is gated behind `isDebugUI()`. */
@@ -25,18 +26,21 @@ const POLL_MODE_CONFIG: Record<
 
 /**
  * The sidebar row's metadata line: relative last-update time, PR number,
- * queued-prompt mail badge, and (debug UI only) the session poll-mode letter.
+ * queued-prompt mail badge, WIP queue icon, and (debug UI only) the session
+ * poll-mode letter.
  */
 export function TaskItemStatsRow({
   updatedAt,
   prInfo,
   primarySessionId,
   queuedCount,
+  wipQueue,
 }: {
   updatedAt?: string;
   prInfo?: { number: number; state: string; aggregateState?: string };
   primarySessionId?: string | null;
   queuedCount?: number;
+  wipQueue?: WipQueueStatus;
 }) {
   const { t } = useTranslation();
   const pollMode = useAppStore((s) =>
@@ -45,10 +49,17 @@ export function TaskItemStatsRow({
       : null,
   );
 
-  if (!updatedAt && !prInfo && !pollMode && !queuedCount) return null;
+  if (!updatedAt && !prInfo && !pollMode && !queuedCount && !wipQueue) return null;
 
   const modeConfig = pollMode ? POLL_MODE_CONFIG[pollMode] : null;
   const modeLabel = modeConfig ? t(modeConfig.labelKey) : "";
+  const wipQueueLabel = wipQueue
+    ? t("sidebar:wipQueuePosition", {
+        position: wipQueue.position,
+        total: wipQueue.total,
+        step: wipQueue.destinationTitle,
+      })
+    : "";
 
   return (
     <span className="flex items-center gap-1.5 text-[11px]">
@@ -66,6 +77,22 @@ export function TaskItemStatsRow({
           <IconMail className="h-3 w-3" aria-hidden="true" />
           {queuedCount}
         </span>
+      ) : null}
+      {wipQueue ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              data-testid="sidebar-task-wip-queue"
+              tabIndex={0}
+              aria-label={wipQueueLabel}
+              title={wipQueueLabel}
+              className="inline-flex shrink-0 items-center text-muted-foreground/60 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <IconClockHour4 className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right">{wipQueueLabel}</TooltipContent>
+        </Tooltip>
       ) : null}
       {modeConfig && (
         <Tooltip>

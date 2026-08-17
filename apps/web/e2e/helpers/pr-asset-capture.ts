@@ -122,6 +122,17 @@ export class PrAssetCapture {
   }
 
   /**
+   * Whether captures are actually being written (`CAPTURE_PR_ASSETS`).
+   *
+   * Every capture method is a no-op otherwise, so a spec that does extra work
+   * *for* a capture -- settling the UI, hiding transient chrome -- should skip
+   * that work in ordinary runs rather than pay for it on every shard.
+   */
+  get capturing(): boolean {
+    return this.enabled;
+  }
+
+  /**
    * Captures one asset. `opts.page` overrides the constructor page so a single
    * capture instance can shoot several clients in one test (a cross-device spec
    * drives two). Using a second instance instead would not work: flush() clears

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -406,8 +405,8 @@ func TestService_MoveTaskWithOptionsAllowsRunningPrimarySession(t *testing.T) {
 	}
 }
 
-func TestService_MoveTaskRejectsFullWIPLimitedTarget(t *testing.T) {
-	svc, _, repo := createTestService(t)
+func TestService_MoveTaskQueuesFullWIPLimitedTarget(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
 	seedMoveSteps(svc)
@@ -418,25 +417,44 @@ func TestService_MoveTaskRejectsFullWIPLimitedTarget(t *testing.T) {
 	createMoveTask(t, ctx, repo, "task-moving", "wf-source", "step-source", nil)
 	createMoveTask(t, ctx, repo, "task-occupant", "wf-source", "step-full", nil)
 
-	_, err := svc.MoveTask(ctx, "task-moving", "wf-source", "step-full", 0)
-	if err == nil {
-		t.Fatalf("expected WIP-limited move to be rejected")
+	moved, err := svc.MoveTask(ctx, "task-moving", "wf-source", "step-full", 0)
+	if err != nil {
+		t.Fatalf("MoveTask: %v", err)
 	}
-	if !strings.Contains(err.Error(), "WIP limit") {
-		t.Fatalf("error = %q, want WIP limit rejection", err.Error())
+	if moved.Task.WIPAdmitted {
+		t.Fatal("overflow move consumed WIP capacity")
+	}
+	if moved.Task.QueuedForStepID != "step-full" {
+		t.Fatalf("queued_for_step_id = %q, want step-full", moved.Task.QueuedForStepID)
+	}
+	if moved.Task.QueuedAt == nil {
+		t.Fatal("overflow move did not record queued_at")
 	}
 
 	task, err := repo.GetTask(ctx, "task-moving")
 	if err != nil {
 		t.Fatalf("GetTask: %v", err)
 	}
-	if task.WorkflowStepID != "step-source" {
-		t.Fatalf("task moved despite WIP limit: %s", task.WorkflowStepID)
+	if task.WorkflowStepID != "step-full" {
+		t.Fatalf("workflow_step_id = %s, want step-full", task.WorkflowStepID)
 	}
-
+	event := findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskMoved)
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data type = %T, want map[string]interface{}", event.Data)
+	}
+	if admitted, _ := data["wip_admitted"].(bool); admitted {
+		t.Fatal("task.moved event marked queued move as admitted")
+	}
+	if got := data["queued_for_step_id"]; got != "step-full" {
+		t.Fatalf("task.moved queued_for_step_id = %v, want step-full", got)
+	}
+	if data["queued_at"] == nil {
+		t.Fatal("task.moved event omitted queued_at")
+	}
 }
 
-func TestService_ApproveSessionRejectsFullWIPLimitedTarget(t *testing.T) {
+func TestService_ApproveSessionQueuesFullWIPLimitedTarget(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
@@ -457,28 +475,34 @@ func TestService_ApproveSessionRejectsFullWIPLimitedTarget(t *testing.T) {
 	createMoveTask(t, ctx, repo, "task-occupant", "wf-source", "step-full", nil)
 	createMoveSession(t, ctx, repo, "session-approve", "task-approve", models.TaskSessionStateWaitingForInput, models.ReviewStatusPending)
 
-	_, err := svc.ApproveSession(ctx, "session-approve")
-	if err == nil {
-		t.Fatalf("expected approval transition to be rejected")
+	result, err := svc.ApproveSession(ctx, "session-approve")
+	if err != nil {
+		t.Fatalf("ApproveSession: %v", err)
 	}
-	if !strings.Contains(err.Error(), "WIP limit") {
-		t.Fatalf("error = %q, want WIP limit rejection", err.Error())
+	if result.Task == nil {
+		t.Fatal("approval result did not include task")
+	}
+	if result.Task.WIPAdmitted {
+		t.Fatal("approval overflow move consumed WIP capacity")
+	}
+	if result.Task.QueuedForStepID != "step-full" {
+		t.Fatalf("queued_for_step_id = %q, want step-full", result.Task.QueuedForStepID)
 	}
 
 	task, err := repo.GetTask(ctx, "task-approve")
 	if err != nil {
 		t.Fatalf("GetTask: %v", err)
 	}
-	if task.WorkflowStepID != "step-source" {
-		t.Fatalf("task moved despite WIP limit: %s", task.WorkflowStepID)
+	if task.WorkflowStepID != "step-full" {
+		t.Fatalf("workflow_step_id = %s, want step-full", task.WorkflowStepID)
 	}
 
 	session, err := repo.GetTaskSession(ctx, "session-approve")
 	if err != nil {
 		t.Fatalf("GetTaskSession: %v", err)
 	}
-	if session.ReviewStatus != models.ReviewStatusPending {
-		t.Fatalf("review status = %q, want pending after rejected approval", session.ReviewStatus)
+	if session.ReviewStatus != models.ReviewStatusApproved {
+		t.Fatalf("review status = %q, want approved after queued approval", session.ReviewStatus)
 	}
 }
 
@@ -797,7 +821,7 @@ func TestService_BulkMoveSelectedTasksValidatesBatchBeforeMoving(t *testing.T) {
 	}
 }
 
-func TestService_BulkMoveSelectedTasksRejectsOverCapacityBeforeMoving(t *testing.T) {
+func TestService_BulkMoveSelectedTasksQueuesOverCapacity(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
@@ -808,21 +832,32 @@ func TestService_BulkMoveSelectedTasksRejectsOverCapacityBeforeMoving(t *testing
 	createMoveTask(t, ctx, repo, "task-batch-a", "wf-source", "step-source", nil)
 	createMoveTask(t, ctx, repo, "task-batch-b", "wf-source", "step-source", nil)
 
-	_, err := svc.BulkMoveSelectedTasks(ctx, []string{"task-batch-a", "task-batch-b"}, "wf-source", "step-full")
-	if err == nil {
-		t.Fatalf("expected selected batch move to be rejected")
+	result, err := svc.BulkMoveSelectedTasks(ctx, []string{"task-batch-a", "task-batch-b"}, "wf-source", "step-full")
+	if err != nil {
+		t.Fatalf("BulkMoveSelectedTasks: %v", err)
 	}
-	if !strings.Contains(err.Error(), "WIP limit") {
-		t.Fatalf("error = %q, want WIP limit rejection", err.Error())
+	if result.MovedCount != 2 {
+		t.Fatalf("moved_count = %d, want 2", result.MovedCount)
 	}
 
-	for _, id := range []string{"task-batch-a", "task-batch-b"} {
+	for index, id := range []string{"task-batch-a", "task-batch-b"} {
 		task, err := repo.GetTask(ctx, id)
 		if err != nil {
 			t.Fatalf("GetTask(%s): %v", id, err)
 		}
-		if task.WorkflowStepID != "step-source" {
-			t.Fatalf("%s moved despite rejected batch: %s", id, task.WorkflowStepID)
+		if task.WorkflowStepID != "step-full" {
+			t.Fatalf("%s workflow_step_id = %s, want step-full", id, task.WorkflowStepID)
+		}
+		if index == 0 && !task.WIPAdmitted {
+			t.Fatal("first batch task was not admitted")
+		}
+		if index == 1 {
+			if task.WIPAdmitted {
+				t.Fatal("second batch task consumed WIP capacity")
+			}
+			if task.QueuedForStepID != "step-full" || task.QueuedAt == nil {
+				t.Fatalf("second batch task queue metadata = (%q, %v), want destination queue", task.QueuedForStepID, task.QueuedAt)
+			}
 		}
 	}
 }

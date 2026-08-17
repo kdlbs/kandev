@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   PluginHostApi as PublicPluginHostApi,
+  PluginNavSection as PublicPluginNavSection,
   PluginRegistry as PublicPluginRegistry,
   RepositoryProviderRegistration as PublicRepositoryProviderRegistration,
   ReviewSummary as PublicReviewSummary,
@@ -8,6 +9,7 @@ import type {
 } from "@kandev/plugin-sdk";
 import type {
   PluginHostApi,
+  PluginNavSection,
   PluginRegistry,
   RepositoryProviderRegistration,
   ReviewItemSummary,
@@ -42,6 +44,10 @@ describe("public plugin SDK", () => {
     const reviewSummaryIsCanonical: SameType<ReviewItemSummary, PublicReviewSummary> = true;
     const associationIsCanonical: SameType<ReviewTaskAssociation, PublicReviewTaskAssociation> =
       true;
+    // Named-import equality, not just structural: a plugin author writes
+    // `import type { PluginNavSection } from "@kandev/plugin-sdk"` verbatim, and
+    // TS's structural typing can't otherwise tell an inline union from a named export.
+    const navSectionIsCanonical: SameType<PluginNavSection, PublicPluginNavSection> = true;
     expect(hostHasEveryPublicKey).toBe(true);
     expect(registryHasEveryPublicKey).toBe(true);
     expect(publicHasEveryRegistryKey).toBe(true);
@@ -50,6 +56,7 @@ describe("public plugin SDK", () => {
     expect(repositoryProviderIsCanonical).toBe(true);
     expect(reviewSummaryIsCanonical).toBe(true);
     expect(associationIsCanonical).toBe(true);
+    expect(navSectionIsCanonical).toBe(true);
     expect(publicHostContract).toBeTypeOf("function");
     expect(publicRegistryContract).toBeTypeOf("function");
   });

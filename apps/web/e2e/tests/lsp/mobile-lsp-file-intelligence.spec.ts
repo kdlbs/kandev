@@ -12,6 +12,7 @@ import {
   readFakeLspEvents,
   releaseFakeLspInitialization,
 } from "./lsp-e2e-helpers";
+import { dwell } from "../../helpers/causal-waits";
 
 test.describe("Mobile LSP boundaries", () => {
   test.describe.configure({ timeout: 90_000 });
@@ -56,7 +57,12 @@ test.describe("Mobile LSP boundaries", () => {
       await expect(viewer.locator(".cm-editor")).toBeVisible();
       await expect(viewer.getByTestId("lsp-status-button")).toHaveCount(0);
       await expect(testPage.getByTestId("app-status-lsp")).toHaveCount(0);
-      await testPage.waitForTimeout(1_000);
+      await dwell(
+        testPage,
+        1_000,
+        "negative-assertion",
+        "asserts that no LSP socket is ever opened on mobile; a connection that must not happen publishes nothing, so the check needs the window in which it would have opened to elapse",
+      );
       expect(lspSockets).toEqual([]);
       expect(readFakeLspEvents(backend)).toEqual([]);
     } finally {

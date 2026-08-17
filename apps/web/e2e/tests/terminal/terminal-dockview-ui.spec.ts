@@ -4,6 +4,11 @@ import type { SeedData } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
+import {
+  snapshotPersistedLayouts,
+  waitForPersistedLayoutChange,
+} from "../../helpers/dockview-persistence";
+import { dwell } from "../../helpers/causal-waits";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -143,10 +148,16 @@ test.describe("Terminals — dockview UI", () => {
       .getByTestId("terminal-tab-seq-2")
       .locator("..")
       .locator(".dv-default-tab-action");
+    const layoutBeforeClose = await snapshotPersistedLayouts(testPage);
     await seq2Close.click();
     await expect(testPage.getByTestId("terminal-tab-seq-2")).toHaveCount(0, { timeout: 5_000 });
 
-    await testPage.waitForTimeout(800);
+    // The tab is gone from the DOM, but the reload below reads sessionStorage,
+    // and that write is on a ~300ms debounce with no event. Wait for the write
+    // rather than past it: if the close never reaches storage, that is the bug
+    // this test exists to catch, and it should fail here rather than as a
+    // confusing assertion after the reload.
+    await waitForPersistedLayoutChange(testPage, layoutBeforeClose);
 
     await testPage.reload();
     await session.waitForLoad();
@@ -193,14 +204,16 @@ test.describe("Terminals — dockview UI", () => {
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
+    const layoutBeforeNewTerminal = await snapshotPersistedLayouts(testPage);
     await clickNewTerminalInPlusMenu(testPage, session);
     await expect(testPage.getByTestId("terminal-tab-seq-1")).toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 5_000 });
 
-    // Layout-save is 300ms-debounced. Wait past the debounce so the
-    // saved JSON includes the user-created terminal panel before we
-    // reload — otherwise a fast test races the save.
-    await testPage.waitForTimeout(800);
+    // Layout-save is 300ms-debounced and publishes nothing, so the saved JSON
+    // has to be observed rather than waited out: the reload below reads it, and
+    // a slow save on a loaded shard would make this fail claiming the panel was
+    // not preserved.
+    await waitForPersistedLayoutChange(testPage, layoutBeforeNewTerminal);
 
     await testPage.reload();
     // After the dockview "preserve restored active tab" change (commit
@@ -291,14 +304,22 @@ test.describe("Terminals — dockview UI", () => {
     // Create a second terminal so we have a non-default row to click.
     await clickNewTerminalInPlusMenu(testPage, session);
     await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 10_000 });
-    await testPage.waitForTimeout(800);
 
-    // Count terminal tab content elements before the focus click.
+    // Count terminal tab content elements before the focus click. Polling the
+    // count is the wait: it returns as soon as the second tab has rendered
+    // instead of after a fixed budget, and it fails if the tab never arrives
+    // rather than reporting a baseline of 1 that makes the comparison below
+    // meaningless.
     const terminalContent = testPage.locator(".dv-default-tab-content").filter({
       hasText: /^Terminal$/,
     });
+    await expect
+      .poll(() => terminalContent.count(), {
+        timeout: 10_000,
+        message: "two terminal tabs before clicking reopen",
+      })
+      .toBeGreaterThanOrEqual(2);
     const before = await terminalContent.count();
-    expect(before, "two terminal tabs before clicking reopen").toBeGreaterThanOrEqual(2);
 
     // Open the menu and click the seq=2 row — that terminal is already
     // open as a tab, so the click should focus rather than mint a new
@@ -310,9 +331,15 @@ test.describe("Terminals — dockview UI", () => {
     await expect(seq2Row).toHaveCount(1, { timeout: 10_000 });
     await seq2Row.click();
 
-    // Tab count must NOT grow. The menu closes on its own; wait briefly
-    // for any spurious panel to land.
-    await testPage.waitForTimeout(500);
+    // Tab count must NOT grow. There is no event for a panel that must never
+    // be created, so the only way to give a regression room to happen is to let
+    // the window in which it would have landed elapse.
+    await dwell(
+      testPage,
+      500,
+      "negative-assertion",
+      "asserts that clicking an already-open terminal focuses rather than minting a second panel; a panel that must not appear publishes nothing to wait on",
+    );
     const after = await terminalContent.count();
     expect(
       after,

@@ -96,6 +96,7 @@ describe("addPRPanel — layout-owned group placement", () => {
   const SESSION_PANEL_ID = `session:${SESSION_ID}`;
   const SESSION_GROUP = "group-session-host";
   const PR_DETAILS_GROUP = "group-configured-pr-details";
+  const REQUESTED_GROUP = "group-invoking-add-menu";
 
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
@@ -141,6 +142,26 @@ describe("addPRPanel — layout-owned group placement", () => {
     const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
     expect(pr).toBeDefined();
     expect(pr.group.id).toBe(CENTER_GROUP);
+  });
+
+  it("opens in the explicitly requested group when no PR Details panel exists", () => {
+    const { api, actions } = buildExtra(makeApi({ extraGroupIds: [REQUESTED_GROUP] }));
+
+    actions.addPRPanel(PR_KEY, { groupId: REQUESTED_GROUP });
+
+    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
+    expect(pr).toBeDefined();
+    expect(pr.group.id).toBe(REQUESTED_GROUP);
+  });
+
+  it("prefers the explicitly requested group over another canonical group", () => {
+    const { api, actions } = buildExtra(makeApi({ extraGroupIds: [REQUESTED_GROUP] }));
+    seedCanonicalPRDetails(api);
+
+    actions.addPRPanel(PR_KEY, { groupId: REQUESTED_GROUP });
+
+    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
+    expect(pr.group.id).toBe(REQUESTED_GROUP);
   });
 
   it("focuses an existing keyed PR tab without relocating it", () => {
@@ -209,6 +230,16 @@ describe("addMRPanel — layout-owned review tabs", () => {
     expect(keyed).toBeDefined();
     expect(keyed.group.id).toBe("group-configured-pr-details");
     expect(api.panels.filter((panel) => panel.id.startsWith(LEGACY_MR_ID))).toHaveLength(2);
+  });
+
+  it("opens a new MR panel in the explicitly requested group", () => {
+    const requestedGroup = "group-invoking-add-menu";
+    const { api, actions } = buildExtra(makeApi({ extraGroupIds: [requestedGroup] }));
+
+    actions.addMRPanel(MR_KEY, { groupId: requestedGroup });
+
+    const panel = api.getPanel(`${LEGACY_MR_ID}|${MR_KEY}`) as unknown as MockPanel;
+    expect(panel.group.id).toBe(requestedGroup);
   });
 });
 
@@ -325,6 +356,17 @@ describe("addReviewPanel", () => {
 
     expect((api.getPanel("pr-detail") as unknown as MockPanel).isActive).toBe(true);
     expect(api.getPanel(panelId)).toBeUndefined();
+  });
+
+  it("opens a new provider-neutral review in the explicitly requested group", () => {
+    const requestedGroup = "group-invoking-add-menu";
+    const api = makeApi({ extraGroupIds: [requestedGroup] });
+    const actions = buildExtraPanelActions(makeStore(api).get);
+
+    actions.addReviewPanel(review, { groupId: requestedGroup });
+
+    const panel = api.getPanel(panelId) as unknown as MockPanel;
+    expect(panel.group.id).toBe(requestedGroup);
   });
 
   it("does not collide when provider IDs or review keys contain panel delimiters", () => {

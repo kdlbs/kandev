@@ -32,12 +32,15 @@ const RECOVERY_MESSAGE = "Agent encountered an error";
 const RESUME_LABEL = "Resume session";
 const RESUME_TEST_ID = "recovery-resume-button";
 const STALL_CANCEL_TEST_ID = "stall-cancel-turn-button";
+const TEST_SESSION_ID = "sess-1";
+const TEST_TASK_ID = "task-1";
+const SESSION_RECOVER_METHOD = "session.recover";
 
 function retryMessage(overrides: Partial<Message> = {}): Message {
   return {
     id: "msg-1",
-    session_id: toSessionId("sess-1"),
-    task_id: toTaskId("task-1"),
+    session_id: toSessionId(TEST_SESSION_ID),
+    task_id: toTaskId(TEST_TASK_ID),
     author_type: "system",
     content: "Provider overloaded — retrying in 5s (attempt 1/5)",
     type: "status",
@@ -48,8 +51,8 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
       attempt: 1,
       max_attempts: 5,
       retry_in_seconds: 5,
-      session_id: "sess-1",
-      task_id: "task-1",
+      session_id: TEST_SESSION_ID,
+      task_id: TEST_TASK_ID,
       actions: [
         {
           type: "ws_request",
@@ -57,8 +60,8 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
           icon: "x",
           test_id: CANCEL_TEST_ID,
           params: {
-            method: "session.recover",
-            payload: { task_id: "task-1", session_id: "sess-1", action: "cancel_retry" },
+            method: SESSION_RECOVER_METHOD,
+            payload: { task_id: TEST_TASK_ID, session_id: TEST_SESSION_ID, action: "cancel_retry" },
           },
         },
       ],
@@ -74,8 +77,8 @@ function transientRetryMetadata(attempt: number, retryInSeconds: number) {
     attempt,
     max_attempts: 5,
     retry_in_seconds: retryInSeconds,
-    session_id: "sess-1",
-    task_id: "task-1",
+    session_id: TEST_SESSION_ID,
+    task_id: TEST_TASK_ID,
     actions: [],
   };
 }
@@ -94,8 +97,8 @@ function recoveryMessage(withParams = false): Message {
           ...(withParams
             ? {
                 params: {
-                  method: "session.recover",
-                  payload: { task_id: "task-1", session_id: "sess-1" },
+                  method: SESSION_RECOVER_METHOD,
+                  payload: { task_id: TEST_TASK_ID, session_id: TEST_SESSION_ID },
                 },
               }
             : {}),
@@ -116,7 +119,7 @@ function stalledMessage(turnId = "turn-1"): Message {
           type: "ws_request",
           label: "Cancel turn",
           test_id: STALL_CANCEL_TEST_ID,
-          params: { method: "agent.cancel", payload: { session_id: "sess-1" } },
+          params: { method: "agent.cancel", payload: { session_id: TEST_SESSION_ID } },
         },
       ],
     },
@@ -135,12 +138,12 @@ function renderAction(
     ? {
         taskSessions: {
           items: {
-            "sess-1": { state: sessionState, error_message: sessionError } as TaskSession,
+            [TEST_SESSION_ID]: { state: sessionState, error_message: sessionError } as TaskSession,
           },
         },
         turns: {
           bySession: {},
-          activeBySession: activeTurnId ? { "sess-1": activeTurnId } : {},
+          activeBySession: activeTurnId ? { [TEST_SESSION_ID]: activeTurnId } : {},
         },
       }
     : {};
@@ -176,8 +179,8 @@ describe("ActionMessage — transient retry (warning variant)", () => {
             failure_code: "model_capacity",
             provider_name: "Codex",
             model_id: "gpt-5",
-            session_id: "sess-1",
-            task_id: "task-1",
+            session_id: TEST_SESSION_ID,
+            task_id: TEST_TASK_ID,
             actions: [],
           },
         }),
@@ -196,9 +199,9 @@ describe("ActionMessage — transient retry (warning variant)", () => {
     renderAction(retryMessage(), "WAITING_FOR_INPUT");
     fireEvent.click(screen.getByTestId(CANCEL_TEST_ID));
     await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
-    expect(requestMock).toHaveBeenCalledWith("session.recover", {
-      task_id: "task-1",
-      session_id: "sess-1",
+    expect(requestMock).toHaveBeenCalledWith(SESSION_RECOVER_METHOD, {
+      task_id: TEST_TASK_ID,
+      session_id: TEST_SESSION_ID,
       action: "cancel_retry",
     });
   });
@@ -244,6 +247,22 @@ describe("ActionMessage — transient retry (warning variant)", () => {
 
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
     expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — agent transport lost", () => {
+  it("renders the agent-transport-lost reason for a dropped ACP connection", () => {
+    renderAction(
+      retryMessage({
+        content: "Agent connection lost",
+        metadata: {
+          ...transientRetryMetadata(1, 5),
+          failure_code: "agent_transport_lost",
+        },
+      }),
+      "WAITING_FOR_INPUT",
+    );
+    expect(screen.getByText(/Agent connection lost/i)).toBeTruthy();
   });
 });
 
@@ -293,7 +312,7 @@ describe("ActionMessage — running stall notice", () => {
     fireEvent.click(screen.getByTestId(STALL_CANCEL_TEST_ID));
 
     await waitFor(() =>
-      expect(requestMock).toHaveBeenCalledWith("agent.cancel", { session_id: "sess-1" }),
+      expect(requestMock).toHaveBeenCalledWith("agent.cancel", { session_id: TEST_SESSION_ID }),
     );
   });
 
@@ -442,6 +461,57 @@ describe("ActionMessage — provider quota recovery", () => {
 
     expect(screen.getByTestId("provider-quota-recovery")).toBeTruthy();
     expect(screen.getByText(/when the provider makes capacity available/i)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — managed npm runtime recovery", () => {
+  it("renders one localized retry action with collapsed technical details", async () => {
+    renderAction(
+      retryMessage({
+        content: "managed runtime failed",
+        metadata: {
+          variant: "error",
+          recovery_actions: true,
+          failure_kind: "managed_runtime_npm_resolution",
+          error_output: "npm error code ETARGET\nnpm error notarget No matching version found",
+          actions: [
+            {
+              type: "ws_request",
+              label: "backend label is ignored",
+              test_id: "managed-runtime-npm-retry-button",
+              params: {
+                method: SESSION_RECOVER_METHOD,
+                payload: {
+                  task_id: TEST_TASK_ID,
+                  session_id: TEST_SESSION_ID,
+                  action: "runtime_retry",
+                },
+              },
+            },
+          ],
+        },
+      } as Partial<Message>),
+      "WAITING_FOR_INPUT",
+    );
+
+    const card = screen.getByTestId("managed-runtime-npm-recovery");
+    expect(card.textContent).toContain("npm could not prepare the runtime");
+    expect(card.textContent).toContain("Kandev refreshed package data");
+    expect(card.textContent).not.toMatch(/ACP/i);
+    expect(screen.getByText(TECHNICAL_DETAILS).closest("details")?.open).toBe(false);
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByTestId("managed-runtime-npm-retry-button").textContent).toContain(
+      "Retry runtime",
+    );
+
+    fireEvent.click(screen.getByTestId("managed-runtime-npm-retry-button"));
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith(SESSION_RECOVER_METHOD, {
+        task_id: TEST_TASK_ID,
+        session_id: TEST_SESSION_ID,
+        action: "runtime_retry",
+      }),
+    );
   });
 });
 

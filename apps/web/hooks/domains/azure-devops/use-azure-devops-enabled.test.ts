@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useAzureDevOpsEnabled } from "./use-azure-devops-enabled";
 import { makeLocalStorageMock } from "../../local-storage-mock.test-helpers";
+import { resetIntegrationEnabledMigrations } from "../integrations/use-integration-enabled";
 
 const STORAGE_KEY = "kandev:azure-devops:enabled:v1";
 
@@ -15,6 +16,7 @@ Object.defineProperty(window, "localStorage", {
 describe("useAzureDevOpsEnabled", () => {
   beforeEach(() => {
     localStorageMock.clear();
+    resetIntegrationEnabledMigrations();
   });
   afterEach(() => {
     localStorageMock.clear();
@@ -68,14 +70,19 @@ describe("useAzureDevOpsEnabled", () => {
     await waitFor(() => expect(result.current.enabled).toBe(false));
   });
 
-  it("migrates a legacy per-workspace key onto the canonical storage key", async () => {
-    window.localStorage.setItem("kandev:azure-devops:enabled:ws-123", "false");
+  it("restores a legacy per-workspace key to that workspace's own key", async () => {
+    // The pre-scoping keys were `kandev:azure-devops:enabled:<workspaceId>:v1`, one per
+    // workspace, so each is restored to the workspace it came from rather than
+    // folded into a single install-wide value.
+    window.localStorage.setItem("kandev:azure-devops:enabled:ws-123:v1", "false");
 
-    const { result } = renderHook(() => useAzureDevOpsEnabled());
+    const { result } = renderHook(() => useAzureDevOpsEnabled("ws-123"));
 
     await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(result.current.enabled).toBe(false);
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("false");
-    expect(window.localStorage.getItem("kandev:azure-devops:enabled:ws-123")).toBeNull();
+    expect(window.localStorage.getItem(`${STORAGE_KEY}:ws-123`)).toBe("false");
+    expect(window.localStorage.getItem("kandev:azure-devops:enabled:ws-123:v1")).toBeNull();
+    // Another workspace is untouched by that migration.
+    expect(renderHook(() => useAzureDevOpsEnabled("ws-other")).result.current.enabled).toBe(true);
   });
 });

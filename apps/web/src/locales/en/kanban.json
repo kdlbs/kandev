@@ -68,7 +68,10 @@
   "pipeline": "Pipeline",
   "previewPanel": "Preview Panel",
   "previousStep": "Previous step",
+  "queuedCount_one": "{{count}} queued",
+  "queuedCount_other": "{{count}} queued",
   "queuedForStep": "Queued for {{step}}",
+  "queuedSection": "Queued",
   "repository": "Repository",
   "searchPlaceholder": "Search...",
   "searchSection": "Search",
@@ -97,5 +100,10 @@
   "workflowStepFallback": "workflow step {{stepId}}",
   "columns": "Columns",
   "columnsForWorkflow": "Columns for {{name}}",
-  "needsReassignment": "Needs Reassignment"
+  "needsReassignment": "Needs Reassignment",
+  "noTasksYet": "No tasks yet",
+  "noWorkflowsAvailableYet": "No workflows available yet.",
+  "pullToRefreshPull": "Pull to refresh",
+  "pullToRefreshRefreshing": "Refreshing tasks",
+  "pullToRefreshRelease": "Release to refresh"
 }

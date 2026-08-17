@@ -47,6 +47,20 @@ and subtasks alike.
   (session-scoped, unchanged routing) gains an informational `task_id` field.
   Its `entries` content remains session-scoped; it is never broadcast
   workspace-wide.
+- **Lifecycle purge:** any path that empties a task's queue outside ordinary
+  enqueue/dequeue/cancel (task archive, task delete, workspace cascade archive
+  or delete) must still drive the live count path. After the queue rows are
+  gone, the system publishes `message.queue.status_changed` for the task
+  (with `task_id` set) so the projector recomputes pending = 0 and broadcasts
+  `task.status_summary.updated`. The badge disappears on every live client
+  without requiring a full list reload.
+- **Session delete:** deleting a session cancels/purges that session's pending
+  queue entries and publishes the same queue-status event for the owning task
+  so orphaned session rows cannot keep inflating the task badge.
+- **Deleted task:** once the task row is removed, the frontend drops the task
+  from every sidebar source (`kanban`, multi-workflow snapshots, and
+  `sidebarArchivedTasks`). A later summary/count event for a deleted task id
+  is a no-op; it never resurrects the row.
 
 ## API Surface
 
@@ -118,6 +132,15 @@ existing `SemanticJSON` envelope; old rows decode with the field absent
 - **Queued-counter provider unavailable (unwired):** the DTO leaves the
   projected `queued_prompt_count` untouched instead of stamping a zero over
   it, so a previously projected positive count survives list loads.
+- **Lifecycle purge without queue-status event (pre-fix):** archive/delete
+  emptied `queued_messages` in SQL but never published
+  `message.queue.status_changed`. Live clients kept the last projected positive
+  count until a full list reload; archive kept the badge on the archived row
+  via preserved `statusSummary`. The lifecycle-purge rule above closes this.
+- **Session delete leaving orphan queue rows (pre-fix):** session delete
+  removed the session row without cancelling its pending queue entries. Task
+  list assembly and the badge continued to count those orphans. Session delete
+  must purge the session queue and publish the status event.
 
 ## Scenarios
 
@@ -138,6 +161,19 @@ existing `SemanticJSON` envelope; old rows decode with the field absent
 - **GIVEN** a phone viewport, **WHEN** the sidebar renders a row with queued
   prompts, **THEN** the badge is visible without hover and the row does not
   overflow horizontally.
+- **GIVEN** a live task whose status summary projects `queued_prompt_count = 11`
+  and whose queue has eleven pending rows, **WHEN** the task is archived,
+  **THEN** the queue is purged, a `message.queue.status_changed` event fires for
+  that `task_id`, the projector persists `queued_prompt_count = 0`, and every
+  live sidebar surface that still shows the task (including the archived
+  filter) renders no mail badge without a page reload.
+- **GIVEN** a live task with pending prompts, **WHEN** the task is deleted,
+  **THEN** the task disappears from active and archived sidebar sources and no
+  residual badge remains for that task id.
+- **GIVEN** a multi-session task with pending prompts on one session only,
+  **WHEN** that session is deleted, **THEN** those pending rows are cancelled,
+  a queue-status event fires for the task, and the badge reflects only the
+  remaining sessions' pending count (or nothing when none remain).
 
 ## Out of Scope
 

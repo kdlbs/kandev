@@ -152,6 +152,48 @@ func (c *PATClient) HasRepositoryAccess(ctx context.Context, owner, repo string)
 	return metadata.FullName != "", nil
 }
 
+// GetRepository returns the provider-authoritative repository identity and
+// permissions used by managed contribution-destination preparation.
+func (c *PATClient) GetRepository(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	var raw githubRepositoryResponse
+	endpoint := fmt.Sprintf("/repos/%s/%s", owner, repo)
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("get repository %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
+// ListRepositoryForks lists every fork in the canonical repository's fork
+// network, including forks whose names differ from the canonical name.
+func (c *PATClient) ListRepositoryForks(ctx context.Context, owner, repo string) ([]*GitHubRepository, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/forks?per_page=100", owner, repo)
+	forks := make([]*GitHubRepository, 0)
+	for endpoint != "" {
+		var page []githubRepositoryResponse
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list repository forks for %s/%s: %w", owner, repo, err)
+		}
+		for _, raw := range page {
+			forks = append(forks, projectGitHubRepository(raw))
+		}
+		endpoint = next
+	}
+	return forks, nil
+}
+
+// CreateFork creates a fork for the authenticated human automation identity.
+// GitHub may return before the fork is fully readable; the service resolver
+// performs the bounded follow-up verification.
+func (c *PATClient) CreateFork(ctx context.Context, owner, repo string) (*GitHubRepository, error) {
+	var raw githubRepositoryResponse
+	endpoint := fmt.Sprintf("/repos/%s/%s/forks", owner, repo)
+	if err := c.postJSON(ctx, endpoint, []byte(`{}`), &raw); err != nil {
+		return nil, fmt.Errorf("create fork for %s/%s: %w", owner, repo, err)
+	}
+	return projectGitHubRepository(raw), nil
+}
+
 func (c *PATClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	var raw patPR
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, repo, number)
@@ -184,6 +226,22 @@ func (c *PATClient) FindPRByBranch(ctx context.Context, owner, repo, branch stri
 		return nil, nil
 	}
 	return status.PR, nil
+}
+
+func (c *PATClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, headRepo, branch string) (*PR, error) {
+	var raw []patPR
+	head := url.QueryEscape(headOwner + ":" + branch)
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?state=open&head=%s&per_page=100", owner, repo, head)
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("find PR by head %q:%q: %w", headOwner, branch, err)
+	}
+	for i := range raw {
+		pr := convertPatPR(&raw[i], owner, repo)
+		if sameRepositoryIdentity(pr.HeadRepoOwner, pr.HeadRepoName, headOwner, headRepo) {
+			return pr, nil
+		}
+	}
+	return nil, nil
 }
 
 func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error) {

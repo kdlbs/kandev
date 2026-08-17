@@ -293,21 +293,42 @@ var ValidProjectStatuses = map[ProjectStatus]bool{
 // is true when token counts were synthesised by the adapter (e.g.
 // cumulative-delta inference for codex-acp) rather than reported directly
 // by the agent; the row still counts toward budget totals at face value.
+//
+// TokensCachedRead / TokensCachedWrite / TurnID / UsageEventID / CostSource /
+// the Rate*PerMillion columns / PricingCatalogVersion / CostContractVersion
+// are all nullable (pointer fields): NULL means "not recorded" — a legacy
+// row written before the column existed, or (for the cache split
+// specifically) an adapter with no per-turn usage frame, such as codex-acp's
+// occupancy-growth synthesis (Estimated=true). NULL is never backfilled to
+// 0; TokensCachedIn keeps its original read+write sum semantics on every
+// row so existing consumers of that column are unaffected. See
+// docs/specs/office/costs.md.
 type CostEvent struct {
-	ID             string    `json:"id" db:"id"`
-	SessionID      string    `json:"session_id" db:"session_id"`
-	TaskID         string    `json:"task_id" db:"task_id"`
-	AgentProfileID string    `json:"agent_profile_id" db:"agent_profile_id"`
-	ProjectID      string    `json:"project_id" db:"project_id"`
-	Model          string    `json:"model" db:"model"`
-	Provider       string    `json:"provider" db:"provider"`
-	TokensIn       int64     `json:"tokens_in" db:"tokens_in"`
-	TokensCachedIn int64     `json:"tokens_cached_in" db:"tokens_cached_in"`
-	TokensOut      int64     `json:"tokens_out" db:"tokens_out"`
-	CostSubcents   int64     `json:"cost_subcents" db:"cost_subcents"`
-	Estimated      bool      `json:"estimated" db:"estimated"`
-	OccurredAt     time.Time `json:"occurred_at" db:"occurred_at"`
-	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+	ID                        string      `json:"id" db:"id"`
+	SessionID                 string      `json:"session_id" db:"session_id"`
+	TaskID                    string      `json:"task_id" db:"task_id"`
+	AgentProfileID            string      `json:"agent_profile_id" db:"agent_profile_id"`
+	ProjectID                 string      `json:"project_id" db:"project_id"`
+	Model                     string      `json:"model" db:"model"`
+	Provider                  string      `json:"provider" db:"provider"`
+	TokensIn                  int64       `json:"tokens_in" db:"tokens_in"`
+	TokensCachedIn            int64       `json:"tokens_cached_in" db:"tokens_cached_in"`
+	TokensCachedRead          *int64      `json:"tokens_cached_read,omitempty" db:"tokens_cached_read"`
+	TokensCachedWrite         *int64      `json:"tokens_cached_write,omitempty" db:"tokens_cached_write"`
+	TokensOut                 int64       `json:"tokens_out" db:"tokens_out"`
+	CostSubcents              int64       `json:"cost_subcents" db:"cost_subcents"`
+	Estimated                 bool        `json:"estimated" db:"estimated"`
+	TurnID                    *string     `json:"turn_id,omitempty" db:"turn_id"`
+	UsageEventID              *string     `json:"usage_event_id,omitempty" db:"usage_event_id"`
+	CostSource                *CostSource `json:"cost_source,omitempty" db:"cost_source"`
+	RateInputPerMillion       *int64      `json:"rate_input_per_million,omitempty" db:"rate_input_per_million"`
+	RateCachedReadPerMillion  *int64      `json:"rate_cached_read_per_million,omitempty" db:"rate_cached_read_per_million"`
+	RateCachedWritePerMillion *int64      `json:"rate_cached_write_per_million,omitempty" db:"rate_cached_write_per_million"`
+	RateOutputPerMillion      *int64      `json:"rate_output_per_million,omitempty" db:"rate_output_per_million"`
+	PricingCatalogVersion     *string     `json:"pricing_catalog_version,omitempty" db:"pricing_catalog_version"`
+	CostContractVersion       *int64      `json:"cost_contract_version,omitempty" db:"cost_contract_version"`
+	OccurredAt                time.Time   `json:"occurred_at" db:"occurred_at"`
+	CreatedAt                 time.Time   `json:"created_at" db:"created_at"`
 }
 
 // BudgetPolicy represents a budget limit policy. LimitSubcents is

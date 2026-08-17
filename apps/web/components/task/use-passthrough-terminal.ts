@@ -148,6 +148,7 @@ function initTerminalInstance(
     scrollOnUserInput: true,
     scrollback: 5000,
     fontSize: options.fontSize || 13,
+    // i18n-exempt: CSS font-family stack, not copy.
     fontFamily: options.fontFamily || 'Menlo, Monaco, "Courier New", monospace',
     macOptionIsMeta: true,
     theme: getTerminalTheme(termContainer),

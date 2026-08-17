@@ -20,7 +20,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
-import type { SavedView } from "./use-saved-views";
+import { savedViewLabel, type SavedView } from "./use-saved-views";
 import type { SortKey } from "./filter-model";
 import { useTranslation } from "react-i18next";
 
@@ -76,7 +76,7 @@ export function ListToolbar({
         activeViewId={activeViewId}
         onSelect={onSelectView}
         onDelete={onDeleteView}
-        activeName={activeView?.name}
+        activeName={activeView ? savedViewLabel(t, activeView) : undefined}
       />
       <SaveViewButton onSave={onSaveView} />
       <div className="ml-auto flex items-center gap-1">
@@ -265,7 +265,7 @@ function ViewRow({
         className="flex-1 flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer rounded hover:bg-muted/50"
       >
         <IconCheck className={`h-3.5 w-3.5 ${active ? "opacity-100" : "opacity-0"}`} />
-        <span className="truncate">{view.name}</span>
+        <span className="truncate">{savedViewLabel(t, view)}</span>
       </button>
       {!view.builtin && (
         <button

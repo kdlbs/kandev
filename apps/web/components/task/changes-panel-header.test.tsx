@@ -27,11 +27,12 @@ vi.mock("./changes-panel-per-repo-menu", () => ({
 afterEach(cleanup);
 
 describe("PullDropdown remote safety", () => {
-  it("keeps the history-change reason reachable while Pull is disabled", () => {
+  it("keeps the configured-upstream reason reachable while Pull is disabled", () => {
     render(
       <PullDropdown
         behindCount={0}
         pullDisabled
+        pullDisabledReason="Pull requires a configured upstream for this checkout."
         isLoading={false}
         loadingOperation={null}
         repoNames={[""]}
@@ -45,10 +46,11 @@ describe("PullDropdown remote safety", () => {
     const pullButton = screen.getByRole("button", { name: /Pull/ });
     expect(pullButton).toHaveProperty("disabled", true);
     expect(pullButton.parentElement?.getAttribute("tabindex")).toBe("0");
+    expect(screen.getByText("Pull requires a configured upstream for this checkout.")).toBeTruthy();
     expect(
-      screen.getByText(
+      screen.queryByText(
         "Current PR history is unavailable. The checkout history is shown without assuming a rewrite.",
       ),
-    ).toBeTruthy();
+    ).toBeNull();
   });
 });

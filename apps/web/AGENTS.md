@@ -91,7 +91,6 @@ For rebasing or finishing PRs written against the old Next.js runtime, follow [`
 Use subscription hooks only; the WS client auto-deduplicates.
 
 **Task overview vs. session detail:** Shared task rows read `Task.statusSummary` and `task.status_summary.updated`; rich streams stay session-detail-only. Extend the bounded projection per the [spec](../../docs/specs/platform/bounded-task-status-delivery.md) and [ADR](../../docs/decisions/2026-08-01-separate-task-summary-session-stream-traffic.md).
-
 **Branch-scoped task state:** For live worktree/session state plus `task_prs`, key by `(repository, checked-out branch)`, not task/repository alone. `branch_switched` invalidates prior status/commits; reject late results with a generation/identity guard and preserve siblings. Historical PRs affect Changes only when `repository_id` and normalized `head_branch` match; Review/PR history may still show them. Test single/multi-repo cases and desktop/mobile Changes behavior.
 **HTTP/WS cache races:** When HTTP hydrates a cache also updated by WebSockets, guard responses with per-scope revision and request/workspace generation; discard or refresh stale responses and cover deferred responses. `useEnsureTaskSession` re-fires `session.ensure` when an open task page sees zero sessions after a prior ensure, so deleting the last session from that page spawns a replacement; test zero-session states through the backend/API instead.
 
@@ -208,45 +207,45 @@ surface.
 
 ## Internationalization (i18n)
 
-**Externalization is complete.** #2367 localized `app/office`, the last
-un-migrated area. A hardcoded user-facing literal is now a regression, not
-leftover migration work. New copy must go through `t()` / `<Trans>` wherever you
-write it.
+**Externalization is complete.** A hardcoded user-facing literal is a
+regression, not leftover migration work. New copy goes through `t()` / `<Trans>`
+wherever you write it.
 
 Add English keys to `src/locales/en/<namespace>.json`; use `useTranslation()` in
 components and module-level `t` only inside plain helper calls. `<Trans>` is only
-for markup, and a `t()` child corrupts its tag indices.
-Do not translate domain data, identifiers, test IDs, discriminants, comparison
-tokens, or map keys; split display copy from logic before translating it.
-Keep `lib/i18n/provider.tsx` module initialization; removing it blanks the app.
+for markup, and a `t()` child corrupts its tag indices. Do not translate domain
+data, identifiers, test IDs, discriminants, comparison tokens, or map keys; split
+display copy from logic first. Keep `lib/i18n/provider.tsx` module
+initialization; removing it blanks the app. Use `_one`/`_other` plural keys,
+never English suffixes. Never capture `t()` in a module-level constant; it
+freezes the boot locale. No Unicode em dash (U+2014) in copy or locale values.
 
-Use i18next `_one`/`_other` plural keys; never build English suffixes locally.
+`pnpm lint` fails on hardcoded UI strings: `i18next/no-literal-string` is an
+**error on every `.ts`/`.tsx` file** (tests, `*.test-helpers.*`, `*.test-utils.*`
+and `e2e/**` excluded). It was scoped to `i18nGuardFiles` during the migration;
+measured at zero violations across all 2560 source files, it was widened.
+`i18nGuardFiles` remains the migration record and the `lint:i18n <path>` preview
+scope: append when you externalize a path, never delete an entry
+(`check-guard-allowlist.mjs` rejects that). `i18n:ratchet` guards new/changed
+lines independently. The rule sees only JSX literals; SCREAMING_CASE tables,
+plain `.ts` helpers, parameter defaults and toast/setter arguments are gated by
+`scripts/check-nonjsx-copy.mjs`, which scans the **whole tree by exclusion**.
+Silence a legitimate one with `// i18n-exempt: <reason>` (required) as a `//`
+LINE comment — the detector's pattern is line-anchored, so a marker inside a
+`/** */` block is silently ignored.
 
-Never capture `t()` in a module-level constant; it freezes the boot locale.
+**Real-locale catalogs gate.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw` are complete;
+`check-i18n-keys.mjs` fails on a missing/extra key, a dropped `{{placeholder}}`
+or `<n>` tag, an empty value, or a value identical to English. Untranslatable
+values are handled in two tiers: those `looksLikeCopy` rejects as non-copy need
+no declaration; prose that reads the same in the target language goes in
+`src/locales/<locale>/_verbatim.json` (or the shared `_verbatim.json`) with a
+mandatory reason — reasonless or stale entries are errors. For zh-tw/zh-hk run
+`pnpm run i18n:zh-hant`, do not hand-translate.
 
-UI punctuation: avoid Unicode em dash (U+2014) in user-facing copy, locale values,
-published documentation. `pnpm run i18n:check` and the `public-copy-em-dash` hook
-enforce periods, colons, commas, semicolons, and parentheses across those sources.
-
-`pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
-**error**), but **only on the `i18nGuardFiles` allowlist** in
-`eslint.i18n.options.mjs`, which covers every area the migration touched. It
-stays an allowlist because a repo-wide error breaks every unrelated PR that adds
-a label — what made the first attempt unmergeable. **Append a path in the same PR
-that adds it or externalizes it** (`lib/sidebar` is one still off the list).
-Never delete an entry to make a build pass; `check-guard-allowlist.mjs` rejects
-that unless the file is gone. Use `pnpm run lint:i18n <path>` to preview the
-guard on a path not yet on the list.
-
-`pnpm run i18n:ratchet` guards all new/changed lines independently of that
-allowlist; untouched literals are not reported.
-
-The rule sees JSX literals but misses `confirm()` and plain `.ts` helper copy; it
-also skips SCREAMING_CASE constants, so review config tables by eye. `i18n:check`
-gates key/catalog drift, `<Trans>` indices, inline plurals, module-scope `t()`, and
-the **pseudo-locale** (Settings → General → Appearance) completeness check. It
-needs **Node 24**. Full guide:
-[`docs/i18n.md`](../../docs/i18n.md); spec:
+`i18n:check` also gates key/catalog drift, `<Trans>` indices, inline plurals,
+module-scope `t()`, em dashes, and the **pseudo-locale** check. Needs **Node 24**.
+Guide: [`docs/i18n.md`](../../docs/i18n.md); spec
 [`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
 
 ## Markdown safety
@@ -287,6 +286,7 @@ plugin leaks a stale registration.
 - **Kanban card contributions:** `registerTaskMenuAction({ group: "edit", ... })` turns the flat
   `Edit` item into an `Edit` submenu (`kanban-card-edit-submenu.tsx`);
   `registerComponent("task-card-indicators", ...)` renders beside `PRTaskIcon` via `<PluginSlot/>`; `task-card-tags` renders in its own row below the badges (for contributions too wide for the title-row indicators spot, e.g. tag chips).
+- **Sidebar workspace actions:** `registerComponent("sidebar-workspace-actions", ...)` renders after Quick Terminal/Quick Chat in the desktop sidebar's New Task row and in the shared phone navigation sheet, forwarding `SidebarWorkspaceActionsSlotProps` with `presentation: "desktop" | "mobile"`; mobile plugin controls own a 44px touch target and accessible name.
 - **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`), backed by
   `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`).
   `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering
@@ -295,6 +295,6 @@ plugin leaks a stale registration.
 
 ## Testing notes
 
-- jsdom secure cookies need cookie-setter interception; Radix Tooltip tests use keyboard focus, while Playwright covers pointer hover with `locator.hover()`.
-- Scope terminal selectors to the active panel/container; mobile and dockview may
-  mount multiple instances, so shared helpers must not use global selectors.
+- `vitest.config.ts` pins `process.env.NODE_ENV = "test"`, and that line is load-bearing. React exports `act()` only from its development build, so under `NODE_ENV=production` — which the runtime image sets (`Dockerfile`) and every container/agent shell inherits, while CI's image does not — `@testing-library/react` falls back to `react-dom/test-utils` and **every** `render()`/`renderHook()` throws `TypeError: React.act is not a function` before any assertion, with CI still green. `vitest-environment.test.tsx` and the `vitest.setup.ts` preflight fail by name if the pin goes, and the `Run tests` step in `.github/workflows/frontend-tests.yml` exports `NODE_ENV=production` on purpose so those guards fire in CI too rather than only in a container.
+- **E2E waits name the cause, they do not budget for the effect.** The suite's dominant flake is `await expect(x).toBeEnabled({ timeout: 30_000 })` — an assertion on a UI shadow of a backend event whose hand-picked budget expires under load. `e2e/helpers/causal-waits.ts` has one primitive per transport (`waitForHttp`, `watchWs().waitForEvent`, `watchWs().waitForResponse`): arm it before the action, await it after, then assert the UI with its **default** timeout. "The backend reached state X" needs no primitive — `expect.poll` against `e2e/helpers/api-client.ts` already reads the backend, not the DOM. `watchWs(page)` only sees sockets opened after it is called, so it goes before the first `page.goto()`. Confirm a causal chain by probing a live run with a throwaway `page.on("response")` logger; reading the components predicts it wrong often enough to matter. The only sanctioned wall-clock wait is `dwell(page, ms, category, reason)`, or `dwell(ms, category, reason)` where no `Page` exists (fixtures, api-client retries) — `category` is the closed `DwellCategory` union (`negative-assertion` is permanent, `unverified` is debt to drive to zero), `reason` says why no event exists, no options; a delay inside a `page.route()` handler is `injectLatency(ms, reason)` instead, since the delay is the stimulus rather than a wait; raw `page.waitForTimeout` and promise sleeps are not sanctioned. Guide and worked examples: `e2e/README.md`.
+- jsdom secure cookies need cookie-setter interception; Radix Tooltip tests use keyboard focus, while Playwright covers pointer hover with `locator.hover()`. Scope terminal selectors to the active panel/container; mobile and dockview may mount multiple instances, so shared helpers must not use global selectors.

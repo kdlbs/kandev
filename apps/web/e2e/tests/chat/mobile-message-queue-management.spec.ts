@@ -2,7 +2,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
@@ -39,7 +39,7 @@ async function seedBusyQueueTask(
   await session.waitForChatIdle({ timeout: 30_000 });
   await session.sendMessageViaButton("/slow 30s");
   await session.agentStatus().waitFor({ state: "visible", timeout: 15_000 });
-  await testPage.waitForTimeout(500);
+  await waitForComposerQueueMode(testPage);
   return { session, taskId: task.id };
 }
 
@@ -48,7 +48,12 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
   apiClient,
   seedData,
 }) => {
-  const session = await seedFullQueueTask(testPage, apiClient, seedData, "Mobile queue management");
+  const { session } = await seedFullQueueTask(
+    testPage,
+    apiClient,
+    seedData,
+    "Mobile queue management",
+  );
 
   await expectFullQueueScrolls(session);
 

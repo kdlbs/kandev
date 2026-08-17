@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { ApiClient } from "../../helpers/api-client";
+import { dwell } from "../../helpers/causal-waits";
 import type { SeedData } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 
@@ -64,7 +65,11 @@ async function waitForWorktreePath(
     const worktreePath =
       session?.worktree_path ?? session?.workspace_path ?? session?.worktrees?.[0]?.worktree_path;
     if (worktreePath) return worktreePath;
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await dwell(
+      250,
+      "poll-interval",
+      "sampling interval for the loop above; no Page exists here, and the worktree appears in a session record the backend writes without publishing anything this helper can subscribe to",
+    );
   }
   throw new Error(`Timed out waiting for the nested-review worktree for ${sessionId}`);
 }

@@ -70,6 +70,10 @@ const (
 	// unavailable. Data carries {"fallback_model": <model id>}.
 	EventTypeSessionModelFallback = "session_model_fallback"
 
+	// EventTypeSessionModelSelectionWarning explains an executor-authoritative
+	// default or explicit fallback decision.
+	EventTypeSessionModelSelectionWarning = "session_model_selection_warning"
+
 	// EventTypeSessionInfo indicates ACP session metadata such as title changed.
 	EventTypeSessionInfo = "session_info"
 
@@ -119,6 +123,11 @@ type AgentEvent struct {
 	// boundaries such as foreground-idle echo it so delayed events cannot be
 	// attributed to a newer prompt on the same execution.
 	PromptGeneration uint64 `json:"prompt_generation,omitempty"`
+
+	// TurnID is the durable Kandev turn identity captured for terminal events.
+	// It travels with the completion frame so consumers do not have to infer
+	// ownership from cross-subject event ordering.
+	TurnID string `json:"turn_id,omitempty"`
 
 	// --- Message fields (for "message_chunk" type) ---
 
@@ -298,6 +307,10 @@ type AgentEvent struct {
 	// events).
 	FallbackModel string `json:"fallback_model,omitempty"`
 
+	// ModelSelectionWarning carries the provider-neutral model decision made
+	// before the session's first prompt.
+	ModelSelectionWarning *ModelSelectionWarning `json:"model_selection_warning,omitempty"`
+
 	// SessionModels lists models available in the ACP session.
 	SessionModels []SessionModelInfo `json:"session_models,omitempty"`
 
@@ -328,6 +341,20 @@ type AgentEvent struct {
 
 	// Usage contains token usage stats from the prompt response.
 	Usage *PromptUsage `json:"usage,omitempty"`
+}
+
+// ModelSelectionWarning is the structured, provider-neutral explanation for
+// continuing with an executor model other than the saved profile request.
+type ModelSelectionWarning struct {
+	Kind              string `json:"kind"`
+	DecisionID        string `json:"decision_id,omitempty"`
+	Reason            string `json:"reason"`
+	RequestedModel    string `json:"requested_model,omitempty"`
+	EffectiveModel    string `json:"effective_model,omitempty"`
+	FallbackModel     string `json:"fallback_model,omitempty"`
+	AgentID           string `json:"agent_id,omitempty"`
+	ExecutorType      string `json:"executor_type,omitempty"`
+	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
 }
 
 // PlanEntry represents an entry in the agent's execution plan.
@@ -413,6 +440,15 @@ type SessionModelInfo struct {
 
 	// Meta contains raw _meta from the agent for agent-specific rendering.
 	Meta map[string]any `json:"meta,omitempty"`
+}
+
+// SessionModelState is the synchronous model snapshot returned with a newly
+// created or loaded session. It lets lifecycle callers apply a saved model
+// before the asynchronous session_models stream event is dispatched.
+type SessionModelState struct {
+	CurrentModelID string             `json:"current_model_id,omitempty"`
+	Models         []SessionModelInfo `json:"models,omitempty"`
+	ConfigOptions  []ConfigOption     `json:"config_options,omitempty"`
 }
 
 // AuthMethodInfo represents an authentication method from ACP initialize.
@@ -505,7 +541,12 @@ type PromptUsage struct {
 	ThoughtTokens                int64 `json:"thought_tokens,omitempty"`
 	TotalTokens                  int64 `json:"total_tokens"`
 	ProviderReportedCostSubcents int64 `json:"provider_reported_cost_subcents,omitempty"`
-	Estimated                    bool  `json:"estimated,omitempty"`
+	// ProviderReportedCostPresent distinguishes an explicit provider-reported
+	// zero from a missing cost sample. Providers can legitimately report zero
+	// for BYOK/free turns, and that value must still suppress list-price
+	// estimation downstream.
+	ProviderReportedCostPresent bool `json:"provider_reported_cost_present,omitempty"`
+	Estimated                   bool `json:"estimated,omitempty"`
 }
 
 // ToolCallContentItem represents a content item produced by a tool call.

@@ -1,28 +1,18 @@
 name: E2E Tests
 
+# No trigger-level `paths:` filter, deliberately. A workflow skipped by one
+# reports no conclusion at all, and a required check that never reports leaves
+# a pull request unable to enter a merge queue and a merge group unable to
+# leave it. `merge_group` cannot carry a `paths:` filter in the first place.
+# The filter lives in the `changes` job below instead, and `e2e-gate` reports
+# the single conclusion the queue waits on. See docs/ci-merge-queue.md.
 on:
   push:
     branches: [main]
-    paths:
-      - "apps/backend/**"
-      - "apps/desktop/**"
-      - "apps/web/**"
-      - "apps/packages/**"
-      - "apps/pnpm-lock.yaml"
-      - "apps/pnpm-workspace.yaml"
-      - ".github/workflows/e2e-tests.yml"
-      - "!**/*.md"
   pull_request:
     branches: [main]
-    paths:
-      - "apps/backend/**"
-      - "apps/desktop/**"
-      - "apps/web/**"
-      - "apps/packages/**"
-      - "apps/pnpm-lock.yaml"
-      - "apps/pnpm-workspace.yaml"
-      - ".github/workflows/e2e-tests.yml"
-      - "!**/*.md"
+  merge_group:
+    types: [checks_requested]
   # Manual trigger for verifying CI on draft PRs and ad-hoc reruns. The
   # default sharded run uses the same ref the user picks in the dispatch UI.
   workflow_dispatch:
@@ -35,7 +25,10 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a merge-queue run. Its ref is unique per queue entry, so a
+  # cancellation here could only come from a mis-keyed group, and the queue
+  # would read the cancelled check as a failure and eject the pull request.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 permissions:
   contents: read
@@ -46,8 +39,77 @@ permissions:
   packages: read
 
 jobs:
+  # The former trigger-level `paths:` list, applied one level down so a skip
+  # still produces a conclusion. `.github/scripts/changed-paths.py` implements
+  # the same last-match-wins semantics GitHub applies to `paths:`.
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.detect.outputs.run }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # The base commit has to be present locally for the diff below.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect relevant changes
+        id: detect
+        env:
+          PATTERNS: |
+            apps/backend/**
+            apps/desktop/**
+            apps/web/**
+            apps/packages/**
+            apps/pnpm-lock.yaml
+            apps/pnpm-workspace.yaml
+            .github/workflows/e2e-tests.yml
+            .github/scripts/changed-paths.py
+            !**/*.md
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          case "${EVENT_NAME}" in
+            # The checkout is the merge ref, whose first parent is the base
+            # branch tip. Diffing against that tip directly collapses to a
+            # two-dot diff over everything main landed since the PR opened, so
+            # take the fork point instead.
+            pull_request) BASE="$(git merge-base HEAD "origin/${BASE_REF}")" ;;
+            # The queue branch is cut from this commit, so it is a true ancestor.
+            merge_group) BASE="${MERGE_GROUP_BASE_SHA}" ;;
+            push) BASE="${PUSH_BEFORE}" ;;
+            # workflow_dispatch is an explicit request to run the suite.
+            *) BASE="" ;;
+          esac
+
+          # Fail open. A first push to a branch, a force push, or a manual
+          # dispatch leaves no usable base, and running the suite needlessly is
+          # cheaper than merging something no job ever looked at.
+          if [[ -z "${BASE}" || "${BASE}" == "0000000000000000000000000000000000000000" ]] \
+             || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "No usable base commit for '${EVENT_NAME}'; running everything."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # `-z`, not plain --name-only: git quotes non-ASCII paths under its
+          # default core.quotePath, and a quoted path matches no pattern, so a
+          # change to one would skip every job and still report success.
+          git diff --name-only -z "${BASE}" HEAD \
+            | python3 .github/scripts/changed-paths.py
+
   build:
     name: Build
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     # Pre-baked image bundles Go, Node 24, pnpm 9.15.9 — see
     # .github/docker/ci-base/Dockerfile. Uses the `build` tag (with Go)
@@ -77,6 +139,21 @@ jobs:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
+
+      # Same reasoning as the pnpm store above: the image sets GOPATH=/root/go
+      # and leaves GOCACHE at its default, and $HOME is /root, so these are the
+      # same two paths backend-tests.yml caches. Without this the backend build
+      # below starts from a cold module *and* build cache on every run.
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-e2e-build-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          restore-keys: |
+            go-e2e-build-${{ runner.os }}-
+            go-${{ runner.os }}-
 
       - name: Install dependencies
         working-directory: apps
@@ -219,7 +296,8 @@ jobs:
 
   e2e:
     name: E2E Shard ${{ matrix.shard }}/14
-    needs: build
+    needs: [changes, build]
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright browser
     # binaries (Chromium etc.) — see .github/docker/ci-base/Dockerfile. This is
@@ -346,7 +424,8 @@ jobs:
   # Sharded 6 ways — each shard is its own runner. See apps/web/e2e/README.md.
   e2e-containers:
     name: E2E Containers Shard ${{ matrix.shard }}/6
-    needs: build
+    needs: [changes, build]
+    if: needs.changes.outputs.run == 'true'
     # This job intentionally runs on the host ubuntu runner (NOT the kandev-ci
     # container image): the containers project needs direct access to the
     # host Docker daemon, and a docker-in-docker setup would break the tests'
@@ -395,6 +474,10 @@ jobs:
       # Their read-only GITHUB_TOKEN can still be rejected by GHCR during an
       # explicit login because it belongs to the base repository, not the
       # contributor's fork. Keep authenticated pulls for trusted runs.
+      #
+      # A merge_group run has no `github.event.pull_request` at all, so the
+      # first operand decides it. That is the right answer: the queue branch
+      # lives in this repository and its token is a base-repository token.
       - name: Log in to GHCR
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -516,6 +599,8 @@ jobs:
 
   desktop-e2e:
     name: Desktop E2E Smoke
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     # Includes Ubuntu WebKit/Tauri system package installation; GitHub apt mirrors
     # can spend more than 20 minutes there before tests start.
@@ -574,13 +659,20 @@ jobs:
 
   e2e-report:
     name: Merge E2E Reports
-    needs: [e2e, e2e-containers, desktop-e2e]
-    if: always()
+    needs: [changes, e2e, e2e-containers, desktop-e2e]
+    # `always()` so a failed shard still gets its report merged, but not when
+    # change detection skipped the shards outright: there would be no blob
+    # reports to download, and the artifact step would fail on an empty run.
+    # `e2e-gate` below, not this job, is what the merge queue waits on.
+    if: always() && needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
     # `runtime` tag — no Go needed for merging blob reports.
     container: ghcr.io/kdlbs/kandev-ci:runtime-latest
-    timeout-minutes: 5
+    # 8 min (was 5) — the merge now also emits the JSON report used to
+    # cross-check the flake count, and the flake baseline lookup walks recent
+    # main runs looking for a published history artifact.
+    timeout-minutes: 8
     # Container jobs default to `sh`; pin to bash.
     defaults:
       run:
@@ -790,7 +882,119 @@ jobs:
         # embeds the absolute testDir in each blob and refuses to merge
         # reports recorded with different test directories — passing the
         # config makes it normalize against the config's `testDir` instead.
-        run: npx playwright merge-reports --config e2e/playwright.config.ts --reporter=html ./e2e/blob-reports
+        #
+        # The `json` reporter is Playwright's own verdict on the run: its
+        # `stats.flaky` counts `TestCase.outcome() === "flaky"`. The flake report
+        # below cross-checks our blob-derived count against it, so a parser bug
+        # cannot quietly move the trended number. `merge-reports` unpacks
+        # `report.jsonl` next to each `report.zip` it reads, so this must stay
+        # after the blob-parsing steps above.
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: e2e/merged-report.json
+        run: npx playwright merge-reports --config e2e/playwright.config.ts --reporter=html,json ./e2e/blob-reports
+
+      # The flake trend is carried run to run as an artifact: find the newest
+      # `main` run that published one and use it as this run's baseline.
+      #
+      # This deliberately queries `status=completed`, not the `status=success`
+      # the timing-profile lookup uses, and the asymmetry is the point. A
+      # timing profile is only trustworthy from a run where everything passed,
+      # but flake data is most interesting from runs that did not: restricting
+      # to `success` would drop the history of every run that had a failure,
+      # which is the opposite of what a flake trend is for. Do not "fix" this
+      # to match the other lookup.
+      - name: Locate latest main flake history
+        id: flake-history-run
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const api = async (url) => {
+            const response = await fetch(url, {
+              headers: {
+                accept: "application/vnd.github+json",
+                authorization: "Bearer " + process.env.GH_TOKEN,
+              },
+            });
+            if (!response.ok) throw new Error(url + " -> " + response.status);
+            return response.json();
+          };
+
+          (async () => {
+            const base = process.env.GITHUB_API_URL + "/repos/" + process.env.GITHUB_REPOSITORY;
+            const runs = await api(
+              base + "/actions/workflows/e2e-tests.yml/runs?branch=main&status=completed&per_page=15",
+            );
+            for (const run of runs.workflow_runs ?? []) {
+              const artifacts = await api(base + "/actions/runs/" + run.id + "/artifacts?per_page=100");
+              const found = (artifacts.artifacts ?? []).some(
+                (artifact) => artifact.name === "e2e-flake-history" && !artifact.expired,
+              );
+              if (found) {
+                fs.appendFileSync(process.env.GITHUB_OUTPUT, "run_id=" + run.id + "\n");
+                console.log("Using flake history from main run " + run.id + ".");
+                return;
+              }
+            }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, "run_id=\n");
+            console.log("No main run has published a flake history yet; this run seeds the trend.");
+          })().catch((error) => {
+            console.log("::warning::Unable to locate a flake history baseline: " + error.message);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, "run_id=\n");
+          });
+          NODE
+
+      - name: Download previous flake history
+        if: always() && steps.flake-history-run.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: e2e-flake-history
+          path: e2e/previous-flake-history
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.flake-history-run.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Write E2E flake report
+        if: always()
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+          if [[ ! -f e2e/retry-summary.json ]]; then
+            echo "No retry summary was produced; skipping the flake report."
+            exit 0
+          fi
+          history_args=()
+          if [[ -f "$GITHUB_WORKSPACE/e2e/previous-flake-history/flake-history.json" ]]; then
+            history_args=(--history "$GITHUB_WORKSPACE/e2e/previous-flake-history/flake-history.json")
+          fi
+          playwright_args=()
+          if [[ -f e2e/merged-report.json ]]; then
+            playwright_args=(--playwright-json e2e/merged-report.json)
+          fi
+          pnpm exec tsx e2e/scripts/flake-report.ts \
+            --summary e2e/retry-summary.json \
+            --output e2e/flake-history.json \
+            "${history_args[@]}" \
+            "${playwright_args[@]}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --branch "$GITHUB_REF_NAME" \
+            --sha "$GITHUB_SHA"
+
+      - name: Upload flake history
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-flake-history
+          path: apps/web/e2e/flake-history.json
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Upload merged report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -819,3 +1023,65 @@ jobs:
             echo "desktop-e2e finished with result: $DESKTOP_E2E_RESULT" >&2
             exit 1
           fi
+
+  # The required check. Runs on every event, including the ones where every job
+  # above is correctly skipped, so the merge queue always has a conclusion to
+  # read instead of a check that stays pending forever.
+  #
+  # A single gate is what makes this workflow usable from a ruleset at all: the
+  # alternative is naming all 14 E2E shards, all 6 container shards, and the
+  # desktop smoke individually, and renumbering the ruleset every time a shard
+  # count changes.
+  e2e-gate:
+    name: E2E Tests Passed
+    runs-on: ubuntu-latest
+    needs: [changes, build, e2e, e2e-containers, desktop-e2e, e2e-report]
+    if: always()
+
+    steps:
+      - name: Require the E2E jobs to have passed or been skipped
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+          E2E_CONTAINERS_RESULT: ${{ needs['e2e-containers'].result }}
+          DESKTOP_E2E_RESULT: ${{ needs['desktop-e2e'].result }}
+          E2E_REPORT_RESULT: ${{ needs['e2e-report'].result }}
+        run: |
+          set -euo pipefail
+
+          echo "Change detection: ${CHANGES_RESULT}"
+          echo "Build: ${BUILD_RESULT}"
+          echo "E2E shards: ${E2E_RESULT}"
+          echo "E2E container shards: ${E2E_CONTAINERS_RESULT}"
+          echo "Desktop smoke: ${DESKTOP_E2E_RESULT}"
+          echo "Report merge: ${E2E_REPORT_RESULT}"
+
+          # Change detection itself must succeed: if it errored we do not know
+          # whether the skips below were deliberate.
+          if [[ "${CHANGES_RESULT}" != "success" ]]; then
+            echo "Change detection did not succeed; refusing to report a pass." >&2
+            exit 1
+          fi
+
+          # `skipped` is a pass — the change-detection job decided nothing this
+          # workflow covers was touched. `cancelled` is not: a cancelled job
+          # never reached a verdict, and treating that as a pass would let an
+          # untested merge group through.
+          #
+          # This gate is the one check a human opens when a merge is blocked, so
+          # name the job that failed here rather than making them correlate the
+          # list above against twenty shard names.
+          for entry in \
+            "build:${BUILD_RESULT}" \
+            "e2e:${E2E_RESULT}" \
+            "e2e-containers:${E2E_CONTAINERS_RESULT}" \
+            "desktop-e2e:${DESKTOP_E2E_RESULT}" \
+            "e2e-report:${E2E_REPORT_RESULT}"; do
+            name="${entry%%:*}"
+            result="${entry#*:}"
+            if [[ "${result}" != "success" && "${result}" != "skipped" ]]; then
+              echo "${name} finished with result: ${result}" >&2
+              exit 1
+            fi
+          done
