@@ -234,5 +234,9 @@
   "duplicateProfileSuccess": "智能体配置已复制",
   "duplicateSaveBlocked": "设置仍在保存，请稍后重试。",
   "failedToDuplicateProfile": "复制智能体配置失败",
-  "noProfilesYetShort": "暂无配置"
+  "noProfilesYetShort": "暂无配置",
+  "createProfile": "创建配置",
+  "creatingProfile": "正在创建…",
+  "saveProfile": "保存配置",
+  "savingProfile": "正在保存…"
 }

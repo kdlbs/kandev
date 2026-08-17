@@ -581,5 +581,12 @@
   "timeAgoMonths_one": "{{count}}mo ago",
   "timeAgoMonths_other": "{{count}}mo ago",
   "timeAgoYears_one": "{{count}}y ago",
-  "timeAgoYears_other": "{{count}}y ago"
+  "timeAgoYears_other": "{{count}}y ago",
+  "appRegistrationsUnavailable": "GitHub App registrations are unavailable",
+  "failedToFetchPrCommits": "Failed to fetch PR commits",
+  "failedToFetchPrFeedback": "Failed to fetch PR feedback",
+  "failedToFetchPrFiles": "Failed to fetch PR files",
+  "failedToLoadCiAutomationOptions": "Failed to load CI automation options.",
+  "failedToSearchGitHub": "Failed to search GitHub",
+  "pullRequestNumbered": "Pull Request #{{number}}"
 }

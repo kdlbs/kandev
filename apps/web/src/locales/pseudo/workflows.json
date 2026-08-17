@@ -262,5 +262,8 @@
   "workflows": "Ŵōŕķƒĺōŵś",
   "workflowsSectionDescription": "Ćŕēàţē àũţōńōḿōũś ƥĩƥēĺĩńēś ŵĩţĥ àũţōḿàţēď ţŕàńśĩţĩōńś ōŕ ḿàńũàĺ ŵōŕķƒĺōŵś ŵĥēŕē ŷōũ ḿōvē ţàśķś ŷōũŕśēĺƒ",
   "workflowSteps": "Ŵōŕķƒĺōŵ Śţēƥś",
-  "workflowSyncCompleted": "Ŵōŕķƒĺōŵ śŷńć ćōḿƥĺēţēď"
+  "workflowSyncCompleted": "Ŵōŕķƒĺōŵ śŷńć ćōḿƥĺēţēď",
+  "loadingSteps": "Ĺōàďĩńĝ śţēƥś…",
+  "noStepsInThisWorkflow": "Ńō śţēƥś ĩń ţĥĩś ŵōŕķƒĺōŵ",
+  "selectAWorkflowFirst": "Śēĺēćţ à ŵōŕķƒĺōŵ ƒĩŕśţ"
 }

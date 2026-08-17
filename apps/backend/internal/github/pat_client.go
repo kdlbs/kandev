@@ -221,7 +221,7 @@ func (c *PATClient) FindPRByBranch(ctx context.Context, owner, repo, branch stri
 	if err != nil {
 		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
 	}
-	status := statuses[graphqlBranchKey(owner, repo, branch)]
+	status := statuses.Statuses[graphqlBranchKey(owner, repo, branch)]
 	if status == nil {
 		return nil, nil
 	}

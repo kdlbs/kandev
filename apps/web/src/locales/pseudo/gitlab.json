@@ -351,5 +351,13 @@
   "gitlabRejectedAssociation": "ĜĩţĹàƀ ŕēĵēćţēď ţĥē àśśōćĩàţĩōń.",
   "taskCreatedMrNotLinked": "Ţàśķ ćŕēàţēď, ƀũţ ḿēŕĝē ŕēqũēśţ ŵàś ńōţ ĺĩńķēď",
   "taskCreatedMrNotLinkedDescription": "Ōƥēń ţĥē ţàśķ àńď ũśē Ĺĩńķ ĜĩţĹàƀ ḿēŕĝē ŕēqũēśţ ţō ŕēţŕŷ. {{error}}",
-  "memberSearchFailed": "Ḿēḿƀēŕ śēàŕćĥ ƒàĩĺēď"
+  "memberSearchFailed": "Ḿēḿƀēŕ śēàŕćĥ ƒàĩĺēď",
+  "addedMrFeedbackToTaskContext": "Àďďēď ḿēŕĝē ŕēqũēśţ ƒēēďƀàćķ ţō ţàśķ ćōńţēxţ",
+  "failedToLoadMergeRequest": "Ƒàĩĺēď ţō ĺōàď ḿēŕĝē ŕēqũēśţ",
+  "failedToLoadMrAutomationOptions": "Ƒàĩĺēď ţō ĺōàď ḾŔ àũţōḿàţĩōń ōƥţĩōńś.",
+  "failedToSearchGitLab": "Ƒàĩĺēď ţō śēàŕćĥ ĜĩţĹàƀ",
+  "presetAssigned": "Àśśĩĝńēď",
+  "presetAuthored": "Àũţĥōŕēď",
+  "presetCreated": "Ćŕēàţēď",
+  "presetReviewRequested": "Ŕēvĩēŵ ŕēqũēśţēď"
 }

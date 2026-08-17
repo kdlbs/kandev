@@ -581,5 +581,12 @@
   "timeAgoMonths_one": "{{count}}ḿō àĝō",
   "timeAgoMonths_other": "{{count}}ḿō àĝō",
   "timeAgoYears_one": "{{count}}ŷ àĝō",
-  "timeAgoYears_other": "{{count}}ŷ àĝō"
+  "timeAgoYears_other": "{{count}}ŷ àĝō",
+  "appRegistrationsUnavailable": "ĜĩţĤũƀ Àƥƥ ŕēĝĩśţŕàţĩōńś àŕē ũńàvàĩĺàƀĺē",
+  "failedToFetchPrCommits": "Ƒàĩĺēď ţō ƒēţćĥ ƤŔ ćōḿḿĩţś",
+  "failedToFetchPrFeedback": "Ƒàĩĺēď ţō ƒēţćĥ ƤŔ ƒēēďƀàćķ",
+  "failedToFetchPrFiles": "Ƒàĩĺēď ţō ƒēţćĥ ƤŔ ƒĩĺēś",
+  "failedToLoadCiAutomationOptions": "Ƒàĩĺēď ţō ĺōàď ĆĨ àũţōḿàţĩōń ōƥţĩōńś.",
+  "failedToSearchGitHub": "Ƒàĩĺēď ţō śēàŕćĥ ĜĩţĤũƀ",
+  "pullRequestNumbered": "Ƥũĺĺ Ŕēqũēśţ #{{number}}"
 }

@@ -99,7 +99,6 @@
   "lastAttempt": "última tentativa {{when}}",
   "lastSynced": "última sincronização {{when}}",
   "loadingWorkflowSteps": "A carregar os passos do fluxo de trabalho...",
-  "manageWorkflowsForThisWorkspace": "Faça a gestão dos fluxos de trabalho desta área de trabalho.",
   "migrateAndDelete": "Migrar e eliminar",
   "migrateAndDeleteStep": "Migrar e eliminar o passo",
   "migrating": "A migrar...",
@@ -258,5 +257,13 @@
   "workflowsSectionDescription": "Crie pipelines autónomas com transições automáticas ou fluxos de trabalho manuais em que é o utilizador a mover as tarefas",
   "workflowSteps": "Passos do fluxo de trabalho",
   "workflowSyncCompleted": "Sincronização de fluxos de trabalho concluída",
-  "workspaceSettings": "Definições da área de trabalho"
+  "duplicateUnavailableInImproveKandev": "Os fluxos de trabalho deste workspace não podem ser duplicados.",
+  "duplicateWorkflow": "Duplicar",
+  "duplicatingWorkflow": "A duplicar...",
+  "failedToDuplicateWorkflow": "Falha ao duplicar o fluxo de trabalho",
+  "loadingSteps": "A carregar passos…",
+  "noStepsInThisWorkflow": "Este fluxo de trabalho não tem passos",
+  "saveBeforeDuplicating": "Guarde o fluxo de trabalho antes de o duplicar.",
+  "selectAWorkflowFirst": "Selecione primeiro um fluxo de trabalho",
+  "workflowMutationInProgress": "Aguarde que a alteração atual do fluxo de trabalho termine."
 }

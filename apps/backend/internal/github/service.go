@@ -128,6 +128,7 @@ type Service struct {
 	mergeMethodsCache    *ttlCache
 	accessibleReposCache *ttlCache
 	repoErrorCache       *ttlCache
+	forkParentCache      *ttlCache
 	protectionCache      *branchProtectionCache
 	rateTracker          *RateTracker
 	promptResolver       PromptResolver
@@ -197,6 +198,7 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		mergeMethodsCache:       newMergeMethodsCache(),
 		accessibleReposCache:    newAccessibleReposCache(),
 		repoErrorCache:          newRepoErrorCache(),
+		forkParentCache:         newForkParentCache(),
 		protectionCache:         newBranchProtectionCache(),
 		rateTracker:             NewRateTracker(eventBus, log),
 		tokenClientFactory:      func(token string) Client { return NewPATClient(token) },

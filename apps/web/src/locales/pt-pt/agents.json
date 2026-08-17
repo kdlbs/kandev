@@ -221,5 +221,22 @@
   "watcherKindLinear": "Linear",
   "collapseAgentProfiles": "Recolher perfis de {{name}}",
   "expandAgentProfiles": "Expandir perfis de {{name}}",
-  "noProfilesYetShort": "Sem perfis ainda"
+  "noProfilesYetShort": "Sem perfis ainda",
+  "browseAvailableAgents": "Ver agentes disponíveis",
+  "createProfile": "Criar perfil",
+  "creatingProfile": "A criar...",
+  "duplicate": "Duplicar",
+  "duplicateProfileNamed": "Duplicar {{name}}",
+  "duplicateProfileSuccess": "Perfil duplicado",
+  "duplicateSaveBlocked": "As definições ainda estão a ser guardadas. Tente novamente daqui a pouco.",
+  "everythingInstalled": "Todos os agentes e ferramentas disponíveis já estão instalados.",
+  "failedToDuplicateProfile": "Falha ao duplicar o perfil",
+  "installAgents": "Instalar agentes",
+  "newProfile": "Novo perfil",
+  "noProfilesYet": "Ainda sem perfis. Crie um a partir de um agente instalado.",
+  "profileActions": "Ações do perfil",
+  "profileCount_one": "{{count}} perfil",
+  "profileCount_other": "{{count}} perfis",
+  "saveProfile": "Guardar perfil",
+  "savingProfile": "A guardar..."
 }

@@ -46,5 +46,11 @@
   "walkthrough": "Ŵàĺķţĥŕōũĝĥ",
   "walkthroughNoteAdded": "Ŵàĺķţĥŕōũĝĥ ńōţē àďďēď",
   "walkthroughNoteQueued": "Ŵàĺķţĥŕōũĝĥ ńōţē qũēũēď",
-  "walkthroughNoteSent": "Ŵàĺķţĥŕōũĝĥ ńōţē śēńţ"
+  "walkthroughNoteSent": "Ŵàĺķţĥŕōũĝĥ ńōţē śēńţ",
+  "fileStatusAdded": "Àďďēď",
+  "fileStatusDeleted": "Ďēĺēţēď",
+  "fileStatusModified": "Ḿōďĩƒĩēď",
+  "fileStatusMoved": "Ḿōvēď",
+  "fileStatusMovedFrom": "Ḿōvēď ƒŕōḿ {{oldPath}}",
+  "fileStatusUntracked": "Ũńţŕàćķēď"
 }

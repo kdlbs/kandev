@@ -86,17 +86,23 @@ The web UI is localized with i18next (`namespace:key`). **All new user-facing co
 must go through `t()` / `<Trans>`** — never a hardcoded literal — regardless of
 which directory you are in.
 
-This is enforced, not just requested. Two ratchets, both of which only tighten:
+This is enforced, not just requested, and the enforcement is now repo-wide:
 
+- **`i18next/no-literal-string` is a lint error on every `.ts`/`.tsx` file**
+  (tests and `e2e/` excluded). It was scoped to `i18nGuardFiles` while the
+  migration was in flight; measured at zero violations across all 2560 source
+  files, it was widened, so "the file was not on the list" is no longer a way for
+  copy to ship untranslated.
+- **`scripts/check-nonjsx-copy.mjs` scans the whole tree too**, by exclusion
+  (`node_modules`, `dist`, `e2e`, `scripts`, `src/locales`, tests) rather than by
+  allowlist, so a new directory is covered the day it is created.
 - **New code, everywhere** — `pnpm run i18n:ratchet` (pre-commit + CI) fails on a
-  hardcoded string in a file you added, or on a line you changed, regardless of
-  directory. Untouched lines are never judged, so you are never asked to migrate
-  code you did not write.
-- **Listed paths, whole file** — `i18next/no-literal-string` is a lint error for
-  the paths in `i18nGuardFiles` (`apps/web/eslint.i18n.options.mjs`). The
-  migration of existing strings is **complete**, and the list covers every area it
-  touched; append a path in the same PR that adds it or externalizes one still
-  off the list. Never remove an entry to make a build pass — a check rejects that.
+  hardcoded string in a file you added, or on a line you changed. Untouched lines
+  are never judged.
+- **`i18nGuardFiles`** (`apps/web/eslint.i18n.options.mjs`) survives as the
+  migration record and the scope `pnpm run lint:i18n` previews. Append a path
+  when you externalize one; never remove an entry — `check-guard-allowlist.mjs`
+  rejects that.
 
 Three rules that cause silent, hard-to-find bugs when broken: never translate a
 string compared with `===` (type-to-confirm tokens become impossible to type);
@@ -110,8 +116,19 @@ parameter defaults, toast and setter arguments — are gated by
 `scripts/check-nonjsx-copy.mjs`, which runs inside `pnpm run i18n:check` and the
 new-code ratchet. Mark a genuine non-string (a persisted value, an agent-facing
 prompt, a `===` token) with `// i18n-exempt: <reason>`; an unexplained marker
-fails. The pseudo-locale (Settings → General → Appearance, dev/e2e builds) is
-still the completeness check for copy no literal scan can see. Full guide:
+fails, and the marker must be a `//` line comment — the detector's pattern is
+line-anchored and will not see one buried in a `/** */` block. The pseudo-locale
+(Settings → General → Appearance, dev/e2e builds) is still the completeness check
+for copy no literal scan can see.
+
+**Translations gate the build.** `pt-pt`, `zh-cn`, `zh-hk` and `zh-tw` are
+complete, and `check-i18n-keys.mjs` now fails on a missing key, an extra key, a
+dropped placeholder, or a value left identical to English. Adding user-facing
+copy means adding it in five languages; for the Traditional Chinese pair run
+`pnpm run i18n:zh-hant` rather than hand-translating. When the correct
+translation genuinely IS the English word, declare it in
+`src/locales/<locale>/_verbatim.json` with a reason — brand nouns, acronyms and
+placeholder-only frames need no declaration at all. Full guide:
 [`docs/i18n.md`](docs/i18n.md).
 
 UI punctuation is plain and intentional: do not use the Unicode em dash (U+2014)
@@ -122,21 +139,25 @@ rendered fallback strings. `pnpm run i18n:check` enforces it. Historical
 history and remains immutable.
 
 ### Knowledge
+
 - **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology.
 - **Specs:** Feature specs live in `docs/specs/<slug>/spec.md` — the durable "what & why" of a feature, written before coding. Use `/spec` to write or update a spec. See `docs/specs/INDEX.md`.
 - **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Read `docs/decisions/INDEX.md` for an overview. When making significant architectural choices, create a new ADR via `/record decision`.
 - **Plans:** Implementation plans are generated from specs via `/plan` and committed under `docs/plans/<slug>/plan.md`, with individual sibling task files named `docs/plans/<slug>/task-<NN>-<short-slug>.md`. Specs are the living requirements; plans and task files are implementation records for the current buildout.
 
 ### Plan Implementation
+
 - Specs, plans, and task files are the durable source of implementation scope,
   dependency order, and task-level validation. Keep their statuses and recorded
   command results accurate. The feature and fix skills define the workflow.
 
 ### Observability
+
 - In dev mode (`KANDEV_MOCK_AGENT=true` or `debug.pprofEnabled`), `/debug/vars` exposes the stdlib expvar handler. Office provider-routing metrics live under `routing_*` (route attempts, fallbacks, parked runs, provider degraded/recovered counters). The metrics are also still emitted as structured `routing.metric.*` zap logs for human debugging.
 - ADR 0015's step-completion-signal telemetry lives under `workflow_*`: `workflow_step_completion_signal_received_total` (`internal/workflow/signalmetrics/`), labelled by `source` and `agent_type`, counts accepted `step_complete_kandev` signals. Its separate `workflow_step_completion_signal_fallback_used_total` counter is labelled by `agent_type` and counts manual fallback uses. The fallback button does not have a production increment site yet, so the counter remains zero until that UI ships.
 
 ### GitHub Operations
+
 Skills use `gh` CLI by default. If a `gh` command fails (not installed, not authenticated, etc.), use whatever GitHub tools are available in the environment (MCP GitHub tools, API tools, etc.) to accomplish the same operation. The goal is the same — the tool may differ.
 
 For multiline Markdown issue or PR bodies, write the body to a file and pass it
@@ -213,7 +234,7 @@ Contract authority is intentionally split by implementation boundary: frontend a
 
 ### Runtime profiles (prod / dev / e2e)
 
-**`profiles.yaml` at the repo root** is the single source of truth for env-driven runtime defaults — feature flags, mock providers (agent / GitHub / Jira / Linear), debug switches, and e2e tuning knobs. The backend embeds it (`//go:embed` via `apps/backend/internal/profiles/`) and at startup calls `profiles.ApplyProfile()` to write the matching profile's env vars onto its own process, *only when each var is not already set* — so launchers, shells, and per-spec overrides still win.
+**`profiles.yaml` at the repo root** is the single source of truth for env-driven runtime defaults — feature flags, mock providers (agent / GitHub / Jira / Linear), debug switches, and e2e tuning knobs. The backend embeds it (`//go:embed` via `apps/backend/internal/profiles/`) and at startup calls `profiles.ApplyProfile()` to write the matching profile's env vars onto its own process, _only when each var is not already set_ — so launchers, shells, and per-spec overrides still win.
 
 Runtime feature toggles add a SQLite-backed override tier managed through `Settings > System > Feature Toggles`. Effective values use this precedence: explicit environment variable > SQLite override > profile default. The typed runtime flag registry lives in `apps/backend/internal/runtimeflags/registry.go`; each registration owns the public metadata, environment variable, config reader, and config applier. Do not add parallel per-flag maps or switches.
 

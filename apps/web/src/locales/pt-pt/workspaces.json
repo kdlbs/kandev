@@ -114,7 +114,17 @@
   "workspaceNamePlaceholder": "A minha área de trabalho",
   "workspaceNotFound": "Área de trabalho não encontrada",
   "workspaceSettings": "Definições da área de trabalho",
-  "workspaceSettingsLink": "Definições da área de trabalho",
   "worktreeBranchTemplate": "Modelo de branch do worktree",
-  "worktreeSync": "Sincronização de worktree"
+  "worktreeSync": "Sincronização de worktree",
+  "chooseDifferentRepositoryName": "Escolha outro nome de repositório.",
+  "enterRepositoryName": "Introduza um nome de repositório.",
+  "overview": "Visão geral",
+  "repositoryNameMustBeOneFolder": "O nome do repositório tem de ser o nome de uma única pasta.",
+  "resourceCount_one": "{{count}} recurso",
+  "resourceCount_other": "{{count}} recursos",
+  "sourceChooseAFolder": "Escolha uma pasta.",
+  "sourceChooseRepoAndBranch": "Escolha um repositório e um ramo base.",
+  "sourceEnterValidRemoteUrl": "Introduza um URL de repositório remoto e um ramo base válidos.",
+  "sourceFolderAlreadySelected": "Esta pasta já está selecionada.",
+  "sourceRepoBranchAlreadySelected": "Este repositório e ramo já estão selecionados."
 }

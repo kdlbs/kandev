@@ -25,8 +25,10 @@ import {
 import type { TaskCreateDialogProps } from "@/components/task-create-dialog";
 import { useResolvedTaskCreateWorkflowContext } from "@/components/task-create-dialog-workflow-context";
 import { truncateRemoteTaskTitle } from "@/lib/task-title";
+import { t } from "@/lib/i18n";
 
-const PROMPT_INSERTED_MESSAGE = "Enhanced prompt inserted.";
+// Catalog key: module scope, so it is resolved at the call site.
+const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
 
 function useEnhanceForDialog(
   fs: DialogFormState,
@@ -61,7 +63,7 @@ function useEnhanceForDialog(
     const generation = promptDelivery.captureScope();
     void enhancePrompt(current, (result) => {
       const inserted = promptDelivery.deliver(current, result, generation);
-      if (inserted) toast({ description: PROMPT_INSERTED_MESSAGE, variant: "success" });
+      if (inserted) toast({ description: t(PROMPT_INSERTED_MESSAGE_KEY), variant: "success" });
       return inserted;
     });
   }, [enhancePrompt, fs.descriptionInputRef, promptDelivery, toast]);
