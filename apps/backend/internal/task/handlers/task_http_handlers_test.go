@@ -109,23 +109,6 @@ func TestParseHTTPWorkspaceSourcesPreservesSnakeCaseFields(t *testing.T) {
 	assert.Equal(t, "feature/x", sources[0].CheckoutBranch)
 }
 
-func TestTaskPendingActionPtrAggregatesInputCapableSessions(t *testing.T) {
-	sessions := []*models.TaskSession{
-		{ID: "running", State: models.TaskSessionStateRunning},
-		{ID: "waiting", State: models.TaskSessionStateWaitingForInput},
-		{ID: "starting", State: models.TaskSessionStateStarting},
-	}
-	actions := map[string]models.TaskPendingAction{
-		"running":  models.TaskPendingActionClarification,
-		"waiting":  models.TaskPendingActionPermission,
-		"starting": models.TaskPendingActionPermission,
-	}
-
-	got := taskPendingActionPtr(sessions, actions)
-	require.NotNil(t, got)
-	assert.Equal(t, "permission", *got)
-}
-
 func TestQuickChatResolveParamsForcesWorktreeForRepositoryContext(t *testing.T) {
 	defaultExecutor := models.ExecutorIDLocal
 	body := httpStartQuickChatRequest{

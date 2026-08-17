@@ -571,6 +571,7 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 			for _, t := range tasks {
 				dtos = append(dtos, dto.FromTask(t))
 			}
+			h.enrichTasksWithPendingActions(ctx, tasks, dtos)
 			h.enrichTasksWithPRs(ctx, dtos)
 			return dto.ListTasksResponse{Tasks: dtos, Total: len(dtos)}, nil
 		})

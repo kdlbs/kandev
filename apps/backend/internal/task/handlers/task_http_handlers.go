@@ -281,9 +281,9 @@ func buildTaskDTOsWithSessionInfo(
 			si.agentName,
 			si.workingDirectory,
 			si.sessionState,
-			pendingActionPtr(si.sessionID, pendingActionsBySession),
+			dto.PendingActionPtr(si.sessionID, pendingActionsBySession),
 		)
-		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
+		taskDTO.TaskPendingAction = dto.TaskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
 		taskDTO.StatusSummary = statusSummaries[task.ID]
@@ -364,7 +364,7 @@ func pendingActionsForInputCapableSessions(
 	sessionIDs := make([]string, 0)
 	for _, sessions := range sessionsByTask {
 		for _, session := range sessions {
-			if isInputCapableSession(session) {
+			if dto.IsInputCapableSession(session) {
 				sessionIDs = append(sessionIDs, session.ID)
 			}
 		}
@@ -375,50 +375,10 @@ func pendingActionsForInputCapableSessions(
 	return svc.GetPendingActionsForSessions(ctx, sessionIDs)
 }
 
-func isInputCapableSession(session *models.TaskSession) bool {
-	return session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput)
-}
-
-func taskPendingActionPtr(sessions []*models.TaskSession, actions map[string]models.TaskPendingAction) *string {
-	var clarification bool
-	for _, session := range sessions {
-		if !isInputCapableSession(session) {
-			continue
-		}
-		switch actions[session.ID] {
-		case models.TaskPendingActionPermission:
-			value := string(models.TaskPendingActionPermission)
-			return &value
-		case models.TaskPendingActionClarification:
-			clarification = true
-		}
-	}
-	if clarification {
-		value := string(models.TaskPendingActionClarification)
-		return &value
-	}
-	return nil
-}
-
-func pendingActionPtr(
-	sessionID *string,
-	pendingActionsBySession map[string]models.TaskPendingAction,
-) *string {
-	if sessionID == nil {
-		return nil
-	}
-	action, ok := pendingActionsBySession[*sessionID]
-	if !ok {
-		return nil
-	}
-	value := string(action)
-	return &value
-}
-
 func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskSession) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
-	if !isInputCapableSession(session) {
+	if !dto.IsInputCapableSession(session) {
 		return result
 	}
 	actions, err := h.service.GetPendingActionsForSessions(ctx, []string{session.ID})
@@ -427,7 +387,7 @@ func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskS
 			zap.String("session_id", session.ID), zap.Error(err))
 		return result
 	}
-	result.PendingAction = pendingActionPtr(&session.ID, actions)
+	result.PendingAction = dto.PendingActionPtr(&session.ID, actions)
 	return result
 }
 
@@ -472,7 +432,7 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 		summary := dto.FromTaskSessionSummary(session)
 		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
 		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
-		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
+		summary.PendingAction = dto.PendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionDTOs = append(sessionDTOs, summary)
 		ids = append(ids, session.ID)
 	}
