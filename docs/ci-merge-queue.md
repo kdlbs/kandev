@@ -1,14 +1,14 @@
-# Enabling the merge queue
+# Merge queue
 
-Everything in this document except the final section is already in the
-repository. Nothing here is switched on: the workflows are prepared, and the
-ruleset change that turns a merge queue on is a separate, deliberate decision.
+The `main` ruleset enabled the merge queue and six required checks on
+2026-08-16. This document records the workflow preparation, active rules, and
+the Stable release exception.
 
 ## Why
 
-`main`'s ruleset (id `13341245`) has `deletion`, `non_fast_forward`,
-`required_linear_history`, and `pull_request` rules, and no
-`required_status_checks` rule at all. Merges are not gated on CI in any way.
+Before activation, `main`'s ruleset (id `13341245`) had `deletion`,
+`non_fast_forward`, `required_linear_history`, and `pull_request` rules. It had
+no `required_status_checks` rule.
 
 That is how #2681 (`38c94e7d0`) landed red. Its E2E checks were fully green, but
 they had run 23 hours earlier against a merge ref that predated the retry loop
@@ -141,16 +141,29 @@ Concurrency groups were checked too. None of the six keyed on a PR number
 `cancel-in-progress: ${{ github.event_name != 'merge_group' }}`, because a queue
 reads a cancelled check as a failure and ejects the pull request.
 
-## Enabling it
+## Active ruleset configuration
 
-1. Add a `merge_queue` rule to the `main` ruleset.
-2. Add a `required_status_checks` rule and select exactly the six check names in
-   the table above. Do **not** select any per-shard name (`E2E Shard 3/14`,
-   `Backend Tests (1/2)`, ...) -- they are covered by the gates, and a queue
-   configured against them breaks the next time a shard count changes.
-3. Do **not** select `lint` (from `pr-title.yml`), `Validate public docs`, or
-   any `claude-review-*` / `opencode-review-*` / `deploy-*` check. Those never
-   run in a merge group and the queue will wait on them indefinitely.
+The `main` ruleset contains a `merge_queue` rule and requires the six gate names
+in the table above. It does not require per-shard names.
+
+Do not require `lint` from `pr-title.yml`, `Validate public docs`, review checks,
+or deployment checks. These checks do not run in every merge group.
+
+### Stable release exception
+
+The Stable release workflow creates a mechanical release PR with `GITHUB_TOKEN`.
+GitHub holds the PR workflows for approval, but maintainers do not require CI
+for this generated commit.
+
+The protected `release` environment contains `RELEASE_PR_BYPASS_TOKEN`. This
+fine-grained personal access token belongs to an organization administrator and
+selects only `kdlbs/kandev` with `contents: write` permission.
+
+The workflow exposes this token only to `gh pr merge --admin`. It also binds
+the merge to the expected PR head. `GITHUB_TOKEN` performs all other PR work.
+
+The administrator merge bypasses the queue and required checks for the release
+PR only. Ordinary PRs still use the queue and all six required checks.
 
 ### Caveat: the ruleset can still be bypassed
 

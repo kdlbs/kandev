@@ -37,8 +37,37 @@ The workflow has four mutually exclusive operating modes:
 2. Confirm required checks are green on `main` and no release or release PR is active.
 3. Confirm merged PR titles/commits use the conventional categories consumed by `cliff.toml`. The workflow generates `CHANGELOG.md` and release notes.
 4. Verify platform-sensitive launcher, agentctl, container, and desktop changes on affected targets.
-5. Check GitHub/GHCR access, npm trusted publishing, the release-tag GPG key, the Homebrew deploy key, the Scoop deploy key (`SCOOP_BUCKET_DEPLOY_KEY`), and any configured desktop signing/notarization secrets.
+5. Check GitHub/GHCR access, npm trusted publishing, `RELEASE_PR_BYPASS_TOKEN`, signing keys, and configured desktop signing or notarization secrets.
 6. Update public docs for behavior that is about to ship.
+
+## Configure the release PR bypass
+
+Normal releases use a fine-grained personal access token only for the privileged release PR merge. The normal `GITHUB_TOKEN` creates the branch and PR.
+
+The token owner must remain an organization administrator. The current `main` ruleset grants that role an always-allowed bypass.
+
+1. Sign in to the organization administrator account that will own the token.
+2. Open **Settings > Developer settings > Personal access tokens > Fine-grained tokens**.
+3. Select **Generate new token**.
+4. Enter a clear name, such as `kandev-release-pr-bypass`.
+5. Set an expiration date that follows the organization policy.
+6. Select `kdlbs` as the resource owner.
+7. Under **Repository access**, select **Only select repositories**.
+8. Select only the `kandev` repository.
+9. Under **Repository permissions**, set **Contents: Read and write**.
+10. Leave all other optional permissions set to **No access**.
+11. Generate the token and complete organization approval when GitHub requires it.
+12. Copy the token before you leave the page.
+
+Add the token to the protected `release` environment:
+
+```bash
+gh secret set RELEASE_PR_BYPASS_TOKEN --env release --repo kdlbs/kandev
+```
+
+Record the token owner and expiration date in the maintainer credential inventory. Rotate the secret before expiration or an owner-role change.
+
+CAUTION: Never store this token as a repository-wide secret. The token owner can bypass the `main` ruleset.
 
 Normal releases require a dedicated release-tag signing identity and a GitHub Environment named `release`. Restrict that environment to deployments from `main`, but do not configure required reviewers: any maintainer authorized to dispatch the workflow and access the environment may start a normal release. Store the ASCII-armored private key as the environment secret `RELEASE_GPG_PRIVATE_KEY`, its optional passphrase as the environment secret `RELEASE_GPG_PASSPHRASE`, and the exact full fingerprint as the required environment variable `RELEASE_GPG_FINGERPRINT`. Before changing version files or creating the release PR, the workflow rejects a missing, multi-key, or secret-material public-key attachment and requires its sole primary fingerprint to match `RELEASE_GPG_FINGERPRINT`. After the release PR merges, it revalidates the public key from the merged revision, imports the private key, and requires that key to match both the merged key and `RELEASE_GPG_FINGERPRINT`. Do not define this signing material as repository-wide configuration.
 
@@ -63,7 +92,7 @@ Use dry run to validate version/changelog preparation. Use desktop validation to
 Normal mode performs these stages:
 
 1. **Preflight and prepare version.** Compute the next version from packages and tags, then verify that the committed public key matches the `release` environment fingerprint before changing release files. Update the CLI package/lock, desktop package and Tauri/Cargo manifests, and `CHANGELOG.md`.
-2. **Merge and tag.** Open a release branch and PR, squash-merge it, then revalidate the public key from the merged revision before importing the protected signing key. The workflow requires the imported key's full fingerprint to exactly match that merged key and `RELEASE_GPG_FINGERPRINT`, adopts that key's name and email as the tagger identity, and locally verifies the GPG-signed `vX.Y.Z` tag before pushing it.
+2. **Merge and tag.** Open a release branch and PR. Use the protected administrator token to squash-merge the exact head without queue or CI latency. Select GitHub's reported merge commit, then revalidate the public key before importing the protected signing key. Verify the signed `vX.Y.Z` tag locally before the push.
 3. **Build web and runtimes.** Build the SPA and five runtime targets: Linux x64/arm64, macOS x64/arm64, and Windows x64. Each archive contains `kandev`, the host `agentctl`, and required remote agentctl helpers; the workflow produces an adjacent checksum for each archive.
 4. **Build desktop.** Embed the matching runtime and package the same five platform/architecture targets into macOS, Linux, and Windows installer formats.
 5. **Build containers.** Publish amd64/arm64 base manifests, enforce the universal-image size gate, then publish multi-architecture universal images.
