@@ -257,7 +257,7 @@ type TurnRepository interface {
 		sessionID, turnID string,
 		updates map[string]interface{},
 		removeKeys []string,
-	) (bool, time.Time, error)
+	) (bool, map[string]interface{}, time.Time, error)
 	CompleteTurn(ctx context.Context, id string) error
 	AbandonTurn(ctx context.Context, id string) error
 	CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error)

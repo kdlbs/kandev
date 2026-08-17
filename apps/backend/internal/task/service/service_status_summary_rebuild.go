@@ -94,7 +94,11 @@ func (s *Service) reconcileExistingSummaries(
 			action,
 		)
 		if err != nil {
-			delete(summaries, task.ID)
+			if reconciled != nil {
+				summaries[task.ID] = reconciled
+			} else {
+				delete(summaries, task.ID)
+			}
 			failedTaskIDs[task.ID] = struct{}{}
 			s.logSummaryRepairFailure(task.ID, "reconcile", err)
 			reconcileErr = errors.Join(
@@ -253,7 +257,7 @@ func (s *Service) reconcileExistingSummary(
 	if current != nil && current.PendingAction == pendingAction {
 		return current, nil
 	}
-	return nil, errors.New("exhausted compare-and-set retries")
+	return current, errors.New("exhausted compare-and-set retries")
 }
 
 const summaryReconcileInitialRetryDelay = time.Millisecond

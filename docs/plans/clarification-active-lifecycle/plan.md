@@ -401,6 +401,14 @@ All locally available task gates passed; environment-gated parity also passed in
   makes blocking test cleanup failure-safe. PostgreSQL-gated epoch coverage now checks monotonic and
   corrupt-value behavior. All affected backend suites and changed-code lint pass; the PostgreSQL case
   is locally skipped when `KANDEV_TEST_POSTGRES_DSN` is unavailable.
+- Exact-head Greptile and Codex follow-up closes the remaining writer and deadline gaps: full turn
+  snapshots now lock and reject stale versions, active metadata patches return their committed state
+  without a fallible post-commit read, and terminal expiry preserves the orchestrator's shorter deadline
+  through the cancellation-detached persistence layer. Cross-dialect lock coverage is PostgreSQL-gated;
+  all locally runnable affected suites pass.
+- The accompanying CodeRabbit pass makes reserved-turn waiter cleanup immediate and idempotent in five
+  agent-ready regressions, and preserves the authoritative status-summary row when pending-action CAS
+  repair exhausts its retries. Both full task-service and orchestrator suites pass again.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

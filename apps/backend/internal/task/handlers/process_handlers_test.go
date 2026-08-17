@@ -307,8 +307,8 @@ func (m *mockRepository) UpdateActiveTurnMetadata(
 	string,
 	map[string]interface{},
 	[]string,
-) (bool, time.Time, error) {
-	return false, time.Time{}, nil
+) (bool, map[string]interface{}, time.Time, error) {
+	return false, nil, time.Time{}, nil
 }
 func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error {
 	return nil

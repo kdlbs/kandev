@@ -59,6 +59,12 @@ type cancelingRejectStatusSummaryRepository struct {
 	compareCalls int
 }
 
+type exhaustingStatusSummaryRepository struct {
+	repository.TaskStatusSummaryRepository
+	summary      statussummary.TaskStatusSummary
+	compareCalls int
+}
+
 type vanishingStatusSummaryRepository struct {
 	repository.TaskStatusSummaryRepository
 	compareCalls int
@@ -156,6 +162,22 @@ func (r *cancelingRejectStatusSummaryRepository) LoadTaskStatusSummaries(
 	[]string,
 ) (map[string]*statussummary.TaskStatusSummary, error) {
 	return map[string]*statussummary.TaskStatusSummary{"task-1": r.summary}, nil
+}
+
+func (r *exhaustingStatusSummaryRepository) CompareAndUpdateTaskStatusSummary(
+	context.Context,
+	*statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	r.compareCalls++
+	return false, nil
+}
+
+func (r *exhaustingStatusSummaryRepository) LoadTaskStatusSummaries(
+	context.Context,
+	[]string,
+) (map[string]*statussummary.TaskStatusSummary, error) {
+	summary := r.summary
+	return map[string]*statussummary.TaskStatusSummary{"task-1": &summary}, nil
 }
 
 func (c statusSummaryQueuedPromptCounter) CountPendingByTaskIDs(_ context.Context, taskIDs []string) (map[string]int, error) {
@@ -563,6 +585,46 @@ func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testin
 	}
 	if rejecting.compareCalls != 1 {
 		t.Fatalf("compare calls after cancellation = %d, want 1", rejecting.compareCalls)
+	}
+}
+
+func TestReconcileTaskStatusSummariesKeepsAuthoritativeRowAfterCASExhaustion(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	stored := statussummary.TaskStatusSummary{Revision: 4, QueuedPromptCount: 9}
+	exhausting := &exhaustingStatusSummaryRepository{
+		TaskStatusSummaryRepository: repo,
+		summary:                     stored,
+	}
+	svc.statusSummaries = exhausting
+	session := &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput,
+	}
+	svc.sessions = &statusSummarySessionRepository{
+		SessionRepository: repo,
+		sessions:          []*models.TaskSession{session},
+	}
+	svc.messages = &authoritativePendingMessageRepository{
+		MessageRepository: repo,
+		actions: map[string]models.TaskPendingAction{
+			"session-1": models.TaskPendingActionClarification,
+		},
+	}
+
+	got, err := svc.ReconcileTaskStatusSummaries(
+		context.Background(),
+		[]*models.Task{{ID: "task-1", WorkspaceID: "ws-1"}},
+		map[string][]*models.TaskSession{"task-1": {session}},
+		map[string]models.TaskPendingAction{"session-1": models.TaskPendingActionClarification},
+		map[string]*statussummary.TaskStatusSummary{"task-1": &stored},
+	)
+	if err == nil {
+		t.Fatal("CAS exhaustion error = nil")
+	}
+	if got["task-1"] == nil || got["task-1"].QueuedPromptCount != 9 {
+		t.Fatalf("summary after CAS exhaustion = %+v, want authoritative row", got["task-1"])
+	}
+	if exhausting.compareCalls != maxSummaryReconcileAttempts {
+		t.Fatalf("compare calls = %d, want %d", exhausting.compareCalls, maxSummaryReconcileAttempts)
 	}
 }
 

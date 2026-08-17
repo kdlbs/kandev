@@ -24,6 +24,33 @@ type nilTaskSessionRepo struct {
 	repository.SessionRepository
 }
 
+type failGetAfterPublishMetadataRepo struct {
+	repository.TurnRepository
+	activeMetadataUpdates int
+}
+
+func (r *failGetAfterPublishMetadataRepo) UpdateActiveTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+	removeKeys []string,
+) (bool, map[string]interface{}, time.Time, error) {
+	updated, metadata, updatedAt, err := r.TurnRepository.UpdateActiveTurnMetadata(
+		ctx, sessionID, turnID, updates, removeKeys,
+	)
+	if err == nil && updated {
+		r.activeMetadataUpdates++
+	}
+	return updated, metadata, updatedAt, err
+}
+
+func (r *failGetAfterPublishMetadataRepo) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {
+	if r.activeMetadataUpdates >= 2 {
+		return nil, errors.New("transient post-commit read failure")
+	}
+	return r.TurnRepository.GetTurn(ctx, turnID)
+}
+
 func TestReconcileUnpublishedPromptTurnsRequiresTurnRepository(t *testing.T) {
 	svc := &Service{}
 
@@ -162,6 +189,33 @@ func TestReservedTurnMetadataUpdatesPreserveConcurrentFields(t *testing.T) {
 	if _, attempted := published.Metadata[models.TurnMetaKeyPromptDispatchAttempted]; attempted {
 		t.Fatalf("published turn retained dispatch-attempt metadata: %#v", published.Metadata)
 	}
+}
+
+func TestPublishReservedTurnEmitsStartWithoutPostCommitRead(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	svc.turns = &failGetAfterPublishMetadataRepo{TurnRepository: repo}
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	turn, err := svc.ReserveTurn(ctx, sessionID, &models.PromptDispatchRecovery{})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	if err := svc.MarkReservedTurnDispatchAttempted(ctx, turn); err != nil {
+		t.Fatalf("MarkReservedTurnDispatchAttempted: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if err := svc.PublishReservedTurn(ctx, turn); err != nil {
+		t.Fatalf("PublishReservedTurn: %v", err)
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type == events.TurnStarted {
+			return
+		}
+	}
+	t.Fatal("committed turn did not publish turn.started")
 }
 
 func TestPublishReservedTurnDoesNotReopenCompletedReservation(t *testing.T) {

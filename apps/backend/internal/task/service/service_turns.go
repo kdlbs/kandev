@@ -107,7 +107,7 @@ func (s *Service) MarkReservedTurnDispatchAttempted(ctx context.Context, turn *m
 	if turn == nil {
 		return errors.New("cannot mark nil reserved turn attempted")
 	}
-	updated, _, err := s.turns.UpdateActiveTurnMetadata(
+	updated, persistedMetadata, updatedAt, err := s.turns.UpdateActiveTurnMetadata(
 		ctx,
 		turn.TaskSessionID,
 		turn.ID,
@@ -120,16 +120,12 @@ func (s *Service) MarkReservedTurnDispatchAttempted(ctx context.Context, turn *m
 	if !updated {
 		return fmt.Errorf("mark reserved turn %s dispatch attempted: turn is no longer active", turn.ID)
 	}
-	persisted, err := s.turns.GetTurn(ctx, turn.ID)
-	if err != nil {
-		return fmt.Errorf("verify reserved turn %s dispatch attempt: %w", turn.ID, err)
-	}
-	durable, _ := persisted.Metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool)
+	durable, _ := persistedMetadata[models.TurnMetaKeyPromptDispatchAttempted].(bool)
 	if !durable {
 		return fmt.Errorf("verify reserved turn %s dispatch attempt: marker missing", turn.ID)
 	}
-	turn.Metadata = persisted.Metadata
-	turn.UpdatedAt = persisted.UpdatedAt
+	turn.Metadata = persistedMetadata
+	turn.UpdatedAt = updatedAt
 	return nil
 }
 
@@ -142,7 +138,7 @@ func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) er
 	if attempted, _ := turn.Metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool); !attempted {
 		return fmt.Errorf("cannot publish unattempted reserved turn %s", turn.ID)
 	}
-	updated, _, err := s.turns.UpdateActiveTurnMetadata(
+	updated, persistedMetadata, updatedAt, err := s.turns.UpdateActiveTurnMetadata(
 		ctx,
 		turn.TaskSessionID,
 		turn.ID,
@@ -158,8 +154,8 @@ func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) er
 	if err != nil {
 		return fmt.Errorf("publish reserved turn %s: %w", turn.ID, err)
 	}
-	persisted, getErr := s.turns.GetTurn(ctx, turn.ID)
 	if !updated {
+		persisted, getErr := s.turns.GetTurn(ctx, turn.ID)
 		if errors.Is(getErr, sql.ErrNoRows) {
 			return fmt.Errorf("publish reserved turn %s: reservation missing: %w", turn.ID, getErr)
 		}
@@ -174,11 +170,8 @@ func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) er
 		turn.UpdatedAt = persisted.UpdatedAt
 		return nil
 	}
-	if getErr != nil {
-		return fmt.Errorf("verify published reserved turn %s: %w", turn.ID, getErr)
-	}
-	turn.Metadata = persisted.Metadata
-	turn.UpdatedAt = persisted.UpdatedAt
+	turn.Metadata = persistedMetadata
+	turn.UpdatedAt = updatedAt
 	s.publishTurnEvent(events.TurnStarted, turn, nil)
 	return nil
 }

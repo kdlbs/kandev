@@ -18,10 +18,12 @@ type stubMessageStore struct {
 	activeErr         error
 	updated           []*taskmodels.Message
 	activeHasDeadline bool
+	activeDeadline    time.Time
 	activeContextErr  error
 	detachHasDeadline bool
 	detachContextErr  error
 	expireHasDeadline bool
+	expireDeadline    time.Time
 	expireContextErr  error
 	expireErr         error
 	findHasDeadline   bool
@@ -51,7 +53,7 @@ func (s *stubMessageStore) FindMessagesByPendingID(ctx context.Context, pendingI
 }
 
 func (s *stubMessageStore) FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error) {
-	_, s.activeHasDeadline = ctx.Deadline()
+	s.activeDeadline, s.activeHasDeadline = ctx.Deadline()
 	s.activeContextErr = ctx.Err()
 	if s.activeErr != nil {
 		return nil, s.activeErr
@@ -99,7 +101,7 @@ func (s *stubMessageStore) ExpireActiveClarificationBundle(
 	ctx context.Context,
 	sessionID, pendingID string,
 ) ([]*taskmodels.Message, error) {
-	_, s.expireHasDeadline = ctx.Deadline()
+	s.expireDeadline, s.expireHasDeadline = ctx.Deadline()
 	s.expireContextErr = ctx.Err()
 	if s.expireErr != nil {
 		return nil, s.expireErr
@@ -295,6 +297,27 @@ func TestCanceller_PersistenceUsesFreshBoundedContext(t *testing.T) {
 				repo.expireHasDeadline, repo.expireContextErr)
 		}
 	})
+}
+
+func TestCanceller_ExpiryPreservesShorterCallerDeadline(t *testing.T) {
+	message := &taskmodels.Message{
+		ID: "m1", TaskSessionID: "s1",
+		Metadata: map[string]any{"status": "pending", "pending_id": "pending-1"},
+	}
+	c, repo, _ := newTestCanceller(t, map[string][]*taskmodels.Message{
+		"pending-1": {message},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	t.Cleanup(cancel)
+	wantDeadline, _ := ctx.Deadline()
+
+	if _, err := c.ExpireSessionAndNotify(ctx, "s1"); err != nil {
+		t.Fatalf("expire clarification: %v", err)
+	}
+	if !repo.activeDeadline.Equal(wantDeadline) || !repo.expireDeadline.Equal(wantDeadline) {
+		t.Fatalf("expiry deadlines = lookup %v update %v, want caller %v",
+			repo.activeDeadline, repo.expireDeadline, wantDeadline)
+	}
 }
 
 func TestCanceller_ExpireSessionAndNotifyReturnsPersistenceError(t *testing.T) {

@@ -61,7 +61,7 @@ func (c *Canceller) expireSessionBundles(ctx context.Context, sessionID string) 
 	// rechecks that exact pending ID, current-turn ownership, and pending status
 	// inside one UPDATE serialized with answers and successor turns.
 	c.store.CancelSession(sessionID)
-	writeCtx, cancel := clarificationPersistenceContext(ctx)
+	writeCtx, cancel := clarificationPersistenceContextPreservingDeadline(ctx)
 	defer cancel()
 	messages, err := c.repo.FindActiveClarificationMessagesBySessionID(writeCtx, sessionID)
 	if err != nil {

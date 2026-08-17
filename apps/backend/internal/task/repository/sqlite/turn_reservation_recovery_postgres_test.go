@@ -283,7 +283,7 @@ func TestPostgresActiveTurnMetadataUpdateUsesSessionTurnLock(t *testing.T) {
 	}
 	updateDone := make(chan updateResult, 1)
 	go func() {
-		updated, _, updateErr := repo.UpdateActiveTurnMetadata(
+		updated, _, _, updateErr := repo.UpdateActiveTurnMetadata(
 			ctx,
 			sessionID,
 			turnID,
@@ -312,5 +312,54 @@ func TestPostgresActiveTurnMetadataUpdateUsesSessionTurnLock(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for metadata update")
+	}
+}
+
+func TestPostgresUpdateTurnUsesSessionTurnLock(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 5)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	const taskID = "task-full-metadata-lock-pg"
+	const sessionID = "session-full-metadata-lock-pg"
+	const turnID = "turn-full-metadata-lock-pg"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	createRecoveryTurn(t, repo, taskID, sessionID, turnID, time.Now().UTC(), nil)
+	turn, err := repo.GetTurn(ctx, turnID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	turn.Metadata = map[string]interface{}{"prompt_usage": true}
+
+	blocker, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin session turn lock blocker: %v", err)
+	}
+	t.Cleanup(func() { _ = blocker.Rollback() })
+	if err := lockSessionTurnWrites(ctx, blocker, repo.db.DriverName(), sessionID); err != nil {
+		t.Fatalf("hold session turn lock: %v", err)
+	}
+
+	updateDone := make(chan error, 1)
+	go func() { updateDone <- repo.UpdateTurn(ctx, turn) }()
+	waitForPostgresLockWait(t, ctx, repo, "pg_advisory_xact_lock")
+	select {
+	case updateErr := <-updateDone:
+		t.Fatalf("full metadata update bypassed session turn lock: %v", updateErr)
+	default:
+	}
+
+	if err := blocker.Commit(); err != nil {
+		t.Fatalf("release session turn lock: %v", err)
+	}
+	select {
+	case updateErr := <-updateDone:
+		if updateErr != nil {
+			t.Fatalf("full metadata update after lock release: %v", updateErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for full metadata update")
 	}
 }

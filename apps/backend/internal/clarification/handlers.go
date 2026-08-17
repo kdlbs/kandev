@@ -604,6 +604,14 @@ func clarificationPersistenceContext(ctx context.Context) (context.Context, cont
 	return context.WithTimeout(context.WithoutCancel(ctx), clarificationPersistenceTimeout)
 }
 
+func clarificationPersistenceContextPreservingDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
+	detached := context.WithoutCancel(ctx)
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < clarificationPersistenceTimeout {
+		return context.WithDeadline(detached, deadline)
+	}
+	return context.WithTimeout(detached, clarificationPersistenceTimeout)
+}
+
 // validateRespondAnswers enforces the all-required gate **and** the question-id
 // invariant: every answer must target a real question in the bundle, every
 // question must have an answer, and no question id may be answered twice.

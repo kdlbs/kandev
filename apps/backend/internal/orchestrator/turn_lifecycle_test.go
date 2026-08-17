@@ -521,6 +521,7 @@ func TestAgentReadyWaitsForReservedPromptGeneration(t *testing.T) {
 	agentMgr.currentPromptGeneration.Store(1)
 
 	turnID, _, reserved, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	t.Cleanup(func() { svc.resolveReservedPromptTurn("session1", turnID, false) })
 	if err != nil {
 		t.Fatalf("reserve successor turn: %v", err)
 	}
@@ -572,6 +573,7 @@ func TestAgentReadyRevalidatesAfterReservedPromptRollback(t *testing.T) {
 	agentMgr.currentPromptGeneration.Store(1)
 
 	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	t.Cleanup(func() { svc.resolveReservedPromptTurn("session1", turnID, false) })
 	if err != nil {
 		t.Fatalf("reserve successor turn: %v", err)
 	}
@@ -613,10 +615,12 @@ func TestAgentReadyDetachesDeliveryCancellationAfterReservedPromptRollback(t *te
 	agentMgr.currentPromptGeneration.Store(1)
 
 	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(context.Background(), "session1", true, nil)
+	t.Cleanup(func() { svc.resolveReservedPromptTurn("session1", turnID, false) })
 	if err != nil {
 		t.Fatalf("reserve successor turn: %v", err)
 	}
 	deliveryCtx, cancelDelivery := context.WithCancel(context.Background())
+	t.Cleanup(cancelDelivery)
 	readyDone := make(chan struct{})
 	go func() {
 		svc.handleAgentReady(deliveryCtx, watcher.AgentEventData{
@@ -658,6 +662,7 @@ func TestAgentReadyReconcilesWhenReservedPromptRollbackFinishesAfterWaitTimeout(
 	agentMgr.currentPromptGeneration.Store(1)
 
 	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	t.Cleanup(func() { svc.resolveReservedPromptTurn("session1", turnID, false) })
 	if err != nil {
 		t.Fatalf("reserve successor turn: %v", err)
 	}
@@ -703,6 +708,7 @@ func TestAgentReadyWaitsForReservedTurnThenDropsGenerationlessEventOnRollback(t 
 	agentMgr.currentPromptExecutionID = "exec1"
 
 	turnID, _, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", true, nil)
+	t.Cleanup(func() { svc.resolveReservedPromptTurn("session1", turnID, false) })
 	if err != nil {
 		t.Fatalf("reserve successor turn: %v", err)
 	}

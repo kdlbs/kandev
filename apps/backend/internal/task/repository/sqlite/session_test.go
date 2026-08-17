@@ -2203,6 +2203,48 @@ func TestUpdateTurnWritesCompletionAndMetadata(t *testing.T) {
 	}
 }
 
+func TestUpdateTurnRejectsSnapshotStaleBehindMetadataPatch(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForTurns(t, repo, "task-turn-stale", "session-turn-stale")
+	turn := &models.Turn{
+		ID: "turn-stale", TaskSessionID: "session-turn-stale", TaskID: "task-turn-stale",
+		Metadata: map[string]interface{}{"initial": true},
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	stale, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(stale snapshot): %v", err)
+	}
+	updated, _, _, err := repo.UpdateActiveTurnMetadata(
+		ctx,
+		turn.TaskSessionID,
+		turn.ID,
+		map[string]interface{}{models.TurnMetaKeyPromptDispatchAttempted: true},
+		nil,
+	)
+	if err != nil || !updated {
+		t.Fatalf("UpdateActiveTurnMetadata: updated=%v err=%v", updated, err)
+	}
+	stale.Metadata["prompt_usage"] = map[string]interface{}{"input_tokens": float64(1)}
+
+	if err := repo.UpdateTurn(ctx, stale); err == nil {
+		t.Fatal("UpdateTurn accepted a stale full metadata snapshot")
+	}
+	persisted, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn(persisted): %v", err)
+	}
+	if attempted, _ := persisted.Metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool); !attempted {
+		t.Fatalf("stale update dropped dispatch-attempt marker: %#v", persisted.Metadata)
+	}
+	if _, exists := persisted.Metadata["prompt_usage"]; exists {
+		t.Fatalf("stale update committed prompt metadata: %#v", persisted.Metadata)
+	}
+}
+
 func TestCompleteTurnStampsNowAndAbandonTurnCollapsesToStartedAt(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

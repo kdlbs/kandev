@@ -225,20 +225,39 @@ func (r *Repository) GetActiveTurnBySessionID(ctx context.Context, sessionID str
 
 // UpdateTurn updates an existing turn
 func (r *Repository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
-	turn.UpdatedAt = time.Now().UTC()
-
 	metadataJSON, err := serializeTurnMetadata(turn.Metadata)
 	if err != nil {
 		return err
 	}
-
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin turn update: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
+		return err
+	}
+	updatedAt := r.nowUTC()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_turns
 		SET completed_at = ?, metadata = ?, updated_at = ?
-		WHERE id = ?
-	`), turn.CompletedAt, metadataJSON, turn.UpdatedAt, turn.ID)
-
-	return err
+		WHERE id = ? AND task_session_id = ? AND updated_at = ?
+	`), turn.CompletedAt, metadataJSON, updatedAt, turn.ID, turn.TaskSessionID, turn.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect turn update: %w", err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("update turn %s: stale metadata snapshot", turn.ID)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit turn update: %w", err)
+	}
+	turn.UpdatedAt = updatedAt
+	return nil
 }
 
 // UpdateActiveTurnMetadata applies a narrow metadata patch without copying a
@@ -248,14 +267,14 @@ func (r *Repository) UpdateActiveTurnMetadata(
 	sessionID, turnID string,
 	updates map[string]interface{},
 	removeKeys []string,
-) (bool, time.Time, error) {
+) (bool, map[string]interface{}, time.Time, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return false, time.Time{}, fmt.Errorf("begin active turn metadata update: %w", err)
+		return false, nil, time.Time{}, fmt.Errorf("begin active turn metadata update: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
-		return false, time.Time{}, err
+		return false, nil, time.Time{}, err
 	}
 	var metadataJSON string
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
@@ -264,15 +283,15 @@ func (r *Repository) UpdateActiveTurnMetadata(
 		WHERE id = ? AND task_session_id = ? AND completed_at IS NULL
 	`), turnID, sessionID).Scan(&metadataJSON)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, time.Time{}, nil
+		return false, nil, time.Time{}, nil
 	}
 	if err != nil {
-		return false, time.Time{}, fmt.Errorf("read active turn metadata: %w", err)
+		return false, nil, time.Time{}, fmt.Errorf("read active turn metadata: %w", err)
 	}
 	metadata := make(map[string]interface{})
 	if metadataJSON != "" && metadataJSON != "{}" {
 		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-			return false, time.Time{}, fmt.Errorf("deserialize active turn metadata: %w", err)
+			return false, nil, time.Time{}, fmt.Errorf("deserialize active turn metadata: %w", err)
 		}
 	}
 	for key, value := range updates {
@@ -283,7 +302,7 @@ func (r *Repository) UpdateActiveTurnMetadata(
 	}
 	metadataJSON, err = serializeTurnMetadata(metadata)
 	if err != nil {
-		return false, time.Time{}, err
+		return false, nil, time.Time{}, err
 	}
 	updatedAt := r.nowUTC()
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -292,16 +311,19 @@ func (r *Repository) UpdateActiveTurnMetadata(
 		WHERE id = ? AND task_session_id = ? AND completed_at IS NULL
 	`), metadataJSON, updatedAt, turnID, sessionID)
 	if err != nil {
-		return false, time.Time{}, err
+		return false, nil, time.Time{}, err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return false, time.Time{}, fmt.Errorf("inspect active turn metadata update: %w", err)
+		return false, nil, time.Time{}, fmt.Errorf("inspect active turn metadata update: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return false, time.Time{}, fmt.Errorf("commit active turn metadata update: %w", err)
+		return false, nil, time.Time{}, fmt.Errorf("commit active turn metadata update: %w", err)
 	}
-	return affected == 1, updatedAt, nil
+	if affected != 1 {
+		return false, nil, time.Time{}, nil
+	}
+	return true, metadata, updatedAt, nil
 }
 
 func serializeTurnMetadata(metadata map[string]interface{}) (string, error) {
