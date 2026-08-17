@@ -46,6 +46,7 @@ import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/prefe
 import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
 import { AppStatusBarSettingsCard } from "@/components/settings/app-status-bar-settings-card";
 import { SettingsMenuModeCard } from "@/components/settings/settings-menu-mode-card";
+import { RichOutputMotionSettingsCard } from "@/components/settings/rich-output-motion-settings-card";
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
@@ -237,12 +238,18 @@ function SettingsMenuModeSection({
 
 function AppearanceThemeSection({
   theme,
-  isDirty,
-  onChange,
+  isThemeDirty,
+  onThemeChange,
+  richOutputAnimationsEnabled,
+  isRichOutputMotionDirty,
+  onRichOutputMotionChange,
 }: {
   theme: Theme;
-  isDirty: boolean;
-  onChange: (theme: Theme) => void;
+  isThemeDirty: boolean;
+  onThemeChange: (theme: Theme) => void;
+  richOutputAnimationsEnabled: boolean;
+  isRichOutputMotionDirty: boolean;
+  onRichOutputMotionChange: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -251,11 +258,17 @@ function AppearanceThemeSection({
       title={t("settings:appearance")}
       description={t("settings:customizeHowTheApplicationLooks")}
     >
-      <ThemeSettingsCard theme={theme} isDirty={isDirty} onChange={onChange} />
+      <div className="space-y-4">
+        <ThemeSettingsCard theme={theme} isDirty={isThemeDirty} onChange={onThemeChange} />
+        <RichOutputMotionSettingsCard
+          enabled={richOutputAnimationsEnabled}
+          isDirty={isRichOutputMotionDirty}
+          onChange={onRichOutputMotionChange}
+        />
+      </div>
     </SettingsSection>
   );
 }
-
 function AppStatusBarSettingsSection({
   enabled,
   isDirty,
@@ -352,6 +365,9 @@ function useAppearanceSaveContributor({
   const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
   const commitMenuMode = useAppStore((state) => state.commitSettingsMenuMode);
   const restoreMenuMode = useAppStore((state) => state.restoreSettingsMenuMode);
+  const previewRichOutputAnimations = useAppStore((state) => state.previewRichOutputAnimations);
+  const commitRichOutputAnimations = useAppStore((state) => state.commitRichOutputAnimations);
+  const restoreRichOutputAnimations = useAppStore((state) => state.restoreRichOutputAnimations);
   const revision = appearanceRevision(draft);
 
   useSettingsSaveContributor({
@@ -369,6 +385,7 @@ function useAppearanceSaveContributor({
         const response = Object.keys(patch).length > 0 ? await updateUserSettings(patch) : null;
         commitTheme(submitted.theme);
         commitMenuMode(submitted.settingsMenuMode);
+        commitRichOutputAnimations(submitted.richOutputAnimationsEnabled);
         // A draft edited while the save was in flight keeps its preview: what was
         // submitted is now persisted, but the screen should still show what the
         // user is currently looking at.
@@ -377,6 +394,11 @@ function useAppearanceSaveContributor({
         }
         if (draftRef.current.settingsMenuMode !== submitted.settingsMenuMode) {
           previewMenuMode(draftRef.current.settingsMenuMode);
+        }
+        if (
+          draftRef.current.richOutputAnimationsEnabled !== submitted.richOutputAnimationsEnabled
+        ) {
+          previewRichOutputAnimations(draftRef.current.richOutputAnimationsEnabled);
         }
         const latestUserSettings = storeApi.getState().userSettings;
         let responseIsCurrent = false;
@@ -395,6 +417,7 @@ function useAppearanceSaveContributor({
         const confirmed = createAppearanceSavedState(
           submitted.theme,
           submitted.settingsMenuMode,
+          submitted.richOutputAnimationsEnabled,
           nextUserSettings,
         );
         setSaved(confirmed);
@@ -410,6 +433,7 @@ function useAppearanceSaveContributor({
       setDraft(saved);
       restoreTheme();
       restoreMenuMode();
+      restoreRichOutputAnimations();
     },
   });
 }
@@ -439,22 +463,32 @@ function AppearanceSettingsSections({
   updateDraft,
   previewTheme,
   previewMenuMode,
+  previewRichOutputAnimations,
 }: {
   draft: AppearanceState;
   saved: AppearanceState;
   updateDraft: (patch: Partial<AppearanceState>) => void;
   previewTheme: (theme: Theme) => void;
   previewMenuMode: (mode: SettingsMenuMode) => void;
+  previewRichOutputAnimations: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
     <>
       <AppearanceThemeSection
         theme={draft.theme}
-        isDirty={draft.theme !== saved.theme}
-        onChange={(theme) => {
+        isThemeDirty={draft.theme !== saved.theme}
+        onThemeChange={(theme) => {
           updateDraft({ theme });
           previewTheme(theme);
+        }}
+        richOutputAnimationsEnabled={draft.richOutputAnimationsEnabled}
+        isRichOutputMotionDirty={
+          draft.richOutputAnimationsEnabled !== saved.richOutputAnimationsEnabled
+        }
+        onRichOutputMotionChange={(richOutputAnimationsEnabled) => {
+          updateDraft({ richOutputAnimationsEnabled });
+          previewRichOutputAnimations(richOutputAnimationsEnabled);
         }}
       />
 
@@ -522,9 +556,11 @@ export function AppearanceSettings() {
   const userSettings = useAppStore((state) => state.userSettings);
   const { savedTheme, previewTheme } = useTheme();
   const savedMenuMode = useAppStore((state) => state.settingsMenu.savedMode);
+  const savedRichOutputAnimations = useAppStore((state) => state.richOutputMotion.savedEnabled);
   const previewMenuMode = useAppStore((state) => state.previewSettingsMenuMode);
+  const previewRichOutputAnimations = useAppStore((state) => state.previewRichOutputAnimations);
   const [saved, setSaved] = useState(() =>
-    createAppearanceSavedState(savedTheme, savedMenuMode, userSettings),
+    createAppearanceSavedState(savedTheme, savedMenuMode, savedRichOutputAnimations, userSettings),
   );
   const [draft, setDraft] = useState(saved);
   const draftRef = useRef(draft);
@@ -538,6 +574,7 @@ export function AppearanceSettings() {
     const nextSaved = createAppearanceSavedState(
       previousSaved.theme,
       previousSaved.settingsMenuMode,
+      previousSaved.richOutputAnimationsEnabled,
       userSettings,
     );
     setDraft(
@@ -575,6 +612,7 @@ export function AppearanceSettings() {
         updateDraft={updateDraft}
         previewTheme={previewTheme}
         previewMenuMode={previewMenuMode}
+        previewRichOutputAnimations={previewRichOutputAnimations}
       />
     </div>
   );

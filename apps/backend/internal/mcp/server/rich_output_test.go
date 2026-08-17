@@ -169,6 +169,23 @@ func TestRichOutputToolDescriptionMakesCSVChartsDiscoverable(t *testing.T) {
 	assert.Contains(t, string(encoded), `"examples"`)
 	assert.Contains(t, string(encoded), `"chart_type":"bar"`)
 	assert.Contains(t, string(encoded), `"chart_type":"line"`)
+	assert.Contains(t, string(encoded), `"labels":["A","B"]`)
+	assert.Contains(t, string(encoded), `"series":[{"label":"Count","values":[42,27]}]`)
+	for _, phrase := range []string{
+		"Inline chart recipe",
+		`"labels":["A","B"]`,
+		`"series":[{"label":"Count","values":[42,27]}]`,
+		"Kandev owns axes and legends",
+		"do not send data, categories, x_axis, or y_axis",
+		"CSV chart recipe",
+		`"csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}`,
+	} {
+		assert.Contains(t, tool.Description, phrase)
+	}
+	require.NotNil(t, tool.Annotations.ReadOnlyHint)
+	assert.True(t, *tool.Annotations.ReadOnlyHint)
+	require.NotNil(t, tool.Annotations.DestructiveHint)
+	assert.False(t, *tool.Annotations.DestructiveHint)
 }
 
 func TestRichOutputToolRejectsMismatchedChartSeries(t *testing.T) {

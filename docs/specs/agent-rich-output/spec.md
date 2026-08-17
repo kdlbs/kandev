@@ -29,6 +29,16 @@ agent-designed dashboards.
 - Every chart identifies its series in a legend. Multi-series legends are
   local keyboard- and touch-operable filters; changing them never changes the
   persisted presentation or sends a tool callback.
+- Line and bar charts retain their native Recharts entrance animation by
+  default. Kandev defers the expensive plot until its chart is near the
+  viewport in a visible browser tab, then mounts and animates it once.
+- Appearance settings provide a per-device option to disable rich-output chart
+  animation. The operating system's reduced-motion preference also disables
+  it, regardless of the saved option.
+- Unchanged completed presentations reuse their parsed payload and derived
+  chart inputs across unrelated transcript rerenders. Local legend filtering
+  rerenders only the affected chart, keeps its data/configuration objects
+  stable, and does not restart its entrance animation.
 - Kandev owns all typography, spacing, color, layout, accessibility, and
   responsive behavior. Agent input never supplies HTML, Markdown, JavaScript,
   CSS, remote URLs, colors, animation, or component names.
@@ -39,6 +49,9 @@ agent-designed dashboards.
   compact localized unavailable state and does not break nearby messages.
 - Small textual comparisons continue to use Markdown tables. Version 1 does
   not provide a native data-table block.
+- Agent guidance includes one exact inline-chart recipe and one CSV recipe.
+  Kandev, rather than the agent, owns axes, legends, colors, and layout; agents
+  provide only `labels` plus labeled `series[].values`, or CSV column mappings.
 
 ## API surface
 
@@ -130,6 +143,11 @@ authorization. It does not accept a task or session identifier and performs no
 separate backend mutation. File expansion uses the current session's existing
 workspace-file authorization.
 
+The tool is advertised as a read-only presentation tool. Test and demo agent
+profiles may still choose a stricter provider permission policy, so isolated
+real-agent evaluation profiles must explicitly enable full access and automatic
+approval when the evaluation is intended to run unattended.
+
 ## Failure modes
 
 - Schema or semantic validation failure rejects the tool call with a concise
@@ -156,6 +174,13 @@ file-preview bytes remain owned by the task workspace and can disappear when
 that workspace is archived, deleted, reset, or cleaned; the message remains and
 its file block degrades explicitly.
 
+Codex ACP may transport MCP calls in an `execute` tool frame whose `rawInput`
+contains the MCP server, actual tool name, and `arguments`. The ACP adapter
+recognizes that provider envelope and persists a provider-neutral generic tool
+call using the actual MCP tool name, arguments, and completed MCP result. The
+shell-shaped transport category is never exposed as the presentation's stored
+tool identity.
+
 No raw CSV, file bytes, images, or other binary payloads are copied into SQLite
 for this feature.
 
@@ -180,6 +205,10 @@ for this feature.
 
 - **GIVEN** a task or Office agent, **WHEN** it lists MCP tools, **THEN**
   `show_rich_output_kandev` is available with the closed version 1 schema.
+- **GIVEN** an agent is asked for an inline line or bar chart, **WHEN** it reads
+  Kandev's tool guidance, **THEN** it can copy the canonical `chart_type`,
+  `title`, `summary`, `labels`, and labeled `series[].values` shape without
+  inventing axis, category, or data fields.
 - **GIVEN** a configuration or external MCP client, **WHEN** it lists tools,
   **THEN** `show_rich_output_kandev` is absent.
 - **GIVEN** a valid completed presentation, **WHEN** the transcript receives
@@ -187,6 +216,10 @@ for this feature.
   standalone native transcript item.
 - **GIVEN** the same completed message after a page reload, **WHEN** history is
   replayed, **THEN** the presentation is equivalent to its live rendering.
+- **GIVEN** Codex ACP emits an MCP invocation as an `execute` frame with
+  `_meta.is_mcp_tool_call`, **WHEN** the initial and terminal updates are
+  normalized, **THEN** the transcript stores one generic
+  `show_rich_output_kandev` tool call with unwrapped arguments and MCP result.
 - **GIVEN** a pending rich-output call, **WHEN** its arguments arrive, **THEN**
   the transcript shows only the normal pending tool state.
 - **GIVEN** malformed input, an unknown block, or a payload over 64 KiB,
@@ -203,6 +236,21 @@ for this feature.
 - **GIVEN** a multi-series chart, **WHEN** the user toggles a legend item with a
   pointer, touch, or keyboard, **THEN** that series is filtered locally and can
   be restored without changing the persisted payload.
+- **GIVEN** a valid line or bar chart below the viewport or in a background
+  browser tab, **WHEN** its transcript loads, **THEN** Kandev preserves the
+  chart's title, summary, and layout space without mounting or animating the
+  expensive plot.
+- **GIVEN** that deferred chart, **WHEN** it approaches the viewport in a
+  visible tab, **THEN** its plot mounts once and retains the default Recharts
+  entrance animation.
+- **GIVEN** an unchanged completed rich-output message, **WHEN** unrelated chat
+  state rerenders its parent, **THEN** Kandev reuses the parsed presentation,
+  chart data, chart configuration, and formatter callbacks instead of
+  rebuilding the chart subtree or restarting its entrance animation.
+- **GIVEN** the per-device rich-output animation option is disabled, or the
+  operating system requests reduced motion, **WHEN** a chart plot mounts,
+  **THEN** its complete series geometry appears without animation while axes,
+  tooltips, and legend filtering remain available.
 - **GIVEN** a valid presentation with a workspace file, **WHEN** the user
   expands the file block, **THEN** Kandev requests the file once and displays
   a bounded preview or explicit unavailable state.
@@ -223,8 +271,14 @@ for this feature.
   contract.
 - Native tables, forms, editors, maps, arbitrary dashboards, or agent-defined
   layout.
+- Changing Recharts' default entrance style or duration for users who leave
+  rich-output animation enabled.
+- Transcript-wide virtualization, a canvas chart renderer, data sampling, or
+  lower chart payload limits. Those require separate evidence after deferred
+  mounting and referential-stability work is measured.
 - Durable raw artifact storage or a new workspace file-preview API.
 
 ## Implementation plan
 
-[Implementation plan](../../plans/agent-rich-output/plan.md)
+- [Original implementation plan](../../plans/agent-rich-output/plan.md)
+- [Chart rendering performance repair](../../plans/rich-output-chart-performance/plan.md)

@@ -125,6 +125,12 @@ replay from normalized tool-call input. CSV charts reuse the existing
 - Public reference validation passed all 61 validator tests and 41 published
   pages after documenting automatic axes, tooltips, legend filtering, and
   unit-bearing series labels.
+- Real-agent ACP delivery: the broad agentctl/MCP Go suite passed; focused
+  rich-output/settings Vitest passed 10 files and 86 tests; typecheck and i18n
+  checks passed; desktop Chromium passed 2 tests and mobile Chrome passed 1.
+  A fresh full-access, auto-approved Luna session produced the CSV chart in one
+  successful tool call. Canonical persistence, axes, legend, and reload were
+  verified in the live isolated UI with no permission prompt or console error.
 
 ## Implementation Waves
 
@@ -135,6 +141,7 @@ replay from normalized tool-call input. CSV charts reuse the existing
 5. [x] [E2E and public documentation](task-05-e2e-public-docs.md)
 6. [x] [CSV-backed chart sources](task-06-csv-chart-sources.md)
 7. [x] [Chart axes and legends](task-07-chart-axes-legends.md)
+8. [x] [Real-agent ACP delivery](task-08-real-agent-acp-delivery.md)
 
 Execution is sequential in the primary conversation. No subagents are
 authorized.
@@ -155,6 +162,13 @@ authorized.
 - Recharts discovers axes and tooltips from direct chart children. A wrapper
   component around those primitives silently removes tick values, grid lines,
   and hover/touch tooltips.
+- Codex ACP reports MCP invocations with the broad `execute` kind. Provider
+  envelope recognition must be gated by explicit MCP metadata and must retain
+  the actual tool name, arguments, and result without reclassifying ordinary
+  shell execution.
+- JSON Schema examples alone may not be visible enough to weaker agents. Keep
+  the system prompt recipe compact, exact, and synchronized across Task and
+  Office surfaces.
 
 ## Axis and legend repair
 
@@ -183,3 +197,24 @@ dates, categories, and numbers. Every chart names its series; multi-series
 legends are 44px pressed-state controls that filter locally. The isolated
 desktop and Pixel 5 gallery rendered four axes and four legend controls with no
 horizontal overflow, while the main `:9998` process retained its original PID.
+
+## Real-agent ACP delivery
+
+Status: complete on 2026-08-16.
+
+- Recognize only explicitly marked Codex MCP `execute` frames, preserve trusted
+  provenance across the marker-less completion update, and persist canonical
+  arguments plus the unwrapped MCP result.
+- Keep the frontend compatible with historic nested Codex payloads while new
+  messages use the provider-neutral shape.
+- Give agents compact, exact inline and CSV chart recipes in Task, Office, and
+  MCP tool descriptions.
+- Validate selection, restraint, CSV authoring, automatic approval, canonical
+  replay, axes, and legends with fresh real Luna sessions in an isolated
+  Tailscale-accessible instance.
+
+Result: Luna chose rich output for requested inline and CSV charts, retained
+Markdown for a small textual comparison, and completed the final CSV case on
+its first tool attempt. The isolated profile was full-access and auto-approved;
+no permission or clarification request occurred. The rendered line chart
+survived reload with five x-axis ticks, five y-axis ticks, and one legend.

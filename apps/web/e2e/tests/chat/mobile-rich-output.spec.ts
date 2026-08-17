@@ -22,8 +22,10 @@ test("mobile rich output stays contained and opens the native file viewer", asyn
   const barChart = richOutput.getByTestId("rich-output-chart-bar");
   await expect(lineChart).toBeVisible();
   await expect(barChart).toBeVisible();
+  await lineChart.scrollIntoViewIfNeeded();
   await expect(lineChart.locator(".recharts-xAxis text").first()).toBeVisible();
   await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible();
+  await barChart.scrollIntoViewIfNeeded();
   await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible();
   await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(lineChart.getByTestId("rich-output-chart-legend-series_0")).toContainText("p95");
@@ -56,8 +58,7 @@ test("mobile rich output stays contained and opens the native file viewer", asyn
   }
 
   for (const button of await richOutput.getByRole("button").all()) {
-    const box = await button.boundingBox();
-    expect(box?.height).toBeGreaterThanOrEqual(44);
+    expect(await button.evaluate((element) => element.offsetHeight)).toBeGreaterThanOrEqual(44);
   }
 
   await richOutput.getByTestId("rich-output-file-preview-toggle").tap();

@@ -248,6 +248,7 @@ export type AppState = KanbanSlice & {
   sidebarTaskPrefs: (typeof defaultUIState)["sidebarTaskPrefs"];
   appSidebar: (typeof defaultUIState)["appSidebar"];
   settingsMenu: (typeof defaultUIState)["settingsMenu"];
+  richOutputMotion: (typeof defaultUIState)["richOutputMotion"];
   acknowledgedAgentErrors: (typeof defaultUIState)["acknowledgedAgentErrors"];
   dismissedAgentErrors: (typeof defaultUIState)["dismissedAgentErrors"];
 
@@ -563,6 +564,9 @@ export type AppState = KanbanSlice & {
   commitSettingsMenuMode: UIA["commitSettingsMenuMode"];
   restoreSettingsMenuMode: UIA["restoreSettingsMenuMode"];
   setSettingsMenuExpandedKeys: UIA["setSettingsMenuExpandedKeys"];
+  previewRichOutputAnimations: UIA["previewRichOutputAnimations"];
+  commitRichOutputAnimations: UIA["commitRichOutputAnimations"];
+  restoreRichOutputAnimations: UIA["restoreRichOutputAnimations"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
 } & GitHubSliceActions &

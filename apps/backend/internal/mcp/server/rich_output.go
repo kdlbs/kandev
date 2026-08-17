@@ -154,6 +154,7 @@ var richOutputInputSchema = json.RawMessage(`{
     }
   },
   "examples": [
+	{"version":1,"title":"Service failures","blocks":[{"type":"chart","chart_type":"bar","title":"Failures by service","summary":"Failed requests in the latest interval.","labels":["A","B"],"series":[{"label":"Count","values":[42,27]}]}]},
     {"version":1,"title":"Latency trend","blocks":[{"type":"chart","chart_type":"line","title":"p95 latency","summary":"Latency across recorded samples.","csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}}]},
     {"version":1,"title":"Requests by route","blocks":[{"type":"chart","chart_type":"bar","title":"Route volume","summary":"Request count for each route.","csv":{"path":"reports/routes.csv","x_column":"route","series":[{"column":"requests"}]}}]}
   ],
@@ -164,9 +165,11 @@ var richOutputInputSchema = json.RawMessage(`{
 func (s *Server) registerRichOutputTool() {
 	tool := mcplib.NewToolWithRawSchema(
 		richOutputToolName,
-		"Render a Kandev-native file preview, metric group, line chart, bar chart, or CSV-backed time series/comparison. Use this when the user asks for a graph, chart, plot, or preview and suitable data is available; give each series a clear legend label with its unit when useful. Kandev supplies visible axes, tooltips, and local multi-series legend filtering. Use Markdown for small tables and plain prose for ordinary answers.",
+		`Render a Kandev-native file preview, metric group, line chart, bar chart, or CSV-backed time series/comparison. Use this when the user asks for a graph, chart, plot, or preview and suitable data is available. Inline chart recipe: {"type":"chart","chart_type":"bar","title":"...","summary":"...","labels":["A","B"],"series":[{"label":"Count","values":[42,27]}]}; switch chart_type to line for trends. CSV chart recipe: {"type":"chart","chart_type":"line","title":"...","summary":"...","csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}}. Kandev owns axes and legends; do not send data, categories, x_axis, or y_axis. Give each series a clear label with its unit when useful. CSV paths must be task-workspace-relative. Use Markdown for small tables and plain prose for ordinary answers.`,
 		richOutputInputSchema,
 	)
+	tool.Annotations.ReadOnlyHint = mcplib.ToBoolPtr(true)
+	tool.Annotations.DestructiveHint = mcplib.ToBoolPtr(false)
 	s.mcpServer.AddTool(tool, s.wrapHandler(richOutputToolName, s.showRichOutputHandler()))
 }
 

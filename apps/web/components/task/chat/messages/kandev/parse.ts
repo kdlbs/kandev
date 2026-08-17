@@ -13,7 +13,7 @@
 // usually an array of `{type, text}` content blocks where `text` is itself a
 // JSON-encoded string; we parse that inner JSON so the renderers see plain JS.
 
-const NAMESPACE_SEP = /\/|__/;
+const NAMESPACE_SEP = /\/|__|\./;
 const KANDEV_SUFFIX = "_kandev";
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -27,7 +27,8 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 export function extractKandevArgs(value: unknown): Record<string, unknown> | undefined {
   const input = asRecord(value);
   if (!input) return undefined;
-  return asRecord(input.raw_input) ?? input;
+  const rawInput = asRecord(input.raw_input);
+  return asRecord(rawInput?.arguments) ?? rawInput ?? input;
 }
 
 export function extractKandevStem(toolName: string | undefined): string | null {
@@ -88,8 +89,11 @@ export function extractMcpResult(value: unknown): unknown {
     if (obj.structured_content !== undefined) return obj.structured_content;
     if (Array.isArray(obj.content)) return unwrapContentBlocks(obj.content);
     if (typeof obj.output === "string") return tryParseJson(obj.output);
-    if (Object.keys(obj).length === 1 && typeof obj.result === "string") {
-      return tryParseJson(obj.result);
+    if (
+      obj.result !== undefined &&
+      (Object.hasOwn(obj, "error") || Object.keys(obj).length === 1)
+    ) {
+      return extractMcpResult(obj.result);
     }
     return value;
   }

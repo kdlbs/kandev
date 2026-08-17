@@ -185,6 +185,13 @@ func TestRichOutputDocs_MakeExplicitAndCSVUseDiscoverable(t *testing.T) {
 				"include its unit",
 				"local multi-series legend",
 				"Markdown table",
+				"Inline chart recipe",
+				`"labels":["A","B"]`,
+				`"series":[{"label":"Count","values":[42,27]}]`,
+				"Kandev owns axes and legends",
+				"do not send data, categories, x_axis, or y_axis",
+				"CSV chart recipe",
+				`"csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}`,
 			} {
 				assert.Contains(t, prompt, phrase)
 			}

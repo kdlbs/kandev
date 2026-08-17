@@ -27,9 +27,12 @@ test("renders and persists native rich output with an explicit file preview", as
   const barChart = richOutput.getByTestId("rich-output-chart-bar");
   await expect(lineChart).toBeVisible();
   await expect(barChart).toBeVisible();
+  await lineChart.scrollIntoViewIfNeeded();
   await expect(lineChart.locator(".recharts-xAxis text").first()).toBeVisible();
+  await expect(lineChart.locator(".recharts-line-curve")).toHaveAttribute("stroke-dasharray", /\d/);
   await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(lineChart.locator(".recharts-xAxis")).toContainText("Aug 12");
+  await barChart.scrollIntoViewIfNeeded();
   await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible();
   await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(barChart.locator(".recharts-xAxis")).toContainText("/api");
@@ -72,6 +75,7 @@ test("renders and persists native rich output with an explicit file preview", as
   const persisted = session.activeChat().getByTestId("rich-output");
   await expect(persisted.getByTestId("rich-output-chart-line")).toBeVisible();
   await expect(persisted.getByTestId("rich-output-chart-bar")).toBeVisible();
+  await persisted.getByTestId("rich-output-chart-line").scrollIntoViewIfNeeded();
   await expect(
     persisted.getByTestId("rich-output-chart-line").locator(".recharts-xAxis text").first(),
   ).toBeVisible();
@@ -80,6 +84,7 @@ test("renders and persists native rich output with an explicit file preview", as
       .getByTestId("rich-output-chart-line")
       .getByTestId("rich-output-chart-legend-series_0"),
   ).toContainText("p95");
+  await persisted.getByTestId("rich-output-chart-bar").scrollIntoViewIfNeeded();
   await expect(persisted.getByRole("button", { name: "Errors" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -91,4 +96,31 @@ test("renders and persists native rich output with an explicit file preview", as
   await expect(testPage.locator(`.dv-default-tab:has-text('${RICH_OUTPUT_FILE}')`)).toBeVisible({
     timeout: 10_000,
   });
+});
+
+test("renders complete chart geometry when device animation is disabled", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await testPage.addInitScript(() => {
+    window.localStorage.setItem("kandev.settings.richOutputAnimations", "false");
+  });
+  const session = await seedRichOutputTask({
+    page: testPage,
+    apiClient,
+    seedData,
+    title: "Static desktop rich output",
+  });
+  const richOutput = session.activeChat().getByTestId("rich-output");
+  const lineChart = richOutput.getByTestId("rich-output-chart-line");
+  const barChart = richOutput.getByTestId("rich-output-chart-bar");
+
+  await lineChart.scrollIntoViewIfNeeded();
+  const line = lineChart.locator(".recharts-line-curve");
+  await expect(line).toBeVisible({ timeout: 30_000 });
+  await expect(line).not.toHaveAttribute("stroke-dasharray", /\d/);
+
+  await barChart.scrollIntoViewIfNeeded();
+  await expect(barChart.locator(".recharts-bar-rectangle")).toHaveCount(6);
 });

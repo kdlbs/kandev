@@ -95,16 +95,20 @@ describe("KandevToolMessage host context", () => {
     );
   });
 
-  it("unwraps live ACP raw_input before rendering rich output", () => {
+  it("unwraps the real Codex ACP MCP arguments before rendering rich output", () => {
     const html = renderToStaticMarkup(
       <KandevToolMessage
         comment={kandevToolCall({
-          toolName: "mcp__kandev__show_rich_output_kandev",
+          toolName: "mcp.kandev.show_rich_output_kandev",
           input: {
             raw_input: {
-              version: 1,
-              title: "Nested presentation",
-              blocks: [{ type: "metrics", items: [{ label: "Passed", value: "38" }] }],
+              server: "kandev",
+              tool: "show_rich_output_kandev",
+              arguments: {
+                version: 1,
+                title: "Nested presentation",
+                blocks: [{ type: "metrics", items: [{ label: "Passed", value: "38" }] }],
+              },
             },
           },
         })}

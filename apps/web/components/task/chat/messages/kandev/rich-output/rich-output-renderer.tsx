@@ -1,6 +1,7 @@
 "use client";
 
 import { IconChartBar } from "@tabler/icons-react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { KandevRow } from "../shared";
 import type { KandevRenderer } from "../types";
@@ -32,7 +33,7 @@ export const RichOutputRenderer: KandevRenderer = ({
   onOpenFile,
 }) => {
   const { t } = useTranslation();
-  const output = parseRichOutput(args, result);
+  const output = useMemo(() => parseRichOutput(args, result), [args, result]);
 
   if (status !== "complete") {
     return (

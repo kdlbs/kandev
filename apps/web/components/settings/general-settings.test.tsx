@@ -6,9 +6,11 @@ import { AppearanceSettings } from "./general-settings";
 
 const apiMocks = vi.hoisted(() => ({ updateUserSettings: vi.fn() }));
 const SHOW_STATUS_BAR_LABEL = "Show status bar";
+const ANIMATE_RICH_OUTPUT_CHARTS_LABEL = "Animate rich-output charts";
 const SAVE_CHANGES_LABEL = "Save changes";
 const CHECKED_STATE = "checked";
 const DATA_STATE_ATTRIBUTE = "data-state";
+const DATA_SETTINGS_DIRTY_ATTRIBUTE = "data-settings-dirty";
 const INITIAL_REVISION = 1;
 const OLDER_LIVE_REVISION = 2;
 const SAVED_REVISION = 3;
@@ -23,6 +25,9 @@ const storeMocks = vi.hoisted(() => ({
   previewSettingsMenuMode: vi.fn(),
   commitSettingsMenuMode: vi.fn(),
   restoreSettingsMenuMode: vi.fn(),
+  previewRichOutputAnimations: vi.fn(),
+  commitRichOutputAnimations: vi.fn(),
+  restoreRichOutputAnimations: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -183,7 +188,7 @@ async function verifyEditDuringSaveSurvivesItsLiveUpdate() {
   resolveSave(appearanceSettingsResponse({ app_status_bar_enabled: false }));
   await waitFor(() => expect(storeMocks.setUserSettings).toHaveBeenCalledOnce());
   expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
-  expect(toggle.getAttribute("data-settings-dirty")).toBe("true");
+  expect(toggle.getAttribute(DATA_SETTINGS_DIRTY_ATTRIBUTE)).toBe("true");
 }
 
 async function verifyNewerSaveResponseWinsOverOlderLiveUpdate() {
@@ -241,20 +246,57 @@ beforeEach(() => {
   storeMocks.previewSettingsMenuMode.mockReset();
   storeMocks.commitSettingsMenuMode.mockReset();
   storeMocks.restoreSettingsMenuMode.mockReset();
+  storeMocks.previewRichOutputAnimations.mockReset();
+  storeMocks.commitRichOutputAnimations.mockReset();
+  storeMocks.restoreRichOutputAnimations.mockReset();
   storeMocks.state = {
     userSettings: {
       ...defaultSettingsState.userSettings,
       appStatusBarEnabled: true,
     },
     settingsMenu: { savedMode: "flat" },
+    richOutputMotion: { enabled: true, savedEnabled: true },
     setUserSettings: storeMocks.setUserSettings,
     previewSettingsMenuMode: storeMocks.previewSettingsMenuMode,
     commitSettingsMenuMode: storeMocks.commitSettingsMenuMode,
     restoreSettingsMenuMode: storeMocks.restoreSettingsMenuMode,
+    previewRichOutputAnimations: storeMocks.previewRichOutputAnimations,
+    commitRichOutputAnimations: storeMocks.commitRichOutputAnimations,
+    restoreRichOutputAnimations: storeMocks.restoreRichOutputAnimations,
   };
 });
 
 afterEach(cleanup);
+
+describe("AppearanceSettings rich-output motion preference", () => {
+  it("previews and saves chart motion locally without a user-settings request", async () => {
+    renderAppearance();
+
+    const toggle = screen.getByRole("switch", { name: ANIMATE_RICH_OUTPUT_CHARTS_LABEL });
+    expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
+
+    fireEvent.click(toggle);
+    expect(storeMocks.previewRichOutputAnimations).toHaveBeenCalledWith(false);
+    expect(toggle.getAttribute(DATA_SETTINGS_DIRTY_ATTRIBUTE)).toBe("true");
+
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+
+    await waitFor(() => expect(storeMocks.commitRichOutputAnimations).toHaveBeenCalledWith(false));
+    expect(apiMocks.updateUserSettings).not.toHaveBeenCalled();
+    expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
+  });
+
+  it("restores the saved chart motion preference through Reset", async () => {
+    renderAppearance();
+
+    const toggle = screen.getByRole("switch", { name: ANIMATE_RICH_OUTPUT_CHARTS_LABEL });
+    fireEvent.click(toggle);
+    fireEvent.click(await screen.findByRole("button", { name: "Reset" }));
+
+    await waitFor(() => expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE));
+    expect(storeMocks.restoreRichOutputAnimations).toHaveBeenCalledOnce();
+  });
+});
 
 describe("AppearanceSettings status bar preference", () => {
   it("saves local-only Appearance changes without a user-settings request", async () => {
@@ -288,7 +330,7 @@ describe("AppearanceSettings status bar preference", () => {
 
     expect(apiMocks.updateUserSettings).not.toHaveBeenCalled();
     expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
-    expect(toggle.getAttribute("data-settings-dirty")).toBe("true");
+    expect(toggle.getAttribute(DATA_SETTINGS_DIRTY_ATTRIBUTE)).toBe("true");
 
     fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
 
@@ -328,7 +370,7 @@ describe("AppearanceSettings status bar preference", () => {
 
     expect(await screen.findByText("Couldn't save")).toBeTruthy();
     expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe("unchecked");
-    expect(toggle.getAttribute("data-settings-dirty")).toBe("true");
+    expect(toggle.getAttribute(DATA_SETTINGS_DIRTY_ATTRIBUTE)).toBe("true");
     expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
     expect(
       (storeMocks.state.userSettings as { appStatusBarEnabled: boolean }).appStatusBarEnabled,
