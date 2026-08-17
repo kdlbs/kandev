@@ -265,6 +265,13 @@ type TurnRepository interface {
 		updates map[string]interface{},
 		removeKeys []string,
 	) (bool, map[string]interface{}, time.Time, error)
+	// ClearTurnPromptDispatchMetadata removes reservation-only metadata from
+	// an active or completed turn after its start event has been accepted by
+	// the event bus. It preserves unrelated concurrent metadata.
+	ClearTurnPromptDispatchMetadata(
+		ctx context.Context,
+		sessionID, turnID string,
+	) (bool, map[string]interface{}, time.Time, error)
 	CompleteTurn(ctx context.Context, id string) error
 	AbandonTurn(ctx context.Context, id string) error
 	CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error)

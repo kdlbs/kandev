@@ -405,24 +405,27 @@ func TestTaskPublication_TaskCreatedAfterTombstoneClearsAndPublishes(t *testing.
 	}
 }
 
-func TestMessageEventChangesPendingActionOnlyForActionableMessages(t *testing.T) {
-	for _, eventType := range []string{events.MessageAdded, events.MessageUpdated, events.MessageDeleted} {
-		for _, messageType := range []models.MessageType{
-			models.MessageTypeClarificationRequest,
-			models.MessageTypePermissionRequest,
-		} {
-			if !messageEventChangesPendingAction(eventType, &models.Message{Type: messageType}) {
-				t.Fatalf("%s %s did not project pending action", eventType, messageType)
+func TestMessageEventChangesPendingActionForAuthorityMutations(t *testing.T) {
+	tests := []struct {
+		name        string
+		eventType   string
+		messageType models.MessageType
+		want        bool
+	}{
+		{name: "ordinary add can establish turn authority", eventType: events.MessageAdded, messageType: models.MessageTypeMessage, want: true},
+		{name: "ordinary delete can remove turn authority", eventType: events.MessageDeleted, messageType: models.MessageTypeAgentPlan, want: true},
+		{name: "ordinary update preserves turn authority", eventType: events.MessageUpdated, messageType: models.MessageTypeMessage, want: false},
+		{name: "clarification add changes pending action", eventType: events.MessageAdded, messageType: models.MessageTypeClarificationRequest, want: true},
+		{name: "clarification update changes pending action", eventType: events.MessageUpdated, messageType: models.MessageTypeClarificationRequest, want: true},
+		{name: "permission delete changes pending action", eventType: events.MessageDeleted, messageType: models.MessageTypePermissionRequest, want: true},
+		{name: "unrelated event", eventType: events.TurnStarted, messageType: models.MessageTypeClarificationRequest, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := messageEventChangesPendingAction(tt.eventType, &models.Message{Type: tt.messageType}); got != tt.want {
+				t.Fatalf("messageEventChangesPendingAction(%s, %s) = %t, want %t", tt.eventType, tt.messageType, got, tt.want)
 			}
-		}
-		for _, messageType := range []models.MessageType{
-			models.MessageTypeMessage,
-			models.MessageTypeAgentPlan,
-		} {
-			if messageEventChangesPendingAction(eventType, &models.Message{Type: messageType}) {
-				t.Fatalf("%s %s projected pending action", eventType, messageType)
-			}
-		}
+		})
 	}
 }
 

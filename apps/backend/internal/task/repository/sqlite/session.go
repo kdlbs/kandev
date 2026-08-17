@@ -281,6 +281,23 @@ func (r *Repository) PatchTurnMetadata(
 	return updated, updatedAt, err
 }
 
+// ClearTurnPromptDispatchMetadata removes durable recovery state only after
+// turn.started publication succeeds. It intentionally accepts a completed
+// turn because provider output can settle a fast turn while publication is in
+// progress; clearing metadata must never reopen or otherwise alter completion.
+func (r *Repository) ClearTurnPromptDispatchMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, map[string]interface{}, time.Time, error) {
+	return r.patchTurnMetadata(ctx, sessionID, turnID, nil, []string{
+		models.TurnMetaKeyPromptDispatchPending,
+		models.TurnMetaKeyPromptDispatchAttempted,
+		models.TurnMetaKeyPromptDispatchClarificationPendingID,
+		models.TurnMetaKeyPromptDispatchClarificationTurnID,
+		models.TurnMetaKeyPromptDispatchClarificationMessageIDs,
+	}, false)
+}
+
 func (r *Repository) patchTurnMetadata(
 	ctx context.Context,
 	sessionID, turnID string,

@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -27,6 +28,33 @@ type nilTaskSessionRepo struct {
 type failGetAfterPublishMetadataRepo struct {
 	repository.TurnRepository
 	activeMetadataUpdates int
+}
+
+type failTurnStartedEventBus struct {
+	*MockEventBus
+	err error
+}
+
+func (b *failTurnStartedEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	if subject == events.TurnStarted {
+		return b.err
+	}
+	return b.MockEventBus.Publish(ctx, subject, event)
+}
+
+type completeTurnOnStartedEventBus struct {
+	*MockEventBus
+	repo   repository.TurnRepository
+	turnID string
+}
+
+func (b *completeTurnOnStartedEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	if subject == events.TurnStarted {
+		if err := b.repo.CompleteTurn(ctx, b.turnID); err != nil {
+			return err
+		}
+	}
+	return b.MockEventBus.Publish(ctx, subject, event)
 }
 
 func (r *failGetAfterPublishMetadataRepo) UpdateActiveTurnMetadata(
@@ -130,6 +158,11 @@ func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testin
 	for _, event := range eventBus.GetPublishedEvents() {
 		if event.Type == events.TurnStarted {
 			started++
+			data, _ := event.Data.(map[string]interface{})
+			metadata, _ := data["metadata"].(map[string]interface{})
+			if _, pending := metadata[models.TurnMetaKeyPromptDispatchPending]; pending {
+				t.Fatalf("turn.started exposed recovery metadata: %#v", metadata)
+			}
 		}
 	}
 	if started != 1 {
@@ -216,6 +249,90 @@ func TestPublishReservedTurnEmitsStartWithoutPostCommitRead(t *testing.T) {
 		}
 	}
 	t.Fatal("committed turn did not publish turn.started")
+}
+
+func TestPublishReservedTurnRetainsRecoveryStateWhenStartEventFails(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	failingBus := &failTurnStartedEventBus{MockEventBus: eventBus, err: errors.New("nats unavailable")}
+	svc.eventBus = failingBus
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	turn, err := svc.ReserveTurn(ctx, sessionID, &models.PromptDispatchRecovery{
+		PendingID:  "pending-recovery",
+		TurnID:     "source-turn",
+		MessageIDs: []string{"clarification-message"},
+	})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	if err := svc.MarkReservedTurnDispatchAttempted(ctx, turn); err != nil {
+		t.Fatalf("MarkReservedTurnDispatchAttempted: %v", err)
+	}
+
+	if err := svc.PublishReservedTurn(ctx, turn); err == nil {
+		t.Fatal("PublishReservedTurn error = nil, want event publication failure")
+	}
+	persisted, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	for _, key := range []string{
+		models.TurnMetaKeyPromptDispatchPending,
+		models.TurnMetaKeyPromptDispatchAttempted,
+		models.TurnMetaKeyPromptDispatchClarificationPendingID,
+		models.TurnMetaKeyPromptDispatchClarificationTurnID,
+		models.TurnMetaKeyPromptDispatchClarificationMessageIDs,
+	} {
+		if _, exists := persisted.Metadata[key]; !exists {
+			t.Fatalf("failed publication removed recovery key %q: %#v", key, persisted.Metadata)
+		}
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type == events.TurnStarted {
+			t.Fatal("failed publication recorded turn.started")
+		}
+	}
+}
+
+func TestPublishReservedTurnClearsRecoveryStateAfterConcurrentCompletion(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	turn, err := svc.ReserveTurn(ctx, sessionID, &models.PromptDispatchRecovery{})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	if err := svc.MarkReservedTurnDispatchAttempted(ctx, turn); err != nil {
+		t.Fatalf("MarkReservedTurnDispatchAttempted: %v", err)
+	}
+	svc.eventBus = &completeTurnOnStartedEventBus{
+		MockEventBus: eventBus,
+		repo:         repo,
+		turnID:       turn.ID,
+	}
+
+	if err := svc.PublishReservedTurn(ctx, turn); err != nil {
+		t.Fatalf("PublishReservedTurn: %v", err)
+	}
+	persisted, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if persisted.CompletedAt == nil {
+		t.Fatal("publication metadata cleanup reopened concurrently completed turn")
+	}
+	for _, key := range []string{
+		models.TurnMetaKeyPromptDispatchPending,
+		models.TurnMetaKeyPromptDispatchAttempted,
+	} {
+		if _, exists := persisted.Metadata[key]; exists {
+			t.Fatalf("completed published turn retained recovery key %q: %#v", key, persisted.Metadata)
+		}
+	}
 }
 
 func TestPatchTurnMetadataMergesAfterReservedTurnPublication(t *testing.T) {

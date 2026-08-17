@@ -318,6 +318,13 @@ func (m *mockRepository) UpdateActiveTurnMetadata(
 ) (bool, map[string]interface{}, time.Time, error) {
 	return false, nil, time.Time{}, nil
 }
+func (m *mockRepository) ClearTurnPromptDispatchMetadata(
+	context.Context,
+	string,
+	string,
+) (bool, map[string]interface{}, time.Time, error) {
+	return false, nil, time.Time{}, nil
+}
 func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error {
 	return nil
 }

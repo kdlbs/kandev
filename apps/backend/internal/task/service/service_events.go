@@ -913,7 +913,11 @@ func (s *Service) addMessagePendingAction(
 
 func messageEventChangesPendingAction(eventType string, message *models.Message) bool {
 	switch eventType {
-	case events.MessageAdded, events.MessageUpdated, events.MessageDeleted:
+	case events.MessageAdded, events.MessageDeleted:
+		// Adding or deleting any message can establish or remove the message
+		// evidence that makes an unpublished successor turn authoritative.
+		return true
+	case events.MessageUpdated:
 		return message.Type == models.MessageTypeClarificationRequest ||
 			message.Type == models.MessageTypePermissionRequest
 	default:

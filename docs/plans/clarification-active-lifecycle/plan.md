@@ -408,12 +408,20 @@ All locally available task gates passed; environment-gated parity also passed in
   all locally runnable affected suites pass.
 - The accompanying CodeRabbit pass makes reserved-turn waiter cleanup immediate and idempotent in five
   agent-ready regressions, and preserves the authoritative status-summary row when pending-action CAS
-  repair exhausts its retries. A delayed thread also restricts pending-action reads on add/delete events
-  to clarification and permission messages. Both full task-service and orchestrator suites pass again.
+  repair exhausts its retries. A later exact-head authority regression supersedes the delayed suggestion
+  to restrict add/delete events: all message additions and deletions refresh pending action because they
+  can add or remove the evidence that makes a reserved successor authoritative; only ordinary content
+  updates omit the projection.
 - A final Codex race follow-up routes late prompt-usage and agent-identity fields through an atomic
   metadata patch that works after reservation publication and turn completion. The stale full-snapshot
   CAS remains as a clobber guard, while publication-winning usage metadata now persists on retry-free
   merge semantics. Full SQLite repository, task-service, and orchestrator suites pass.
+- Exact-head Codex and Greptile follow-up preserves both client and restart convergence. Ordinary message
+  add/delete events now carry the authoritative pending-action projection when message evidence changes
+  turn authority. Reserved-turn publication keeps recovery markers durable until `turn.started` is
+  accepted, surfaces bus failure, then clears only reservation metadata under session authority even if
+  a fast provider completed the turn during publication. Focused regressions and the full task,
+  integration, backend-composition, and orchestrator suites pass.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

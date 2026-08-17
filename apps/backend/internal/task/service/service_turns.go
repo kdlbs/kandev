@@ -87,7 +87,7 @@ func (s *Service) createTurn(
 
 	if publishStarted {
 		// had_output is only meaningful on turn.completed; omit it from turn.started.
-		s.publishTurnEvent(events.TurnStarted, turn, nil)
+		_ = s.publishTurnEvent(events.TurnStarted, turn, nil)
 	}
 
 	s.logger.Debug("started turn",
@@ -129,8 +129,9 @@ func (s *Service) MarkReservedTurnDispatchAttempted(ctx context.Context, turn *m
 	return nil
 }
 
-// PublishReservedTurn makes a durably attempted reservation authoritative,
-// removes its recovery metadata, then reveals it to connected clients.
+// PublishReservedTurn makes a durably attempted reservation authoritative.
+// Recovery metadata stays durable until the event bus accepts turn.started, so
+// a failed publication remains discoverable by startup reconciliation.
 func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) error {
 	if turn == nil {
 		return errors.New("cannot publish nil reserved turn")
@@ -138,18 +139,15 @@ func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) er
 	if attempted, _ := turn.Metadata[models.TurnMetaKeyPromptDispatchAttempted].(bool); !attempted {
 		return fmt.Errorf("cannot publish unattempted reserved turn %s", turn.ID)
 	}
+	// Re-read under session turn-write authority before revealing anything. A
+	// no-op patch gives publication a current, active durable snapshot without
+	// copying the caller's potentially stale metadata over concurrent fields.
 	updated, persistedMetadata, updatedAt, err := s.turns.UpdateActiveTurnMetadata(
 		ctx,
 		turn.TaskSessionID,
 		turn.ID,
 		nil,
-		[]string{
-			models.TurnMetaKeyPromptDispatchPending,
-			models.TurnMetaKeyPromptDispatchAttempted,
-			models.TurnMetaKeyPromptDispatchClarificationPendingID,
-			models.TurnMetaKeyPromptDispatchClarificationTurnID,
-			models.TurnMetaKeyPromptDispatchClarificationMessageIDs,
-		},
+		nil,
 	)
 	if err != nil {
 		return fmt.Errorf("publish reserved turn %s: %w", turn.ID, err)
@@ -170,9 +168,34 @@ func (s *Service) PublishReservedTurn(ctx context.Context, turn *models.Turn) er
 		turn.UpdatedAt = persisted.UpdatedAt
 		return nil
 	}
-	turn.Metadata = persistedMetadata
-	turn.UpdatedAt = updatedAt
-	s.publishTurnEvent(events.TurnStarted, turn, nil)
+	if pending, _ := persistedMetadata[models.TurnMetaKeyPromptDispatchPending].(bool); !pending {
+		return fmt.Errorf("publish reserved turn %s: durable reservation marker missing", turn.ID)
+	}
+	if attempted, _ := persistedMetadata[models.TurnMetaKeyPromptDispatchAttempted].(bool); !attempted {
+		return fmt.Errorf("publish reserved turn %s: durable dispatch attempt marker missing", turn.ID)
+	}
+
+	publicTurn := *turn
+	publicTurn.Metadata = maps.Clone(persistedMetadata)
+	models.ClearPromptDispatchMetadata(publicTurn.Metadata)
+	publicTurn.UpdatedAt = updatedAt
+	if err := s.publishTurnEvent(events.TurnStarted, &publicTurn, nil); err != nil {
+		return fmt.Errorf("publish reserved turn %s start event: %w", turn.ID, err)
+	}
+
+	cleared, publishedMetadata, publishedAt, err := s.turns.ClearTurnPromptDispatchMetadata(
+		ctx,
+		turn.TaskSessionID,
+		turn.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("clear published reserved turn %s recovery metadata: %w", turn.ID, err)
+	}
+	if !cleared {
+		return fmt.Errorf("clear published reserved turn %s recovery metadata: reservation missing", turn.ID)
+	}
+	turn.Metadata = publishedMetadata
+	turn.UpdatedAt = publishedAt
 	return nil
 }
 
@@ -378,7 +401,7 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 	}
 
 	hadOutput := s.turnHadOutput(ctx, turn)
-	s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput)
+	_ = s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput)
 
 	s.logger.Debug("completed turn",
 		zap.String("turn_id", turnID),
@@ -474,7 +497,7 @@ func (s *Service) AbandonOpenTurns(ctx context.Context, sessionID string) error 
 			// Report had_output=true so the frontend never shows an "empty turn"
 			// notice for them — only genuine live completions should trigger it.
 			hadOutput := true
-			s.publishTurnEvent(events.TurnCompleted, refreshed, &hadOutput)
+			_ = s.publishTurnEvent(events.TurnCompleted, refreshed, &hadOutput)
 		}
 		s.logger.Info("abandoned orphan turn on session resume",
 			zap.String("turn_id", turn.ID),
@@ -518,13 +541,13 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 // turn.completed events (the frontend uses it to surface an "empty turn"
 // notice). Pass nil for turn.started so the field is omitted entirely rather
 // than carrying a misleading "false" on a turn that has not completed.
-func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool) {
+func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool) error {
 	if s.eventBus == nil {
-		return
+		return nil
 	}
 	if turn == nil {
 		s.logger.Warn("publishTurnEvent: turn is nil, skipping", zap.String("event_type", eventType))
-		return
+		return nil
 	}
 	payload := map[string]interface{}{
 		"id":           turn.ID,
@@ -539,7 +562,14 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 	if hadOutput != nil {
 		payload["had_output"] = *hadOutput
 	}
-	_ = s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", payload))
+	if err := s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", payload)); err != nil {
+		s.logger.Error("failed to publish turn event",
+			zap.String("event_type", eventType),
+			zap.String("turn_id", turn.ID),
+			zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // turnHadOutput reports whether a completed turn produced any agent output.

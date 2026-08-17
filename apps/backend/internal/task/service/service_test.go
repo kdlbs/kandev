@@ -3273,6 +3273,64 @@ func TestService_ClarificationMessageEventsCarryPendingActionProjection(t *testi
 	}
 }
 
+func TestService_OrdinaryMessageAuthorityEventsRefreshPendingAction(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	sourceTurnID := "turn-pending-source"
+	sourceTime := time.Now().UTC().Add(-time.Minute)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            sourceTurnID,
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		StartedAt:     sourceTime,
+		CreatedAt:     sourceTime,
+	}); err != nil {
+		t.Fatalf("create source turn: %v", err)
+	}
+	if _, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        sourceTurnID,
+		Content:       "Choose",
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeClarificationRequest),
+		Metadata:      map[string]interface{}{"pending_id": "pending-source", "status": "pending"},
+	}); err != nil {
+		t.Fatalf("create source clarification: %v", err)
+	}
+
+	successor, err := svc.ReserveTurn(ctx, sessionID, &models.PromptDispatchRecovery{})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	eventBus.ClearEvents()
+	ordinary, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        successor.ID,
+		Content:       "Successor output",
+		AuthorType:    "agent",
+	})
+	if err != nil {
+		t.Fatalf("create successor message: %v", err)
+	}
+	added := singlePublishedEventData(t, eventBus)
+	if got, exists := added["pending_action"]; !exists || got != nil {
+		t.Fatalf("ordinary message.added pending_action = %#v, want explicit nil", got)
+	}
+
+	eventBus.ClearEvents()
+	if err := svc.DeleteMessage(ctx, ordinary.ID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	deleted := singlePublishedEventData(t, eventBus)
+	if got := deleted["pending_action"]; got != "clarification" {
+		t.Fatalf("ordinary message.deleted pending_action = %#v, want clarification", got)
+	}
+}
+
 func TestService_CreateMessageIdempotentReturnsCommittedMessage(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

@@ -52,8 +52,10 @@ hiding the action the icon represents.
   marked unpublished so provider frames can reference it without making it current. Immediately before
   the external executor call, Kandev durably marks the reservation attempted. That marker is the
   at-most-once boundary: a crash can no longer prove whether agentctl accepted the prompt, so restart
-  preserves the successor and keeps the claimed bundle terminal. Acknowledgement clears the recovery
-  metadata and publishes the reservation, and HTTP success requires that durable publication. If the
+  preserves the successor and keeps the claimed bundle terminal. Acknowledgement publishes a
+  recovery-clean `turn.started` payload while the recovery metadata remains durable, then clears that
+  metadata after the event bus accepts the event. HTTP success requires both operations. A rejected
+  event publication therefore remains discoverable by startup reconciliation. If the
   predecessor's delayed ready event overlaps this private reservation, ready handling waits for the
   reservation to resolve and then revalidates prompt generation before touching turn or workflow state.
   It cannot complete the reserved successor or run predecessor completion actions against it. When the
