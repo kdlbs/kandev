@@ -8,37 +8,34 @@ status: done
 
 ## Overview
 
-Canonicalize agent-authored clarification context in the shared clarification
-domain before persistence. Both user and parent question handlers use the same
-normalizer; the frontend continues to render canonical text without special
-escape handling.
+Add an explicit paragraph-array input to the shared clarification MCP contract
+before persistence. Both user and parent question handlers use the same reader;
+the frontend continues to render canonical text without escape inference.
 
 ## Root Cause
 
-Standard MCP JSON decoding handles ordinary JSON newline escapes. Some agent
-clients can nevertheless submit a string whose decoded value still contains
-JSON-style newline sequences. The backend currently persists that value
-verbatim, and `whitespace-pre-wrap` correctly displays the literal characters.
-The recently added context UI exposed this previously invisible input variant.
+Standard MCP JSON decoding handles ordinary JSON newline escapes, while a
+remaining backslash sequence is indistinguishable from intentional literal
+content. Rewriting context therefore risks corrupting documentation, code, and
+paths. The contract needs an unambiguous multiline representation.
 
 ## Backend
 
-- Add `clarification.NormalizeContext` for the clarification prose contract.
-- Convert escaped CRLF, LF, and CR paragraph separators while preserving
-  existing actual newlines, single escape syntax, paths, and unrelated
-  backslashes.
-- Apply it in both MCP clarification handlers before dispatching payloads.
+- Add optional `context_paragraphs` string-array input to user and parent
+  question tools.
+- Join non-empty declared paragraphs with blank lines before dispatch and
+  persistence; otherwise preserve legacy `context` verbatim.
+- Use the same reader in both MCP clarification handlers.
 
 ## Frontend
 
-No renderer logic changes. Update the mock-agent fixture to send the affected
-wire form and strengthen existing desktop/mobile assertions and screenshots.
+No renderer logic changes. Update the mock-agent fixture to send explicit
+paragraphs and retain existing desktop/mobile assertions and screenshots.
 
 ## Tests
 
-- Unit-test canonicalization variants in
-  `apps/backend/internal/clarification/context_test.go`.
-- Assert both MCP handlers dispatch canonical context in
+- Assert literal legacy context remains unchanged and both MCP handlers dispatch
+  joined explicit paragraphs in
   `apps/backend/internal/mcp/server/ask_user_question_test.go`.
 - Exercise the production backend-to-overlay flow in the existing desktop and
   mobile shared-context Playwright tests.
@@ -55,6 +52,9 @@ wire form and strengthen existing desktop/mobile assertions and screenshots.
 - Desktop and Pixel 5 screenshots were captured and visually inspected. Both
   show two separate context paragraphs with no visible escape text; mobile has
   no horizontal overflow.
+- Review remediation replaced ambiguous escape inference with explicit
+  `context_paragraphs`; focused user/parent contract tests and both rendered
+  checks passed again.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -66,9 +66,8 @@ Sequential; no subagent is planned or authorized.
 
 ## Risks
 
-- The helper intentionally canonicalizes paragraph separators rather than
-  single newline escapes, avoiding ambiguity with paths and prose that
-  documents newline syntax.
+- Legacy callers remain supported through verbatim `context`; multiline callers
+  must adopt `context_paragraphs` to avoid ambiguous escape syntax.
 
 ## Out of Scope
 

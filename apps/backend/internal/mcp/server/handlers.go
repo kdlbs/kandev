@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/clarification"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -25,20 +25,21 @@ var askQuestionKeepAliveInterval = 20 * time.Second
 // Argument-name constants used across the ask_user_question_kandev handler.
 // Pulled out so goconst stays happy and renames stay safe.
 const (
-	promptArg          = "prompt"
-	questionsArg       = "questions"
-	optionsArg         = "options"
-	idArg              = "id"
-	titleArg           = "title"
-	labelArg           = "label"
-	descriptionArg     = "description"
-	optionIDFieldName  = "option_id"
-	questionIDFieldKey = "question_id"
-	answeredFieldKey   = "answered"
-	rejectedFieldKey   = "rejected"
-	documentArg        = "document"
-	messageArg         = "message"
-	autopilotArg       = "autopilot"
+	promptArg            = "prompt"
+	questionsArg         = "questions"
+	optionsArg           = "options"
+	idArg                = "id"
+	titleArg             = "title"
+	labelArg             = "label"
+	descriptionArg       = "description"
+	optionIDFieldName    = "option_id"
+	questionIDFieldKey   = "question_id"
+	answeredFieldKey     = "answered"
+	rejectedFieldKey     = "rejected"
+	documentArg          = "document"
+	messageArg           = "message"
+	autopilotArg         = "autopilot"
+	contextParagraphsArg = "context_paragraphs"
 )
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
@@ -566,7 +567,7 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			return errResult, nil
 		}
 
-		questionCtx := clarification.NormalizeContext(req.GetString("context", ""))
+		questionCtx := readQuestionContext(req)
 		payload := map[string]interface{}{
 			"session_id": s.sessionID,
 			questionsArg: questions,
@@ -609,7 +610,7 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 			"task_id":    s.taskID,
 			"session_id": s.sessionID,
 			questionsArg: questions,
-			"context":    clarification.NormalizeContext(req.GetString("context", "")),
+			"context":    readQuestionContext(req),
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAskParentQuestion, payload, &result); err != nil {
@@ -618,6 +619,14 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func readQuestionContext(req mcp.CallToolRequest) string {
+	paragraphs := req.GetStringSlice(contextParagraphsArg, nil)
+	if len(paragraphs) > 0 {
+		return strings.Join(paragraphs, "\n\n")
+	}
+	return req.GetString("context", "")
 }
 
 // emitKeepAlivePings invokes send on every interval tick until stop is closed or

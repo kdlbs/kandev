@@ -25,9 +25,9 @@ that depend on that background can therefore appear incomplete or confusing.
 - Omitted or whitespace-only context does not create an empty context region.
 - The UI preserves line breaks in the agent-authored context and allows long
   text to wrap within the clarification surface.
-- Clarification context has one canonical paragraph representation regardless
-  of whether an agent client submits actual blank lines or JSON-style escaped
-  paragraph separators.
+- Agents can provide multiline shared background as explicit context
+  paragraphs. The backend joins those paragraphs with blank lines while
+  preserving the legacy single context string verbatim.
 
 ## Scenarios
 
@@ -43,9 +43,12 @@ that depend on that background can therefore appear incomplete or confusing.
 - **GIVEN** a pending clarification with shared context on a phone viewport,
   **WHEN** the operator views the question, **THEN** the context is visible,
   wraps inside the overlay, and does not introduce horizontal page overflow.
-- **GIVEN** an agent client submits context with escaped paragraph breaks,
-  **WHEN** the clarification is stored and displayed, **THEN** the operator sees
-  multiline prose without literal newline escape sequences.
+- **GIVEN** an agent submits multiple explicit context paragraphs, **WHEN** the
+  clarification is stored and displayed, **THEN** the operator sees those
+  paragraphs separated by blank lines.
+- **GIVEN** an agent submits a legacy context string containing literal escape
+  syntax, **WHEN** the clarification is stored and displayed, **THEN** the
+  literal text remains unchanged.
 
 ## Out of scope
 

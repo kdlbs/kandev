@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
@@ -38,6 +39,7 @@ func TestAskUserQuestion_ToolSchema_RequiresQuestionsArray(t *testing.T) {
 	require.True(t, ok, "schema should have properties")
 	assert.Contains(t, props, "questions", "schema must expose 'questions'")
 	assert.Contains(t, props, "context")
+	assert.Contains(t, props, "context_paragraphs")
 	assert.NotContains(t, props, "prompt", "legacy 'prompt' must not be top-level anymore")
 	assert.NotContains(t, props, "options", "legacy 'options' must not be top-level anymore")
 
@@ -112,7 +114,7 @@ func TestAskUserQuestion_SingleQuestion_PayloadShape(t *testing.T) {
 	assert.Equal(t, "q1_opt1", q1["selected_option"])
 }
 
-func TestAskUserQuestion_NormalizesEscapedContextNewlines(t *testing.T) {
+func TestAskUserQuestion_PreservesLiteralContextEscapes(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
 	s := newTaskModeServer(t, backend, "task-current")
 
@@ -133,7 +135,52 @@ func TestAskUserQuestion_NormalizesEscapedContextNewlines(t *testing.T) {
 
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
+	assert.Equal(t, `First paragraph.\n\nSecond paragraph.`, payload["context"])
+}
+
+func TestAskUserQuestion_JoinsContextParagraphs(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "ask_user_question_kandev", clarificationArgsWithParagraphs())
+	require.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
 	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", payload["context"])
+}
+
+func TestAskParentQuestion_JoinsContextParagraphs(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{}}
+	profile := mcpprofile.New(
+		mcpprofile.SurfaceKanbanTask,
+		[]mcpprofile.Capability{mcpprofile.CapabilityParentQuestion},
+		nil,
+	)
+	s := NewWithProfile(backend, "child-session", "child-task", 10005, newTestLogger(t), "", false, profile)
+
+	result := callTool(t, s, "ask_parent_question_kandev", clarificationArgsWithParagraphs())
+	require.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", payload["context"])
+}
+
+func clarificationArgsWithParagraphs() map[string]interface{} {
+	return map[string]interface{}{
+		"context_paragraphs": []string{"First paragraph.", "Second paragraph."},
+		"questions": []map[string]interface{}{
+			{
+				"id":     "q1",
+				"prompt": "Continue?",
+				"options": []map[string]interface{}{
+					{"label": "Yes", "description": "Continue"},
+					{"label": "No", "description": "Stop"},
+				},
+			},
+		},
+	}
 }
 
 // TestAskUserQuestion_MultiQuestion_BuildsMapResponse covers the full multi-q
