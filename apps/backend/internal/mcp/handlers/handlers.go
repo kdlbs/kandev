@@ -247,6 +247,12 @@ type Handlers struct {
 	diagnosticMaterializer DiagnosticBundleMaterializer
 	// Optional task-bound GitLab MR automation controls.
 	taskMRAutomation TaskMRAutomationService
+
+	// Optional list_pending_questions_kandev / answer_question_kandev
+	// dependencies (external MCP surface only, set via
+	// SetClarificationResolver).
+	clarificationResolver *clarification.Resolver
+	clarificationBundles  ClarificationBundleLister
 }
 
 // NewHandlers creates new MCP handlers.
@@ -387,6 +393,10 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
 	if h.diagnosticBundles != nil && h.diagnosticMaterializer != nil {
 		d.RegisterFunc(ws.ActionMCPGetDiagnosticBundle, h.handleGetDiagnosticBundle)
+	}
+	if h.clarificationResolver != nil && h.clarificationBundles != nil {
+		d.RegisterFunc(ws.ActionMCPListPendingQuestions, h.handleListPendingQuestions)
+		d.RegisterFunc(ws.ActionMCPAnswerQuestion, h.handleAnswerQuestion)
 	}
 	h.registerReviewHandlers(d)
 

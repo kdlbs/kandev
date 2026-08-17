@@ -1248,7 +1248,7 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 	}
 
-	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
+	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
@@ -1530,6 +1530,7 @@ func registerMCPAndDebugRoutes(
 	wfCtrl *workflowcontroller.Controller,
 	clarificationStore *clarification.Store,
 	clarificationCanceller *clarification.Canceller,
+	clarificationResolver *clarification.Resolver,
 	planService *taskservice.PlanService,
 	handoffSvc *taskservice.HandoffService,
 ) {
@@ -1548,6 +1549,10 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
 	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)
 	mcpHandlers.SetUserSettingsProvider(p.services.User)
+	// list_pending_questions_kandev / answer_question_kandev (external MCP
+	// surface only). p.taskRepo already implements ClarificationBundleLister
+	// (ListUnresolvedClarificationBundles, FindMessagesByPendingID).
+	mcpHandlers.SetClarificationResolver(clarificationResolver, p.taskRepo)
 	if p.systemSvc != nil && p.systemSvc.LogBundles != nil {
 		mcpHandlers.SetDiagnosticBundleServices(p.systemSvc.LogBundles, p.lifecycleMgr)
 	}
