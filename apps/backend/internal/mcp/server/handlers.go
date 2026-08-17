@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kandev/kandev/internal/clarification"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -565,7 +566,7 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			return errResult, nil
 		}
 
-		questionCtx := req.GetString("context", "")
+		questionCtx := clarification.NormalizeContext(req.GetString("context", ""))
 		payload := map[string]interface{}{
 			"session_id": s.sessionID,
 			questionsArg: questions,
@@ -608,7 +609,7 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 			"task_id":    s.taskID,
 			"session_id": s.sessionID,
 			questionsArg: questions,
-			"context":    req.GetString("context", ""),
+			"context":    clarification.NormalizeContext(req.GetString("context", "")),
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAskParentQuestion, payload, &result); err != nil {

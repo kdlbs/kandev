@@ -756,7 +756,7 @@ func clarificationMultiQuestionArgs() map[string]any {
 				},
 			},
 		},
-		"context": "Picking the foundational stack: answer all three so we can move forward.",
+		"context": `Picking the foundational stack.\n\nAnswer all three so we can move forward.`,
 	}
 }
 

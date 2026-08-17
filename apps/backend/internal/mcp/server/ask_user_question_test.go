@@ -112,6 +112,30 @@ func TestAskUserQuestion_SingleQuestion_PayloadShape(t *testing.T) {
 	assert.Equal(t, "q1_opt1", q1["selected_option"])
 }
 
+func TestAskUserQuestion_NormalizesEscapedContextNewlines(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"answers": []interface{}{}}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "ask_user_question_kandev", map[string]interface{}{
+		"context": `First paragraph.\n\nSecond paragraph.`,
+		"questions": []map[string]interface{}{
+			{
+				"id":     "q1",
+				"prompt": "Continue?",
+				"options": []map[string]interface{}{
+					{"label": "Yes", "description": "Continue"},
+					{"label": "No", "description": "Stop"},
+				},
+			},
+		},
+	})
+	require.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "First paragraph.\n\nSecond paragraph.", payload["context"])
+}
+
 // TestAskUserQuestion_MultiQuestion_BuildsMapResponse covers the full multi-q
 // path: agent receives a JSON map keyed by every question id.
 func TestAskUserQuestion_MultiQuestion_BuildsMapResponse(t *testing.T) {

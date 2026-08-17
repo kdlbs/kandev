@@ -421,8 +421,9 @@ test.describe("Multi-question clarification carousel", () => {
     const context = session.clarificationContext();
     await expect(context).toHaveCount(1);
     await expect(context).toHaveText(
-      "Picking the foundational stack: answer all three so we can move forward.",
+      "Picking the foundational stack.\n\nAnswer all three so we can move forward.",
     );
+    await expect(context).not.toContainText(String.raw`\n`);
     await expect(context).toHaveCSS("margin-top", "12px");
     await expect(context).toHaveCSS("padding", "0px");
     await expect(context).toHaveCSS("border-width", "0px");
@@ -444,7 +445,7 @@ test.describe("Multi-question clarification carousel", () => {
     await expect(session.clarificationStep(1)).toHaveAttribute("data-active", "true");
     await expect(context).toHaveCount(1);
     await expect(context).toHaveText(
-      "Picking the foundational stack: answer all three so we can move forward.",
+      "Picking the foundational stack.\n\nAnswer all three so we can move forward.",
     );
   });
 
