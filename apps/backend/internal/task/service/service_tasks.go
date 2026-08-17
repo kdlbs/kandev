@@ -442,6 +442,13 @@ func (s *Service) pullTasksFromNewFeederWork(ctx context.Context, workflowID, fe
 	}
 }
 
+// ReconcileFeederPulls wakes steps that pull from feederStepID. The
+// orchestrator calls this after an admitted manual move's lifecycle barrier
+// completes so selection and promotion rules stay owned by this service.
+func (s *Service) ReconcileFeederPulls(ctx context.Context, workflowID, feederStepID string) {
+	s.pullTasksFromNewFeederWork(ctx, workflowID, feederStepID)
+}
+
 func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task) error {
 	if task.IsEphemeral || task.WorkflowStepID == "" {
 		return s.tasks.CreateTask(ctx, task)
