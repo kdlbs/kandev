@@ -2,7 +2,6 @@ package worktree
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,13 +40,6 @@ func initGitRepoWithOriginAheadLocal(t *testing.T) (string, string) {
 
 	localHead := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "main"))
 	return repoPath, localHead
-}
-
-func writeRepoFile(t *testing.T, repoPath, name, contents string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(repoPath, name), []byte(contents), 0644); err != nil {
-		t.Fatalf("failed to write %s: %v", name, err)
-	}
 }
 
 // captureSyncProgress records every SyncProgressEvent so a test can assert

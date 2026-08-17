@@ -70,30 +70,6 @@ func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bo
 	return true, nil
 }
 
-// isAncestor reports whether ancestor is reachable from descendant, i.e.
-// whether descendant already contains every commit in ancestor.
-//
-// Used to decide whether falling back to origin/<branch> can lose local work.
-// A probe that cannot answer (throttle wait, timeout, missing ref) returns
-// false, which keeps the caller on the local branch: being slightly stale is
-// recoverable, silently dropping the user's unpushed commits is not.
-func (m *Manager) isAncestor(ctx context.Context, repoPath, ancestor, descendant string) bool {
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		m.logger.Warn("isAncestor bounded by context before throttle acquire",
-			zap.String("repository_path", repoPath),
-			zap.String("ancestor", ancestor),
-			zap.String("descendant", descendant),
-			zap.Error(err))
-		return false
-	}
-	defer release()
-	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
-	defer cancel()
-	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "merge-base", "--is-ancestor", ancestor, descendant)
-	return cmd.Run() == nil
-}
-
 // checkoutBranchExistsAnywhere returns true when the named branch is present
 // either locally or as origin/<branch>. Used by createInTaskDir to decide
 // whether to treat req.CheckoutBranch as "fetch this existing ref" or as
@@ -192,12 +168,6 @@ func (m *Manager) BranchRecoveryStatus(ctx context.Context, repoPath, branch str
 // wait, timeout, missing ref) returns false, and callers must treat that as
 // "cannot rule out loss": being slightly stale is recoverable, silently
 // dropping the user's unpushed commits is not.
-//
-// NOTE: PR #2654 adds an equivalent `isAncestor` helper on the
-// pullCurrentBranchOrFallback path, with the arguments in the opposite order.
-// The two are deliberately named differently so both can land in either order
-// without a duplicate-symbol build failure; whichever merges second should
-// collapse them into one helper.
 func (m *Manager) refContains(ctx context.Context, repoPath, container, contained string) bool {
 	// Same Acquire-then-build-execCtx ordering as branchExists.
 	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
@@ -371,7 +341,7 @@ func (m *Manager) pullCurrentBranchOrFallback(
 		// in that case, matching handleFetchFallback and the non-current-branch
 		// path in resolveLocalBaseRef, which both resolve to it on failure.
 		fallbackRef := remoteRef
-		if !m.isAncestor(ctx, repoPath, baseBranch, remoteRef) {
+		if !m.refContains(ctx, repoPath, remoteRef, baseBranch) {
 			fallbackRef = baseBranch
 		}
 		m.logger.Warn("git pull failed before worktree creation; continuing with fallback ref",
