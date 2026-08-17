@@ -1,0 +1,101 @@
+package clarification
+
+import (
+	"sort"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+)
+
+// orderBundleMessages sorts a copy of msgs into D2/L5's total order:
+// question_index ascending, then message created_at ascending, then message
+// id ascending. questionIndexFromMetadata returns 0 for a missing or
+// unparseable index, so a legacy or corrupt bundle can present several
+// messages all claiming index 0 — the created_at/id tiebreaks make the
+// composite total rather than merely a best effort.
+func orderBundleMessages(msgs []*taskmodels.Message) []*taskmodels.Message {
+	sorted := make([]*taskmodels.Message, len(msgs))
+	copy(sorted, msgs)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		ii, ij := questionIndexFromMetadata(sorted[i].Metadata), questionIndexFromMetadata(sorted[j].Metadata)
+		if ii != ij {
+			return ii < ij
+		}
+		if !sorted[i].CreatedAt.Equal(sorted[j].CreatedAt) {
+			return sorted[i].CreatedAt.Before(sorted[j].CreatedAt)
+		}
+		return sorted[i].ID < sorted[j].ID
+	})
+	return sorted
+}
+
+// bundleQuestions builds the D2/L5-ordered Question list for a bundle,
+// parsing each message's full question metadata (id, title, prompt and
+// options). Unlike questionsFromMessages (handlers.go), used only for the
+// resume-summary path, this parses options too: N8 needs them to validate
+// selected_options membership and N3a rule 2 needs their order.
+//
+// A message with unparseable `question` metadata (L15) yields a Question
+// carrying only its question_id, with empty title/prompt and no options. A
+// message with no question_id anywhere (L16) yields a Question with an
+// empty ID.
+func bundleQuestions(msgs []*taskmodels.Message) []Question {
+	ordered := orderBundleMessages(msgs)
+	out := make([]Question, 0, len(ordered))
+	for _, m := range ordered {
+		out = append(out, questionFromMessageMetadataFull(m.Metadata))
+	}
+	return out
+}
+
+func questionFromMessageMetadataFull(meta map[string]any) Question {
+	q := Question{ID: stringFromMetadata(meta, metaQuestionIDKey)}
+	qData, ok := meta[metaQuestionKey].(map[string]any)
+	if !ok {
+		return q
+	}
+	if v, ok := qData["prompt"].(string); ok {
+		q.Prompt = v
+	}
+	if v, ok := qData["title"].(string); ok {
+		q.Title = v
+	}
+	if q.ID == "" {
+		if v, ok := qData["id"].(string); ok {
+			q.ID = v
+		}
+	}
+	q.Options = optionsFromQuestionData(qData)
+	return q
+}
+
+// optionsFromQuestionData reads a question's `options` array as stored by
+// CreateClarificationRequestMessages (`backendapp/adapters.go`): a
+// []interface{} of map[string]interface{} with option_id/label/description
+// string keys, the shape json.Unmarshal produces after a database round
+// trip. Any entry that does not match this shape is skipped rather than
+// aborting the whole question (L15's degrade-gracefully rule).
+func optionsFromQuestionData(qData map[string]any) []Option {
+	raw, ok := qData["options"].([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]Option, 0, len(raw))
+	for _, item := range raw {
+		om, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		var opt Option
+		if v, ok := om["option_id"].(string); ok {
+			opt.ID = v
+		}
+		if v, ok := om["label"].(string); ok {
+			opt.Label = v
+		}
+		if v, ok := om["description"].(string); ok {
+			opt.Description = v
+		}
+		out = append(out, opt)
+	}
+	return out
+}
