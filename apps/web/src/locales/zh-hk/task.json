@@ -446,6 +446,7 @@
   "failedToArchiveTask": "歸檔任務失敗",
   "failedToChangeCompareBranch": "更改比較分支失敗",
   "failedToChangeModel": "更改模型失敗",
+  "failedToCloseTerminal": "關閉終端失敗",
   "failedToDeleteDocument": "刪除文檔失敗",
   "failedToDeleteLayout": "刪除佈局失敗",
   "failedToDiscardChanges": "無法放棄更改",

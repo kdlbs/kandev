@@ -446,6 +446,7 @@
   "failedToArchiveTask": "Não foi possível arquivar a tarefa",
   "failedToChangeCompareBranch": "Não foi possível alterar o branch de comparação",
   "failedToChangeModel": "Não foi possível alterar o modelo",
+  "failedToCloseTerminal": "Não foi possível fechar o terminal",
   "failedToDeleteDocument": "Não foi possível eliminar o documento",
   "failedToDeleteLayout": "Não foi possível eliminar o esquema",
   "failedToDiscardChanges": "Não foi possível descartar as alterações",
