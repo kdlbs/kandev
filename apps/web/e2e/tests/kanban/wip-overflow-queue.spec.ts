@@ -60,6 +60,7 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
 
   await expect(pullColumn).toContainText("1/1");
   await expect(kanban.taskCardInColumn("Wake feeder task", pullStep.id)).toBeVisible();
+  await expect(kanban.taskCardInColumn("Wake feeder task", sourceStep.id)).not.toBeVisible();
 });
 
 test("shows same-step WIP overflow and promotes the next queued task", async ({
