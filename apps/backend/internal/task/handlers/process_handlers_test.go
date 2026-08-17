@@ -301,6 +301,14 @@ func (m *mockRepository) GetActiveTurnBySessionID(ctx context.Context, sessionID
 func (m *mockRepository) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	return nil
 }
+func (m *mockRepository) PatchTurnMetadata(
+	context.Context,
+	string,
+	string,
+	map[string]interface{},
+) (bool, time.Time, error) {
+	return false, time.Time{}, nil
+}
 func (m *mockRepository) UpdateActiveTurnMetadata(
 	context.Context,
 	string,

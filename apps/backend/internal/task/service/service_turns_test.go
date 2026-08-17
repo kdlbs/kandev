@@ -218,6 +218,45 @@ func TestPublishReservedTurnEmitsStartWithoutPostCommitRead(t *testing.T) {
 	t.Fatal("committed turn did not publish turn.started")
 }
 
+func TestPatchTurnMetadataMergesAfterReservedTurnPublication(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turn, err := svc.ReserveTurn(ctx, sessionID, &models.PromptDispatchRecovery{})
+	if err != nil {
+		t.Fatalf("ReserveTurn: %v", err)
+	}
+	if err := svc.MarkReservedTurnDispatchAttempted(ctx, turn); err != nil {
+		t.Fatalf("MarkReservedTurnDispatchAttempted: %v", err)
+	}
+	if err := svc.PublishReservedTurn(ctx, turn); err != nil {
+		t.Fatalf("PublishReservedTurn: %v", err)
+	}
+	if err := repo.CompleteTurn(ctx, turn.ID); err != nil {
+		t.Fatalf("CompleteTurn: %v", err)
+	}
+
+	usage := map[string]interface{}{"input_tokens": float64(7)}
+	if err := svc.PatchTurnMetadata(ctx, sessionID, turn.ID, map[string]interface{}{
+		"prompt_usage": usage,
+		"agent_id":     "exec-fast",
+	}); err != nil {
+		t.Fatalf("PatchTurnMetadata: %v", err)
+	}
+	persisted, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	gotUsage, ok := persisted.Metadata["prompt_usage"].(map[string]interface{})
+	if !ok || gotUsage["input_tokens"] != float64(7) || persisted.Metadata["agent_id"] != "exec-fast" {
+		t.Fatalf("patched metadata = %#v, want usage and agent identity", persisted.Metadata)
+	}
+	if _, pending := persisted.Metadata[models.TurnMetaKeyPromptDispatchPending]; pending {
+		t.Fatalf("late metadata patch restored dispatch marker: %#v", persisted.Metadata)
+	}
+}
+
 func TestPublishReservedTurnDoesNotReopenCompletedReservation(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

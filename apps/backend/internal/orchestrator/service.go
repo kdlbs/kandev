@@ -139,6 +139,7 @@ type TurnService interface {
 	GetTurn(ctx context.Context, turnID string) (*models.Turn, error)
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
+	PatchTurnMetadata(ctx context.Context, sessionID, turnID string, updates map[string]interface{}) error
 	// AbandonOpenTurns buries any open turns for a session by setting
 	// completed_at = started_at (zero duration), so a subsequent prompt starts
 	// a fresh turn instead of adopting one that was orphaned by a crash or

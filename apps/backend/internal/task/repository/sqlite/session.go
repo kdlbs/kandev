@@ -268,6 +268,26 @@ func (r *Repository) UpdateActiveTurnMetadata(
 	updates map[string]interface{},
 	removeKeys []string,
 ) (bool, map[string]interface{}, time.Time, error) {
+	return r.patchTurnMetadata(ctx, sessionID, turnID, updates, removeKeys, true)
+}
+
+// PatchTurnMetadata merges metadata into an active or completed turn.
+func (r *Repository) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) (bool, time.Time, error) {
+	updated, _, updatedAt, err := r.patchTurnMetadata(ctx, sessionID, turnID, updates, nil, false)
+	return updated, updatedAt, err
+}
+
+func (r *Repository) patchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+	removeKeys []string,
+	activeOnly bool,
+) (bool, map[string]interface{}, time.Time, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, nil, time.Time{}, fmt.Errorf("begin active turn metadata update: %w", err)
@@ -276,40 +296,34 @@ func (r *Repository) UpdateActiveTurnMetadata(
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
 		return false, nil, time.Time{}, err
 	}
-	var metadataJSON string
-	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+	activeClause := ""
+	if activeOnly {
+		activeClause = " AND completed_at IS NULL"
+	}
+	selectQuery := fmt.Sprintf(`
 		SELECT metadata
 		FROM task_session_turns
-		WHERE id = ? AND task_session_id = ? AND completed_at IS NULL
-	`), turnID, sessionID).Scan(&metadataJSON)
+		WHERE id = ? AND task_session_id = ?%s
+	`, activeClause)
+	var metadataJSON string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(selectQuery), turnID, sessionID).Scan(&metadataJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil, time.Time{}, nil
 	}
 	if err != nil {
 		return false, nil, time.Time{}, fmt.Errorf("read active turn metadata: %w", err)
 	}
-	metadata := make(map[string]interface{})
-	if metadataJSON != "" && metadataJSON != "{}" {
-		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-			return false, nil, time.Time{}, fmt.Errorf("deserialize active turn metadata: %w", err)
-		}
-	}
-	for key, value := range updates {
-		metadata[key] = value
-	}
-	for _, key := range removeKeys {
-		delete(metadata, key)
-	}
-	metadataJSON, err = serializeTurnMetadata(metadata)
+	metadata, metadataJSON, err := applyTurnMetadataPatch(metadataJSON, updates, removeKeys)
 	if err != nil {
 		return false, nil, time.Time{}, err
 	}
 	updatedAt := r.nowUTC()
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+	updateQuery := fmt.Sprintf(`
 		UPDATE task_session_turns
 		SET metadata = ?, updated_at = ?
-		WHERE id = ? AND task_session_id = ? AND completed_at IS NULL
-	`), metadataJSON, updatedAt, turnID, sessionID)
+		WHERE id = ? AND task_session_id = ?%s
+	`, activeClause)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), metadataJSON, updatedAt, turnID, sessionID)
 	if err != nil {
 		return false, nil, time.Time{}, err
 	}
@@ -324,6 +338,27 @@ func (r *Repository) UpdateActiveTurnMetadata(
 		return false, nil, time.Time{}, nil
 	}
 	return true, metadata, updatedAt, nil
+}
+
+func applyTurnMetadataPatch(
+	metadataJSON string,
+	updates map[string]interface{},
+	removeKeys []string,
+) (map[string]interface{}, string, error) {
+	metadata := make(map[string]interface{})
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			return nil, "", fmt.Errorf("deserialize turn metadata patch: %w", err)
+		}
+	}
+	for key, value := range updates {
+		metadata[key] = value
+	}
+	for _, key := range removeKeys {
+		delete(metadata, key)
+	}
+	serialized, err := serializeTurnMetadata(metadata)
+	return metadata, serialized, err
 }
 
 func serializeTurnMetadata(metadata map[string]interface{}) (string, error) {

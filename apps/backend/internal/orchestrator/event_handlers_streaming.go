@@ -2677,22 +2677,19 @@ func (s *Service) persistPromptMetadataOnTurn(
 	turn *models.Turn,
 ) {
 	model, agentType := resolvePromptUsageLabels(payload, session)
-	metadata := turn.Metadata
-	if metadata == nil {
-		metadata = make(map[string]interface{})
+	updates := map[string]interface{}{
+		"prompt_usage": promptUsageMetadata(payload.Data.Usage),
 	}
-	metadata["prompt_usage"] = promptUsageMetadata(payload.Data.Usage)
 	if model != "" {
-		metadata[sessionModelConfigKey] = model
+		updates[sessionModelConfigKey] = model
 	}
 	if agentType != "" {
-		metadata["agent_type"] = agentType
+		updates["agent_type"] = agentType
 	}
 	if payload.AgentID != "" {
-		metadata["agent_id"] = payload.AgentID
+		updates["agent_id"] = payload.AgentID
 	}
-	turn.Metadata = metadata
-	if err := s.turnService.UpdateTurn(ctx, turn); err != nil {
+	if err := s.turnService.PatchTurnMetadata(ctx, turn.TaskSessionID, turn.ID, updates); err != nil {
 		s.logger.Warn("failed to persist prompt usage metadata on turn",
 			zap.String("turn_id", turn.ID),
 			zap.String("session_id", payload.SessionID),

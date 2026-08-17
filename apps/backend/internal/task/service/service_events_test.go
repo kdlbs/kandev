@@ -405,6 +405,27 @@ func TestTaskPublication_TaskCreatedAfterTombstoneClearsAndPublishes(t *testing.
 	}
 }
 
+func TestMessageEventChangesPendingActionOnlyForActionableMessages(t *testing.T) {
+	for _, eventType := range []string{events.MessageAdded, events.MessageUpdated, events.MessageDeleted} {
+		for _, messageType := range []models.MessageType{
+			models.MessageTypeClarificationRequest,
+			models.MessageTypePermissionRequest,
+		} {
+			if !messageEventChangesPendingAction(eventType, &models.Message{Type: messageType}) {
+				t.Fatalf("%s %s did not project pending action", eventType, messageType)
+			}
+		}
+		for _, messageType := range []models.MessageType{
+			models.MessageTypeMessage,
+			models.MessageTypeAgentPlan,
+		} {
+			if messageEventChangesPendingAction(eventType, &models.Message{Type: messageType}) {
+				t.Fatalf("%s %s projected pending action", eventType, messageType)
+			}
+		}
+	}
+}
+
 func TestTaskPublication_TaskUpdatedIncludesNullArchivedAtForActiveTasks(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

@@ -408,7 +408,12 @@ All locally available task gates passed; environment-gated parity also passed in
   all locally runnable affected suites pass.
 - The accompanying CodeRabbit pass makes reserved-turn waiter cleanup immediate and idempotent in five
   agent-ready regressions, and preserves the authoritative status-summary row when pending-action CAS
-  repair exhausts its retries. Both full task-service and orchestrator suites pass again.
+  repair exhausts its retries. A delayed thread also restricts pending-action reads on add/delete events
+  to clarification and permission messages. Both full task-service and orchestrator suites pass again.
+- A final Codex race follow-up routes late prompt-usage and agent-identity fields through an atomic
+  metadata patch that works after reservation publication and turn completion. The stale full-snapshot
+  CAS remains as a clobber guard, while publication-winning usage metadata now persists on retry-free
+  merge semantics. Full SQLite repository, task-service, and orchestrator suites pass.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

@@ -71,6 +71,14 @@ func (a *turnServiceAdapter) UpdateTurn(ctx context.Context, turn *models.Turn) 
 	return a.svc.UpdateTurn(ctx, turn)
 }
 
+func (a *turnServiceAdapter) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) error {
+	return a.svc.PatchTurnMetadata(ctx, sessionID, turnID, updates)
+}
+
 func (a *turnServiceAdapter) AbandonOpenTurns(ctx context.Context, sessionID string) error {
 	return a.svc.AbandonOpenTurns(ctx, sessionID)
 }

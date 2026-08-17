@@ -249,6 +249,13 @@ type TurnRepository interface {
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
+	// PatchTurnMetadata merges fields into an active or completed turn while
+	// preserving unrelated metadata under the session's turn-write authority.
+	PatchTurnMetadata(
+		ctx context.Context,
+		sessionID, turnID string,
+		updates map[string]interface{},
+	) (bool, time.Time, error)
 	// UpdateActiveTurnMetadata merges updates and removes named keys only while
 	// the turn is active and belongs to sessionID. Implementations serialize
 	// this authority change with other current-turn decisions for the session.

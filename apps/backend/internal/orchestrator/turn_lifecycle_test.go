@@ -157,6 +157,18 @@ func (a *repoTurnService) UpdateTurn(ctx context.Context, turn *models.Turn) err
 	return a.repo.UpdateTurn(ctx, turn)
 }
 
+func (a *repoTurnService) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) error {
+	updated, _, err := a.repo.PatchTurnMetadata(ctx, sessionID, turnID, updates)
+	if err == nil && !updated {
+		return sql.ErrNoRows
+	}
+	return err
+}
+
 func (a *repoTurnService) AbandonOpenTurns(ctx context.Context, sessionID string) error {
 	for {
 		turn, err := a.GetActiveTurn(ctx, sessionID)

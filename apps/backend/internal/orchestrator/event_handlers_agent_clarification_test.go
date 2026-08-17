@@ -31,6 +31,11 @@ type testRepo interface {
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
+	PatchTurnMetadata(
+		ctx context.Context,
+		sessionID, turnID string,
+		updates map[string]interface{},
+	) (bool, time.Time, error)
 }
 
 func (s *repoBackedTurnService) StartTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
@@ -94,6 +99,18 @@ func (s *repoBackedTurnService) GetActiveTurn(ctx context.Context, sessionID str
 
 func (s *repoBackedTurnService) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	return s.repo.UpdateTurn(ctx, turn)
+}
+
+func (s *repoBackedTurnService) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) error {
+	updated, _, err := s.repo.PatchTurnMetadata(ctx, sessionID, turnID, updates)
+	if err == nil && !updated {
+		return sql.ErrNoRows
+	}
+	return err
 }
 
 func (s *repoBackedTurnService) AbandonOpenTurns(ctx context.Context, sessionID string) error {

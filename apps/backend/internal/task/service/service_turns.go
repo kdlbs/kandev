@@ -406,6 +406,22 @@ func (s *Service) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	return s.turns.UpdateTurn(ctx, turn)
 }
 
+// PatchTurnMetadata atomically merges metadata into an active or completed turn.
+func (s *Service) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) error {
+	updated, _, err := s.turns.PatchTurnMetadata(ctx, sessionID, turnID, updates)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return fmt.Errorf("patch turn %s metadata: turn not found in session %s", turnID, sessionID)
+	}
+	return nil
+}
+
 // AbandonOpenTurns closes any open turns for a session by setting their
 // completed_at = started_at. Used on session resume to bury orphan turns left
 // behind by a previous crash/restart so a fresh prompt starts a fresh turn
