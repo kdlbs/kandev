@@ -97,10 +97,18 @@ func TestGitCredentialScopeIsIndependentOfRemoteTransport(t *testing.T) {
 	}
 
 	https := scopeFor(t, "https://github.com/acme/widgets.git")
-	for _, remoteURL := range []string{"git@github.com:acme/widgets.git", "ssh://git@github.com/acme/widgets.git"} {
-		if got := scopeFor(t, remoteURL); got != https {
-			t.Fatalf("scopes for %q = %q, want the HTTPS-remote scopes %q", remoteURL, got, https)
-		}
+	// Driven from sshRemoteScopeCases() rather than a hand-listed subset. All
+	// four spellings agree today only because the provider identity wins; the
+	// fallback that rewrites the remote in place does not collapse the `.git`
+	// suffix, so a regression demoting the provider columns makes the bare forms
+	// diverge from the suffixed ones. A hand-listed pair of suffixed remotes
+	// cannot see that.
+	for _, testCase := range sshRemoteScopeCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := scopeFor(t, testCase.remoteURL); got != https {
+				t.Fatalf("scopes for %q = %q, want the HTTPS-remote scopes %q", testCase.remoteURL, got, https)
+			}
+		})
 	}
 }
 

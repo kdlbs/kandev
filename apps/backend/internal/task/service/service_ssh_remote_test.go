@@ -43,9 +43,15 @@ func TestService_FindOrCreateRepositoryPersistsAndAdoptsSSHRemote(t *testing.T) 
 				t.Fatalf("created RemoteURL = %q, want %q", created.RemoteURL, remoteURL)
 			}
 
+			// Deliberately the HTTPS spelling of the same repository. Resolution
+			// keys off the provider columns, so a later provider-driven request
+			// carrying the HTTPS URL must adopt this row rather than create a
+			// duplicate. Passing the SSH URL back would also pass against an
+			// implementation that matched on exact remote_url.
 			resolved, duplicateCreated, err := svc.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
 				WorkspaceID: "ws-1", Provider: "github", ProviderHost: "https://github.com",
-				ProviderOwner: "acme", ProviderName: "widgets", RemoteURL: remoteURL,
+				ProviderOwner: "acme", ProviderName: "widgets",
+				RemoteURL: "https://github.com/acme/widgets.git",
 			})
 			if err != nil {
 				t.Fatalf("second FindOrCreateRepository() error = %v", err)
@@ -53,8 +59,10 @@ func TestService_FindOrCreateRepositoryPersistsAndAdoptsSSHRemote(t *testing.T) 
 			if duplicateCreated || resolved.ID != created.ID {
 				t.Fatalf("second call = %q (created=%t), want existing %q", resolved.ID, duplicateCreated, created.ID)
 			}
+			// The row already had a remote, so the HTTPS spelling must not clobber
+			// the stored SSH one: backfill only fills an empty column.
 			if resolved.RemoteURL != remoteURL {
-				t.Fatalf("resolved RemoteURL = %q, want %q", resolved.RemoteURL, remoteURL)
+				t.Fatalf("resolved RemoteURL = %q, want the stored SSH remote %q", resolved.RemoteURL, remoteURL)
 			}
 
 			stored, err := repo.GetRepository(ctx, created.ID)
