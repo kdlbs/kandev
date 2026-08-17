@@ -769,7 +769,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
 		}
 		taskdto.EnrichTaskDependencies(&dto, bootDependencyProjection(dependencyViews[task.ID]), task)
-		dto.StatusSummary = statusSummaries[task.ID]
+		taskdto.EnrichTaskStatusSummary(&dto, task.ID, statusSummaries)
 		if dto.StatusSummary != nil {
 			switch {
 			case queuedErr != nil:

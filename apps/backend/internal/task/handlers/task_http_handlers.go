@@ -287,7 +287,7 @@ func buildTaskDTOsWithSessionInfo(
 		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
-		taskDTO.StatusSummary = statusSummaries[task.ID]
+		dto.EnrichTaskStatusSummary(&taskDTO, task.ID, statusSummaries)
 		if taskDTO.StatusSummary != nil {
 			switch {
 			case queuedErr != nil:

@@ -116,5 +116,9 @@ actual files, then update task/plan status.
   configured attempt count, and last observed revision. The existing exhaustion regression now asserts
   that observability contract.
 - Exact-head Codex review aligns exhaustion with the feature spec: a summary still disagreeing with the
-  authoritative pending action after all retries is omitted from the partial result, so task-list and
-  boot consumers use the coarse pending-action fallback rather than a known-stale summary.
+  authoritative pending action after all retries is explicitly invalidated, so task-list and boot
+  consumers clear cached stale state and use the coarse pending-action fallback. Delayed Codex follow-up
+  carries that invalidation through the Go DTO and shared desktop/mobile snapshot merge without erasing
+  a newer WebSocket revision received while the read was in flight.
+- Task service, DTO, handler, backend composition, 31 focused web tests, frontend typecheck/lint, and
+  changed-code Go lint pass after remediation.

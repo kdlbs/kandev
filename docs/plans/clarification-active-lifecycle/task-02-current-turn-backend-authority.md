@@ -202,3 +202,7 @@ blockers/risks, and update task/plan status.
   clearing it; a failed replay fails startup and leaves the marker for the next restart.
 - Replay regressions, the full task subtree, backend composition, integration, orchestrator, executor,
   and changed-code Go lint pass. PostgreSQL parity remains CI-gated without a local DSN.
+- Delayed Claude review caps post-deadline delivery-confirmation waiting at five minutes, fails startup
+  on partial clarification recovery metadata, logs expected watchdog cancellation at debug, and
+  documents the intentional duplicated pending-ID SQL bind.
+- Clarification, SQLite repository, orchestrator, and changed-code Go lint pass after remediation.

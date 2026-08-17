@@ -44,6 +44,34 @@ func TestClarificationTurnAuthorityDistinguishesMissingDependencyFromMissingIden
 	}
 }
 
+func TestClarificationTurnAuthorityLogsCanceledLookupAtDebug(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	observedLogger, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observed logger: %v", err)
+	}
+	svc := &Service{
+		logger:      observedLogger,
+		turnService: &failingActiveTurnLookup{err: context.Canceled},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	data := clarificationAnsweredData{
+		SessionID: "session-1", PendingID: "pending-1", ClarificationTurnID: "turn-1",
+	}
+
+	if svc.clarificationTurnStillCurrent(ctx, data) {
+		t.Fatal("canceled turn lookup accepted clarification fallback")
+	}
+	if warnings := logs.FilterLevelExact(zapcore.WarnLevel).All(); len(warnings) != 0 {
+		t.Fatalf("canceled turn lookup warnings = %#v, want none", warnings)
+	}
+	debugEntries := logs.FilterMessage("clarification fallback authority check canceled").All()
+	if len(debugEntries) != 1 || debugEntries[0].Level != zapcore.DebugLevel {
+		t.Fatalf("canceled turn lookup logs = %#v, want one debug entry", debugEntries)
+	}
+}
+
 func TestClarificationWatchdogDoesNotDispatchAfterTurnIsSuperseded(t *testing.T) {
 	svc, agentMgr := setupSupersededClarificationTurn(t)
 	svc.clarificationWatchdogTimeout = time.Millisecond

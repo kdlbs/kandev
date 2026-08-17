@@ -165,24 +165,22 @@ func (r *Repository) finalizeReservedClarificationDelivery(
 	tx *sqlx.Tx,
 	metadata map[string]interface{},
 ) error {
-	pendingID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID].(string)
-	turnID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationTurnID].(string)
-	messageIDs, err := metadataStringSlice(metadata[models.TurnMetaKeyPromptDispatchClarificationMessageIDs])
+	claim, err := reservedClarificationClaimFromMetadata(metadata)
 	if err != nil {
-		return fmt.Errorf("decode prompt dispatch clarification message ids: %w", err)
+		return err
 	}
-	if pendingID == "" || turnID == "" || len(messageIDs) == 0 {
+	if claim == nil {
 		return nil
 	}
-	claimedIDs := make(map[string]struct{}, len(messageIDs))
-	for _, messageID := range messageIDs {
+	claimedIDs := make(map[string]struct{}, len(claim.messageIDs))
+	for _, messageID := range claim.messageIDs {
 		claimedIDs[messageID] = struct{}{}
 	}
 	messages, err := r.loadPendingClarificationResponseDeliveryBundle(
 		ctx,
 		tx,
 		r.db.DriverName(),
-		pendingID,
+		claim.pendingID,
 	)
 	if err != nil {
 		return err
@@ -192,19 +190,19 @@ func (r *Repository) finalizeReservedClarificationDelivery(
 			"response delivery intent expected %d messages, found %d for pending_id %s",
 			len(claimedIDs),
 			len(messages),
-			pendingID,
+			claim.pendingID,
 		)
 	}
 	for _, message := range messages {
 		if _, claimed := claimedIDs[message.ID]; !claimed {
 			return fmt.Errorf("response delivery intent includes unreserved message %s", message.ID)
 		}
-		if message.TurnID != turnID {
+		if message.TurnID != claim.turnID {
 			return fmt.Errorf(
 				"response delivery intent message %s belongs to turn %s, want %s",
 				message.ID,
 				message.TurnID,
-				turnID,
+				claim.turnID,
 			)
 		}
 		if status, _ := message.Metadata["status"].(string); status != clarificationStatusAnswered {
@@ -221,6 +219,42 @@ func (r *Repository) finalizeReservedClarificationDelivery(
 		messages,
 		clarificationStatusAnswered,
 	)
+}
+
+type reservedClarificationClaim struct {
+	pendingID  string
+	turnID     string
+	messageIDs []string
+}
+
+func reservedClarificationClaimFromMetadata(
+	metadata map[string]interface{},
+) (*reservedClarificationClaim, error) {
+	pendingID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID].(string)
+	turnID, _ := metadata[models.TurnMetaKeyPromptDispatchClarificationTurnID].(string)
+	messageIDs, err := metadataStringSlice(metadata[models.TurnMetaKeyPromptDispatchClarificationMessageIDs])
+	if err != nil {
+		return nil, fmt.Errorf("decode prompt dispatch clarification message ids: %w", err)
+	}
+	hasPendingID := pendingID != ""
+	hasTurnID := turnID != ""
+	hasMessageIDs := len(messageIDs) > 0
+	if !hasPendingID && !hasTurnID && !hasMessageIDs {
+		return nil, nil
+	}
+	if !hasPendingID || !hasTurnID || !hasMessageIDs {
+		return nil, fmt.Errorf(
+			"incomplete prompt dispatch clarification metadata: pending_id=%t turn_id=%t message_ids=%t",
+			hasPendingID,
+			hasTurnID,
+			hasMessageIDs,
+		)
+	}
+	return &reservedClarificationClaim{
+		pendingID:  pendingID,
+		turnID:     turnID,
+		messageIDs: messageIDs,
+	}, nil
 }
 
 // metadataFlagIsTrue mirrors the SQL JSON predicates across supported

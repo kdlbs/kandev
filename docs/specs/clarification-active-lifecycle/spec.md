@@ -236,9 +236,11 @@ session they can already access. Session selection does not broaden task visibil
   request instead of returning a successful list with empty pending ownership.
 - Summary compare-and-set loses a race: reload the newer summary, reapply authoritative pending state,
   and retry within a bounded loop. Exhaustion is an error, so restored-state acknowledgement is withheld
-  until the pending action is durably confirmed. Task-list and boot reads omit that task's stale summary
-  on repair failure so the authoritative coarse pending action remains visible. Never overwrite unrelated
-  newer summary fields.
+  until the pending action is durably confirmed. Task-list and boot reads explicitly invalidate that
+  task's stale summary on repair failure so an unchanged browser cache clears it and exposes the
+  authoritative coarse pending action. Ordinary summary omission remains a partial-response no-op, and
+  an invalidating response cannot erase a newer live summary received while that read was in flight.
+  Never overwrite unrelated newer summary fields.
 - Summary repair persists but its WebSocket publication fails: the initiating response carries the
   corrected summary; other clients converge on their next event or read.
 - A stale browser submits an older-turn answer: return conflict, do not update runtime ownership, and

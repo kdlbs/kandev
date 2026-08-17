@@ -169,8 +169,10 @@ describe("setTaskSessionPendingAction", () => {
 
   it("accepts a newer backend epoch and rejects delayed frames from the old epoch", () => {
     const store = makeStore();
-    const oldRevision = { epoch: "7", sequence: 99 };
-    const newRevision = { epoch: "8", sequence: 1 };
+    // Epochs are parsed as bigint, so decimal width changes at restart 10 do
+    // not turn this into lexicographic ordering.
+    const oldRevision = { epoch: "9", sequence: 99 };
+    const newRevision = { epoch: "10", sequence: 1 };
     store
       .getState()
       .setTaskSessionsForTask(TASK_ID, [

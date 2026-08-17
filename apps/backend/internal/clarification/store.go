@@ -17,6 +17,8 @@ var (
 	ErrAlreadyResponded = errors.New("response already submitted")
 )
 
+const maxStartedDeliveryConfirmationWait = 5 * time.Minute
+
 // Store manages pending clarification requests.
 // It provides thread-safe storage and notification when responses arrive.
 type Store struct {
@@ -306,7 +308,8 @@ func (s *Store) waitForStartedDeliveryConfirmation(
 	pending *PendingClarification,
 	confirmationDone <-chan struct{},
 ) error {
-	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.timeout)
+	finishTimeout := min(s.timeout, maxStartedDeliveryConfirmationWait)
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finishTimeout)
 	defer cancel()
 	select {
 	case <-confirmationDone:

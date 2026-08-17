@@ -37,7 +37,9 @@ func (s *Service) SetTaskStatusSummaryPRReader(reader TaskStatusSummaryPRReader)
 
 // ReconcileTaskStatusSummaries repairs stale pending state in existing rows and
 // builds absent rows. All durable inputs are batch-loaded by the caller or by
-// optional batch readers, so startup does not scan every historical task.
+// optional batch readers, so startup does not scan every historical task. A
+// present nil result is an explicit cache invalidation; an absent key remains
+// an ordinary partial-response omission.
 func (s *Service) ReconcileTaskStatusSummaries(
 	ctx context.Context,
 	tasks []*models.Task,
@@ -97,7 +99,10 @@ func (s *Service) reconcileExistingSummaries(
 			if reconciled != nil {
 				summaries[task.ID] = reconciled
 			} else {
-				delete(summaries, task.ID)
+				// A present nil entry is an explicit invalidation. DTO assembly
+				// distinguishes it from an ordinarily absent partial projection so
+				// clients can clear a known-stale cached summary.
+				summaries[task.ID] = nil
 			}
 			failedTaskIDs[task.ID] = struct{}{}
 			s.logSummaryRepairFailure(task.ID, "reconcile", err)

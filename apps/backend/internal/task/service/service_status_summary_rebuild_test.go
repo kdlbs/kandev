@@ -415,7 +415,7 @@ func TestReconcileTaskStatusSummariesRepairsExistingPendingOnly(t *testing.T) {
 	}
 }
 
-func TestReconcileTaskStatusSummariesOmitsStaleSummaryOnRepairFailure(t *testing.T) {
+func TestReconcileTaskStatusSummariesInvalidatesStaleSummaryOnRepairFailure(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	repairErr := errors.New("status summary write failed")
 	svc.statusSummaries = &failingStatusSummaryRepository{
@@ -443,8 +443,8 @@ func TestReconcileTaskStatusSummariesOmitsStaleSummaryOnRepairFailure(t *testing
 	if !errors.Is(err, repairErr) {
 		t.Fatalf("ReconcileTaskStatusSummaries error = %v, want %v", err, repairErr)
 	}
-	if got[task.ID] != nil {
-		t.Fatalf("stale summary remained in response: %+v", got[task.ID])
+	if summary, exists := got[task.ID]; !exists || summary != nil {
+		t.Fatalf("stale summary = %+v, present=%v; want explicit invalidation", summary, exists)
 	}
 }
 
@@ -479,8 +479,8 @@ func TestReconcileTaskStatusSummariesRebuildsUnrelatedMissingSummaryAfterRepairF
 	if !errors.Is(err, repairErr) {
 		t.Fatalf("ReconcileTaskStatusSummaries error = %v, want %v", err, repairErr)
 	}
-	if got["task-1"] != nil {
-		t.Fatalf("failed task summary remained: %+v", got["task-1"])
+	if summary, exists := got["task-1"]; !exists || summary != nil {
+		t.Fatalf("failed task summary = %+v, present=%v; want explicit invalidation", summary, exists)
 	}
 	if got["task-2"] == nil {
 		t.Fatal("unrelated missing task summary was not rebuilt")
@@ -593,7 +593,7 @@ func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testin
 	}
 }
 
-func TestReconcileTaskStatusSummariesDropsStaleRowAfterCASExhaustion(t *testing.T) {
+func TestReconcileTaskStatusSummariesMarksStaleRowInvalidAfterCASExhaustion(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	core, logs := observer.New(zapcore.WarnLevel)
 	log, logErr := commonlogger.NewFromZap(zap.New(core))
@@ -631,8 +631,8 @@ func TestReconcileTaskStatusSummariesDropsStaleRowAfterCASExhaustion(t *testing.
 	if err == nil {
 		t.Fatal("CAS exhaustion error = nil")
 	}
-	if _, exists := got["task-1"]; exists {
-		t.Fatalf("summary after CAS exhaustion = %+v, want stale row omitted", got["task-1"])
+	if summary, exists := got["task-1"]; !exists || summary != nil {
+		t.Fatalf("summary after CAS exhaustion = %+v, present=%v; want explicit invalidation", summary, exists)
 	}
 	if exhausting.compareCalls != maxSummaryReconcileAttempts {
 		t.Fatalf("compare calls = %d, want %d", exhausting.compareCalls, maxSummaryReconcileAttempts)

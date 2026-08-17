@@ -27,10 +27,21 @@ function hasNewerLivePlacement(existing: KanbanTask, fetchStart: KanbanTask | un
   );
 }
 
+function hasNewerLiveStatusSummary(
+  existing: KanbanTask,
+  fetchStart: KanbanTask | undefined,
+): boolean {
+  const existingRevision = existing.statusSummary?.revision;
+  if (existingRevision === undefined) return false;
+  if (!fetchStart) return true;
+  return existingRevision > (fetchStart.statusSummary?.revision ?? -1);
+}
+
 function mergeFetchedTask(
   mapped: KanbanTask,
   existing: KanbanTask,
   fetchStart: KanbanTask | undefined,
+  statusSummaryInvalidated: boolean,
 ): KanbanTask {
   if (hasNewerLivePlacement(existing, fetchStart)) {
     // A live task.updated/task.moved event arrived after this request
@@ -45,14 +56,18 @@ function mergeFetchedTask(
   // A response that started before a live WS status update may finish
   // afterwards, so do not let an older snapshot roll the status
   // projection back to a lower revision.
-  const existingRevision = existing.statusSummary?.revision;
-  const mappedRevision = mapped.statusSummary?.revision;
-  if (existingRevision !== undefined && existingRevision > (mappedRevision ?? -1)) {
-    mapped.statusSummary = existing.statusSummary;
+  if (statusSummaryInvalidated && !hasNewerLiveStatusSummary(existing, fetchStart)) {
+    mapped.statusSummary = undefined;
+  } else {
+    const existingRevision = existing.statusSummary?.revision;
+    const mappedRevision = mapped.statusSummary?.revision;
+    if (existingRevision !== undefined && existingRevision > (mappedRevision ?? -1)) {
+      mapped.statusSummary = existing.statusSummary;
+    }
+    // An equal revision can still carry a newer queued-prompt count. Preserve
+    // the freshest status projection while keeping the revision guard above.
+    mapped.statusSummary = pickFreshestStatusSummary(mapped.statusSummary, existing.statusSummary);
   }
-  // An equal revision can still carry a newer queued-prompt count. Preserve
-  // the freshest status projection while keeping the revision guard above.
-  mapped.statusSummary = pickFreshestStatusSummary(mapped.statusSummary, existing.statusSummary);
   mapped.primarySessionId = mapped.primarySessionId || existing.primarySessionId;
   mapped.primarySessionState = mapped.primarySessionState || existing.primarySessionState;
   // Autopilot is immutable after creation. Keep the cached value when
@@ -79,7 +94,14 @@ function mergeSnapshotTasks(
       const mapped = mapSnapshotTask(task, stepIds);
       if (!mapped) return null;
       const existing = existingById.get(mapped.id);
-      return existing ? mergeFetchedTask(mapped, existing, fetchStartById.get(mapped.id)) : mapped;
+      return existing
+        ? mergeFetchedTask(
+            mapped,
+            existing,
+            fetchStartById.get(mapped.id),
+            task.status_summary_invalidated === true,
+          )
+        : mapped;
     })
     .filter((t): t is KanbanTask => t !== null);
   const snapshotTaskIds = new Set(tasks.map((t) => t.id));

@@ -507,6 +507,8 @@ func (r *Repository) claimActiveClarificationBundle(
 	`, dialect.JSONSet(drv, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr,
 		nonTerminalSessionPredicate("task_session_messages"),
 		turnAuthorityPredicate(drv, "turn_row"), bundlePendingIDExpr)
+	// pendingID is bound once for the outer bundle and once for the malformed-
+	// bundle NOT EXISTS guard.
 	result, err := tx.ExecContext(ctx, r.db.Rebind(claimQuery), claimAt, pendingID, pendingID)
 	if err != nil {
 		return 0, fmt.Errorf("claim active clarification bundle: %w", err)

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 
 	"go.uber.org/zap"
 )
@@ -21,6 +22,14 @@ func (s *Service) clarificationTurnStillCurrent(ctx context.Context, data clarif
 	}
 	turn, err := s.turnService.GetActiveTurn(ctx, data.SessionID)
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			s.logger.Debug("clarification fallback authority check canceled",
+				zap.String("session_id", data.SessionID),
+				zap.String("pending_id", data.PendingID),
+				zap.String("clarification_turn_id", data.ClarificationTurnID),
+				zap.Error(err))
+			return false
+		}
 		s.logger.Warn("failed to verify clarification fallback turn authority",
 			zap.String("session_id", data.SessionID),
 			zap.String("pending_id", data.PendingID),

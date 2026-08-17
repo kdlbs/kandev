@@ -233,6 +233,10 @@ type TaskDTO struct {
 	// It is loaded in batches and is absent when no projection exists yet; the
 	// existing coarse fields above remain the compatibility fallback.
 	StatusSummary *statussummary.TaskStatusSummary `json:"status_summary,omitempty"`
+	// StatusSummaryInvalidated distinguishes a known-stale summary from an
+	// ordinarily omitted partial projection so clients clear their cache and
+	// expose the coarse compatibility fallback.
+	StatusSummaryInvalidated bool `json:"status_summary_invalidated,omitempty"`
 }
 
 type TaskRepositoryDTO struct {

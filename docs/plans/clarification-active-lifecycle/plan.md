@@ -407,8 +407,8 @@ All locally available task gates passed; environment-gated parity also passed in
   through the cancellation-detached persistence layer. Cross-dialect lock coverage is PostgreSQL-gated;
   all locally runnable affected suites pass.
 - The accompanying CodeRabbit pass makes reserved-turn waiter cleanup immediate and idempotent in five
-  agent-ready regressions. A later exact-head summary regression enforces the feature spec by omitting a
-  known-stale status-summary row when pending-action CAS repair exhausts its retries, preserving the
+  agent-ready regressions. A later exact-head summary regression enforces the feature spec by invalidating
+  a known-stale status-summary row when pending-action CAS repair exhausts its retries, preserving the
   authoritative coarse fallback. A later exact-head authority regression supersedes the delayed suggestion
   to restrict add/delete events: all message additions and deletions refresh pending action because they
   can add or remove the evidence that makes a reserved successor authoritative; only ordinary content
@@ -431,15 +431,22 @@ All locally available task gates passed; environment-gated parity also passed in
 - Exact-head Codex follow-up sanitizes private prompt-dispatch recovery fields from every public turn
   event. The concurrent publication regression now completes through the task service and proves a fast
   `turn.completed` payload cannot retain the pre-cleanup metadata.
-- A further exact-head Codex regression drops the known-stale summary from partial boot/task-list results
-  when all pending-action compare-and-set retries lose. The authoritative coarse task fallback remains
-  visible instead of being shadowed by the stale summary.
+- A further exact-head Codex regression marks the known-stale summary invalid in partial boot/task-list
+  results when all pending-action compare-and-set retries lose. The authoritative coarse task fallback
+  remains visible instead of being shadowed by the stale summary.
 - Exact-head Greptile review adds a durable startup event outbox for accepted and ambiguous prompt
   reservations. Recovery replaces private reservation fields with a start-event marker, replays
   `turn.started` and any already-required `turn.completed` event in order, and clears the marker only
   after successful publication. Failed replay now fails startup and remains retryable across restarts.
 - Replay regressions, the full task subtree, backend composition, integration, orchestrator, executor,
   and changed-code Go lint pass. PostgreSQL parity remains CI-gated when no local DSN is configured.
+- Delayed Codex and Claude review makes summary invalidation explicit across the Go DTO and shared
+  desktop/mobile snapshot merge while protecting a newer in-flight WebSocket revision. It also caps
+  post-deadline delivery-confirmation waiting at five minutes, treats partial clarification recovery
+  metadata as a startup error, suppresses expected cancellation warnings, documents the duplicated SQL
+  bind, and pins numeric epoch ordering across `"9"` to `"10"`.
+- All affected Go package suites, 31 focused web tests, frontend typecheck, zero-warning frontend and
+  changed-code Go lint, and the i18n ratchet pass.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

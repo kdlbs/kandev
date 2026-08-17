@@ -102,6 +102,32 @@ func TestReconcileUnpublishedPromptTurnsRejectsMalformedClaimMessageIDs(t *testi
 	}
 }
 
+func TestReconcileUnpublishedPromptTurnsRejectsPartialClarificationRecoveryMetadata(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-partial-recovery-metadata"
+	const sessionID = "session-partial-recovery-metadata"
+	const turnID = "turn-partial-recovery-metadata"
+	seedSessionForTurns(t, repo, taskID, sessionID)
+	createRecoveryTurn(t, repo, taskID, sessionID, turnID, time.Now().UTC(), map[string]interface{}{
+		models.TurnMetaKeyPromptDispatchPending:                true,
+		models.TurnMetaKeyPromptDispatchAttempted:              true,
+		models.TurnMetaKeyPromptDispatchClarificationPendingID: "pending-without-turn-or-messages",
+	})
+
+	reconciled, err := repo.ReconcileUnpublishedPromptTurns(ctx)
+	if err == nil || reconciled != 0 {
+		t.Fatalf("ReconcileUnpublishedPromptTurns = %d, %v; want 0 and partial metadata error", reconciled, err)
+	}
+	turn, getErr := repo.GetTurn(ctx, turnID)
+	if getErr != nil {
+		t.Fatalf("GetTurn(partial recovery metadata): %v", getErr)
+	}
+	if pending, _ := turn.Metadata[models.TurnMetaKeyPromptDispatchPending].(bool); !pending {
+		t.Fatalf("partial recovery metadata was cleared: %#v", turn.Metadata)
+	}
+}
+
 func TestReconcileUnpublishedPromptTurnsContinuesAfterMalformedReservation(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

@@ -294,3 +294,45 @@ func TestRespondWithDeliveryConfirmationBoundsStartedConfirmationAfterDeadline(t
 		}
 	})
 }
+
+func TestRespondWithDeliveryConfirmationCapsStartedConfirmationBelowStoreTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := NewStore(10 * time.Minute)
+		id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		confirmationStarted := make(chan struct{})
+		releaseConfirmation := make(chan struct{})
+		defer close(releaseConfirmation)
+		go func() {
+			_, _ = s.WaitForResponse(context.Background(), id)
+		}()
+		respondDone := make(chan error, 1)
+		go func() {
+			respondDone <- s.RespondWithDeliveryConfirmation(ctx, id, &Response{}, func() error {
+				close(confirmationStarted)
+				<-releaseConfirmation
+				return nil
+			})
+		}()
+
+		synctest.Wait()
+		select {
+		case <-confirmationStarted:
+		default:
+			t.Fatal("waiter did not start delivery confirmation")
+		}
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
+		time.Sleep(5 * time.Minute)
+		synctest.Wait()
+		select {
+		case err := <-respondDone:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("RespondWithDeliveryConfirmation error = %v, want capped deadline", err)
+			}
+		default:
+			t.Fatal("RespondWithDeliveryConfirmation used the longer store timeout")
+		}
+	})
+}
