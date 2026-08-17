@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 describe("DynamicRouteRecovery", () => {
-  it("uses one atomic route action request for Try next", async () => {
+  it("uses one atomic route action request for Skip now", async () => {
     render(<DynamicRouteRecovery session={session} />);
 
     fireEvent.click(screen.getByTestId("dynamic-route-try-next"));
@@ -56,7 +56,7 @@ describe("DynamicRouteRecovery", () => {
       "session.route_action",
       {
         session_id: "session-1",
-        action: "try_next",
+        action: "skip",
         expected_generation: 3,
       },
       30000,

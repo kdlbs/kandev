@@ -1,7 +1,7 @@
 ---
 id: "01-shared-error-catalogue"
 title: "Shared error catalogue"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -33,4 +33,17 @@ spec: "../../specs/platform/provider-error-recovery.md"
 
 ## Results
 
-Pending.
+Completed. Added the provider-neutral transient, hard, and unclassified error
+classes, persisted `provider-errors.v1` catalogue provenance, and covered the
+initial semantic code catalogue with table-driven tests. Existing provider
+fixtures and sanitized diagnostics remain unchanged.
+
+Verification:
+
+- `cd apps/backend && go test ./internal/agent/runtime/routingerr -run TestClassifyAssignsSharedProviderErrorClasses -count=1` passed: 6 tests.
+- `cd apps/backend && go test ./internal/agent/runtime/routingerr -run 'Test(ClassForCode|ClassifyAssignsSharedProviderErrorClasses|ClassifyPersistsCatalogueVersion)' -count=1` passed: 8 tests.
+- `cd apps/backend && go test -tags fts5 ./internal/agent/runtime/routingerr/... ./internal/agent/agents/... ./internal/agentctl/...` passed: 2,597 tests in 18 packages.
+
+Security/trust boundary: class assignments are deterministic and unknown codes
+remain unclassified. No raw provider credentials or unbounded error text were
+added.

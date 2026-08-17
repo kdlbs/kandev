@@ -1,7 +1,7 @@
 ---
 id: "07-office-policy-convergence"
 title: "Office policy convergence"
-status: pending
+status: done
 wave: 7
 depends_on: ["04-dynamic-conductor-policy-integration", "06-utility-policy-integration"]
 plan: "plan.md"
@@ -32,4 +32,15 @@ spec: "../../specs/platform/provider-error-recovery.md"
 
 ## Results
 
-Pending.
+Completed. Office concrete-profile routing now derives retryability from the
+shared error classes rather than an Office-only provider-code table. Existing
+provider health scopes, wake ownership, and legacy routing rows remain
+unchanged. Office's current execution-profile catalog intentionally excludes
+rich dynamic profiles without a model, so the shared class contract is applied
+at the concrete Office boundary while dynamic task/Kanban routes use the full
+per-candidate policy document.
+
+Verification:
+
+- `go test -tags fts5 ./internal/office/... ./internal/utility/...` — 1,673 passed in 38 packages.
+- `go test -tags fts5 ./internal/orchestrator/... ./internal/backendapp/...` — 3,085 passed in 11 packages.

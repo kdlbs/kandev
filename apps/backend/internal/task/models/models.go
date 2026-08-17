@@ -1230,6 +1230,12 @@ type TaskSession struct {
 	RouteState             string                 `json:"route_state,omitempty"`
 	RouteReason            string                 `json:"route_reason,omitempty"`
 	DownstreamACPSessionID string                 `json:"downstream_acp_session_id,omitempty"`
+	RouteErrorCode         string                 `json:"route_error_code,omitempty"`
+	RouteErrorClass        string                 `json:"route_error_class,omitempty"`
+	RouteCatalogueVersion  string                 `json:"route_catalogue_version,omitempty"`
+	RouteRetryOrdinal      int64                  `json:"route_retry_ordinal,omitempty"`
+	RouteDeadline          *time.Time             `json:"route_deadline,omitempty"`
+	RoutePendingOutcome    string                 `json:"route_pending_outcome,omitempty"`
 	ExecutorID             string                 `json:"executor_id"`
 	ExecutorProfileID      string                 `json:"executor_profile_id"`
 	EnvironmentID          string                 `json:"environment_id"`
@@ -1296,6 +1302,24 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	}
 	if s.DownstreamACPSessionID != "" {
 		result["downstream_acp_session_id"] = s.DownstreamACPSessionID
+	}
+	if s.RouteErrorCode != "" {
+		result["route_error_code"] = s.RouteErrorCode
+	}
+	if s.RouteErrorClass != "" {
+		result["route_error_class"] = s.RouteErrorClass
+	}
+	if s.RouteCatalogueVersion != "" {
+		result["route_catalogue_version"] = s.RouteCatalogueVersion
+	}
+	if s.RouteRetryOrdinal > 0 {
+		result["route_retry_ordinal"] = s.RouteRetryOrdinal
+	}
+	if s.RouteDeadline != nil {
+		result["route_deadline"] = s.RouteDeadline
+	}
+	if s.RoutePendingOutcome != "" {
+		result["route_pending_outcome"] = s.RoutePendingOutcome
 	}
 	if worktrees := s.WorktreesAPI(); len(worktrees) > 0 {
 		result["worktrees"] = worktrees

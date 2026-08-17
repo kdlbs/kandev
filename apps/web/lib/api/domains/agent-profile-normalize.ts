@@ -9,9 +9,12 @@
 import type { ProfileEnvVar } from "@/lib/types/http";
 import type {
   AgentProfile,
+  DynamicAgentPolicy,
   AgentProfileKind,
   AgentProfilePayload,
   CLIFlag,
+  DynamicErrorPolicy,
+  DynamicPolicyOutcome,
   DynamicAgentProfile,
 } from "@/lib/types/agent-profile";
 import { agentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
@@ -53,6 +56,120 @@ function pickConfigOptions(raw: RawProfile): Record<string, string> | undefined 
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
+const TRANSIENT_CODES = new Set([
+  "network_unavailable",
+  "provider_unavailable",
+  "provider_overloaded",
+  "model_capacity",
+  "rate_limited",
+  "agent_transport_lost",
+]);
+
+const HARD_CODES = new Set([
+  "auth_required",
+  "missing_credentials",
+  "subscription_required",
+  "quota_limited",
+  "model_unavailable",
+  "provider_not_configured",
+]);
+
+function defaultDynamicErrorPolicy(): DynamicErrorPolicy {
+  return {
+    retry: { enabled: false, maxRetries: 0, initialIntervalSeconds: 0 },
+    waitForReset: { enabled: false, maxWaitSeconds: 0 },
+    onExhausted: "skip",
+  };
+}
+
+function policyForLegacyAction(action: string): DynamicErrorPolicy {
+  const policy = defaultDynamicErrorPolicy();
+  if (action === "retry_same") {
+    policy.retry = { enabled: true, maxRetries: 1, initialIntervalSeconds: 5 };
+    policy.onExhausted = "stop";
+  } else if (action === "stop") {
+    policy.onExhausted = "stop";
+  }
+  return policy;
+}
+
+function legacyRulesToPolicy(rules: Record<string, string>): DynamicAgentPolicy {
+  const generic = rules.on_provider_error;
+  const result: DynamicAgentPolicy = {
+    version: 1,
+    transient: policyForLegacyAction(generic ?? "try_next"),
+    hard: policyForLegacyAction(generic ?? "try_next"),
+  };
+  for (const [code, action] of Object.entries(rules)) {
+    if (code === "on_provider_error") continue;
+    if (TRANSIENT_CODES.has(code)) result.transient = policyForLegacyAction(action);
+    if (HARD_CODES.has(code)) result.hard = policyForLegacyAction(action);
+  }
+  return result;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function numberValue(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeDynamicRetryPolicy(source: Record<string, unknown>): DynamicErrorPolicy["retry"] {
+  const retry = objectValue(source.retry) ?? {};
+  const retrySnake = objectValue(source.retry_policy) ?? {};
+  return {
+    enabled: (retry.enabled ?? retrySnake.enabled) === true,
+    maxRetries: numberValue(
+      retry.maxRetries ?? retry.max_retries ?? retrySnake.maxRetries ?? retrySnake.max_retries,
+      0,
+    ),
+    initialIntervalSeconds: numberValue(
+      retry.initialIntervalSeconds ??
+        retry.initial_interval_seconds ??
+        retrySnake.initialIntervalSeconds ??
+        retrySnake.initial_interval_seconds,
+      0,
+    ),
+  };
+}
+
+function normalizeDynamicWaitPolicy(
+  source: Record<string, unknown>,
+): DynamicErrorPolicy["waitForReset"] {
+  const wait = objectValue(source.waitForReset) ?? objectValue(source.wait_for_reset) ?? {};
+  return {
+    enabled: wait.enabled === true,
+    maxWaitSeconds: numberValue(wait.maxWaitSeconds ?? wait.max_wait_seconds, 0),
+  };
+}
+
+function normalizeDynamicErrorPolicy(raw: unknown): DynamicErrorPolicy {
+  const source = objectValue(raw) ?? {};
+  const outcome = source.onExhausted ?? source.on_exhausted;
+  return {
+    retry: normalizeDynamicRetryPolicy(source),
+    waitForReset: normalizeDynamicWaitPolicy(source),
+    onExhausted: outcome === "stop" ? "stop" : "skip",
+  };
+}
+
+function normalizeDynamicPolicy(
+  raw: unknown,
+  legacyRules: Record<string, string>,
+): DynamicAgentPolicy {
+  const source = objectValue(raw);
+  if (!source) return legacyRulesToPolicy(legacyRules);
+  return {
+    version: numberValue(source.version, 1),
+    transient: normalizeDynamicErrorPolicy(source.transient),
+    hard: normalizeDynamicErrorPolicy(source.hard),
+  };
+}
+
 function pickDynamic(raw: RawProfile): DynamicAgentProfile | undefined {
   const value = raw.dynamic;
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -68,20 +185,21 @@ function pickDynamic(raw: RawProfile): DynamicAgentProfile | undefined {
       const position = item.position;
       if (typeof executionProfileId !== "string" || typeof position !== "number") return [];
       const rules = item.rules;
+      const legacyRules =
+        rules && typeof rules === "object" && !Array.isArray(rules)
+          ? Object.fromEntries(
+              Object.entries(rules).filter(
+                (entry): entry is [string, string] =>
+                  typeof entry[0] === "string" && typeof entry[1] === "string",
+              ),
+            )
+          : {};
       return [
         {
           position,
           executionProfileId: agentProfileId(executionProfileId),
           enabled: typeof item.enabled === "boolean" ? item.enabled : true,
-          rules:
-            rules && typeof rules === "object" && !Array.isArray(rules)
-              ? Object.fromEntries(
-                  Object.entries(rules).filter(
-                    (entry): entry is [string, string] =>
-                      typeof entry[0] === "string" && typeof entry[1] === "string",
-                  ),
-                )
-              : {},
+          policies: normalizeDynamicPolicy(item.policies ?? item.policy, legacyRules),
         },
       ];
     }),
@@ -168,12 +286,41 @@ export function toAgentProfilePayload(
   if (profile.dynamic) {
     payload.dynamic = {
       version: profile.dynamic.version,
-      candidates: profile.dynamic.candidates.map((candidate) => ({
-        position: candidate.position,
-        execution_profile_id: candidate.executionProfileId,
-        enabled: candidate.enabled,
-        rules: candidate.rules,
-      })),
+      candidates: profile.dynamic.candidates.map((candidate) => {
+        const policy = candidate.policies ?? legacyRulesToPolicy(candidate.rules ?? {});
+        return {
+          position: candidate.position,
+          execution_profile_id: candidate.executionProfileId,
+          enabled: candidate.enabled,
+          policies: {
+            version: policy.version,
+            transient: {
+              retry: {
+                enabled: policy.transient.retry.enabled,
+                max_retries: policy.transient.retry.maxRetries,
+                initial_interval_seconds: policy.transient.retry.initialIntervalSeconds,
+              },
+              wait_for_reset: {
+                enabled: policy.transient.waitForReset.enabled,
+                max_wait_seconds: policy.transient.waitForReset.maxWaitSeconds,
+              },
+              on_exhausted: policy.transient.onExhausted as DynamicPolicyOutcome,
+            },
+            hard: {
+              retry: {
+                enabled: policy.hard.retry.enabled,
+                max_retries: policy.hard.retry.maxRetries,
+                initial_interval_seconds: policy.hard.retry.initialIntervalSeconds,
+              },
+              wait_for_reset: {
+                enabled: policy.hard.waitForReset.enabled,
+                max_wait_seconds: policy.hard.waitForReset.maxWaitSeconds,
+              },
+              on_exhausted: policy.hard.onExhausted as DynamicPolicyOutcome,
+            },
+          },
+        };
+      }),
     };
   }
   return payload;

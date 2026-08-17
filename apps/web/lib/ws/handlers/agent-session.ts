@@ -13,6 +13,7 @@ import {
 import type { QueueStatusChangedPayload } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
+import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
 
 const debug = createDebugLogger("session:state");
 
@@ -234,6 +235,7 @@ const CARRIED_WHEN_DEFINED = [
   "route_generation",
   "route_state",
   "route_reason",
+  ...ROUTE_SESSION_FIELDS,
   "downstream_acp_session_id",
 ] as const;
 

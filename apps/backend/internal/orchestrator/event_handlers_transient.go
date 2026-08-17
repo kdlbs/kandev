@@ -126,7 +126,10 @@ func (s *Service) rememberTurnPrompt(sessionID, text, model string, planMode boo
 // or an exhausted retry budget.
 func (s *Service) handleTransientFailure(ctx context.Context, data watcher.AgentEventData) bool {
 	data = s.withDynamicAttemptEvidence(data)
-	if data.DynamicRouteAttempt && !dynamicPreResultSafe(data) {
+	// Dynamic profiles own both error classes and their retry/reset policy. The
+	// legacy Kanban retry ladder must not consume a configured dynamic retry
+	// budget before the shared evaluator sees the failure.
+	if data.DynamicRouteAttempt {
 		return false
 	}
 	classified := classifyKanbanFailure(data)

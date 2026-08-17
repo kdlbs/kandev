@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 )
 
 func TestEngineSelectsFixedOrderAndFencesGenerations(t *testing.T) {
@@ -116,6 +117,131 @@ func TestEngineRetrySameKeepsTheFailedCandidate(t *testing.T) {
 	}
 	if initialDecision.ExecutionProfileID != "first" || initialDecision.Generation != 2 {
 		t.Fatalf("retry decision = %#v, want first at generation 2", initialDecision)
+	}
+}
+
+func TestEnginePersistsPolicyWaitAndResumesWithGenerationFence(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	document := routingpolicy.DefaultDocument()
+	document.Transient.Retry = routingpolicy.RetryPolicy{
+		Enabled: true, MaxRetries: 2, InitialIntervalSeconds: 5,
+	}
+	profile := Profile{
+		ID: "dynamic-policy", Version: 1,
+		Candidates: []Candidate{
+			{ID: "first", Enabled: true, Policies: document},
+			{ID: "second", Enabled: true},
+		},
+	}
+	initial, err := engine.Select("policy-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	decision, err := engine.ApplyFailure(
+		"policy-session", profile, initial.Generation, initial.ExecutionProfileID,
+		&routingerr.Error{
+			Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient,
+			FallbackAllowed: true,
+		},
+	)
+	if !errors.Is(err, ErrRecoveryPending) {
+		t.Fatalf("ApplyFailure error = %v, want pending recovery", err)
+	}
+	if decision.Status != "retry_wait" || decision.Generation != initial.Generation {
+		t.Fatalf("pending decision = %#v", decision)
+	}
+	state, ok := engine.State("policy-session")
+	if !ok || state.PolicyStateJSON == "" {
+		t.Fatalf("policy state was not persisted: %#v, ok=%v", state, ok)
+	}
+	now = now.Add(5 * time.Second)
+	due, err := engine.ResumePending(context.Background(), "policy-session", initial.Generation)
+	if err != nil {
+		t.Fatalf("ResumePending: %v", err)
+	}
+	if due.Status != "retrying" || due.ExecutionProfileID != "first" {
+		t.Fatalf("due decision = %#v", due)
+	}
+	if _, err := engine.ResumePending(context.Background(), "policy-session", initial.Generation-1); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("stale ResumePending error = %v", err)
+	}
+}
+
+func TestEngineManualRetryNowBypassesPolicyDeadlineWithoutAdvancingGeneration(t *testing.T) {
+	now := time.Unix(300, 0).UTC()
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	document := routingpolicy.DefaultDocument()
+	document.Transient.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 1, InitialIntervalSeconds: 60}
+	profile := Profile{ID: "manual-policy", Version: 1, Candidates: []Candidate{
+		{ID: "first", Enabled: true, Policies: document},
+		{ID: "second", Enabled: true},
+	}}
+	initial, err := engine.Select("manual-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	pending, err := engine.ApplyFailure(
+		"manual-session", profile, initial.Generation, initial.ExecutionProfileID,
+		&routingerr.Error{Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient, FallbackAllowed: true},
+	)
+	if !errors.Is(err, ErrRecoveryPending) || pending.Status != "retry_wait" {
+		t.Fatalf("pending decision = %#v, error = %v", pending, err)
+	}
+	manual, err := engine.ResumePendingNow(context.Background(), "manual-session", initial.Generation)
+	if err != nil {
+		t.Fatalf("ResumePendingNow: %v", err)
+	}
+	if manual.Generation != initial.Generation || manual.ExecutionProfileID != "first" || manual.Status != "retrying" {
+		t.Fatalf("manual decision = %#v", manual)
+	}
+}
+
+func TestEngineManualSkipRecordsItsReason(t *testing.T) {
+	engine := NewEngine()
+	profile := Profile{ID: "manual-skip", Version: 1, Candidates: []Candidate{
+		{ID: "first", Enabled: true},
+		{ID: "second", Enabled: true},
+	}}
+	initial, err := engine.Select("skip-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	next, err := engine.SelectContextWithReason(
+		context.Background(), "skip-session", profile, initial.Generation, initial.ExecutionProfileID, "manual_skip",
+	)
+	if err != nil {
+		t.Fatalf("manual skip: %v", err)
+	}
+	if next.ExecutionProfileID != "second" || next.Reason != "manual_skip" {
+		t.Fatalf("manual skip decision = %#v", next)
+	}
+}
+
+func TestEngineCancelPendingStopsWithoutAdvancingGeneration(t *testing.T) {
+	engine := NewEngine()
+	document := routingpolicy.DefaultDocument()
+	document.Transient.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 1, InitialIntervalSeconds: 5}
+	profile := Profile{ID: "cancel-policy", Version: 1, Candidates: []Candidate{
+		{ID: "first", Enabled: true, Policies: document},
+	}}
+	initial, err := engine.Select("cancel-session", profile, 0, "")
+	if err != nil {
+		t.Fatalf("initial Select: %v", err)
+	}
+	pending, err := engine.ApplyFailure(
+		"cancel-session", profile, initial.Generation, initial.ExecutionProfileID,
+		&routingerr.Error{Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient, FallbackAllowed: true},
+	)
+	if !errors.Is(err, ErrRecoveryPending) || pending.Status != "retry_wait" {
+		t.Fatalf("pending decision = %#v, error = %v", pending, err)
+	}
+	stopped, err := engine.CancelPending(context.Background(), "cancel-session", initial.Generation, "manual_stop")
+	if err != nil {
+		t.Fatalf("CancelPending: %v", err)
+	}
+	if stopped.Status != "action_required" || stopped.Generation != initial.Generation || stopped.Reason != "manual_stop" {
+		t.Fatalf("stopped decision = %#v", stopped)
 	}
 }
 

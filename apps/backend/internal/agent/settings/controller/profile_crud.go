@@ -266,15 +266,8 @@ func validateDynamicAgentProfile(profile *dto.DynamicAgentProfileDTO) error {
 		if strings.TrimSpace(candidate.ExecutionProfileID) == "" {
 			return fmt.Errorf("%w: candidate %d has no execution profile", ErrDynamicProfileCandidate, position)
 		}
-		for key, action := range candidate.Rules {
-			if strings.TrimSpace(key) == "" {
-				return fmt.Errorf("%w: empty rule key", ErrDynamicProfileRule)
-			}
-			switch strings.TrimSpace(action) {
-			case dynamicRouteActionRetrySame, dynamicRouteActionTryNext, dynamicRouteActionStop:
-			default:
-				return fmt.Errorf("%w: %s=%s", ErrDynamicProfileRule, key, action)
-			}
+		if err := normalizeDynamicCandidatePolicy(&profile.Candidates[position]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -286,20 +279,19 @@ func dynamicRoutesFromDTO(profileID string, profile *dto.DynamicAgentProfileDTO)
 	}
 	routes := make([]models.DynamicAgentRoute, 0, len(profile.Candidates))
 	for _, candidate := range profile.Candidates {
-		rules := make(map[string]string, len(candidate.Rules))
-		for key, action := range candidate.Rules {
-			rules[strings.TrimSpace(key)] = strings.TrimSpace(action)
+		if candidate.Policies == nil {
+			return nil, fmt.Errorf("%w: candidate %d has no normalized policy", ErrDynamicProfileRule, candidate.Position)
 		}
-		rulesJSON, err := json.Marshal(rules)
+		policyJSON, err := json.Marshal(candidate.Policies)
 		if err != nil {
-			return nil, fmt.Errorf("marshal dynamic route rules: %w", err)
+			return nil, fmt.Errorf("marshal dynamic route policy: %w", err)
 		}
 		routes = append(routes, models.DynamicAgentRoute{
 			DynamicProfileID:   profileID,
 			Position:           candidate.Position,
 			ExecutionProfileID: strings.TrimSpace(candidate.ExecutionProfileID),
 			Enabled:            candidate.Enabled,
-			RulesJSON:          string(rulesJSON),
+			RulesJSON:          string(policyJSON),
 		})
 	}
 	return routes, nil
@@ -314,17 +306,15 @@ func dynamicProfileDTO(profile *models.DynamicAgentProfile, routes []models.Dyna
 		Candidates: make([]dto.DynamicAgentCandidateDTO, 0, len(routes)),
 	}
 	for _, route := range routes {
-		rules := map[string]string{}
-		if strings.TrimSpace(route.RulesJSON) != "" {
-			if err := json.Unmarshal([]byte(route.RulesJSON), &rules); err != nil {
-				return nil, fmt.Errorf("decode dynamic route rules: %w", err)
-			}
+		policy, err := decodeDynamicPolicyDocument(route.RulesJSON, route.Position)
+		if err != nil {
+			return nil, err
 		}
 		result.Candidates = append(result.Candidates, dto.DynamicAgentCandidateDTO{
 			Position:           route.Position,
 			ExecutionProfileID: route.ExecutionProfileID,
 			Enabled:            route.Enabled,
-			Rules:              rules,
+			Policies:           &policy,
 		})
 	}
 	return result, nil

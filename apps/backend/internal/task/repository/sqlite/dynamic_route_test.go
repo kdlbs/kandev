@@ -27,7 +27,7 @@ func TestDynamicRouteStateAndAttemptsPersistAcrossRepositoryReads(t *testing.T) 
 	state := dynamicruntime.RouteState{
 		SessionID: "session-dynamic-route", LogicalProfileID: "dynamic-1",
 		ExecutionProfileID: "concrete-1", Generation: 7, ProfileVersion: 3,
-		Status: "active", UpdatedAt: now,
+		Status: "active", PolicyStateJSON: `{"retry_ordinal":2,"pending_outcome":"skip"}`, UpdatedAt: now,
 	}
 	if err := repo.SaveRouteState(ctx, state); err != nil {
 		t.Fatalf("SaveRouteState: %v", err)
@@ -62,6 +62,9 @@ func TestDynamicRouteStateAndAttemptsPersistAcrossRepositoryReads(t *testing.T) 
 	}
 	if loaded.Generation != 7 || loaded.ExecutionProfileID != "concrete-1" {
 		t.Fatalf("loaded state = %#v", loaded)
+	}
+	if loaded.PolicyStateJSON != state.PolicyStateJSON {
+		t.Fatalf("loaded policy state = %q, want %q", loaded.PolicyStateJSON, state.PolicyStateJSON)
 	}
 	var loadedContinuation dynamicruntime.Continuation
 	if err := json.Unmarshal([]byte(loaded.ContinuationJSON), &loadedContinuation); err != nil {
@@ -101,6 +104,37 @@ func TestClaimRouteStateDoesNotInsertAfterRestartWithNonZeroExpectation(t *testi
 	}
 	if loaded != nil {
 		t.Fatalf("stale claim created state: %#v", loaded)
+	}
+}
+
+func TestListPendingRouteStatesExcludesAmbiguousRetryingStates(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, sessionID := range []string{"pending-retry", "pending-reset", "ambiguous-retry"} {
+		taskID := "task-" + sessionID
+		if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: sessionID}); err != nil {
+			t.Fatalf("CreateTask(%s): %v", taskID, err)
+		}
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID, State: models.TaskSessionStateWaitingForInput}); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", sessionID, err)
+		}
+	}
+	for _, state := range []dynamicruntime.RouteState{
+		{SessionID: "pending-retry", LogicalProfileID: "dynamic", Generation: 1, Status: "retry_wait", PolicyStateJSON: `{"deadline":"2099-01-01T00:00:00Z"}`, UpdatedAt: now},
+		{SessionID: "pending-reset", LogicalProfileID: "dynamic", Generation: 2, Status: "waiting_for_reset", PolicyStateJSON: `{"deadline":"2099-01-01T00:00:00Z"}`, UpdatedAt: now.Add(time.Second)},
+		{SessionID: "ambiguous-retry", LogicalProfileID: "dynamic", Generation: 3, Status: "retrying", PolicyStateJSON: `{"deadline":"2099-01-01T00:00:00Z"}`, UpdatedAt: now.Add(2 * time.Second)},
+	} {
+		if err := repo.SaveRouteState(ctx, state); err != nil {
+			t.Fatalf("SaveRouteState(%s): %v", state.SessionID, err)
+		}
+	}
+	states, err := repo.ListPendingRouteStates(ctx)
+	if err != nil {
+		t.Fatalf("ListPendingRouteStates: %v", err)
+	}
+	if len(states) != 2 || states[0].SessionID != "pending-retry" || states[1].SessionID != "pending-reset" {
+		t.Fatalf("pending states = %#v", states)
 	}
 }
 

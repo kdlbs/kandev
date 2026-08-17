@@ -77,9 +77,15 @@ test.describe("Dynamic Agents settings card", () => {
 
       const candidateRow = testPage.getByTestId("dynamic-profile-candidates").locator("li");
       await expect(candidateRow).toContainText(candidate.name);
-      const help = testPage.getByTestId("dynamic-route-action-help-try_next");
+      await expect(testPage.getByTestId("dynamic-policy-transient")).toBeVisible();
+      await expect(testPage.getByTestId("dynamic-policy-hard")).toBeVisible();
+      const help = testPage
+        .getByTestId("dynamic-policy-transient")
+        .getByTestId("dynamic-policy-option-help-outcome");
       await help.hover();
-      await expect(testPage.getByRole("tooltip")).toContainText("Skip this candidate");
+      await expect(testPage.getByRole("tooltip")).toContainText(
+        "after reset waiting and all same-candidate retries are exhausted",
+      );
     } finally {
       await releaseFeature();
     }

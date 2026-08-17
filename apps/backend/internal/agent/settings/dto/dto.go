@@ -56,14 +56,42 @@ type DynamicAgentProfileDTO struct {
 	Candidates []DynamicAgentCandidateDTO `json:"candidates"`
 }
 
+// DynamicAgentPolicyDTO is the canonical, versioned policy document persisted
+// for one dynamic candidate. The two classes are deliberately explicit so a
+// missing class can never silently inherit another class's behavior.
+type DynamicAgentPolicyDTO struct {
+	Version   int64                 `json:"version"`
+	Transient DynamicErrorPolicyDTO `json:"transient"`
+	Hard      DynamicErrorPolicyDTO `json:"hard"`
+}
+
+type DynamicErrorPolicyDTO struct {
+	Retry        DynamicRetryPolicyDTO     `json:"retry"`
+	WaitForReset DynamicResetWaitPolicyDTO `json:"wait_for_reset"`
+	OnExhausted  string                    `json:"on_exhausted"`
+}
+
+type DynamicRetryPolicyDTO struct {
+	Enabled                bool  `json:"enabled"`
+	MaxRetries             int64 `json:"max_retries"`
+	InitialIntervalSeconds int64 `json:"initial_interval_seconds"`
+}
+
+type DynamicResetWaitPolicyDTO struct {
+	Enabled        bool  `json:"enabled"`
+	MaxWaitSeconds int64 `json:"max_wait_seconds"`
+}
+
 // DynamicAgentCandidateDTO is one ordered concrete execution profile and its
-// provider-error actions. Rules are keyed by normalized semantic error code or
-// the shorthand on_provider_error default.
+// provider-error policy. Rules remains a read-compatible legacy input shape;
+// profile CRUD normalizes it into Policies before persistence and never emits
+// it in canonical responses.
 type DynamicAgentCandidateDTO struct {
-	Position           int               `json:"position"`
-	ExecutionProfileID string            `json:"execution_profile_id"`
-	Enabled            bool              `json:"enabled"`
-	Rules              map[string]string `json:"rules,omitempty"`
+	Position           int                    `json:"position"`
+	ExecutionProfileID string                 `json:"execution_profile_id"`
+	Enabled            bool                   `json:"enabled"`
+	Policies           *DynamicAgentPolicyDTO `json:"policies,omitempty"`
+	Rules              map[string]string      `json:"rules,omitempty"`
 }
 
 // GetWorkspaceID lets struct-shaped profile payloads (e.g. the MCP event-bus

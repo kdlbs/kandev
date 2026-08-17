@@ -2,14 +2,18 @@ package dynamic
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 )
 
 type EngineOption func(*Engine)
+
+const routeStatusActionRequired = "action_required"
 
 func WithClock(now func() time.Time) EngineOption {
 	return func(engine *Engine) {
@@ -85,7 +89,20 @@ func (e *Engine) Select(sessionID string, profile Profile, expectedGeneration in
 }
 
 func (e *Engine) SelectContext(ctx context.Context, sessionID string, profile Profile, expectedGeneration int64, excludeProfileID string) (RouteDecision, error) {
-	return e.selectContext(ctx, sessionID, profile, expectedGeneration, excludeProfileID, "")
+	return e.selectContext(ctx, sessionID, profile, expectedGeneration, excludeProfileID, "", "candidate_order")
+}
+
+// SelectContextWithReason is used by generation-fenced manual route actions
+// so the immutable attempt row records why a candidate was selected.
+func (e *Engine) SelectContextWithReason(
+	ctx context.Context,
+	sessionID string,
+	profile Profile,
+	expectedGeneration int64,
+	excludeProfileID string,
+	reason string,
+) (RouteDecision, error) {
+	return e.selectContext(ctx, sessionID, profile, expectedGeneration, excludeProfileID, "", reason)
 }
 
 // SelectContextWithPreference retries the requested candidate when it remains
@@ -99,7 +116,7 @@ func (e *Engine) SelectContextWithPreference(
 	excludeProfileID string,
 	preferredProfileID string,
 ) (RouteDecision, error) {
-	return e.selectContext(ctx, sessionID, profile, expectedGeneration, excludeProfileID, preferredProfileID)
+	return e.selectContext(ctx, sessionID, profile, expectedGeneration, excludeProfileID, preferredProfileID, "candidate_order")
 }
 
 func (e *Engine) selectContext(
@@ -109,6 +126,7 @@ func (e *Engine) selectContext(
 	expectedGeneration int64,
 	excludeProfileID string,
 	preferredProfileID string,
+	reason string,
 ) (RouteDecision, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -135,7 +153,8 @@ func (e *Engine) selectContext(
 			ExecutionProfileID: candidate.ID,
 			Generation:         generation,
 			ProfileVersion:     profile.Version,
-			Reason:             "candidate_order",
+			Reason:             reason,
+			Status:             "starting",
 		}
 		nextState := RouteState{
 			SessionID:          sessionID,
@@ -281,11 +300,38 @@ func (e *Engine) State(sessionID string) (RouteState, bool) {
 	return state, ok
 }
 
+// LoadState returns the current route state and hydrates it from the durable
+// loader when this process has not handled the session before.
+func (e *Engine) LoadState(ctx context.Context, sessionID string) (RouteState, bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.loadStateLocked(ctx, sessionID)
+}
+
 func (e *Engine) ActionFor(profile Profile, candidateID string, code routingerr.Code) Action {
 	for _, candidate := range profile.Candidates {
-		if candidate.ID == candidateID {
-			return actionForRules(candidate.Rules, code)
+		if candidate.ID != candidateID {
+			continue
 		}
+		return actionForCandidate(candidate, code)
+	}
+	return ActionStop
+}
+
+func actionForCandidate(candidate Candidate, code routingerr.Code) Action {
+	if candidate.Policies.Version == 0 {
+		return actionForRules(candidate.Rules, code)
+	}
+	class := routingerr.ClassForCode(code)
+	policy, ok := candidate.Policies.PolicyFor(class)
+	if !ok {
+		return ActionStop
+	}
+	if policy.Retry.Enabled {
+		return ActionRetrySame
+	}
+	if policy.OnExhausted == routingpolicy.OutcomeSkip {
+		return ActionTryNext
 	}
 	return ActionStop
 }
@@ -317,15 +363,291 @@ func (e *Engine) ApplyFailureContext(
 	}
 	e.openCircuitForFailure(profile, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
+	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
+		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
+	}
 	action := e.ActionFor(profile, currentCandidateID, failure.Code)
 	switch action {
 	case ActionRetrySame:
-		return e.selectContext(ctx, sessionID, profile, expectedGeneration, "", currentCandidateID)
+		return e.selectContext(ctx, sessionID, profile, expectedGeneration, "", currentCandidateID, "retry")
 	case ActionTryNext:
-		return e.selectContext(ctx, sessionID, profile, expectedGeneration, currentCandidateID, "")
+		return e.selectContext(ctx, sessionID, profile, expectedGeneration, currentCandidateID, "", "try_next")
 	default:
 		return RouteDecision{}, ErrNoEligibleCandidate
 	}
+}
+
+func candidateByID(profile Profile, candidateID string) (Candidate, bool) {
+	for _, candidate := range profile.Candidates {
+		if candidate.ID == candidateID {
+			return candidate, true
+		}
+	}
+	return Candidate{}, false
+}
+
+func (e *Engine) applyPolicyFailure(
+	ctx context.Context,
+	sessionID string,
+	profile Profile,
+	expectedGeneration int64,
+	currentCandidateID string,
+	candidate Candidate,
+	failure *routingerr.Error,
+) (RouteDecision, error) {
+	state, exists, policyState, evaluation, now, err := e.preparePolicyFailure(
+		ctx, sessionID, expectedGeneration, candidate, failure,
+	)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+
+	if evaluation.Kind == routingpolicy.DecisionSkip {
+		return e.selectContext(ctx, sessionID, profile, expectedGeneration, currentCandidateID, "", "policy_skip")
+	}
+	nextState := state
+	if !exists {
+		nextState = RouteState{
+			SessionID:          sessionID,
+			LogicalProfileID:   profile.ID,
+			ExecutionProfileID: currentCandidateID,
+			Generation:         expectedGeneration,
+			ProfileVersion:     profile.Version,
+		}
+	}
+	nextState.Status = string(evaluation.Kind)
+	nextState.PolicyStateJSON = string(mustJSON(policyState))
+	nextState.UpdatedAt = now
+	if evaluation.Kind == routingpolicy.DecisionStop {
+		nextState.Status = routeStatusActionRequired
+	}
+	if err := e.persistSameGeneration(ctx, expectedGeneration, nextState); err != nil {
+		return RouteDecision{}, err
+	}
+	e.mu.Lock()
+	e.states[sessionID] = nextState
+	e.mu.Unlock()
+	var deadline *time.Time
+	if !evaluation.Deadline.IsZero() {
+		value := evaluation.Deadline
+		deadline = &value
+	}
+	decision := RouteDecision{
+		SessionID: sessionID, LogicalProfileID: profile.ID,
+		ExecutionProfileID: currentCandidateID, Generation: expectedGeneration,
+		ProfileVersion: profile.Version, Reason: string(evaluation.Kind),
+		Status: nextState.Status, Deadline: deadline,
+		ErrorCode: evaluation.Code, ErrorClass: evaluation.Class,
+		CatalogueVersion: evaluation.CatalogueVersion,
+		RetryOrdinal:     evaluation.RetryOrdinal, PendingOutcome: evaluation.PendingOutcome,
+	}
+	if evaluation.Kind == routingpolicy.DecisionStop {
+		return decision, ErrNoEligibleCandidate
+	}
+	return decision, fmt.Errorf("%w: %s", ErrRecoveryPending, evaluation.Kind)
+}
+
+func (e *Engine) preparePolicyFailure(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+	candidate Candidate,
+	failure *routingerr.Error,
+) (RouteState, bool, PolicyState, routingpolicy.Evaluation, time.Time, error) {
+	state, exists, err := e.stateForFailure(ctx, sessionID)
+	if err != nil {
+		return RouteState{}, false, PolicyState{}, routingpolicy.Evaluation{}, time.Time{}, err
+	}
+	if exists && state.Generation != expectedGeneration {
+		return RouteState{}, false, PolicyState{}, routingpolicy.Evaluation{}, time.Time{}, ErrStaleGeneration
+	}
+	policyState := PolicyState{}
+	if exists && state.PolicyStateJSON != "" {
+		if err := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); err != nil {
+			return RouteState{}, false, PolicyState{}, routingpolicy.Evaluation{}, time.Time{}, fmt.Errorf("decode dynamic policy state: %w", err)
+		}
+	}
+	now := e.now()
+	failureClass := failure.Class
+	if failureClass == "" {
+		failureClass = routingerr.ClassForCode(failure.Code)
+	}
+	resetWaitUsed := policyState.ResetWaitUsed && policyState.FailureClass == failureClass
+	if policyState.ResetWaitClasses != nil {
+		resetWaitUsed = policyState.ResetWaitClasses[failureClass]
+	}
+	evaluation := routingpolicy.Evaluate(candidate.Policies, routingpolicy.EvaluationInput{
+		Failure: failure, Now: now, RetryOrdinal: policyState.RetryOrdinal,
+		ResetWaitUsed: resetWaitUsed, EffectSafe: failure.FallbackAllowed,
+	})
+	policyJSON, err := json.Marshal(candidate.Policies)
+	if err != nil {
+		return RouteState{}, false, PolicyState{}, routingpolicy.Evaluation{}, time.Time{}, fmt.Errorf("encode dynamic policy snapshot: %w", err)
+	}
+	policyState.FailureCode = evaluation.Code
+	policyState.FailureClass = evaluation.Class
+	policyState.CatalogueVersion = evaluation.CatalogueVersion
+	policyState.PolicyJSON = string(policyJSON)
+	policyState.RetryOrdinal = evaluation.RetryOrdinal
+	if policyState.ResetWaitClasses == nil {
+		policyState.ResetWaitClasses = make(map[routingerr.Class]bool)
+	}
+	if evaluation.Kind == routingpolicy.DecisionWaitForReset {
+		policyState.ResetWaitClasses[evaluation.Class] = true
+	}
+	policyState.ResetWaitUsed = policyState.ResetWaitClasses[evaluation.Class]
+	policyState.PendingOutcome = evaluation.PendingOutcome
+	if evaluation.Deadline.IsZero() {
+		policyState.Deadline = nil
+	} else {
+		deadline := evaluation.Deadline
+		policyState.Deadline = &deadline
+	}
+	return state, exists, policyState, evaluation, now, nil
+}
+
+func (e *Engine) stateForFailure(ctx context.Context, sessionID string) (RouteState, bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.loadStateLocked(ctx, sessionID)
+}
+
+func (e *Engine) persistSameGeneration(ctx context.Context, expectedGeneration int64, state RouteState) error {
+	if e.persistence == nil {
+		return nil
+	}
+	if claimer, ok := e.persistence.(GenerationClaimer); ok {
+		claimed, err := claimer.ClaimRouteState(ctx, expectedGeneration, state)
+		if err != nil {
+			return err
+		}
+		if !claimed {
+			return ErrStaleGeneration
+		}
+		return nil
+	}
+	return e.persistence.SaveRouteState(ctx, state)
+}
+
+func mustJSON(value PolicyState) []byte {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return payload
+}
+
+// ResumePending advances a due retry/wait state to retrying. The caller still
+// owns the concrete launch and must pass the returned generation through its
+// normal launch fence.
+func (e *Engine) ResumePending(ctx context.Context, sessionID string, expectedGeneration int64) (RouteDecision, error) {
+	return e.resumePending(ctx, sessionID, expectedGeneration, false)
+}
+
+// ResumePendingNow is the generation-fenced manual "Retry now" operation.
+// It bypasses the deadline but never bypasses the durable generation owner.
+func (e *Engine) ResumePendingNow(ctx context.Context, sessionID string, expectedGeneration int64) (RouteDecision, error) {
+	return e.resumePending(ctx, sessionID, expectedGeneration, true)
+}
+
+// CancelPending transitions a pending wait to manual recovery without
+// advancing the route generation. Stop and cancel-wait both use this durable
+// state transition; the caller chooses the reason shown to the user.
+func (e *Engine) CancelPending(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+	reason string,
+) (RouteDecision, error) {
+	state, exists, err := e.stateForFailure(ctx, sessionID)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+	if !exists {
+		return RouteDecision{}, ErrRouteStateNotFound
+	}
+	if state.Generation != expectedGeneration {
+		return RouteDecision{}, ErrStaleGeneration
+	}
+	if state.Status != string(routingpolicy.DecisionRetry) &&
+		state.Status != string(routingpolicy.DecisionWaitForReset) &&
+		state.Status != routeStatusActionRequired {
+		return RouteDecision{}, ErrRecoveryPending
+	}
+	var policyState PolicyState
+	if state.PolicyStateJSON != "" {
+		if err := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); err != nil {
+			return RouteDecision{}, err
+		}
+	}
+	policyState.PendingOutcome = routingpolicy.OutcomeStop
+	state.PolicyStateJSON = string(mustJSON(policyState))
+	state.Status = routeStatusActionRequired
+	state.UpdatedAt = e.now()
+	if err := e.persistSameGeneration(ctx, expectedGeneration, state); err != nil {
+		return RouteDecision{}, err
+	}
+	e.mu.Lock()
+	e.states[sessionID] = state
+	e.mu.Unlock()
+	return RouteDecision{
+		SessionID: sessionID, LogicalProfileID: state.LogicalProfileID,
+		ExecutionProfileID: state.ExecutionProfileID, Generation: state.Generation,
+		ProfileVersion: state.ProfileVersion, Reason: reason, Status: state.Status,
+		ErrorCode: policyState.FailureCode, ErrorClass: policyState.FailureClass,
+		CatalogueVersion: policyState.CatalogueVersion, RetryOrdinal: policyState.RetryOrdinal,
+		PendingOutcome: policyState.PendingOutcome, Deadline: policyState.Deadline,
+	}, nil
+}
+
+func (e *Engine) resumePending(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+	force bool,
+) (RouteDecision, error) {
+	state, exists, err := e.stateForFailure(ctx, sessionID)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+	if !exists {
+		return RouteDecision{}, ErrRouteStateNotFound
+	}
+	if state.Generation != expectedGeneration {
+		return RouteDecision{}, ErrStaleGeneration
+	}
+	if force && state.Status == "retrying" {
+		return RouteDecision{}, ErrRecoveryPending
+	}
+	if !force && state.Status != string(routingpolicy.DecisionRetry) && state.Status != string(routingpolicy.DecisionWaitForReset) {
+		return RouteDecision{}, ErrRecoveryPending
+	}
+	var policyState PolicyState
+	if state.PolicyStateJSON != "" {
+		if err := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); err != nil {
+			return RouteDecision{}, err
+		}
+	}
+	now := e.now()
+	if !force && policyState.Deadline != nil && now.Before(*policyState.Deadline) {
+		return RouteDecision{}, ErrRecoveryNotDue
+	}
+	state.Status = "retrying"
+	state.UpdatedAt = now
+	if err := e.persistSameGeneration(ctx, expectedGeneration, state); err != nil {
+		return RouteDecision{}, err
+	}
+	e.mu.Lock()
+	e.states[sessionID] = state
+	e.mu.Unlock()
+	return RouteDecision{
+		SessionID: sessionID, LogicalProfileID: state.LogicalProfileID,
+		ExecutionProfileID: state.ExecutionProfileID, Generation: state.Generation,
+		ProfileVersion: state.ProfileVersion, Reason: "retry_due", Status: state.Status,
+		ErrorCode: policyState.FailureCode, ErrorClass: policyState.FailureClass,
+		CatalogueVersion: policyState.CatalogueVersion,
+		RetryOrdinal:     policyState.RetryOrdinal, PendingOutcome: policyState.PendingOutcome,
+	}, nil
 }
 
 // ReleaseProbe closes a successful half-open resource probe or applies the

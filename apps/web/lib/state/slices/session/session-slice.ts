@@ -151,6 +151,12 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
           route_generation: existing.route_generation,
           route_state: existing.route_state,
           route_reason: existing.route_reason,
+          route_error_code: existing.route_error_code,
+          route_error_class: existing.route_error_class,
+          route_catalogue_version: existing.route_catalogue_version,
+          route_retry_ordinal: existing.route_retry_ordinal,
+          route_deadline: existing.route_deadline,
+          route_pending_outcome: existing.route_pending_outcome,
           downstream_acp_session_id: existing.downstream_acp_session_id,
         }
       : {}),

@@ -579,8 +579,52 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		return nil, fmt.Errorf("failed to load session worktrees: %w", err)
 	}
 	session.Worktrees = worktrees
+	if err := r.hydrateDynamicRoutePolicy(ctx, session); err != nil {
+		return nil, err
+	}
 
 	return session, nil
+}
+
+// hydrateDynamicRoutePolicy projects the durable route decision into session
+// responses. The route row remains the source of truth, so this projection
+// survives a backend restart without adding a second mutable policy store to
+// task_sessions.
+func (r *Repository) hydrateDynamicRoutePolicy(ctx context.Context, session *models.TaskSession) error {
+	if session == nil || session.RouteGeneration <= 0 {
+		return nil
+	}
+	var policyStateJSON string
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT policy_state_json FROM dynamic_route_states WHERE session_id = ?`,
+	), session.ID).Scan(&policyStateJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to load dynamic route policy projection: %w", err)
+	}
+	var projection struct {
+		FailureCode      string     `json:"failure_code"`
+		FailureClass     string     `json:"failure_class"`
+		CatalogueVersion string     `json:"catalogue_version"`
+		RetryOrdinal     int64      `json:"retry_ordinal"`
+		Deadline         *time.Time `json:"deadline"`
+		PendingOutcome   string     `json:"pending_outcome"`
+	}
+	if policyStateJSON == "" {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(policyStateJSON), &projection); err != nil {
+		return fmt.Errorf("failed to decode dynamic route policy projection: %w", err)
+	}
+	session.RouteErrorCode = projection.FailureCode
+	session.RouteErrorClass = projection.FailureClass
+	session.RouteCatalogueVersion = projection.CatalogueVersion
+	session.RouteRetryOrdinal = projection.RetryOrdinal
+	session.RouteDeadline = projection.Deadline
+	session.RoutePendingOutcome = projection.PendingOutcome
+	return nil
 }
 
 // GetTaskSession retrieves an agent session by ID

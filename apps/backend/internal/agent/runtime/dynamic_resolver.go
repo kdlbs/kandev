@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
 )
@@ -267,6 +268,146 @@ func (r *ProfileExecutionResolver) ResolveWithPreference(
 	return r.resolve(ctx, sessionID, profileID, expectedGeneration, excludeProfileID, preferredProfileID)
 }
 
+// ResolveRouteAction applies a manual route action to the durable route
+// state. Retry resumes the current generation, even when its policy deadline
+// has not elapsed; try-next claims a new generation and excludes the current
+// candidate. The caller can then launch the returned concrete profile through
+// the normal conductor path.
+func (r *ProfileExecutionResolver) ResolveRouteAction(
+	ctx context.Context,
+	sessionID, profileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	action string,
+) (ProfileExecution, error) {
+	if r.profiles == nil {
+		return ProfileExecution{}, errors.New("profile execution resolver has no profile store")
+	}
+	profile, err := r.profiles.GetAgentProfile(ctx, profileID)
+	if err != nil {
+		return ProfileExecution{}, fmt.Errorf("resolve profile %s: %w", profileID, err)
+	}
+	agent, err := r.profiles.GetAgent(ctx, profile.AgentID)
+	if err != nil {
+		return ProfileExecution{}, fmt.Errorf("resolve profile family %s: %w", profileID, err)
+	}
+	if agent.Name != agents.DynamicAgentID {
+		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profile.ID, Profile: profile}, nil
+	}
+	if !r.enabled.Load() {
+		return ProfileExecution{}, ErrDynamicRoutingDisabled
+	}
+	if r.dynamic == nil || r.engine == nil {
+		return ProfileExecution{}, errors.New("dynamic profile execution is not configured")
+	}
+	if sessionID == "" {
+		return ProfileExecution{}, errors.New("dynamic route action requires a session")
+	}
+
+	switch action {
+	case "retry":
+		return r.resolveRetryRouteAction(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration)
+	case "try_next", "skip":
+		return r.resolveSkipRouteAction(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration)
+	case "cancel_wait", "stop":
+		return r.resolveCancelRouteAction(ctx, sessionID, profileID, expectedGeneration, action)
+	default:
+		return ProfileExecution{}, fmt.Errorf("unsupported dynamic route action %q", action)
+	}
+}
+
+func (r *ProfileExecutionResolver) resolveRetryRouteAction(
+	ctx context.Context,
+	sessionID, profileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+) (ProfileExecution, error) {
+	state, exists, err := r.engine.LoadState(ctx, sessionID)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
+	if exists && state.Generation != expectedGeneration {
+		return ProfileExecution{}, dynamic.ErrStaleGeneration
+	}
+	if exists {
+		decision, resumeErr := r.engine.ResumePendingNow(ctx, sessionID, expectedGeneration)
+		if resumeErr == nil {
+			return r.executionFromDecision(ctx, profileID, sessionID, decision)
+		}
+		if !errors.Is(resumeErr, dynamic.ErrRecoveryPending) && !errors.Is(resumeErr, dynamic.ErrRouteStateNotFound) {
+			return ProfileExecution{}, resumeErr
+		}
+	}
+	return r.resolve(ctx, sessionID, profileID, expectedGeneration, "", currentExecutionProfileID)
+}
+
+func (r *ProfileExecutionResolver) resolveSkipRouteAction(
+	ctx context.Context,
+	sessionID, profileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+) (ProfileExecution, error) {
+	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
+	if currentExecutionProfileID == "" {
+		state, exists, stateErr := r.engine.LoadState(ctx, sessionID)
+		if stateErr != nil {
+			return ProfileExecution{}, stateErr
+		}
+		if exists {
+			currentExecutionProfileID = state.ExecutionProfileID
+		}
+	}
+	decision, err := r.engine.SelectContextWithReason(
+		ctx, sessionID, profileConfig, expectedGeneration, currentExecutionProfileID, "manual_skip",
+	)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
+	return r.executionFromDecision(ctx, profileID, sessionID, decision)
+}
+
+func (r *ProfileExecutionResolver) resolveCancelRouteAction(
+	ctx context.Context,
+	sessionID, profileID string,
+	expectedGeneration int64,
+	action string,
+) (ProfileExecution, error) {
+	reason := "manual_cancel_wait"
+	if action == "stop" {
+		reason = "manual_stop"
+	}
+	decision, err := r.engine.CancelPending(ctx, sessionID, expectedGeneration, reason)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
+	return r.executionFromDecision(ctx, profileID, sessionID, decision)
+}
+
+// ResumePendingRoute advances a due durable policy wait/retry without
+// selecting another generation. It is used by the orchestrator's recovery
+// scheduler after the persisted deadline has elapsed.
+func (r *ProfileExecutionResolver) ResumePendingRoute(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+) (ProfileExecution, error) {
+	if r.engine == nil || r.profiles == nil {
+		return ProfileExecution{}, errors.New("dynamic profile execution is not configured")
+	}
+	state, exists, err := r.engine.LoadState(ctx, sessionID)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
+	if !exists {
+		return ProfileExecution{}, dynamic.ErrRouteStateNotFound
+	}
+	decision, err := r.engine.ResumePending(ctx, sessionID, expectedGeneration)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
+	return r.executionFromDecision(ctx, state.LogicalProfileID, sessionID, decision)
+}
+
 func (r *ProfileExecutionResolver) resolve(
 	ctx context.Context,
 	sessionID, profileID string,
@@ -311,9 +452,29 @@ func (r *ProfileExecutionResolver) resolve(
 	}
 	return ProfileExecution{
 		LogicalProfileID: profileID, ExecutionProfileID: decision.ExecutionProfileID,
-		Generation: decision.Generation, ProfileVersion: decision.ProfileVersion,
+		RouteSessionID: sessionID,
+		Generation:     decision.Generation, ProfileVersion: decision.ProfileVersion,
 		Profile:  concrete,
 		Decision: decision,
+	}, nil
+}
+
+func (r *ProfileExecutionResolver) executionFromDecision(
+	ctx context.Context,
+	profileID, sessionID string,
+	decision dynamic.RouteDecision,
+) (ProfileExecution, error) {
+	concrete, err := r.profiles.GetAgentProfile(ctx, decision.ExecutionProfileID)
+	if err != nil {
+		return ProfileExecution{}, fmt.Errorf("resolve execution profile %s: %w", decision.ExecutionProfileID, err)
+	}
+	if concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled {
+		return ProfileExecution{}, fmt.Errorf("execution profile %s is unavailable", decision.ExecutionProfileID)
+	}
+	return ProfileExecution{
+		LogicalProfileID: profileID, ExecutionProfileID: decision.ExecutionProfileID,
+		RouteSessionID: sessionID, Generation: decision.Generation,
+		ProfileVersion: decision.ProfileVersion, Profile: concrete, Decision: decision,
 	}, nil
 }
 
@@ -338,11 +499,12 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
 		}
 		if route.RulesJSON != "" {
-			var rawRules map[string]dynamic.Action
-			if err := json.Unmarshal([]byte(route.RulesJSON), &rawRules); err != nil {
-				return dynamic.Profile{}, fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, err)
+			policy, legacyRules, policyErr := decodeDynamicRoutePolicy(route.RulesJSON)
+			if policyErr != nil {
+				return dynamic.Profile{}, fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, policyErr)
 			}
-			candidate.Rules = rawRules
+			candidate.Policies = policy
+			candidate.Rules = legacyRules
 		}
 		concrete, profileErr := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
 		switch {
@@ -364,6 +526,65 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
 	return profile, nil
+}
+
+func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dynamic.Action, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return routingpolicy.Document{}, nil, err
+	}
+	if _, hasVersion := fields["version"]; hasVersion {
+		var document routingpolicy.Document
+		if err := json.Unmarshal([]byte(raw), &document); err != nil {
+			return routingpolicy.Document{}, nil, err
+		}
+		if err := routingpolicy.ValidateDocument(document); err != nil {
+			return routingpolicy.Document{}, nil, err
+		}
+		return document, nil, nil
+	}
+	var legacy map[string]dynamic.Action
+	if err := json.Unmarshal([]byte(raw), &legacy); err != nil {
+		return routingpolicy.Document{}, nil, err
+	}
+	document := routingpolicy.DefaultDocument()
+	classActions := make(map[routingerr.Class]dynamic.Action)
+	for key, action := range legacy {
+		if key == "on_provider_error" {
+			document.Transient = legacyActionPolicy(action)
+			document.Hard = legacyActionPolicy(action)
+			continue
+		}
+		class := routingerr.ClassForCode(routingerr.Code(key))
+		if class != routingerr.ClassTransient && class != routingerr.ClassHard {
+			return routingpolicy.Document{}, nil, fmt.Errorf("legacy rule %q is not a provider error code", key)
+		}
+		if previous, ok := classActions[class]; ok && previous != action {
+			return routingpolicy.Document{}, nil, fmt.Errorf("legacy rules conflict for %s errors", class)
+		}
+		classActions[class] = action
+		if class == routingerr.ClassTransient {
+			document.Transient = legacyActionPolicy(action)
+		} else {
+			document.Hard = legacyActionPolicy(action)
+		}
+	}
+	if err := routingpolicy.ValidateDocument(document); err != nil {
+		return routingpolicy.Document{}, nil, err
+	}
+	return document, legacy, nil
+}
+
+func legacyActionPolicy(action dynamic.Action) routingpolicy.Policy {
+	policy := routingpolicy.DefaultPolicy()
+	switch action {
+	case dynamic.ActionRetrySame:
+		policy.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 1, InitialIntervalSeconds: 5}
+		policy.OnExhausted = routingpolicy.OutcomeStop
+	case dynamic.ActionStop:
+		policy.OnExhausted = routingpolicy.OutcomeStop
+	}
+	return policy
 }
 
 func profileCredentialBindingDescriptor(profile *agentsettingsmodels.AgentProfile) dynamic.CredentialBindingDescriptor {

@@ -30,11 +30,39 @@ export type BillingType = "api_key" | "subscription";
 
 export type AgentProfileKind = "concrete" | "dynamic";
 
+export type DynamicErrorClass = "transient" | "hard";
+export type DynamicPolicyOutcome = "skip" | "stop";
+
+export type DynamicRetryPolicy = {
+  enabled: boolean;
+  maxRetries: number;
+  initialIntervalSeconds: number;
+};
+
+export type DynamicResetWaitPolicy = {
+  enabled: boolean;
+  maxWaitSeconds: number;
+};
+
+export type DynamicErrorPolicy = {
+  retry: DynamicRetryPolicy;
+  waitForReset: DynamicResetWaitPolicy;
+  onExhausted: DynamicPolicyOutcome;
+};
+
+export type DynamicAgentPolicy = {
+  version: number;
+  transient: DynamicErrorPolicy;
+  hard: DynamicErrorPolicy;
+};
+
 export type DynamicAgentCandidate = {
   position: number;
   executionProfileId: AgentProfileId;
   enabled: boolean;
-  rules: Record<string, string>;
+  policies: DynamicAgentPolicy;
+  /** Read compatibility for clients that still construct legacy drafts. */
+  rules?: Record<string, string>;
 };
 
 export type DynamicAgentProfile = {
@@ -201,6 +229,33 @@ export type AgentProfilePayload = {
       position: number;
       execution_profile_id: string;
       enabled: boolean;
+      policies?: {
+        version: number;
+        transient: {
+          retry: {
+            enabled: boolean;
+            max_retries: number;
+            initial_interval_seconds: number;
+          };
+          wait_for_reset: {
+            enabled: boolean;
+            max_wait_seconds: number;
+          };
+          on_exhausted: DynamicPolicyOutcome;
+        };
+        hard: {
+          retry: {
+            enabled: boolean;
+            max_retries: number;
+            initial_interval_seconds: number;
+          };
+          wait_for_reset: {
+            enabled: boolean;
+            max_wait_seconds: number;
+          };
+          on_exhausted: DynamicPolicyOutcome;
+        };
+      };
       rules?: Record<string, string>;
     }>;
   };

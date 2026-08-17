@@ -1,7 +1,7 @@
 ---
 id: "11-documentation-release-gate"
 title: "Documentation release gate"
-status: pending
+status: done
 wave: 10
 depends_on: ["10-policy-e2e"]
 plan: "plan.md"
@@ -32,4 +32,17 @@ spec: "../../specs/platform/provider-error-recovery.md"
 
 ## Results
 
-Pending.
+Completed. Updated the public agent/profile and feature-status pages with both
+error classes, policy controls, safe defaults, catalogue growth, Kanban/Office
+scope, and deferred model-based classification. Telemetry routing remains
+outside this package.
+
+Verification:
+
+- `make -C apps/backend lint` — `golangci-lint`: 0 issues.
+- `pnpm run lint` — passed with no warnings.
+- `pnpm run typecheck` — passed.
+- `pnpm run i18n:check` and `pnpm run i18n:ratchet` — passed.
+- `node --test scripts/validate-public-docs.test.mjs` — 61 passed.
+- `node scripts/validate-public-docs.mjs` — 41 published pages validated.
+- `git diff --check` — passed.

@@ -1476,6 +1476,7 @@ func applyResolvedExecution(session *models.TaskSession, resolved agentruntime.P
 	if session.RouteReason == "" {
 		session.RouteReason = "candidate_order"
 	}
+	applyDynamicRouteDecisionProjection(session, resolved.Decision)
 	// A new concrete candidate never inherits a provider-native ACP identity.
 	// Reapplying the persisted route during restart must keep the identity so
 	// native conversation resume remains possible.

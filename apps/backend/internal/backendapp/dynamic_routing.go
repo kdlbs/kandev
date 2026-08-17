@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -53,6 +54,9 @@ func applyDynamicRouteAction(
 	if err := persistDynamicRouteSelection(ctx, repo, session, decision); err != nil {
 		return nil, err
 	}
+	if request.Action == orchestrator.RouteActionCancelWait || request.Action == orchestrator.RouteActionStop {
+		return routeActionResult(ctx, repo, session), nil
+	}
 	return finishDynamicRouteAction(ctx, repo, session.ID, launchSuccessor)
 }
 
@@ -90,19 +94,14 @@ func resolveDynamicRouteAction(
 	request orchestrator.RouteActionRequest,
 	session *models.TaskSession,
 ) (agentruntime.ProfileExecution, error) {
-	exclude := ""
-	if request.Action == orchestrator.RouteActionTryNext {
-		exclude = session.ExecutionProfileID
-	}
-	switch request.Action {
-	case orchestrator.RouteActionRetry:
-		return resolver.ResolveWithPreference(
-			ctx, session.ID, session.AgentProfileID, request.ExpectedGeneration,
-			exclude, session.ExecutionProfileID,
-		)
-	default:
-		return resolver.Resolve(ctx, session.ID, session.AgentProfileID, request.ExpectedGeneration, exclude)
-	}
+	return resolver.ResolveRouteAction(
+		ctx,
+		session.ID,
+		session.AgentProfileID,
+		session.ExecutionProfileID,
+		request.ExpectedGeneration,
+		string(request.Action),
+	)
 }
 
 func handleDynamicRouteActionError(
@@ -122,7 +121,7 @@ func handleDynamicRouteActionError(
 	if updateErr := repo.UpdateTaskSession(ctx, session); updateErr != nil {
 		return nil, routeActionPersistenceError(ctx, repo, session, updateErr)
 	}
-	return routeActionResult(session), nil
+	return routeActionResult(ctx, repo, session), nil
 }
 
 func persistDynamicRouteSelection(
@@ -133,8 +132,17 @@ func persistDynamicRouteSelection(
 ) error {
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
-	session.RouteState = "starting"
+	session.RouteState = decision.Decision.Status
+	if session.RouteState == "" {
+		session.RouteState = "starting"
+	}
 	session.RouteReason = decision.Decision.Reason
+	session.RouteErrorCode = string(decision.Decision.ErrorCode)
+	session.RouteErrorClass = string(decision.Decision.ErrorClass)
+	session.RouteCatalogueVersion = decision.Decision.CatalogueVersion
+	session.RouteRetryOrdinal = decision.Decision.RetryOrdinal
+	session.RoutePendingOutcome = string(decision.Decision.PendingOutcome)
+	session.RouteDeadline = decision.Decision.Deadline
 	// A candidate change never carries a provider-native ACP identity across
 	// profiles. The conductor will populate this after a fresh launch.
 	session.DownstreamACPSessionID = ""
@@ -155,7 +163,7 @@ func finishDynamicRouteAction(
 		if err != nil {
 			return nil, err
 		}
-		return routeActionResult(session), nil
+		return routeActionResult(ctx, repo, session), nil
 	}
 	if err := launchSuccessor(ctx, sessionID); err != nil {
 		return recoverDynamicRouteAction(ctx, repo, sessionID, err)
@@ -164,7 +172,7 @@ func finishDynamicRouteAction(
 	if err != nil {
 		return nil, err
 	}
-	return routeActionResult(session), nil
+	return routeActionResult(ctx, repo, session), nil
 }
 
 func recoverDynamicRouteAction(
@@ -185,18 +193,43 @@ func recoverDynamicRouteAction(
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		return nil, routeActionPersistenceError(ctx, repo, session, err)
 	}
-	return routeActionResult(session), nil
+	return routeActionResult(ctx, repo, session), nil
 }
 
-func routeActionResult(session *models.TaskSession) *orchestrator.RouteActionResult {
-	return &orchestrator.RouteActionResult{
+func routeActionResult(
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	session *models.TaskSession,
+) *orchestrator.RouteActionResult {
+	result := &orchestrator.RouteActionResult{
 		SessionID:          session.ID,
 		LogicalProfileID:   session.AgentProfileID,
 		ExecutionProfileID: session.ExecutionProfileID,
 		RouteGeneration:    session.RouteGeneration,
 		State:              session.RouteState,
 		Reason:             session.RouteReason,
+		ErrorCode:          session.RouteErrorCode,
+		ErrorClass:         session.RouteErrorClass,
+		CatalogueVersion:   session.RouteCatalogueVersion,
+		RetryOrdinal:       session.RouteRetryOrdinal,
+		Deadline:           session.RouteDeadline,
+		PendingOutcome:     session.RoutePendingOutcome,
 	}
+	if repo != nil {
+		if state, err := repo.LoadRouteState(ctx, session.ID); err == nil && state != nil {
+			result.ProfileVersion = state.ProfileVersion
+			var policyState dynamicruntime.PolicyState
+			if jsonErr := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); jsonErr == nil {
+				result.ErrorCode = string(policyState.FailureCode)
+				result.ErrorClass = string(policyState.FailureClass)
+				result.CatalogueVersion = policyState.CatalogueVersion
+				result.RetryOrdinal = policyState.RetryOrdinal
+				result.Deadline = policyState.Deadline
+				result.PendingOutcome = string(policyState.PendingOutcome)
+			}
+		}
+	}
+	return result
 }
 
 func routeActionError(
@@ -239,6 +272,12 @@ func routeActionConflict(
 		ExecutionProfileID: session.ExecutionProfileID,
 		RouteGeneration:    session.RouteGeneration,
 		State:              session.RouteState,
+		ErrorCode:          session.RouteErrorCode,
+		ErrorClass:         session.RouteErrorClass,
+		CatalogueVersion:   session.RouteCatalogueVersion,
+		RetryOrdinal:       session.RouteRetryOrdinal,
+		Deadline:           session.RouteDeadline,
+		PendingOutcome:     session.RoutePendingOutcome,
 	}
 	if state != nil {
 		result.ExecutionProfileID = state.ExecutionProfileID
@@ -246,6 +285,15 @@ func routeActionConflict(
 		result.ProfileVersion = state.ProfileVersion
 		result.State = state.Status
 		result.LogicalProfileID = state.LogicalProfileID
+		var policyState dynamicruntime.PolicyState
+		if jsonErr := json.Unmarshal([]byte(state.PolicyStateJSON), &policyState); jsonErr == nil {
+			result.ErrorCode = string(policyState.FailureCode)
+			result.ErrorClass = string(policyState.FailureClass)
+			result.CatalogueVersion = policyState.CatalogueVersion
+			result.RetryOrdinal = policyState.RetryOrdinal
+			result.Deadline = policyState.Deadline
+			result.PendingOutcome = string(policyState.PendingOutcome)
+		}
 	}
 	return &orchestrator.RouteActionConflictError{Result: result, Err: err}
 }

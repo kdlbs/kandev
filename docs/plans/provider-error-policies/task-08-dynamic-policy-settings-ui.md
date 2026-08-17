@@ -1,7 +1,7 @@
 ---
 id: "08-dynamic-policy-settings-ui"
 title: "Dynamic policy settings UI"
-status: pending
+status: done
 wave: 4
 depends_on: ["02-versioned-policy-document", "03-durable-policy-evaluator"]
 plan: "plan.md"
@@ -37,4 +37,17 @@ spec: "../../specs/platform/provider-error-recovery.md"
 
 ## Results
 
-Pending.
+Completed. Create mode now renders one draft without an enabled toggle or Add
+profile action; edit mode retains the profile enablement control. Each
+candidate has localized transient and hard policy editors for retry limits,
+initial intervals, reset waits, exhausted outcomes, derived schedules, and
+inline validation. The shared searchable agent-profile picker is reused for
+candidate selection, with mobile-sized controls and a single page scroll
+owner.
+
+Verification:
+
+- `pnpm test -- --run components/task/chat/dynamic-route-recovery.test.tsx components/settings/dynamic-agent-policy-editor.test.tsx lib/api/domains/agent-profile-normalize.test.ts components/settings/dynamic-agents-card.test.tsx` — 24 passed.
+- `pnpm run lint` — 0 errors and 0 warnings.
+- `pnpm run typecheck` — passed.
+- `pnpm run i18n:check` and `pnpm run i18n:ratchet` — passed.

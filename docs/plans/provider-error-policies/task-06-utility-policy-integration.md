@@ -1,7 +1,7 @@
 ---
 id: "06-utility-policy-integration"
 title: "Utility policy integration"
-status: pending
+status: done
 wave: 6
 depends_on: ["04-dynamic-conductor-policy-integration", "05-kanban-recovery-convergence"]
 plan: "plan.md"
@@ -30,4 +30,13 @@ spec: "../../specs/platform/provider-error-recovery.md"
 
 ## Results
 
-Pending.
+Completed. Utility profile resolution creates a unique `utility:<uuid>` route
+identity for every invocation, including calls associated with a task session.
+The shared evaluator is applied to classified pre-result failures; partial
+responses and ambiguous effects fail closed, so utility output is never
+combined with a successor provider. Pending retry/reset decisions remain
+durable and are returned to the caller without an unsafe synchronous fallback.
+
+Verification:
+
+- `go test -tags fts5 ./internal/utility/... ./internal/agent/runtime/... ./internal/task/repository/sqlite/...` — covered by the 1,673 Office/utility and 1,106 routing/settings/SQLite results.

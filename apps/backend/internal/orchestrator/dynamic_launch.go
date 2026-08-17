@@ -90,14 +90,19 @@ func (s *Service) persistDynamicLaunchDecision(
 		return err
 	}
 	if session.ExecutionProfileID == decision.ExecutionProfileID &&
-		session.RouteGeneration == decision.Generation {
+		session.RouteGeneration == decision.Generation &&
+		decision.Status == "" {
 		return nil
 	}
 	previousExecutionProfileID := session.ExecutionProfileID
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
-	session.RouteState = "starting"
+	session.RouteState = decision.Status
+	if session.RouteState == "" {
+		session.RouteState = "starting"
+	}
 	session.RouteReason = decision.Reason
+	applyDynamicRouteDecisionProjection(session, decision)
 	// The executor marks a failed provider launch terminal before the
 	// conductor can claim the next candidate. Re-open the logical session for
 	// that immediate retry so the second launch can persist STARTING state.
@@ -109,6 +114,25 @@ func (s *Service) persistDynamicLaunchDecision(
 		session.DownstreamACPSessionID = ""
 	}
 	return s.repo.UpdateTaskSession(ctx, session)
+}
+
+func applyDynamicRouteDecisionProjection(
+	session *models.TaskSession,
+	decision dynamicruntime.RouteDecision,
+) {
+	if session == nil {
+		return
+	}
+	session.RouteErrorCode = string(decision.ErrorCode)
+	session.RouteErrorClass = string(decision.ErrorClass)
+	session.RouteCatalogueVersion = decision.CatalogueVersion
+	session.RouteRetryOrdinal = decision.RetryOrdinal
+	session.RoutePendingOutcome = string(decision.PendingOutcome)
+	session.RouteDeadline = nil
+	if decision.Deadline != nil {
+		deadline := decision.Deadline.UTC()
+		session.RouteDeadline = &deadline
+	}
 }
 
 // launchPreparedSessionWithDynamicFallback keeps the logical session stable
@@ -397,8 +421,57 @@ func (s *Service) routeDynamicAgentFailure(
 		session.RouteGeneration, classified,
 	)
 	if err != nil {
+		return s.persistPendingDynamicRecovery(ctx, session, decision, err)
+	}
+	return s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput)
+}
+
+func (s *Service) persistPendingDynamicRecovery(
+	ctx context.Context,
+	session *models.TaskSession,
+	decision dynamicruntime.RouteDecision,
+	err error,
+) bool {
+	if !errors.Is(err, dynamicruntime.ErrRecoveryPending) {
 		return false
 	}
+	// The evaluator durably owns the retry/reset deadline. Keep the logical
+	// session available for the authoritative recovery surface; no successor
+	// launch is allowed until a due/manual action claims the same generation.
+	session.RouteState = decision.Status
+	session.RouteReason = decision.Reason
+	applyDynamicRouteDecisionProjection(session, decision)
+	session.State = models.TaskSessionStateWaitingForInput
+	session.DownstreamACPSessionID = ""
+	if updateErr := s.repo.UpdateTaskSession(ctx, session); updateErr != nil {
+		s.logger.Warn("failed to persist pending dynamic recovery",
+			zap.String("session_id", session.ID), zap.Error(updateErr))
+		return false
+	}
+	s.schedulePersistedDynamicRecovery(ctx, session.ID, decision.Generation)
+	return true
+}
+
+func (s *Service) schedulePersistedDynamicRecovery(ctx context.Context, sessionID string, generation int64) {
+	loader, ok := s.repo.(dynamicRouteStateLoader)
+	if !ok {
+		return
+	}
+	state, err := loader.LoadRouteState(ctx, sessionID)
+	if err != nil || state == nil {
+		return
+	}
+	s.scheduleDynamicPolicyRecovery(sessionID, generation, state.PolicyStateJSON)
+}
+
+func (s *Service) launchDynamicSuccessorAfterFailure(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	conductor *dynamicruntime.Conductor,
+	decision dynamicruntime.RouteDecision,
+	continuationInput dynamicruntime.ContinuationInput,
+) bool {
 	continuation, err := conductor.BuildContinuation(ctx, continuationInput)
 	if err != nil {
 		return false

@@ -278,15 +278,17 @@ export function ProfilesCard({
         <SettingsCardHeader
           title={t("agents:dynamicProfileSettings")}
           actions={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onAddProfile}
-              className={settingsActionClassName("cursor-pointer")}
-            >
-              <IconPlus className="mr-2 h-4 w-4" />
-              {t("agents:addProfile")}
-            </Button>
+            !isCreateMode && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onAddProfile}
+                className={settingsActionClassName("cursor-pointer")}
+              >
+                <IconPlus className="mr-2 h-4 w-4" />
+                {t("agents:addProfile")}
+              </Button>
+            )
           }
         />
         <CardContent className="space-y-6">
@@ -296,6 +298,7 @@ export function ProfilesCard({
                 <DynamicAgentProfileEditor
                   agent={draftAgent}
                   profile={profile}
+                  isCreating={Boolean(profile.isNew)}
                   onDraftChange={(patch) => onProfileChange(profile.id, patch)}
                 />
               ) : (

@@ -450,6 +450,13 @@ export type TaskSession = ActiveSubagentCountFields & {
   route_state?: string;
   /** Stable reason code for the current dynamic-route state. */
   route_reason?: string;
+  /** Classified provider cause currently driving route recovery. */
+  route_error_code?: string;
+  route_error_class?: "transient" | "hard" | "unclassified" | string;
+  route_catalogue_version?: string;
+  route_retry_ordinal?: number;
+  route_deadline?: string;
+  route_pending_outcome?: "skip" | "stop" | string;
   /** Downstream ACP session ID for the currently selected concrete candidate. */
   downstream_acp_session_id?: string;
   container_id?: string;

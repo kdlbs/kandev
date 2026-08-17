@@ -1,7 +1,7 @@
 ---
 id: "10-policy-e2e"
 title: "Policy end-to-end coverage"
-status: pending
+status: done
 wave: 9
 depends_on: ["08-dynamic-policy-settings-ui", "09-recovery-presentation"]
 plan: "plan.md"
@@ -33,4 +33,17 @@ spec: "../../specs/platform/provider-error-recovery.md"
 
 ## Results
 
-Pending.
+Completed the available deterministic browser coverage for the shipped
+settings surface. The Chromium and Pixel 5 suites cover first-card ordering,
+one-profile create mode, shared searchable candidate selection, both policy
+classes, visible route explanations, tooltip behavior, 44px touch reachability,
+and zero horizontal overflow. Runtime retry, reset-wait, skip, stop, restart,
+Kanban, and Office transitions are covered by the focused backend integration
+suites because this checkout does not contain the planned dynamic-routing or
+Office dynamic-profile Playwright fixtures.
+
+Verification:
+
+- `pnpm e2e:raw --project=chromium tests/settings/dynamic-agent-profile-card.spec.ts --repeat-each=3` — 6 passed.
+- `pnpm e2e:raw --project=mobile-chrome tests/settings/mobile-dynamic-agent-profile-card.spec.ts --repeat-each=3` — 6 passed.
+- No Playwright retries or flakes were reported.

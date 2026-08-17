@@ -18,6 +18,7 @@ import { arePermissionsDirty, permissionsToProfilePatch } from "@/lib/agent-perm
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
 import { areConfigOptionsEqual } from "@/lib/config-options";
 import { t } from "@/lib/i18n";
+import { toAgentProfilePayload } from "@/lib/api/domains/agent-profile-normalize";
 import type { ProfileFormData } from "@/components/settings/profile-form-fields";
 
 // The JSON key the MCP editor validates against — an identifier, interpolated
@@ -87,15 +88,7 @@ export type DraftAgent = Omit<Agent, "profiles"> & { profiles: DraftProfile[]; i
 
 function dynamicProfilePayload(profile: DraftProfile) {
   if (profile.kind !== "dynamic" && !profile.dynamic) return undefined;
-  return {
-    version: profile.dynamic?.version ?? 1,
-    candidates: (profile.dynamic?.candidates ?? []).map((candidate, position) => ({
-      position,
-      execution_profile_id: candidate.executionProfileId,
-      enabled: candidate.enabled,
-      rules: candidate.rules,
-    })),
-  };
+  return toAgentProfilePayload(profile).dynamic;
 }
 
 export const parseProfileMcpServers = (raw: string): Record<string, McpServerDef> => {

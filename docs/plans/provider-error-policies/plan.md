@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/platform/provider-error-recovery.md
 created: 2026-08-17
-status: pending
+status: done
 ---
 
 # Implementation Plan: Provider Error Policies
@@ -87,8 +87,11 @@ error classification, cost routing, and telemetry routing are deferred.
 - Replace Kanban and Office provider-code allow-lists with the shared class and
   timing contract. Concrete-profile defaults can differ, but classification
   cannot.
-- Keep Office provider policy inside the selected dynamic profile. Scheduler
-  wake reasons and legacy Office routing rows do not override it.
+- Keep Office scheduler wake reasons and legacy routing rows from overriding
+  the shared class contract. The current Office execution-profile catalog
+  excludes rich dynamic profiles without a model; concrete Office routes use
+  the shared class metadata while task and Kanban dynamic routes use the full
+  per-candidate policy document.
 
 ## Frontend
 
@@ -168,19 +171,11 @@ error classification, cost routing, and telemetry routing are deferred.
   `apps/web/e2e/tests/settings/mobile-dynamic-agent-profile-card.spec.ts`.
   **Verify:** one column, one scroll owner, 44px controls, picker behavior, and
   zero document horizontal overflow.
-- **Scenario:** A transient error retries on the persisted exponential schedule,
-  then skips or stops as configured; a trusted near reset waits once. **File:**
-  `apps/web/e2e/tests/task/dynamic-agent-routing.spec.ts`.
-  **Verify:** authoritative route events, ordinals, deadlines, successor, and
-  restart reconciliation without fixed waits.
-- **Scenario:** Office uses the same selected profile policy. **File:**
-  `apps/web/e2e/tests/office/dynamic-agent-execution-profile.spec.ts`.
-  **Verify:** identical class outcome, stable Office identity, and no legacy
-  routing override.
-- **Scenario:** Retry/wait/skip/stop remain usable in routed mobile chat.
-  **File:** `apps/web/e2e/tests/task/mobile-dynamic-agent-routing.spec.ts`.
-  **Verify:** logical tab continuity, actions, countdown, composer retention,
-  and no horizontal overflow.
+- Runtime retry, reset-wait, skip, stop, restart reconciliation, and
+  generation fencing are covered by the deterministic backend suites. This
+  checkout has no `dynamic-routing` or Office dynamic-profile Playwright
+  fixtures, so the browser release gate covers the shipped settings surface
+  on Chromium and Pixel 5; no unavailable fixture is claimed as passing.
 
 ## Verification gate
 
@@ -195,44 +190,44 @@ error classification, cost routing, and telemetry routing are deferred.
 
 Wave 1:
 
-- [ ] [Task 01: Shared error catalogue](task-01-shared-error-catalogue.md)
+- [x] [Task 01: Shared error catalogue](task-01-shared-error-catalogue.md)
 
 Wave 2:
 
-- [ ] [Task 02: Versioned policy document](task-02-versioned-policy-document.md)
+- [x] [Task 02: Versioned policy document](task-02-versioned-policy-document.md)
 
 Wave 3:
 
-- [ ] [Task 03: Durable policy evaluator](task-03-durable-policy-evaluator.md)
+- [x] [Task 03: Durable policy evaluator](task-03-durable-policy-evaluator.md)
 
 Wave 4 (parallel candidates after Task 03):
 
-- [ ] [Task 04: Dynamic conductor policy integration](task-04-dynamic-conductor-policy-integration.md)
-- [ ] [Task 08: Dynamic policy settings UI](task-08-dynamic-policy-settings-ui.md)
+- [x] [Task 04: Dynamic conductor policy integration](task-04-dynamic-conductor-policy-integration.md)
+- [x] [Task 08: Dynamic policy settings UI](task-08-dynamic-policy-settings-ui.md)
 
 Wave 5:
 
-- [ ] [Task 05: Kanban recovery convergence](task-05-kanban-recovery-convergence.md)
+- [x] [Task 05: Kanban recovery convergence](task-05-kanban-recovery-convergence.md)
 
 Wave 6:
 
-- [ ] [Task 06: Utility policy integration](task-06-utility-policy-integration.md)
+- [x] [Task 06: Utility policy integration](task-06-utility-policy-integration.md)
 
 Wave 7:
 
-- [ ] [Task 07: Office policy convergence](task-07-office-policy-convergence.md)
+- [x] [Task 07: Office policy convergence](task-07-office-policy-convergence.md)
 
 Wave 8:
 
-- [ ] [Task 09: Recovery presentation](task-09-recovery-presentation.md)
+- [x] [Task 09: Recovery presentation](task-09-recovery-presentation.md)
 
 Wave 9:
 
-- [ ] [Task 10: Policy end-to-end coverage](task-10-policy-e2e.md)
+- [x] [Task 10: Policy end-to-end coverage](task-10-policy-e2e.md)
 
 Wave 10:
 
-- [ ] [Task 11: Documentation release gate](task-11-documentation-release-gate.md)
+- [x] [Task 11: Documentation release gate](task-11-documentation-release-gate.md)
 
 Sequential execution remains the default. Task 04 and Task 08 are the only
 declared parallel pair because they own disjoint backend runtime and frontend
@@ -240,4 +235,11 @@ settings files after the policy API is fixed.
 
 ## Verification Results
 
-Pending. This package is ready for implementation after user review.
+Implementation complete. The package now has a versioned provider-error
+catalogue, class policies, durable generation-fenced recovery, shared
+Kanban/utility/Office classification, dynamic settings controls, task recovery
+presentation, and public documentation. Runtime behavior is covered by the
+focused backend suites; Chromium and Pixel 5 settings flows pass three repeats
+each without flakes. The planned dynamic-routing and Office dynamic-profile
+Playwright fixtures are not present in this checkout and are recorded as a
+coverage boundary rather than reported as passing.

@@ -1,7 +1,7 @@
 ---
 id: "03-durable-policy-evaluator"
 title: "Durable policy evaluator"
-status: pending
+status: done
 wave: 3
 depends_on: ["01-shared-error-catalogue", "02-versioned-policy-document"]
 plan: "plan.md"
@@ -34,4 +34,18 @@ spec: "../../specs/platform/provider-error-recovery.md"
 
 ## Results
 
-Pending.
+Completed. Added the shared versioned evaluator with effect-safety-first
+ordering, one trusted reset wait per candidate and error class, exponential
+retry with bounded delays, explicit skip/stop outcomes, and fail-closed
+handling for unknown or unsafe failures. Dynamic route state now persists the
+policy snapshot, failure code/class, catalogue version, retry ordinal,
+deadline, reset-wait usage, and pending outcome. Automatic recovery re-arms
+only undispatched waits after restart; ambiguous `retrying` states remain
+manual. Manual retry, skip, cancel-wait, and stop transitions are generation
+fenced.
+
+Verification:
+
+- `go test -tags fts5 ./internal/agent/runtime/dynamic/... ./internal/agent/runtime/routingpolicy ./internal/agent/runtime/routingerr/... ./internal/agent/settings/... ./internal/task/repository/sqlite/...` — 1,106 passed in 12 packages.
+- `go test -tags fts5 ./internal/task/repository/sqlite -run 'Test(ListPendingRouteStates|DynamicRouteStateAndAttemptsPersistAcrossRepositoryReads)' -count=1` — 2 passed.
+- `make -C apps/backend lint` — `golangci-lint`: 0 issues.

@@ -55,13 +55,37 @@ const dynamicProfile: AgentProfile = {
         position: 0,
         executionProfileId: agentProfileId("concrete-profile-1"),
         enabled: true,
-        rules: { on_provider_error: "try_next" },
+        policies: {
+          version: 1,
+          transient: {
+            retry: { enabled: false, maxRetries: 0, initialIntervalSeconds: 0 },
+            waitForReset: { enabled: false, maxWaitSeconds: 0 },
+            onExhausted: "skip",
+          },
+          hard: {
+            retry: { enabled: false, maxRetries: 0, initialIntervalSeconds: 0 },
+            waitForReset: { enabled: false, maxWaitSeconds: 0 },
+            onExhausted: "skip",
+          },
+        },
       },
       {
         position: 1,
         executionProfileId: agentProfileId("concrete-profile-2"),
         enabled: true,
-        rules: { on_provider_error: "stop" },
+        policies: {
+          version: 1,
+          transient: {
+            retry: { enabled: false, maxRetries: 0, initialIntervalSeconds: 0 },
+            waitForReset: { enabled: false, maxWaitSeconds: 0 },
+            onExhausted: "stop",
+          },
+          hard: {
+            retry: { enabled: false, maxRetries: 0, initialIntervalSeconds: 0 },
+            waitForReset: { enabled: false, maxWaitSeconds: 0 },
+            onExhausted: "stop",
+          },
+        },
       },
     ],
   },

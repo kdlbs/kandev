@@ -7,9 +7,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { AgentLogo } from "@/components/agent-logo";
@@ -17,21 +15,41 @@ import { AgentProfilePicker } from "@/components/settings/agent-profile-picker";
 import { ProfileNameField } from "@/components/settings/profile-form-fields";
 import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import {
+  DynamicPolicyEditor,
+  isDynamicErrorPolicyValid,
+} from "@/components/settings/dynamic-agent-policy-editor";
 import { updateAgentProfileAction } from "@/app/actions/agents";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { Agent, AgentProfile } from "@/lib/types/http";
-import type { DynamicAgentCandidate } from "@/lib/types/agent-profile";
+import type {
+  DynamicAgentCandidate,
+  DynamicAgentPolicy,
+  DynamicErrorClass,
+  DynamicErrorPolicy,
+} from "@/lib/types/agent-profile";
 
 type DynamicAgentProfileEditorProps = {
   agent: Agent;
   profile: AgentProfile;
+  isCreating?: boolean;
   /** When supplied, render as a draft editor owned by the parent save flow. */
   onDraftChange?: (patch: Pick<AgentProfile, "name" | "dynamic" | "enabled">) => void;
 };
 
-const defaultProviderErrorAction = "try_next";
+const defaultDynamicErrorPolicy = (): DynamicErrorPolicy => ({
+  retry: { enabled: false, maxRetries: 0, initialIntervalSeconds: 0 },
+  waitForReset: { enabled: false, maxWaitSeconds: 0 },
+  onExhausted: "skip",
+});
+
+const defaultDynamicPolicy = (): DynamicAgentPolicy => ({
+  version: 1,
+  transient: defaultDynamicErrorPolicy(),
+  hard: defaultDynamicErrorPolicy(),
+});
 
 function dynamicDraftRevision(
   name: string,
@@ -48,60 +66,6 @@ function candidateLabel(candidate: DynamicAgentCandidate, profiles: AgentProfile
   );
 }
 
-function dynamicRouteActionCopy(action: string): {
-  labelKey: "agents:retry" | "task:stop" | "task:dynamicRouteTryNext";
-  descriptionKey:
-    | "agents:dynamicRouteRetryDescription"
-    | "agents:dynamicRouteStopDescription"
-    | "agents:dynamicRouteTryNextDescription";
-} {
-  switch (action) {
-    case "retry_same":
-      return {
-        labelKey: "agents:retry",
-        descriptionKey: "agents:dynamicRouteRetryDescription",
-      };
-    case "stop":
-      return {
-        labelKey: "task:stop",
-        descriptionKey: "agents:dynamicRouteStopDescription",
-      };
-    default:
-      return {
-        labelKey: "task:dynamicRouteTryNext",
-        descriptionKey: "agents:dynamicRouteTryNextDescription",
-      };
-  }
-}
-
-function DynamicRouteActionHelp({ action }: { action: string }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const { labelKey, descriptionKey } = dynamicRouteActionCopy(action);
-  const actionLabel = t(labelKey);
-
-  return (
-    <Tooltip open={open} onOpenChange={setOpen}>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="size-11 shrink-0 cursor-help text-muted-foreground sm:size-7"
-          aria-label={t("agents:dynamicRouteActionInfo", { action: actionLabel })}
-          onClick={() => setOpen((current) => !current)}
-          data-testid={`dynamic-route-action-help-${action}`}
-        >
-          <IconInfoCircle className="size-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs text-xs leading-relaxed">
-        {t(descriptionKey)}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
 function DynamicRoutingPolicyHelp() {
   const { t } = useTranslation();
   return (
@@ -115,6 +79,7 @@ function DynamicRoutingPolicyHelp() {
         <p>{t("agents:dynamicRoutingPolicySwitchable")}</p>
         <p>{t("agents:dynamicRoutingPolicyExcluded")}</p>
         <p>{t("agents:dynamicRoutingPolicyRecovery")}</p>
+        <p>{t("agents:dynamicPolicyWaitExplanation")}</p>
       </div>
     </div>
   );
@@ -168,6 +133,7 @@ function DynamicProfileEditorHeader({
 export function DynamicAgentProfileEditor({
   agent,
   profile,
+  isCreating = false,
   onDraftChange,
 }: DynamicAgentProfileEditorProps) {
   const { t } = useTranslation();
@@ -245,7 +211,7 @@ export function DynamicAgentProfileEditor({
           position: current.length,
           executionProfileId: toAgentProfileId(executionProfileId),
           enabled: true,
-          rules: { on_provider_error: defaultProviderErrorAction },
+          policies: defaultDynamicPolicy(),
         },
       ];
       notifyDraft(name, next);
@@ -288,11 +254,21 @@ export function DynamicAgentProfileEditor({
     });
   };
 
-  const updateCandidateAction = (index: number, action: string) => {
+  const updateCandidatePolicy = (
+    index: number,
+    errorClass: DynamicErrorClass,
+    patch: Partial<DynamicErrorPolicy>,
+  ) => {
     setCandidates((current) => {
       const next = current.map((candidate, candidateIndex) =>
         candidateIndex === index
-          ? { ...candidate, rules: { ...candidate.rules, on_provider_error: action } }
+          ? {
+              ...candidate,
+              policies: {
+                ...candidate.policies,
+                [errorClass]: { ...candidate.policies[errorClass], ...patch },
+              },
+            }
           : candidate,
       );
       notifyDraft(name, next);
@@ -321,7 +297,34 @@ export function DynamicAgentProfileEditor({
             position,
             execution_profile_id: candidate.executionProfileId,
             enabled: candidate.enabled,
-            rules: candidate.rules,
+            policies: {
+              version: candidate.policies.version,
+              transient: {
+                retry: {
+                  enabled: candidate.policies.transient.retry.enabled,
+                  max_retries: candidate.policies.transient.retry.maxRetries,
+                  initial_interval_seconds:
+                    candidate.policies.transient.retry.initialIntervalSeconds,
+                },
+                wait_for_reset: {
+                  enabled: candidate.policies.transient.waitForReset.enabled,
+                  max_wait_seconds: candidate.policies.transient.waitForReset.maxWaitSeconds,
+                },
+                on_exhausted: candidate.policies.transient.onExhausted,
+              },
+              hard: {
+                retry: {
+                  enabled: candidate.policies.hard.retry.enabled,
+                  max_retries: candidate.policies.hard.retry.maxRetries,
+                  initial_interval_seconds: candidate.policies.hard.retry.initialIntervalSeconds,
+                },
+                wait_for_reset: {
+                  enabled: candidate.policies.hard.waitForReset.enabled,
+                  max_wait_seconds: candidate.policies.hard.waitForReset.maxWaitSeconds,
+                },
+                on_exhausted: candidate.policies.hard.onExhausted,
+              },
+            },
           })),
         },
       };
@@ -367,12 +370,21 @@ export function DynamicAgentProfileEditor({
   };
 
   const draftRevision = dynamicDraftRevision(name, candidates, profileEnabled);
+  const policiesValid = candidates.every(
+    (candidate) =>
+      isDynamicErrorPolicyValid(candidate.policies.transient) &&
+      isDynamicErrorPolicyValid(candidate.policies.hard),
+  );
+  let invalidReason = t("agents:dynamicPolicyValidation");
+  if (!name.trim()) invalidReason = t("agents:profileNameRequired");
+  else if (candidates.length === 0) invalidReason = t("agents:noDynamicCandidates");
   useSettingsSaveContributor({
     id: `dynamic-profile:${profile.id}`,
     revision: draftRevision,
     isDirty: standalone && draftRevision !== savedRevision,
-    canSave: routingEnabled && !saving && Boolean(name.trim()) && candidates.length > 0,
-    invalidReason: !name.trim() ? t("agents:profileNameRequired") : t("agents:noDynamicCandidates"),
+    canSave:
+      routingEnabled && !saving && Boolean(name.trim()) && candidates.length > 0 && policiesValid,
+    invalidReason,
     save,
     discard: () => {
       if (!standalone) return;
@@ -436,17 +448,19 @@ export function DynamicAgentProfileEditor({
             {t("agents:noDynamicCandidates")}
           </p>
         ) : (
-          <ol className="grid gap-2">
+          <ol className="grid gap-4">
             {candidates.map((candidate, index) => (
               <li
                 key={candidate.executionProfileId}
-                className="flex min-w-0 flex-col gap-2 rounded-md border p-2 sm:flex-row sm:items-center"
+                className="min-w-0 space-y-4 rounded-md border p-3"
               >
-                <Badge variant="outline">{index + 1}</Badge>
-                <span className="min-w-0 flex-1 truncate text-sm">
-                  {candidateLabel(candidate, concreteProfiles)}
-                </span>
-                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-3">
+                  <div className="flex min-w-0 basis-full items-center gap-3 sm:basis-auto sm:flex-1">
+                    <Badge variant="outline">{index + 1}</Badge>
+                    <span className="min-w-0 truncate text-sm font-medium">
+                      {candidateLabel(candidate, concreteProfiles)}
+                    </span>
+                  </div>
                   <div className="flex min-h-11 items-center gap-2 rounded-md border px-2">
                     <span className="text-xs text-muted-foreground">{enabledLabel}</span>
                     <Switch
@@ -455,59 +469,50 @@ export function DynamicAgentProfileEditor({
                       aria-label={`${enabledLabel}: ${candidateLabel(candidate, concreteProfiles)}`}
                     />
                   </div>
-                  <div className="flex min-h-11 w-full items-center gap-1 sm:w-auto">
-                    <Select
-                      value={candidate.rules?.on_provider_error ?? defaultProviderErrorAction}
-                      onValueChange={(action) => updateCandidateAction(index, action)}
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="min-h-11 min-w-11 shrink-0 cursor-pointer"
+                      onClick={() => moveCandidate(index, -1)}
+                      disabled={index === 0}
+                      aria-label={t("agents:moveDynamicCandidateUp")}
                     >
-                      <SelectTrigger
-                        className="min-h-11 min-w-0 flex-1 sm:w-40 sm:flex-none"
-                        aria-label={t("agents:dynamicRouteAction")}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="retry_same">{t("agents:retry")}</SelectItem>
-                        <SelectItem value={defaultProviderErrorAction}>
-                          {t("task:dynamicRouteTryNext")}
-                        </SelectItem>
-                        <SelectItem value="stop">{t("task:stop")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <DynamicRouteActionHelp
-                      action={candidate.rules?.on_provider_error ?? defaultProviderErrorAction}
-                    />
+                      <IconArrowUp className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="min-h-11 min-w-11 shrink-0 cursor-pointer"
+                      onClick={() => moveCandidate(index, 1)}
+                      disabled={index === candidates.length - 1}
+                      aria-label={t("agents:moveDynamicCandidateDown")}
+                    >
+                      <IconArrowDown className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="min-h-11 min-w-11 shrink-0 cursor-pointer text-destructive"
+                      onClick={() => removeCandidate(index)}
+                      aria-label={t("agents:removeDynamicCandidate")}
+                    >
+                      <IconTrash className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="min-h-11 min-w-11 shrink-0 cursor-pointer"
-                  onClick={() => moveCandidate(index, -1)}
-                  disabled={index === 0}
-                  aria-label={t("agents:moveDynamicCandidateUp")}
-                >
-                  <IconArrowUp className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="min-h-11 min-w-11 shrink-0 cursor-pointer"
-                  onClick={() => moveCandidate(index, 1)}
-                  disabled={index === candidates.length - 1}
-                  aria-label={t("agents:moveDynamicCandidateDown")}
-                >
-                  <IconArrowDown className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="min-h-11 min-w-11 shrink-0 cursor-pointer text-destructive"
-                  onClick={() => removeCandidate(index)}
-                  aria-label={t("agents:removeDynamicCandidate")}
-                >
-                  <IconTrash className="h-4 w-4" />
-                </Button>
+                <div className="grid min-w-0 gap-4 md:grid-cols-2">
+                  <DynamicPolicyEditor
+                    errorClass="transient"
+                    policy={candidate.policies.transient}
+                    onChange={(patch) => updateCandidatePolicy(index, "transient", patch)}
+                  />
+                  <DynamicPolicyEditor
+                    errorClass="hard"
+                    policy={candidate.policies.hard}
+                    onChange={(patch) => updateCandidatePolicy(index, "hard", patch)}
+                  />
+                </div>
               </li>
             ))}
           </ol>
@@ -518,7 +523,7 @@ export function DynamicAgentProfileEditor({
 
   return (
     <div className="min-w-0 space-y-6 overflow-x-hidden">
-      {standalone && (
+      {standalone && !isCreating && (
         <DynamicProfileEditorHeader
           agent={agent}
           profile={profile}

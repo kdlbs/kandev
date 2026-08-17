@@ -63,7 +63,11 @@ func (h *Handlers) wsRouteAction(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
-	if req.Action != string(orchestrator.RouteActionRetry) && req.Action != string(orchestrator.RouteActionTryNext) {
+	if req.Action != string(orchestrator.RouteActionRetry) &&
+		req.Action != string(orchestrator.RouteActionTryNext) &&
+		req.Action != string(orchestrator.RouteActionSkip) &&
+		req.Action != string(orchestrator.RouteActionCancelWait) &&
+		req.Action != string(orchestrator.RouteActionStop) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unsupported route action", nil)
 	}
 	result, err := h.service.ApplyRouteAction(ctx, orchestrator.RouteActionRequest{

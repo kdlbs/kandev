@@ -405,6 +405,14 @@ type Service struct {
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
 
+	// dynamicRecovery owns durable reset/retry deadlines. Only pending states
+	// are scheduled after restart; a retrying state means dispatch may have
+	// crossed the process boundary and remains manual until reconciled.
+	dynamicRecoveryMu     sync.Mutex
+	dynamicRecoveryCtx    context.Context
+	dynamicRecoveryCancel context.CancelFunc
+	dynamicRecoveryTimers map[string]*time.Timer
+
 	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
 	// an agent resolves a prompt-first task title. It is optional for tests and
 	// installations that do not configure an agent runtime.
@@ -806,8 +814,11 @@ type Service struct {
 type RouteAction string
 
 const (
-	RouteActionRetry   RouteAction = "retry"
-	RouteActionTryNext RouteAction = "try_next"
+	RouteActionRetry      RouteAction = "retry"
+	RouteActionTryNext    RouteAction = "try_next"
+	RouteActionSkip       RouteAction = "skip"
+	RouteActionCancelWait RouteAction = "cancel_wait"
+	RouteActionStop       RouteAction = "stop"
 )
 
 type RouteActionRequest struct {
@@ -817,13 +828,19 @@ type RouteActionRequest struct {
 }
 
 type RouteActionResult struct {
-	SessionID          string `json:"session_id"`
-	LogicalProfileID   string `json:"logical_profile_id"`
-	ExecutionProfileID string `json:"execution_profile_id,omitempty"`
-	RouteGeneration    int64  `json:"route_generation"`
-	ProfileVersion     int64  `json:"profile_version"`
-	State              string `json:"state"`
-	Reason             string `json:"reason,omitempty"`
+	SessionID          string     `json:"session_id"`
+	LogicalProfileID   string     `json:"logical_profile_id"`
+	ExecutionProfileID string     `json:"execution_profile_id,omitempty"`
+	RouteGeneration    int64      `json:"route_generation"`
+	ProfileVersion     int64      `json:"profile_version"`
+	State              string     `json:"state"`
+	Reason             string     `json:"reason,omitempty"`
+	ErrorCode          string     `json:"error_code,omitempty"`
+	ErrorClass         string     `json:"error_class,omitempty"`
+	CatalogueVersion   string     `json:"catalogue_version,omitempty"`
+	RetryOrdinal       int64      `json:"retry_ordinal,omitempty"`
+	Deadline           *time.Time `json:"deadline,omitempty"`
+	PendingOutcome     string     `json:"pending_outcome,omitempty"`
 }
 
 // RouteActionConflictError carries the authoritative route snapshot when a
@@ -862,7 +879,9 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 	if request.SessionID == "" {
 		return nil, errors.New("session_id is required")
 	}
-	if request.Action != RouteActionRetry && request.Action != RouteActionTryNext {
+	if request.Action != RouteActionRetry && request.Action != RouteActionTryNext &&
+		request.Action != RouteActionSkip && request.Action != RouteActionCancelWait &&
+		request.Action != RouteActionStop {
 		return nil, fmt.Errorf("unsupported route action %q", request.Action)
 	}
 	if s.routeActionHandler == nil {
@@ -967,6 +986,7 @@ func NewService(
 		messageQueue:                 msgQueue,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
+		dynamicRecoveryTimers:        make(map[string]*time.Timer),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
 	}
@@ -1977,6 +1997,10 @@ func (s *Service) Start(ctx context.Context) error {
 	// Reconcile queued tasks when WIP limits or feeder settings change.
 	s.subscribeWorkflowQueueEvents()
 
+	// Restore durable dynamic policy waits after the route and lifecycle
+	// services are ready. Only un-dispatched pending states are scheduled.
+	s.startDynamicPolicyRecovery(ctx)
+
 	s.logger.Info("orchestrator service started successfully")
 	return nil
 }
@@ -1992,6 +2016,7 @@ func (s *Service) Stop() error {
 	s.mu.Unlock()
 
 	s.logger.Info("stopping orchestrator service")
+	s.stopDynamicPolicyRecovery()
 
 	// Stop components in reverse order
 	var errs []error

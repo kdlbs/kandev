@@ -1,7 +1,7 @@
 ---
 id: "09-recovery-presentation"
 title: "Recovery presentation"
-status: pending
+status: done
 wave: 8
 depends_on: ["05-kanban-recovery-convergence", "06-utility-policy-integration", "07-office-policy-convergence", "08-dynamic-policy-settings-ui"]
 plan: "plan.md"
@@ -32,4 +32,14 @@ spec: "../../specs/platform/provider-error-recovery.md"
 
 ## Results
 
-Pending.
+Completed. Task-session route snapshots and WebSocket state events now expose
+safe error class/code, catalogue version, retry ordinal, absolute deadline,
+and pending outcome. Recovery actions are generation-fenced and use one route
+operation for Retry now, Skip now, Cancel wait, and Stop. The browser renders
+the authoritative deadline and does not own retry timers; controls retain
+mobile-sized targets.
+
+Verification:
+
+- `go test -tags fts5 ./internal/orchestrator/... ./internal/backendapp/...` — 3,085 passed.
+- Focused recovery/settings web tests — 24 passed.

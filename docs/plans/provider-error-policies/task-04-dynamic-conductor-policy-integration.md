@@ -1,7 +1,7 @@
 ---
 id: "04-dynamic-conductor-policy-integration"
 title: "Dynamic conductor policy integration"
-status: pending
+status: done
 wave: 4
 depends_on: ["03-durable-policy-evaluator"]
 plan: "plan.md"
@@ -34,4 +34,15 @@ spec: "../../specs/platform/provider-error-recovery.md"
 
 ## Results
 
-Pending.
+Completed. Dynamic launch and settled-turn failures now use the shared policy
+evaluator, retain pre-result effect-safety gates, and persist continuation
+packages before successor launches. Launch fallback continues through all
+eligible candidates within the configured candidate bound. Manual route
+actions use one backend operation for selection, predecessor shutdown,
+successor launch, and durable result; stale generations are rejected. Durable
+recovery resumes only due pending states.
+
+Verification:
+
+- `go test -tags fts5 ./internal/orchestrator/... ./internal/backendapp/...` — 3,085 passed in 11 packages.
+- `go test -tags fts5 ./internal/agent/runtime/dynamic/...` — included in the 1,106-package run for Task 03.

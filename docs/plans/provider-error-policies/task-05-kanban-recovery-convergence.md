@@ -1,7 +1,7 @@
 ---
 id: "05-kanban-recovery-convergence"
 title: "Kanban recovery convergence"
-status: pending
+status: done
 wave: 5
 depends_on: ["04-dynamic-conductor-policy-integration"]
 plan: "plan.md"
@@ -30,4 +30,12 @@ spec: "../../specs/platform/provider-error-recovery.md"
 
 ## Results
 
-Pending.
+Completed. Dynamic sessions bypass the legacy Kanban retry ladder so the
+shared evaluator owns their retry, reset-wait, skip, and stop decisions.
+Concrete Kanban recovery keeps its existing interactive defaults while
+provider retryability comes from the shared transient class; unknown,
+effect-unsafe, and ambiguous failures remain manual.
+
+Verification:
+
+- `go test -tags fts5 ./internal/orchestrator/... ./internal/agent/runtime/routingerr/...` — covered by the 3,085 orchestrator/backendapp and 1,106 routing-package results.

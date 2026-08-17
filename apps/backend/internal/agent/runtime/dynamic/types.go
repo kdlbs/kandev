@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 )
 
 type Action string
@@ -24,6 +25,8 @@ var (
 	ErrStaleGeneration     = errors.New("dynamic route generation is stale")
 	ErrNoEligibleCandidate = errors.New("dynamic profile has no eligible candidate")
 	ErrRouteStateNotFound  = errors.New("dynamic route state not found")
+	ErrRecoveryPending     = errors.New("dynamic route recovery is pending")
+	ErrRecoveryNotDue      = errors.New("dynamic route recovery is not due")
 )
 
 type Candidate struct {
@@ -31,6 +34,7 @@ type Candidate struct {
 	Enabled    bool
 	BindingKey string
 	Rules      map[string]Action
+	Policies   routingpolicy.Document
 }
 
 type Profile struct {
@@ -47,7 +51,23 @@ type RouteState struct {
 	ProfileVersion     int64
 	Status             string
 	ContinuationJSON   string
+	PolicyStateJSON    string
 	UpdatedAt          time.Time
+}
+
+// PolicyState is the durable snapshot of one evaluated provider failure. It
+// is stored as JSON so older installations can add fields without changing
+// candidate or session identity columns.
+type PolicyState struct {
+	FailureCode      routingerr.Code           `json:"failure_code"`
+	FailureClass     routingerr.Class          `json:"failure_class"`
+	CatalogueVersion string                    `json:"catalogue_version"`
+	PolicyJSON       string                    `json:"policy_json"`
+	RetryOrdinal     int64                     `json:"retry_ordinal"`
+	ResetWaitUsed    bool                      `json:"reset_wait_used"`
+	ResetWaitClasses map[routingerr.Class]bool `json:"reset_wait_classes,omitempty"`
+	Deadline         *time.Time                `json:"deadline,omitempty"`
+	PendingOutcome   routingpolicy.Outcome     `json:"pending_outcome"`
 }
 
 type RouteDecision struct {
@@ -57,6 +77,13 @@ type RouteDecision struct {
 	Generation         int64
 	ProfileVersion     int64
 	Reason             string
+	Status             string
+	Deadline           *time.Time
+	ErrorCode          routingerr.Code
+	ErrorClass         routingerr.Class
+	CatalogueVersion   string
+	RetryOrdinal       int64
+	PendingOutcome     routingpolicy.Outcome
 }
 
 type RouteAttempt struct {

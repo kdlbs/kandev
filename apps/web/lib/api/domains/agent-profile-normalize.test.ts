@@ -149,7 +149,19 @@ describe("normalizeAgentProfile", () => {
             position: 0,
             execution_profile_id: "primary",
             enabled: true,
-            rules: { auth_required: "try_next" },
+            policies: {
+              version: 1,
+              transient: {
+                retry: { enabled: true, max_retries: 2, initial_interval_seconds: 5 },
+                wait_for_reset: { enabled: true, max_wait_seconds: 300 },
+                on_exhausted: "skip",
+              },
+              hard: {
+                retry: { enabled: false, max_retries: 0, initial_interval_seconds: 0 },
+                wait_for_reset: { enabled: false, max_wait_seconds: 0 },
+                on_exhausted: "stop",
+              },
+            },
           },
         ],
       },
@@ -162,10 +174,43 @@ describe("normalizeAgentProfile", () => {
           position: 0,
           executionProfileId: "primary",
           enabled: true,
-          rules: { auth_required: "try_next" },
+          policies: {
+            version: 1,
+            transient: {
+              retry: { enabled: true, maxRetries: 2, initialIntervalSeconds: 5 },
+              waitForReset: { enabled: true, maxWaitSeconds: 300 },
+              onExhausted: "skip",
+            },
+            hard: {
+              retry: { enabled: false, maxRetries: 0, initialIntervalSeconds: 0 },
+              waitForReset: { enabled: false, maxWaitSeconds: 0 },
+              onExhausted: "stop",
+            },
+          },
         },
       ],
     });
+  });
+
+  it("normalizes legacy dynamic rules into both error classes", () => {
+    const result = normalizeAgentProfile({
+      id: "dynamic-profile",
+      kind: "dynamic",
+      dynamic: {
+        version: 1,
+        candidates: [
+          {
+            position: 0,
+            execution_profile_id: "primary",
+            enabled: true,
+            rules: { on_provider_error: "retry_same", quota_limited: "stop" },
+          },
+        ],
+      },
+    });
+    const candidate = result.dynamic?.candidates[0];
+    expect(candidate?.policies.transient.retry.maxRetries).toBe(1);
+    expect(candidate?.policies.hard.onExhausted).toBe("stop");
   });
 });
 
@@ -225,7 +270,9 @@ describe("toAgentProfilePayload", () => {
     const omitted = toAgentProfilePayload({ id: toAgentProfileId(SAMPLE_ID) });
     expect("enabled" in omitted).toBe(false);
   });
+});
 
+describe("toAgentProfilePayload dynamic candidates", () => {
   it("serializes dynamic candidates with opaque profile IDs", () => {
     const payload = toAgentProfilePayload({
       id: toAgentProfileId("dynamic-profile"),
@@ -237,7 +284,19 @@ describe("toAgentProfilePayload", () => {
             position: 0,
             executionProfileId: toAgentProfileId("primary"),
             enabled: true,
-            rules: { rate_limited: "retry_same" },
+            policies: {
+              version: 1,
+              transient: {
+                retry: { enabled: true, maxRetries: 1, initialIntervalSeconds: 5 },
+                waitForReset: { enabled: false, maxWaitSeconds: 0 },
+                onExhausted: "stop",
+              },
+              hard: {
+                retry: { enabled: false, maxRetries: 0, initialIntervalSeconds: 0 },
+                waitForReset: { enabled: false, maxWaitSeconds: 0 },
+                onExhausted: "skip",
+              },
+            },
           },
         ],
       },
@@ -249,7 +308,19 @@ describe("toAgentProfilePayload", () => {
           position: 0,
           execution_profile_id: "primary",
           enabled: true,
-          rules: { rate_limited: "retry_same" },
+          policies: {
+            version: 1,
+            transient: {
+              retry: { enabled: true, max_retries: 1, initial_interval_seconds: 5 },
+              wait_for_reset: { enabled: false, max_wait_seconds: 0 },
+              on_exhausted: "stop",
+            },
+            hard: {
+              retry: { enabled: false, max_retries: 0, initial_interval_seconds: 0 },
+              wait_for_reset: { enabled: false, max_wait_seconds: 0 },
+              on_exhausted: "skip",
+            },
+          },
         },
       ],
     });
