@@ -180,6 +180,15 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 			if stepMatchesDefinition(existing, step) {
 				continue
 			}
+			if existing.AgentProfileID != "" && existing.AgentProfileID != step.AgentProfileID {
+				s.logger.Warn("workflow sync rebinding step's agent profile",
+					zap.String("workflow_id", wf.ID),
+					zap.String("workflow_name", wf.Name),
+					zap.String("step_id", existing.ID),
+					zap.String("step_name", sp.Name),
+					zap.String("old_agent_profile_id", existing.AgentProfileID),
+					zap.String("new_agent_profile_id", step.AgentProfileID))
+			}
 			err = s.repo.UpdateStep(ctx, step)
 		} else {
 			err = s.repo.CreateStep(ctx, step)

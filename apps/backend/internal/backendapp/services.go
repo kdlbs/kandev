@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
@@ -148,7 +149,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Wire agent profile resolver/matcher for workflow export/import
 	workflowSvc.SetAgentProfileFuncs(
 		buildAgentProfileResolver(repos),
-		buildAgentProfileMatcher(repos),
+		buildAgentProfileMatcher(repos, log),
 	)
 
 	githubSvc := initGitHubService(cfg, dbPool, eventBus, repos.Secrets, log)
@@ -1296,26 +1297,64 @@ func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolve
 	}
 }
 
-// buildAgentProfileMatcher creates a matcher that finds profiles by agent name, model, and mode for import.
-func buildAgentProfileMatcher(repos *Repositories) wfmodels.AgentProfileMatcher {
+// buildAgentProfileMatcher creates a matcher that finds profiles by agent
+// name, model, and mode for import.
+//
+// The (agent_display_name, model, mode) triple is not unique: duplicating a
+// profile through the UI produces a byte-identical triple for the copy.
+// Candidates are filtered to enabled, global (non-workspace-scoped) profiles,
+// and ties are broken by oldest CreatedAt (then ID for a total order). Oldest
+// wins so that duplicating a profile can never steal an existing synced
+// workflow step's binding - a copy is always newer than its source.
+func buildAgentProfileMatcher(repos *Repositories, log *logger.Logger) wfmodels.AgentProfileMatcher {
 	return func(agentName, model, mode string) string {
 		agents, err := repos.AgentSettings.ListAgents(context.Background())
 		if err != nil {
 			return ""
 		}
+		var best *agentsettingsmodels.AgentProfile
+		matches := 0
 		for _, agent := range agents {
 			profiles, pErr := repos.AgentSettings.ListAgentProfiles(context.Background(), agent.ID)
 			if pErr != nil {
 				continue
 			}
 			for _, p := range profiles {
-				if p.AgentDisplayName == agentName && p.Model == model && p.Mode == mode {
-					return p.ID
+				if p.AgentDisplayName != agentName || p.Model != model || p.Mode != mode {
+					continue
+				}
+				if !p.Enabled || p.WorkspaceID != "" {
+					continue
+				}
+				matches++
+				if best == nil || isOlderAgentProfileMatch(p, best) {
+					best = p
 				}
 			}
 		}
-		return ""
+		if best == nil {
+			return ""
+		}
+		if matches > 1 {
+			log.Debug("agent profile matcher: multiple candidates for workflow step sync",
+				zap.String("agent_display_name", agentName),
+				zap.String("model", model),
+				zap.String("mode", mode),
+				zap.Int("candidates", matches),
+				zap.String("selected_profile_id", best.ID))
+		}
+		return best.ID
 	}
+}
+
+// isOlderAgentProfileMatch reports whether candidate should replace current
+// as the matcher's selection: earlier CreatedAt wins, ties broken by ID so
+// the result is stable across repeated calls.
+func isOlderAgentProfileMatch(candidate, current *agentsettingsmodels.AgentProfile) bool {
+	if !candidate.CreatedAt.Equal(current.CreatedAt) {
+		return candidate.CreatedAt.Before(current.CreatedAt)
+	}
+	return candidate.ID < current.ID
 }
 
 // codeHostBranchListerAdapter routes first-party GitHub repositories directly

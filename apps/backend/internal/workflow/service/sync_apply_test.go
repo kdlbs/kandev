@@ -7,7 +7,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/models"
 )
@@ -59,6 +63,17 @@ func (m *mockSyncOps) SetWorkflowSource(ctx context.Context, id, source, sourceP
 
 func setupSyncService(t *testing.T) (*Service, *mockWorkflowProvider, *mockSyncOps) {
 	svc, _ := setupTestService(t)
+	provider := &mockWorkflowProvider{}
+	svc.SetWorkflowProvider(provider)
+	ops := newMockSyncOps(provider)
+	svc.SetSyncWorkflowOps(ops)
+	return svc, provider, ops
+}
+
+// setupSyncServiceWithLogger is a variant of setupSyncService for tests that
+// need to observe log output (e.g. via a zaptest observer core).
+func setupSyncServiceWithLogger(t *testing.T, log *logger.Logger) (*Service, *mockWorkflowProvider, *mockSyncOps) {
+	svc, _ := setupTestService(t, log)
 	provider := &mockWorkflowProvider{}
 	svc.SetWorkflowProvider(provider)
 	ops := newMockSyncOps(provider)
@@ -491,4 +506,48 @@ func TestReleaseSyncedWorkflows(t *testing.T) {
 		assert.Empty(t, wf.SourcePath)
 		assert.NoError(t, svc.EnsureWorkflowMutable(ctx, id), "released workflows are editable again")
 	}
+}
+
+// TestApplySyncedWorkflows_RebindingStepAgentProfileLogsWarning covers the
+// visibility half of the profile-rebinding defect: a sync round that changes
+// an existing step's AgentProfileID must warn (naming the workflow, step,
+// and both profile IDs) since the workflow is read-only to the user and the
+// change would otherwise be silent. A second sync that resolves to the same
+// profile must not add another warning.
+func TestApplySyncedWorkflows_RebindingStepAgentProfileLogsWarning(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+
+	svc, provider, _ := setupSyncServiceWithLogger(t, log)
+	ctx := context.Background()
+	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
+	createStep(t, svc, &models.WorkflowStep{
+		ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true,
+		AgentProfileID: "profile-old",
+	})
+
+	pw := portableWorkflow("Dev Flow", "Todo")
+	pw.Steps[0].AgentProfile = &models.AgentProfilePortable{AgentName: "Claude", Model: "opus[1m]", Mode: "auto"}
+	files := []SyncFileExport{{Path: "flows/dev.yml", Export: exportOf(pw)}}
+
+	svc.SetAgentProfileFuncs(nil, func(string, string, string) string { return "profile-new" })
+	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Dev Flow"}, result.Updated)
+
+	entries := logs.FilterMessage("workflow sync rebinding step's agent profile").All()
+	require.Len(t, entries, 1, "rebind must be logged exactly once")
+	fields := entries[0].ContextMap()
+	assert.Equal(t, "step-todo", fields["step_id"])
+	assert.Equal(t, "Todo", fields["step_name"])
+	assert.Equal(t, "profile-old", fields["old_agent_profile_id"])
+	assert.Equal(t, "profile-new", fields["new_agent_profile_id"])
+
+	// A second sync resolving to the same profile must not warn again.
+	result, err = svc.ApplySyncedWorkflows(ctx, "ws-1", files)
+	require.NoError(t, err)
+	assert.Empty(t, result.Updated, "no drift means nothing is rewritten")
+	assert.Len(t, logs.FilterMessage("workflow sync rebinding step's agent profile").All(), 1,
+		"an unchanged profile must not log another warning")
 }
