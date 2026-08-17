@@ -1297,6 +1297,18 @@ func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolve
 	}
 }
 
+// agentProfileStillMatches reports whether the profile with id still has the
+// exact (agent_display_name, model, mode) triple, ignoring Enabled and
+// WorkspaceID - those only gate candidate *selection*, not a binding that
+// already exists.
+func agentProfileStillMatches(repos *Repositories, id, agentName, model, mode string) bool {
+	p, err := repos.AgentSettings.GetAgentProfile(context.Background(), id)
+	if err != nil || p == nil {
+		return false
+	}
+	return p.AgentDisplayName == agentName && p.Model == model && p.Mode == mode
+}
+
 // buildAgentProfileMatcher creates a matcher that finds profiles by agent
 // name, model, and mode for import.
 //
@@ -1306,45 +1318,62 @@ func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolve
 // and ties are broken by oldest CreatedAt (then ID for a total order). Oldest
 // wins so that duplicating a profile can never steal an existing synced
 // workflow step's binding - a copy is always newer than its source.
+//
+// currentID, when non-empty, is checked first: if that profile still has the
+// exact descriptor, it's kept as-is without re-running candidate selection -
+// even when it's disabled or workspace-scoped. Reconciliation must not treat
+// "profile got disabled" as "profile needs a new binding" (profile-disable.md
+// promises existing bindings survive disabling); candidate selection only
+// applies when picking a profile for new work.
 func buildAgentProfileMatcher(repos *Repositories, log *logger.Logger) wfmodels.AgentProfileMatcher {
-	return func(agentName, model, mode string) string {
-		agents, err := repos.AgentSettings.ListAgents(context.Background())
-		if err != nil {
-			return ""
+	return func(agentName, model, mode, currentID string) string {
+		if currentID != "" && agentProfileStillMatches(repos, currentID, agentName, model, mode) {
+			return currentID
 		}
-		var best *agentsettingsmodels.AgentProfile
-		matches := 0
-		for _, agent := range agents {
-			profiles, pErr := repos.AgentSettings.ListAgentProfiles(context.Background(), agent.ID)
-			if pErr != nil {
+		return selectAgentProfileCandidate(repos, log, agentName, model, mode)
+	}
+}
+
+// selectAgentProfileCandidate scans enabled, global profiles for an exact
+// (agent_display_name, model, mode) match and returns the oldest one (see
+// buildAgentProfileMatcher), logging when the triple was ambiguous.
+func selectAgentProfileCandidate(repos *Repositories, log *logger.Logger, agentName, model, mode string) string {
+	agents, err := repos.AgentSettings.ListAgents(context.Background())
+	if err != nil {
+		return ""
+	}
+	var best *agentsettingsmodels.AgentProfile
+	matches := 0
+	for _, agent := range agents {
+		profiles, pErr := repos.AgentSettings.ListAgentProfiles(context.Background(), agent.ID)
+		if pErr != nil {
+			continue
+		}
+		for _, p := range profiles {
+			if p.AgentDisplayName != agentName || p.Model != model || p.Mode != mode {
 				continue
 			}
-			for _, p := range profiles {
-				if p.AgentDisplayName != agentName || p.Model != model || p.Mode != mode {
-					continue
-				}
-				if !p.Enabled || p.WorkspaceID != "" {
-					continue
-				}
-				matches++
-				if best == nil || isOlderAgentProfileMatch(p, best) {
-					best = p
-				}
+			if !p.Enabled || p.WorkspaceID != "" {
+				continue
+			}
+			matches++
+			if best == nil || isOlderAgentProfileMatch(p, best) {
+				best = p
 			}
 		}
-		if best == nil {
-			return ""
-		}
-		if matches > 1 {
-			log.Debug("agent profile matcher: multiple candidates for workflow step sync",
-				zap.String("agent_display_name", agentName),
-				zap.String("model", model),
-				zap.String("mode", mode),
-				zap.Int("candidates", matches),
-				zap.String("selected_profile_id", best.ID))
-		}
-		return best.ID
 	}
+	if best == nil {
+		return ""
+	}
+	if matches > 1 {
+		log.Debug("agent profile matcher: multiple candidates for workflow step sync",
+			zap.String("agent_display_name", agentName),
+			zap.String("model", model),
+			zap.String("mode", mode),
+			zap.Int("candidates", matches),
+			zap.String("selected_profile_id", best.ID))
+	}
+	return best.ID
 }
 
 // isOlderAgentProfileMatch reports whether candidate should replace current

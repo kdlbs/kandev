@@ -160,7 +160,7 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 	// persisting any step. A malformed later step must leave the synced workflow
 	// untouched so the next sync can retry after the source is fixed.
 	for _, sp := range pw.Steps {
-		step := s.stepFromPortable(wf.ID, sp, posToID)
+		step := s.stepFromPortable(wf.ID, sp, posToID, existingStepProfileID(existingByName, sp.Name))
 		if err := models.ValidateWorkflowStep(step); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: invalid step %q: %v", wf.Name, sp.Name, err))
 			return
@@ -173,7 +173,7 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		return
 	}
 	for _, sp := range pw.Steps {
-		step := s.stepFromPortable(wf.ID, sp, posToID)
+		step := s.stepFromPortable(wf.ID, sp, posToID, existingStepProfileID(existingByName, sp.Name))
 		var rebinding bool
 		var oldProfileID, existingID string
 		if existing, ok := existingByName[sp.Name]; ok {
@@ -214,6 +214,17 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 	if changed {
 		result.Updated = append(result.Updated, wf.Name)
 	}
+}
+
+// existingStepProfileID returns the AgentProfileID already bound to the
+// existing step matched by name, or "" when the step is new. Passed to
+// stepFromPortable so the matcher can preserve a disabled-but-still-matching
+// binding instead of treating disablement as a rebind.
+func existingStepProfileID(existingByName map[string]*models.WorkflowStep, name string) string {
+	if st, ok := existingByName[name]; ok {
+		return st.AgentProfileID
+	}
+	return ""
 }
 
 // stepMatchesDefinition reports whether an existing step already equals its
@@ -282,7 +293,7 @@ func (s *Service) planStepChanges(ctx context.Context, wf *taskmodels.Workflow, 
 func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable) (bool, error) {
 	profileID := ""
 	if pw.AgentProfile != nil && s.matchProfile != nil {
-		profileID = s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode)
+		profileID = s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode, wf.AgentProfileID)
 	}
 	if wf.Description == pw.Description && wf.Prompt == pw.Prompt && wf.AgentProfileID == profileID {
 		return false, nil

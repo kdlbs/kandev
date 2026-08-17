@@ -66,6 +66,10 @@ func insertWorkflow(t *testing.T, db *sqlx.DB, id, name string) {
 type mockWorkflowProvider struct {
 	workflows        []*taskmodels.Workflow
 	getWorkflowCalls int
+	// forceUpdateWorkflowErr, when set, makes UpdateWorkflow fail without
+	// mutating state - used to test that a rebind Warn never fires for a
+	// change that was not actually persisted.
+	forceUpdateWorkflowErr error
 }
 
 func (m *mockWorkflowProvider) ListWorkflows(_ context.Context, workspaceID string, includeHidden bool) ([]*taskmodels.Workflow, error) {
@@ -107,6 +111,9 @@ func (m *mockWorkflowProvider) CreateWorkflow(_ context.Context, workspaceID, na
 }
 
 func (m *mockWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskmodels.Workflow) error {
+	if m.forceUpdateWorkflowErr != nil {
+		return m.forceUpdateWorkflowErr
+	}
 	for i, wf := range m.workflows {
 		if wf.ID == workflow.ID {
 			m.workflows[i] = workflow
@@ -928,7 +935,7 @@ func TestImportWorkflows(t *testing.T) {
 		svc, _, _ := setupTestServiceWithProvider(t)
 		ctx := context.Background()
 
-		matcher := func(agentName, model, mode string) string {
+		matcher := func(agentName, model, mode, _ string) string {
 			if agentName == "Claude Code" && model == "opus" {
 				return "matched-prof-1"
 			}
