@@ -741,11 +741,21 @@ func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int,
 	var response mergeAsyncResponse
 	if err := c.putJSON(ctx, endpoint, jsonBody, &response); err != nil {
 		var apiErr *GitHubAPIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict &&
-			isAlreadyQueuedMergeConflict(apiErr.Body) {
-			return MergeOutcomeQueued, nil
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict ||
+			json.Unmarshal([]byte(apiErr.Body), &response) != nil || response.UUID == "" {
+			return "", err
 		}
-		return "", err
+	}
+	for response.Status == "pending" {
+		if response.UUID == "" {
+			return "", fmt.Errorf("GitHub merge response is pending without a UUID")
+		}
+		if err := c.get(ctx, endpoint+"/"+response.UUID, &response); err != nil {
+			return "", err
+		}
+	}
+	if response.Status == mergeStatusFailed {
+		return "", fmt.Errorf("GitHub rejected merge: %s", response.Message)
 	}
 	return normalizeMergeOutcome(response.Status)
 }

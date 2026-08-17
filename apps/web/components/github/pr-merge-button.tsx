@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { IconChevronDown, IconGitMerge } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -91,7 +91,7 @@ export function PRMergeButton({
   const [merging, setMerging] = useState(false);
   // After GitHub accepts a direct or queued merge, stay hidden until refreshed
   // provider state catches up so a repeat click cannot submit a second request.
-  const [accepted, setAccepted] = useState(false);
+  const [acceptedFor, setAcceptedFor] = useState<string | null>(null);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const methods = useRepoMergeMethods(workspaceId, taskPR.owner, taskPR.repo);
   const { status } = useGitHubStatus(workspaceId);
@@ -99,9 +99,8 @@ export function PRMergeButton({
 
   // Reset after switching PRs or after GitHub reports an observable lifecycle
   // or mergeability transition, including a PR ejected from a merge queue.
-  useEffect(() => {
-    setAccepted(false);
-  }, [taskPR.id, taskPR.state, taskPR.mergeable_state]);
+  const signature = `${taskPR.id}:${taskPR.state}:${taskPR.mergeable_state}`;
+  const accepted = acceptedFor === signature;
 
   if (accepted || !canAttemptPRMerge(taskPR)) return null;
   // `methods` may be null on first render, on lookup failure, or after the
@@ -115,6 +114,7 @@ export function PRMergeButton({
 
   const runMerge = async (method?: MergeMethod) => {
     if (!workspaceId) return;
+    const submittedSignature = signature;
     setMerging(true);
     try {
       const result = await mergePR(
@@ -124,7 +124,7 @@ export function PRMergeButton({
         taskPR.pr_number,
         method,
       );
-      setAccepted(true);
+      setAcceptedFor(submittedSignature);
       toast({
         description: t(
           result.status === "queued" ? "github:prAddedToMergeQueue" : "github:prMerged",

@@ -88,4 +88,31 @@ describe("PRMergeButton", () => {
     resolve({ status: "queued" });
     expect(await screen.findByText("PR added to merge queue")).not.toBeNull();
   });
+
+  it("does not apply a delayed acceptance to a different pull request", async () => {
+    let resolve!: (value: { status: "queued" }) => void;
+    mergePRMock.mockReturnValue(new Promise((done) => (resolve = done)));
+    const initialState = { workspaces: { activeId: "workspace-1" } } as Partial<AppState>;
+    const view = render(
+      <StateProvider initialState={initialState}>
+        <ToastProvider>
+          <PRMergeButton taskPR={taskPR} />
+        </ToastProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId(MERGE_BUTTON_TEST_ID));
+    const nextPR = { ...taskPR, id: "pr-2", pr_number: 43 };
+    view.rerender(
+      <StateProvider initialState={initialState}>
+        <ToastProvider>
+          <PRMergeButton taskPR={nextPR} />
+        </ToastProvider>
+      </StateProvider>,
+    );
+    resolve({ status: "queued" });
+
+    await screen.findByText("PR added to merge queue");
+    expect(screen.getByTestId(MERGE_BUTTON_TEST_ID)).not.toBeNull();
+  });
 });

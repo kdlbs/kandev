@@ -2,9 +2,7 @@ package github
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -21,36 +19,26 @@ type MergeOutcome string
 const (
 	MergeOutcomeMerged MergeOutcome = "merged"
 	MergeOutcomeQueued MergeOutcome = "queued"
+	mergeStatusFailed               = "failed"
 )
 
 type mergeAsyncResponse struct {
-	Status string `json:"status"`
-}
-
-func parseMergeOutcome(body []byte) (MergeOutcome, error) {
-	var response mergeAsyncResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return "", fmt.Errorf("decode GitHub merge response: %w", err)
-	}
-	return normalizeMergeOutcome(response.Status)
+	Status  string `json:"status"`
+	UUID    string `json:"uuid"`
+	Message string `json:"message"`
 }
 
 func normalizeMergeOutcome(status string) (MergeOutcome, error) {
 	switch status {
 	case string(MergeOutcomeMerged):
 		return MergeOutcomeMerged, nil
-	case "pending", "queued":
+	case "enqueued", "queued":
 		return MergeOutcomeQueued, nil
+	case mergeStatusFailed:
+		return "", fmt.Errorf("GitHub rejected merge: %s", status)
 	default:
 		return "", fmt.Errorf("unexpected GitHub merge status %q", status)
 	}
-}
-
-func isAlreadyQueuedMergeConflict(message string) bool {
-	normalized := strings.ToLower(message)
-	return strings.Contains(normalized, "already enqueued") ||
-		strings.Contains(normalized, "already queued") ||
-		strings.Contains(normalized, "already in the merge queue")
 }
 
 // Client defines the interface for interacting with the GitHub API.

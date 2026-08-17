@@ -26,8 +26,9 @@ spec: "../../specs/github-pr-merge-queue/spec.md"
 
 ## Acceptance
 
-- Desktop E2E proves both immediate merge and merge-queue acceptance from the
-  existing PR UI, including duplicate-submission suppression.
+- Desktop E2E proves merge-queue acceptance from the existing PR UI.
+- Component coverage proves immediate merge feedback and duplicate-submission
+  suppression without duplicating those deterministic cases in Playwright.
 - Mobile E2E reaches the same queued outcome through Review using touch and
   verifies action size and absence of horizontal document overflow.
 - The managed runner builds fresh backend/frontend artifacts and both focused

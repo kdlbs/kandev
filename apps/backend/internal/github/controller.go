@@ -771,6 +771,8 @@ func (c *Controller) httpMergePR(ctx *gin.Context) {
 		var apiErr *GitHubAPIError
 		if errors.As(err, &apiErr) {
 			switch apiErr.StatusCode {
+			case http.StatusBadRequest:
+				status = http.StatusBadRequest
 			case http.StatusMethodNotAllowed, http.StatusConflict:
 				status = http.StatusConflict
 			case http.StatusUnauthorized:

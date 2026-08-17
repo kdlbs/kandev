@@ -582,9 +582,10 @@ func TestGHClient_MergePR_StatusIsRecoverable(t *testing.T) {
 }
 
 func TestGHClient_MergePR_AlreadyQueuedIsIdempotent(t *testing.T) {
-	newFakeGH(t, ghResponse{
-		Prefix: "api repos/", Stderr: "gh: merge request already enqueued (HTTP 409)", Exit: 1,
-	})
+	newFakeGH(t,
+		ghResponse{Prefix: "api repos/acme/widget/pulls/42/merge-async/request-1", Stdout: `{"status":"enqueued","uuid":"request-1"}`},
+		ghResponse{Prefix: "api repos/", Stderr: `{"status":"pending","uuid":"request-1"} gh: HTTP 409`, Exit: 1},
+	)
 	outcome, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, "squash")
 	if err != nil || outcome != MergeOutcomeQueued {
 		t.Fatalf("outcome = %q, err = %v, want queued", outcome, err)

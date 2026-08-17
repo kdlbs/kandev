@@ -130,8 +130,11 @@ func TestPATClient_MergePR_StatusIsRecoverable(t *testing.T) {
 }
 
 func TestPATClient_MergePR_AlreadyQueuedIsIdempotent(t *testing.T) {
-	c, _ := newRecordingPATServerFunc(t, func(*http.Request) (int, string) {
-		return http.StatusConflict, `{"message":"merge request already enqueued"}`
+	c, _ := newRecordingPATServerFunc(t, func(r *http.Request) (int, string) {
+		if r.Method == http.MethodGet {
+			return http.StatusOK, `{"status":"enqueued","uuid":"request-1"}`
+		}
+		return http.StatusConflict, `{"status":"pending","uuid":"request-1"}`
 	})
 	outcome, err := c.MergePR(context.Background(), "acme", "widget", 42, "squash")
 	if err != nil || outcome != MergeOutcomeQueued {

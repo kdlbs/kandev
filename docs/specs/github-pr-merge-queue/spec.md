@@ -56,9 +56,11 @@ Content-Type: application/json
 {"status":"queued"}
 ```
 
-- GitHub responses that mean the request is accepted but still pending map to
-  `queued`. An already-merged pull request maps to `merged`. An already-queued
-  pull request is treated idempotently as `queued`.
+- A `pending` response includes a UUID. Kandev polls that request, including
+  the UUID returned by an existing-request `409`, until GitHub reports
+  `merged`, `enqueued`, or `failed`.
+- Only `enqueued` maps to `queued`. An already-merged pull request maps to
+  `merged`, while `failed` remains an error that the user can retry.
 
 ## Permissions
 

@@ -58,6 +58,8 @@ cd apps && pnpm install --frozen-lockfile && pnpm --filter @kandev/web test -- l
 - Review remediation keeps GitHub's overloaded `blocked` state visually neutral
   and labels the pre-submit action `Merge PR`; only the accepted response claims
   that GitHub added the PR to its merge queue.
+- Queue feedback is driven by GitHub's terminal `enqueued` result, not
+  asynchronous `pending` acceptance.
 - Focused terminal-outcome coverage passes for merged, queued, rejected, and
   duplicate-click paths. The full frontend suite passed 12,046 tests across
   1,455 files, with four skips.
