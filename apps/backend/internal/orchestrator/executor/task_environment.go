@@ -37,12 +37,17 @@ func resolveEnvironmentSources(
 			Origin: source.origin, WorkspaceID: source.workspaceID,
 		})
 	}
-	return runtimeenv.Resolve(ctx, definitions, func(ctx context.Context, definition runtimeenv.Definition) (string, error) {
+	// This helper is test-only-reachable today (no production caller): it
+	// discards the OverrideRecords Resolve now returns because it has no
+	// task/session context to log or count against, and SHALL NOT log or
+	// count on its own.
+	resolved, _, err := runtimeenv.Resolve(ctx, definitions, func(ctx context.Context, definition runtimeenv.Definition) (string, error) {
 		return resolve(ctx, environmentSource{
 			key: definition.Key, literal: definition.Literal, secretID: definition.SecretID,
 			origin: definition.Origin, workspaceID: definition.WorkspaceID,
 		})
 	})
+	return resolved, err
 }
 
 func (e *Executor) taskEnvironmentSources(
@@ -60,11 +65,14 @@ func (e *Executor) taskEnvironmentSources(
 	}
 	sort.Strings(managedKeys)
 	for _, key := range managedKeys {
-		sources = append(sources, environmentSource{key: key, literal: managed[key], origin: "managed runtime"})
+		sources = append(sources, environmentSource{key: key, literal: managed[key], origin: runtimeenv.OriginManagedRuntime})
 	}
 	for _, envVar := range profileEnvVars {
+		if envVar.SecretID == "" && envVar.Value == "" {
+			continue
+		}
 		sources = append(sources, environmentSource{
-			key: envVar.Key, literal: envVar.Value, secretID: envVar.SecretID, origin: "executor profile",
+			key: envVar.Key, literal: envVar.Value, secretID: envVar.SecretID, origin: runtimeenv.OriginExecutorProfile,
 		})
 	}
 	for _, info := range repositories {
@@ -74,9 +82,9 @@ func (e *Executor) taskEnvironmentSources(
 		if info.Repository.WorkspaceID != workspaceID {
 			return nil, fmt.Errorf("repository environment belongs to a different workspace")
 		}
-		origin := "repository"
+		origin := strings.TrimSpace(runtimeenv.OriginRepositoryPrefix)
 		if name := strings.TrimSpace(info.Repository.Name); name != "" {
-			origin = "repository " + name
+			origin = runtimeenv.OriginRepositoryPrefix + name
 		}
 		for _, binding := range info.Repository.SecretBindings {
 			sources = append(sources, environmentSource{

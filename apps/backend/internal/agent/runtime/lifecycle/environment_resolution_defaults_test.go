@@ -27,7 +27,7 @@ func TestAppendAgentRuntimeDefaultsFillsOnlyMissingKeys(t *testing.T) {
 	}
 
 	definitions := []runtimeenv.Definition{
-		{Key: claimed, Literal: "profile-wins", Origin: agentProfileOrigin},
+		{Key: claimed, Literal: "profile-wins", Origin: runtimeenv.OriginAgentProfile},
 	}
 	appendAgentRuntimeDefaults(&definitions, agentConfig)
 
@@ -40,13 +40,13 @@ func TestAppendAgentRuntimeDefaultsFillsOnlyMissingKeys(t *testing.T) {
 		"every Agent.Runtime().Env key must reach the launch environment exactly once")
 	require.Equal(t, "profile-wins", byKey[claimed].Literal,
 		"an existing higher-precedence definition must not be overwritten by the agent default")
-	require.Equal(t, agentProfileOrigin, byKey[claimed].Origin)
+	require.Equal(t, runtimeenv.OriginAgentProfile, byKey[claimed].Origin)
 	for key, value := range runtimeEnv {
 		if key == claimed {
 			continue
 		}
 		require.Equal(t, value, byKey[key].Literal, "runtime env %q lost its value", key)
-		require.Equal(t, managedAgentDefaultsOrigin, byKey[key].Origin)
+		require.Equal(t, runtimeenv.OriginManagedAgentDefaults, byKey[key].Origin)
 	}
 }
 
@@ -75,16 +75,16 @@ func TestAppendMapDefinitionsIsDeterministicallyOrdered(t *testing.T) {
 
 	appendMapDefinitions(&definitions, map[string]string{
 		"ZED": "3", "ALPHA": "1", "MIKE": "2",
-	}, agentProfileOrigin)
+	}, runtimeenv.OriginAgentProfile)
 
 	require.Equal(t, []runtimeenv.Definition{
-		{Key: "ALPHA", Literal: "1", Origin: agentProfileOrigin},
-		{Key: "MIKE", Literal: "2", Origin: agentProfileOrigin},
-		{Key: "ZED", Literal: "3", Origin: agentProfileOrigin},
+		{Key: "ALPHA", Literal: "1", Origin: runtimeenv.OriginAgentProfile},
+		{Key: "MIKE", Literal: "2", Origin: runtimeenv.OriginAgentProfile},
+		{Key: "ZED", Literal: "3", Origin: runtimeenv.OriginAgentProfile},
 	}, definitions, "map iteration order must not leak into the launch environment")
 
 	var empty []runtimeenv.Definition
-	appendMapDefinitions(&empty, nil, agentProfileOrigin)
+	appendMapDefinitions(&empty, nil, runtimeenv.OriginAgentProfile)
 	require.Empty(t, empty)
 }
 
@@ -99,11 +99,11 @@ func TestAppendProfileDefinitionsDropsUnusableEntries(t *testing.T) {
 		{Key: "EMPTY"},
 		{Key: "LITERAL", Value: "value"},
 		{Key: "SECRET", SecretID: "secret-1"},
-	}, agentProfileOrigin)
+	}, runtimeenv.OriginAgentProfile)
 
 	require.Equal(t, []runtimeenv.Definition{
-		{Key: "LITERAL", Literal: "value", Origin: agentProfileOrigin},
-		{Key: "SECRET", SecretID: "secret-1", Origin: agentProfileOrigin},
+		{Key: "LITERAL", Literal: "value", Origin: runtimeenv.OriginAgentProfile},
+		{Key: "SECRET", SecretID: "secret-1", Origin: runtimeenv.OriginAgentProfile},
 	}, definitions)
 }
 
