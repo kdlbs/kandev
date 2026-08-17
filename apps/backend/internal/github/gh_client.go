@@ -901,23 +901,26 @@ func (c *GHClient) RequestReviewers(ctx context.Context, owner, repo string, num
 	return nil
 }
 
-func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
-	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge", owner, repo, number)
-	args := []string{"api", endpoint, "-X", "PUT"}
+func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error) {
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
+	args := []string{"api", endpoint, "-X", "PUT", "-f", "merge_action=default"}
 	if mergeMethod != "" {
 		args = append(args, "-f", "merge_method="+mergeMethod)
 	}
-	_, err := c.run(ctx, args...)
+	out, err := c.run(ctx, args...)
 	if err != nil {
 		// Surface status-based errors as GitHubAPIError so httpMergePR can
 		// translate 405 (not mergeable) / 409 (conflict) to HTTP 409 for
 		// gh CLI users too, matching the PAT path.
 		if code, ok := ghMergeStatusCode(err); ok {
-			return &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
+			if code == http.StatusConflict {
+				return MergeOutcomeQueued, nil
+			}
+			return "", &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
 		}
-		return fmt.Errorf("merge PR #%d: %w", number, err)
+		return "", fmt.Errorf("merge PR #%d: %w", number, err)
 	}
-	return nil
+	return parseMergeOutcome([]byte(out))
 }
 
 // ghMergeStatusCode extracts the HTTP status code from a gh CLI merge error.

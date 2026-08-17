@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { IconClock, IconShield } from "@tabler/icons-react";
+import { IconClock, IconGitMerge, IconShield } from "@tabler/icons-react";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import {
@@ -10,7 +10,11 @@ import {
   type PRFeedbackComment,
 } from "@/lib/state/slices/comments";
 import type { TaskPR } from "@/lib/types/github";
-import { isPRAwaitingReview, isPRWaitingOnBranchProtection } from "./pr-task-icon";
+import {
+  isPRAwaitingReview,
+  isPRReadyToMerge,
+  isPRWaitingOnBranchProtection,
+} from "./pr-task-icon";
 import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
 import { useTranslation } from "react-i18next";
 
@@ -86,6 +90,7 @@ export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
   // contradict them.
   if (pr.state === "open" && pr.mergeable_state === "blocked") {
     if (isPRAwaitingReview(pr)) return null;
+    if (isPRReadyToMerge(pr)) return <MergeQueueReadyNote />;
     if (isPRWaitingOnBranchProtection(pr)) {
       return <BranchProtectionWaitNote reason={blockedReason(pr, t)} />;
     }
@@ -102,6 +107,26 @@ export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
       onResolveConflicts={onResolveConflicts ?? undefined}
       resolveDisabled={conflictQueued}
     />
+  );
+}
+
+function MergeQueueReadyNote() {
+  const { t } = useTranslation();
+  return (
+    <div
+      data-testid="pr-merge-queue-ready-note"
+      className="flex items-start gap-1.5 px-1 py-1 text-xs"
+    >
+      <IconGitMerge className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+      <div className="min-w-0">
+        <div className="font-medium text-emerald-600 dark:text-emerald-400">
+          {t("github:readyForMergeQueue")}
+        </div>
+        <p className="text-[11px] leading-snug text-muted-foreground">
+          {t("github:mergeQueueReadyDescription")}
+        </p>
+      </div>
+    </div>
   );
 }
 

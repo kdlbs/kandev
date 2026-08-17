@@ -759,7 +759,7 @@ func (c *Controller) httpMergePR(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "merge_method must be merge, squash, or rebase"})
 		return
 	}
-	principal, err := c.service.MergePRForWorkspace(
+	principal, outcome, err := c.service.MergePRForWorkspace(
 		ctx.Request.Context(), ctx.Query("workspace_id"), currentGitHubUserID(ctx),
 		owner, repo, number, req.MergeMethod,
 	)
@@ -784,7 +784,7 @@ func (c *Controller) httpMergePR(ctx *gin.Context) {
 		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"merged": true, "principal": principal})
+	ctx.JSON(http.StatusOK, gin.H{"status": outcome, "principal": principal})
 }
 
 func (c *Controller) httpListPRWatches(ctx *gin.Context) {

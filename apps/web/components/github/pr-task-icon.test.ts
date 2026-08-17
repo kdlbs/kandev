@@ -123,7 +123,7 @@ describe("isPRReadyToMerge", () => {
     ).toBe(false);
   });
 
-  it("is false when mergeable_state is blocked", () => {
+  it("is true when checks and reviews pass but GitHub requires a merge queue", () => {
     expect(
       isPRReadyToMerge(
         makePR({
@@ -133,7 +133,7 @@ describe("isPRReadyToMerge", () => {
           mergeable_state: "blocked",
         }),
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("is false when state is merged", () => {
@@ -261,17 +261,15 @@ describe("getPRStatusColor", () => {
     expect(getPRStatusColor(pr)).toBe(EMERALD_400);
   });
 
-  it("returns muted for approved+success but mergeable_state blocked (branch protection)", () => {
-    // Branch protection is a normal repository-rule wait after CI passes, not
-    // a warning state.
+  it("returns ready-to-merge color for an approved queue-required PR", () => {
     const pr = makePR({
       state: "open",
       review_state: "approved",
       checks_state: "success",
       mergeable_state: "blocked",
     });
-    expect(getPRStatusColor(pr)).toBe(MUTED_FOREGROUND);
-    expect(isPRWaitingOnBranchProtection(pr)).toBe(true);
+    expect(getPRStatusColor(pr)).toBe(EMERALD_400);
+    expect(isPRWaitingOnBranchProtection(pr)).toBe(false);
   });
 
   it("returns sky-400 for approved PR that still has pending reviewers (1 of N required)", () => {
