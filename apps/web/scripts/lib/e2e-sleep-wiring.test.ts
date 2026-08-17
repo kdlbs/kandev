@@ -185,7 +185,14 @@ describe("sleep ratchet wiring", () => {
   it(
     "covers the directories the conversion added after the seed",
     async () => {
-      for (const dir of ["e2e/tests/task", "e2e/tests/session", "e2e/tests/settings"]) {
+      for (const dir of [
+        "e2e/tests/task",
+        "e2e/tests/session",
+        "e2e/tests/settings",
+        "e2e/helpers",
+        "e2e/fixtures",
+        "e2e/pages",
+      ]) {
         expect(await sleepSeverity(`${dir}/probe.spec.ts`), `${dir} is not guarded`).toEqual([
           RULE_ERROR,
         ]);
