@@ -213,6 +213,60 @@ describe("ClarificationInputOverlay — Escape guard predicate (F1 regression)",
   });
 });
 
+describe("ClarificationInputOverlay — Escape defaultPrevented guard (F3/F4 regression)", () => {
+  it("does not collapse the panel when another in-scope consumer already claimed the Escape", () => {
+    // Stands in for queued-ghost-message's own Escape handler (cancel edit)
+    // or tiptap-suggestion's mention/slash popup close: an in-scope listener
+    // between the target and window that claims the key first. Attached on
+    // scopeRef itself so it fires during the same bubble dispatch before
+    // CarouselKeyboardShortcuts's window listener ever sees the event.
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { onDismiss, scopeRef } = renderOverlay(messages);
+    scopeRef.current!.addEventListener("keydown", (e) => e.preventDefault());
+
+    fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
+
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("still collapses the panel on a plain, unclaimed Escape (no regression from the defaultPrevented check)", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { onDismiss, scopeRef } = renderOverlay(messages);
+
+    fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("guard predicate returns false for an Escape whose defaultPrevented is already true", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, getGuard } = renderOverlayWithGuard(messages);
+
+    const alreadyClaimed = {
+      ...fakeEscape(composerRef.current!),
+      defaultPrevented: true,
+    } as KeyboardEvent;
+
+    expect(getGuard()?.test(alreadyClaimed)).toBe(false);
+  });
+
+  it("does not arm the guard when the active message has no resolvable question meta (F4)", () => {
+    const badMessage: Message = {
+      id: "m-bad",
+      session_id: toSessionId("s1"),
+      task_id: toTaskId("t1"),
+      author_type: "agent",
+      content: "Q",
+      type: "clarification_request",
+      created_at: "2026-05-04T00:00:00Z",
+      metadata: { pending_id: "p1" },
+    };
+    const { composerRef, getGuard } = renderOverlayWithGuard([badMessage]);
+
+    expect(getGuard()?.test(fakeEscape(composerRef.current!))).toBe(false);
+  });
+});
+
 describe("ClarificationInputOverlay — labelled Skip button", () => {
   it("still POSTs a rejection when the Skip button is clicked", async () => {
     const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];

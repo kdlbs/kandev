@@ -192,6 +192,10 @@ function EditView({
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
+      // Claim the key here: once this edit is cancelled, nothing further up
+      // the tree (e.g. a clarification panel's own Escape-collapses handler)
+      // should also react to the same keypress.
+      event.stopPropagation();
       onCancel();
     } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
