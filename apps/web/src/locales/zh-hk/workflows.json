@@ -143,7 +143,6 @@
   "promptSourceStepPromptWithTaskDescription": "重新進入「{{stepName}}」會傳送已渲染的步驟提示詞（含任務描述）。",
   "promptSourceTaskDescription": "「{{stepName}}」沒有步驟提示詞，因此重新進入時會傳送任務描述。",
   "pullFrom": "拉取自",
-  "pullFromHelp": "當此步驟有容量時，可選的饋送步驟用於拉取排隊中的工作。",
   "readOnlyManagedBySync": "只讀；由工作流程同步管理",
   "readOnlyManagedByImproveKandev": "只讀；由 Improve Kandev 管理",
   "remove": "移除",

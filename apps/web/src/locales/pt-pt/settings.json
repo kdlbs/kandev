@@ -375,8 +375,6 @@
   "globalScope": "Global",
   "modelFallbackSuffix": "(alternativo)",
   "modelWithValue": "Modelo: {{model}}",
-  "profileFallbackWillBeUsed": "O modelo inicial {{model}} já não está disponível; será usado o alternativo {{fallback}}.",
-  "profileStartModelUnavailable": "O modelo inicial {{model}} já não está disponível; altere-o no perfil do agente.",
   "selectAModel": "Selecionar um modelo...",
   "startModelUnavailable": "Já não está disponível; selecione outro modelo",
   "startModelAria": "Definições do modelo inicial do perfil",
