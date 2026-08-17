@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 
 async function createProfiles(
   apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
@@ -588,6 +588,7 @@ test.describe("Workflow agent profile switching", () => {
     const profileASession = initialSessions.find((item) => item.agent_profile_id === profileA.id);
     expect(profileASession).toBeDefined();
 
+    const ws = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -607,23 +608,18 @@ test.describe("Workflow agent profile switching", () => {
     await expect(selector).toContainText(profileB.name);
 
     await session.newSessionPromptInput().fill("/e2e:simple-message");
+    const sessionCreated = ws.waitForEvent("session.state_changed", {
+      where: (payload) =>
+        payload.task_id === task.id &&
+        payload.agent_profile_id === profileB.id &&
+        payload.new_state === "CREATED",
+    });
     await session.newSessionStartButton().click();
     await expect(dialog).not.toBeVisible({ timeout: 15_000 });
 
-    let profileBSessionId = "";
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          profileBSessionId =
-            sessions.find(
-              (item) => item.id !== profileASession!.id && item.agent_profile_id === profileB.id,
-            )?.id ?? "";
-          return profileBSessionId;
-        },
-        { timeout: 60_000, message: "manual New Agent launch did not use profile B" },
-      )
-      .toBeTruthy();
+    const sessionCreatedFrame = await sessionCreated;
+    const profileBSessionId = String(sessionCreatedFrame.payload.session_id ?? "");
+    expect(profileBSessionId).not.toBe("");
 
     const finalSessions = await pollSessions(apiClient, task.id, 2, 60_000);
     const profileBSession = finalSessions.find((item) => item.id === profileBSessionId);
