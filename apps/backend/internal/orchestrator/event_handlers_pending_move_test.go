@@ -138,6 +138,46 @@ func TestPendingMove_OutOfTerminalStepReopensCompletedTask(t *testing.T) {
 	}
 }
 
+func TestPendingMove_DoesNotReplayAfterStaleSnapshotRestored(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+	move := &messagequeue.PendingMove{
+		MoveID:         "move-once",
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepInProgressID,
+	}
+
+	// Consume the deferred move once, as handleAgentReady does at turn end.
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load task after first move: %v", err)
+	}
+	if task.WorkflowStepID != stepInProgressID {
+		t.Fatalf("workflow_step_id after first move = %q, want %q", task.WorkflowStepID, stepInProgressID)
+	}
+
+	// Simulate a legitimate later return to Review, followed by a stale queue
+	// rollback restoring the original already-consumed pending move.
+	task.WorkflowStepID = stepInReviewID
+	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
+		t.Fatalf("return task to review: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+
+	task, err = sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load task after stale replay: %v", err)
+	}
+	if task.WorkflowStepID != stepInReviewID {
+		t.Fatalf("workflow_step_id after stale replay = %q, want %q", task.WorkflowStepID, stepInReviewID)
+	}
+}
+
 func TestPendingMove_DropsForeignWorkflowStepWithoutMovingTask(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
 	sc.stepGetter.steps["foreign-step"] = &wfmodels.WorkflowStep{

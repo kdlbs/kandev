@@ -389,11 +389,11 @@ func isCanonicalKandevRepositoryInput(
 	repository *taskmodels.Repository,
 ) bool {
 	if repository != nil {
-		return repository.Provider == "github" &&
+		return repository.Provider == gitCredentialGitHubProviderID &&
 			isPublicGitHubProviderHost(repository.ProviderHost) &&
 			repository.ProviderOwner == canonicalKandevOwner && repository.ProviderName == canonicalKandevName
 	}
-	return input != nil && input.Provider == "github" &&
+	return input != nil && input.Provider == gitCredentialGitHubProviderID &&
 		isPublicGitHubProviderHost(input.ProviderHost) &&
 		input.ProviderOwner == canonicalKandevOwner && input.ProviderName == canonicalKandevName
 }

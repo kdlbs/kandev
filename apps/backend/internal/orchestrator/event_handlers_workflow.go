@@ -27,6 +27,8 @@ import (
 
 type turnCompletionCause string
 
+var errDeferredMoveAlreadyApplied = errors.New("deferred move already applied")
+
 type taskMetadataKeyRemover interface {
 	RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
 }
@@ -2040,7 +2042,10 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		deferredMoveAttribution.SessionID = move.SenderSessionID
 	}
 	deferredMoveCtx := steptelemetry.WithAttribution(ctx, deferredMoveAttribution)
-	if err := s.workflowStore.ApplyTransition(deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, engine.TriggerOnEnter); err != nil {
+	if err := s.workflowStore.ApplyDeferredMoveTransition(deferredMoveCtx, taskID, sessionID, fromStepID, move.WorkflowStepID, move.MoveID); errors.Is(err, errDeferredMoveAlreadyApplied) {
+		s.logger.Info("dropping already-applied pending move", zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
+		return
+	} else if err != nil {
 		s.logger.Error("failed to apply pending move transition",
 			zap.String("task_id", taskID),
 			zap.Error(err))

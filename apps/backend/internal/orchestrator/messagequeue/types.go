@@ -205,6 +205,10 @@ type QueueStatus struct {
 // move_task_kandev) while its turn is still active. Applied by handleAgentReady
 // once the turn ends.
 type PendingMove struct {
+	// MoveID identifies one deferred move request across queue snapshots. A
+	// rollback can restore a previously consumed snapshot, so the orchestrator
+	// needs a durable identity to reject that stale replay.
+	MoveID         string    `json:"move_id"`
 	TaskID         string    `json:"task_id"`
 	WorkflowID     string    `json:"workflow_id"`
 	WorkflowStepID string    `json:"workflow_step_id"`

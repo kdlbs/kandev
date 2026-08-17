@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/steptelemetry"
@@ -164,6 +166,7 @@ func (h *Handlers) deferMoveTask(
 		}
 	}
 	h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
+		MoveID:          uuid.NewString(),
 		TaskID:          req.TaskID,
 		WorkflowID:      req.WorkflowID,
 		WorkflowStepID:  req.WorkflowStepID,

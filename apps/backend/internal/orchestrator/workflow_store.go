@@ -184,6 +184,14 @@ func (s *workflowStore) LoadPreviousStep(ctx context.Context, workflowID string,
 }
 
 func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger) error {
+	return s.applyTransition(ctx, taskID, sessionID, fromStepID, toStepID, trigger, "")
+}
+
+func (s *workflowStore) ApplyDeferredMoveTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID, moveID string) error {
+	return s.applyTransition(ctx, taskID, sessionID, fromStepID, toStepID, engine.TriggerOnEnter, moveID)
+}
+
+func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger, moveID string) error {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("load task for transition: %w", err)
@@ -197,6 +205,10 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 	// task.WorkflowID already), but applyPendingMove uses this path for
 	// cross-workflow move_task_kandev hand-offs too — without this, the task
 	// would end up with a step ID from a workflow its WorkflowID doesn't match.
+	if err := markDeferredMoveApplied(task, moveID); err != nil {
+		return err
+	}
+
 	oldWorkflowID := task.WorkflowID
 	if targetStep != nil {
 		task.WorkflowID = targetStep.WorkflowID
@@ -244,6 +256,25 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 
 	s.pullNextTaskOnVacate(ctx, fromStepID, taskID)
 
+	return nil
+}
+
+func markDeferredMoveApplied(task *models.Task, moveID string) error {
+	if moveID == "" {
+		return nil
+	}
+	applied, _ := task.Metadata[models.MetaKeyAppliedDeferredMoves].(map[string]interface{})
+	if _, exists := applied[moveID]; exists {
+		return errDeferredMoveAlreadyApplied
+	}
+	if applied == nil {
+		applied = make(map[string]interface{})
+	}
+	applied[moveID] = true
+	if task.Metadata == nil {
+		task.Metadata = make(map[string]interface{})
+	}
+	task.Metadata[models.MetaKeyAppliedDeferredMoves] = applied
 	return nil
 }
 
