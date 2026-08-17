@@ -144,14 +144,16 @@ func TestPendingMove_DoesNotReplayAfterStaleSnapshotRestored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load review session: %v", err)
 	}
-	move := &messagequeue.PendingMove{
+	queuedAt := time.Date(2026, 8, 17, 2, 23, 48, 0, time.UTC)
+	firstMove := &messagequeue.PendingMove{
 		TaskID:         "task-1",
 		WorkflowID:     "wf1",
 		WorkflowStepID: stepInProgressID,
+		QueuedAt:       queuedAt,
 	}
 
 	// Consume the deferred move once, as handleAgentReady does at turn end.
-	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, firstMove)
 	task, err := sc.repo.GetTask(sc.ctx, "task-1")
 	if err != nil {
 		t.Fatalf("load task after first move: %v", err)
@@ -161,12 +163,21 @@ func TestPendingMove_DoesNotReplayAfterStaleSnapshotRestored(t *testing.T) {
 	}
 
 	// Simulate a legitimate later return to Review, followed by a stale queue
-	// rollback restoring the original already-consumed pending move.
+	// rollback restoring the original already-consumed legacy pending move. The
+	// restored row predates move_id, so applyPendingMove must derive the same
+	// stable identity from the persisted legacy fields instead of relying on the
+	// mutated firstMove pointer above.
 	task.WorkflowStepID = stepInReviewID
 	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
 		t.Fatalf("return task to review: %v", err)
 	}
-	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	staleRestoredMove := &messagequeue.PendingMove{
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepInProgressID,
+		QueuedAt:       queuedAt,
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, staleRestoredMove)
 
 	task, err = sc.repo.GetTask(sc.ctx, "task-1")
 	if err != nil {
