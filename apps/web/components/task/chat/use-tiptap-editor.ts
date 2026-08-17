@@ -250,7 +250,7 @@ function buildEditorProps(args: {
       },
       beforeinput: (_view: import("@tiptap/pm/view").EditorView, event: Event) => {
         const inputType = (event as InputEvent).inputType;
-        if (inputType.startsWith("delete")) args.onBeforeInputRef.current?.(inputType);
+        if (inputType?.startsWith("delete")) args.onBeforeInputRef.current?.(inputType);
         return false;
       },
     },

@@ -92,6 +92,14 @@ describe("entity reference trigger gating", () => {
     expect(gate.shouldShow({ from: 1, to: 9 }, transaction)).toBe(true);
   });
 
+  it("allows a direct trigger to include text that was already present", () => {
+    const gate = createEntityReferenceInputGate();
+    const transaction = { getMeta: () => undefined };
+
+    gate.recordTextInput(1, 1, "#");
+    expect(gate.shouldShow({ from: 1, to: 8 }, transaction)).toBe(true);
+  });
+
   it("does not start or continue a suggestion from pasted or dropped text", () => {
     const gate = createEntityReferenceInputGate();
     const transaction = {
@@ -123,6 +131,15 @@ describe("entity reference trigger gating", () => {
 
     gate.recordTextInput(2, 2, "a");
     expect(gate.shouldShow({ from: 1, to: 3 }, transaction)).toBe(true);
+  });
+
+  it("keeps an active range for a non-document transaction", () => {
+    const gate = createEntityReferenceInputGate();
+    const transaction = { getMeta: () => undefined };
+
+    gate.recordTextInput(1, 1, "#");
+    expect(gate.shouldShow({ from: 1, to: 2 }, transaction)).toBe(true);
+    expect(gate.shouldShow({ from: 1, to: 2 }, transaction)).toBe(true);
   });
 
   it("rejects a space after a bare # but allows spaces in a query", () => {

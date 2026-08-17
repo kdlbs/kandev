@@ -64,10 +64,12 @@ Report the RED result, implementation summary, changed files, exact test results
 
 - RED unit run: the new input-gate assertions failed because the gate and
   suggestion-plugin exit path were not implemented yet.
-- Unit: 38 tests passed across the three focused TipTap test files.
+- Unit: 41 tests passed across the three focused TipTap test files.
 - Type check: `pnpm run typecheck` passed.
 - Lint: `pnpm run lint` passed with zero warnings.
 - Internationalization: `pnpm run i18n:check` passed.
 - Desktop E2E: the pasted-hash and dismissed-menu regression passed.
 - Mobile E2E: the existing entity-reference composer test passed.
+- PR fixup: direct Backspace/Delete edits keep the active menu open, and a
+  direct `#` before existing text remains eligible for a suggestion.
 - Repository check: `git diff --check` passed.

@@ -82,10 +82,11 @@ The browser regression must fail before the production change. It must pass afte
 
 The diagnostic E2E run failed as expected before production changes. The
 managed runner removed its isolated processes. After implementation, the
-focused desktop regression passed, the existing mobile regression passed, 38
+focused desktop regression passed, the existing mobile regression passed, 41
 focused unit tests passed, type checking passed, lint passed with zero
 warnings, the internationalization check passed, and `git diff --check`
-passed.
+passed. A PR review fixup also covered direct Backspace/Delete edits inside an
+active query and direct `#` insertion before existing text.
 
 ## Implementation waves
 

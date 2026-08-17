@@ -70,12 +70,8 @@ function matchesDirectEntityReferenceInput(
 ): boolean {
   const hashOffset = input.text.lastIndexOf("#");
   const triggerFrom = hashOffset >= 0 ? input.from + hashOffset : null;
-  const insertionEnd = input.from + input.text.length;
   const isDirectNewTrigger =
-    triggerFrom !== null &&
-    range.from === triggerFrom &&
-    range.to >= triggerFrom + 1 &&
-    range.to <= insertionEnd;
+    triggerFrom !== null && range.from === triggerFrom && range.to >= triggerFrom + 1;
   const isDirectContinuation = isActiveEntityReferenceRange(range, activeRange);
   return isDirectNewTrigger || isDirectContinuation;
 }
