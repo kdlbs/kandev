@@ -318,6 +318,8 @@ func TestSyncWatchesBatched_ForkParentPRWithForeignHeadIsRejectedAndCached(t *te
 
 	// The parent is a different repository the batch never asked about, so it
 	// is probed on both cycles — but fork identity itself is fetched once.
+	// The probe here is FindPRByHead, which the mock implements by delegating
+	// to FindPRByBranch, so this counter sees it.
 	if got := gh.FindPRByBranchCallCount(); got != 2 {
 		t.Errorf("fork-parent lookups = %d, want 2 (one per cycle)", got)
 	}

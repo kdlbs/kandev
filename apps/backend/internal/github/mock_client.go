@@ -237,6 +237,12 @@ func (m *MockClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, h
 
 // FindPRByBranchCallCount returns how many times FindPRByBranch has been
 // called. Used by tests asserting detection-probe throttling.
+//
+// This also counts FindPRByHead: the mock implements it by delegating to
+// FindPRByBranch (it reuses the same branch index), so a fork-parent probe
+// increments this counter too. Tests asserting on fork-parent lookups are
+// reading it through that delegation — do not split the counters without
+// re-reading every assertion that uses it.
 func (m *MockClient) FindPRByBranchCallCount() int {
 	return int(m.findPRByBranchCalls.Load())
 }
@@ -1034,6 +1040,7 @@ func (m *MockClient) Reset() {
 	m.nextGistID = 0
 	m.repoFiles = make(map[repoKey][]repoFileEntry)
 	m.findPRByBranchCalls.Store(0)
+	m.getRepositoryCalls.Store(0)
 	m.probeEntered = nil
 	m.probeRelease = nil
 }
