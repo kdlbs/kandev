@@ -104,6 +104,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         messages={pendingClarificationGroup}
         onResolved={handleClarificationResolved}
         shortcutScopeRef={shortcutScopeRef}
+        maxHeightVh={35}
       />
       <ChatInputArea
         chatInputRef={chatInputRef}

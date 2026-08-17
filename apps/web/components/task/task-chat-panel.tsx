@@ -393,6 +393,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           messages={pendingClarificationGroup}
           onResolved={handleClarificationResolved}
           shortcutScopeRef={panelRef}
+          maxHeightVh={50}
         />
       )}
       <ChatFooter

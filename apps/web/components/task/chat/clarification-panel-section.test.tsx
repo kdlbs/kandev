@@ -55,7 +55,7 @@ function clarMessage(opts: {
   };
 }
 
-function renderSection(pending: boolean, messages: Message[]) {
+function renderSection(pending: boolean, messages: Message[], maxHeightVh = 50) {
   const scopeRef = createRef<HTMLDivElement>();
   const onResolved = vi.fn();
   const utils = render(
@@ -65,6 +65,7 @@ function renderSection(pending: boolean, messages: Message[]) {
         messages={messages}
         onResolved={onResolved}
         shortcutScopeRef={scopeRef}
+        maxHeightVh={maxHeightVh}
       />
     </div>,
   );
@@ -83,6 +84,7 @@ afterEach(() => {
 });
 
 const SCROLL_REGION_TESTID = "clarification-scroll-region";
+const CONTAINER_TESTID = "clarification-overlay-container";
 
 describe("ClarificationPanelSection — collapse affordance", () => {
   it("collapses on Escape without posting a rejection, and stays reachable to expand again", () => {
@@ -96,7 +98,7 @@ describe("ClarificationPanelSection — collapse affordance", () => {
     fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("clarification-overlay-container")).not.toBeNull();
+    expect(screen.queryByTestId(CONTAINER_TESTID)).not.toBeNull();
     expect(screen.getByTestId(SCROLL_REGION_TESTID).className).toContain("hidden");
 
     // Restore: clicking the toggle re-expands the same still-pending bundle.
@@ -134,10 +136,68 @@ describe("ClarificationPanelSection — collapse affordance", () => {
           messages={bundleB}
           onResolved={vi.fn()}
           shortcutScopeRef={scopeRef}
+          maxHeightVh={50}
         />
       </div>,
     );
 
     expect(screen.getByTestId(SCROLL_REGION_TESTID).className).not.toContain("hidden");
+  });
+});
+
+describe("ClarificationPanelSection — per-surface max-height cap", () => {
+  it("renders the CSS max-height from the maxHeightVh prop instead of a hardcoded value", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages, 50);
+
+    const container = screen.getByTestId(CONTAINER_TESTID);
+    expect(container.style.maxHeight).toBe("50vh");
+  });
+
+  it("a different surface's maxHeightVh renders a different cap (e.g. Quick Chat's 35vh)", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages, 35);
+
+    const container = screen.getByTestId(CONTAINER_TESTID);
+    expect(container.style.maxHeight).toBe("35vh");
+  });
+});
+
+describe("ClarificationPanelSection — dragged height does not survive a bundle handover", () => {
+  it("resets the user-dragged height when a new bundle (different pending_id) replaces one still pending", () => {
+    const bundleA = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    const bundleB = [
+      clarMessage({ pendingId: "p2", id: "m2", questionId: "q2", index: 0, total: 1 }),
+    ];
+    const { rerender, scopeRef } = renderSection(true, bundleA);
+    const container = screen.getByTestId(CONTAINER_TESTID);
+
+    const handle = screen.getByRole("button", { name: /resize/i });
+    fireEvent.mouseDown(handle, { clientY: 500 });
+    fireEvent.mouseMove(document, { clientY: 300 }); // drag up 200px → explicit pixel height
+    fireEvent.mouseUp(document);
+
+    expect(container.style.height).toMatch(/^\d+(\.\d+)?px$/);
+
+    rerender(
+      <div ref={scopeRef} tabIndex={-1}>
+        <ClarificationPanelSection
+          pending={true}
+          messages={bundleB}
+          onResolved={vi.fn()}
+          shortcutScopeRef={scopeRef}
+          maxHeightVh={50}
+        />
+      </div>,
+    );
+
+    // Bundle B must not inherit bundle A's dragged pixel height.
+    expect(container.style.height).toBe("");
   });
 });

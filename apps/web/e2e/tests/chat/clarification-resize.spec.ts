@@ -145,4 +145,61 @@ test.describe("Clarification overlay resizable layout", () => {
     expect(afterReset.inlineHeight).toBe("");
     expect(Math.abs(afterReset.height - initial.height)).toBeLessThanOrEqual(2);
   });
+
+  // Regression coverage for the task-chat-panel cap: the rendered CSS
+  // max-height and the resize hook's drag clamp must agree on 50vh here.
+  // Before the fix, ClarificationPanelSection rendered a flat 35vh cap
+  // (inherited from Quick Chat) while the hook still clamped drags to 50vh,
+  // so the handle silently stopped growing the box ~30% short of its own
+  // documented ceiling with zero feedback.
+  test("dragging well past the old 35vh mark keeps growing the task panel up to its 50vh cap, with no dead zone", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // 2000px viewport → 35vh = 700px, 50vh = 1000px. Round numbers make the
+    // two caps unambiguous to distinguish in assertions.
+    await testPage.setViewportSize({ width: 1280, height: 2000 });
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Resize Cap",
+    );
+
+    await session.sendMessage("/ask-multiple");
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    const container = testPage.getByTestId("clarification-overlay-container");
+    await expect(container).toBeVisible();
+    await expect(container).toHaveCSS("max-height", "1000px");
+
+    const handle = container.locator("xpath=..").locator("button[aria-label='Resize']");
+    await expect(handle).toBeVisible();
+
+    // Drag far enough (900px) that a working cap must clamp it — well past
+    // the old, wrong 700px (35vh) ceiling.
+    const handleBox = await handle.boundingBox();
+    expect(handleBox).not.toBeNull();
+    const startX = handleBox!.x + handleBox!.width / 2;
+    const startY = handleBox!.y + handleBox!.height / 2;
+    await testPage.mouse.move(startX, startY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(startX, startY - 900, { steps: 15 });
+    await testPage.mouse.up();
+
+    const afterDrag = await container.evaluate((el) => ({
+      height: el.getBoundingClientRect().height,
+      inlineHeight: (el as HTMLElement).style.height,
+    }));
+
+    // The drag target overshoots 50vh, so the hook's own clamp pins the
+    // inline height at exactly 1000px...
+    expect(afterDrag.inlineHeight).toBe("1000px");
+    // ...and because the CSS cap now agrees, the box actually renders there
+    // instead of stopping dead at the old 700px ceiling.
+    expect(afterDrag.height).toBeGreaterThan(700);
+    expect(afterDrag.height).toBeCloseTo(1000, 0);
+  });
 });

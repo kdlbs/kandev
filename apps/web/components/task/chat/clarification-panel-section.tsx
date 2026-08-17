@@ -14,6 +14,13 @@ type ClarificationPanelSectionProps = {
   messages: readonly Message[] | null | undefined;
   onResolved: () => void;
   shortcutScopeRef: RefObject<HTMLElement | null>;
+  /**
+   * Caps the expanded overlay's height as a percentage of the viewport.
+   * Drives both the rendered CSS max-height and the resize hook's drag
+   * clamp — the two MUST agree, or the drag handle silently stops
+   * responding before its own visible ceiling.
+   */
+  maxHeightVh: number;
 };
 
 function pendingIdFromMessages(messages: readonly Message[] | null | undefined): string | null {
@@ -49,19 +56,27 @@ export function ClarificationPanelSection({
   messages,
   onResolved,
   shortcutScopeRef,
+  maxHeightVh,
 }: ClarificationPanelSectionProps) {
   const { t } = useTranslation();
   const pendingId = pendingIdFromMessages(messages);
   const [collapsed, setCollapsed] = useCollapsedForBundle(pendingId);
   const contentId = useId();
-  const { height, containerRef, resetHeight, resizeHandleProps } =
-    useResizableClarificationOverlay();
+  const { height, containerRef, resetHeight, resizeHandleProps } = useResizableClarificationOverlay(
+    maxHeightVh / 100,
+  );
 
   // A newly opened clarification starts expanded and auto-sized. Collapsing
   // an active one leaves its form state and user-selected height intact.
   useEffect(() => {
     if (!pending) resetHeight();
   }, [pending, resetHeight]);
+
+  // A new bundle (different pending_id) replacing a still-pending one must
+  // not inherit the previous bundle's dragged height.
+  useEffect(() => {
+    resetHeight();
+  }, [pendingId, resetHeight]);
 
   if (!pending) return null;
 
@@ -75,11 +90,13 @@ export function ClarificationPanelSection({
         ref={containerRef}
         data-testid="clarification-overlay-container"
         className={
-          collapsed
-            ? "h-11"
-            : "flex min-h-[7.5rem] max-h-[35vh] flex-col overflow-hidden overscroll-contain"
+          collapsed ? "h-11" : "flex min-h-[7.5rem] flex-col overflow-hidden overscroll-contain"
         }
-        style={!collapsed && height !== null ? { height } : undefined}
+        style={
+          collapsed
+            ? undefined
+            : { maxHeight: `${maxHeightVh}vh`, ...(height !== null ? { height } : {}) }
+        }
       >
         <div className="flex h-11 flex-shrink-0 items-center justify-between gap-2 pl-4">
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
