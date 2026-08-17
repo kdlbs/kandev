@@ -15,6 +15,11 @@ type MessageHistorySearchProps = {
   /** Bottom-anchor rect (typically the chat input's bounding rect). The
    *  overlay positions itself directly above this rect. */
   anchorRect: DOMRect | null;
+  /** DOM node to portal the overlay into. On the main task chat panel this is
+   *  `document.body`; on Quick Chat it must be a node inside the Dialog's
+   *  FocusScope (e.g. `[data-slot="dialog-content"]`) or the Dialog's focus
+   *  trap reverts focus away from this overlay's input on every render. */
+  container: Element;
   onClose: () => void;
   /** Invoked when the user picks a result. `index` is the position in
    *  `history` so the editor's history navigation can resume from there. */
@@ -97,15 +102,31 @@ function useScrollSelectedIntoView(
   }, [selectedIndex, listRef]);
 }
 
-function computeStyle(anchorRect: DOMRect | null): React.CSSProperties | null {
+/**
+ * Position math is relative to `containerRect`, the bounding rect of the
+ * portal target, not the viewport. A `document.body` target has no transform
+ * of its own, so `containerRect` is null there and the origin collapses to
+ * (0, 0, window.innerWidth, window.innerHeight) -- identical to the previous
+ * viewport-relative formula. Quick Chat's DialogContent carries a permanent
+ * `translate` for centering, which establishes a new containing block for
+ * `position: fixed` descendants portaled inside it, so once the overlay
+ * renders there its rect must be computed relative to that ancestor instead.
+ */
+export function computeStyle(
+  anchorRect: DOMRect | null,
+  containerRect: DOMRect | null,
+): React.CSSProperties | null {
   if (!anchorRect) return null;
-  const left = Math.max(8, anchorRect.left);
-  const maxWidth = Math.min(OVERLAY_MAX_WIDTH, Math.max(200, window.innerWidth - left - 8));
+  const originLeft = containerRect?.left ?? 0;
+  const originWidth = containerRect?.width ?? window.innerWidth;
+  const originBottom = containerRect?.bottom ?? window.innerHeight;
+  const left = Math.max(8, anchorRect.left - originLeft);
+  const maxWidth = Math.min(OVERLAY_MAX_WIDTH, Math.max(200, originWidth - left - 8));
   return {
     position: "fixed",
     left,
     width: Math.min(maxWidth, anchorRect.width || maxWidth),
-    bottom: window.innerHeight - anchorRect.top + 8,
+    bottom: originBottom - anchorRect.top + 8,
     maxHeight: OVERLAY_HEIGHT,
     zIndex: 60,
     pointerEvents: "auto",
@@ -116,6 +137,7 @@ export function MessageHistorySearch({
   history,
   isLoadingOlder = false,
   anchorRect,
+  container,
   onClose,
   onSelect,
 }: MessageHistorySearchProps) {
@@ -144,7 +166,8 @@ export function MessageHistorySearch({
   useScrollSelectedIntoView(selectedIndex, listRef);
 
   if (typeof document === "undefined") return null;
-  const style = computeStyle(anchorRect);
+  const containerRect = container === document.body ? null : container.getBoundingClientRect();
+  const style = computeStyle(anchorRect, containerRect);
   if (!style) return null;
 
   const overlay = (
@@ -202,5 +225,5 @@ export function MessageHistorySearch({
     </div>
   );
 
-  return createPortal(overlay, document.body);
+  return createPortal(overlay, container);
 }

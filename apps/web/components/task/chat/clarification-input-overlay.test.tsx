@@ -5,6 +5,7 @@ import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/li
 import {
   ClarificationEscapeGuardProvider,
   type ClarificationEscapeGuardEntry,
+  type ClarificationEscapeGuardRegistry,
 } from "@/hooks/use-clarification-escape-guard";
 import { ClarificationInputOverlay } from "./clarification-input-overlay";
 
@@ -142,13 +143,19 @@ function renderOverlayWithGuard(messages: Message[]) {
   const onDismiss = vi.fn();
   // A holder object, not a reassigned `let`, so TS doesn't narrow the read
   // in getGuard() to the initializer's type across the closure boundary.
+  // ClarificationInputOverlay is the only registrant in this test tree, so a
+  // single-slot holder still faithfully mirrors what it registered.
   const holder: { entry: ClarificationEscapeGuardEntry } = { entry: null };
+  const registry: ClarificationEscapeGuardRegistry = {
+    register: (_id, predicate) => {
+      holder.entry = { test: predicate };
+    },
+    unregister: () => {
+      holder.entry = null;
+    },
+  };
   render(
-    <ClarificationEscapeGuardProvider
-      value={(entry) => {
-        holder.entry = entry;
-      }}
-    >
+    <ClarificationEscapeGuardProvider value={registry}>
       {/* Stands in for the Quick Chat tab bar / resize handles: rendered
           inside the dialog but outside the clarification's shortcut scope. */}
       <button ref={outsideRef} type="button">

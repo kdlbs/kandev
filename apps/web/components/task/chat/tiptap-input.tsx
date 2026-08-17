@@ -32,6 +32,11 @@ import {
   type SlashSuggestionCallbacks,
 } from "./tiptap-suggestion";
 import { useTipTapEditor, type TipTapInputHandle } from "./use-tiptap-editor";
+import { useSuggestionEscapeFallback } from "./use-suggestion-escape-fallback";
+import {
+  useClarificationEscapeGuard,
+  type ClarificationEscapePredicate,
+} from "@/hooks/use-clarification-escape-guard";
 import type { MentionItem } from "@/hooks/use-inline-mention";
 import type { SlashCommand } from "./slash-command-types";
 import type { ContextFile } from "@/lib/state/context-files-store";
@@ -400,10 +405,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     workspaceId,
     sessionId,
   });
-  const isSuggestionMenuOpen =
-    (menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0) ||
-    (menu.slashMenu.isOpen && menu.slashMenu.items.length > 0) ||
-    entityReferences.isOpen;
+  const { isSuggestionMenuOpen } = useSuggestionMenuOpenState(menu, entityReferences);
   const { history, getHistory } = useChatHistory(sessionId);
   const { editorWrapperRef, ...overlay } = useReverseSearchOverlay(sessionId);
   const { isDraining } = useDrainOlderMessages(sessionId, overlay.isReverseSearchOpen);
@@ -520,11 +522,12 @@ function TipTapPopups({
         onClose={menu.handleSlashClose}
         setSelectedIndex={menu.setSlashSelectedIndex}
       />
-      {overlay.isReverseSearchOpen && (
+      {overlay.isReverseSearchOpen && overlay.reverseSearchContainer && (
         <MessageHistorySearch
           history={history}
           isLoadingOlder={isDraining}
           anchorRect={overlay.reverseSearchAnchor}
+          container={overlay.reverseSearchContainer}
           onClose={overlay.closeReverseSearch}
           onSelect={onReverseSearchSelect}
         />
@@ -550,9 +553,34 @@ function useChatHistory(sessionId: string | null) {
   return { history, getHistory };
 }
 
+function useSuggestionMenuOpenState(
+  menu: ReturnType<typeof useMenuHandlers>,
+  entityReferences: ReturnType<typeof useEntityReferenceComposer>,
+) {
+  const mentionMenuOpen = menu.mentionMenu.isOpen && menu.mentionMenu.items.length > 0;
+  const slashMenuOpen = menu.slashMenu.isOpen && menu.slashMenu.items.length > 0;
+  const isSuggestionMenuOpen = mentionMenuOpen || slashMenuOpen || entityReferences.isOpen;
+  useSuggestionEscapeFallback({
+    isSuggestionMenuOpen,
+    mentionMenuOpen,
+    slashMenuOpen,
+    entityReferenceMenuOpen: entityReferences.isOpen,
+    closeMentionMenu: menu.handleMentionClose,
+    closeSlashMenu: menu.handleSlashClose,
+    closeEntityReferenceMenu: entityReferences.close,
+  });
+  return { isSuggestionMenuOpen, mentionMenuOpen, slashMenuOpen };
+}
+
+// Stable reference (module scope) so the guard registry sees the same
+// predicate identity across renders while the overlay stays open, instead of
+// re-registering on every render.
+const CLAIM_ANY_ESCAPE: ClarificationEscapePredicate = () => true;
+
 function useReverseSearchOverlay(sessionId: string | null) {
   const editorWrapperRef = useRef<HTMLDivElement>(null);
   const [reverseSearchAnchor, setReverseSearchAnchor] = useState<DOMRect | null>(null);
+  const [reverseSearchContainer, setReverseSearchContainer] = useState<Element | null>(null);
   const [isReverseSearchOpen, setIsReverseSearchOpen] = useState(false);
   const sessionIdRef = useRef(sessionId);
   useLayoutEffect(() => {
@@ -560,10 +588,29 @@ function useReverseSearchOverlay(sessionId: string | null) {
   });
   const openReverseSearch = useCallback(() => {
     if (!sessionIdRef.current) return;
-    setReverseSearchAnchor(editorWrapperRef.current?.getBoundingClientRect() ?? null);
+    const wrapper = editorWrapperRef.current;
+    setReverseSearchAnchor(wrapper?.getBoundingClientRect() ?? null);
+    // Radix's Dialog traps focus within [data-slot="dialog-content"]. Portaling
+    // outside that scope (the prior document.body default) meant the overlay's
+    // own focus() and Escape/typing handlers never fired on a surface that
+    // renders this composer inside a Dialog (Quick Chat) -- the trap reverted
+    // focus every time. Render inside that scope when one wraps the composer;
+    // otherwise (the non-modal main task chat panel) keep document.body.
+    setReverseSearchContainer(
+      wrapper?.closest<HTMLElement>('[data-slot="dialog-content"]') ?? document.body,
+    );
     setIsReverseSearchOpen(true);
   }, []);
   const closeReverseSearch = useCallback(() => setIsReverseSearchOpen(false), []);
+  // On Quick Chat, Radix's DismissableLayer dismisses the whole dialog on
+  // Escape unless something already called preventDefault() during the same
+  // document-capture pass -- see use-suggestion-escape-fallback.ts for the
+  // full mechanism. The overlay's own onKeyDown (message-history-search.tsx)
+  // runs later, in the bubble phase, too late to stop that. Registering here
+  // tells the dialog this Escape is spoken for, so it stays open and lets the
+  // overlay's own handler close just the overlay. No-ops on the main task
+  // chat panel, where there is no ClarificationEscapeGuardProvider.
+  useClarificationEscapeGuard(isReverseSearchOpen ? CLAIM_ANY_ESCAPE : null);
   // The anchor rect is captured once at open time; dismiss on viewport
   // changes rather than recompute, matching how the project's other
   // fixed-position popups behave on resize/scroll. Bubbling-phase scroll
@@ -582,6 +629,7 @@ function useReverseSearchOverlay(sessionId: string | null) {
   return {
     editorWrapperRef,
     reverseSearchAnchor,
+    reverseSearchContainer,
     isReverseSearchOpen,
     openReverseSearch,
     closeReverseSearch,

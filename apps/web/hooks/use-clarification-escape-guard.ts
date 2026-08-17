@@ -1,17 +1,29 @@
 "use client";
 
-import { createContext, useContext, useEffect } from "react";
+import { createContext, useContext, useEffect, useId } from "react";
 
 export type ClarificationEscapePredicate = (event: KeyboardEvent) => boolean;
 
-// Wrapped in an object so storing a function via useState's setter is never
-// mistaken for React's "updater function" overload (setState(fn) calls fn
-// instead of storing it).
+// Wrapped in an object so storing a function via a registry call is never
+// mistaken for React's "updater function" overload.
 export type ClarificationEscapeGuardEntry = { test: ClarificationEscapePredicate } | null;
 
-type ClarificationEscapeGuardSetter = (entry: ClarificationEscapeGuardEntry) => void;
+/**
+ * Multiple widgets can be mounted inside the same dialog at once (e.g. a
+ * pending clarification carousel and an open suggestion popup, or a pending
+ * clarification and an open reverse-search overlay), so the registry holds
+ * one predicate per caller -- keyed by a stable per-hook-instance id -- rather
+ * than a single slot. A single-slot design would let a second caller's
+ * register/unregister silently evict the first's still-active predicate.
+ */
+export type ClarificationEscapeGuardRegistry = {
+  register: (id: string, predicate: ClarificationEscapePredicate) => void;
+  unregister: (id: string) => void;
+};
 
-const ClarificationEscapeGuardContext = createContext<ClarificationEscapeGuardSetter | null>(null);
+const ClarificationEscapeGuardContext = createContext<ClarificationEscapeGuardRegistry | null>(
+  null,
+);
 
 export const ClarificationEscapeGuardProvider = ClarificationEscapeGuardContext.Provider;
 
@@ -30,10 +42,11 @@ export const ClarificationEscapeGuardProvider = ClarificationEscapeGuardContext.
  * can invoke this unconditionally.
  */
 export function useClarificationEscapeGuard(predicate: ClarificationEscapePredicate | null) {
-  const setEntry = useContext(ClarificationEscapeGuardContext);
+  const registry = useContext(ClarificationEscapeGuardContext);
+  const id = useId();
   useEffect(() => {
-    if (!setEntry) return;
-    setEntry(predicate ? { test: predicate } : null);
-    return () => setEntry(null);
-  }, [predicate, setEntry]);
+    if (!registry || !predicate) return;
+    registry.register(id, predicate);
+    return () => registry.unregister(id);
+  }, [registry, id, predicate]);
 }

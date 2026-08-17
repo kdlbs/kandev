@@ -3,7 +3,7 @@ import { renderHook } from "@testing-library/react";
 import {
   ClarificationEscapeGuardProvider,
   useClarificationEscapeGuard,
-  type ClarificationEscapeGuardEntry,
+  type ClarificationEscapeGuardRegistry,
 } from "./use-clarification-escape-guard";
 
 function fakeEscape(target: EventTarget): KeyboardEvent {
@@ -17,13 +17,22 @@ function fakeEscape(target: EventTarget): KeyboardEvent {
   } as unknown as KeyboardEvent;
 }
 
+function fakeRegistry() {
+  const entries = new Map<string, (event: KeyboardEvent) => boolean>();
+  const registry: ClarificationEscapeGuardRegistry = {
+    register: vi.fn((id, predicate) => entries.set(id, predicate)),
+    unregister: vi.fn((id) => entries.delete(id)),
+  };
+  return { registry, entries };
+}
+
 describe("useClarificationEscapeGuard", () => {
   it("does nothing outside a provider, so non-modal callers can invoke it unconditionally", () => {
     expect(() => renderHook(() => useClarificationEscapeGuard(() => true))).not.toThrow();
   });
 
-  it("wraps a registered predicate in an entry object, so useState never mistakes the function for an updater", () => {
-    const setEntry = vi.fn();
+  it("registers and unregisters the predicate as it changes and on unmount", () => {
+    const { registry, entries } = fakeRegistry();
     const predicateA = () => true;
     const predicateB = () => false;
     const { rerender, unmount } = renderHook(
@@ -31,32 +40,55 @@ describe("useClarificationEscapeGuard", () => {
       {
         initialProps: { predicate: predicateA as (() => boolean) | null },
         wrapper: ({ children }) => (
-          <ClarificationEscapeGuardProvider value={setEntry}>
+          <ClarificationEscapeGuardProvider value={registry}>
             {children}
           </ClarificationEscapeGuardProvider>
         ),
       },
     );
 
-    expect(setEntry).toHaveBeenLastCalledWith({ test: predicateA });
+    expect(registry.register).toHaveBeenCalledTimes(1);
+    expect([...entries.values()]).toEqual([predicateA]);
 
     rerender({ predicate: predicateB });
-    expect(setEntry).toHaveBeenLastCalledWith({ test: predicateB });
+    expect([...entries.values()]).toEqual([predicateB]);
 
     rerender({ predicate: null });
-    expect(setEntry).toHaveBeenLastCalledWith(null);
+    expect(entries.size).toBe(0);
+
+    rerender({ predicate: predicateA });
+    expect([...entries.values()]).toEqual([predicateA]);
 
     unmount();
-    expect(setEntry).toHaveBeenLastCalledWith(null);
+    expect(entries.size).toBe(0);
+  });
+
+  it("two simultaneous callers each keep their own registered predicate (no single-slot clobbering)", () => {
+    const { registry, entries } = fakeRegistry();
+    const predicateA = vi.fn(() => true);
+    const predicateB = vi.fn(() => false);
+
+    renderHook(() => useClarificationEscapeGuard(predicateA), {
+      wrapper: ({ children }) => (
+        <ClarificationEscapeGuardProvider value={registry}>
+          {children}
+        </ClarificationEscapeGuardProvider>
+      ),
+    });
+    renderHook(() => useClarificationEscapeGuard(predicateB), {
+      wrapper: ({ children }) => (
+        <ClarificationEscapeGuardProvider value={registry}>
+          {children}
+        </ClarificationEscapeGuardProvider>
+      ),
+    });
+
+    expect(entries.size).toBe(2);
+    expect([...entries.values()]).toEqual(expect.arrayContaining([predicateA, predicateB]));
   });
 
   it("the registered predicate is called with the real Escape event, not re-derived", () => {
-    // A holder object, not a reassigned `let`, so TS doesn't narrow the
-    // read below to the initializer's type across the closure boundary.
-    const holder: { entry: ClarificationEscapeGuardEntry } = { entry: null };
-    const setEntry = vi.fn((entry: ClarificationEscapeGuardEntry) => {
-      holder.entry = entry;
-    });
+    const { registry, entries } = fakeRegistry();
     const scope = document.createElement("div");
     const inside = document.createElement("button");
     scope.appendChild(inside);
@@ -64,17 +96,18 @@ describe("useClarificationEscapeGuard", () => {
 
     renderHook(() => useClarificationEscapeGuard(predicate), {
       wrapper: ({ children }) => (
-        <ClarificationEscapeGuardProvider value={setEntry}>
+        <ClarificationEscapeGuardProvider value={registry}>
           {children}
         </ClarificationEscapeGuardProvider>
       ),
     });
 
+    const [registered] = [...entries.values()];
     const insideEvent = fakeEscape(inside);
-    expect(holder.entry?.test(insideEvent)).toBe(true);
+    expect(registered(insideEvent)).toBe(true);
     expect(predicate).toHaveBeenCalledWith(insideEvent);
 
     const outside = document.createElement("button");
-    expect(holder.entry?.test(fakeEscape(outside))).toBe(false);
+    expect(registered(fakeEscape(outside))).toBe(false);
   });
 });
