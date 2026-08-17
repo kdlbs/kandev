@@ -145,7 +145,6 @@ func TestPendingMove_DoesNotReplayAfterStaleSnapshotRestored(t *testing.T) {
 		t.Fatalf("load review session: %v", err)
 	}
 	move := &messagequeue.PendingMove{
-		MoveID:         "move-once",
 		TaskID:         "task-1",
 		WorkflowID:     "wf1",
 		WorkflowStepID: stepInProgressID,

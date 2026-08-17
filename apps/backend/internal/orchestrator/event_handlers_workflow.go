@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1970,6 +1971,9 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		reinsertPendingMove()
 		return
 	}
+	if move.MoveID == "" {
+		move.MoveID = legacyPendingMoveID(sessionID, move)
+	}
 
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
@@ -2099,6 +2103,14 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// it's safe to defer the rest.
 	taskDescription := task.Description
 	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
+}
+
+func legacyPendingMoveID(sessionID string, move *messagequeue.PendingMove) string {
+	identity := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%s",
+		sessionID, move.TaskID, move.WorkflowID, move.WorkflowStepID, move.Position,
+		move.QueuedAt.UTC().Format(time.RFC3339Nano), move.Actor, move.SenderSessionID)
+	sum := sha256.Sum256([]byte(identity))
+	return fmt.Sprintf("legacy-%x", sum[:])
 }
 
 func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromStepID, toStepID string) {
