@@ -133,7 +133,7 @@ test.describe("Terminals — dockview UI", () => {
   });
 
   /**
-   * Regression: closing a terminal tab via dockview's X button must
+   * Regression: confirming a terminal close via dockview's X button must
    * destroy the shell (PTY stopped, DB row removed), not park it.
    * After reload the closed terminal must NOT surface in the "+" menu.
    */
@@ -143,7 +143,7 @@ test.describe("Terminals — dockview UI", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    await createTaskAndWait(apiClient, seedData, "Close + Reload UI");
+    const task = await createTaskAndWait(apiClient, seedData, "Close + Reload UI");
     const session = await openTask(testPage, "Close + Reload UI");
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
@@ -158,7 +158,32 @@ test.describe("Terminals — dockview UI", () => {
       .locator(".dv-default-tab-action");
     const layoutBeforeClose = await snapshotPersistedLayouts(testPage);
     await seq2Close.click();
+    const confirmation = testPage.getByTestId("terminal-close-confirm-popover");
+    await expect(confirmation).toBeVisible();
+    await confirmation.getByRole("button", { name: "Close terminal", exact: true }).click();
     await expect(testPage.getByTestId("terminal-tab-seq-2")).toHaveCount(0, { timeout: 5_000 });
+
+    // Local removal is intentionally optimistic. Observe background teardown
+    // before reloading so the reload cannot race the server-owned shell row.
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const environmentId = sessions[0]?.task_environment_id;
+    expect(environmentId).toBeTruthy();
+    await expect
+      .poll(
+        async () => {
+          const response = await apiClient.wsRequest<{ shells?: Array<{ seq?: number }> }>(
+            "user_shell.list",
+            {
+              task_id: task.id,
+              task_environment_id: environmentId,
+              include_parked: true,
+            },
+          );
+          return response.shells?.some((shell) => shell.seq === 2) ?? false;
+        },
+        { timeout: 10_000, message: "terminal teardown did not reach server state" },
+      )
+      .toBe(false);
 
     // The tab is gone from the DOM, but the reload below reads sessionStorage,
     // and that write is on a ~300ms debounce with no event. Wait for the write
