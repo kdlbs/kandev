@@ -90,6 +90,7 @@ afterEach(async () => {
 
 const SCROLL_REGION_TESTID = "clarification-scroll-region";
 const CONTAINER_TESTID = "clarification-overlay-container";
+const QUESTION_COUNT_TESTID = "clarification-question-count";
 
 describe("ClarificationPanelSection — collapse affordance", () => {
   it("collapses on Escape without posting a rejection, and stays reachable to expand again", () => {
@@ -172,31 +173,39 @@ describe("ClarificationPanelSection — per-surface max-height cap", () => {
   });
 });
 
-describe("ClarificationPanelSection — waiting-count localization", () => {
-  it("uses the singular form for exactly one waiting question", () => {
+describe("ClarificationPanelSection — question-count localization", () => {
+  it("uses the singular form for exactly one question in the bundle", () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 2 }),
     ];
     renderSection(true, messages);
 
-    expect(screen.getByTestId("clarification-waiting-count").textContent).toBe(
-      "1 question waiting",
-    );
+    expect(screen.getByTestId(QUESTION_COUNT_TESTID).textContent).toBe("1 question");
   });
 
-  it("uses the plural form for more than one waiting question", () => {
+  it("uses the plural form for more than one question in the bundle", () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 2 }),
       clarMessage({ pendingId: "p1", id: "m2", questionId: "q2", index: 1, total: 2 }),
     ];
     renderSection(true, messages);
 
-    expect(screen.getByTestId("clarification-waiting-count").textContent).toBe(
-      "2 questions waiting",
-    );
+    expect(screen.getByTestId(QUESTION_COUNT_TESTID).textContent).toBe("2 questions");
   });
 
-  it("resolves the waiting-count text through the catalog on a locale switch, not an English fallback", async () => {
+  it("keeps the total count wording after a partial answer", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 2 }),
+      clarMessage({ pendingId: "p1", id: "m2", questionId: "q2", index: 1, total: 2 }),
+    ];
+    renderSection(true, messages);
+
+    fireEvent.click(screen.getAllByTestId("clarification-option")[0]);
+
+    expect(screen.getByTestId(QUESTION_COUNT_TESTID).textContent).toBe("2 questions");
+  });
+
+  it("resolves the question-count text through the catalog on a locale switch, not an English fallback", async () => {
     const messages = [
       clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
     ];
@@ -204,9 +213,7 @@ describe("ClarificationPanelSection — waiting-count localization", () => {
 
     await i18n.changeLanguage("pseudo");
 
-    expect(screen.getByTestId("clarification-waiting-count").textContent).toBe(
-      "1 qũēśţĩōń ŵàĩţĩńĝ",
-    );
+    expect(screen.getByTestId(QUESTION_COUNT_TESTID).textContent).toBe("1 qũēśţĩōń");
   });
 });
 

@@ -86,7 +86,7 @@ export function ClarificationPanelSection({
 
   if (!pending) return null;
 
-  const waitingCount = messages?.length ?? 0;
+  const questionCount = messages?.length ?? 0;
   const actionLabel = collapsed ? t("chat:expandClarification") : t("chat:collapseClarification");
 
   return (
@@ -108,12 +108,12 @@ export function ClarificationPanelSection({
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <IconMessageQuestion className="h-4 w-4 flex-shrink-0 text-blue-500" />
             <span className="truncate">{t("chat:clarificationNeeded")}</span>
-            {waitingCount > 0 && (
+            {questionCount > 0 && (
               <span
-                data-testid="clarification-waiting-count"
+                data-testid="clarification-question-count"
                 className="truncate text-xs font-normal text-muted-foreground"
               >
-                {t("chat:questionsWaiting", { count: waitingCount })}
+                {t("task:questionCount", { count: questionCount })}
               </span>
             )}
           </div>
