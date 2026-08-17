@@ -426,17 +426,26 @@ func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID stri
 }
 
 // FindPendingClarificationMessagesBySessionID returns every clarification_request
-// message for the session whose metadata.status is still "pending". Used by the
-// canceller as a fallback when the in-memory store entry has already been drained
-// by a racing timeout path.
+// message for the session that is still pending per spec D4a's membership test
+// (both conjuncts, spec G1): its metadata.status is not one of the four terminal
+// clarification.Status values, including an absent or unrecognized status (spec
+// G5), AND its pending_id has no clarification_resolutions row (spec G1/G4). The
+// caller — the orchestrator's workflow guard, and the canceller as a fallback
+// when the in-memory store entry has already been drained by a racing timeout
+// path — must never treat a resolved bundle as still pending on the strength of
+// stale message metadata.
 func (r *Repository) FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	drv := r.ro.DriverName()
+	statusExpr := dialect.JSONExtract(drv, "metadata", "status")
+	pendingIDExpr := dialect.JSONExtract(drv, "metadata", "pending_id")
 	query := fmt.Sprintf(`
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
 		FROM task_session_messages
-		WHERE task_session_id = ? AND type = 'clarification_request' AND %s = 'pending'
+		WHERE task_session_id = ? AND type = 'clarification_request'
+		  AND (%[1]s IS NULL OR %[1]s NOT IN (%[2]s))
+		  AND NOT EXISTS (SELECT 1 FROM clarification_resolutions cr WHERE cr.pending_id = %[3]s)
 		ORDER BY created_at ASC
-	`, dialect.JSONExtract(drv, "metadata", "status"))
+	`, statusExpr, clarificationTerminalStatusesSQL, pendingIDExpr)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID)
 	if err != nil {
 		return nil, err
