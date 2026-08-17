@@ -27,6 +27,28 @@ func TestIsRepositoryOrigin(t *testing.T) {
 	}
 }
 
+// TestRepositoryOrigin pins the shared repository-origin construction used by
+// both launch assembly paths, including its blank-name fallback.
+func TestRepositoryOrigin(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "named repository", input: "app", want: "repository app"},
+		{name: "trims repository name", input: "  app  ", want: "repository app"},
+		{name: "empty repository name", input: "", want: "repository"},
+		{name: "whitespace-only repository name", input: " \t ", want: "repository"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RepositoryOrigin(tc.input); got != tc.want {
+				t.Fatalf("RepositoryOrigin(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestTierForOrigin_KnownOrigins pins tier membership for every named origin.
 func TestTierForOrigin_KnownOrigins(t *testing.T) {
 	cases := []struct {
