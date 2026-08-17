@@ -85,7 +85,10 @@ hiding the action the icon represents.
 - Every response atomically claims current-turn ownership and persists a response-delivery recovery
   intent before it can reach a live waiter or request a detached resume. A live waiter runs durable
   delivery confirmation before returning the response to the agent; enqueue alone does not retire the
-  intent. The detached path retires it only at its durable resume boundary. Startup first
+  intent. Once confirmation starts, it owns its durable operation through completion even if the
+  responder's bounded wait expires. Its input claim remains immutable, its result remains local to the
+  callback, and any compensating restore serializes against finalization so only one durable outcome
+  wins. The detached path retires the intent only at its durable resume boundary. Startup first
   reconciles prompt reservations, then restores an unhanded current-turn claim to pending; a terminal
   session or newer authoritative turn instead retires the stale intent without reactivating history.
   Terminal message updates are published only after delivery succeeds. If detached
@@ -264,7 +267,9 @@ session they can already access. Session selection does not broaden task visibil
   server error, keep the claimed bundle terminal, and make later rollback fail closed so the accepted
   answer cannot be dispatched again in-process.
 - Live waiter delivery fails unexpectedly: restore the durable claim only if its turn remains current,
-  report whether retry state was recovered, and never restore it after a successor turn is accepted.
+  report whether retry state was recovered, and never restore it after a successor turn is accepted. A
+  started confirmation may finish after the responder's bounded wait, but it cannot mutate the
+  responder's claim snapshot and its durable finalization serializes against that restore.
 - Historical partial terminalization leaves pending and terminal siblings in one current-turn bundle:
   complete the pending siblings without rewriting terminal history or returning a permanent conflict.
 - A malformed persisted pending row has no matching durable turn: drain any live in-memory waiter, but
@@ -379,6 +384,9 @@ session they can already access. Session selection does not broaden task visibil
   rows to pending and the same answer can be submitted again.
 - **GIVEN** a response is enqueued to a live waiter, **WHEN** durable confirmation has not completed,
   **THEN** the waiter does not return the response and restart recovery may safely restore the claim.
+- **GIVEN** durable confirmation starts but outlives the responder's bounded wait, **WHEN** the responder
+  attempts recovery, **THEN** the immutable claim is race-free and repository serialization lets either
+  finalization or restore win without reopening a successfully finalized response.
 - **GIVEN** cancellation removes a live clarification after a responder loads it but before response
   delivery is claimed, **WHEN** that responder continues, **THEN** it returns not-found immediately so
   the caller can use detached recovery instead of waiting for an orphaned delivery confirmation. If

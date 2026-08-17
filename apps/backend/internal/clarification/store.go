@@ -308,6 +308,11 @@ func (s *Store) waitForStartedDeliveryConfirmation(
 	pending *PendingClarification,
 	confirmationDone <-chan struct{},
 ) error {
+	// A started callback owns its durable operation through completion, even if
+	// the responder stops waiting. WithoutCancel protects that operation from
+	// caller cancellation; the second bound extends total latency by at most
+	// min(s.timeout, five minutes). If it expires, callback inputs must remain
+	// immutable and callback results must remain callback-owned.
 	finishTimeout := min(s.timeout, maxStartedDeliveryConfirmationWait)
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finishTimeout)
 	defer cancel()

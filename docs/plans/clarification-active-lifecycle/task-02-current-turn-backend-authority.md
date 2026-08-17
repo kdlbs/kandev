@@ -206,3 +206,8 @@ blockers/risks, and update task/plan status.
   on partial clarification recovery metadata, logs expected watchdog cancellation at debug, and
   documents the intentional duplicated pending-ID SQL bind.
 - Clarification, SQLite repository, orchestrator, and changed-code Go lint pass after remediation.
+- Latest CodeRabbit follow-up makes claimed messages immutable after construction and keeps finalized
+  snapshots callback-owned. A callback may complete after the responder's bounded wait without racing
+  recovery reads; the existing repository guards serialize its durable outcome against compensation.
+- Focused immutable-snapshot and confirmation tests pass under the race detector, and the full
+  clarification suite passes.

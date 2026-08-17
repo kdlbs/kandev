@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/testutil"
@@ -50,6 +51,8 @@ func TestNextPendingActionProjectionEpochRejectsCorruptGeneration(t *testing.T) 
 
 	if _, err := repo.NextPendingActionProjectionEpoch(ctx); err == nil {
 		t.Fatal("corrupt epoch was silently reset")
+	} else if !strings.Contains(err.Error(), "canonical positive integer") {
+		t.Fatalf("corrupt epoch error = %q, want diagnostic metadata cause", err)
 	}
 }
 

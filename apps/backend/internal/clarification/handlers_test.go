@@ -1019,6 +1019,14 @@ func TestHttpRespond_AllAnswers_PrimaryPath_Success(t *testing.T) {
 			t.Fatalf("message %s retained delivery marker %v", message.ID, marker)
 		}
 	}
+	if len(msgCreator.publishedMessages) != 1 {
+		t.Fatalf("published message bundles = %d, want 1", len(msgCreator.publishedMessages))
+	}
+	for _, message := range msgCreator.publishedMessages[0] {
+		if marker := message.Metadata["response_delivery_pending"]; marker != nil {
+			t.Fatalf("published message %s retained delivery marker %v", message.ID, marker)
+		}
+	}
 }
 
 // TestValidateAndNormalizeQuestions_AssignsDefaults checks that question and

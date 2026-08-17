@@ -122,3 +122,5 @@ actual files, then update task/plan status.
   a newer WebSocket revision received while the read was in flight.
 - Task service, DTO, handler, backend composition, 31 focused web tests, frontend typecheck/lint, and
   changed-code Go lint pass after remediation.
+- Latest Claude follow-up turns a corrupt persisted projection epoch's otherwise opaque `sql.ErrNoRows`
+  into an actionable canonical-positive-integer diagnostic, with a focused regression.

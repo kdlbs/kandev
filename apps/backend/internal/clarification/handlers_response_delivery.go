@@ -15,18 +15,19 @@ func (h *Handlers) confirmLiveClarificationResponseDelivery(
 	ctx context.Context,
 	pendingID string,
 	claim *clarificationResponseClaim,
-) error {
-	if !h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
-		return errors.New("clarification delivery confirmation failed")
+) ([]*taskmodels.Message, error) {
+	finalizedMessages, finalized := h.finalizeClarificationResponseDelivery(ctx, pendingID, claim)
+	if !finalized {
+		return nil, errors.New("clarification delivery confirmation failed")
 	}
-	return nil
+	return finalizedMessages, nil
 }
 
 func (h *Handlers) finalizeClarificationResponseDelivery(
 	ctx context.Context,
 	pendingID string,
 	claim *clarificationResponseClaim,
-) bool {
+) ([]*taskmodels.Message, bool) {
 	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
 	defer cancel()
 	finalizedMessages, finalized, err := h.messageCreator.FinalizeClarificationResponseDelivery(
@@ -39,15 +40,14 @@ func (h *Handlers) finalizeClarificationResponseDelivery(
 		h.logger.Error("failed to finalize clarification response delivery",
 			zap.String("pending_id", pendingID),
 			zap.Error(err))
-		return false
+		return nil, false
 	}
 	if !finalized {
 		h.logger.Warn("clarification response delivery was not finalizable",
 			zap.String("pending_id", pendingID))
-		return false
+		return nil, false
 	}
-	claim.messages = finalizedMessages
-	return true
+	return finalizedMessages, true
 }
 
 func (h *Handlers) clarificationClaimTurnID(pendingID string, messages []*taskmodels.Message) string {

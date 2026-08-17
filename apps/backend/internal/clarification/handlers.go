@@ -356,7 +356,9 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 type clarificationResponseClaim struct {
 	response       *Response
 	terminalStatus string
-	messages       []*taskmodels.Message
+	// messages is immutable after claim construction. A delivery callback can
+	// outlive the responder's bounded wait, so callback results stay local.
+	messages []*taskmodels.Message
 }
 
 func (h *Handlers) claimClarificationResponse(
@@ -426,23 +428,31 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 		clarificationPersistenceTimeout+5*time.Second,
 	)
 	defer cancelDelivery()
+	// The callback may outlive this handler's bounded wait. Keep its result in
+	// callback-owned storage so the immutable claim remains safe for recovery.
+	finalizedMessages := make(chan []*taskmodels.Message, 1)
 	deliveryErr := h.store.RespondWithDeliveryConfirmation(
 		deliveryCtx,
 		pendingID,
 		claim.response,
 		func() error {
-			return h.confirmLiveClarificationResponseDelivery(ctx, pendingID, claim)
+			finalized, confirmErr := h.confirmLiveClarificationResponseDelivery(ctx, pendingID, claim)
+			if confirmErr == nil {
+				finalizedMessages <- finalized
+			}
+			return confirmErr
 		},
 	)
 	if deliveryErr == nil {
-		h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
+		finalized := <-finalizedMessages
+		h.publishClarificationBundleUpdates(ctx, pendingID, finalized)
 		h.publishPrimaryAnsweredEvent(
 			ctx,
 			pendingID,
 			body.Answers,
 			body.Rejected,
 			body.RejectReason,
-			h.clarificationClaimTurnID(pendingID, claim.messages),
+			h.clarificationClaimTurnID(pendingID, finalized),
 		)
 		h.logger.Info("clarification answered via primary path (same turn)",
 			zap.String("pending_id", pendingID),
@@ -455,8 +465,8 @@ func (h *Handlers) deliverClaimedClarificationResponse(
 		// safety net if the in-memory waiter ever diverges from durable state.
 		// Re-publishing these already-terminal rows is idempotent for connected
 		// clients and converges any client that missed the winner's publication.
-		if h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
-			h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
+		if finalized, ok := h.finalizeClarificationResponseDelivery(ctx, pendingID, claim); ok {
+			h.publishClarificationBundleUpdates(ctx, pendingID, finalized)
 		}
 		h.logger.Warn("duplicate response attempt", zap.String("pending_id", pendingID))
 		return http.StatusConflict, "response already submitted"
@@ -491,12 +501,13 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 	// We still need to mark the bundle rejected in the DB; otherwise the durable
 	// pending-clarification guard would keep blocking future workflow transitions.
 	if body.Rejected {
-		if !h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
+		finalized, ok := h.finalizeClarificationResponseDelivery(ctx, pendingID, claim)
+		if !ok {
 			return http.StatusInternalServerError,
 				"clarification rejection was recorded, but delivery state could not be finalized"
 		}
 		h.publishStaleDismissedEvent(ctx, pendingID)
-		h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
+		h.publishClarificationBundleUpdates(ctx, pendingID, finalized)
 		h.logger.Info("clarification rejected after agent moved on; no-op",
 			zap.String("pending_id", pendingID))
 		return 0, ""
@@ -516,8 +527,8 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 			// The prompt reached agentctl. Keep the durable answer terminal so an
 			// HTTP retry cannot dispatch it again, even though turn publication
 			// failed and the caller must receive a server error.
-			if h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
-				h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
+			if finalized, ok := h.finalizeClarificationResponseDelivery(ctx, pendingID, claim); ok {
+				h.publishClarificationBundleUpdates(ctx, pendingID, finalized)
 			}
 			h.logger.Error("accepted clarification resume was not durably published",
 				zap.String("pending_id", pendingID),
@@ -534,11 +545,12 @@ func (h *Handlers) deliverDetachedClarificationResponse(
 		}
 		return http.StatusInternalServerError, "failed to resume clarification and recover pending clarification state"
 	}
-	if !h.finalizeClarificationResponseDelivery(ctx, pendingID, claim) {
+	finalized, ok := h.finalizeClarificationResponseDelivery(ctx, pendingID, claim)
+	if !ok {
 		return http.StatusInternalServerError,
 			"clarification response was accepted, but delivery state could not be finalized"
 	}
-	h.publishClarificationBundleUpdates(ctx, pendingID, claim.messages)
+	h.publishClarificationBundleUpdates(ctx, pendingID, finalized)
 	return 0, ""
 }
 

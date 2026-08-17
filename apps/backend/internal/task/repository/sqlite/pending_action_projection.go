@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 )
@@ -22,6 +24,12 @@ func (r *Repository) NextPendingActionProjectionEpoch(ctx context.Context) (uint
 		RETURNING value
 	`), pendingActionProjectionEpochMetaKey).Scan(&value)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf(
+				"allocate pending-action projection epoch: stored metadata is not a canonical positive integer: %w",
+				err,
+			)
+		}
 		return 0, fmt.Errorf("allocate pending-action projection epoch: %w", err)
 	}
 	epoch, err := strconv.ParseUint(value, 10, 64)

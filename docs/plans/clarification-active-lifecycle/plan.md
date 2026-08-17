@@ -447,6 +447,11 @@ All locally available task gates passed; environment-gated parity also passed in
   bind, and pins numeric epoch ordering across `"9"` to `"10"`.
 - All affected Go package suites, 31 focused web tests, frontend typecheck, zero-warning frontend and
   changed-code Go lint, and the i18n ratchet pass.
+- Latest Claude and CodeRabbit follow-up reports corrupt persisted projection epochs with an actionable
+  metadata diagnostic and makes a response claim immutable across an outliving confirmation callback.
+  Callback output remains locally owned, while durable finalization and recovery continue to serialize.
+- Focused confirmation, immutable-snapshot, projection-epoch, and race-enabled regressions pass, along
+  with the full clarification and SQLite repository suites.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---
