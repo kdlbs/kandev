@@ -348,6 +348,8 @@ describe("useWorkspaceContentSearch incremental publishing", () => {
     await act(async () => vi.advanceTimersByTimeAsync(500));
     expect(result.current.results).toEqual([primary, extra]);
     expect(result.current.isSearching).toBe(true);
+  });
+
   it("drops a partial result published by a superseded query", async () => {
     const staleResult = {
       repository_name: "",
