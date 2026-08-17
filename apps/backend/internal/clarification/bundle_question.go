@@ -47,6 +47,57 @@ func bundleQuestions(msgs []*taskmodels.Message) []Question {
 	return out
 }
 
+// QuestionStatus is the spec L4 wire shape for one question inside a listed
+// clarification bundle: the same fields as Question but keyed by
+// question_id (not id, which list_pending_questions_kandev callers never
+// see), plus the question's D3 effective status. Options is never nil (L4a).
+type QuestionStatus struct {
+	QuestionID string   `json:"question_id"`
+	Title      string   `json:"title"`
+	Prompt     string   `json:"prompt"`
+	Status     string   `json:"status"`
+	Options    []Option `json:"options"`
+}
+
+// BundleQuestionStatuses builds the D2/L5-ordered, L4-shaped question list
+// for a bundle, one entry per durable message, each carrying its D3
+// effective status: the message's own recorded status when it is one of
+// the five known values, otherwise "pending" — an absent or corrupt status
+// must not make a question look unanswerable to a list_pending_questions_kandev
+// caller (D3).
+func BundleQuestionStatuses(msgs []*taskmodels.Message) []QuestionStatus {
+	ordered := orderBundleMessages(msgs)
+	out := make([]QuestionStatus, 0, len(ordered))
+	for _, m := range ordered {
+		q := questionFromMessageMetadataFull(m.Metadata)
+		options := q.Options
+		if options == nil {
+			options = []Option{}
+		}
+		out = append(out, QuestionStatus{
+			QuestionID: q.ID,
+			Title:      q.Title,
+			Prompt:     q.Prompt,
+			Status:     effectiveMessageStatus(m),
+			Options:    options,
+		})
+	}
+	return out
+}
+
+// effectiveMessageStatus implements D3: a message's status counts as
+// pending unless it carries one of the five recognized terminal-or-pending
+// status strings.
+func effectiveMessageStatus(msg *taskmodels.Message) string {
+	status := stringFromMetadata(msg.Metadata, "status")
+	switch Status(status) {
+	case StatusPending, StatusAnswered, StatusRejected, StatusExpired, StatusCancelled:
+		return status
+	default:
+		return string(StatusPending)
+	}
+}
+
 func questionFromMessageMetadataFull(meta map[string]any) Question {
 	q := Question{ID: stringFromMetadata(meta, metaQuestionIDKey)}
 	qData, ok := meta[metaQuestionKey].(map[string]any)

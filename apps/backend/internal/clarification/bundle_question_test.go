@@ -148,3 +148,92 @@ func TestBundleQuestions_OrdersBeforeParsing(t *testing.T) {
 		t.Fatalf("got %q, %q; want q1, q2", questions[0].ID, questions[1].ID)
 	}
 }
+
+// TestBundleQuestionStatuses_L4Shape proves the L4 wire shape: question_id
+// (not id), title, prompt, status and options, with options carrying
+// option_id/label/description per the existing Option JSON tags.
+func TestBundleQuestionStatuses_L4Shape(t *testing.T) {
+	msgs := []*taskmodels.Message{
+		{
+			ID: "m1",
+			Metadata: questionMetadata("p1", "q1", 0, map[string]any{
+				"id":     "q1",
+				"title":  "Color",
+				"prompt": "Pick a color",
+				"options": []interface{}{
+					map[string]interface{}{"option_id": "opt-a", "label": "Red", "description": "Red option"},
+				},
+			}),
+		},
+	}
+	statuses := BundleQuestionStatuses(msgs)
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 question, got %d", len(statuses))
+	}
+	got := statuses[0]
+	if got.QuestionID != "q1" || got.Title != "Color" || got.Prompt != "Pick a color" {
+		t.Fatalf("unexpected question: %+v", got)
+	}
+	if got.Status != "pending" {
+		t.Fatalf("expected status pending, got %q", got.Status)
+	}
+	if len(got.Options) != 1 || got.Options[0].ID != "opt-a" || got.Options[0].Label != "Red" {
+		t.Fatalf("unexpected options: %+v", got.Options)
+	}
+}
+
+// TestBundleQuestionStatuses_D3AbsentStatusCountsAsPending proves D3: a
+// message with no recognized status metadata is reported as "pending"
+// rather than an empty string or the raw unrecognized value.
+func TestBundleQuestionStatuses_D3AbsentStatusCountsAsPending(t *testing.T) {
+	msgs := []*taskmodels.Message{
+		{ID: "m1", Metadata: map[string]any{"pending_id": "p1", "question_index": 0, "question_id": "q1"}},
+	}
+	statuses := BundleQuestionStatuses(msgs)
+	if statuses[0].Status != "pending" {
+		t.Fatalf("expected pending for absent status, got %q", statuses[0].Status)
+	}
+}
+
+// TestBundleQuestionStatuses_D3UnrecognizedStatusCountsAsPending proves the
+// other half of D3: a corrupt/legacy status string that isn't one of the
+// five known values also degrades to "pending" rather than passing through
+// verbatim.
+func TestBundleQuestionStatuses_D3UnrecognizedStatusCountsAsPending(t *testing.T) {
+	msgs := []*taskmodels.Message{
+		{ID: "m1", Metadata: map[string]any{"pending_id": "p1", "question_index": 0, "question_id": "q1", "status": "bogus"}},
+	}
+	statuses := BundleQuestionStatuses(msgs)
+	if statuses[0].Status != "pending" {
+		t.Fatalf("expected pending for unrecognized status, got %q", statuses[0].Status)
+	}
+}
+
+// TestBundleQuestionStatuses_RecognizedTerminalStatusPassesThrough proves a
+// recognized terminal status (e.g. answered) is reported as-is, not
+// collapsed to pending.
+func TestBundleQuestionStatuses_RecognizedTerminalStatusPassesThrough(t *testing.T) {
+	msgs := []*taskmodels.Message{
+		{ID: "m1", Metadata: map[string]any{"pending_id": "p1", "question_index": 0, "question_id": "q1", "status": "answered"}},
+	}
+	statuses := BundleQuestionStatuses(msgs)
+	if statuses[0].Status != "answered" {
+		t.Fatalf("expected answered to pass through, got %q", statuses[0].Status)
+	}
+}
+
+// TestBundleQuestionStatuses_OptionsNeverNil proves L4a: a degraded
+// question with no parseable options still yields an empty slice, not nil,
+// so JSON marshaling emits [] rather than null.
+func TestBundleQuestionStatuses_OptionsNeverNil(t *testing.T) {
+	msgs := []*taskmodels.Message{
+		{ID: "m1", Metadata: questionMetadata("p1", "q1", 0, nil)},
+	}
+	statuses := BundleQuestionStatuses(msgs)
+	if statuses[0].Options == nil {
+		t.Fatalf("expected non-nil empty options slice, got nil")
+	}
+	if len(statuses[0].Options) != 0 {
+		t.Fatalf("expected empty options, got %+v", statuses[0].Options)
+	}
+}
