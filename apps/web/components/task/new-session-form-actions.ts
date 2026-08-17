@@ -51,7 +51,7 @@ export function useSessionLaunchSubmit({
   promptRef,
   taskId,
   selectedProfileId,
-  profileExplicit = true,
+  profileExplicit,
   executorId,
   contextValue,
   initialPrompt,
@@ -66,7 +66,7 @@ export function useSessionLaunchSubmit({
   promptRef: RefObject<TaskFormInputsHandle | null>;
   taskId: string;
   selectedProfileId: string;
-  profileExplicit?: boolean;
+  profileExplicit: boolean;
   executorId: string;
   contextValue: string;
   initialPrompt: string | null;
