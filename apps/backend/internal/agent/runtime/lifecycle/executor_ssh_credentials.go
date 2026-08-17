@@ -36,20 +36,17 @@ func (r *SSHExecutor) uploadCredentials(
 	r.resolveAuthSecrets(ctx, req, catalog)
 	r.runAuthSetupScripts(ctx, client, req, catalog, platform)
 
-	credsJSON := getMetadataString(req.Metadata, "remote_credentials")
-	if credsJSON == "" {
-		return nil
+	var fileMethods []remoteauth.Method
+	if credsJSON := getMetadataString(req.Metadata, "remote_credentials"); credsJSON != "" {
+		var selectedMethodIDs []string
+		if err := json.Unmarshal([]byte(credsJSON), &selectedMethodIDs); err != nil {
+			return fmt.Errorf("failed to parse remote_credentials: %w", err)
+		}
+		selectedMethodIDs = r.resolveGHToken(selectedMethodIDs)
+		fileMethods = selectFileMethods(catalog, selectedMethodIDs, r.logger)
 	}
-
-	var selectedMethodIDs []string
-	if err := json.Unmarshal([]byte(credsJSON), &selectedMethodIDs); err != nil {
-		return fmt.Errorf("failed to parse remote_credentials: %w", err)
-	}
-
-	selectedMethodIDs = r.resolveGHToken(selectedMethodIDs)
-
-	fileMethods := selectFileMethods(catalog, selectedMethodIDs, r.logger)
-	if len(fileMethods) == 0 {
+	selectedBundles := selectedPortableConfigBundleIDs(req.Metadata)
+	if len(fileMethods) == 0 && len(selectedBundles) == 0 {
 		return nil
 	}
 
@@ -58,7 +55,18 @@ func (r *SSHExecutor) uploadCredentials(
 	if err != nil {
 		return err
 	}
-	return UploadCredentialFiles(ctx, uploader, fileMethods, homeDir, r.logger)
+	var uploadErr error
+	if len(fileMethods) > 0 {
+		uploadErr = UploadCredentialFiles(ctx, uploader, fileMethods, homeDir, r.logger)
+		if uploadErr != nil {
+			r.logger.Warn("ssh executor: credential files failed; continuing with configuration bundles", zap.Error(uploadErr))
+		}
+	}
+	if len(selectedBundles) > 0 && req.AgentConfig != nil {
+		warnings := UploadPortableConfigBundles(ctx, uploader, req.AgentConfig, selectedBundles, homeDir, r.logger)
+		reportPortableConfigWarnings(req.OnProgress, warnings)
+	}
+	return uploadErr
 }
 
 // runAuthSetupScripts executes setup scripts for env-type auth methods whose

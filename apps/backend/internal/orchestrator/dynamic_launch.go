@@ -40,6 +40,7 @@ func (d *dynamicTaskDownstream) Launch(
 	options := d.options
 	options.AgentProfileID = launch.ExecutionProfileID
 	options.Prompt = launch.Prompt
+	options.PriorACPSession = launch.PriorACPSession
 	d.service.beginDynamicAttempt(d.sessionID)
 	execution, err := d.service.executor.LaunchPreparedSession(ctx, d.task, d.sessionID, options)
 	if err != nil {
@@ -65,11 +66,37 @@ func (d *dynamicTaskDownstream) Launch(
 	if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
 		acpSessionID = session.DownstreamACPSessionID
 	}
+	if acpSessionID != "" {
+		if err := d.service.persistDynamicACPSession(ctx, d.sessionID, launch.Decision, acpSessionID); err != nil {
+			return dynamicruntime.DownstreamExecution{}, err
+		}
+	}
 	return dynamicruntime.DownstreamExecution{
 		ID:                 execution.AgentExecutionID,
 		ExecutionProfileID: launch.ExecutionProfileID,
 		ACPSessionID:       acpSessionID,
 	}, nil
+}
+
+func (d *dynamicTaskDownstream) LoadExecution(
+	ctx context.Context,
+	sessionID string,
+) (dynamicruntime.DownstreamExecution, bool, error) {
+	if sessionID == "" {
+		return dynamicruntime.DownstreamExecution{}, false, nil
+	}
+	session, err := d.service.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return dynamicruntime.DownstreamExecution{}, false, err
+	}
+	if session == nil || session.AgentExecutionID == "" {
+		return dynamicruntime.DownstreamExecution{}, false, nil
+	}
+	return dynamicruntime.DownstreamExecution{
+		ID:                 session.AgentExecutionID,
+		ExecutionProfileID: session.ExecutionProfileID,
+		ACPSessionID:       session.DownstreamACPSessionID,
+	}, true, nil
 }
 
 func (d *dynamicTaskDownstream) Resume(context.Context, string, string) error {
@@ -113,6 +140,27 @@ func (s *Service) persistDynamicLaunchDecision(
 	if previousExecutionProfileID != decision.ExecutionProfileID {
 		session.DownstreamACPSessionID = ""
 	}
+	return s.repo.UpdateTaskSession(ctx, session)
+}
+
+func (s *Service) persistDynamicACPSession(
+	ctx context.Context,
+	sessionID string,
+	decision dynamicruntime.RouteDecision,
+	acpSessionID string,
+) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.RouteGeneration != decision.Generation ||
+		session.ExecutionProfileID != decision.ExecutionProfileID {
+		return dynamicruntime.ErrStaleGeneration
+	}
+	if session.DownstreamACPSessionID == acpSessionID {
+		return nil
+	}
+	session.DownstreamACPSessionID = acpSessionID
 	return s.repo.UpdateTaskSession(ctx, session)
 }
 
@@ -181,6 +229,7 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 	selected := dynamicruntime.ConductorSelectedLaunch{
 		SessionID: session.ID, LogicalProfileID: session.AgentProfileID,
 		Decision: decision, Prompt: options.Prompt,
+		PriorACPSession: session.DownstreamACPSessionID,
 	}
 	if prebuiltContinuation != nil {
 		selected.PrebuiltContinuation = prebuiltContinuation

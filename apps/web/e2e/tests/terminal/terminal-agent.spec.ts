@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { errors, type Page } from "@playwright/test";
@@ -280,6 +281,10 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       message: "the initial passthrough turn did not settle before the cascade",
       timeout: 30_000,
     });
+    // The API state can settle before the page has subscribed to the session's
+    // agentctl lifecycle. Establish that subscription before moving the task,
+    // so reset/relaunch events cannot race the terminal's initial handshake.
+    await waitForSessionAgentctlReady(testPage, task.session_id as string);
 
     // Trigger cascade: Analyze → (turn complete) → Implement (reset + auto_start) → Review
     await apiClient.moveTask(task.id, workflow.id, analyzeStep.id);

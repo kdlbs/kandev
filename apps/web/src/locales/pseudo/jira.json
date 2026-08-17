@@ -208,5 +208,7 @@
   "watcherUpdated": "Ŵàţćĥēŕ ũƥďàţēď",
   "workflow": "Ŵōŕķƒĺōŵ",
   "workflowStep": "Ŵōŕķƒĺōŵ Śţēƥ",
-  "yourJiraSessionExpiredOrNeeds": "Ŷōũŕ Ĵĩŕà śēśśĩōń ēxƥĩŕēď ōŕ ńēēďś śţēƥ-ũƥ àũţĥēńţĩćàţĩōń. Ŕēćōńńēćţ ţō vĩēŵ ţĥĩś ţĩćķēţ."
+  "yourJiraSessionExpiredOrNeeds": "Ŷōũŕ Ĵĩŕà śēśśĩōń ēxƥĩŕēď ōŕ ńēēďś śţēƥ-ũƥ àũţĥēńţĩćàţĩōń. Ŕēćōńńēćţ ţō vĩēŵ ţĥĩś ţĩćķēţ.",
+  "builtinViewAssignedToMe": "Àśśĩĝńēď ţō ḿē",
+  "builtinViewUnassigned": "Ũńàśśĩĝńēď"
 }

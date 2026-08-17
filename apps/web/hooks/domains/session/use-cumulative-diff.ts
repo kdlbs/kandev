@@ -3,6 +3,7 @@ import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
+import { t } from "@/lib/i18n";
 
 const debug = createDebugLogger("review:cumulative");
 
@@ -175,7 +176,7 @@ export function useCumulativeDiff(sessionId: string | null) {
     } catch (err) {
       if (version !== requestVersionRef.current) return;
       console.error("Failed to fetch cumulative diff:", err);
-      const message = err instanceof Error ? err.message : "Failed to fetch cumulative diff";
+      const message = err instanceof Error ? err.message : t("task:failedToFetchCumulativeDiff");
       setError(message);
       debug("fetch.error", { sessionId, envKey, error: message });
     } finally {

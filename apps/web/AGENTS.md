@@ -207,46 +207,46 @@ surface.
 
 ## Internationalization (i18n)
 
-**Externalization is complete.** #2367 localized `app/office`, the last
-un-migrated area. A hardcoded user-facing literal is now a regression, not
-leftover migration work. New copy must go through `t()` / `<Trans>` wherever you
-write it.
+**Externalization is complete.** A hardcoded user-facing literal is a
+regression, not leftover migration work. New copy goes through `t()` / `<Trans>`
+wherever you write it.
 
 Add English keys to `src/locales/en/<namespace>.json`; use `useTranslation()` in
 components and module-level `t` only inside plain helper calls. `<Trans>` is only
-for markup, and a `t()` child corrupts its tag indices.
-Do not translate domain data, identifiers, test IDs, discriminants, comparison
-tokens, or map keys; split display copy from logic before translating it.
-Keep `lib/i18n/provider.tsx` module initialization; removing it blanks the app.
+for markup, and a `t()` child corrupts its tag indices. Do not translate domain
+data, identifiers, test IDs, discriminants, comparison tokens, or map keys; split
+display copy from logic first. Keep `lib/i18n/provider.tsx` module
+initialization; removing it blanks the app. Use `_one`/`_other` plural keys,
+never English suffixes. Never capture `t()` in a module-level constant; it
+freezes the boot locale. No Unicode em dash (U+2014) in copy or locale values.
 
-Use i18next `_one`/`_other` plural keys; never build English suffixes locally.
+`pnpm lint` fails on hardcoded UI strings: `i18next/no-literal-string` is an
+**error on every `.ts`/`.tsx` file** (tests, `*.test-helpers.*`, `*.test-utils.*`
+and `e2e/**` excluded). It was scoped to `i18nGuardFiles` during the migration;
+measured at zero violations across all 2560 source files, it was widened.
+`i18nGuardFiles` remains the migration record and the `lint:i18n <path>` preview
+scope: append when you externalize a path, never delete an entry
+(`check-guard-allowlist.mjs` rejects that). `i18n:ratchet` guards new/changed
+lines independently. The rule sees only JSX literals; SCREAMING_CASE tables,
+plain `.ts` helpers, parameter defaults and toast/setter arguments are gated by
+`scripts/check-nonjsx-copy.mjs`, which scans the **whole tree by exclusion**.
+Silence a legitimate one with `// i18n-exempt: <reason>` (required) as a `//`
+LINE comment — the detector's pattern is line-anchored, so a marker inside a
+`/** */` block is silently ignored.
 
-Never capture `t()` in a module-level constant; it freezes the boot locale.
+**Real-locale catalogs gate.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw` are complete;
+`check-i18n-keys.mjs` fails on a missing/extra key, a dropped `{{placeholder}}`
+or `<n>` tag, an empty value, or a value identical to English. Untranslatable
+values are handled in two tiers: those `looksLikeCopy` rejects as non-copy need
+no declaration; prose that reads the same in the target language goes in
+`src/locales/<locale>/_verbatim.json` (or the shared `_verbatim.json`) with a
+mandatory reason — reasonless or stale entries are errors. For zh-tw/zh-hk run
+`pnpm run i18n:zh-hant`, do not hand-translate.
 
-UI punctuation: avoid Unicode em dash (U+2014) in user-facing copy, locale values,
-published documentation. `pnpm run i18n:check` and the `public-copy-em-dash` hook
-enforce periods, colons, commas, semicolons, and parentheses across those sources.
-
-`pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
-**error**), but **only on the `i18nGuardFiles` allowlist** in
-`eslint.i18n.options.mjs`, which covers every area the migration touched. It
-stays an allowlist because a repo-wide error breaks every unrelated PR that adds
-a label — what made the first attempt unmergeable. **Append a path in the same PR
-that adds it or externalizes it** (`lib/sidebar` is one still off the list).
-Never delete an entry to make a build pass; `check-guard-allowlist.mjs` rejects
-that unless the file is gone. `pnpm run lint:i18n <path>` previews the guard on a
-path not yet listed.
-
-`pnpm run i18n:ratchet` guards all new/changed lines independently of that
-allowlist; untouched literals are not reported.
-
-The rule sees only JSX literals. What it cannot inspect — SCREAMING_CASE tables,
-plain `.ts` helpers, parameter defaults, toast/setter arguments — is gated by
-`scripts/check-nonjsx-copy.mjs` on the same allowlist, run by `i18n:check` and
-the ratchet; silence a legitimate one with `// i18n-exempt: <reason>` (required).
 `i18n:check` also gates key/catalog drift, `<Trans>` indices, inline plurals,
-module-scope `t()`, and the **pseudo-locale** check. Needs **Node 24**. Guide:
-[`docs/i18n.md`](../../docs/i18n.md); spec [`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
+module-scope `t()`, em dashes, and the **pseudo-locale** check. Needs **Node 24**.
+Guide: [`docs/i18n.md`](../../docs/i18n.md); spec
+[`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
 
 ## Markdown safety
 

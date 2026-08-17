@@ -189,5 +189,6 @@
   "waitingForTheNextBackendHealth": "Waiting for the next backend health check…",
   "cursorPaginationSummary_one": "Page {{page}} · {{count}} result",
   "cursorPaginationSummary_other": "Page {{page}} · {{count}} results",
-  "allRepositories": "All repositories"
+  "allRepositories": "All repositories",
+  "changeRequestCreationFailed": "Change-request creation failed"
 }

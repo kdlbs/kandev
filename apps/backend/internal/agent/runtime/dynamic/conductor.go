@@ -33,6 +33,13 @@ type DownstreamRuntime interface {
 	Stop(context.Context, string, string) error
 }
 
+// DownstreamExecutionLoader restores the concrete execution identity after a
+// process restart. Implementations should read the durable task-session row,
+// not a process-local cache.
+type DownstreamExecutionLoader interface {
+	LoadExecution(context.Context, string) (DownstreamExecution, bool, error)
+}
+
 type ProfileLoader interface {
 	LoadDynamicProfile(context.Context, string) (Profile, error)
 }
@@ -76,6 +83,7 @@ type ConductorLaunch struct {
 	ExpectedGeneration int64
 	ExcludeProfileID   string
 	Prompt             string
+	PriorACPSession    string
 	Continuation       ContinuationInput
 }
 
@@ -88,6 +96,7 @@ type ConductorSelectedLaunch struct {
 	LogicalProfileID     string
 	Decision             RouteDecision
 	Prompt               string
+	PriorACPSession      string
 	Continuation         ContinuationInput
 	PrebuiltContinuation *Continuation
 }
@@ -153,7 +162,13 @@ func (c *Conductor) LaunchSelected(ctx context.Context, request ConductorSelecte
 		ctx,
 		profile,
 		request.Decision,
-		ConductorLaunch{SessionID: request.SessionID, LogicalProfileID: request.LogicalProfileID, Prompt: request.Prompt, Continuation: request.Continuation},
+		ConductorLaunch{
+			SessionID:        request.SessionID,
+			LogicalProfileID: request.LogicalProfileID,
+			Prompt:           request.Prompt,
+			PriorACPSession:  request.PriorACPSession,
+			Continuation:     request.Continuation,
+		},
 		continuation,
 	)
 	if err != nil {
@@ -222,6 +237,7 @@ func (c *Conductor) launchWithFallback(
 			ExecutionProfileID: current.ExecutionProfileID,
 			Decision:           current,
 			Prompt:             ContinuationPrompt(request.Prompt, currentContinuation),
+			PriorACPSession:    priorACPSession(request.PriorACPSession, decision, current),
 			Continuation:       currentContinuation,
 		})
 		if err == nil {
@@ -254,6 +270,17 @@ func (c *Conductor) launchWithFallback(
 		current = next
 	}
 	return DownstreamExecution{}, current, ErrNoEligibleCandidate
+}
+
+func priorACPSession(
+	persisted string,
+	initial RouteDecision,
+	current RouteDecision,
+) string {
+	if current.ExecutionProfileID != initial.ExecutionProfileID {
+		return ""
+	}
+	return persisted
 }
 
 func (c *Conductor) nextAfterLaunchFailure(
@@ -317,7 +344,21 @@ func (c *Conductor) Resume(ctx context.Context, sessionID, prompt string) error 
 	execution, ok := c.active[sessionID]
 	c.mu.Unlock()
 	if !ok {
-		return errors.New("dynamic conductor has no active downstream execution")
+		loader, supportsLoading := c.downstream.(DownstreamExecutionLoader)
+		if !supportsLoading {
+			return errors.New("dynamic conductor has no active downstream execution")
+		}
+		loaded, found, err := loader.LoadExecution(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errors.New("dynamic conductor has no active downstream execution")
+		}
+		execution = loaded
+		c.mu.Lock()
+		c.active[sessionID] = execution
+		c.mu.Unlock()
 	}
 	return c.downstream.Resume(ctx, execution.ID, prompt)
 }

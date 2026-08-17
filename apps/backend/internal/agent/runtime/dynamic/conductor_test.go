@@ -55,6 +55,7 @@ func TestConductorFallsBackAfterClassifiedLaunchFailure(t *testing.T) {
 		SessionID:        "session-1",
 		LogicalProfileID: profile.ID,
 		Prompt:           "hello",
+		PriorACPSession:  "acp-first",
 	})
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -76,6 +77,43 @@ func TestConductorFallsBackAfterClassifiedLaunchFailure(t *testing.T) {
 	}
 	if downstream.launches[1].Decision.Generation != 2 {
 		t.Fatalf("fallback generation = %d, want 2", downstream.launches[1].Decision.Generation)
+	}
+	if got := downstream.launches[0].PriorACPSession; got != "acp-first" {
+		t.Fatalf("first prior ACP session = %q, want acp-first", got)
+	}
+	if got := downstream.launches[1].PriorACPSession; got != "" {
+		t.Fatalf("fallback prior ACP session = %q, want empty", got)
+	}
+}
+
+type restoringConductorTestDownstream struct {
+	loaded  DownstreamExecution
+	resumed DownstreamExecution
+}
+
+func (d *restoringConductorTestDownstream) Launch(context.Context, DownstreamLaunch) (DownstreamExecution, error) {
+	return d.loaded, nil
+}
+
+func (d *restoringConductorTestDownstream) LoadExecution(context.Context, string) (DownstreamExecution, bool, error) {
+	return d.loaded, true, nil
+}
+
+func (d *restoringConductorTestDownstream) Resume(_ context.Context, executionID, _ string) error {
+	d.resumed.ID = executionID
+	return nil
+}
+
+func (*restoringConductorTestDownstream) Stop(context.Context, string, string) error { return nil }
+
+func TestConductorRestoresActiveExecutionBeforeResume(t *testing.T) {
+	downstream := &restoringConductorTestDownstream{loaded: DownstreamExecution{ID: "execution-restored"}}
+	conductor := NewConductor(NewEngine(), conductorTestProfileLoader{}, downstream)
+	if err := conductor.Resume(context.Background(), "session-restored", "continue"); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if downstream.resumed.ID != "execution-restored" {
+		t.Fatalf("resumed execution = %q, want execution-restored", downstream.resumed.ID)
 	}
 }
 

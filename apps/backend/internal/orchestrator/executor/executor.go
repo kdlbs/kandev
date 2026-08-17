@@ -489,6 +489,7 @@ type LaunchOptions struct {
 	ExecutorID           string
 	TurnID               string
 	Prompt               string
+	PriorACPSession      string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID       string
 	StartAgent           bool
 	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, or McpModeOffice

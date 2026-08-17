@@ -163,7 +163,7 @@ When a user opens `/office`, the backend checks both DB and filesystem state via
 
 1. **Welcome + Workspace** - workspace name (default "Default Workspace") and task prefix (default "KAN", explained as "Tasks will be numbered KAN-1, KAN-2, etc.").
 2. **Execution Agent Profile** - select an existing concrete or dynamic profile for the CEO, with a link to create a dynamic profile in Agent settings.
-3. **Create CEO Agent** - agent name (default "CEO"), execution agent profile dropdown, and executor preference (Local / Docker / Sprites) with descriptions.
+3. **Create CEO Agent** - agent name (default "CEO"), a read-only confirmation of the Step 2 execution-profile selection, and executor preference (Local / Docker / Sprites) with descriptions. The onboarding API persists the single profile selected in Step 2.
 4. **First Task** - editable starter task prefilled with title "Setup Workspace" and a CEO brief that asks the agent to inspect `https://github.com/org/repo` (replaceable by the user), create one project per repository, create the needed agent team, give agents responsibilities and permissions, then propose follow-up tasks/subtasks for human approval before creating them. `[Back] [Skip] [Next]`; Skip clears the starter task.
 5. **Review & Launch** - summary card of what will be created. `[Back] [Create & Launch]`.
 
@@ -332,7 +332,7 @@ The CEO and workers move tasks between states by calling the same API the UI use
 
 - **GIVEN** a YAML file with parse errors, **WHEN** the user tries to import, **THEN** the import preview shows the parse error for that file and other files can still be imported.
 
-- **GIVEN** a new user opening `/office` for the first time, **WHEN** no workspace exists on DB or FS, **THEN** they are redirected to `/office/setup` and see the 4-step wizard.
+- **GIVEN** a new user opening `/office` for the first time, **WHEN** no workspace exists on DB or FS, **THEN** they are redirected to `/office/setup` and see the 5-step wizard.
 
 - **GIVEN** a user opening `/office` for the first time, **WHEN** no DB workspace exists but FS workspaces are found, **THEN** they are redirected to `/office/setup` and see the import prompt with workspace names listed.
 
@@ -342,7 +342,7 @@ The CEO and workers move tasks between states by calling the same API the UI use
 
 - **GIVEN** a user on the review step who clicks "Create & Launch" with the default first task still present, **WHEN** all inputs are valid, **THEN** the workspace, CEO agent, and setup task are created, a `task_assigned` wakeup is enqueued, and the dashboard shows 1 agent enabled and 1 task in progress.
 
-- **GIVEN** a user who skipped the first task on step 3, **WHEN** they reach the dashboard, **THEN** the CEO agent exists but is idle (no tasks) and the empty state says "Assign a task to your CEO to get started."
+- **GIVEN** a user who skipped the first task on step 4, **WHEN** they reach the dashboard, **THEN** the CEO agent exists but is idle (no tasks) and the empty state says "Assign a task to your CEO to get started."
 
 - **GIVEN** a returning user who already completed onboarding, **WHEN** they open `/office`, **THEN** they see the dashboard directly.
 

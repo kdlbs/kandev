@@ -14,6 +14,7 @@ import type { QueueStatusChangedPayload } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
+import { t } from "@/lib/i18n";
 
 const debug = createDebugLogger("session:state");
 
@@ -560,7 +561,9 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
   store.getState().setSessionFailureNotification({
     sessionId,
     taskId,
-    message: payload.error_message ? String(payload.error_message) : "Session failed unexpectedly",
+    message: payload.error_message
+      ? String(payload.error_message)
+      : t("task:sessionFailedUnexpectedly"),
   });
 }
 

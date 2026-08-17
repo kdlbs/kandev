@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
+import { t } from "@/lib/i18n";
 
 export type WorkflowStepOption = { id: string; name: string };
 
@@ -68,8 +69,8 @@ export function stepPlaceholder(
   stepsLoading: boolean,
   stepsCount: number,
 ): string {
-  if (!workflowId) return "Select a workflow first";
-  if (stepsLoading) return "Loading steps…";
-  if (stepsCount === 0) return "No steps in this workflow";
-  return "Select step";
+  if (!workflowId) return t("workflows:selectAWorkflowFirst");
+  if (stepsLoading) return t("workflows:loadingSteps");
+  if (stepsCount === 0) return t("workflows:noStepsInThisWorkflow");
+  return t("workflows:selectStep");
 }

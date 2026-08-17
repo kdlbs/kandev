@@ -509,5 +509,8 @@
   "versionCurrent": "当前",
   "versionLatest": "最新",
   "versionTitle": "版本",
-  "versionViewUpdates": "查看更新"
+  "versionViewUpdates": "查看更新",
+  "messageQueueAutoMergeDescription": "在投递前，把来自同一来源的连续且兼容的排队消息合并为一轮。",
+  "messageQueueAutoMergeNotice": "如果某条消息的来源不同，或任务、模型、模式、元数据或共享限制不兼容，它会保持为单独的排队消息。这只适用于新接收的消息，不会改变手动合并控制。",
+  "messageQueueAutoMergeToggleLabel": "自动合并连续消息"
 }
