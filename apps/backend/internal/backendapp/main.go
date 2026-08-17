@@ -1465,8 +1465,9 @@ func startSchedulingRuntime(
 	if services.Office != nil {
 		officeRecovery = officeservice.NewOfficeRecoveryHandler(orchScheduler)
 	}
+	sessionWakes := schedulercron.NewSessionWakeHandler(services.Task, orchestratorSvc, nil)
 	cronLoop := startCronScheduler(
-		ctx, repos, engineDispatcher, officeRoutines, officeRecovery, log,
+		ctx, repos, engineDispatcher, officeRoutines, officeRecovery, sessionWakes, log,
 	)
 	return &schedulingRuntime{runs: runScheduler, cron: cronLoop}
 }
