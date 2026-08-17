@@ -481,6 +481,13 @@ test.describe("Entity reference composer", () => {
 
     await editor.pressSequentially(" #E2E");
     await expect(referenceOption(testPage, target.title)).toBeVisible({ timeout: 10_000 });
+    await editor.press("Backspace");
+    await expect(referenceOption(testPage, target.title)).toBeVisible({ timeout: 10_000 });
+    await editor.pressSequentially("E");
+    await editor.press("ArrowLeft");
+    await editor.press("Delete");
+    await expect(referenceOption(testPage, target.title)).toBeVisible({ timeout: 10_000 });
+    await editor.pressSequentially("E");
     await editor.press("Escape");
     await expect(menu).toHaveCount(0);
     await editor.pressSequentially(" continued");

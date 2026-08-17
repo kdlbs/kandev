@@ -98,5 +98,8 @@ export function useEntityReferenceComposer({
     selectReference,
     close,
     onTextInput: inputGate.recordTextInput,
+    onBeforeInput: (inputType: string) => {
+      if (inputType.startsWith("delete")) inputGate.recordDeletion();
+    },
   };
 }

@@ -425,6 +425,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     slashSuggestion,
     entityReferenceSuggestion: entityReferences.suggestion,
     onTextInput: entityReferences.onTextInput,
+    onBeforeInput: entityReferences.onBeforeInput,
     slashCommands,
     isSuggestionMenuOpen,
     getHistory,

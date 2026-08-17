@@ -85,6 +85,7 @@ type UseTipTapEditorOptions = {
   sessionId: string | null;
   onImagePaste?: (files: File[], issue?: ImagePasteIssue) => void;
   onTextInput?: (from: number, to: number, text: string) => void;
+  onBeforeInput?: (inputType: string) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mentionSuggestion: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -118,6 +119,7 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
   const onChangeRef = useRef(opts.onChange);
   const onImagePasteRef = useRef(opts.onImagePaste);
   const onTextInputRef = useRef(opts.onTextInput);
+  const onBeforeInputRef = useRef(opts.onBeforeInput);
   const sessionIdRef = useRef(opts.sessionId);
   const planModeEnabledRef = useRef(opts.planModeEnabled);
   const onPlanModeChangeRef = useRef(opts.onPlanModeChange);
@@ -136,6 +138,7 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
     onChangeRef.current = opts.onChange;
     onImagePasteRef.current = opts.onImagePaste;
     onTextInputRef.current = opts.onTextInput;
+    onBeforeInputRef.current = opts.onBeforeInput;
     sessionIdRef.current = opts.sessionId;
     planModeEnabledRef.current = opts.planModeEnabled;
     onPlanModeChangeRef.current = opts.onPlanModeChange;
@@ -153,6 +156,7 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
     onChangeRef,
     onImagePasteRef,
     onTextInputRef,
+    onBeforeInputRef,
     sessionIdRef,
     planModeEnabledRef,
     onPlanModeChangeRef,
@@ -209,6 +213,7 @@ function buildEditorProps(args: {
   onBlur: (() => void) | undefined;
   onImagePasteRef: React.RefObject<((files: File[], issue?: ImagePasteIssue) => void) | undefined>;
   onTextInputRef: React.RefObject<((from: number, to: number, text: string) => void) | undefined>;
+  onBeforeInputRef: React.RefObject<((inputType: string) => void) | undefined>;
 }) {
   return {
     attributes: {
@@ -241,6 +246,11 @@ function buildEditorProps(args: {
       },
       blur: () => {
         args.onBlur?.();
+        return false;
+      },
+      beforeinput: (_view: import("@tiptap/pm/view").EditorView, event: Event) => {
+        const inputType = (event as InputEvent).inputType;
+        if (inputType.startsWith("delete")) args.onBeforeInputRef.current?.(inputType);
         return false;
       },
     },
@@ -286,6 +296,7 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
       onBlur: opts.onBlur,
       onImagePasteRef: refs.onImagePasteRef,
       onTextInputRef: refs.onTextInputRef,
+      onBeforeInputRef: refs.onBeforeInputRef,
     }),
     onUpdate: ({ editor: e }) => {
       if (isSyncingRef.current || !initialSyncDoneRef.current) return;

@@ -36,6 +36,7 @@ type PendingEntityReferenceInput = {
 
 export type EntityReferenceInputGate = {
   recordTextInput: (from: number, to: number, text: string) => void;
+  recordDeletion: () => void;
   shouldShow: (
     range: EntityReferenceSuggestionRange,
     transaction: EntityReferenceSuggestionTransaction,
@@ -75,8 +76,7 @@ function matchesDirectEntityReferenceInput(
     range.from === triggerFrom &&
     range.to >= triggerFrom + 1 &&
     range.to <= insertionEnd;
-  const isDirectContinuation =
-    isActiveEntityReferenceRange(range, activeRange) && range.from === activeRange?.from;
+  const isDirectContinuation = isActiveEntityReferenceRange(range, activeRange);
   return isDirectNewTrigger || isDirectContinuation;
 }
 
@@ -89,14 +89,22 @@ function matchesDirectEntityReferenceInput(
 export function createEntityReferenceInputGate(): EntityReferenceInputGate {
   let activeRange: EntityReferenceSuggestionRange | null = null;
   let pendingInput: PendingEntityReferenceInput | null = null;
+  let pendingDeletion = false;
 
   const reset = () => {
     activeRange = null;
     pendingInput = null;
+    pendingDeletion = false;
   };
 
   const recordTextInput = (from: number, _to: number, text: string) => {
     pendingInput = { from, text };
+    pendingDeletion = false;
+  };
+
+  const recordDeletion = () => {
+    pendingInput = null;
+    pendingDeletion = true;
   };
 
   const shouldShow = (
@@ -109,16 +117,26 @@ export function createEntityReferenceInputGate(): EntityReferenceInputGate {
     }
 
     const input = pendingInput;
+    const deletion = pendingDeletion;
     pendingInput = null;
+    pendingDeletion = false;
 
     // A document-changing transaction without a matching text-input callback
     // is a paste, draft restore, history recall, or programmatic update.
-    if (!input && transaction.docChanged) {
+    if (!input && !deletion && transaction.docChanged) {
       reset();
       return false;
     }
 
     const isActiveRange = isActiveEntityReferenceRange(range, activeRange);
+    if (deletion) {
+      if (!isActiveRange) {
+        reset();
+        return false;
+      }
+      activeRange = { ...range };
+      return true;
+    }
     if (!input) {
       return Boolean(isActiveRange);
     }
@@ -132,7 +150,7 @@ export function createEntityReferenceInputGate(): EntityReferenceInputGate {
     return true;
   };
 
-  return { recordTextInput, shouldShow, reset };
+  return { recordTextInput, recordDeletion, shouldShow, reset };
 }
 
 export function isEntityReferenceQueryAllowed(query: string): boolean {

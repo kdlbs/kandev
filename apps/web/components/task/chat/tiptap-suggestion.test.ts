@@ -111,6 +111,20 @@ describe("entity reference trigger gating", () => {
     ).toBe(false);
   });
 
+  it("keeps an active range while direct deletion changes the query", () => {
+    const gate = createEntityReferenceInputGate();
+    const transaction = { docChanged: true, getMeta: () => undefined };
+
+    gate.recordTextInput(1, 1, "#");
+    expect(gate.shouldShow({ from: 1, to: 2 }, transaction)).toBe(true);
+
+    gate.recordDeletion();
+    expect(gate.shouldShow({ from: 1, to: 2 }, transaction)).toBe(true);
+
+    gate.recordTextInput(2, 2, "a");
+    expect(gate.shouldShow({ from: 1, to: 3 }, transaction)).toBe(true);
+  });
+
   it("rejects a space after a bare # but allows spaces in a query", () => {
     expect(isEntityReferenceQueryAllowed("")).toBe(true);
     expect(isEntityReferenceQueryAllowed(" ")).toBe(false);
