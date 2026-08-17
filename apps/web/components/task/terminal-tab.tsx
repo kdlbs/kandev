@@ -54,14 +54,20 @@ function extractParams(props: IDockviewPanelHeaderProps): StampedParams {
 function pickDisplayName(
   shell: { kind?: string; customName?: string | null; label?: string } | null,
   fallback: string,
+  ordinaryLabel: string,
 ): string {
   if (shell?.customName && shell.customName !== "") return shell.customName;
-  if (shell?.kind === "ordinary") return "Terminal";
+  if (shell?.kind === "ordinary") return ordinaryLabel;
   if (shell?.label) return shell.label;
   return fallback;
 }
 
-function useTerminalTabState(stampedEnv: string | undefined, terminalId: string, apiTitle: string) {
+function useTerminalTabState(
+  stampedEnv: string | undefined,
+  terminalId: string,
+  apiTitle: string,
+  ordinaryLabel: string,
+) {
   const shell = useAppStore((s) => {
     if (!stampedEnv) return null;
     const list = s.userShells.byEnvironmentId[stampedEnv] ?? [];
@@ -75,7 +81,7 @@ function useTerminalTabState(stampedEnv: string | undefined, terminalId: string,
   const isOrdinary = shell?.kind === "ordinary";
   const seq = shell?.seq;
   const showBadge = isOrdinary && ordinaryCount > 1 && typeof seq === "number";
-  const displayName = pickDisplayName(shell, apiTitle);
+  const displayName = pickDisplayName(shell, apiTitle, ordinaryLabel);
   const closable = shell?.closable ?? true;
   return { shell, isOrdinary, seq, showBadge, displayName, closable };
 }
@@ -143,6 +149,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     stampedEnv,
     terminalId,
     props.api.title ?? t("common:terminal"),
+    t("task:terminal"),
   );
 
   // DockviewDefaultTab reads the title from `api.title` directly and

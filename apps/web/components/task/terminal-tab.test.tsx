@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { i18n } from "@/lib/i18n";
 
 const mockDestroyUserShell = vi.fn();
 const mockRenameUserShell = vi.fn();
@@ -118,8 +119,19 @@ describe("TerminalTab", () => {
     mockDestroyUserShell.mockImplementation(() => new Promise<void>(() => {}));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
+    await i18n.changeLanguage("en");
+  });
+
+  it("uses the localized ordinary-terminal title", async () => {
+    await i18n.changeLanguage("pseudo");
+
+    render(<TerminalTab {...makeProps()} />);
+
+    await waitFor(() => {
+      expect(mockSetTitle).toHaveBeenCalledWith(i18n.t("task:terminal"));
+    });
   });
 
   it("asks for localized confirmation before closing an idle terminal", () => {
