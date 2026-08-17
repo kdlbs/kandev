@@ -18,6 +18,7 @@ const (
 	QueuedByAgent    = "agent"
 	QueuedByWorkflow = "workflow"
 	QueuedByServer   = "server"
+	QueuedByMoveTask = "mcp-move-task"
 )
 
 // IsReservedQueuedBy reports identities owned by backend dispatch paths.
@@ -71,6 +72,11 @@ const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
 // agent entries may only merge when their sender task ids match, so the merge
 // never mixes prompts issued by different agents.
 const MetadataSenderTaskID = "sender_task_id"
+
+// MetadataDeferredMoveID identifies the hand-off prompt created for one
+// deferred workflow move. The orchestrator uses it to remove only stale move
+// prompts after a replay.
+const MetadataDeferredMoveID = "deferred_move_id"
 
 // QueueFullErrorCode is the well-known WS / MCP error code surfaced when an
 // insert would exceed the per-session cap. Shared between the user-side WS

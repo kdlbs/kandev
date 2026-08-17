@@ -188,6 +188,88 @@ func TestPendingMove_DoesNotReplayAfterStaleSnapshotRestored(t *testing.T) {
 	}
 }
 
+func TestPendingMove_EqualTargetRecordsAppliedMoveID(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.WorkflowStepID = stepInProgressID
+	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
+		t.Fatalf("move task to target step: %v", err)
+	}
+
+	const moveID = "move-equal-target"
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		MoveID:         moveID,
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepInProgressID,
+	})
+
+	updated, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	applied, ok := updated.Metadata[models.MetaKeyAppliedDeferredMoves].(map[string]interface{})
+	if !ok || applied[moveID] != true {
+		t.Fatalf("applied deferred moves = %#v, want %q", updated.Metadata[models.MetaKeyAppliedDeferredMoves], moveID)
+	}
+}
+
+func TestPendingMove_DuplicateRemovesOnlyMatchingHandoffPrompt(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+
+	const moveID = "move-duplicate"
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.Metadata = map[string]interface{}{
+		models.MetaKeyAppliedDeferredMoves: map[string]interface{}{moveID: true},
+	}
+	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
+		t.Fatalf("mark deferred move as applied: %v", err)
+	}
+	if _, ok := sc.svc.messageQueue.TakeQueued(sc.ctx, sc.reviewSessionID); !ok {
+		t.Fatalf("remove scenario handoff prompt")
+	}
+
+	if _, err := sc.svc.messageQueue.QueueMessageWithMetadata(
+		sc.ctx, sc.reviewSessionID, "task-1", "stale handoff", "",
+		messagequeue.QueuedByMoveTask, false, nil,
+		map[string]interface{}{messagequeue.MetadataDeferredMoveID: moveID},
+	); err != nil {
+		t.Fatalf("queue stale handoff: %v", err)
+	}
+	if _, err := sc.svc.messageQueue.QueueMessage(
+		sc.ctx, sc.reviewSessionID, "task-1", "unrelated prompt", "",
+		messagequeue.QueuedByUser, false, nil,
+	); err != nil {
+		t.Fatalf("queue unrelated prompt: %v", err)
+	}
+
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		MoveID:         moveID,
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepInProgressID,
+	})
+
+	status := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID)
+	if len(status.Entries) != 1 || status.Entries[0].Content != "unrelated prompt" {
+		t.Fatalf("remaining queue entries = %#v, want only unrelated prompt", status.Entries)
+	}
+}
+
 func TestPendingMove_DropsForeignWorkflowStepWithoutMovingTask(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
 	sc.stepGetter.steps["foreign-step"] = &wfmodels.WorkflowStep{
@@ -323,7 +405,7 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 	const handoffPrompt = "You were moved to this step with the following message: " +
 		"The file fibonacci.py has two bugs — fix them."
 	if _, err := svc.messageQueue.QueueMessage(
-		ctx, reviewSessionID, "task-1", handoffPrompt, "", "mcp-move-task", false, nil,
+		ctx, reviewSessionID, "task-1", handoffPrompt, "", messagequeue.QueuedByMoveTask, false, nil,
 	); err != nil {
 		t.Fatalf("queue hand-off prompt: %v", err)
 	}

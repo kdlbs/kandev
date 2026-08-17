@@ -191,6 +191,23 @@ func (s *workflowStore) ApplyDeferredMoveTransition(ctx context.Context, taskID,
 	return s.applyTransition(ctx, taskID, sessionID, fromStepID, toStepID, engine.TriggerOnEnter, moveID)
 }
 
+func (s *workflowStore) MarkDeferredMoveApplied(ctx context.Context, taskID, moveID string) error {
+	if moveID == "" {
+		return nil
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load task for deferred move identity: %w", err)
+	}
+	if err := markDeferredMoveApplied(task, moveID); err != nil {
+		return err
+	}
+	if err := s.repo.UpdateTask(ctx, task); err != nil {
+		return fmt.Errorf("persist deferred move identity: %w", err)
+	}
+	return nil
+}
+
 func (s *workflowStore) applyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger, moveID string) error {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
