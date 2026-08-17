@@ -52,6 +52,40 @@ func (r *Repository) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, 
 	return reconciled + deliveries, errors.Join(reconcileErrs...)
 }
 
+// ListTurnsPendingStartEvent returns the durable event outbox in deterministic
+// turn order. Startup replays every row before prompt admission, then clears
+// the marker through ClearTurnPromptDispatchMetadata.
+func (r *Repository) ListTurnsPendingStartEvent(ctx context.Context) ([]*models.Turn, error) {
+	query := fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, started_at, completed_at, metadata, created_at, updated_at
+		FROM task_session_turns turn_row
+		WHERE %s
+		ORDER BY turn_row.task_session_id, turn_row.started_at, turn_row.created_at, turn_row.id
+	`, turnMetadataFlagPredicate(
+		r.ro.DriverName(),
+		"turn_row",
+		models.TurnMetaKeyPromptDispatchStartEventPending,
+	))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query))
+	if err != nil {
+		return nil, fmt.Errorf("list turns pending start-event replay: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var turns []*models.Turn
+	for rows.Next() {
+		turn, scanErr := scanTurn(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan turn pending start-event replay: %w", scanErr)
+		}
+		turns = append(turns, turn)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate turns pending start-event replay: %w", err)
+	}
+	return turns, nil
+}
+
 func (r *Repository) listUnpublishedPromptTurns(ctx context.Context) ([]unpublishedPromptTurn, error) {
 	driverName := r.ro.DriverName()
 	query := fmt.Sprintf(`
@@ -108,6 +142,7 @@ func (r *Repository) reconcileUnpublishedPromptTurn(
 		err = r.finalizeReservedClarificationDelivery(ctx, tx, metadata)
 		if err == nil {
 			models.ClearPromptDispatchMetadata(metadata)
+			metadata[models.TurnMetaKeyPromptDispatchStartEventPending] = true
 			err = updateTurnMetadata(ctx, tx, r.db, turn.id, metadata, updatedAt)
 		}
 	} else {

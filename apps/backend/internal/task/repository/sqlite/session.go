@@ -180,11 +180,15 @@ func (r *Repository) DeleteTurnIfUnreferenced(
 	return deleted == 1, nil
 }
 
-func scanTurnRow(row *sql.Row) (*models.Turn, error) {
+type turnScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+func scanTurn(scanner turnScanner) (*models.Turn, error) {
 	turn := &models.Turn{}
 	var metadataJSON string
 	var completedAt sql.NullTime
-	err := row.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+	err := scanner.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +201,10 @@ func scanTurnRow(row *sql.Row) (*models.Turn, error) {
 		}
 	}
 	return turn, nil
+}
+
+func scanTurnRow(row *sql.Row) (*models.Turn, error) {
+	return scanTurn(row)
 }
 
 // GetTurn retrieves a turn by ID
@@ -295,6 +303,7 @@ func (r *Repository) ClearTurnPromptDispatchMetadata(
 		models.TurnMetaKeyPromptDispatchClarificationPendingID,
 		models.TurnMetaKeyPromptDispatchClarificationTurnID,
 		models.TurnMetaKeyPromptDispatchClarificationMessageIDs,
+		models.TurnMetaKeyPromptDispatchStartEventPending,
 	}, false)
 }
 
@@ -433,20 +442,9 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 
 	var result []*models.Turn
 	for rows.Next() {
-		turn := &models.Turn{}
-		var metadataJSON string
-		var completedAt sql.NullTime
-		err := rows.Scan(&turn.ID, &turn.TaskSessionID, &turn.TaskID, &turn.StartedAt, &completedAt, &metadataJSON, &turn.CreatedAt, &turn.UpdatedAt)
+		turn, err := scanTurn(rows)
 		if err != nil {
 			return nil, err
-		}
-		if completedAt.Valid {
-			turn.CompletedAt = &completedAt.Time
-		}
-		if metadataJSON != "" && metadataJSON != "{}" {
-			if err := json.Unmarshal([]byte(metadataJSON), &turn.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to deserialize turn metadata: %w", err)
-			}
 		}
 		result = append(result, turn)
 	}

@@ -197,3 +197,8 @@ blockers/risks, and update task/plan status.
 - Exact-head Codex review makes public turn-event metadata recovery-clean at the shared publication
   boundary. The fast-completion regression now uses `Service.CompleteTurn` and verifies the concurrently
   emitted completion event does not leak any `prompt_dispatch_*` fields.
+- Exact-head Greptile review adds a durable startup start-event marker for accepted and ambiguous
+  reservations. Startup replays `turn.started` and any already-required `turn.completed` event before
+  clearing it; a failed replay fails startup and leaves the marker for the next restart.
+- Replay regressions, the full task subtree, backend composition, integration, orchestrator, executor,
+  and changed-code Go lint pass. PostgreSQL parity remains CI-gated without a local DSN.

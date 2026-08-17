@@ -55,9 +55,13 @@ hiding the action the icon represents.
   preserves the successor and keeps the claimed bundle terminal. Acknowledgement publishes a
   recovery-clean `turn.started` payload while the recovery metadata remains durable, then clears that
   metadata after the event bus accepts the event. HTTP success requires both operations. A rejected
-  event publication therefore remains discoverable by startup reconciliation. Every public turn event,
-  including a completion racing that cleanup, strips the private prompt-dispatch fields. If the
-  predecessor's delayed ready event overlaps this private reservation, ready handling waits for the
+  event publication therefore remains discoverable by startup reconciliation. Recovery atomically
+  replaces an accepted or ambiguous reservation with a durable start-event outbox marker. Before
+  admitting work, startup replays `turn.started`, followed by `turn.completed` when the turn is already
+  terminal, and clears the marker only after the event bus accepts every required event. Failed replay
+  fails startup and leaves the marker for the next attempt. Every public turn event, including a
+  completion racing live cleanup or emitted during recovery, strips the private prompt-dispatch fields.
+  If the predecessor's delayed ready event overlaps this private reservation, ready handling waits for the
   reservation to resolve and then revalidates prompt generation before touching turn or workflow state.
   It cannot complete the reserved successor or run predecessor completion actions against it. When the
   reservation rolls back, a ready event whose predecessor generation still owns the session continues
@@ -408,6 +412,10 @@ session they can already access. Session selection does not broaden task visibil
   restores the still-current bundle.
 - **GIVEN** startup cannot reconcile an unpublished prompt reservation, **WHEN** the orchestrator starts,
   **THEN** startup returns an error before watcher, scheduler, or prompt admission begins.
+- **GIVEN** restart recovery preserves an accepted or ambiguous prompt reservation, **WHEN** its public
+  start event may have been missed, **THEN** startup durably retains and retries an ordered event replay
+  until `turn.started` and any already-required `turn.completed` event are accepted before clearing the
+  recovery marker.
 - **GIVEN** an unpublished prompt reservation contains a malformed claimed-message ID list, **WHEN**
   startup recovery decodes it, **THEN** recovery fails closed without deleting the reservation or
   reopening only a subset of its claimed rows.

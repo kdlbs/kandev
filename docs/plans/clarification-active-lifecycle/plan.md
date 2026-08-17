@@ -434,6 +434,12 @@ All locally available task gates passed; environment-gated parity also passed in
 - A further exact-head Codex regression drops the known-stale summary from partial boot/task-list results
   when all pending-action compare-and-set retries lose. The authoritative coarse task fallback remains
   visible instead of being shadowed by the stale summary.
+- Exact-head Greptile review adds a durable startup event outbox for accepted and ambiguous prompt
+  reservations. Recovery replaces private reservation fields with a start-event marker, replays
+  `turn.started` and any already-required `turn.completed` event in order, and clears the marker only
+  after successful publication. Failed replay now fails startup and remains retryable across restarts.
+- Replay regressions, the full task subtree, backend composition, integration, orchestrator, executor,
+  and changed-code Go lint pass. PostgreSQL parity remains CI-gated when no local DSN is configured.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

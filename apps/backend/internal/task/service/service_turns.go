@@ -212,7 +212,48 @@ func (s *Service) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, err
 	if s.turns == nil {
 		return 0, errors.New("cannot reconcile unpublished prompt turns without a turn repository")
 	}
-	return s.turns.ReconcileUnpublishedPromptTurns(ctx)
+	reconciled, err := s.turns.ReconcileUnpublishedPromptTurns(ctx)
+	if err != nil {
+		return reconciled, err
+	}
+	turns, err := s.turns.ListTurnsPendingStartEvent(ctx)
+	if err != nil {
+		return reconciled, fmt.Errorf("list recovered turns pending start-event replay: %w", err)
+	}
+	var replayErrs []error
+	for _, turn := range turns {
+		if err := s.replayRecoveredTurnEvents(ctx, turn); err != nil {
+			replayErrs = append(replayErrs, err)
+		}
+	}
+	return reconciled, errors.Join(replayErrs...)
+}
+
+func (s *Service) replayRecoveredTurnEvents(ctx context.Context, turn *models.Turn) error {
+	if turn == nil {
+		return errors.New("cannot replay events for nil recovered turn")
+	}
+	if err := s.publishTurnEvent(events.TurnStarted, turn, nil); err != nil {
+		return fmt.Errorf("replay recovered turn %s start event: %w", turn.ID, err)
+	}
+	if turn.CompletedAt != nil {
+		hadOutput := s.turnHadOutput(ctx, turn)
+		if err := s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput); err != nil {
+			return fmt.Errorf("replay recovered turn %s completion event: %w", turn.ID, err)
+		}
+	}
+	cleared, _, _, err := s.turns.ClearTurnPromptDispatchMetadata(
+		ctx,
+		turn.TaskSessionID,
+		turn.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("clear recovered turn %s event marker: %w", turn.ID, err)
+	}
+	if !cleared {
+		return fmt.Errorf("clear recovered turn %s event marker: turn missing", turn.ID)
+	}
+	return nil
 }
 
 // RollbackReservedTurn removes only an empty rejected reservation. If output
@@ -549,7 +590,7 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 // than carrying a misleading "false" on a turn that has not completed.
 func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool) error {
 	if s.eventBus == nil {
-		return nil
+		return errors.New("turn event bus is unavailable")
 	}
 	if turn == nil {
 		s.logger.Warn("publishTurnEvent: turn is nil, skipping", zap.String("event_type", eventType))

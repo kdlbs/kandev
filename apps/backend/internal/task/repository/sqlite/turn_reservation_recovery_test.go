@@ -230,6 +230,16 @@ func TestReconcileUnpublishedPromptTurnsAcceptsMessageBackedReservation(t *testi
 			t.Fatalf("message-backed turn retained %q: %#v", key, turn.Metadata)
 		}
 	}
+	if pending, _ := turn.Metadata[models.TurnMetaKeyPromptDispatchStartEventPending].(bool); !pending {
+		t.Fatalf("message-backed turn metadata = %#v, want durable start-event marker", turn.Metadata)
+	}
+	pendingEvents, err := repo.ListTurnsPendingStartEvent(ctx)
+	if err != nil {
+		t.Fatalf("ListTurnsPendingStartEvent: %v", err)
+	}
+	if len(pendingEvents) != 1 || pendingEvents[0].ID != turn.ID {
+		t.Fatalf("turns pending start event = %#v, want %s", pendingEvents, turn.ID)
+	}
 }
 
 func TestReconcileUnpublishedPromptTurnsPreservesAmbiguousEmptyReservation(t *testing.T) {
@@ -271,6 +281,9 @@ func TestReconcileUnpublishedPromptTurnsPreservesAmbiguousEmptyReservation(t *te
 		if _, exists := turn.Metadata[key]; exists {
 			t.Fatalf("accepted reservation retained %q: %#v", key, turn.Metadata)
 		}
+	}
+	if pending, _ := turn.Metadata[models.TurnMetaKeyPromptDispatchStartEventPending].(bool); !pending {
+		t.Fatalf("accepted reservation metadata = %#v, want durable start-event marker", turn.Metadata)
 	}
 	claimed, err := repo.GetMessage(ctx, "message-accepted-claim")
 	if err != nil {

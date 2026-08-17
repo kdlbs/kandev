@@ -243,6 +243,16 @@ func TestPostgresReconcileAmbiguousEmptyPromptTurn(t *testing.T) {
 	if err != nil || active.ID != "turn-reservation-accepted-pg" {
 		t.Fatalf("accepted active turn = %#v, %v", active, err)
 	}
+	if pending, _ := active.Metadata[models.TurnMetaKeyPromptDispatchStartEventPending].(bool); !pending {
+		t.Fatalf("accepted active turn metadata = %#v, want durable start-event marker", active.Metadata)
+	}
+	pendingEvents, err := repo.ListTurnsPendingStartEvent(ctx)
+	if err != nil {
+		t.Fatalf("ListTurnsPendingStartEvent: %v", err)
+	}
+	if len(pendingEvents) != 1 || pendingEvents[0].ID != active.ID {
+		t.Fatalf("turns pending start event = %#v, want %s", pendingEvents, active.ID)
+	}
 	message, err := repo.GetMessage(ctx, "message-accepted-pg")
 	if err != nil {
 		t.Fatalf("GetMessage(accepted): %v", err)

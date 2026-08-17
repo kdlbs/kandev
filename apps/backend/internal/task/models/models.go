@@ -273,6 +273,10 @@ const (
 	TurnMetaKeyPromptDispatchClarificationPendingID  = "prompt_dispatch_clarification_pending_id"
 	TurnMetaKeyPromptDispatchClarificationTurnID     = "prompt_dispatch_clarification_turn_id"
 	TurnMetaKeyPromptDispatchClarificationMessageIDs = "prompt_dispatch_clarification_message_ids"
+	// TurnMetaKeyPromptDispatchStartEventPending is a durable outbox marker.
+	// Startup recovery sets it after accepting an ambiguous reservation and
+	// clears it only after the task service replays the public turn events.
+	TurnMetaKeyPromptDispatchStartEventPending = "prompt_dispatch_start_event_pending"
 )
 
 var promptDispatchMetadataKeys = [...]string{
@@ -281,10 +285,11 @@ var promptDispatchMetadataKeys = [...]string{
 	TurnMetaKeyPromptDispatchClarificationPendingID,
 	TurnMetaKeyPromptDispatchClarificationTurnID,
 	TurnMetaKeyPromptDispatchClarificationMessageIDs,
+	TurnMetaKeyPromptDispatchStartEventPending,
 }
 
-// ClearPromptDispatchMetadata removes every reservation-only field after
-// publication or conservative startup recovery.
+// ClearPromptDispatchMetadata removes every reservation-only field after live
+// publication or successful startup event replay.
 func ClearPromptDispatchMetadata(metadata map[string]interface{}) {
 	for _, key := range promptDispatchMetadataKeys {
 		delete(metadata, key)

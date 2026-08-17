@@ -234,9 +234,14 @@ type TurnRepository interface {
 	DeleteTurnIfUnreferenced(ctx context.Context, sessionID, turnID string) (bool, error)
 	// ReconcileUnpublishedPromptTurns repairs or accepts durable prompt
 	// reservations and response-delivery claims before startup admits new work.
+	// Accepted reservations retain a durable start-event outbox marker for the
+	// service to replay before it clears recovery metadata.
 	// Every production turn store must provide this recovery boundary; callers
 	// fail rather than skip it.
 	ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error)
+	// ListTurnsPendingStartEvent returns accepted reservations whose durable
+	// start-event outbox marker still needs replay before startup admits work.
+	ListTurnsPendingStartEvent(ctx context.Context) ([]*models.Turn, error)
 	// CreateTurnWithStepStamp creates turn atomically with the
 	// workflow-step-at-start stamp: it reads the task's current step and
 	// inserts the turn row in the same transaction, taking the same lock

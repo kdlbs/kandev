@@ -40,6 +40,9 @@ func (m *mockRepository) DeleteTurnIfUnreferenced(context.Context, string, strin
 func (m *mockRepository) ReconcileUnpublishedPromptTurns(context.Context) (int, error) {
 	return 0, nil
 }
+func (m *mockRepository) ListTurnsPendingStartEvent(context.Context) ([]*models.Turn, error) {
+	return nil, nil
+}
 
 func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {
 	return nil
