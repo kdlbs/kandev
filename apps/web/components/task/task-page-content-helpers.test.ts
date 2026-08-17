@@ -29,7 +29,7 @@ function makeArchivedTaskDetails(overrides: Partial<Task> = {}): Task {
     state: "TODO",
     workspace_id: "ws-1",
     workflow_id: "wf-1",
-    priority: 0,
+    priority: "medium",
     repositories: [],
     created_at: "",
     updated_at: ARCHIVED_AT,

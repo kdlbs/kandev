@@ -58,7 +58,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     title: "Office task",
     description: "",
     state: "TODO",
-    priority: 0,
+    priority: "medium",
     created_at: NOW,
     updated_at: NOW,
     ...overrides,
