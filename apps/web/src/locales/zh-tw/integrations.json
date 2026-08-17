@@ -104,6 +104,8 @@
   "queryName": "名稱",
   "queryNamePlaceholder": "例如：需要我的審查",
   "saveQuery": "儲存查詢",
+  "cursorPaginationSummary_one": "第 {{page}} 頁 · {{count}} 個結果",
+  "cursorPaginationSummary_other": "第 {{page}} 頁 · {{count}} 個結果",
   "actionFromReviewer": "{{name}} {{action}}",
   "actionRequired": "需要處理",
   "addAllCommentsToChatContext": "將所有評論加入對話上下文",

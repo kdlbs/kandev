@@ -104,6 +104,8 @@
   "queryNamePlaceholder": "por ex., Precisa da minha revisão",
   "saveQuery": "Guardar consulta",
   "waitingForTheNextBackendHealth": "A aguardar a próxima verificação de saúde do backend…",
+  "cursorPaginationSummary_one": "Página {{page}} · {{count}} resultado",
+  "cursorPaginationSummary_other": "Página {{page}} · {{count}} resultados",
   "actionFromReviewer": "{{action}} de {{name}}",
   "actionRequired": "ação necessária",
   "addAllCommentsToChatContext": "Adicionar todos os comentários ao contexto da conversa",
