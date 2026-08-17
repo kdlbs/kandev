@@ -1132,7 +1132,10 @@ func registerSecondaryRoutes(
 	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")
 
-	clarification.RegisterRoutes(p.router, clarificationStore, p.gateway.Hub, p.msgCreator, p.taskRepo, p.eventBus, p.log)
+	clarificationResolver := clarification.NewResolver(
+		clarificationStore, p.taskRepo, p.taskRepo, p.msgCreator, p.taskSvc, p.eventBus, p.log,
+	)
+	clarification.RegisterRoutes(p.router, clarificationStore, p.gateway.Hub, p.msgCreator, p.taskRepo, p.eventBus, clarificationResolver, p.log)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
 	if p.secretsSvc != nil {

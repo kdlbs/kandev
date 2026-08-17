@@ -108,6 +108,23 @@ func NewResolver(
 	}
 }
 
+// AuthorizeBundleAccess resolves a bundle's identity (M5) and authorizes the
+// caller against its owning task (A2), without claiming or applying anything.
+// REST read endpoints (GET /:id, GET /:id/wait) call this ahead of their
+// in-memory read (A7) so an unauthorized caller gets ErrBundleNotFound
+// exactly as A3 requires, and A5a's "no durable messages" case also
+// collapses to the same sentinel.
+func (r *Resolver) AuthorizeBundleAccess(ctx context.Context, pendingID string) (sessionID, taskID string, err error) {
+	_, sessionID, taskID, err = r.resolveIdentity(ctx, pendingID)
+	if err != nil {
+		return "", "", err
+	}
+	if err := r.authorizer.AuthorizeTaskAccess(ctx, taskID); err != nil {
+		return "", "", ErrBundleNotFound // A3
+	}
+	return sessionID, taskID, nil
+}
+
 // ResolveBundle runs the five ordered steps described in the spec: resolve
 // identity, authorize, validate, claim, and (winner only) apply. Steps 4 and
 // 5 are ordered so the durable claim lands before any event is published —
