@@ -9,6 +9,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
+import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole } from "@/lib/state/slices/office/types";
 import { AgentRoutingCard } from "./agent-routing-card";
@@ -72,7 +73,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
   const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
   const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
-  const allOfficeAgents = useAppStore((s) => s.office.agentProfiles);
+  const allOfficeAgents = useAppStore(selectOfficeAgentProfiles);
 
   const roles =
     meta?.roles.map((r) => ({ id: r.id, label: r.label })) ??
@@ -106,7 +107,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
         executorPreference: form.executorType ? { type: form.executorType } : undefined,
       };
       const saved = await updateAgentProfile(agent.id, update);
-      updateStore(agent.id, saved);
+      updateStore(agent.workspaceId, agent.id, saved);
       setForm(initialForm(saved));
       setDirty(false);
       toast.success(t("office:agentConfigurationUpdated"));
@@ -115,7 +116,7 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
     } finally {
       setSaving(false);
     }
-  }, [agent.id, form, updateStore]);
+  }, [agent.id, agent.workspaceId, form, updateStore]);
 
   return (
     <div className="space-y-4 mt-4" data-testid="agent-configuration-tab">

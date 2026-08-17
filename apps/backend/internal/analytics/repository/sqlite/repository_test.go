@@ -129,9 +129,24 @@ func createTestDB(t *testing.T) *sqlx.DB {
 		files TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL
 	);
+	CREATE TABLE IF NOT EXISTS kandev_meta (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL DEFAULT ''
+	);
 	`
 	if _, err := sqlxDB.Exec(schema); err != nil {
 		t.Fatalf("failed to create schema: %v", err)
+	}
+	// Seed a commit-capture activation marker far in the past, matching
+	// migrateSessionCommitsDedupeAndActivation's production kandev_meta row,
+	// so every test session (started_at ~ time.Now()) is post-activation and
+	// gets a real 0 for committed lines rather than the legacy-NULL case -
+	// tests that want the legacy path override this row explicitly.
+	if _, err := sqlxDB.Exec(
+		`INSERT INTO kandev_meta (key, value) VALUES (?, ?)`,
+		commitCaptureActivatedAtMetaKey, "2000-01-01T00:00:00Z",
+	); err != nil {
+		t.Fatalf("failed to seed commit_capture_activated_at: %v", err)
 	}
 	return sqlxDB
 }

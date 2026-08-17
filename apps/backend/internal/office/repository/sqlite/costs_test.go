@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -84,6 +85,56 @@ func TestCostEvent_CreateAndList(t *testing.T) {
 	}
 	if costs[0].CostSubcents != 10 {
 		t.Errorf("cost_subcents = %d, want 10", costs[0].CostSubcents)
+	}
+}
+
+// TestCreateCostEvent_DuplicateUsageEventID confirms redelivery of the same
+// prompt-usage bus event (same UsageEventID) is reported as
+// ErrDuplicateUsageEvent rather than inserting a second row or a raw driver
+// error, and that unrelated rows with a NULL UsageEventID never collide.
+func TestCreateCostEvent_DuplicateUsageEventID(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	seedTasksTable(t, repo, "task-dup", "ws-dup")
+
+	usageEventID := "usage-evt-1"
+	first := &models.CostEvent{
+		TaskID:       "task-dup",
+		CostSubcents: 10,
+		UsageEventID: &usageEventID,
+		OccurredAt:   time.Now().UTC(),
+	}
+	if err := repo.CreateCostEvent(ctx, first); err != nil {
+		t.Fatalf("create first: %v", err)
+	}
+
+	second := &models.CostEvent{
+		TaskID:       "task-dup",
+		CostSubcents: 10,
+		UsageEventID: &usageEventID,
+		OccurredAt:   time.Now().UTC(),
+	}
+	err := repo.CreateCostEvent(ctx, second)
+	if !errors.Is(err, sqlite.ErrDuplicateUsageEvent) {
+		t.Fatalf("create second (duplicate) err = %v, want ErrDuplicateUsageEvent", err)
+	}
+
+	costs, err := repo.ListCostEvents(ctx, "ws-dup")
+	if err != nil {
+		t.Fatalf("list costs: %v", err)
+	}
+	if len(costs) != 1 {
+		t.Fatalf("cost count = %d, want 1 (duplicate must not insert)", len(costs))
+	}
+
+	// Two rows with no UsageEventID (manual entries, or rows predating this
+	// field) must not collide with each other.
+	for i := 0; i < 2; i++ {
+		if err := repo.CreateCostEvent(ctx, &models.CostEvent{
+			TaskID: "task-dup", CostSubcents: 5, OccurredAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("create nil-usage-event row %d: %v", i, err)
+		}
 	}
 }
 

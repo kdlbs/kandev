@@ -8,10 +8,7 @@ import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { isLaunchStateRegression } from "@/lib/session-state";
-import {
-  buildResumeRequest,
-  buildStartCreatedRequest,
-} from "@/lib/services/session-launch-helpers";
+import { buildStartCreatedRequest } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
 import { useTask } from "@/hooks/use-task";
 import { ChatMessage } from "@/components/task/chat/messages/chat-message";
@@ -53,10 +50,10 @@ type AdapterContext = {
 /**
  * Decides whether the task-description message renders the Start agent
  * button. Shown only for never-started (CREATED) sessions; resume-skipped
- * (prevent-auto-start-on-open) sessions get their Start agent button from
- * the message-list footer instead (which also covers empty sessions and
- * empty descriptions). Hidden while the task is SCHEDULING (the launch is
- * in flight) and when no task/session context is bound.
+ * (prevent-auto-start-on-open) sessions get the composer hint affordance
+ * instead (which also covers empty sessions and empty descriptions). Hidden
+ * while the task is SCHEDULING (the launch is in flight) and when no
+ * task/session context is bound.
  */
 export function shouldShowDescriptionStartButton({
   sessionState,
@@ -72,31 +69,32 @@ export function shouldShowDescriptionStartButton({
   return sessionState === "CREATED" && taskState !== "SCHEDULING" && !!taskId && !!sessionId;
 }
 
+/**
+ * "Start agent" button inside the task-description message, shown only for
+ * never-started (CREATED) sessions. Dispatches the start_created launch and
+ * hides while the workspace environment is being prepared.
+ */
 function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; sessionId: string }) {
   const { t } = useTranslation();
   const [isStarting, setIsStarting] = useState(false);
   const prepareStatus = useAppStore(
     (state) => state.prepareProgress.bySessionId[sessionId]?.status ?? null,
   );
-  const resumeSkipped = useAppStore(
-    (state) => state.tasks.resumeSkippedSessionIds[sessionId] === true,
-  );
-  const setResumeSkipped = useAppStore((state) => state.setResumeSkipped);
   const session = useAppStore((state) => state.taskSessions.items[sessionId] ?? null);
   const setTaskSession = useAppStore((state) => state.setTaskSession);
 
   const handleStart = useCallback(async () => {
     setIsStarting(true);
     try {
-      // Never-started (CREATED) sessions use the start_created intent; a
-      // resume-skipped (recovered-idle) session resumes its existing agent.
-      const { request } = resumeSkipped
-        ? buildResumeRequest(taskId, sessionId)
-        : buildStartCreatedRequest(taskId, sessionId);
+      // This button only renders for never-started (CREATED) sessions
+      // (shouldShowDescriptionStartButton); resume-skipped (recovered-idle)
+      // sessions get their affordance from the composer hint instead, so the
+      // launch intent is always start_created.
+      const { request } = buildStartCreatedRequest(taskId, sessionId);
       const response = await launchSession(request);
       if (response.success && response.state) {
         // Hydrate the launch state (commonly STARTING) so the button hides
-        // immediately and repeated start_created/resume requests cannot fire
+        // immediately and repeated start_created requests cannot fire
         // against an already-starting session before the WS transition lands.
         // Never apply it over a newer live state: a WS RUNNING/FAILED
         // transition can land before the launch response resolves, and the
@@ -112,19 +110,12 @@ function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; ses
           });
         }
       }
-      // Only confirmed RUNNING clears the resume-skipped marker: a resume
-      // response commonly reports STARTING (launch accepted, agent starting),
-      // and the WS RUNNING transition clears it later. Failed launches keep
-      // the button as a retry affordance.
-      if (response.state === "RUNNING") {
-        setResumeSkipped(sessionId, false);
-      }
     } catch (error) {
       console.error("Failed to start agent:", error);
     } finally {
       setIsStarting(false);
     }
-  }, [taskId, sessionId, resumeSkipped, setResumeSkipped, session, setTaskSession]);
+  }, [taskId, sessionId, session, setTaskSession]);
 
   // Hide while environment is being prepared
   if (prepareStatus === "preparing") return null;

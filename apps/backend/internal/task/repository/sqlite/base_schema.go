@@ -20,6 +20,7 @@ func (r *Repository) initSchema() error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initStepTransitionsSchema,
 		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
 		r.initGitSchema,
@@ -610,7 +611,100 @@ func (r *Repository) initSessionSchema() error {
 	if err := r.initSessionWorktreeSchema(); err != nil {
 		return err
 	}
-	return r.initMessageTurnSchema()
+	if err := r.initMessageTurnSchema(); err != nil {
+		return err
+	}
+	return r.initSubagentContextSchema()
+}
+
+// initSubagentContextSchema creates task_session_subagents, the durable
+// relational record of a subagent (Task tool) invocation. See
+// docs/specs/subagent-context-persistence/spec.md. The three measurement
+// columns (total_tokens, tool_use_count, duration_ms) deliberately carry no
+// DEFAULT: an unreported value must store NULL, never 0 (75% of observed
+// invocations report none of them). turn_id carries no FOREIGN KEY so a turn
+// deletion never silently deletes the fan-out record it measured.
+//
+// agent_execution_id carries DEFAULT 'unknown' (AC-31's reserved sentinel for
+// "no execution identity available") so every row has one, and is part of the
+// UNIQUE key (task_session_id, agent_execution_id, tool_call_id) — a late
+// frame from an earlier, already-completed execution creates/updates its own
+// row instead of clobbering a later execution's (AC-32). Historical message
+// rows are handled separately by the one-time backfill migration.
+func (r *Repository) initSubagentContextSchema() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_session_subagents (
+		id                  TEXT PRIMARY KEY,
+		task_session_id     TEXT NOT NULL,
+		task_id             TEXT NOT NULL,
+		turn_id             TEXT,
+		tool_call_id        TEXT NOT NULL,
+		agent_execution_id  TEXT NOT NULL DEFAULT 'unknown',
+		parent_tool_call_id TEXT,
+		subagent_type       TEXT,
+		description         TEXT,
+		agent_id            TEXT,
+		child_session_id    TEXT,
+		model               TEXT,
+		agent_status        TEXT,
+		tool_status         TEXT,
+		is_async            INTEGER NOT NULL DEFAULT 0,
+		total_tokens        INTEGER,
+		tool_use_count      INTEGER,
+		duration_ms         INTEGER,
+		source              TEXT NOT NULL DEFAULT 'live',
+		observed_at         TIMESTAMP NOT NULL,
+		settled_at          TIMESTAMP,
+		updated_at          TIMESTAMP NOT NULL,
+		UNIQUE (task_session_id, agent_execution_id, tool_call_id),
+		FOREIGN KEY (task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_subagents_session_id ON task_session_subagents(task_session_id);
+	CREATE INDEX IF NOT EXISTS idx_subagents_task_id    ON task_session_subagents(task_id);
+	CREATE INDEX IF NOT EXISTS idx_subagents_turn_id    ON task_session_subagents(turn_id);
+	`)
+	return err
+}
+
+// initStepTransitionsSchema creates task_step_transitions: one row per
+// committed change to tasks.workflow_step_id. This is a new table, not a
+// column added to an existing one, so CREATE TABLE IF NOT EXISTS in the init
+// block is correct and complete — the "columns only via runMigrations" rule
+// governs ALTER TABLE, not table creation.
+//
+// Deliberately no foreign key to workflow_steps or workflows: steps and
+// workflows get deleted, and the historical fact that a card was in a
+// now-deleted step must survive that deletion.
+func (r *Repository) initStepTransitionsSchema() error {
+	idCol := "id INTEGER PRIMARY KEY AUTOINCREMENT"
+	if dialect.IsPostgres(r.db.DriverName()) {
+		idCol = "id BIGSERIAL PRIMARY KEY"
+	}
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_step_transitions (
+		` + idCol + `,
+		task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+		session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL,
+		from_workflow_id TEXT,
+		from_workflow_step_id TEXT,
+		to_workflow_id TEXT,
+		to_workflow_step_id TEXT,
+		trigger TEXT NOT NULL,
+		actor_kind TEXT NOT NULL,
+		actor_id TEXT,
+		contract_version INTEGER NOT NULL,
+		occurred_at TIMESTAMP NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_task
+		ON task_step_transitions(task_id, occurred_at, id);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_occurred
+		ON task_step_transitions(occurred_at);
+	`)
+	if err != nil {
+		return fmt.Errorf("init step transitions schema: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) initMessageTurnSchema() error {

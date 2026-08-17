@@ -16,6 +16,7 @@ import { IMPROVE_KANDEV_WORKSPACE_NAME } from "@/components/improve-kandev-dialo
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
 import { subscribeNewTaskCreationRequests } from "@/lib/desktop/new-task-request";
+import { AppSidebarWorkspaceActions } from "./app-sidebar-workspace-actions";
 
 // The Office "New issue" dialog only renders on `/office` routes, but this item
 // lives in the global sidebar (every page). Lazy-load it so its office-only
@@ -37,7 +38,6 @@ function useNewTaskCreationRequest(workspaceId: string | null, openDialog: () =>
   }, [workspaceId, openDialog]);
 }
 
-const ROW_ACTION_INSET_CLASS = "pr-16";
 type RowActionButtonProps = {
   icon: TablerIcon;
   label: string;
@@ -180,7 +180,6 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   useNewTaskCreationRequest(workspaceId, handleOpenNewTask);
 
   const canOpenRowActions = !collapsed && !!workspaceId;
-  const actionInsetClass = canOpenRowActions ? ROW_ACTION_INSET_CLASS : undefined;
   const handleRegularTaskCreated = useCallback(
     (
       task: Task,
@@ -201,7 +200,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
 
   return (
     <>
-      <div className="relative">
+      <div className="flex min-w-0 items-center gap-1">
         <AppSidebarNavItem
           icon={IconSquarePlus}
           label={t("sidebar:newTask")}
@@ -209,10 +208,10 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
           collapsed={collapsed}
           disabled={!workspaceId}
           testId="create-task-button"
-          className={actionInsetClass}
+          className={!collapsed ? "min-w-0 flex-1" : undefined}
         />
         {canOpenRowActions && (
-          <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 sidebar-fade-in">
+          <div className="flex shrink-0 items-center gap-1 sidebar-fade-in">
             <RowActionButton
               icon={IconTerminal2}
               label={t("sidebar:quickTerminal")}
@@ -224,6 +223,11 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
               label={t("sidebar:quickChat")}
               testId="sidebar-quick-chat-shortcut"
               onClick={handleOpenQuickChat}
+            />
+            <AppSidebarWorkspaceActions
+              workspaceId={workspaceId}
+              workspaceLabel={activeWorkspace?.name}
+              presentation="desktop"
             />
           </div>
         )}

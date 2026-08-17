@@ -227,7 +227,9 @@ test.describe("Mobile general settings", () => {
     await index.getByRole("link", { name: "Appearance" }).click();
 
     await expect(testPage).toHaveURL(/\/settings\/preferences\/appearance$/);
-    await expect(testPage.getByRole("heading", { name: "Appearance", exact: true })).toBeVisible();
+    await expect(
+      testPage.getByRole("heading", { level: 2, name: "Appearance", exact: true }),
+    ).toBeVisible();
 
     // The topbar home crumb leaves the settings surface entirely.
     await testPage.getByTestId("topbar-phone-home").click();

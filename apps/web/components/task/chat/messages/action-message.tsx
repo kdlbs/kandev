@@ -11,7 +11,6 @@ import {
   IconSparkles,
   IconGitCommit,
   IconX,
-  IconChevronDown,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@kandev/ui/button";
@@ -21,11 +20,9 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { deleteTask } from "@/lib/api/domains/kanban-api";
-import { AuthMethodsPanel, GenericAuthPanel } from "./auth-methods-panel";
-import { RemediationLink } from "@/components/task/remediation-link";
-import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import type { Message, TaskSessionState } from "@/lib/types/http";
-import type { MessageAction, RecoveryAuthMethod } from "@/components/task/chat/types";
+import type { MessageAction } from "@/components/task/chat/types";
+import { ActionMessageDetails, type ActionMeta } from "./action-message-details";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
 
@@ -38,28 +35,6 @@ const ICON_MAP: Record<string, React.ElementType> = {
   "git-commit": IconGitCommit,
   "alert-triangle": IconAlertTriangle,
   x: IconX,
-};
-
-type ActionMeta = {
-  actions?: MessageAction[];
-  action_visibility?: "running";
-  variant?: string;
-  recovery_actions?: boolean;
-  is_auth_error?: boolean;
-  auth_methods?: RecoveryAuthMethod[];
-  error_output?: string;
-  failure_kind?: string;
-  missing_branch?: string;
-  provider_name?: string;
-  model_id?: string;
-  reset_at?: string;
-  remediation_url?: string;
-  retrying?: boolean;
-  attempt?: number;
-  max_attempts?: number;
-  retry_in_seconds?: number;
-  retry_at?: string;
-  failure_code?: string;
 };
 
 function isSessionActive(state?: TaskSessionState) {
@@ -198,6 +173,8 @@ function transientRetryReasonKey(failureCode?: string) {
       return "chat:transientRetryReasonProviderUnavailable";
     case "rate_limited":
       return "chat:transientRetryReasonRateLimited";
+    case "agent_transport_lost":
+      return "chat:transientRetryReasonAgentTransportLost";
     default:
       return "chat:transientRetryReasonGeneric";
   }
@@ -300,7 +277,60 @@ function renderSpecialRecovery({
       />
     );
   }
+  if (metadata?.failure_kind === "managed_runtime_npm_resolution") {
+    return (
+      <ManagedRuntimeNpmRecovery
+        metadata={metadata}
+        taskId={taskId}
+        onRecoveryRequested={onRecoveryRequested}
+      />
+    );
+  }
   return null;
+}
+
+function ManagedRuntimeNpmRecovery({
+  metadata,
+  taskId,
+  onRecoveryRequested,
+}: {
+  metadata: ActionMeta;
+  taskId?: string;
+  onRecoveryRequested: () => void;
+}) {
+  const { t } = useTranslation();
+  const actions = metadata.actions?.slice(0, 1) ?? [];
+  return (
+    <section
+      data-testid="managed-runtime-npm-recovery"
+      role="alert"
+      className="w-full min-w-0 rounded-md border border-amber-500/25 bg-amber-500/[0.06] p-3 sm:p-4"
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        <IconAlertTriangle
+          className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500"
+          aria-hidden="true"
+        />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-medium text-foreground">
+            {t("chat:managedRuntimeNpmTitle")}
+          </h3>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            {t("chat:managedRuntimeNpmBody")}
+          </p>
+          <ActionMessageDetails metadata={metadata} />
+          {actions.length > 0 && (
+            <ActionButtons
+              actions={actions}
+              taskId={taskId}
+              onRecoveryRequested={onRecoveryRequested}
+              labelOverride={t("chat:managedRuntimeRetry")}
+            />
+          )}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function ProviderQuotaRecovery({
@@ -439,80 +469,18 @@ function MissingBranchRecovery({
   );
 }
 
-function TechnicalDetails({ children }: { children: string }) {
-  const { t } = useTranslation();
-  return (
-    <details className="mt-2 min-w-0 text-xs text-muted-foreground">
-      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 sm:min-h-8">
-        <IconChevronDown className="h-3.5 w-3.5" />
-        {t("chat:technicalDetails")}
-      </summary>
-      <pre className="max-h-[300px] max-w-full overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted/50 p-2 font-mono text-[11px]">
-        {children}
-      </pre>
-    </details>
-  );
-}
-
-function ActionMessageDetails({
-  metadata,
-  technicalDetails,
-}: {
-  metadata: ActionMeta | undefined;
-  technicalDetails?: string;
-}) {
-  const [hostShellOpen, setHostShellOpen] = useState(false);
-  const [hostShellCommand, setHostShellCommand] = useState<string | undefined>(undefined);
-
-  // Auth recovery uses the kandev host shell (where the agent CLIs are
-  // installed), not the task environment shell - the task env often isn't
-  // ready when an auth error fires (no workspace path yet), and the user's
-  // agent auth state lives in their home dir on the host anyway.
-  const openHostShellWithCommand = useCallback((command: string) => {
-    // Trailing newline runs the command immediately. Drop it if you'd rather
-    // let the user review first.
-    setHostShellCommand(command + "\n");
-    setHostShellOpen(true);
-  }, []);
-  const openHostShell = useCallback(() => {
-    setHostShellCommand(undefined);
-    setHostShellOpen(true);
-  }, []);
-
-  if (!metadata) return null;
-  const errorOutput = metadata.error_output || technicalDetails;
-  return (
-    <>
-      {metadata.remediation_url && <RemediationLink url={metadata.remediation_url} />}
-      {errorOutput && <TechnicalDetails>{errorOutput}</TechnicalDetails>}
-      {metadata.is_auth_error && metadata.auth_methods && metadata.auth_methods.length > 0 && (
-        <AuthMethodsPanel
-          methods={metadata.auth_methods}
-          onOpenTerminal={openHostShellWithCommand}
-        />
-      )}
-      {metadata.is_auth_error && (!metadata.auth_methods || metadata.auth_methods.length === 0) && (
-        <GenericAuthPanel onOpenTerminal={openHostShell} />
-      )}
-      <HostShellDialog
-        open={hostShellOpen}
-        onOpenChange={setHostShellOpen}
-        initialInput={hostShellCommand}
-      />
-    </>
-  );
-}
-
 function ActionButtons({
   actions,
   taskId,
   onRecoveryRequested,
   compact = false,
+  labelOverride,
 }: {
   actions: MessageAction[];
   taskId?: string;
   onRecoveryRequested?: () => void;
   compact?: boolean;
+  labelOverride?: string;
 }) {
   return (
     <div
@@ -529,6 +497,7 @@ function ActionButtons({
           messageTaskId={taskId}
           onCompleted={onRecoveryRequested}
           compact={compact}
+          labelOverride={labelOverride}
         />
       ))}
     </div>
@@ -540,11 +509,13 @@ function ActionButton({
   messageTaskId,
   onCompleted,
   compact = false,
+  labelOverride,
 }: {
   action: MessageAction;
   messageTaskId?: string;
   onCompleted?: () => void;
   compact?: boolean;
+  labelOverride?: string;
 }): ReactElement | null {
   const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
@@ -616,7 +587,7 @@ function ActionButton({
       data-testid={action.test_id}
     >
       {Icon && <Icon className="h-3 w-3" />}
-      {action.label}
+      {labelOverride ?? action.label}
     </Button>
   );
 

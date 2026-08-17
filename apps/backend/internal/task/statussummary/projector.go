@@ -37,6 +37,27 @@ type GitObservation struct {
 // needed when a projector is recreated after a process restart.
 type GitObservationLoader func(context.Context, string) ([]GitObservation, error)
 
+// PendingActionLoader returns the authoritative pending action for every
+// input-capable session belonging to one task.
+type PendingActionLoader func(context.Context, string) (map[string]string, error)
+
+// SessionObservationSnapshot is the authoritative keyed session state needed
+// to rebuild aggregates that cannot be recovered from their single summary
+// representative after a restart or compare-and-set loss.
+type SessionObservationSnapshot struct {
+	Sessions         []RebuildSession
+	ActivityObserved bool
+	ErrorsObserved   bool
+}
+
+// SessionObservationLoader rehydrates session, activity, and error source
+// observations for one task.
+type SessionObservationLoader func(context.Context, string) (SessionObservationSnapshot, error)
+
+// PullRequestLoader rehydrates the keyed PR observations needed to preserve
+// sibling pull requests across projector restarts and CAS rebases.
+type PullRequestLoader func(context.Context, string) ([]PullRequestInput, error)
+
 // SummaryUpdated is the complete replacement payload sent to workspace
 // subscribers. It intentionally contains no transcript, file list, or source
 // event payload.
@@ -51,10 +72,13 @@ type SummaryUpdated struct {
 func (e SummaryUpdated) GetWorkspaceID() string { return e.WorkspaceID }
 
 type ProjectorConfig struct {
-	Store               SummaryStore
-	EventBus            bus.EventBus
-	ResolveWorkspace    WorkspaceResolver
-	LoadGitObservations GitObservationLoader
+	Store                   SummaryStore
+	EventBus                bus.EventBus
+	ResolveWorkspace        WorkspaceResolver
+	LoadGitObservations     GitObservationLoader
+	LoadPendingActions      PendingActionLoader
+	LoadSessionObservations SessionObservationLoader
+	LoadPullRequests        PullRequestLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
 	// message.queue.get). Wired from the messagequeue service at the
@@ -69,13 +93,16 @@ type ProjectorConfig struct {
 // independent tasks do not block one another during a burst. Raw stream events
 // are never subscribed to here.
 type Projector struct {
-	store               SummaryStore
-	eventBus            bus.EventBus
-	resolveWorkspace    WorkspaceResolver
-	loadGitObservations GitObservationLoader
-	countQueuedPrompts  func(context.Context, string) (int, error)
-	logger              *logger.Logger
-	now                 func() time.Time
+	store                   SummaryStore
+	eventBus                bus.EventBus
+	resolveWorkspace        WorkspaceResolver
+	loadGitObservations     GitObservationLoader
+	loadPendingActions      PendingActionLoader
+	loadSessionObservations SessionObservationLoader
+	loadPullRequests        PullRequestLoader
+	countQueuedPrompts      func(context.Context, string) (int, error)
+	logger                  *logger.Logger
+	now                     func() time.Time
 
 	mu         sync.Mutex
 	state      map[string]*projectionState
@@ -151,15 +178,18 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Projector{
-		store:               cfg.Store,
-		eventBus:            cfg.EventBus,
-		resolveWorkspace:    cfg.ResolveWorkspace,
-		loadGitObservations: cfg.LoadGitObservations,
-		countQueuedPrompts:  cfg.CountQueuedPrompts,
-		logger:              log.WithFields(zap.String("component", "task-status-summary-projector")),
-		now:                 now,
-		state:               make(map[string]*projectionState),
-		taskLocks:           make(map[string]*taskProjectionLock),
+		store:                   cfg.Store,
+		eventBus:                cfg.EventBus,
+		resolveWorkspace:        cfg.ResolveWorkspace,
+		loadGitObservations:     cfg.LoadGitObservations,
+		loadPendingActions:      cfg.LoadPendingActions,
+		loadSessionObservations: cfg.LoadSessionObservations,
+		loadPullRequests:        cfg.LoadPullRequests,
+		countQueuedPrompts:      cfg.CountQueuedPrompts,
+		logger:                  log.WithFields(zap.String("component", "task-status-summary-projector")),
+		now:                     now,
+		state:                   make(map[string]*projectionState),
+		taskLocks:               make(map[string]*taskProjectionLock),
 	}
 }
 
@@ -274,15 +304,80 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 	}
 
 	if event.Type == events.MessageQueueStatusChanged {
+		if p.loadPendingActions != nil && !state.pendingObserved {
+			pendingChanged, refreshErr := p.refreshPendingLocked(ctx, taskID, state)
+			if refreshErr != nil {
+				return refreshErr
+			}
+			if err := p.persistPendingRefreshLocked(ctx, taskID, state, pendingChanged, "", nil); err != nil {
+				return err
+			}
+		}
 		return p.applyQueueStatusEvent(ctx, state, taskID)
+	}
+
+	refreshPending := p.loadPendingActions != nil &&
+		(!state.pendingObserved || isPendingSensitiveEvent(event.Type, data))
+	if refreshPending {
+		pendingChanged, refreshErr := p.refreshPendingLocked(ctx, taskID, state)
+		if refreshErr != nil {
+			return refreshErr
+		}
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged
+		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
 	changed := p.applySourceEventLocked(state, event.Type, data)
 	if !changed {
 		return nil
 	}
-	_, err = p.persistAndPublishLocked(ctx, taskID, state)
-	return err
+	return p.persistPendingRefreshLocked(ctx, taskID, state, true, event.Type, data)
+}
+
+const maxPendingPersistAttempts = 3
+
+func (p *Projector) persistPendingRefreshLocked(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+	changed bool,
+	eventType string,
+	eventData map[string]interface{},
+) error {
+	if !changed {
+		return nil
+	}
+	for attempt := 0; attempt < maxPendingPersistAttempts; attempt++ {
+		accepted, err := p.persistAndPublishLocked(ctx, taskID, state)
+		if err != nil {
+			return err
+		}
+		if accepted {
+			return nil
+		}
+		// The rejected writer reloaded the winning summary into state.current.
+		// Rebase every derived source before replaying this event; otherwise stale
+		// observation maps can overwrite unrelated fields from the winner.
+		if err := p.rebaseProjectionStateFromCurrent(ctx, taskID, state); err != nil {
+			return err
+		}
+		if p.loadPendingActions != nil {
+			if _, err := p.refreshPendingLocked(ctx, taskID, state); err != nil {
+				return err
+			}
+		}
+		if eventType != "" {
+			p.applySourceEventLocked(state, eventType, eventData)
+		}
+	}
+	p.logger.Warn("exhausted CAS retries refreshing pending task status",
+		zap.String("task_id", taskID),
+		zap.Int("attempts", maxPendingPersistAttempts))
+	return fmt.Errorf(
+		"exhausted CAS retries refreshing pending task status for task %s after %d attempts",
+		taskID,
+		maxPendingPersistAttempts,
+	)
 }
 
 // maxQueueCountPersistAttempts bounds the retry loop when a competing writer
@@ -329,6 +424,12 @@ func (p *Projector) applyQueueStatusEvent(ctx context.Context, state *projection
 		}
 		if accepted {
 			return nil
+		}
+		// A competing writer may have changed any summary domain. Rebuild every
+		// keyed source before recounting so the queue retry cannot overwrite the
+		// winner with stale in-memory observations.
+		if err := p.rebaseProjectionStateFromCurrent(ctx, taskID, state); err != nil {
+			return err
 		}
 	}
 	// The count self-corrects on the next queue event or list load, but a
@@ -417,4 +518,3 @@ func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, 
 	}
 	return true, nil
 }
-

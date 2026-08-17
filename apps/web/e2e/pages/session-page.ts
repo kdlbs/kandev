@@ -13,6 +13,8 @@ function sectionLabelToStateTestId(label: string): string {
   return "task-state-backlog";
 }
 
+const TERMINAL_READY_TIMEOUT = 30_000;
+
 export class SessionPage {
   readonly chat: Locator;
   readonly sidebar: Locator;
@@ -705,7 +707,7 @@ export class SessionPage {
   }
 
   stepperStep(name: string): Locator {
-    return this.page.getByTestId(`workflow-step-${name}`);
+    return this.page.locator(`[data-testid="workflow-step-${name}"][aria-current="step"]`);
   }
 
   /** PR button in the topbar (visible only when a PR is associated). */
@@ -1257,8 +1259,12 @@ export class SessionPage {
    * disappears — i.e. the WebSocket actually opened for that env terminal.
    * Use this to detect the "terminal hangs forever on Connecting" bug.
    */
-  async expectTerminalConnected(timeout = 15_000): Promise<void> {
-    await this.terminal.getByTestId("passthrough-loading").waitFor({ state: "hidden", timeout });
+  async expectTerminalConnected(timeout = TERMINAL_READY_TIMEOUT): Promise<void> {
+    await this.page
+      .locator("[data-testid='terminal-panel']:visible")
+      .first()
+      .getByTestId("passthrough-loading")
+      .waitFor({ state: "hidden", timeout });
   }
 
   /**
@@ -1266,9 +1272,10 @@ export class SessionPage {
    * the prompt), then type a command and press Enter.
    */
   async typeInTerminal(command: string): Promise<void> {
+    await this.expectTerminalConnected();
     await expect
       .poll(async () => (await this.readXtermBuffer("terminal-panel")).length > 0, {
-        timeout: 15_000,
+        timeout: TERMINAL_READY_TIMEOUT,
         message: "Waiting for terminal shell to connect",
       })
       .toBe(true);

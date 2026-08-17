@@ -6,6 +6,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { IconLayoutKanban, IconList, IconTimeline } from "@tabler/icons-react";
+import { MobileWorkspaceActionsSection } from "@/components/app-sidebar/app-sidebar-workspace-actions";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import {
   AppNavSections,
@@ -351,6 +352,7 @@ function ResponsiveMenuSurface({
 }
 
 function MobileMenuContent({
+  workspaceId,
   searchQuery,
   onSearchChange,
   isSearchLoading,
@@ -362,7 +364,7 @@ function MobileMenuContent({
   navControls,
 }: Pick<
   MobileMenuSheetProps,
-  "searchQuery" | "onSearchChange" | "isSearchLoading" | "onOpenChange"
+  "workspaceId" | "searchQuery" | "onSearchChange" | "isSearchLoading" | "onOpenChange"
 > & {
   viewValue: string;
   onViewChange: (value: string) => void;
@@ -390,6 +392,7 @@ function MobileMenuContent({
       <AppNavSections
         onNavigate={() => onOpenChange(false)}
         omitSections={["primary"]}
+        workspaceActions={<MobileWorkspaceActionsSection workspaceId={workspaceId} />}
         controls={navControls}
       />
     </div>
@@ -417,6 +420,7 @@ export function MobileMenuSheet({
       onOpenChange={onOpenChange}
       contentRef={contentRef}
       onOpenAutoFocus={focusMenu}
+      workspaceId={workspaceId}
       searchQuery={searchQuery}
       onSearchChange={onSearchChange}
       isSearchLoading={isSearchLoading}
@@ -431,7 +435,7 @@ export function MobileMenuSheet({
 function MobileMenuRender(
   props: Pick<
     MobileMenuSheetProps,
-    "open" | "onOpenChange" | "searchQuery" | "onSearchChange" | "isSearchLoading"
+    "open" | "onOpenChange" | "workspaceId" | "searchQuery" | "onSearchChange" | "isSearchLoading"
   > & {
     isMobile: boolean;
     contentRef: RefObject<HTMLDivElement | null>;

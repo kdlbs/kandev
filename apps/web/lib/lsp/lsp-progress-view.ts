@@ -116,6 +116,9 @@ export function getLspCompactSummary(
   return getLspConnectionLabel(status, snapshot);
 }
 
+// i18n-exempt: `label` is a discriminant, not copy. `lsp-status-button.tsx`
+// uses it as a `LIFECYCLE_ACTION_KEYS` lookup key, compares it with `===` to
+// pick the button variant, and lowercases it into `data-lsp-action`.
 export function getLspLifecycleAction(status: LspStatus): LspLifecycleAction {
   switch (status.state) {
     case "disabled":

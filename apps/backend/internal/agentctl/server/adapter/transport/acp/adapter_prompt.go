@@ -272,16 +272,17 @@ func (a *Adapter) sendPrompt(
 	// subscriber sees an approximate input count. It has no input/output split,
 	// so Estimated remains true. usage_update cost is cumulative session cost;
 	// consumeUsageDelta converts it to the current turn's nonnegative delta.
-	delta, costSubcents := a.consumeUsageDelta(sessionID)
+	delta, costSubcents, costPresent := a.consumeUsageDeltaWithPresence(sessionID)
 	if usage == nil {
-		if delta > 0 || costSubcents > 0 {
+		if delta > 0 || costPresent {
 			usage = &streams.PromptUsage{
 				InputTokens:                  delta,
 				Estimated:                    true,
 				ProviderReportedCostSubcents: costSubcents,
+				ProviderReportedCostPresent:  costPresent,
 			}
 		}
-	} else if costSubcents > 0 {
+	} else if costPresent {
 		// claude-acp: usage_update.cost.amount carries authoritative cumulative
 		// USD cost — attach the derived turn delta so Layer A wins
 		// downstream and the office cost subscriber stores the row
@@ -289,6 +290,7 @@ func (a *Adapter) sendPrompt(
 		// model id is a logical alias (sonnet / haiku) that won't match
 		// any pricing entry, so this is the only accurate cost path.
 		usage.ProviderReportedCostSubcents = costSubcents
+		usage.ProviderReportedCostPresent = true
 	}
 	a.sendUpdate(AgentEvent{
 		Type:             streams.EventTypeComplete,

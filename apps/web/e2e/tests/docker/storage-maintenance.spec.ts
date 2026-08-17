@@ -6,7 +6,11 @@ import {
   E2E_IMAGE_TAG,
   waitForScopedKandevContainersRemoved,
 } from "../../fixtures/docker-probe";
-import { dockerInspectExists, dockerRemove } from "../../helpers/docker";
+import {
+  dockerInspectExists,
+  dockerRemove,
+  waitForDockerContainerRemoved,
+} from "../../helpers/docker";
 
 function createStoppedContainer(labels: string[]): string {
   const args = ["create"];
@@ -82,12 +86,10 @@ test.describe.serial("process-scoped container cleanup", () => {
   });
 
   test("starts the next test without the previous process-owned container", async () => {
-    await expect
-      .poll(() => dockerInspectExists(previousTestContainer), {
-        timeout: 30_000,
-        message: "previous process-owned container should be removed before the next test",
-      })
-      .toBe(false);
+    await waitForDockerContainerRemoved(
+      previousTestContainer,
+      "previous process-owned container was not removed",
+    );
   });
 });
 

@@ -88,5 +88,10 @@
   "findingQueuedForAgent": "Ƒĩńďĩńĝ qũēũēď ƒōŕ ţĥē àĝēńţ",
   "findingSentToAgent": "Ƒĩńďĩńĝ śēńţ ţō ţĥē àĝēńţ",
   "walkthroughRequestQueued": "Ŵàĺķţĥŕōũĝĥ ŕēqũēśţ qũēũēď",
-  "walkthroughRequestSent": "Ŵàĺķţĥŕōũĝĥ ŕēqũēśţ śēńţ"
+  "walkthroughRequestSent": "Ŵàĺķţĥŕōũĝĥ ŕēqũēśţ śēńţ",
+  "couldNotStartReview": "Ćōũĺď ńōţ śţàŕţ ţĥē ŕēvĩēŵ",
+  "severityBlocker": "Ɓĺōćķēŕ",
+  "severityMajor": "Ḿàĵōŕ",
+  "severityMinor": "Ḿĩńōŕ",
+  "severityNit": "Ńĩţ"
 }

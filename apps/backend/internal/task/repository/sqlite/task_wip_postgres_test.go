@@ -26,6 +26,11 @@ func TestPostgresUpdateTaskWithWorkflowStepAdmission_ConcurrentLastSlot(t *testi
 		t.Fatalf("init postgres schema: %v", err)
 	}
 	ctx := context.Background()
+	// The creation/admission paths lock the workspace row before the
+	// workflow-step locks; the tasks below reference it, so it must exist.
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "postgres-wip-workspace", Name: "Postgres WIP workspace"}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
 	if _, err := db.Exec(db.Rebind(`
 		INSERT INTO workflow_steps (id, workflow_id, name, position)
 		VALUES (?, ?, ?, ?)

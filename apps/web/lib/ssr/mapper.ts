@@ -54,6 +54,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         activeSubagentCount: task.active_subagent_count ?? undefined,
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
+        statusSummary: task.status_summary,
         parentTaskId: task.parent_id ?? undefined,
         metadata: task.metadata,
         workspaceMode: workspaceModeFromMetadata(task.metadata),

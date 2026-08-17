@@ -577,8 +577,9 @@ func registerRoutes(p routeParams) {
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 	clarificationStore := clarification.NewStore(2 * time.Hour)
-	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.eventBus, p.log)
+	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.taskSvc, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
+	p.taskSvc.SetClarificationCanceller(clarificationCanceller)
 
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
@@ -1132,7 +1133,16 @@ func registerSecondaryRoutes(
 	agentcapabilities.RegisterRoutes(p.router, p.hostUtilityMgr, p.log)
 	p.log.Debug("Registered Agent Capabilities handlers (HTTP)")
 
-	clarification.RegisterRoutes(p.router, clarificationStore, p.gateway.Hub, p.msgCreator, p.taskRepo, p.eventBus, p.log)
+	clarification.RegisterRoutes(
+		p.router,
+		clarificationStore,
+		p.gateway.Hub,
+		p.msgCreator,
+		p.taskRepo,
+		p.eventBus,
+		p.orchestratorSvc,
+		p.log,
+	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
 	if p.secretsSvc != nil {
@@ -1234,6 +1244,9 @@ func registerSecondaryRoutes(
 			}
 		}
 		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)
+		if p.services.GitHub != nil {
+			ikHandler.SetManagedGitHubForkProber(p.services.GitHub)
+		}
 		ikHandler.SetTemporaryArtifactRegistry(p.temporaryArtifacts)
 		if p.systemSvc != nil {
 			ikHandler.SetLogBundles(p.systemSvc.LogBundles)
@@ -1450,12 +1463,10 @@ func (a githubWorkspaceHealthAdapter) GitHubConnectionHealth(
 		return health.GitHubConnectionHealth{}, err
 	}
 	return health.GitHubConnectionHealth{
-		WorkspaceCount: summary.WorkspaceCount,
-		Active:         summary.Active,
-		Disconnected:   summary.Disconnected,
-		Invalid:        summary.Invalid,
-		Suspended:      summary.Suspended,
-		Revoked:        summary.Revoked,
+		Active:    summary.Active,
+		Invalid:   summary.Invalid,
+		Suspended: summary.Suspended,
+		Revoked:   summary.Revoked,
 	}, nil
 }
 

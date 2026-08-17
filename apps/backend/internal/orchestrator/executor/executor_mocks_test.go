@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
@@ -800,7 +801,15 @@ func (m *mockRepository) GetActiveTurnBySessionID(ctx context.Context, sessionID
 	return nil, nil
 }
 func (m *mockRepository) UpdateTurn(ctx context.Context, turn *models.Turn) error { return nil }
-func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error       { return nil }
+func (m *mockRepository) PatchTurnMetadata(
+	context.Context,
+	string,
+	string,
+	map[string]interface{},
+) (bool, time.Time, error) {
+	return false, time.Time{}, nil
+}
+func (m *mockRepository) CompleteTurn(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
 	return 0, nil
 }
@@ -954,8 +963,8 @@ func (m *mockRepository) GetGitSnapshotsBySession(ctx context.Context, sessionID
 }
 
 // Session Commit operations
-func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error {
-	return nil
+func (m *mockRepository) CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) (bool, error) {
+	return true, nil
 }
 func (m *mockRepository) GetSessionCommits(ctx context.Context, sessionID string) ([]*models.SessionCommit, error) {
 	return nil, nil

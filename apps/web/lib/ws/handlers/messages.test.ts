@@ -6,8 +6,21 @@ import { createMessagesHandlerRegistration, createMessageUpdateScheduler } from 
 
 type UpdatedMessage = BackendMessageMap["session.message.updated"];
 const TEST_TIMESTAMP = "2026-08-02T00:00:00.000Z";
+const PROJECTION_EPOCH = "7";
+const SESSION_ID = "session-1";
+const QUESTION_ID = "question-1";
+const QUESTION_CONTENT = "Choose";
 
-function makePayload(sessionId: string, messageId: string, content: string) {
+function pendingRevision(sequence: number) {
+  return { epoch: PROJECTION_EPOCH, sequence };
+}
+
+function makePayload(
+  sessionId: string,
+  messageId: string,
+  content: string,
+  overrides: Record<string, unknown> = {},
+) {
   return {
     task_id: "task-1",
     session_id: sessionId,
@@ -19,6 +32,7 @@ function makePayload(sessionId: string, messageId: string, content: string) {
     type: "message",
     created_at: TEST_TIMESTAMP,
     updated_at: "2026-08-02T00:00:01.000Z",
+    ...overrides,
   };
 }
 
@@ -32,21 +46,31 @@ function makeUpdated(sessionId: string, messageId: string, content: string): Upd
   };
 }
 
-function makeStore(currentMessages: Record<string, unknown[]> = {}) {
+function makeStore(currentMessages: Record<string, unknown[]> = {}, completedTurn = false) {
   const updateMessage = vi.fn();
   const addMessage = vi.fn();
   const removeMessage = vi.fn();
+  const setTaskSessionPendingAction = vi.fn();
   const state = {
     updateMessage,
     addMessage,
     removeMessage,
+    setTaskSessionPendingAction,
     messages: { bySession: currentMessages },
+    turns: {
+      bySession: completedTurn
+        ? {
+            "session-1": [{ id: "turn-1", completed_at: TEST_TIMESTAMP }],
+          }
+        : {},
+    },
   };
   return {
     store: { getState: () => state } as unknown as StoreApi<AppState>,
     updateMessage,
     addMessage,
     removeMessage,
+    setTaskSessionPendingAction,
   };
 }
 
@@ -174,6 +198,127 @@ describe("session message frame scheduler", () => {
   });
 });
 
+describe("session message pending-action projection", () => {
+  it("applies the authoritative projection carried by a message event", () => {
+    const { store, setTaskSessionPendingAction } = makeStore();
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers["session.message.added"]!({
+      id: "add-clarification",
+      type: "notification",
+      action: "session.message.added",
+      payload: {
+        ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+        type: "clarification_request",
+        pending_action: "clarification",
+        pending_action_revision: pendingRevision(1),
+      },
+      timestamp: TEST_TIMESTAMP,
+    });
+
+    expect(setTaskSessionPendingAction).toHaveBeenCalledWith(
+      SESSION_ID,
+      "clarification",
+      pendingRevision(1),
+    );
+
+    registration.handlers["session.message.updated"]!({
+      ...makeUpdated(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+      payload: {
+        ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+        type: "clarification_request",
+        pending_action: null,
+        pending_action_revision: pendingRevision(2),
+      },
+    });
+    registration.scheduler.flush();
+
+    expect(setTaskSessionPendingAction).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      null,
+      pendingRevision(2),
+    );
+    registration.dispose();
+  });
+
+  it("preserves event order when batched updates revisit a message", () => {
+    const { store, setTaskSessionPendingAction } = makeStore();
+    const registration = createMessagesHandlerRegistration(store);
+    const handler = registration.handlers["session.message.updated"]!;
+    let sequence = 0;
+    const update = (messageId: string, pendingAction: "clarification" | "permission" | null) => {
+      handler({
+        ...makeUpdated(SESSION_ID, messageId, QUESTION_CONTENT),
+        payload: {
+          ...makePayload(SESSION_ID, messageId, QUESTION_CONTENT),
+          type: "clarification_request",
+          pending_action: pendingAction,
+          pending_action_revision: pendingRevision(++sequence),
+        },
+      });
+    };
+
+    update("question-a", "clarification");
+    update("question-b", null);
+    update("question-a", "permission");
+    registration.scheduler.flush();
+
+    expect(setTaskSessionPendingAction).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "permission",
+      pendingRevision(3),
+    );
+    registration.dispose();
+  });
+});
+
+describe("session message deleted pending-action projection", () => {
+  it("applies the cleared projection carried by a deleted message event", () => {
+    const { store, removeMessage, setTaskSessionPendingAction } = makeStore();
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers["session.message.deleted"]!({
+      id: "delete-clarification",
+      type: "notification",
+      action: "session.message.deleted",
+      payload: {
+        ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+        type: "clarification_request",
+        pending_action: null,
+        pending_action_revision: pendingRevision(4),
+      },
+      timestamp: TEST_TIMESTAMP,
+    });
+
+    expect(removeMessage).toHaveBeenCalledWith(SESSION_ID, QUESTION_ID);
+    expect(setTaskSessionPendingAction).toHaveBeenCalledWith(SESSION_ID, null, pendingRevision(4));
+    registration.dispose();
+  });
+});
+
+describe("session message pending-action ordering", () => {
+  it("ignores a projection from an update older than the current message", () => {
+    const { store, setTaskSessionPendingAction } = makeStore({
+      [SESSION_ID]: [{ id: QUESTION_ID, updated_at: "2026-08-02T00:00:02.000Z" }],
+    });
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers["session.message.updated"]!({
+      ...makeUpdated(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+      payload: {
+        ...makePayload(SESSION_ID, QUESTION_ID, QUESTION_CONTENT),
+        type: "clarification_request",
+        pending_action: "clarification",
+        pending_action_revision: pendingRevision(1),
+      },
+    });
+    registration.scheduler.flush();
+
+    expect(setTaskSessionPendingAction).not.toHaveBeenCalled();
+    registration.dispose();
+  });
+});
+
 describe("session message snapshot ordering", () => {
   it("does not apply a batched update older than a refetched snapshot", () => {
     const { store, updateMessage } = makeStore({
@@ -193,6 +338,58 @@ describe("session message snapshot ordering", () => {
     frame.runFrame();
 
     expect(updateMessage).not.toHaveBeenCalled();
+    registration.dispose();
+  });
+});
+
+describe("late tool messages", () => {
+  it("settles a tool message added after its turn completed", () => {
+    const { store, addMessage } = makeStore({}, true);
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers["session.message.added"]!({
+      id: "add-tool",
+      type: "notification",
+      action: "session.message.added",
+      payload: makePayload("session-1", "tool-1", "Terminal", {
+        type: "tool_call",
+        metadata: { tool_call_id: "call-1", status: "running" },
+      }),
+      timestamp: TEST_TIMESTAMP,
+    } as never);
+
+    expect(addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: { tool_call_id: "call-1", status: "complete" },
+      }),
+    );
+    registration.dispose();
+  });
+
+  it("does not let a late running update reintroduce a spinner", () => {
+    const { store, updateMessage } = makeStore({}, true);
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers["session.message.updated"]!(
+      makeUpdated("session-1", "tool-1", "Terminal") as never,
+    );
+    registration.handlers["session.message.updated"]!({
+      id: "updated-tool",
+      type: "notification",
+      action: "session.message.updated",
+      payload: makePayload("session-1", "tool-1", "Terminal", {
+        type: "tool_call",
+        metadata: { tool_call_id: "call-1", status: "running" },
+      }),
+      timestamp: TEST_TIMESTAMP,
+    } as never);
+    registration.scheduler.flush();
+
+    expect(updateMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: { tool_call_id: "call-1", status: "complete" },
+      }),
+    );
     registration.dispose();
   });
 });

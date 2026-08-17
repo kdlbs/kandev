@@ -23,6 +23,7 @@ import {
   contributorAccessMessage,
   getImproveKandevForkBlockedReason,
   getImproveKandevStepDescription,
+  isImproveKandevForkBlockedStatus,
   resolveImproveKandevWorkflow,
   type ImproveKandevKind,
 } from "./improve-kandev-dialog-model";
@@ -55,6 +56,20 @@ function bootstrapBlockedReason(t: TFunction, bootstrap: BootstrapState): string
   return null;
 }
 
+function getForkBlockedReason(
+  t: TFunction,
+  kind: ImproveKind,
+  ready: Extract<BootstrapState, { kind: "ready" }> | null,
+): string | null {
+  if (!ready) return null;
+  const reason = getImproveKandevForkBlockedReason(
+    kind,
+    ready.data.fork_status,
+    ready.data.fork_reason_code,
+  );
+  return reason ? t(reason) : null;
+}
+
 // Keys, not resolved copy: a `t()` at module scope would freeze at the boot
 // locale and the pseudo-locale could not see it.
 const PLACEHOLDER_KEYS: Record<ImproveKind, string> = {
@@ -81,9 +96,7 @@ export function CreateModeView(props: CreateModeViewProps) {
   const [kind, setKind] = useState<ImproveKind>("bug");
   const ready = bootstrap.kind === "ready" ? bootstrap : null;
   const workflow = resolveImproveKandevWorkflow(ready, kind);
-  const forkBlockedReason = ready
-    ? getImproveKandevForkBlockedReason(kind, ready.data.fork_status, ready.data.fork_message)
-    : null;
+  const forkBlockedReason = getForkBlockedReason(t, kind, ready);
   // Tasks land in the dedicated workspace the bootstrap returned, not the
   // user's active one. While bootstrap is in flight the active workspace is
   // only a fallback — submit stays blocked until `ready`.
@@ -349,15 +362,22 @@ function ContributorBanner({
 }) {
   const { t } = useTranslation();
   const { github_login: login, has_write_access: hasWrite } = data;
-  if (data.fork_status === "blocked_emu" && kind !== "issue") {
+  if (isImproveKandevForkBlockedStatus(data.fork_status) && kind !== "issue") {
     return (
       <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
         <IconAlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-        <span>{data.fork_message ?? t("common:thisGithubAccountCannotForkKdlbs")}</span>
+        <span>
+          {t(
+            getImproveKandevForkBlockedReason(kind, data.fork_status, data.fork_reason_code) ??
+              (data.fork_status === "blocked_managed"
+                ? "common:managedGithubForkUnavailable"
+                : "common:thisGithubAccountCannotForkKdlbs"),
+          )}
+        </span>
       </div>
     );
   }
-  const accessMessage = contributorAccessMessage(kind, hasWrite);
+  const accessMessage = t(contributorAccessMessage(kind, hasWrite, data.fork_status));
   return (
     <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
       {hasWrite ? (

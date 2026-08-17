@@ -6,6 +6,7 @@ import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tab
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeModeState } from "@/hooks/use-in-office";
 import { cn } from "@/lib/utils";
 import { workspaceHomeHref } from "./app-sidebar-workspace-navigation";
 import { AppSidebarWorkspacePicker } from "./app-sidebar-workspace-picker";
@@ -24,10 +25,12 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
   // one) through the store; the mobile sheet keeps its own local open state.
   const pickerOpen = useAppStore((s) => s.appSidebar.workspacePickerOpen);
   const setPickerOpen = useAppStore((s) => s.setWorkspacePickerOpen);
+  const mode = useOfficeModeState();
   const activeWorkspace = workspaces.items.find(
     (workspace) => workspace.id === workspaces.activeId,
   );
-  const homeHref = workspaceHomeHref(activeWorkspace);
+  const homeDisabled = mode === "unknown";
+  const homeHref = homeDisabled ? "#" : workspaceHomeHref(activeWorkspace);
 
   if (collapsed) {
     // Minimal rail: brand home + expand. The workspace switcher lives only in
@@ -38,6 +41,8 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
           <TooltipTrigger asChild>
             <Link
               href={homeHref}
+              aria-disabled={homeDisabled || undefined}
+              onClick={homeDisabled ? (event) => event.preventDefault() : undefined}
               aria-label={t("sidebar:kandevHome")}
               className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/80 hover:bg-muted/60 cursor-pointer"
             >
@@ -75,6 +80,8 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
     >
       <Link
         href={homeHref}
+        aria-disabled={homeDisabled || undefined}
+        onClick={homeDisabled ? (event) => event.preventDefault() : undefined}
         aria-label={t("sidebar:kandevHome")}
         className={cn(
           "shrink-0 cursor-pointer text-sm font-semibold tracking-tight",

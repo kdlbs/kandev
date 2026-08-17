@@ -685,6 +685,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if err != nil {
 		return nil, err
 	}
+	contributionDestinations, err := contributionDestinationsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -713,6 +717,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 			RemoteContributions:            remoteContributions,
+			ContributionDestinations:       contributionDestinations,
 		},
 		profileInfo: profileInfo,
 	}, nil

@@ -229,6 +229,25 @@ func TestUsageTracker_CumulativeUSDCost(t *testing.T) {
 	}
 }
 
+func TestUsageTracker_ExplicitZeroCostIsPresent(t *testing.T) {
+	a := newTestAdapter()
+	const sess = "sess-zero-cost"
+
+	a.convertUsageUpdate(sess, usageUpdateWithCost(200_000, 100, 0, "USD"))
+	_, cost, present := a.consumeUsageDeltaWithPresence(sess)
+	if cost != 0 {
+		t.Fatalf("cost = %d, want 0", cost)
+	}
+	if !present {
+		t.Fatal("zero USD cost should be reported as present")
+	}
+
+	_, _, present = a.consumeUsageDeltaWithPresence(sess)
+	if present {
+		t.Fatal("consumed cost presence should not leak into the next turn")
+	}
+}
+
 func TestUsageTracker_IgnoresNonUSDCostAndResetsDecreases(t *testing.T) {
 	a := newTestAdapter()
 	const sess = "sess-cost-currency"

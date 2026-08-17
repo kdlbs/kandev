@@ -1,17 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
+import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import type { TaskPR } from "@/lib/types/github";
+import type { TaskMR } from "@/lib/types/gitlab";
+import type { ReviewItemSummary } from "@/lib/plugins/types";
+import { reviewPanelId } from "@/lib/state/dockview-review-panel-id";
 import { AddPanelMenuItems, type AddPanelMenuState } from "./dockview-add-panel-items";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import { reviewItemId } from "./review-selection";
 
-const { mockAddPRPanel, mockAddTodosPanel } = vi.hoisted(() => ({
-  mockAddPRPanel: vi.fn(),
-  mockAddTodosPanel: vi.fn(),
-}));
+const { mockAddMRPanel, mockAddPRPanel, mockAddReviewPanel, mockAddTodosPanel } = vi.hoisted(
+  () => ({
+    mockAddMRPanel: vi.fn(),
+    mockAddPRPanel: vi.fn(),
+    mockAddReviewPanel: vi.fn(),
+    mockAddTodosPanel: vi.fn(),
+  }),
+);
 
 const mockDockviewStore = vi.hoisted(() => ({
-  api: null,
+  api: null as null | {
+    getPanel: (id: string) => { params?: Record<string, unknown> } | undefined;
+  },
   centerGroupId: "group-center",
   addBrowserPanel: vi.fn(),
   addVscodePanel: vi.fn(),
@@ -21,8 +32,15 @@ const mockDockviewStore = vi.hoisted(() => ({
   addChangesPanel: vi.fn(),
   addFilesPanel: vi.fn(),
   addPRPanel: mockAddPRPanel,
-  addMRPanel: vi.fn(),
+  addMRPanel: mockAddMRPanel,
+  addReviewPanel: mockAddReviewPanel,
   addTerminalPanel: vi.fn(),
+}));
+const CENTER_GROUP_ID = mockDockviewStore.centerGroupId;
+const SECONDARY_GROUP_ID = "group-secondary";
+
+const mockNormalizedReviews = vi.hoisted(() => ({
+  reviews: [] as ReviewItemSummary[],
 }));
 
 const mockAppState = vi.hoisted(() => ({
@@ -54,8 +72,14 @@ vi.mock("@/hooks/domains/workspace/use-repository-scripts", () => ({
   useRepositoryScripts: () => ({ scripts: [] }),
 }));
 
+vi.mock("./review-panel-provider", () => ({
+  useNormalizedTaskReviews: () => mockNormalizedReviews.reviews,
+}));
+
 const PR_SUBMENU_TEST_ID = "add-panel-pr-submenu";
 const PR_ITEM_TEST_ID_PREFIX = "add-panel-pr-item-";
+const GITLAB_ORIGIN = "https://gitlab.example";
+const TEST_TIMESTAMP = "2026-07-31T00:00:00Z";
 
 function makePR(id: string, number: number, repo = "kandev"): TaskPR {
   return {
@@ -81,15 +105,63 @@ function makePR(id: string, number: number, repo = "kandev"): TaskPR {
     checks_passing: 0,
     additions: 0,
     deletions: 0,
-    created_at: "2026-07-31T00:00:00Z",
+    created_at: TEST_TIMESTAMP,
     merged_at: null,
     closed_at: null,
     last_synced_at: null,
-    updated_at: "2026-07-31T00:00:00Z",
+    updated_at: TEST_TIMESTAMP,
   };
 }
 
-function renderMenu(state: Partial<AddPanelMenuState> = {}) {
+function makeMR(id: string, number: number, projectPath = "acme/kandev"): TaskMR {
+  return {
+    id,
+    task_id: "task-1",
+    host: GITLAB_ORIGIN,
+    project_path: projectPath,
+    mr_iid: number,
+    mr_url: `${GITLAB_ORIGIN}/${projectPath}/-/merge_requests/${number}`,
+    mr_title: `MR ${number}`,
+    head_branch: `feature/${number}`,
+    base_branch: "main",
+    author_username: "alice",
+    state: "open",
+    approval_state: "",
+    pipeline_state: "",
+    merge_status: "",
+    draft: false,
+    approval_count: 0,
+    required_approvals: 0,
+    pipeline_jobs_total: 0,
+    pipeline_jobs_pass: 0,
+    reviewer_count: 0,
+    unapproved_reviewers: 0,
+    unresolved_discussions: 0,
+    created_at: TEST_TIMESTAMP,
+    updated_at: TEST_TIMESTAMP,
+  };
+}
+
+function makeRegisteredReview(number: number): ReviewItemSummary {
+  return {
+    providerId: "bitbucket",
+    reviewKey: `acme/kandev/${number}`,
+    title: `Change request ${number}`,
+    url: `https://bitbucket.example/acme/kandev/pull-requests/${number}`,
+    connectionScope: "https://bitbucket.example",
+    repositoryId: "acme/kandev",
+    changeRequestNumber: number,
+    state: "open",
+  };
+}
+
+function setOpenPanels(panels: Record<string, Record<string, unknown>>) {
+  mockDockviewStore.api = {
+    getPanel: (id) => (Object.hasOwn(panels, id) ? { params: panels[id] } : undefined),
+  };
+}
+
+function renderMenu(state: Partial<AddPanelMenuState> = {}, groupId = CENTER_GROUP_ID) {
   const fullState: AddPanelMenuState = {
     taskId: null,
     isPassthrough: false,
@@ -104,7 +176,7 @@ function renderMenu(state: Partial<AddPanelMenuState> = {}) {
       <DropdownMenuTrigger>open</DropdownMenuTrigger>
       <DropdownMenuContent>
         <AddPanelMenuItems
-          groupId="group-center"
+          groupId={groupId}
           state={fullState}
           onNewSession={() => {}}
           onAddTerminal={() => {}}
@@ -123,7 +195,11 @@ async function openPRSubmenu() {
 }
 
 beforeEach(() => {
+  mockDockviewStore.api = null;
+  mockNormalizedReviews.reviews = [];
+  mockAddMRPanel.mockClear();
   mockAddPRPanel.mockClear();
+  mockAddReviewPanel.mockClear();
   mockAddTodosPanel.mockClear();
 });
 
@@ -163,17 +239,153 @@ describe("AddPanelMenuItems — linked PR rows", () => {
   });
 
   it("opens the selected PR panel with its task key and the active session", async () => {
-    renderMenu({ prs: [makePR("pr-1", 42, "web"), makePR("pr-2", 77, "api")] });
+    renderMenu({ prs: [makePR("pr-1", 42, "web"), makePR("pr-2", 77, "api")] }, SECONDARY_GROUP_ID);
     await openPRSubmenu();
 
     fireEvent.click(screen.getByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-api-77`));
-    expect(mockAddPRPanel).toHaveBeenCalledWith("acme/api/77");
+    expect(mockAddPRPanel).toHaveBeenCalledWith("acme/api/77", {
+      groupId: SECONDARY_GROUP_ID,
+    });
   });
 
   it("keeps the inline row clickable when exactly one PR is linked", () => {
     renderMenu({ prs: [makePR("pr-1", 42)] });
     fireEvent.click(screen.getByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-kandev-42`));
-    expect(mockAddPRPanel).toHaveBeenCalledWith("acme/kandev/42");
+    expect(mockAddPRPanel).toHaveBeenCalledWith("acme/kandev/42", {
+      groupId: CENTER_GROUP_ID,
+    });
+  });
+
+  it("hides a canonical open PR and renders the sole missing PR inline", () => {
+    setOpenPanels({ "pr-detail": { prKey: "acme/web/42" } });
+
+    renderMenu({ prs: [makePR("pr-1", 42, "web"), makePR("pr-2", 77, "api")] });
+
+    expect(screen.queryByTestId(PR_SUBMENU_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-web-42`)).toBeNull();
+    expect(screen.getByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-api-77`)).toBeTruthy();
+  });
+
+  it("hides a keyed open PR by exact task key", () => {
+    setOpenPanels({ "pr-detail|acme/web/42": {} });
+
+    renderMenu({ prs: [makePR("pr-1", 42, "web"), makePR("pr-2", 77, "api")] });
+
+    expect(screen.queryByTestId(PR_SUBMENU_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-web-42`)).toBeNull();
+    expect(screen.getByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-api-77`)).toBeTruthy();
+  });
+
+  it("uses the filtered PR count for the submenu and keeps other reviews available", async () => {
+    setOpenPanels({ "pr-detail": { prKey: "acme/web/42" } });
+
+    renderMenu({
+      prs: [makePR("pr-1", 42, "web"), makePR("pr-2", 77, "api"), makePR("pr-3", 91, "docs")],
+    });
+
+    const trigger = screen.getByTestId(PR_SUBMENU_TEST_ID);
+    expect(trigger.getAttribute("data-pr-count")).toBe("2");
+    fireEvent.click(trigger);
+    expect(await screen.findByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-api-77`)).toBeTruthy();
+    expect(screen.getByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-docs-91`)).toBeTruthy();
+    expect(screen.queryByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-web-42`)).toBeNull();
+  });
+
+  it("offers a PR on the next menu mount after its exact panel closes", () => {
+    setOpenPanels({ "pr-detail|acme/kandev/42": {} });
+    const firstMenu = renderMenu({ prs: [makePR("pr-1", 42)] });
+    expect(screen.queryByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-kandev-42`)).toBeNull();
+
+    firstMenu.unmount();
+    setOpenPanels({});
+    renderMenu({ prs: [makePR("pr-1", 42)] });
+
+    expect(screen.getByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-kandev-42`)).toBeTruthy();
+  });
+});
+
+describe("AddPanelMenuItems — open review identities", () => {
+  it("opens a missing GitLab MR in the invoking group", () => {
+    const mr = makeMR("mr-1", 42);
+    renderMenu({ mrs: [mr] }, SECONDARY_GROUP_ID);
+
+    fireEvent.click(screen.getByTestId("add-panel-mr-item-mr-1"));
+
+    expect(mockAddMRPanel).toHaveBeenCalledWith(mrTaskKey(mr), {
+      groupId: SECONDARY_GROUP_ID,
+    });
+  });
+
+  it("opens a missing registered-provider review in the invoking group", () => {
+    const review = makeRegisteredReview(42);
+    mockNormalizedReviews.reviews = [review];
+    renderMenu({}, SECONDARY_GROUP_ID);
+
+    fireEvent.click(screen.getByTestId(`add-panel-review-item-${reviewItemId(review)}`));
+
+    expect(mockAddReviewPanel).toHaveBeenCalledWith(review, {
+      groupId: SECONDARY_GROUP_ID,
+    });
+  });
+
+  it("hides canonical and keyed GitLab MRs by exact task key", () => {
+    const canonicalMR = makeMR("mr-1", 42, "acme/web");
+    const keyedMR = makeMR("mr-2", 77, "acme/api");
+    const missingMR = makeMR("mr-3", 91, "acme/docs");
+    setOpenPanels({
+      "pr-detail": { mrKey: mrTaskKey(canonicalMR) },
+      [`mr-detail|${mrTaskKey(keyedMR)}`]: {},
+    });
+
+    renderMenu({ mrs: [canonicalMR, keyedMR, missingMR] });
+
+    expect(screen.queryByTestId("add-panel-mr-item-mr-1")).toBeNull();
+    expect(screen.queryByTestId("add-panel-mr-item-mr-2")).toBeNull();
+    expect(screen.getByTestId("add-panel-mr-item-mr-3")).toBeTruthy();
+  });
+
+  it("uses the single-MR label when filtering leaves one visible MR", () => {
+    const openMR = makeMR("mr-1", 42, "acme/web");
+    const missingMR = makeMR("mr-2", 77, "acme/api");
+    setOpenPanels({ "pr-detail": { mrKey: mrTaskKey(openMR) } });
+
+    renderMenu({ mrs: [openMR, missingMR] });
+
+    expect(screen.getByTestId("add-panel-mr-item-mr-2").textContent).toContain("Merge Request !77");
+  });
+
+  it("hides registered-provider reviews with exact canonical and keyed identities", () => {
+    const canonicalReview = makeRegisteredReview(42);
+    const keyedReview = makeRegisteredReview(77);
+    const missingReview = makeRegisteredReview(91);
+    setOpenPanels({
+      "pr-detail": {
+        providerId: canonicalReview.providerId,
+        connectionScope: canonicalReview.connectionScope,
+        repositoryId: canonicalReview.repositoryId,
+        changeRequestNumber: canonicalReview.changeRequestNumber,
+      },
+      [reviewPanelId(keyedReview)]: {},
+    });
+    mockNormalizedReviews.reviews = [canonicalReview, keyedReview, missingReview];
+
+    renderMenu();
+
+    expect(
+      screen.queryByTestId(`add-panel-review-item-${reviewItemId(canonicalReview)}`),
+    ).toBeNull();
+    expect(screen.queryByTestId(`add-panel-review-item-${reviewItemId(keyedReview)}`)).toBeNull();
+    expect(screen.getByTestId(`add-panel-review-item-${reviewItemId(missingReview)}`)).toBeTruthy();
+  });
+
+  it("does not hide an individual review for a provider-neutral canonical selector", () => {
+    const review = makeRegisteredReview(42);
+    setOpenPanels({ "pr-detail": {} });
+    mockNormalizedReviews.reviews = [review];
+
+    renderMenu();
+
+    expect(screen.getByTestId(`add-panel-review-item-${reviewItemId(review)}`)).toBeTruthy();
   });
 });
 
@@ -205,7 +417,7 @@ describe("AddPanelMenuItems — plugin task panels (AC1)", () => {
       "kandev-plugin-notes",
       "notes",
       "Notes",
-      { groupId: "group-center" },
+      { groupId: CENTER_GROUP_ID },
     );
   });
 });
@@ -261,7 +473,7 @@ describe("AddPanelMenuItems — Todos", () => {
     expect(item).toBeTruthy();
 
     fireEvent.click(item);
-    expect(mockAddTodosPanel).toHaveBeenCalledWith({ groupId: "group-center" });
+    expect(mockAddTodosPanel).toHaveBeenCalledWith({ groupId: CENTER_GROUP_ID });
   });
 
   it("hides the Todos row for a passthrough session, matching the Plan row's guard", () => {

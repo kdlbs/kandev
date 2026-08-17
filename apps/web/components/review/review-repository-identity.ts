@@ -37,6 +37,10 @@ function worktreeDirectoryName(path: string | undefined): string | undefined {
   return directory ? sanitizeReviewRepositoryName(directory) || undefined : undefined;
 }
 
+function isRepositoryWorktreeName(worktreeName: string, canonicalName: string): boolean {
+  return worktreeName === canonicalName || worktreeName.startsWith(`${canonicalName}-`);
+}
+
 function findPRTaskRepository(
   pr: ReviewPRIdentity,
   taskRepositories: ReviewTaskRepositoryIdentity[],
@@ -78,6 +82,27 @@ function findPRWorktree(
   return slugMatches.length === 1 ? slugMatches[0] : undefined;
 }
 
+function resolveSiblingRepositoryName(
+  canonicalName: string,
+  pr: ReviewPRIdentity,
+  taskRepository: ReviewTaskRepositoryIdentity | undefined,
+  siblingRepositories: ReviewTaskRepositoryIdentity[],
+  worktrees: ReviewWorktreeIdentity[],
+): string {
+  if (taskRepository && siblingRepositories.length >= 2) {
+    if (taskRepository === siblingRepositories[0]) return canonicalName;
+  }
+
+  const worktreeName = worktreeDirectoryName(findPRWorktree(pr, taskRepository, worktrees)?.path);
+  if (worktreeName && isRepositoryWorktreeName(worktreeName, canonicalName)) return worktreeName;
+
+  if (!taskRepository || siblingRepositories.length < 2) return canonicalName;
+
+  const branch = taskRepository.checkout_branch || taskRepository.base_branch || pr.head_branch;
+  const branchSlug = sanitizeReviewRepositoryName(branch ?? "");
+  return branchSlug ? `${canonicalName}-${branchSlug}` : canonicalName;
+}
+
 /**
  * Resolves the repository_name stamped by agentctl for a selected PR. Same-repo
  * multi-branch tasks use sibling worktree directories (`repo-branch-slug`), so
@@ -100,16 +125,11 @@ export function resolvePRReviewRepositoryIdentity({
   // root. Its worktree basename is therefore the task slug, not a repository
   // identity, and may arrive after initial render. Keep the canonical name so
   // hydration cannot rename the selected PR's file group.
-  if (taskRepository && siblingRepositories.length >= 2) {
-    if (taskRepository === siblingRepositories[0]) return canonicalName;
-  }
-
-  const worktreeName = worktreeDirectoryName(findPRWorktree(pr, taskRepository, worktrees)?.path);
-  if (worktreeName) return worktreeName;
-
-  if (!taskRepository || siblingRepositories.length < 2) return canonicalName;
-
-  const branch = taskRepository.checkout_branch || taskRepository.base_branch || pr.head_branch;
-  const branchSlug = sanitizeReviewRepositoryName(branch ?? "");
-  return branchSlug ? `${canonicalName}-${branchSlug}` : canonicalName;
+  return resolveSiblingRepositoryName(
+    canonicalName,
+    pr,
+    taskRepository,
+    siblingRepositories,
+    worktrees,
+  );
 }

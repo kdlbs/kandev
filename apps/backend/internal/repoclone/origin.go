@@ -25,6 +25,48 @@ func HTTPSProviderOrigin(providerHost string) (string, error) {
 	return ProtocolHTTPS + "://" + strings.ToLower(parsed.Host), nil
 }
 
+// CanonicalHTTPSCloneURL rewrites an SSH clone URL into its HTTPS equivalent,
+// dropping the SSH user and any SSH port. It returns "" for anything that is
+// not an SSH clone URL, so callers can fall back to the original value.
+//
+// A checkout cloned over SSH stores an SSH origin, but the transport is not a
+// different repository: managed credentials, and the executors that install
+// `url.<https>.insteadOf` rewrites, both work off the HTTPS identity. Callers
+// still validate the result against the provider origin.
+func CanonicalHTTPSCloneURL(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	if !strings.Contains(value, "://") {
+		return scpStyleHTTPSCloneURL(value)
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || !strings.EqualFold(parsed.Scheme, ProtocolSSH) ||
+		parsed.Hostname() == "" || parsed.Path == "" || parsed.Path == "/" {
+		return ""
+	}
+	return ProtocolHTTPS + "://" + strings.ToLower(parsed.Hostname()) + parsed.Path
+}
+
+// scpStyleHTTPSCloneURL converts the scp-style "user@host:owner/repo.git" form,
+// which carries no scheme and cannot express a port.
+func scpStyleHTTPSCloneURL(value string) string {
+	user, hostAndPath, found := strings.Cut(value, "@")
+	if !found || user == "" || strings.ContainsAny(user, "/:") {
+		return ""
+	}
+	host, path, found := strings.Cut(hostAndPath, ":")
+	if !found || host == "" || strings.Contains(host, "/") {
+		return ""
+	}
+	path = strings.TrimPrefix(path, "/")
+	if path == "" {
+		return ""
+	}
+	return ProtocolHTTPS + "://" + strings.ToLower(host) + "/" + path
+}
+
 // ValidateHTTPSCloneOrigin rejects credential-bearing or ambiguous clone URLs
 // and requires their origin to match the provider identity that authorized
 // credential use.

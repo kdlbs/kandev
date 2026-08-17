@@ -29,25 +29,28 @@ type ScheduleSelectorProps = {
   onChange: (config: Record<string, unknown>) => void;
 };
 
-const FREQUENCY_OPTIONS: { value: Frequency; label: string }[] = [
-  { value: "every-5m", label: "every 5 minutes" },
-  { value: "every-15m", label: "every 15 minutes" },
-  { value: "every-30m", label: "every 30 minutes" },
-  { value: "hourly", label: "every hour" },
-  { value: "every-6h", label: "every 6 hours" },
-  { value: "daily", label: "every day" },
-  { value: "weekly", label: "every week" },
-  { value: "custom", label: "a custom schedule" },
+// Catalog keys rather than copy: both tables are built at module load, so a
+// `t()` here would freeze at the boot locale (docs/i18n.md). Each render
+// resolves them.
+const FREQUENCY_OPTIONS: { value: Frequency; labelKey: string }[] = [
+  { value: "every-5m", labelKey: "automations:frequencyEvery5Minutes" },
+  { value: "every-15m", labelKey: "automations:frequencyEvery15Minutes" },
+  { value: "every-30m", labelKey: "automations:frequencyEvery30Minutes" },
+  { value: "hourly", labelKey: "automations:frequencyEveryHour" },
+  { value: "every-6h", labelKey: "automations:frequencyEvery6Hours" },
+  { value: "daily", labelKey: "automations:frequencyEveryDay" },
+  { value: "weekly", labelKey: "automations:frequencyEveryWeek" },
+  { value: "custom", labelKey: "automations:frequencyCustom" },
 ];
 
-const WEEKDAYS = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
+const WEEKDAY_KEYS = [
+  "common:weekdaySunday",
+  "common:weekdayMonday",
+  "common:weekdayTuesday",
+  "common:weekdayWednesday",
+  "common:weekdayThursday",
+  "common:weekdayFriday",
+  "common:weekdaySaturday",
 ] as const;
 
 const DESCRIPTORS = new Set([
@@ -211,7 +214,7 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
   const handleCustomBlur = () => {
     const trimmed = customDraft.trim();
     if (!isValidExpression(trimmed)) {
-      setCustomError("That's not a schedule we can read. Try a 5-field cron like 0 9 * * 1-5.");
+      setCustomError(t("automations:scheduleUnparseable"));
       return;
     }
     setCustomError(null);
@@ -269,6 +272,7 @@ function FrequencySelect({
   value: Frequency;
   onChange: (value: Frequency) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Select value={value} onValueChange={(next) => onChange(next as Frequency)}>
       <SelectTrigger className="w-[170px] h-8" data-testid="schedule-frequency">
@@ -277,7 +281,7 @@ function FrequencySelect({
       <SelectContent>
         {FREQUENCY_OPTIONS.map((option) => (
           <SelectItem key={option.value} value={option.value}>
-            {option.label}
+            {t(option.labelKey)}
           </SelectItem>
         ))}
       </SelectContent>
@@ -357,16 +361,16 @@ function FrequencyDetail({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {WEEKDAYS.map((day, index) => (
-                <SelectItem key={day} value={String(index)}>
-                  {day}
+              {WEEKDAY_KEYS.map((dayKey, index) => (
+                <SelectItem key={dayKey} value={String(index)}>
+                  {t(dayKey)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </>
       )}
-      <span className="text-muted-foreground">at</span>
+      <span className="text-muted-foreground">{t("automations:scheduleAtSeparator")}</span>
       <Input
         type="time"
         value={`${pad(spec.hour)}:${pad(spec.minute)}`}

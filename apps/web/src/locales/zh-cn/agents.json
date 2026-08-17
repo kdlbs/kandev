@@ -11,7 +11,6 @@
   "agentNotFound": "未找到智能体。",
   "agentProfileSettings": "{{name}} 智能体配置",
   "agentProfilesTitle": "{{name}} 配置",
-  "approveUpdate": "批准更新",
   "authRequiredOpenLoginTerminal": "需要身份验证；点击打开登录终端",
   "authRequiredOpenShell": "需要身份验证；点击打开 shell 并登录",
   "authenticationRequired": "需要身份验证",
@@ -151,7 +150,6 @@
   "noModeFound": "未找到模式。",
   "noModelFound": "未找到模型。",
   "noModelsFound": "未找到模型。",
-  "noProfilesYet": "尚无配置。请从已安装的智能体创建一个。",
   "notInstalled": "未安装",
   "openTerminal": "打开终端",
   "pageDescription": "发现已安装的智能体、安装新智能体并管理其配置。",
@@ -184,7 +182,6 @@
   "runtimeUpdateSessionsNote": "活动会话会继续运行；仅后续探测与启动会使用刷新后的运行时。",
   "runtimeUpdatedRefreshFailed": "运行时已更新，但无法刷新能力：{{error}}",
   "runtimeUpdatedSuccess": "运行时更新成功。",
-  "runtimeVersion": "运行时版本",
   "activeRuntimeVersion": "活动版本：{{version}}",
   "activeRuntimeVersionMarker": "活动",
   "latestRuntimeVersion": "最新",
@@ -234,5 +231,9 @@
   "duplicateProfileSuccess": "智能体配置已复制",
   "duplicateSaveBlocked": "设置仍在保存，请稍后重试。",
   "failedToDuplicateProfile": "复制智能体配置失败",
-  "noProfilesYetShort": "暂无配置"
+  "noProfilesYetShort": "暂无配置",
+  "createProfile": "创建配置",
+  "creatingProfile": "正在创建…",
+  "saveProfile": "保存配置",
+  "savingProfile": "正在保存…"
 }

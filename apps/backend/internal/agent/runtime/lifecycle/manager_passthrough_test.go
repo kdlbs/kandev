@@ -536,8 +536,12 @@ func TestPassthroughPiWritesProjectFile(t *testing.T) {
 	mgr, execution, profile := newPassthroughMCPTestManager(t, "pi-acp")
 	piPath := filepath.Join(execution.WorkspacePath, ".pi", "mcp.json")
 
-	if _, _, _, _, err := mgr.passthroughAgentCommand(context.Background(), execution, profile); err != nil {
+	_, _, _, cmd, err := mgr.passthroughAgentCommand(context.Background(), execution, profile)
+	if err != nil {
 		t.Fatalf("passthroughAgentCommand returned error: %v", err)
+	}
+	if got, want := cmd.Args(), []string{"pi", "--model", "default"}; !slices.Equal(got, want) {
+		t.Fatalf("passthrough command = %v, want %v", got, want)
 	}
 
 	data, err := os.ReadFile(piPath)

@@ -99,7 +99,6 @@
   "lastAttempt": "última tentativa {{when}}",
   "lastSynced": "última sincronização {{when}}",
   "loadingWorkflowSteps": "A carregar os passos do fluxo de trabalho...",
-  "manageWorkflowsForThisWorkspace": "Faça a gestão dos fluxos de trabalho desta área de trabalho.",
   "migrateAndDelete": "Migrar e eliminar",
   "migrateAndDeleteStep": "Migrar e eliminar o passo",
   "migrating": "A migrar...",
@@ -140,7 +139,6 @@
   "promptSourceStepPromptWithTaskDescription": "Voltar a entrar em \"{{stepName}}\" envia o prompt do passo já processado, incluindo a descrição da tarefa.",
   "promptSourceTaskDescription": "\"{{stepName}}\" não tem prompt de passo, pelo que voltar a entrar envia a descrição da tarefa.",
   "pullFrom": "Puxar de",
-  "pullFromHelp": "Passo alimentador opcional do qual puxar trabalho em fila quando este passo tiver capacidade.",
   "pullFromGuidanceWithFeeder": "Entrada automática opcional através de um alimentador. As tarefas em fila no destino são admitidas primeiro; depois, o Kandev puxa trabalho elegível de {{feeder}} quando surge capacidade. Movimentos diretos e transições automáticas entram na fila do destino e não precisam de alimentador. Tarefas novas para um passo cheio usam este alimentador.",
   "pullFromGuidanceWithoutFeeder": "Não está selecionado nenhum alimentador. Movimentos diretos e transições automáticas entram na fila deste destino quando está cheio. As tarefas novas também permanecem visíveis nesta fila até surgir capacidade.",
   "readOnlyManagedBySync": "Só de leitura; gerido pela sincronização de fluxos de trabalho",
@@ -258,5 +256,13 @@
   "workflowsSectionDescription": "Crie pipelines autónomas com transições automáticas ou fluxos de trabalho manuais em que é o utilizador a mover as tarefas",
   "workflowSteps": "Passos do fluxo de trabalho",
   "workflowSyncCompleted": "Sincronização de fluxos de trabalho concluída",
-  "workspaceSettings": "Definições da área de trabalho"
+  "duplicateUnavailableInImproveKandev": "Os fluxos de trabalho deste workspace não podem ser duplicados.",
+  "duplicateWorkflow": "Duplicar",
+  "duplicatingWorkflow": "A duplicar...",
+  "failedToDuplicateWorkflow": "Falha ao duplicar o fluxo de trabalho",
+  "loadingSteps": "A carregar passos…",
+  "noStepsInThisWorkflow": "Este fluxo de trabalho não tem passos",
+  "saveBeforeDuplicating": "Guarde o fluxo de trabalho antes de o duplicar.",
+  "selectAWorkflowFirst": "Selecione primeiro um fluxo de trabalho",
+  "workflowMutationInProgress": "Aguarde que a alteração atual do fluxo de trabalho termine."
 }

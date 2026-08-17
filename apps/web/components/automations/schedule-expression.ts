@@ -14,6 +14,7 @@
  * schedule composer edits, and computes the next firing so the editor can show
  * the resolved instant instead of leaving it implicit.
  */
+import { t } from "@/lib/i18n";
 
 export type Frequency =
   | "every-5m"
@@ -420,21 +421,24 @@ export function timeZoneAbbreviation(timeZone: string, at: Date = new Date()): s
   }
 }
 
-const WEEKDAY_NAMES = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
+// Catalog KEYS, not copy: this array is built once at module load, so resolving
+// it here would freeze the weekday names at the boot locale (docs/i18n.md,
+// "no module-scope t()"). `describeSchedule` resolves them per call instead.
+const WEEKDAY_KEYS = [
+  "common:weekdaySunday",
+  "common:weekdayMonday",
+  "common:weekdayTuesday",
+  "common:weekdayWednesday",
+  "common:weekdayThursday",
+  "common:weekdayFriday",
+  "common:weekdaySaturday",
 ];
 
-const INTERVAL_LABELS: Partial<Record<Frequency, string>> = {
-  "every-5m": "Every 5 minutes",
-  "every-15m": "Every 15 minutes",
-  "every-30m": "Every 30 minutes",
-  "every-6h": "Every 6 hours",
+const INTERVAL_LABEL_KEYS: Partial<Record<Frequency, string>> = {
+  "every-5m": "automations:scheduleIntervalEvery5Minutes",
+  "every-15m": "automations:scheduleIntervalEvery15Minutes",
+  "every-30m": "automations:scheduleIntervalEvery30Minutes",
+  "every-6h": "automations:scheduleIntervalEvery6Hours",
 };
 
 const pad = (value: number) => String(value).padStart(2, "0");
@@ -445,11 +449,11 @@ const pad = (value: number) => String(value).padStart(2, "0");
  */
 export function describeSchedule(expression: string, timeZone: string): string {
   const trimmed = expression.trim();
-  if (!trimmed) return "No schedule";
+  if (!trimmed) return t("automations:scheduleNone");
 
   const spec = parseExpression(trimmed);
-  const interval = INTERVAL_LABELS[spec.frequency];
-  if (interval) return interval;
+  const intervalKey = INTERVAL_LABEL_KEYS[spec.frequency];
+  if (intervalKey) return t(intervalKey);
 
   const zone = timeZone || "UTC";
   const zoneLabel = timeZoneAbbreviation(zone);
@@ -457,11 +461,15 @@ export function describeSchedule(expression: string, timeZone: string): string {
 
   switch (spec.frequency) {
     case "hourly":
-      return `Every hour at :${pad(spec.minute)}`;
+      return t("automations:scheduleEveryHourAt", { minute: pad(spec.minute) });
     case "daily":
-      return `Every day at ${at} ${zoneLabel}`;
+      return t("automations:scheduleEveryDayAt", { time: at, zone: zoneLabel });
     case "weekly":
-      return `Every ${WEEKDAY_NAMES[spec.weekday]} at ${at} ${zoneLabel}`;
+      return t("automations:scheduleEveryWeekdayAt", {
+        weekday: t(WEEKDAY_KEYS[spec.weekday]),
+        time: at,
+        zone: zoneLabel,
+      });
     default:
       return `${trimmed} · ${zoneLabel}`;
   }

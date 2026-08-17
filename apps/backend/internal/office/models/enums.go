@@ -130,6 +130,37 @@ func (s BudgetScopeType) Valid() bool {
 	return false
 }
 
+// CostSource records which layer priced a CostEvent's dollars, distinct
+// from Estimated (a token-synthesis flag). NULL on legacy rows written
+// before this field existed — never inferred.
+type CostSource string
+
+// Cost-source values. See docs/specs/office/costs.md.
+const (
+	// CostSourceProviderReported means the CLI forwarded an authoritative
+	// USD amount (claude-acp's usage_update.cost.amount); no rates apply.
+	CostSourceProviderReported CostSource = "provider_reported"
+	// CostSourceModelsDevList means the row was priced from a models.dev
+	// list-price lookup; the four rate_*_per_million columns and
+	// pricing_catalog_version record what was applied.
+	CostSourceModelsDevList CostSource = "models_dev_list"
+	// CostSourceUnpriced means no cost could be resolved (no pricing
+	// lookup wired, empty model id, or a lookup miss); cost_subcents is 0.
+	CostSourceUnpriced CostSource = "unpriced"
+)
+
+// String implements fmt.Stringer.
+func (s CostSource) String() string { return string(s) }
+
+// Valid reports whether s is one of the declared CostSource values.
+func (s CostSource) Valid() bool {
+	switch s {
+	case CostSourceProviderReported, CostSourceModelsDevList, CostSourceUnpriced:
+		return true
+	}
+	return false
+}
+
 // BudgetPeriod is the time window a BudgetPolicy limit applies to.
 type BudgetPeriod string
 

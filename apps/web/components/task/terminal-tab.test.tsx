@@ -130,7 +130,7 @@ describe("TerminalTab", () => {
     render(<TerminalTab {...makeProps()} />);
 
     await waitFor(() => {
-      expect(mockSetTitle).toHaveBeenCalledWith(i18n.t("task:terminal"));
+      expect(mockSetTitle).toHaveBeenCalledWith(i18n.t("task:panelTerminal"));
     });
   });
 

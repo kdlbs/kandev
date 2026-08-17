@@ -118,5 +118,13 @@
   "workspaceNotFound": "未找到工作区",
   "workspaceSettings": "工作区设置",
   "worktreeBranchTemplate": "工作树分支模板",
-  "worktreeSync": "工作树同步"
+  "worktreeSync": "工作树同步",
+  "chooseDifferentRepositoryName": "请另选一个仓库名称。",
+  "enterRepositoryName": "请输入仓库名称。",
+  "repositoryNameMustBeOneFolder": "仓库名称必须是单个目录名。",
+  "sourceChooseAFolder": "请选择一个目录。",
+  "sourceChooseRepoAndBranch": "请选择一个仓库和基线分支。",
+  "sourceEnterValidRemoteUrl": "请输入有效的远程仓库 URL 和基线分支。",
+  "sourceFolderAlreadySelected": "该目录已被选择。",
+  "sourceRepoBranchAlreadySelected": "该仓库和分支已被选择。"
 }

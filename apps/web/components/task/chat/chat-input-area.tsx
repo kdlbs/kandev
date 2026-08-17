@@ -13,6 +13,7 @@ import {
   type ChatInputContainerHandle,
 } from "@/components/task/chat/chat-input-container";
 import { QueueAffordance } from "@/components/task/chat/queued-ghost-list";
+import { ComposerAgentStartHint } from "./composer-agent-start-hint";
 import {
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
@@ -85,12 +86,12 @@ export function resolveInputPlaceholder(
   hasClarification: boolean,
   needsRecovery: boolean,
 ): string {
-  if (needsRecovery) return "Choose a recovery option above to continue...";
-  if (hasClarification) return "Queue instructions while the question is pending...";
-  if (isAgentBusy) return "Queue instructions to the agent...";
-  if (activeDocumentType === "file") return "Continue working on the file...";
-  if (planModeEnabled) return "Continue working on the plan...";
-  return "Continue working on the task...";
+  if (needsRecovery) return t("task:composerPlaceholderRecovery");
+  if (hasClarification) return t("task:composerPlaceholderClarification");
+  if (isAgentBusy) return t("task:composerPlaceholderBusy");
+  if (activeDocumentType === "file") return t("task:composerPlaceholderFile");
+  if (planModeEnabled) return t("task:composerPlaceholderPlan");
+  return t("task:composerPlaceholderTask");
 }
 
 type PlaceholderArgs = {
@@ -106,7 +107,7 @@ type PlaceholderArgs = {
 /** Picks the composer placeholder: an explicit override wins, then the
  *  "switching agent" state, then {@link resolveInputPlaceholder}. */
 function pickInputPlaceholder(a: PlaceholderArgs): string {
-  if (a.isMoving) return "Switching agent...";
+  if (a.isMoving) return t("task:composerPlaceholderSwitchingAgent");
   // Preserve the prior `??` semantics: an explicit "" override (caller wants
   // no placeholder text) must NOT fall through to the resolver default.
   if (a.override !== undefined) return a.override;
@@ -339,6 +340,10 @@ type ChatInputAreaProps = {
    * dependency chip is about.
    */
   statusTaskId?: string | null;
+  /** Recovered-idle (resume-skipped) sessions render the "a message will
+   * auto-start the agent" hint above the composer while the agent is
+   * stopped. */
+  showAgentStartHint?: boolean;
 };
 
 /** Resolves whether this session's executor environment is unavailable, and why. */
@@ -426,6 +431,7 @@ export function ChatInputArea({
   showScrollToStart,
   onScrollToStart,
   statusTaskId = null,
+  showAgentStartHint = false,
 }: ChatInputAreaProps) {
   const { resolvedSessionId, taskId, isAgentBusy } = panelState;
   const statusRowTaskId = resolveStatusRowTaskId(taskId, statusTaskId);
@@ -461,6 +467,12 @@ export function ChatInputArea({
       data-testid="chat-input-area"
       className={cn("bg-card flex-shrink-0 px-2 pb-2 pt-1", surfaceClassName)}
     >
+      <ComposerAgentStartHint
+        show={showAgentStartHint}
+        needsRecovery={panelState.needsRecovery}
+        executorUnavailable={executor.unavailable}
+        hasPendingClarification={Boolean(panelState.pendingClarification)}
+      />
       <QueueAffordance
         sessionId={resolvedSessionId}
         canDrain={canDrainQueue}

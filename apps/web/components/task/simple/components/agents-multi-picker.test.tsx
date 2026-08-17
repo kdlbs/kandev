@@ -45,9 +45,11 @@ function makeAgent(id: string, name: string): AgentProfile {
   };
 }
 
+const SEED_WORKSPACE_ID = "ws-1";
+
 function SeedAgents({ agents }: { agents: AgentProfile[] }) {
   const setAgents = useAppStore((s) => s.setOfficeAgentProfiles);
-  useEffect(() => setAgents(agents), [setAgents, agents]);
+  useEffect(() => setAgents(SEED_WORKSPACE_ID, agents), [setAgents, agents]);
   return null;
 }
 
@@ -62,7 +64,9 @@ function Wrapper({
 }) {
   const ctx = { task, applyPatch: () => {}, restore: () => {} };
   return (
-    <StateProvider>
+    // The office collections are workspace-keyed, so the picker only sees the
+    // seeded agents when that workspace is the active one.
+    <StateProvider initialState={{ workspaces: { items: [], activeId: SEED_WORKSPACE_ID } }}>
       <TooltipProvider>
         <SeedAgents agents={agents} />
         <TaskOptimisticContextProvider value={ctx}>{children}</TaskOptimisticContextProvider>

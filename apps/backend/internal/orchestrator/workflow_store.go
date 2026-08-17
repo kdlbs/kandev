@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -182,7 +183,7 @@ func (s *workflowStore) LoadPreviousStep(ctx context.Context, workflowID string,
 	return engine.CompileStep(step), nil
 }
 
-func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, _ engine.Trigger) error {
+func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger) error {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("load task for transition: %w", err)
@@ -210,7 +211,14 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
 	}
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.updateTransitionTask(ctx, task, targetStep); err != nil {
+	// engine_transition applies only when no outer caller already declared a
+	// trigger — applyPendingMove sets mcp_deferred_move before reaching this
+	// path, and that must survive rather than be overwritten.
+	transitionCtx := ctx
+	if !steptelemetry.HasTrigger(transitionCtx) {
+		transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
+	}
+	if err := s.updateTransitionTask(transitionCtx, task, targetStep); err != nil {
 		return fmt.Errorf("update task workflow step: %w", err)
 	}
 
@@ -252,6 +260,15 @@ func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.T
 }
 
 func (s *workflowStore) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {
+	// A queue/WIP reconciliation is always wip_pull, unconditionally
+	// overriding whatever trigger the caller that vacated the step declared
+	// (or absent, for the ReconcileQueuedTasks restart sweep) — the vacating
+	// move and the resulting pull are two distinct ledger rows with two
+	// distinct causes, and no single session initiates a pull.
+	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger:   steptelemetry.TriggerWIPPull,
+		ActorKind: steptelemetry.ActorSystem,
+	})
 	vacatedStep := s.pullEnabledStep(ctx, vacatedStepID)
 	if vacatedStep == nil {
 		return

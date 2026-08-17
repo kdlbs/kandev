@@ -4,12 +4,32 @@ import { activateLocale } from "@/lib/i18n";
 import { FactoryResetDialog } from "./factory-reset-dialog";
 import { RestoreDialog } from "./restore-dialog";
 
+const restoreDialogTestState = vi.hoisted(() => ({
+  job: null as { state: string; message?: string } | null,
+  restart: {
+    phase: "idle" as const,
+    errorMessage: null as string | null,
+    isRestarting: false,
+    start: vi.fn(),
+    dismiss: vi.fn(),
+  },
+}));
+
 vi.mock("@/hooks/domains/system/use-system-jobs", () => ({
-  useSystemJob: () => null,
+  useSystemJob: () => restoreDialogTestState.job,
   useSystemJobs: () => [],
 }));
 
-afterEach(cleanup);
+vi.mock("@/hooks/domains/system/use-kandev-restart", () => ({
+  useKandevRestart: () => restoreDialogTestState.restart,
+}));
+
+afterEach(() => {
+  cleanup();
+  restoreDialogTestState.job = null;
+  restoreDialogTestState.restart.start.mockReset();
+  restoreDialogTestState.restart.dismiss.mockReset();
+});
 
 /**
  * Both dialogs gate their confirm button on `typed === CONFIRM_TOKEN` and send
@@ -58,6 +78,17 @@ describe("system type-to-confirm dialogs", () => {
 
     fireEvent.change(input, { target: { value: "RESTORE" } });
     expect(confirm.disabled).toBe(false);
+  });
+
+  it("requires a restart after a successful restore", () => {
+    restoreDialogTestState.job = { state: "succeeded" };
+    render(<RestoreDialog open onOpenChange={vi.fn()} name="snapshot-1.db" />);
+
+    expect(screen.getByTestId("system-restore-restart")).toBeTruthy();
+    expect(screen.queryByTestId("system-restore-close")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("system-restore-restart"));
+    expect(restoreDialogTestState.restart.start).toHaveBeenCalledOnce();
   });
 });
 

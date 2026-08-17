@@ -77,4 +77,11 @@ export const test = base.extend<{ testPage: Page }, OfficeFixtures>({
   },
 });
 
+// Tests in this suite deliberately exercise status transitions. Reset the
+// worker-shared CEO before every test so a previous paused/stopped/working
+// state cannot make the scheduler silently reject the next assignment.
+test.beforeEach(async ({ officeApi, officeSeed }) => {
+  await officeApi.updateAgentStatus(officeSeed.agentId, "idle");
+});
+
 export { expect } from "@playwright/test";

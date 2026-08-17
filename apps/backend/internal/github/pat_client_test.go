@@ -379,6 +379,35 @@ func TestPATClient_FindPRByBranch_UsesGraphQLHeadRefName(t *testing.T) {
 	}
 }
 
+func TestPATClient_FindPRByHead_UsesExactSourceRepository(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/kdlbs/kandev/pulls" {
+			t.Errorf("path = %q, want /repos/kdlbs/kandev/pulls", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("head"); got != "alice:feature" {
+			t.Errorf("head = %q, want alice:feature", got)
+		}
+		if got := r.URL.Query().Get("per_page"); got != "100" {
+			t.Errorf("per_page = %q, want 100", got)
+		}
+		_, _ = w.Write([]byte(`[{"number":12,"title":"fork PR","html_url":"https://x/12","state":"open",
+			"head":{"ref":"feature","sha":"abc123","repo":{"id":200,"name":"kandev","full_name":"alice/kandev","owner":{"login":"alice"}}},
+			"base":{"ref":"main","repo":{"id":100,"name":"kandev","full_name":"kdlbs/kandev","owner":{"login":"kdlbs"}}},
+			"user":{"login":"alice"}}]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	pr, err := newPATClientPointingAt(t, srv.URL).FindPRByHead(
+		context.Background(), "kdlbs", "kandev", "alice", "kandev", "feature",
+	)
+	if err != nil {
+		t.Fatalf("FindPRByHead: %v", err)
+	}
+	if pr == nil || pr.Number != 12 || pr.HeadRepoOwner != "alice" || pr.HeadRepoName != "kandev" {
+		t.Fatalf("PR = %#v, want source alice/kandev", pr)
+	}
+}
+
 func TestConvertPatRequestedReviewers(t *testing.T) {
 	raw := &patPR{
 		RequestedReviewers: []struct {

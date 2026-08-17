@@ -5,7 +5,9 @@ import { usePathname } from "@/lib/routing/client-router";
 import { isSettingsRoute } from "./app-sidebar-route";
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureWorkspaceWorkflows } from "@/hooks/use-workflows";
-import { useInOffice } from "@/hooks/use-in-office";
+import { useOfficeModeState } from "@/hooks/use-in-office";
+import type { WorkspaceMode } from "@/components/workspace-scope-provider";
+import { useOfficeWorkspaceData } from "@/hooks/use-office-workspace-data";
 import { cn } from "@/lib/utils";
 import {
   APP_SIDEBAR_COLLAPSED_WIDTH,
@@ -44,50 +46,74 @@ const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean 
 
 type AppSidebarNavigationProps = {
   collapsed: boolean;
-  inOffice: boolean;
+  mode: WorkspaceMode;
   settingsMode: boolean;
 };
 
-function AppSidebarNavigation({ collapsed, inOffice, settingsMode }: AppSidebarNavigationProps) {
+/**
+ * Mode comes from the active workspace, which is not known on the first frame
+ * of a boot whose payload ships no workspace list. Rendering only the
+ * mode-independent rows — rather than assuming kanban — is what stops the
+ * sidebar painting one mode's sections and swapping to the other's a tick
+ * later.
+ */
+function AppSidebarUnresolvedNav({ collapsed }: { collapsed: boolean }) {
+  return (
+    <div className="flex flex-col gap-1" data-testid="app-sidebar-scroll">
+      <AppSidebarPrimaryNav collapsed={collapsed} />
+      <PluginNavItems collapsed={collapsed} />
+    </div>
+  );
+}
+
+function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffice: boolean }) {
+  return (
+    <>
+      <div
+        className={cn(
+          "flex flex-col gap-1 overflow-y-auto",
+          inOffice ? "flex-1 min-h-0 pb-8 scroll-pb-8" : "shrink-0",
+        )}
+        data-testid="app-sidebar-scroll"
+      >
+        <AppSidebarPrimaryNav collapsed={collapsed} />
+        {/* Directly under New Task: an automation is a thing you keep, the
+            same weight as a project, and the list IS the nav — picking one
+            opens its history rather than a settings form. */}
+        {!inOffice && <AutomationsSection collapsed={collapsed} />}
+        <PluginNavItems collapsed={collapsed} />
+        {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
+        <ProjectsSection collapsed={collapsed} />
+        <AgentsSection collapsed={collapsed} />
+        {inOffice && <OfficeNavigationSection collapsed={collapsed} section="office" />}
+        {!inOffice && <IntegrationsSection collapsed={collapsed} />}
+      </div>
+      {/* In regular kanban mode, Tasks is the flex-grow middle section so
+          it absorbs remaining vertical space and scrolls internally.
+          Office has a dedicated /office/tasks page, so the sidebar only
+          renders a lightweight Tasks nav row above. */}
+      {!inOffice && <TasksSection collapsed={collapsed} />}
+      {inOffice && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-background to-transparent"
+          data-testid="app-sidebar-bottom-fade"
+        />
+      )}
+    </>
+  );
+}
+
+function AppSidebarNavigation({ collapsed, mode, settingsMode }: AppSidebarNavigationProps) {
+  function content() {
+    if (settingsMode && !collapsed) return <AppSidebarSettingsMode />;
+    if (mode === "unknown") return <AppSidebarUnresolvedNav collapsed={collapsed} />;
+    return <AppSidebarModeNav collapsed={collapsed} inOffice={mode === "office"} />;
+  }
+
   return (
     <nav className="relative flex-1 min-h-0 flex flex-col gap-2 px-2 py-2 overflow-hidden">
-      {settingsMode && !collapsed ? (
-        <AppSidebarSettingsMode />
-      ) : (
-        <>
-          <div
-            className={cn(
-              "flex flex-col gap-1 overflow-y-auto",
-              inOffice ? "flex-1 min-h-0 pb-8 scroll-pb-8" : "shrink-0",
-            )}
-            data-testid="app-sidebar-scroll"
-          >
-            <AppSidebarPrimaryNav collapsed={collapsed} />
-            {/* Directly under New Task: an automation is a thing you keep, the
-                same weight as a project, and the list IS the nav — picking one
-                opens its history rather than a settings form. */}
-            {!inOffice && <AutomationsSection collapsed={collapsed} />}
-            <PluginNavItems collapsed={collapsed} />
-            {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
-            <ProjectsSection collapsed={collapsed} />
-            <AgentsSection collapsed={collapsed} />
-            {inOffice && <OfficeNavigationSection collapsed={collapsed} section="office" />}
-            {!inOffice && <IntegrationsSection collapsed={collapsed} />}
-          </div>
-          {/* In regular kanban mode, Tasks is the flex-grow middle section so
-              it absorbs remaining vertical space and scrolls internally.
-              Office has a dedicated /office/tasks page, so the sidebar only
-              renders a lightweight Tasks nav row above. */}
-          {!inOffice && <TasksSection collapsed={collapsed} />}
-          {inOffice && (
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-background to-transparent"
-              data-testid="app-sidebar-bottom-fade"
-            />
-          )}
-        </>
-      )}
+      {content()}
     </nav>
   );
 }
@@ -152,7 +178,7 @@ export function AppSidebar() {
   const toggleCollapsed = useAppStore((s) => s.toggleAppSidebar);
   const setWidth = useAppStore((s) => s.setAppSidebarWidth);
   const pathname = usePathname();
-  const inOffice = useInOffice();
+  const mode = useOfficeModeState();
   const [isResizing, setIsResizing] = useState(false);
 
   // Keep `state.workflows.items` in sync with the active workspace at the top
@@ -161,6 +187,10 @@ export function AppSidebar() {
   // workspace — hoisting it above the collapsible Tasks section is required so
   // a user with the section collapsed still gets fresh workflows on a switch.
   useEnsureWorkspaceWorkflows();
+  // The office collections the sidebar renders (Projects, Agents, the inbox
+  // badge) load here so they follow the active workspace rather than the
+  // `/office` route family. No-ops for a kanban workspace.
+  useOfficeWorkspaceData();
 
   const handleResize = useCallback(
     (e: React.MouseEvent) => {
@@ -231,11 +261,7 @@ export function AppSidebar() {
           className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
           <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
-          <AppSidebarNavigation
-            collapsed={collapsed}
-            inOffice={inOffice}
-            settingsMode={settingsMode}
-          />
+          <AppSidebarNavigation collapsed={collapsed} mode={mode} settingsMode={settingsMode} />
           <AppSidebarFooter collapsed={collapsed} onToggleSettingsMode={handleToggleSettingsMode} />
         </div>
         {!collapsed && <AppSidebarResizeHandle onMouseDown={handleResize} />}

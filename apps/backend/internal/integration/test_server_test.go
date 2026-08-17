@@ -230,6 +230,33 @@ func (a *testTurnServiceAdapter) StartTurn(ctx context.Context, sessionID string
 	return a.svc.StartTurn(ctx, sessionID)
 }
 
+func (a *testTurnServiceAdapter) ReserveTurn(
+	ctx context.Context,
+	sessionID string,
+	recovery *models.PromptDispatchRecovery,
+) (*models.Turn, error) {
+	return a.svc.ReserveTurn(ctx, sessionID, recovery)
+}
+
+func (a *testTurnServiceAdapter) PublishReservedTurn(ctx context.Context, turn *models.Turn) error {
+	return a.svc.PublishReservedTurn(ctx, turn)
+}
+
+func (a *testTurnServiceAdapter) MarkReservedTurnDispatchAttempted(ctx context.Context, turn *models.Turn) error {
+	return a.svc.MarkReservedTurnDispatchAttempted(ctx, turn)
+}
+
+func (a *testTurnServiceAdapter) RollbackReservedTurn(
+	ctx context.Context,
+	sessionID, turnID string,
+) (bool, error) {
+	return a.svc.RollbackReservedTurn(ctx, sessionID, turnID)
+}
+
+func (a *testTurnServiceAdapter) ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error) {
+	return a.svc.ReconcileUnpublishedPromptTurns(ctx)
+}
+
 func (a *testTurnServiceAdapter) CompleteTurn(ctx context.Context, turnID string) error {
 	return a.svc.CompleteTurn(ctx, turnID)
 }
@@ -244,6 +271,14 @@ func (a *testTurnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID st
 
 func (a *testTurnServiceAdapter) UpdateTurn(ctx context.Context, turn *models.Turn) error {
 	return a.svc.UpdateTurn(ctx, turn)
+}
+
+func (a *testTurnServiceAdapter) PatchTurnMetadata(
+	ctx context.Context,
+	sessionID, turnID string,
+	updates map[string]interface{},
+) error {
+	return a.svc.PatchTurnMetadata(ctx, sessionID, turnID, updates)
 }
 
 func (a *testTurnServiceAdapter) AbandonOpenTurns(ctx context.Context, sessionID string) error {

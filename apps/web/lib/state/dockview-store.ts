@@ -48,6 +48,7 @@ import {
   buildExtraPanelActions,
   type OpenPanelOpts,
   type PreviewType,
+  type ReviewPanelOptions,
 } from "./dockview-panel-actions";
 import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 import { measureDockviewContainer } from "./dockview-measure";
@@ -172,9 +173,9 @@ type DockviewStore = {
   closePluginPanels: (pluginId: string) => void;
   addTodosPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
   /** Open a PR detail panel. prKey (owner/repo/pr_number) gives multi-repo tasks one tab per PR. */
-  addPRPanel: (prKey?: string) => void;
+  addPRPanel: (prKey?: string, opts?: ReviewPanelOptions) => void;
   /** Open a GitLab merge request detail panel keyed by host/project/iid. */
-  addMRPanel: (mrKey: string) => void;
+  addMRPanel: (mrKey: string, opts?: ReviewPanelOptions) => void;
   /** Open a provider-neutral review detail panel. */
   addReviewPanel: (
     review: Pick<
@@ -186,6 +187,7 @@ type DockviewStore = {
       | "changeRequestNumber"
       | "title"
     >,
+    opts?: ReviewPanelOptions,
   ) => void;
   addTerminalPanel: (
     terminalId?: string,

@@ -96,6 +96,19 @@ async function createACPProfileWithFailOnResume(apiClient: ApiClient, name: stri
   });
 }
 
+// Worst-case wait for the manual-recovery banner after `/crash`. The mock
+// agent's crash is a real subprocess exit whose ACP-level error carries the
+// same "peer disconnected before response" text the routingerr classifier
+// now treats as a retryable transport-lost signature (see
+// docs/decisions/2026-08-08-provider-neutral-agent-error-recovery.md) — every
+// genuine production occurrence of that text also means the local subprocess
+// died, so the classifier deliberately does not special-case a crash out of
+// the retry ladder. `/crash` always re-crashes on relaunch, so recovery
+// exhausts the full Kanban backoff (5+10+20+40+60s = 135s) before the manual
+// recovery banner replaces the retry-countdown card. Give it headroom above
+// that worst case rather than the default 30s.
+const CRASH_RECOVERY_TIMEOUT = 170_000;
+
 test.describe("Session recovery", () => {
   test.describe.configure({ retries: 1 });
 
@@ -135,6 +148,8 @@ test.describe("Session recovery", () => {
   });
 
   test("agent crash — start fresh session recovers", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(220_000);
+
     const session = await seedTaskWithSession(
       testPage,
       apiClient,
@@ -146,7 +161,9 @@ test.describe("Session recovery", () => {
     await session.sendMessage("/crash");
 
     // Recovery buttons should appear
-    await expect(session.recoveryFreshButton()).toBeVisible({ timeout: 30_000 });
+    await expect(session.recoveryFreshButton()).toBeVisible({
+      timeout: CRASH_RECOVERY_TIMEOUT,
+    });
     await expect(session.recoveryResumeButton()).toBeVisible();
 
     // Click "Start fresh session"
@@ -172,6 +189,8 @@ test.describe("Session recovery", () => {
   });
 
   test("agent crash — resume session recovers", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(220_000);
+
     const session = await seedTaskWithSession(
       testPage,
       apiClient,
@@ -183,7 +202,9 @@ test.describe("Session recovery", () => {
     await session.sendMessage("/crash");
 
     // Recovery buttons should appear
-    await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
+    await expect(session.recoveryResumeButton()).toBeVisible({
+      timeout: CRASH_RECOVERY_TIMEOUT,
+    });
 
     // Click "Resume session"
     await session.recoveryResumeButton().click();
@@ -212,7 +233,7 @@ test.describe("Session recovery", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(220_000);
 
     // Unique suffix so a swallowed cleanup from a prior run doesn't collide on name.
     const profile = await createACPProfileWithFailOnResume(
@@ -231,7 +252,9 @@ test.describe("Session recovery", () => {
 
       // Crash the agent so the recovery message renders with action buttons.
       await session.sendMessage("/crash");
-      await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
+      await expect(session.recoveryResumeButton()).toBeVisible({
+        timeout: CRASH_RECOVERY_TIMEOUT,
+      });
 
       // Click "Resume session". The backend may resolve this through several
       // paths depending on a race (handleAgentStartFailed vs the AgentFailed

@@ -14,6 +14,7 @@ type queuedDispatchPhase uint32
 const (
 	queuedDispatchPending queuedDispatchPhase = iota + 1
 	queuedDispatchAccepted
+	queuedDispatchLive
 	queuedDispatchSupersededByNewDispatch
 	queuedDispatchSupersededBySendNow
 )
@@ -23,6 +24,16 @@ type queuedDispatchReservation struct {
 	entryID   string
 	source    *messagequeue.QueuedMessage
 	phase     atomic.Uint32
+	// liveEligible is set only for Send Now reservations. It allows the
+	// prompt-claim path to move that reservation to live while it still owns
+	// the session guard; ordinary FIFO handoffs remain in accepted until their
+	// turn settles.
+	liveEligible atomic.Bool
+	// successorTurn is the replacement turn this dispatch opened. A late
+	// complete of the cancelled predecessor must not close that turn or
+	// drop this reservation; only the successor's own ready-path settlement
+	// may do so.
+	successorTurn atomic.Value
 }
 
 func newQueuedDispatchReservation(sessionID, entryID string, source *messagequeue.QueuedMessage) *queuedDispatchReservation {
@@ -136,7 +147,7 @@ func (s *Service) claimQueuedDispatchForExecution(
 		return true, errQueuedDispatchSupersededBySendNow
 	case queuedDispatchSupersededByNewDispatch:
 		return true, errQueuedDispatchSuperseded
-	case queuedDispatchAccepted:
+	case queuedDispatchAccepted, queuedDispatchLive:
 		return true, nil
 	}
 
@@ -192,7 +203,13 @@ func (s *Service) resolveQueuedDispatchForClaim(
 func (s *Service) pendingQueuedDispatchForSendNow(sessionID string) (*queuedDispatchReservation, error) {
 	reservation := s.pendingQueuedDispatch(sessionID)
 	if reservation == nil {
-		if s.acceptedQueuedDispatchForSession(sessionID) != nil {
+		if accepted := s.acceptedQueuedDispatchForSession(sessionID); accepted != nil {
+			// A live Send Now successor is already the running turn. A later
+			// Send Now may cancel-and-replace it. FIFO/handoff still in the
+			// accepted phase remains a hard conflict.
+			if accepted.currentPhase() == queuedDispatchLive {
+				return nil, nil
+			}
 			return nil, ErrSendNowConflict
 		}
 		return nil, nil
@@ -221,7 +238,39 @@ func (s *Service) supersedeQueuedDispatchForSendNow(
 }
 
 func (s *Service) isQueuedDispatchAccepted(sessionID string) bool {
-	return s.acceptedQueuedDispatchForSession(sessionID) != nil
+	accepted := s.acceptedQueuedDispatchForSession(sessionID)
+	return accepted != nil && accepted.currentPhase() == queuedDispatchAccepted
+}
+
+// markAcceptedDispatchLive moves a Send Now successor out of the handoff
+// conflict window once it owns execution. Stream-complete still protects the
+// bound successor turn; a later Send Now may cancel that live turn.
+func (s *Service) markAcceptedDispatchLive(sessionID string, reservation *queuedDispatchReservation) {
+	if sessionID == "" {
+		return
+	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	s.markAcceptedDispatchLiveLocked(sessionID, reservation)
+}
+
+// markAcceptedDispatchLiveLocked moves a Send Now successor out of the
+// handoff conflict window while the caller owns sessionID's cancellation
+// guard. This keeps the phase transition serialized with prompt ownership.
+func (s *Service) markAcceptedDispatchLiveLocked(sessionID string, reservation *queuedDispatchReservation) {
+	accepted := s.acceptedQueuedDispatchForSession(sessionID)
+	if accepted == nil {
+		return
+	}
+	if reservation != nil && accepted != reservation {
+		return
+	}
+	switch accepted.currentPhase() {
+	case queuedDispatchAccepted, queuedDispatchLive:
+		accepted.phase.Store(uint32(queuedDispatchLive))
+	}
 }
 
 // clearQueuedDispatchInFlightIfCurrent clears either phase only for the exact
@@ -291,11 +340,46 @@ func (s *Service) isCurrentQueuedDispatch(sessionID, entryID string) bool {
 // successor turn settles. Send Now checks the accepted phase separately so it
 // can distinguish a supersedable pending reservation from a terminal conflict.
 func (s *Service) isQueuedDispatchInFlight(sessionID string) bool {
-	return s.pendingQueuedDispatch(sessionID) != nil || s.isQueuedDispatchAccepted(sessionID)
+	return s.pendingQueuedDispatch(sessionID) != nil || s.acceptedQueuedDispatchForSession(sessionID) != nil
 }
 
 func (s *Service) clearAcceptedQueuedDispatch(sessionID string) {
 	if sessionID != "" {
 		s.acceptedQueuedDispatch.Delete(sessionID)
 	}
+}
+
+func (reservation *queuedDispatchReservation) successorTurnID() string {
+	if reservation == nil {
+		return ""
+	}
+	id, _ := reservation.successorTurn.Load().(string)
+	return id
+}
+
+func (reservation *queuedDispatchReservation) bindSuccessorTurn(turnID string) {
+	if reservation == nil || turnID == "" {
+		return
+	}
+	reservation.successorTurn.Store(turnID)
+}
+
+func (s *Service) bindAcceptedDispatchTurn(sessionID, turnID string) {
+	if accepted := s.acceptedQueuedDispatchForSession(sessionID); accepted != nil {
+		accepted.bindSuccessorTurn(turnID)
+	}
+}
+
+// acceptedDispatchInFlight reports whether a Send Now / FIFO successor has
+// claimed prompt ownership. Stream-only completion of a cancelled predecessor
+// must preserve that marker until the successor turn itself settles.
+func (s *Service) acceptedDispatchInFlight(sessionID string) bool {
+	return s.acceptedQueuedDispatchForSession(sessionID) != nil
+}
+
+func (s *Service) acceptedDispatchSuccessorTurn(sessionID string) string {
+	if accepted := s.acceptedQueuedDispatchForSession(sessionID); accepted != nil {
+		return accepted.successorTurnID()
+	}
+	return ""
 }

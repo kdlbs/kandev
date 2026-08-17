@@ -85,7 +85,7 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 | **Factory Droid** | `droid` |
 | **iFlow (beta)** | `@iflow-ai/iflow-cli` |
 | **Kilocode** | `@kilocode/cli` |
-| **Pi** | `pi-acp` |
+| **Pi** | ACP adapter: `pi-acp`; CLI passthrough: `pi` |
 | **Kimi** | `kimi` *(install Kimi CLI from Moonshot AI)* |
 | **Kiro** | `kiro-cli-chat` *(install Kiro CLI from AWS)* |
 | **Qoder** | `qodercli` *(install Qoder CLI)* |

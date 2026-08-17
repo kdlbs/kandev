@@ -487,8 +487,7 @@
   "previewSound": "Ƥŕēvĩēŵ śōũńď",
   "profileForTasksCreatedByAgents": "Ƥŕōƒĩĺē ƒōŕ Ţàśķś Ćŕēàţēď ƀŷ Àĝēńţś",
   "programming": "Ƥŕōĝŕàḿḿĩńĝ",
-  "profileFallbackWillBeUsed": "Śţàŕţ ḿōďēĺ {{model}} ĩś ńō ĺōńĝēŕ àvàĩĺàƀĺē; ƒàĺĺƀàćķ {{fallback}} ŵĩĺĺ ƀē ũśēď.",
-  "profileStartModelUnavailable": "Śţàŕţ ḿōďēĺ {{model}} ĩś ńō ĺōńĝēŕ àvàĩĺàƀĺē; ćĥàńĝē ĩţ ĩń ţĥē àĝēńţ ƥŕōƒĩĺē.",
+  "profileStartModelNotAdvertisedOnHost": "Ţĥē ĥōśţ ƥŕōƀē ďĩď ńōţ àďvēŕţĩśē {{model}}. Ţĥē śēĺēćţēď ēxēćũţōŕ ŵĩĺĺ ďēćĩďē ţĥē ḿōďēĺ àţ ĺàũńćĥ.",
   "promptAdd": "Àďď ƥŕōḿƥţ",
   "promptContentPlaceholder": "Ƥŕōḿƥţ ćōńţēńţ",
   "promptCreateFailed": "Ćōũĺďń'ţ ćŕēàţē ƥŕōḿƥţ",
@@ -726,5 +725,8 @@
   "noValidDestinations": "Ńō vàĺĩď ďēśţĩńàţĩōńś àvàĩĺàƀĺē.",
   "transferFailed": "Ćōũĺď ńōţ ćōƥŷ ōŕ ḿōvē ţĥē śēćŕēţ.",
   "destinationGlobal": "Ĝĺōƀàĺ",
-  "secretNameTooLong": "Ńàḿē ḿũśţ ƀē àţ ḿōśţ 100 ƀŷţēś."
+  "secretNameTooLong": "Ńàḿē ḿũśţ ƀē àţ ḿōśţ 100 ƀŷţēś.",
+  "keyValueAddItem": "Àďď Ĩţēḿ",
+  "keyValueKeyPlaceholder": "Ķēŷ",
+  "keyValueValuePlaceholder": "Vàĺũē"
 }

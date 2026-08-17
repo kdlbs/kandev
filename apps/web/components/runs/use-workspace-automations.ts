@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listAutomations } from "@/lib/api/domains/automation-api";
 import type { Automation } from "@/lib/types/automation";
+import { t } from "@/lib/i18n";
 
 const EMPTY_AUTOMATIONS: Automation[] = [];
 
@@ -58,7 +59,7 @@ export function useWorkspaceAutomations(workspaceId: string | undefined) {
       .catch((err: unknown) => {
         if (requestRef.current !== requestId) return;
         setLoaded({ workspaceId, automations: EMPTY_AUTOMATIONS });
-        setError(err instanceof Error ? err.message : "Failed to load automations");
+        setError(err instanceof Error ? err.message : t("automations:failedToLoadAutomations"));
       })
       .finally(() => {
         if (requestRef.current !== requestId) return;

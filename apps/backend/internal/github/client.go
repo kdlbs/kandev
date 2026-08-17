@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+// RateLimitFetcher exposes the optional initial rate-limit probe supported by
+// authenticated GitHub clients. It is deliberately separate from Client so
+// in-memory and specialized clients do not need to implement a settings-only
+// operation.
+type RateLimitFetcher interface {
+	FetchRateLimit(ctx context.Context) error
+}
+
 // Client defines the interface for interacting with the GitHub API.
 type Client interface {
 	// IsAuthenticated checks if the client is authenticated with GitHub.

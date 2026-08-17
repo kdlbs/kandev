@@ -149,7 +149,7 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
     stampedEnv,
     terminalId,
     props.api.title ?? t("common:terminal"),
-    t("task:terminal"),
+    t("task:panelTerminal"),
   );
 
   // DockviewDefaultTab reads the title from `api.title` directly and

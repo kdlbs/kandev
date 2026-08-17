@@ -17,6 +17,7 @@ Repositories that use Git submodules currently show only a changed gitlink commi
 - Changes and Review include changed files from every initialized submodule present when the task repository graph is discovered, including recursively nested submodules.
 - Parent-repository files and submodule files can appear in the same Review session. Each file keeps a repository-relative path and an unambiguous repository scope.
 - Review renders submodule scopes in their task-workspace directory hierarchy and gives each submodule boundary a small visible and accessible indication. A nested submodule appears beneath its parent submodule rather than as an unrelated top-level repository.
+- Review keeps newly discovered directory and submodule scope nodes reachable when review sources arrive in separate updates. It expands only directories introduced by the update and preserves any collapsed state the reviewer chose for existing directories.
 - When Kandev can show the child files for a changed submodule, Review omits the parent's raw gitlink-only row. If the child is unavailable, Review retains the parent gitlink change instead of hiding the only evidence of the change.
 - Uncommitted and committed submodule changes use the same source precedence, diff limits, reviewed hashes, stale detection, anchored comments, findings, filtering, status markers, and file-opening behavior as other Review files.
 - Each submodule compares against the gitlink commit recorded by its parent at the parent's comparison anchor. The comparison does not expand to unrelated history from the submodule's default branch.
@@ -50,6 +51,7 @@ For a multi-repository task, a top-level attached repository keeps its existing 
 
 - **GIVEN** a task repository with an initialized submodule containing an uncommitted file edit and a changed parent file, **WHEN** Review opens, **THEN** both textual diffs appear and the submodule file sits beneath a marked submodule boundary.
 - **GIVEN** a submodule containing another initialized submodule, **WHEN** files change in both children, **THEN** Review shows both nested directory boundaries and each file's repository-relative diff.
+- **GIVEN** Review first receives a parent submodule file and later receives a file from an initialized nested submodule, **WHEN** the later review-source update is rendered, **THEN** the intermediate directory and nested boundary are expanded automatically so the nested scope is reachable without an extra expansion step, while previously collapsed existing directories remain collapsed.
 - **GIVEN** a submodule commit made after the task comparison point, **WHEN** the session reloads or agentctl restarts and Review opens, **THEN** the committed file diff is computed from the parent-recorded gitlink commit and remains visible.
 - **GIVEN** a parent gitlink change whose child file diffs are available, **WHEN** Review builds its file list, **THEN** it shows the child files without a duplicate raw gitlink-only row.
 - **GIVEN** an unavailable submodule whose gitlink changed, **WHEN** Review opens, **THEN** the parent gitlink row remains visible and other repositories continue to render.
@@ -68,3 +70,5 @@ For a multi-repository task, a top-level attached repository keeps its existing 
 ## Implementation plan
 
 See [Nested Submodule Review plan](../../plans/submodule-review/plan.md).
+
+The late-source tree expansion repair is tracked in the [Review tree late expansion plan](../../plans/review-tree-late-expansion/plan.md).

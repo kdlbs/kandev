@@ -16,7 +16,6 @@ import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import type { ApiClient } from "../../helpers/api-client";
-import { dwell } from "../../helpers/causal-waits";
 
 const PANEL_ID = "notes";
 
@@ -266,59 +265,77 @@ test.describe("Plugins — task panel / kanban Edit submenu / card indicator", (
       workflow_step_id: seedData.startStepId,
     });
     const notePath = `/api/plugins/${PLUGIN_ID}/user-state/task/${seedTask.id}/note`;
+    const notePathPattern = `**${notePath}`;
 
-    let firstRequestSeen = false;
-    let releaseFirst: () => void = () => {};
-    const firstHeld = new Promise<void>((resolve) => {
-      releaseFirst = resolve;
+    // Hold only the first mount read. A production E2E bundle does not replay
+    // effects through React Strict Mode, while a development bundle may issue
+    // a second read. Letting later reads continue keeps the causal stale-read
+    // setup valid in both modes without waiting for a dev-only request.
+    let firstReadHeld = false;
+    let releaseInitialReads: () => void = () => {};
+    const initialReadsHeld = new Promise<void>((resolve) => {
+      releaseInitialReads = resolve;
     });
+    let signalFirstRequestStarted: () => void = () => {};
+    const firstRequestStarted = new Promise<void>((resolve) => {
+      signalFirstRequestStarted = resolve;
+    });
+    const initialRequestHandlers: Promise<void>[] = [];
 
-    await testPage.route(`**${notePath}`, async (route) => {
-      if (route.request().method() !== "GET" || firstRequestSeen) {
+    await testPage.route(notePathPattern, async (route) => {
+      if (route.request().method() !== "GET" || firstReadHeld) {
         return route.continue();
       }
-      firstRequestSeen = true;
-      await firstHeld;
-      // Fulfilled with canned stale content instead of passed through, so
-      // its body is deterministically the pre-update value even though the
-      // real store has since moved on.
-      return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ value: "first note", updatedAt: new Date(0).toISOString() }),
+
+      firstReadHeld = true;
+      const handler = (async () => {
+        signalFirstRequestStarted();
+        await initialReadsHeld;
+        // Fulfilled with canned stale content instead of passed through, so
+        // its body is deterministically the pre-update value even though the
+        // real store has since moved on.
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ value: "first note", updatedAt: new Date(0).toISOString() }),
+        });
+      })();
+      initialRequestHandlers.push(handler);
+      return handler;
+    });
+
+    try {
+      await testPage.goto(`/t/${seedTask.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.addPanelButton().click();
+      await session.addPanelPluginItem(PLUGIN_ID, PANEL_ID).click();
+
+      // Wait until the first mount GET is held before issuing the newer write.
+      await firstRequestStarted;
+
+      // Subsequent reads are the real subscription refreshes. The sibling
+      // write now triggers one that resolves with the newer store value.
+      const res = await apiClient.rawRequest("PUT", notePath, {
+        value: "second note",
+        writerId: "e2e-sibling-surface",
       });
-    });
+      expect(res.status).toBe(200);
 
-    await testPage.goto(`/t/${seedTask.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.addPanelButton().click();
-    await session.addPanelPluginItem(PLUGIN_ID, PANEL_ID).click();
+      const notesEditor = testPage.getByTestId("e2e-notes-panel");
+      await expect(notesEditor).toHaveValue("second note", { timeout: 10_000 });
 
-    // The mount's GET is held — the panel stays on its loading state, but
-    // its subscription (set up in the same effect) is already live.
-    await expect(testPage.getByTestId("e2e-notes-panel-loading")).toBeVisible();
-
-    // A sibling surface's write lands; its notification triggers a second,
-    // unheld refresh that resolves quickly with the real current value.
-    const res = await apiClient.rawRequest("PUT", notePath, {
-      value: "second note",
-      writerId: "e2e-sibling-surface",
-    });
-    expect(res.status).toBe(200);
-
-    const notesEditor = testPage.getByTestId("e2e-notes-panel");
-    await expect(notesEditor).toHaveValue("second note", { timeout: 10_000 });
-
-    // Now let the stale first read land — it must not revert the panel.
-    releaseFirst();
-    await dwell(
-      testPage,
-      500,
-      "negative-assertion",
-      "asserts the stale first read never reverts the panel; a value that must not be written renders nothing, so the check needs time for the late response to land and do damage",
-    );
-    await expect(notesEditor).toHaveValue("second note");
+      // Now let the stale mount reads land — neither may revert the panel.
+      // Awaiting the handlers themselves (rather than a fixed dwell) is the
+      // real causal signal that the stale responses have been processed.
+      releaseInitialReads();
+      await Promise.all(initialRequestHandlers);
+      await expect(notesEditor).toHaveValue("second note");
+    } finally {
+      releaseInitialReads();
+      await Promise.all(initialRequestHandlers);
+      await testPage.unroute(notePathPattern);
+    }
   });
 
   test("task-card-indicators slot renders the plugin's indicator on the kanban card (AC13)", async ({

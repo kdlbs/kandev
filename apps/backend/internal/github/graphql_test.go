@@ -610,9 +610,9 @@ func TestRunBatchedBranchQuery_DecodesPRNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	status, ok := got[graphqlBranchKey("o", "r", "feat")]
+	status, ok := got.Statuses[graphqlBranchKey("o", "r", "feat")]
 	if !ok {
-		t.Fatalf("expected branch result, got keys: %v", keysOf(got))
+		t.Fatalf("expected branch result, got keys: %v", keysOf(got.Statuses))
 	}
 	if status.PR == nil || status.PR.Number != 7 {
 		t.Errorf("expected PR number 7, got %#v", status.PR)
@@ -629,7 +629,7 @@ func TestRunBatchedBranchQuery_SkipsUnusedReviewThreadPagination(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	status := got[graphqlBranchKey("o", "r", "feat")]
+	status := got.Statuses[graphqlBranchKey("o", "r", "feat")]
 	if status == nil || status.PR == nil || status.PR.Number != 7 {
 		t.Fatalf("branch status = %#v, want discovered PR #7", status)
 	}
@@ -656,8 +656,13 @@ func TestRunBatchedBranchQuery_EmptyNodesReturnsNoResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected no branch result, got %#v", got)
+	if len(got.Statuses) != 0 {
+		t.Fatalf("expected no branch result, got %#v", got.Statuses)
+	}
+	// Zero nodes is a definitive "no open PR on this branch"; callers rely on
+	// it to skip a redundant per-watch lookup.
+	if _, ok := got.ResolvedEmpty[graphqlBranchKey("o", "r", "feat")]; !ok {
+		t.Fatalf("expected branch to be recorded as definitively empty, got %#v", got.ResolvedEmpty)
 	}
 }
 
@@ -697,8 +702,13 @@ func TestRunBatchedBranchQuery_SkipsAmbiguousForkHeads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected ambiguous fork heads to be skipped, got %#v", got)
+	if len(got.Statuses) != 0 {
+		t.Fatalf("expected ambiguous fork heads to be skipped, got %#v", got.Statuses)
+	}
+	// Ambiguity is not a definitive negative — the caller must keep its
+	// per-watch fallback rather than conclude there is no PR.
+	if _, ok := got.ResolvedEmpty[graphqlBranchKey("o", "r", "feat")]; ok {
+		t.Fatal("ambiguous branch must not be recorded as definitively empty")
 	}
 }
 
@@ -738,8 +748,11 @@ func TestRunBatchedBranchQuery_SkipsMultipleBranchMatchesEvenWithOwnerMatch(t *t
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected duplicate branch matches to be skipped, got %#v", got)
+	if len(got.Statuses) != 0 {
+		t.Fatalf("expected duplicate branch matches to be skipped, got %#v", got.Statuses)
+	}
+	if _, ok := got.ResolvedEmpty[graphqlBranchKey("o", "r", "feat")]; ok {
+		t.Fatal("ambiguous branch must not be recorded as definitively empty")
 	}
 }
 

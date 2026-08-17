@@ -133,9 +133,19 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 func (c *Controller) httpGetStatus(ctx *gin.Context) {
 	workspaceID := ctx.Query("workspace_id")
-	status, err := c.service.GetWorkspaceAuthStatus(
-		ctx.Request.Context(), workspaceID, currentGitHubUserID(ctx),
+	var (
+		status *WorkspaceAuthStatus
+		err    error
 	)
+	if ctx.Query("refresh_rate_limit") == "true" {
+		status, err = c.service.RefreshWorkspaceRateLimit(
+			ctx.Request.Context(), workspaceID, currentGitHubUserID(ctx),
+		)
+	} else {
+		status, err = c.service.GetWorkspaceAuthStatus(
+			ctx.Request.Context(), workspaceID, currentGitHubUserID(ctx),
+		)
+	}
 	if err != nil {
 		writeGitHubAuthError(ctx, err)
 		return

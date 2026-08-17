@@ -60,7 +60,10 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	if workspacePath == "" {
 		workspacePath = req.RepositoryPath
 	}
-	resolvedScript := resolvePreparerSetupScript(req, workspacePath)
+	resolvedScript, err := resolvePreparerSetupScript(req, workspacePath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve setup script: %w", err)
+	}
 
 	// CheckoutBranch (PR head) takes priority over BaseBranch when both set.
 	effectiveBranch := req.CheckoutBranch

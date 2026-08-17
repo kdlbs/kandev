@@ -69,6 +69,32 @@ func (p *rotatingProvider) Resolve(ctx context.Context, _ Scope) (Credential, er
 	return Credential{Username: p.username, Password: p.secret}, nil
 }
 
+// pathRecordingProvider captures every scope path a resolver observes, so a
+// test can prove the broker never rewrites it.
+type pathRecordingProvider struct {
+	mu       sync.Mutex
+	binding  string
+	username string
+	secret   string
+	paths    []string
+}
+
+func (p *pathRecordingProvider) Supports(providerID string) bool { return providerID == "bitbucket" }
+
+func (p *pathRecordingProvider) Binding(_ context.Context, scope Scope) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.paths = append(p.paths, scope.Path)
+	return p.binding, nil
+}
+
+func (p *pathRecordingProvider) Resolve(_ context.Context, scope Scope) (Credential, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.paths = append(p.paths, scope.Path)
+	return Credential{Username: p.username, Password: p.secret}, nil
+}
+
 func testScope() Scope {
 	return Scope{
 		ProviderID: "bitbucket", WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1",
@@ -155,7 +181,67 @@ func TestBrokerRejectsRepositoryPathCaseMismatch(t *testing.T) {
 	}
 }
 
-func TestBrokerRejectsRepositoryGitSuffixMismatch(t *testing.T) {
+// A scope path comes from a clone URL and keeps its ".git" suffix; the gh CLI
+// shim asks for the bare "/<owner>/<repo>". Both name the same repository, so
+// the suffix must not decide whether a lease redeems.
+func TestBrokerAcceptsRepositoryPathWithoutGitSuffix(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		scopePath  string
+		redeemPath string
+	}{
+		{name: "scope keeps suffix", scopePath: "/scm/ENG/widgets.git", redeemPath: "/scm/ENG/widgets"},
+		{name: "redemption keeps suffix", scopePath: "/scm/ENG/widgets", redeemPath: "/scm/ENG/widgets.git"},
+		{name: "trailing slash", scopePath: "/scm/ENG/widgets.git", redeemPath: "/scm/ENG/widgets/"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			provider := &rotatingProvider{binding: "generation-1", username: "user", secret: "secret"}
+			broker := NewBroker(provider, &recordingAuthorizer{})
+			scope := testScope()
+			scope.Path = testCase.scopePath
+			lease, err := broker.Issue(t.Context(), scope)
+			if err != nil {
+				t.Fatalf("Issue() error = %v", err)
+			}
+			request := testRedemption(lease.Token)
+			request.Path = testCase.redeemPath
+			if _, err := broker.Redeem(t.Context(), request); err != nil {
+				t.Fatalf("Redeem() error = %v, want success", err)
+			}
+		})
+	}
+}
+
+// Suffix-insensitivity is a comparison rule only. Plugin providers compare the
+// scope path verbatim in their binding and resolve RPCs, so a lease must carry
+// the exact path it was issued for, not a rewritten one.
+func TestBrokerKeepsExactScopePathForResolvers(t *testing.T) {
+	provider := &pathRecordingProvider{binding: "generation-1", username: "user", secret: "secret"}
+	authorizer := &recordingAuthorizer{}
+	broker := NewBroker(provider, authorizer)
+	lease, err := broker.Issue(t.Context(), testScope())
+	if err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+	if got := authorizer.last.Path; got != "/scm/ENG/widgets.git" {
+		t.Fatalf("authorizer scope path = %q, want the exact issued path", got)
+	}
+	request := testRedemption(lease.Token)
+	request.Path = "/scm/ENG/widgets"
+	if _, err := broker.Redeem(t.Context(), request); err != nil {
+		t.Fatalf("Redeem() error = %v", err)
+	}
+	for _, got := range provider.paths {
+		if got != "/scm/ENG/widgets.git" {
+			t.Fatalf("resolver scope path = %q, want the exact issued path", got)
+		}
+	}
+	if len(provider.paths) == 0 {
+		t.Fatal("resolver was never called")
+	}
+}
+
+func TestBrokerRejectsRepositoryPathMismatch(t *testing.T) {
 	provider := &rotatingProvider{binding: "generation-1", username: "user", secret: "secret"}
 	broker := NewBroker(provider, &recordingAuthorizer{})
 	lease, err := broker.Issue(t.Context(), testScope())
@@ -163,7 +249,7 @@ func TestBrokerRejectsRepositoryGitSuffixMismatch(t *testing.T) {
 		t.Fatalf("Issue() error = %v", err)
 	}
 	request := testRedemption(lease.Token)
-	request.Path = "/scm/ENG/widgets"
+	request.Path = "/scm/ENG/widgets-staging"
 	if _, err := broker.Redeem(t.Context(), request); !errors.Is(err, ErrScopeDenied) {
 		t.Fatalf("Redeem() error = %v, want ErrScopeDenied", err)
 	}

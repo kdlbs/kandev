@@ -26,6 +26,8 @@ import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 import type { AppState } from "@/lib/state/store";
 import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
+// Aliased: `t` is the Terminal parameter name throughout this module.
+import { t as translate } from "@/lib/i18n";
 
 export const OPTIONAL_HYDRATION_TIMEOUT_MS = 5_000;
 
@@ -501,8 +503,8 @@ function deriveHydratedLabel(
   if (t.display_name) return t.display_name;
   if (t.custom_name && t.custom_name !== "") return t.custom_name;
   if (t.label) return t.label;
-  if (isOrdinary && t.seq) return `Terminal ${t.seq}`;
-  return isScript ? "Script" : "Terminal";
+  if (isOrdinary && t.seq) return translate("common:terminalNumbered", { seq: t.seq });
+  return isScript ? translate("common:script") : translate("common:terminal");
 }
 
 function pickTerminalKind(

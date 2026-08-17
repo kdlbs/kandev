@@ -46,6 +46,7 @@ export function lspAutoInstallConfigurable(
   return language.autoInstallSupported && preferenceLanguages.includes(language.id);
 }
 
+// i18n-exempt: programming language names are not translated.
 export const LSP_LANGUAGE_OPTIONS: LspLanguageOption[] = [
   {
     id: "typescript",

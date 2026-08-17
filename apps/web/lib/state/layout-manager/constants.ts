@@ -85,6 +85,7 @@ export const STRUCTURAL_COMPONENTS = new Set([
  * `vscode` has no `titleKey` on purpose: "VS Code" is a product name, and
  * `panelTitle()` falls back to `title` when a key is absent.
  */
+// i18n-exempt: canonical English persisted in saved layouts; `titleKey` beside it is what renders.
 export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id"> & { titleKey?: string }> = {
   chat: {
     component: "chat",

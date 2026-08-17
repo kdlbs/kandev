@@ -258,6 +258,52 @@ type GitCredentialSnapshot struct {
 // configuration attributed to one prompt/response turn.
 const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 
+// TurnMetaKeyWorkflowStepIDAtStart records the workflow step the turn's task
+// was in when the turn started. Absent when the task held no step.
+const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
+
+// TurnMetaKeyPromptDispatchPending marks a successor created before agentctl
+// acknowledges its prompt. Empty marked turns are not current-turn authority
+// unless dispatch ambiguity was recorded; publication clears the marker, while
+// a referencing message also proves ambiguous acceptance after a crash.
+const TurnMetaKeyPromptDispatchPending = "prompt_dispatch_pending"
+
+const (
+	TurnMetaKeyPromptDispatchAttempted               = "prompt_dispatch_attempted"
+	TurnMetaKeyPromptDispatchClarificationPendingID  = "prompt_dispatch_clarification_pending_id"
+	TurnMetaKeyPromptDispatchClarificationTurnID     = "prompt_dispatch_clarification_turn_id"
+	TurnMetaKeyPromptDispatchClarificationMessageIDs = "prompt_dispatch_clarification_message_ids"
+	// TurnMetaKeyPromptDispatchStartEventPending is a durable outbox marker.
+	// Startup recovery sets it after accepting an ambiguous reservation and
+	// clears it only after the task service replays the public turn events.
+	TurnMetaKeyPromptDispatchStartEventPending = "prompt_dispatch_start_event_pending"
+)
+
+var promptDispatchMetadataKeys = [...]string{
+	TurnMetaKeyPromptDispatchPending,
+	TurnMetaKeyPromptDispatchAttempted,
+	TurnMetaKeyPromptDispatchClarificationPendingID,
+	TurnMetaKeyPromptDispatchClarificationTurnID,
+	TurnMetaKeyPromptDispatchClarificationMessageIDs,
+	TurnMetaKeyPromptDispatchStartEventPending,
+}
+
+// ClearPromptDispatchMetadata removes every reservation-only field after live
+// publication or successful startup event replay.
+func ClearPromptDispatchMetadata(metadata map[string]interface{}) {
+	for _, key := range promptDispatchMetadataKeys {
+		delete(metadata, key)
+	}
+}
+
+// PromptDispatchRecovery identifies the exact clarification claim that an
+// unpublished successor reservation must restore after a backend restart.
+type PromptDispatchRecovery struct {
+	PendingID  string
+	TurnID     string
+	MessageIDs []string
+}
+
 // SessionRuntimeConfig is persisted as provider state or explicit overrides.
 // On resume, explicit values take precedence over the latest provider snapshot
 // so delayed provider events cannot replace user intent.
@@ -309,7 +355,7 @@ func LoadEffectiveSessionRuntimeConfig(session *TaskSession) (SessionRuntimeConf
 	if overrides, ok := LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
 		mergeSessionRuntimeConfig(&effective, overrides)
 	}
-	effective.ConfigOptions = cleanRuntimeConfigOptions(effective.ConfigOptions)
+	effective.ConfigOptions = cleanRuntimeConfigOptions(effective.ConfigOptions, session)
 	return effective, !effective.IsZero()
 }
 
@@ -346,17 +392,33 @@ func mergeSessionRuntimeConfig(target *SessionRuntimeConfig, source SessionRunti
 	}
 }
 
-func cleanRuntimeConfigOptions(options map[string]string) map[string]string {
+func cleanRuntimeConfigOptions(options map[string]string, session *TaskSession) map[string]string {
 	if len(options) == 0 {
 		return nil
 	}
 	cleaned := maps.Clone(options)
+	// Model and mode are carried as top-level fields. Other keys are provider-defined.
 	delete(cleaned, "model")
 	delete(cleaned, "mode")
+	if isLegacyAgentIdentity(session, cleaned["agent"]) {
+		delete(cleaned, "agent")
+	}
 	if len(cleaned) == 0 {
 		return nil
 	}
 	return cleaned
+}
+
+func isLegacyAgentIdentity(session *TaskSession, value string) bool {
+	if session == nil || value == "" || session.AgentProfileSnapshot == nil {
+		return false
+	}
+	for _, key := range []string{"agent_id", "agent_name"} {
+		if StringFromAny(session.AgentProfileSnapshot[key]) == value {
+			return true
+		}
+	}
+	return false
 }
 
 // SessionOriginalEffectiveConfiguration is the immutable configuration a task
@@ -457,6 +519,8 @@ type LastAgentError struct {
 	OccurredAt       time.Time  `json:"occurred_at"`
 	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
 	RemediationURL   string     `json:"remediation_url,omitempty"`
+	Code             string     `json:"code,omitempty"`
+	Details          string     `json:"details,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 
@@ -1038,6 +1102,14 @@ const (
 // TaskPendingAction is the compact task-list projection for a session blocked
 // on user input.
 type TaskPendingAction string
+
+// PendingActionRevision is a logical clock shared by REST and WebSocket
+// pending-action projections. Epoch is a durable, monotonically allocated
+// backend generation; Sequence orders snapshots within that generation.
+type PendingActionRevision struct {
+	Epoch    string `json:"epoch"`
+	Sequence uint64 `json:"sequence"`
+}
 
 const (
 	TaskPendingActionClarification TaskPendingAction = "clarification"

@@ -21,6 +21,8 @@ type AgentEventPayload struct {
 	StartedAt          time.Time              `json:"started_at"`
 	FinishedAt         *time.Time             `json:"finished_at,omitempty"`
 	ErrorMessage       string                 `json:"error_message,omitempty"`
+	FailureCode        string                 `json:"failure_code,omitempty"`
+	FailureDetails     string                 `json:"failure_details,omitempty"`
 	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
 	ExitCode           *int                   `json:"exit_code,omitempty"`
 	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
@@ -49,6 +51,8 @@ type AgentctlEventPayload struct {
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
 	AgentExecutionID  string `json:"agent_execution_id"`
 	ErrorMessage      string `json:"error_message,omitempty"`
+	FailureCode       string `json:"failure_code,omitempty"`
+	FailureDetails    string `json:"failure_details,omitempty"`
 	WorktreeID        string `json:"worktree_id,omitempty"`
 	WorktreePath      string `json:"worktree_path,omitempty"`
 	WorktreeBranch    string `json:"worktree_branch,omitempty"`
@@ -129,6 +133,7 @@ type AgentStreamEventData struct {
 	ProviderError    *streams.ProviderError `json:"provider_error,omitempty"`
 	SessionStatus    string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
 	PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
+	TurnID           string                 `json:"turn_id,omitempty"`
 	Data             interface{}            `json:"data,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
@@ -196,6 +201,10 @@ type AgentStreamEventData struct {
 	// fallback model the session started on because the configured start
 	// model was unavailable.
 	FallbackModel string `json:"fallback_model,omitempty"`
+
+	// ModelSelectionWarning explains an executor-authoritative default or
+	// explicit fallback decision.
+	ModelSelectionWarning *streams.ModelSelectionWarning `json:"model_selection_warning,omitempty"`
 
 	// Session info (from "session_info" event)
 	SessionTitle     string         `json:"session_title,omitempty"`
@@ -561,6 +570,21 @@ func (p SessionModelFallbackEventPayload) GetSessionID() string {
 	return p.SessionID
 }
 
+// SessionModelSelectionWarningEventPayload is the provider-neutral live
+// payload for an executor-authoritative model decision.
+type SessionModelSelectionWarningEventPayload struct {
+	TaskID    string                        `json:"task_id"`
+	SessionID string                        `json:"session_id"`
+	AgentID   string                        `json:"agent_id"`
+	Warning   streams.ModelSelectionWarning `json:"warning"`
+	Timestamp string                        `json:"timestamp"`
+}
+
+// GetSessionID returns the task-session ID used by the gateway for routing.
+func (p SessionModelSelectionWarningEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
 // SessionModelsSnapshot is the persisted provider-derived state needed to
 // hydrate the task model selector before live session events reconnect.
 type SessionModelsSnapshot struct {
@@ -662,14 +686,23 @@ func (p SessionTodosEventPayload) GetSessionID() string {
 // AgentID is the lifecycle execution.ID (UUID); AgentType is the CLI engine
 // slug (claude-acp, codex-acp, ...). The office cost subscriber derives the
 // provider name from AgentType — AgentID is kept for legacy consumers.
+//
+// TurnID is captured on the lifecycle completion frame before AgentReady can
+// admit a successor prompt and is forwarded by the orchestrator. The
+// orchestrator mints UsageEventID once at publish time — rather than per
+// consumer — so it remains a stable idempotency key across event redelivery.
+// Both are empty when unavailable (e.g. no active turn), never a synthesized
+// placeholder.
 type SessionPromptUsageEventPayload struct {
-	TaskID    string               `json:"task_id"`
-	SessionID string               `json:"session_id"`
-	AgentID   string               `json:"agent_id"`
-	AgentType string               `json:"agent_type,omitempty"`
-	Model     string               `json:"model,omitempty"`
-	Usage     *streams.PromptUsage `json:"usage"`
-	Timestamp string               `json:"timestamp"`
+	TaskID       string               `json:"task_id"`
+	SessionID    string               `json:"session_id"`
+	AgentID      string               `json:"agent_id"`
+	AgentType    string               `json:"agent_type,omitempty"`
+	Model        string               `json:"model,omitempty"`
+	Usage        *streams.PromptUsage `json:"usage"`
+	Timestamp    string               `json:"timestamp"`
+	TurnID       string               `json:"turn_id,omitempty"`
+	UsageEventID string               `json:"usage_event_id,omitempty"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).
