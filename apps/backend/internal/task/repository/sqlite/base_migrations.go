@@ -355,6 +355,14 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 
+	// External question answering (M1): clarification_resolutions is a wholly
+	// new table, so this ADD is CREATE TABLE IF NOT EXISTS, not an ALTER. Kept
+	// on the replay path as well as the fresh-schema path
+	// (initClarificationResolutionsSchema) so an existing installation gets
+	// the table without a destructive rebuild — same precedent as
+	// task_status_summaries above.
+	r.migrate.Apply("clarification_resolutions.table", clarificationResolutionsSchemaDDL)
+
 	// The execution-aware task_session_subagents schema is created directly by
 	// initSubagentContextSchema. The predecessor change that introduced the
 	// table is not part of the supported upgrade path, so there is no

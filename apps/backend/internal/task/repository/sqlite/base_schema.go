@@ -26,6 +26,7 @@ func (r *Repository) initSchema() error {
 		r.initGitSchema,
 		r.initReviewSchema,
 		r.initTaskReviewSchema,
+		r.initClarificationResolutionsSchema,
 		r.migrateExecutorProfiles,
 		r.migrateTaskSessions,
 		r.ensureDefaultWorkspace,
@@ -71,6 +72,38 @@ const taskResourceCleanupSchemaDDL = `
 
 func (r *Repository) initTaskResourceCleanupSchema() error {
 	_, err := r.db.Exec(taskResourceCleanupSchemaDDL)
+	return err
+}
+
+// clarificationResolutionsSchemaDDL declares the durable claim on a
+// clarification bundle: one row per pending_id, written at most once per
+// terminal outcome. See docs/specs/external-question-answering/spec.md,
+// "clarification_resolutions" (M1-M10). Cascades on session_id per M2:
+// task_session_messages has no FK on task_id, so cascading on the session
+// mirrors the messages' own removal schedule.
+const clarificationResolutionsSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS clarification_resolutions (
+		pending_id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		task_id TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL,
+		response TEXT NOT NULL,
+		resume TEXT NOT NULL DEFAULT 'pending',
+		resolved_by TEXT NOT NULL DEFAULT '',
+		source TEXT NOT NULL,
+		resolved_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_clarification_resolutions_session
+		ON clarification_resolutions(session_id);
+`
+
+// initClarificationResolutionsSchema creates clarification_resolutions for a
+// fresh database (M1). runMigrations() also applies this DDL idempotently so
+// an existing installation gets the table without a destructive rebuild.
+func (r *Repository) initClarificationResolutionsSchema() error {
+	_, err := r.db.Exec(clarificationResolutionsSchemaDDL)
 	return err
 }
 
