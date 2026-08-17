@@ -1261,6 +1261,7 @@
   "sortCreated": "Created",
   "sortCustom": "Custom",
   "sortDirection": "Sort direction {{direction}}",
+  "sortLastActivity": "Last activity",
   "sortStatus": "Status",
   "sortTitle": "Title",
   "sortUpdated": "Updated",

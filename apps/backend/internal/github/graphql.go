@@ -426,7 +426,7 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 	reviewState := summarizeReviewState(raw.Reviews.Nodes)
 	checksState := ""
 	if len(raw.Commits.Nodes) > 0 && raw.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
-		checksState = strings.ToLower(raw.Commits.Nodes[0].Commit.StatusCheckRollup.State)
+		checksState = normalizeGraphQLCheckRollupState(raw.Commits.Nodes[0].Commit.StatusCheckRollup.State)
 	}
 	unresolved := 0
 	for _, t := range raw.ReviewThreads.Nodes {
@@ -444,6 +444,23 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		ReviewCountsPopulated:            true,
 		UnresolvedReviewThreads:          unresolved,
 		UnresolvedReviewThreadsPopulated: true,
+	}
+}
+
+// normalizeGraphQLCheckRollupState converts GitHub's GraphQL status-rollup
+// enum to the smaller contract shared by REST and TaskPR persistence.
+func normalizeGraphQLCheckRollupState(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return ""
+	case checkStatusSuccess:
+		return checkStatusSuccess
+	case checkConclusionFail, "error":
+		return checkConclusionFail
+	case "expected", checkStatusPending:
+		return checkStatusPending
+	default:
+		return ""
 	}
 }
 

@@ -4,52 +4,101 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/events"
 )
 
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
+	activityChanged := applyTaskActivityEventLocked(state, eventType, data)
+	var sourceChanged bool
 	switch eventType {
+	case events.TaskCreated, events.TaskStateChanged:
+		// These lifecycle events have no additional bounded status fields. Their
+		// persisted timestamps are handled by applyTaskActivityEventLocked.
+		sourceChanged = false
 	case events.TaskUpdated:
-		return p.applyTaskUpdatedEventLocked(state, data)
+		sourceChanged = p.applyTaskUpdatedEventLocked(state, data)
 	case events.TaskSessionStateChanged:
-		return p.applySessionEventLocked(state, data)
+		sourceChanged = p.applySessionEventLocked(state, data)
 	case events.TaskSessionActivityChanged:
-		return p.applyActivityEventLocked(state, data)
+		sourceChanged = p.applyActivityEventLocked(state, data)
 	case events.TaskSessionErrorChanged:
-		return p.applyErrorEventLocked(state, data)
+		sourceChanged = p.applyErrorEventLocked(state, data)
 	case events.MessageAdded, events.MessageUpdated, events.MessageDeleted:
-		return p.applyMessageEventLocked(state, eventType, data)
+		sourceChanged = p.applyMessageEventLocked(state, eventType, data)
+	case events.TurnStarted, events.TurnCompleted:
+		// Turn timestamps are the bounded activity source. The turn payload does
+		// not contribute another task-row status field.
+		sourceChanged = false
 	case events.ClarificationAnswered, events.ClarificationPrimaryAnswered,
 		events.ClarificationCancelled:
 		if p.loadPendingActions != nil {
-			return false
+			sourceChanged = false
+			break
 		}
-		return p.clearPendingLocked(state, stringField(data, "session_id"))
+		sourceChanged = p.clearPendingLocked(state, stringField(data, "session_id"))
 	case events.ClarificationStaleDismissed:
 		if p.loadPendingActions != nil {
-			return false
+			sourceChanged = false
+			break
 		}
 		sessionID := stringField(data, "session_id")
 		dismissedID := stringField(data, "pending_id")
 		if dismissedID != "" {
 			if current, ok := state.pendingRequests[sessionID]; ok && current.pendingID != dismissedID {
-				return false
+				sourceChanged = false
+				break
 			}
 		}
-		return p.clearPendingLocked(state, sessionID)
+		sourceChanged = p.clearPendingLocked(state, sessionID)
 	case events.PermissionRequestReceived:
 		if p.loadPendingActions != nil {
+			sourceChanged = false
+			break
+		}
+		sourceChanged = applyPermissionEventLocked(state, data)
+	case events.GitEvent:
+		sourceChanged = p.applyGitEventLocked(state, data)
+	case events.GitHubTaskPRUpdated:
+		sourceChanged = p.applyPREventLocked(state, data)
+	}
+	return activityChanged || sourceChanged
+}
+
+func applyTaskActivityEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
+	var candidate time.Time
+	switch eventType {
+	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged:
+		candidate = timeValue(data["updated_at"])
+		if candidate.IsZero() {
+			candidate = timeValue(data["created_at"])
+		}
+	case events.MessageAdded:
+		if stringField(data, "author_type") != messageTypeUser {
 			return false
 		}
-		return applyPermissionEventLocked(state, data)
-	case events.GitEvent:
-		return p.applyGitEventLocked(state, data)
-	case events.GitHubTaskPRUpdated:
-		return p.applyPREventLocked(state, data)
+		candidate = timeValue(data["created_at"])
+	case events.TurnStarted:
+		candidate = timeValue(data["started_at"])
+	case events.TurnCompleted:
+		candidate = timeValue(data["completed_at"])
 	default:
 		return false
 	}
+	return advanceTaskActivity(state, candidate)
+}
+
+func advanceTaskActivity(state *projectionState, candidate time.Time) bool {
+	if candidate.IsZero() {
+		return false
+	}
+	candidate = candidate.UTC()
+	if state.lastActivityAt != nil && !candidate.After(*state.lastActivityAt) {
+		return false
+	}
+	state.lastActivityAt = &candidate
+	return true
 }
 
 func applyPermissionEventLocked(state *projectionState, data map[string]interface{}) bool {
@@ -218,18 +267,20 @@ func (p *Projector) ensureState(ctx context.Context, taskID string) (*projection
 }
 
 func (p *Projector) restorePersistedState(ctx context.Context, taskID string, state *projectionState) error {
-	if p.store == nil {
-		return nil
+	if p.store != nil {
+		rows, err := p.store.LoadTaskStatusSummaries(ctx, []string{taskID})
+		if err != nil {
+			return fmt.Errorf("load task status summary %q: %w", taskID, err)
+		}
+		summary := rows[taskID]
+		if summary != nil {
+			state.current = cloneSummary(summary)
+			state.revision = summary.Revision
+			applySummaryBaseline(state, summary)
+		}
 	}
-	rows, err := p.store.LoadTaskStatusSummaries(ctx, []string{taskID})
-	if err != nil {
-		return fmt.Errorf("load task status summary %q: %w", taskID, err)
-	}
-	summary := rows[taskID]
-	if summary != nil {
-		state.current = cloneSummary(summary)
-		state.revision = summary.Revision
-		applySummaryBaseline(state, summary)
+	if err := p.restoreTaskActivity(ctx, taskID, state); err != nil {
+		return err
 	}
 	if err := p.restoreSessionObservations(ctx, taskID, state); err != nil {
 		return err
@@ -246,6 +297,7 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.queuedCount = summary.QueuedPromptCount
 	state.taskPending = summary.PendingAction
+	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
 		state.sessions[summary.PrimarySession.ID] = sessionObservation{
 			id:        summary.PrimarySession.ID,
@@ -267,6 +319,18 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	}
 }
 
+func (p *Projector) restoreTaskActivity(ctx context.Context, taskID string, state *projectionState) error {
+	if p.loadTaskActivity == nil || state.lastActivityAt != nil {
+		return nil
+	}
+	activityAt, err := p.loadTaskActivity(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load task activity for task status summary %q: %w", taskID, err)
+	}
+	state.lastActivityAt = maxTimePtr(state.lastActivityAt, activityAt)
+	return nil
+}
+
 // rebaseProjectionStateFromCurrent rebuilds all derived source state from the
 // summary that won a rejected compare-and-set. Pending authority and the
 // triggering source event are refreshed by the caller before retrying.
@@ -279,8 +343,10 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 		return nil
 	}
 	current := state.current
+	previousLastActivityAt := cloneTimePtr(state.lastActivityAt)
 	state.sessions = make(map[string]sessionObservation)
 	state.activityObserved = false
+	state.lastActivityAt = previousLastActivityAt
 	state.pending = make(map[string]string)
 	state.pendingRequests = make(map[string]pendingRequestIdentity)
 	state.pendingObserved = false
@@ -293,6 +359,9 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	state.prBaseline = nil
 	state.prObserved = false
 	applySummaryBaseline(state, current)
+	if err := p.restoreTaskActivity(ctx, taskID, state); err != nil {
+		return err
+	}
 	if err := p.restoreSessionObservations(ctx, taskID, state); err != nil {
 		return err
 	}

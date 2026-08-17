@@ -53,8 +53,9 @@ func (s *Service) ReconcileTaskStatusSummaries(
 	if s == nil || s.statusSummaries == nil || len(tasks) == 0 {
 		return summaries, nil
 	}
+	activityByTask, activityObserved := s.loadSummaryActivity(ctx, taskIDs(tasks))
 	failedTaskIDs, reconcileErr := s.reconcileExistingSummaries(
-		ctx, tasks, sessionsByTask, pendingBySession, summaries,
+		ctx, tasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved,
 	)
 	rebuildTasks := tasks
 	if len(failedTaskIDs) > 0 {
@@ -69,7 +70,7 @@ func (s *Service) ReconcileTaskStatusSummaries(
 		}
 	}
 	summaries = s.rebuildMissingSummaries(
-		ctx, rebuildTasks, sessionsByTask, pendingBySession, summaries,
+		ctx, rebuildTasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved,
 	)
 	return summaries, reconcileErr
 }
@@ -80,6 +81,8 @@ func (s *Service) reconcileExistingSummaries(
 	sessionsByTask map[string][]*models.TaskSession,
 	pendingBySession map[string]models.TaskPendingAction,
 	summaries map[string]*statussummary.TaskStatusSummary,
+	activityByTask map[string]time.Time,
+	activityObserved bool,
 ) (map[string]struct{}, error) {
 	var reconcileErr error
 	failedTaskIDs := make(map[string]struct{})
@@ -94,6 +97,8 @@ func (s *Service) reconcileExistingSummaries(
 			task,
 			summaries[task.ID],
 			action,
+			activityByTask[task.ID],
+			activityObserved,
 		)
 		if err != nil {
 			if reconciled != nil {
@@ -127,6 +132,8 @@ func (s *Service) rebuildMissingSummaries(
 	sessionsByTask map[string][]*models.TaskSession,
 	pendingBySession map[string]models.TaskPendingAction,
 	summaries map[string]*statussummary.TaskStatusSummary,
+	activityByTask map[string]time.Time,
+	activityObserved bool,
 ) map[string]*statussummary.TaskStatusSummary {
 	missing := missingSummaryTasks(tasks, summaries)
 	if len(missing) == 0 {
@@ -135,8 +142,10 @@ func (s *Service) rebuildMissingSummaries(
 	prByTask, prObserved := s.loadSummaryPRs(ctx, taskIDs(missing))
 	gitBySession, gitObserved := s.loadSummaryGit(ctx, sessionIDsForTasks(missing, sessionsByTask))
 	queuedByTask := s.loadQueuedSummaryCounts(ctx, taskIDs(missing))
+	activityAtByTask := activityByTask
 	now := time.Now().UTC()
 	for _, task := range missing {
+		activityAt := activityAtByTask[task.ID]
 		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
 			sessionsByTask[task.ID],
 			pendingBySession,
@@ -145,6 +154,8 @@ func (s *Service) rebuildMissingSummaries(
 			prByTask[task.ID],
 			prObserved,
 			queuedByTask[task.ID],
+			activityAt,
+			activityObserved,
 			now,
 		))
 	}
@@ -160,6 +171,20 @@ func (s *Service) loadQueuedSummaryCounts(ctx context.Context, taskIDs []string)
 		s.logger.Warn("failed to load queued prompt counts for status summary repair", zap.Error(err))
 	}
 	return map[string]int{}
+}
+
+func (s *Service) loadSummaryActivity(ctx context.Context, taskIDs []string) (map[string]time.Time, bool) {
+	if s.taskActivity == nil || len(taskIDs) == 0 {
+		return nil, false
+	}
+	activityByTask, err := s.taskActivity.LoadTaskLastActivity(ctx, taskIDs)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to load task activity for status summary repair", zap.Error(err))
+		}
+		return nil, false
+	}
+	return activityByTask, true
 }
 
 func (s *Service) rebuildMissingSummary(
@@ -211,9 +236,14 @@ func (s *Service) reconcileExistingSummary(
 	task *models.Task,
 	current *statussummary.TaskStatusSummary,
 	pendingAction string,
+	authoritativeActivity time.Time,
+	activityObserved bool,
 ) (*statussummary.TaskStatusSummary, error) {
 	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
-		if current.PendingAction == pendingAction {
+		activityNeedsRepair := activityObserved &&
+			(authoritativeActivity.After(time.Time{}) &&
+				(current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt)))
+		if current.PendingAction == pendingAction && !activityNeedsRepair {
 			return current, nil
 		}
 		if err := prepareSummaryReconcileAttempt(ctx, attempt, current.Revision); err != nil {
@@ -221,6 +251,9 @@ func (s *Service) reconcileExistingSummary(
 		}
 		next := *current
 		next.PendingAction = pendingAction
+		if activityObserved && authoritativeActivity.After(time.Time{}) {
+			next.LastActivityAt = maxSummaryActivity(current.LastActivityAt, authoritativeActivity)
+		}
 		next.Revision = current.Revision + 1
 		next.UpdatedAt = advancedSummaryTime(current.UpdatedAt, time.Now().UTC())
 		if err := next.Validate(); err != nil {
@@ -259,11 +292,30 @@ func (s *Service) reconcileExistingSummary(
 		}
 		pendingAction = pendingActionForTask(refreshedSessions, pendingBySession)
 	}
-	if current != nil && current.PendingAction == pendingAction {
+	activityNeedsRepair := activityObserved &&
+		(authoritativeActivity.After(time.Time{}) &&
+			(current != nil && (current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt))))
+	if current != nil && current.PendingAction == pendingAction && !activityNeedsRepair {
 		return current, nil
 	}
 	s.logSummaryReconcileExhaustion(task.ID, current)
 	return nil, errors.New("exhausted compare-and-set retries")
+}
+
+func maxSummaryActivity(current *time.Time, candidate time.Time) *time.Time {
+	if candidate.IsZero() {
+		if current == nil {
+			return nil
+		}
+		copy := current.UTC()
+		return &copy
+	}
+	if current != nil && !candidate.After(*current) {
+		copy := current.UTC()
+		return &copy
+	}
+	copy := candidate.UTC()
+	return &copy
 }
 
 func (s *Service) logSummaryReconcileExhaustion(
@@ -447,17 +499,24 @@ func (s *Service) rebuildInput(
 	prs []statussummary.PullRequestInput,
 	prObserved bool,
 	queuedPromptCount int,
+	lastActivityAt time.Time,
+	activityObserved bool,
 	now time.Time,
 ) statussummary.RebuildInput {
 	input := statussummary.RebuildInput{
 		Sessions:          make([]statussummary.RebuildSession, 0, len(sessions)),
 		PendingActions:    make(map[string]string),
 		ActivityObserved:  s.foregroundActivity != nil,
+		LastActivityAt:    nil,
 		PullRequests:      prs,
 		PRObserved:        prObserved,
 		GitObserved:       gitObserved,
 		QueuedPromptCount: maxInt(queuedPromptCount, 0),
 		Now:               now,
+	}
+	if activityObserved && !lastActivityAt.IsZero() {
+		activityCopy := lastActivityAt.UTC()
+		input.LastActivityAt = &activityCopy
 	}
 	countProvider, hasCountProvider := s.foregroundActivity.(activeSubagentCountProvider)
 	for _, session := range sessions {

@@ -1223,6 +1223,7 @@
   "sortCreated": "创建时间",
   "sortCustom": "自定义",
   "sortDirection": "排序方向 {{direction}}",
+  "sortLastActivity": "最后活动",
   "sortStatus": "状态",
   "sortTitle": "标题",
   "sortUpdated": "更新时间",

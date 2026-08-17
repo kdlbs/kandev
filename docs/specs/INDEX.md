@@ -232,6 +232,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
 | [sidebar-archived-filter](ui/sidebar-archived-filter.md) | draft |
+| [sidebar-last-activity-sort](ui/sidebar-last-activity-sort.md) | draft |
 | [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
 | [file-tree-chat-context](ui/file-tree-chat-context.md) | shipped |
 | [task-review-shortcut](ui/task-review-shortcut.md) | approved |

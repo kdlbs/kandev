@@ -54,6 +54,10 @@ type SessionObservationSnapshot struct {
 // observations for one task.
 type SessionObservationLoader func(context.Context, string) (SessionObservationSnapshot, error)
 
+// TaskActivityLoader rehydrates the durable maximum activity timestamp for a
+// task when a projector starts with a legacy or incomplete summary row.
+type TaskActivityLoader func(context.Context, string) (*time.Time, error)
+
 // PullRequestLoader rehydrates the keyed PR observations needed to preserve
 // sibling pull requests across projector restarts and CAS rebases.
 type PullRequestLoader func(context.Context, string) ([]PullRequestInput, error)
@@ -78,6 +82,7 @@ type ProjectorConfig struct {
 	LoadGitObservations     GitObservationLoader
 	LoadPendingActions      PendingActionLoader
 	LoadSessionObservations SessionObservationLoader
+	LoadTaskActivity        TaskActivityLoader
 	LoadPullRequests        PullRequestLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
@@ -99,6 +104,7 @@ type Projector struct {
 	loadGitObservations     GitObservationLoader
 	loadPendingActions      PendingActionLoader
 	loadSessionObservations SessionObservationLoader
+	loadTaskActivity        TaskActivityLoader
 	loadPullRequests        PullRequestLoader
 	countQueuedPrompts      func(context.Context, string) (int, error)
 	logger                  *logger.Logger
@@ -121,6 +127,7 @@ type projectionState struct {
 	revision         uint64
 	current          *TaskStatusSummary
 	queuedCount      int
+	lastActivityAt   *time.Time
 	sessions         map[string]sessionObservation
 	pending          map[string]string
 	pendingRequests  map[string]pendingRequestIdentity
@@ -184,6 +191,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadGitObservations:     cfg.LoadGitObservations,
 		loadPendingActions:      cfg.LoadPendingActions,
 		loadSessionObservations: cfg.LoadSessionObservations,
+		loadTaskActivity:        cfg.LoadTaskActivity,
 		loadPullRequests:        cfg.LoadPullRequests,
 		countQueuedPrompts:      cfg.CountQueuedPrompts,
 		logger:                  log.WithFields(zap.String("component", "task-status-summary-projector")),
@@ -201,13 +209,17 @@ func (p *Projector) Start(ctx context.Context) error {
 		return nil
 	}
 	patterns := []string{
+		events.TaskCreated,
 		events.TaskUpdated,
+		events.TaskStateChanged,
 		events.TaskSessionStateChanged,
 		events.TaskSessionActivityChanged,
 		events.TaskSessionErrorChanged,
 		events.MessageAdded,
 		events.MessageUpdated,
 		events.MessageDeleted,
+		events.TurnStarted,
+		events.TurnCompleted,
 		events.ClarificationAnswered,
 		events.ClarificationPrimaryAnswered,
 		events.ClarificationCancelled,
@@ -504,6 +516,7 @@ func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, 
 			state.current = cloneSummary(stored)
 			state.revision = stored.Revision
 			state.queuedCount = stored.QueuedPromptCount
+			state.lastActivityAt = maxTimePtr(state.lastActivityAt, stored.LastActivityAt)
 		}
 		return false, nil
 	}

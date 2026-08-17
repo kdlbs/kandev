@@ -36,6 +36,7 @@ export type TaskSwitcherItem = {
   remoteExecutorType?: string;
   remoteExecutorName?: string;
   updatedAt?: string;
+  lastActivityAt?: string;
   createdAt?: string;
   isArchived?: boolean;
   primarySessionId?: string | null;
@@ -91,6 +92,7 @@ export type TaskSwitcherProps = {
   onRetryLoad?: () => void;
   retryLabel?: string;
   totalTaskCount?: number;
+  showActivityTime?: boolean;
   // Multi-select (cmd/shift click). When the selection is non-empty, plain
   // clicks toggle instead of navigating; the context menu acts on the selection.
   selectedTaskIds?: Set<string>;

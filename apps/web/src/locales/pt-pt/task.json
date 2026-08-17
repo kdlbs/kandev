@@ -1224,6 +1224,7 @@
   "sortCreated": "Criação",
   "sortCustom": "Personalizada",
   "sortDirection": "Sentido da ordenação {{direction}}",
+  "sortLastActivity": "Última atividade",
   "sortStatus": "Estado",
   "sortTitle": "Título",
   "sortUpdated": "Atualização",

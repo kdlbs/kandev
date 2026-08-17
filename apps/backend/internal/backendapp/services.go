@@ -109,6 +109,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			Reviews:           repos.Task,
 			ResourceCleanups:  repos.Task,
 			StatusSummaries:   repos.Task,
+			TaskActivity:      repos.Task,
 			SubagentContexts:  repos.Task,
 		},
 		eventBus,
