@@ -16,7 +16,7 @@ import { useRepoMergeMethods } from "@/hooks/domains/github/use-repo-merge-metho
 import { mergePR } from "@/lib/api/domains/github-api";
 import { getGitHubMutationActor } from "@/lib/github-auth";
 import type { MergeMethod, TaskPR } from "@/lib/types/github";
-import { isPRReadyToMerge } from "./pr-task-icon";
+import { canAttemptPRMerge } from "./pr-task-icon";
 import { useTranslation } from "react-i18next";
 
 function MutationActor({ actor }: { actor: string | null }) {
@@ -97,16 +97,13 @@ export function PRMergeButton({
   const { status } = useGitHubStatus(workspaceId);
   const mutationActor = getGitHubMutationActor(status);
 
-  // If the same component instance ever renders a different PR (e.g. the user
-  // switches the active task while the panel/popover stays mounted), the
-  // sticky accepted flag from a previous merge would hide the button for an
-  // unrelated, still-mergeable PR. Reset it whenever the underlying PR id
-  // changes.
+  // Reset after switching PRs or after GitHub reports an observable lifecycle
+  // or mergeability transition, including a PR ejected from a merge queue.
   useEffect(() => {
     setAccepted(false);
-  }, [taskPR.id]);
+  }, [taskPR.id, taskPR.state, taskPR.mergeable_state]);
 
-  if (accepted || !isPRReadyToMerge(taskPR)) return null;
+  if (accepted || !canAttemptPRMerge(taskPR)) return null;
   // `methods` may be null on first render, on lookup failure, or after the
   // 5-minute cache window. We still render the button — clicking with no
   // method routes through the backend's GetRepoMergeMethods resolver, so
@@ -156,10 +153,10 @@ export function PRMergeButton({
       compact={compact}
       label={
         merging
-          ? t(taskPR.mergeable_state === "blocked" ? "github:addingToMergeQueue" : "github:merging")
+          ? t("github:merging")
           : t(
               taskPR.mergeable_state === "blocked"
-                ? "github:addToMergeQueue"
+                ? "github:mergeMethodDefault"
                 : mergeLabelKey(primary),
             )
       }

@@ -561,6 +561,7 @@ func TestGHClient_MergePR_StatusIsRecoverable(t *testing.T) {
 		{"gh: HTTP 405: Method Not Allowed", http.StatusMethodNotAllowed},
 		{"gh: HTTP 404: Not Found", http.StatusNotFound},
 		{"gh: HTTP 403: Forbidden", http.StatusForbidden},
+		{"gh: merge conflict (HTTP 409)", http.StatusConflict},
 	}
 	for _, tc := range cases {
 		t.Run(http.StatusText(tc.want), func(t *testing.T) {
@@ -581,7 +582,9 @@ func TestGHClient_MergePR_StatusIsRecoverable(t *testing.T) {
 }
 
 func TestGHClient_MergePR_AlreadyQueuedIsIdempotent(t *testing.T) {
-	newFakeGH(t, ghResponse{Prefix: "api repos/", Stderr: "gh: HTTP 409: Conflict", Exit: 1})
+	newFakeGH(t, ghResponse{
+		Prefix: "api repos/", Stderr: "gh: merge request already enqueued (HTTP 409)", Exit: 1,
+	})
 	outcome, err := NewGHClient().MergePR(context.Background(), "acme", "widget", 42, "squash")
 	if err != nil || outcome != MergeOutcomeQueued {
 		t.Fatalf("outcome = %q, err = %v, want queued", outcome, err)

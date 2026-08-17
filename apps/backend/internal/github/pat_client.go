@@ -741,7 +741,8 @@ func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int,
 	var response mergeAsyncResponse
 	if err := c.putJSON(ctx, endpoint, jsonBody, &response); err != nil {
 		var apiErr *GitHubAPIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict {
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict &&
+			isAlreadyQueuedMergeConflict(apiErr.Body) {
 			return MergeOutcomeQueued, nil
 		}
 		return "", err

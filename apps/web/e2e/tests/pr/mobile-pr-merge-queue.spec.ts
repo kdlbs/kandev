@@ -79,7 +79,7 @@ test("adds a GitHub PR to the merge queue from mobile Review", async ({
     checks_total: 3,
     checks_passing: 3,
   });
-  const merge = panel.getByRole("button", { name: "Add to merge queue" });
+  const merge = panel.getByRole("button", { name: "Merge PR" });
   await expect(merge).toBeVisible({ timeout: 15_000 });
   expect((await requireBox(merge, "mobile merge queue action")).height).toBeGreaterThanOrEqual(44);
   await assertNoDocumentHorizontalOverflow(testPage);

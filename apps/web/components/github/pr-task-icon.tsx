@@ -61,7 +61,7 @@ export function hasPRChecksPassedWithoutReviewWaitForDisplay(pr: TaskPR): boolea
 export function isPRReadyToMerge(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
   if (!hasExplicitPRChecksPassed(pr)) return false;
-  if (pr.mergeable_state !== "clean" && pr.mergeable_state !== "blocked") return false;
+  if (pr.mergeable_state !== "clean") return false;
   // Guard against stale mergeable_state: enforce required_reviews to match GitHub's gate.
   if (pr.required_reviews != null && pr.review_count < pr.required_reviews) {
     return false;
@@ -72,6 +72,14 @@ export function isPRReadyToMerge(pr: TaskPR): boolean {
   // sets mergeable_state=clean when branch protection is satisfied, so this
   // covers repos without required reviewers.
   return pr.review_state === "" && pr.pending_review_count === 0;
+}
+
+// GitHub overloads `blocked` for merge queues and unrelated repository rules.
+// Keep readiness clean-only, but allow a neutral merge attempt so GitHub can
+// authoritatively accept the PR into a queue or return the actual blocker.
+export function canAttemptPRMerge(pr: TaskPR): boolean {
+  if (pr.mergeable_state !== "clean" && pr.mergeable_state !== "blocked") return false;
+  return isPRReadyToMerge({ ...pr, mergeable_state: "clean" });
 }
 
 export function isPRDraft(pr: TaskPR): boolean {

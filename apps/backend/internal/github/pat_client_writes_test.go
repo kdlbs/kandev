@@ -106,7 +106,7 @@ func TestPATClient_MergePR(t *testing.T) {
 // A merge rejection must stay recoverable as *GitHubAPIError so the HTTP
 // layer can map 405 (not mergeable) and 409 (conflict) onto a 409 response.
 func TestPATClient_MergePR_StatusIsRecoverable(t *testing.T) {
-	for _, status := range []int{http.StatusMethodNotAllowed} {
+	for _, status := range []int{http.StatusMethodNotAllowed, http.StatusConflict} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			c, _ := newRecordingPATServerFunc(t, func(*http.Request) (int, string) {
 				return status, `{"message":"Pull Request is not mergeable"}`

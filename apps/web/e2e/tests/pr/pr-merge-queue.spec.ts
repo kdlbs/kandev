@@ -32,13 +32,13 @@ test("adds an eligible GitHub PR to its merge queue", async ({ testPage, apiClie
 
   await session.hoverPRTopbar();
   const popover = session.prTopbarPopover();
-  const compactMerge = popover.getByRole("button", { name: "Add to merge queue" });
+  const compactMerge = popover.getByRole("button", { name: "Merge PR" });
   await expect(compactMerge).toBeVisible({ timeout: 15_000 });
   await session.prDetailTab().click();
   await seedQueuedPR(apiClient, task.id);
 
   const detail = testPage.getByTestId("change-request-detail");
-  const merge = detail.getByRole("button", { name: "Add to merge queue" });
+  const merge = detail.getByRole("button", { name: "Merge PR" });
   await expect(merge).toBeVisible({ timeout: 15_000 });
   const [response] = await Promise.all([
     testPage.waitForResponse((candidate) => candidate.url().includes(`/${PR_NUMBER}/merge`)),

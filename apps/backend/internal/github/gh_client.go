@@ -910,10 +910,9 @@ func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, 
 	out, err := c.run(ctx, args...)
 	if err != nil {
 		// Surface status-based errors as GitHubAPIError so httpMergePR can
-		// translate 405 (not mergeable) / 409 (conflict) to HTTP 409 for
-		// gh CLI users too, matching the PAT path.
+		// translate merge rejections for gh CLI users, matching the PAT path.
 		if code, ok := ghMergeStatusCode(err); ok {
-			if code == http.StatusConflict {
+			if code == http.StatusConflict && isAlreadyQueuedMergeConflict(err.Error()) {
 				return MergeOutcomeQueued, nil
 			}
 			return "", &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}

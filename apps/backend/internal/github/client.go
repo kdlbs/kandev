@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -43,6 +44,13 @@ func normalizeMergeOutcome(status string) (MergeOutcome, error) {
 	default:
 		return "", fmt.Errorf("unexpected GitHub merge status %q", status)
 	}
+}
+
+func isAlreadyQueuedMergeConflict(message string) bool {
+	normalized := strings.ToLower(message)
+	return strings.Contains(normalized, "already enqueued") ||
+		strings.Contains(normalized, "already queued") ||
+		strings.Contains(normalized, "already in the merge queue")
 }
 
 // Client defines the interface for interacting with the GitHub API.

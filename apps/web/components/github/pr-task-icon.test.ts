@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  canAttemptPRMerge,
   aggregatePRStatusColor,
   getPRAggregateStatusColor,
   areAllOpenPRsReadyToMerge,
@@ -123,7 +124,7 @@ describe("isPRReadyToMerge", () => {
     ).toBe(false);
   });
 
-  it("is true when checks and reviews pass but GitHub requires a merge queue", () => {
+  it("does not claim readiness for GitHub's overloaded blocked state", () => {
     expect(
       isPRReadyToMerge(
         makePR({
@@ -133,7 +134,7 @@ describe("isPRReadyToMerge", () => {
           mergeable_state: "blocked",
         }),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("is false when state is merged", () => {
@@ -164,6 +165,21 @@ describe("isPRReadyToMerge", () => {
       ).toBe(false);
     },
   );
+});
+
+describe("canAttemptPRMerge", () => {
+  it("allows GitHub to decide whether a locally green blocked PR enters a queue", () => {
+    expect(
+      canAttemptPRMerge(
+        makePR({
+          state: "open",
+          review_state: "approved",
+          checks_state: "success",
+          mergeable_state: "blocked",
+        }),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("isPRReadyToMerge — aggregate counts", () => {
@@ -261,15 +277,15 @@ describe("getPRStatusColor", () => {
     expect(getPRStatusColor(pr)).toBe(EMERALD_400);
   });
 
-  it("returns ready-to-merge color for an approved queue-required PR", () => {
+  it("keeps an approved blocked PR neutral until GitHub accepts it", () => {
     const pr = makePR({
       state: "open",
       review_state: "approved",
       checks_state: "success",
       mergeable_state: "blocked",
     });
-    expect(getPRStatusColor(pr)).toBe(EMERALD_400);
-    expect(isPRWaitingOnBranchProtection(pr)).toBe(false);
+    expect(getPRStatusColor(pr)).toBe(MUTED_FOREGROUND);
+    expect(isPRWaitingOnBranchProtection(pr)).toBe(true);
   });
 
   it("returns sky-400 for approved PR that still has pending reviewers (1 of N required)", () => {
