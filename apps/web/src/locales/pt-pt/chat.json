@@ -79,6 +79,8 @@
   "queueEditAlreadySent": "Mensagem já enviada; o agente recebeu-a antes de a sua edição ser aplicada.",
   "queueEditSaveFailed": "Não foi possível guardar a edição. Tente novamente.",
   "queueFullSuffix": "· cheia",
+  "questionsWaiting_one": "{{count}} pergunta em espera",
+  "questionsWaiting_other": "{{count}} perguntas em espera",
   "quickChatDialogIntro": "Inicie uma conversa rápida com um agente sem criar uma tarefa formal.",
   "quickChatIntro": "Converse com um agente sobre uma ideia, uma dúvida ou uma base de código.",
   "quickChatIntroSecondary": "Os chats rápidos ficam fora do seu quadro de tarefas.",

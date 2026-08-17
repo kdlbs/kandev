@@ -86,6 +86,8 @@
   "queueEditAlreadySent": "消息已发送；智能体在你的编辑生效前已取走它。",
   "queueEditSaveFailed": "保存编辑失败。请重试。",
   "queueFullSuffix": "· 已满",
+  "questionsWaiting_one": "{{count}} 个问题待处理",
+  "questionsWaiting_other": "{{count}} 个问题待处理",
   "quickChatDialogIntro": "与智能体开始快速对话，无需创建正式任务。",
   "quickChatIntro": "就想法、问题或代码库与智能体聊天。",
   "quickChatIntroSecondary": "快速聊天独立于任务看板。",
