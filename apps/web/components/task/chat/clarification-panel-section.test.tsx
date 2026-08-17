@@ -1,6 +1,7 @@
 import { createRef } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, cleanup, fireEvent, screen } from "@testing-library/react";
+import { i18n } from "@/lib/i18n";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import { ClarificationPanelSection } from "./clarification-panel-section";
 
@@ -79,8 +80,12 @@ beforeEach(() => {
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // Restoring the locale is load-bearing: changeLanguage mutates the shared
+  // instance vitest.setup.ts initializes, so leaving it on pseudo would leak
+  // into every test that runs after this file.
+  await i18n.changeLanguage("en");
 });
 
 const SCROLL_REGION_TESTID = "clarification-scroll-region";
@@ -164,6 +169,44 @@ describe("ClarificationPanelSection — per-surface max-height cap", () => {
 
     const container = screen.getByTestId(CONTAINER_TESTID);
     expect(container.style.maxHeight).toBe("35vh");
+  });
+});
+
+describe("ClarificationPanelSection — waiting-count localization", () => {
+  it("uses the singular form for exactly one waiting question", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 2 }),
+    ];
+    renderSection(true, messages);
+
+    expect(screen.getByTestId("clarification-waiting-count").textContent).toBe(
+      "1 question waiting",
+    );
+  });
+
+  it("uses the plural form for more than one waiting question", () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 2 }),
+      clarMessage({ pendingId: "p1", id: "m2", questionId: "q2", index: 1, total: 2 }),
+    ];
+    renderSection(true, messages);
+
+    expect(screen.getByTestId("clarification-waiting-count").textContent).toBe(
+      "2 questions waiting",
+    );
+  });
+
+  it("resolves the waiting-count text through the catalog on a locale switch, not an English fallback", async () => {
+    const messages = [
+      clarMessage({ pendingId: "p1", id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ];
+    renderSection(true, messages);
+
+    await i18n.changeLanguage("pseudo");
+
+    expect(screen.getByTestId("clarification-waiting-count").textContent).toBe(
+      "1 qũēśţĩōń ŵàĩţĩńĝ",
+    );
   });
 });
 

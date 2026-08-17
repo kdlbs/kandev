@@ -171,7 +171,7 @@ test.describe("Clarification overlay resizable layout", () => {
     await session.sendMessage("/ask-multiple");
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
-    const container = testPage.getByTestId("clarification-overlay-container");
+    const container = session.clarificationBar();
     await expect(container).toBeVisible();
     await expect(container).toHaveCSS("max-height", "1000px");
 
