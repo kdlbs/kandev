@@ -25,7 +25,10 @@ import (
 
 // Turn operations
 
-const runtimeModelConfigID = "model"
+const (
+	runtimeModelConfigID = "model"
+	turnEventMetadataKey = "metadata"
+)
 
 // StartTurn creates a new turn for a session and publishes the turn.started event.
 // Returns the created turn.
@@ -552,16 +555,21 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 		s.logger.Warn("publishTurnEvent: turn is nil, skipping", zap.String("event_type", eventType))
 		return nil
 	}
+	// Prompt-dispatch fields are private recovery state. A fast completion can
+	// race start-event publication before the durable cleanup commits, so every
+	// public event must sanitize its own metadata snapshot.
+	metadata := maps.Clone(turn.Metadata)
+	models.ClearPromptDispatchMetadata(metadata)
 	payload := map[string]interface{}{
 		"id":           turn.ID,
 		"session_id":   turn.TaskSessionID,
 		"task_id":      turn.TaskID,
 		"started_at":   turn.StartedAt,
 		"completed_at": turn.CompletedAt,
-		"metadata":     turn.Metadata,
 		"created_at":   turn.CreatedAt,
 		"updated_at":   turn.UpdatedAt,
 	}
+	payload[turnEventMetadataKey] = metadata
 	if hadOutput != nil {
 		payload["had_output"] = *hadOutput
 	}

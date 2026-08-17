@@ -427,6 +427,9 @@ All locally available task gates passed; environment-gated parity also passed in
   emits a structured warning with task, attempt count, and last revision when summary reconciliation
   exhausts its compare-and-set retry budget. Focused backend tests and focused frontend formatting/lint
   pass.
+- Exact-head Codex follow-up sanitizes private prompt-dispatch recovery fields from every public turn
+  event. The concurrent publication regression now completes through the task service and proves a fast
+  `turn.completed` payload cannot retain the pre-cleanup metadata.
 - `git diff --check` passed. All runners used isolated test state and exited cleanly.
 
 ---

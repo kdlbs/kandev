@@ -194,3 +194,6 @@ blockers/risks, and update task/plan status.
 - Delayed CodeRabbit review guards the anomalous `(nil, nil)` session-repository result before turn
   admission dereferences it. `ReserveTurn` now returns an error instead of panicking, with a focused
   regression.
+- Exact-head Codex review makes public turn-event metadata recovery-clean at the shared publication
+  boundary. The fast-completion regression now uses `Service.CompleteTurn` and verifies the concurrently
+  emitted completion event does not leak any `prompt_dispatch_*` fields.

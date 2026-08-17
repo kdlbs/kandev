@@ -55,7 +55,8 @@ hiding the action the icon represents.
   preserves the successor and keeps the claimed bundle terminal. Acknowledgement publishes a
   recovery-clean `turn.started` payload while the recovery metadata remains durable, then clears that
   metadata after the event bus accepts the event. HTTP success requires both operations. A rejected
-  event publication therefore remains discoverable by startup reconciliation. If the
+  event publication therefore remains discoverable by startup reconciliation. Every public turn event,
+  including a completion racing that cleanup, strips the private prompt-dispatch fields. If the
   predecessor's delayed ready event overlaps this private reservation, ready handling waits for the
   reservation to resolve and then revalidates prompt generation before touching turn or workflow state.
   It cannot complete the reserved successor or run predecessor completion actions against it. When the

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -44,17 +45,17 @@ func (b *failTurnStartedEventBus) Publish(ctx context.Context, subject string, e
 
 type completeTurnOnStartedEventBus struct {
 	*MockEventBus
-	repo   repository.TurnRepository
-	turnID string
+	complete func(context.Context) error
 }
 
 func (b *completeTurnOnStartedEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
-	if subject == events.TurnStarted {
-		if err := b.repo.CompleteTurn(ctx, b.turnID); err != nil {
-			return err
-		}
+	if err := b.MockEventBus.Publish(ctx, subject, event); err != nil {
+		return err
 	}
-	return b.MockEventBus.Publish(ctx, subject, event)
+	if subject == events.TurnStarted {
+		return b.complete(ctx)
+	}
+	return nil
 }
 
 func (r *failGetAfterPublishMetadataRepo) UpdateActiveTurnMetadata(
@@ -320,8 +321,9 @@ func TestPublishReservedTurnClearsRecoveryStateAfterConcurrentCompletion(t *test
 	}
 	svc.eventBus = &completeTurnOnStartedEventBus{
 		MockEventBus: eventBus,
-		repo:         repo,
-		turnID:       turn.ID,
+		complete: func(ctx context.Context) error {
+			return svc.CompleteTurn(ctx, turn.ID)
+		},
 	}
 
 	if err := svc.PublishReservedTurn(ctx, turn); err != nil {
@@ -342,6 +344,20 @@ func TestPublishReservedTurnClearsRecoveryStateAfterConcurrentCompletion(t *test
 			t.Fatalf("completed published turn retained recovery key %q: %#v", key, persisted.Metadata)
 		}
 	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type != events.TurnCompleted {
+			continue
+		}
+		data, _ := event.Data.(map[string]interface{})
+		metadata, _ := data["metadata"].(map[string]interface{})
+		for key := range metadata {
+			if strings.HasPrefix(key, "prompt_dispatch_") {
+				t.Fatalf("turn.completed exposed recovery metadata: %#v", metadata)
+			}
+		}
+		return
+	}
+	t.Fatal("concurrent completion did not publish turn.completed")
 }
 
 func TestPatchTurnMetadataMergesAfterReservedTurnPublication(t *testing.T) {
