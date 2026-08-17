@@ -115,3 +115,6 @@ actual files, then update task/plan status.
 - Delayed Claude review adds a structured warning at compare-and-set exhaustion with the task ID,
   configured attempt count, and last observed revision. The existing exhaustion regression now asserts
   that observability contract.
+- Exact-head Codex review aligns exhaustion with the feature spec: a summary still disagreeing with the
+  authoritative pending action after all retries is omitted from the partial result, so task-list and
+  boot consumers use the coarse pending-action fallback rather than a known-stale summary.

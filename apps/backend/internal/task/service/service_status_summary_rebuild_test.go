@@ -593,7 +593,7 @@ func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testin
 	}
 }
 
-func TestReconcileTaskStatusSummariesKeepsAuthoritativeRowAfterCASExhaustion(t *testing.T) {
+func TestReconcileTaskStatusSummariesDropsStaleRowAfterCASExhaustion(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	core, logs := observer.New(zapcore.WarnLevel)
 	log, logErr := commonlogger.NewFromZap(zap.New(core))
@@ -631,8 +631,8 @@ func TestReconcileTaskStatusSummariesKeepsAuthoritativeRowAfterCASExhaustion(t *
 	if err == nil {
 		t.Fatal("CAS exhaustion error = nil")
 	}
-	if got["task-1"] == nil || got["task-1"].QueuedPromptCount != 9 {
-		t.Fatalf("summary after CAS exhaustion = %+v, want authoritative row", got["task-1"])
+	if _, exists := got["task-1"]; exists {
+		t.Fatalf("summary after CAS exhaustion = %+v, want stale row omitted", got["task-1"])
 	}
 	if exhausting.compareCalls != maxSummaryReconcileAttempts {
 		t.Fatalf("compare calls = %d, want %d", exhausting.compareCalls, maxSummaryReconcileAttempts)

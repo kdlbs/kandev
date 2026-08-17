@@ -258,7 +258,7 @@ func (s *Service) reconcileExistingSummary(
 		return current, nil
 	}
 	s.logSummaryReconcileExhaustion(task.ID, current)
-	return current, errors.New("exhausted compare-and-set retries")
+	return nil, errors.New("exhausted compare-and-set retries")
 }
 
 func (s *Service) logSummaryReconcileExhaustion(
