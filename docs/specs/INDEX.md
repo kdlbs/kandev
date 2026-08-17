@@ -292,6 +292,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [e2e-duration-aware-sharding](e2e-duration-aware-sharding/spec.md) | implemented |
 | [board-step-visibility-filter](board-step-visibility-filter/spec.md) | draft |
 | [shutdown-turn-failure-suppression](shutdown-turn-failure-suppression/spec.md) | draft |
+| [executor-profile-env-precedence](executor-profile-env-precedence/spec.md) | building |
 
 ---
 

@@ -63,6 +63,17 @@ func IsRepositoryOrigin(origin string) bool {
 	return len(fields) > 0 && fields[0] == "repository"
 }
 
+// RepositoryOrigin builds a repository origin string from a repository name,
+// falling back to the bare prefix when name is blank. Both assembly sites
+// (orchestrator and lifecycle) construct repository origins through this
+// helper so the two spellings cannot drift.
+func RepositoryOrigin(name string) string {
+	if trimmed := strings.TrimSpace(name); trimmed != "" {
+		return OriginRepositoryPrefix + trimmed
+	}
+	return strings.TrimSpace(OriginRepositoryPrefix)
+}
+
 // NormalizeOriginLabel derives the metric-label form of one origin: a
 // repository origin collapses to the bare value "repository" so per-name
 // cardinality cannot leak into a metric label; every other origin is used

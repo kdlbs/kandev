@@ -20,35 +20,10 @@ type environmentSource struct {
 	workspaceID string
 }
 
-type environmentSourceResolver func(context.Context, environmentSource) (string, error)
-
 // Keep the historical executor error names as aliases while the lifecycle and
 // orchestrator share one source-aware resolver.
 type EnvironmentConflictError = runtimeenv.ConflictError
 type EnvironmentSecretError = runtimeenv.SecretError
-
-func resolveEnvironmentSources(
-	ctx context.Context, sources []environmentSource, resolve environmentSourceResolver,
-) (map[string]string, error) {
-	definitions := make([]runtimeenv.Definition, 0, len(sources))
-	for _, source := range sources {
-		definitions = append(definitions, runtimeenv.Definition{
-			Key: source.key, Literal: source.literal, SecretID: source.secretID,
-			Origin: source.origin, WorkspaceID: source.workspaceID,
-		})
-	}
-	// This helper is test-only-reachable today (no production caller): it
-	// discards the OverrideRecords Resolve now returns because it has no
-	// task/session context to log or count against, and SHALL NOT log or
-	// count on its own.
-	resolved, _, err := runtimeenv.Resolve(ctx, definitions, func(ctx context.Context, definition runtimeenv.Definition) (string, error) {
-		return resolve(ctx, environmentSource{
-			key: definition.Key, literal: definition.Literal, secretID: definition.SecretID,
-			origin: definition.Origin, workspaceID: definition.WorkspaceID,
-		})
-	})
-	return resolved, err
-}
 
 func (e *Executor) taskEnvironmentSources(
 	workspaceID string,
@@ -82,10 +57,7 @@ func (e *Executor) taskEnvironmentSources(
 		if info.Repository.WorkspaceID != workspaceID {
 			return nil, fmt.Errorf("repository environment belongs to a different workspace")
 		}
-		origin := strings.TrimSpace(runtimeenv.OriginRepositoryPrefix)
-		if name := strings.TrimSpace(info.Repository.Name); name != "" {
-			origin = runtimeenv.OriginRepositoryPrefix + name
-		}
+		origin := runtimeenv.RepositoryOrigin(info.Repository.Name)
 		for _, binding := range info.Repository.SecretBindings {
 			sources = append(sources, environmentSource{
 				key: binding.Key, secretID: binding.SecretID, origin: origin, workspaceID: workspaceID,

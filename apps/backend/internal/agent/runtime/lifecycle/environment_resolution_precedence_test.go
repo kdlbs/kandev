@@ -78,6 +78,10 @@ func TestResolveStrictEnvironment_EmitsOverrideLogAndCounter(t *testing.T) {
 	require.Len(t, entries, 1, "exactly one OverrideRecord was produced")
 	fields := entries[0].ContextMap()
 	require.Equal(t, "SHARED", fields["env_key"])
+	require.Equal(t, []interface{}{runtimeenv.OriginManagedRuntime}, fields["winning_origins"])
+	require.EqualValues(t, int(runtimeenv.TierAuthoritative), fields["winning_tier"])
+	require.Equal(t, []interface{}{runtimeenv.OriginAgentProfile}, fields["losing_origins"])
+	require.EqualValues(t, []interface{}{int(runtimeenv.TierProfileDefault)}, fields["losing_tiers"])
 	require.Equal(t, "task-1", fields["task_id"])
 	require.Equal(t, "session-1", fields["session_id"])
 

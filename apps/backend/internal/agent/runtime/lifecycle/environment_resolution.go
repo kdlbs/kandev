@@ -247,10 +247,7 @@ func (m *Manager) repositoryEnvironmentDefinitions(ctx context.Context, taskID, 
 		if repository.WorkspaceID != workspaceID {
 			return nil, errors.New("repository environment belongs to a different workspace")
 		}
-		origin := strings.TrimSpace(runtimeenv.OriginRepositoryPrefix)
-		if name := strings.TrimSpace(repository.Name); name != "" {
-			origin = runtimeenv.OriginRepositoryPrefix + name
-		}
+		origin := runtimeenv.RepositoryOrigin(repository.Name)
 		for _, binding := range repository.SecretBindings {
 			if strings.TrimSpace(binding.Key) == "" || strings.TrimSpace(binding.SecretID) == "" {
 				return nil, fmt.Errorf("repository %s has an invalid secret binding", repository.ID)
