@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconMessageCircle, IconNetwork, IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
@@ -30,6 +30,10 @@ import {
 } from "../task-session-sidebar-link-actions";
 import { useSidebarTaskLinking } from "../task-session-sidebar-task-linking";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
+import {
+  createTaskSheetSelectionController,
+  handleTaskSheetOpenChange,
+} from "./session-task-switcher-sheet-selection";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
 import { SidebarTaskEditDialog, useSidebarTaskEdit } from "../task-session-sidebar-edit";
@@ -42,6 +46,17 @@ type SessionTaskSwitcherSheetProps = {
   workflowId: string | null;
   presentation?: "sheet" | "drawer";
 };
+
+export function useTaskSheetSelectionController() {
+  const [selectionController] = useState(createTaskSheetSelectionController);
+  useEffect(
+    () => () => {
+      selectionController.invalidate();
+    },
+    [selectionController],
+  );
+  return selectionController;
+}
 
 function useMobileTaskLinking(workspaceId: string | null) {
   const store = useAppStoreApi();
@@ -534,32 +549,37 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [subtaskTarget, setSubtaskTarget] = useState<{ id: string; title: string } | null>(null);
   const data = useSheetData(workspaceId);
-  const actions = useSheetActions(workspaceId, onOpenChange);
+  const selectionController = useTaskSheetSelectionController();
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => handleTaskSheetOpenChange(selectionController, nextOpen, onOpenChange),
+    [onOpenChange, selectionController],
+  );
+  const actions = useSheetActions(workspaceId, handleOpenChange, selectionController);
   const rename = useMobileTaskRename();
   const edit = useSidebarTaskEdit();
   const linking = useMobileTaskLinking(workspaceId);
   const openQuickChat = useQuickChatLauncher(workspaceId);
   const handleQuickChat = useCallback(() => {
-    onOpenChange(false);
+    handleOpenChange(false);
     openQuickChat();
-  }, [onOpenChange, openQuickChat]);
+  }, [handleOpenChange, openQuickChat]);
   const handleCreateSubtask = useCallback(
     (taskId: string, taskTitle: string) => {
-      onOpenChange(false);
+      handleOpenChange(false);
       setSubtaskTarget({ id: taskId, title: taskTitle });
     },
-    [onOpenChange],
+    [handleOpenChange],
   );
 
   const surfaceContent = (
     <TaskSwitcherSurfaceContent
       presentation={presentation}
       workspaceId={workspaceId}
-      onOpenChange={onOpenChange}
+      onOpenChange={handleOpenChange}
       onQuickChat={handleQuickChat}
       onCreateSubtask={handleCreateSubtask}
       onNewTask={() => {
-        if (presentation === "drawer") onOpenChange(false);
+        if (presentation === "drawer") handleOpenChange(false);
         setDialogOpen(true);
       }}
       data={data}
@@ -572,13 +592,13 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
 
   const surface =
     presentation === "drawer" ? (
-      <Drawer open={open} onOpenChange={onOpenChange}>
+      <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerContent className="h-[88dvh] max-h-[88dvh] overflow-hidden pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           {surfaceContent}
         </DrawerContent>
       </Drawer>
     ) : (
-      <Sheet open={open} onOpenChange={onOpenChange}>
+      <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent
           showCloseButton={false}
           side="left"

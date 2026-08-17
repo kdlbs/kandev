@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	messageCreateMaxRetries = 5
-	messageCreateRetryDelay = 50 * time.Millisecond
+	messageCreateMaxRetries    = 5
+	messageCreateRetryDelay    = 50 * time.Millisecond
+	clarificationPendingStatus = "pending"
 )
 
 // CreateMessage creates a new message on an agent session
@@ -775,5 +776,87 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 		zap.String("question_id", questionID),
 		zap.String("status", status))
 
+	return nil
+}
+
+// CompleteActiveClarificationBundle atomically transitions a current-turn
+// bundle. The caller publishes the returned messages only after response
+// delivery succeeds, so a failed detached resume can be restored for retry.
+func (s *Service) CompleteActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, status string,
+	responses map[string]interface{},
+) ([]*models.Message, bool, error) {
+	return s.messages.CompleteActiveClarificationBundle(ctx, pendingID, status, responses)
+}
+
+// FinalizeClarificationResponseDelivery retires the durable recovery intent
+// after the claimed response reaches its live or detached handoff boundary.
+func (s *Service) FinalizeClarificationResponseDelivery(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return s.messages.FinalizeClarificationResponseDelivery(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
+// RestoreActiveClarificationBundle reopens a terminal bundle after detached
+// resume acceptance fails and returns the committed pending rows for publication.
+func (s *Service) RestoreActiveClarificationBundle(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*models.Message,
+) ([]*models.Message, bool, error) {
+	return s.messages.RestoreActiveClarificationBundle(
+		ctx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+}
+
+// PublishClarificationBundleUpdates exposes committed rows to ordinary bus
+// subscribers. A restored pending bundle first drives the live summary
+// projector synchronously. Projection failure is returned to the caller, but
+// does not make the durably restored bundle unsafe to retry; later events and
+// reads repair that cache. Committed rows are still published on failure so
+// clients do not retain the terminal snapshot.
+func (s *Service) PublishClarificationBundleUpdates(ctx context.Context, messages []*models.Message) error {
+	var resultErr error
+	if restored := firstRestoredClarification(messages); restored != nil {
+		if s.statusSummaryProjector == nil {
+			resultErr = errors.New("task status summary projector is unavailable")
+		} else if err := s.statusSummaryProjector.HandleEvent(
+			ctx,
+			newMessageEvent(events.MessageUpdated, restored),
+		); err != nil {
+			resultErr = fmt.Errorf("converge clarification status summary: %w", err)
+		}
+	}
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		if err := s.publishMessageEvent(ctx, events.MessageUpdated, message); err != nil && resultErr == nil {
+			resultErr = fmt.Errorf("publish clarification message update: %w", err)
+		}
+	}
+	return resultErr
+}
+
+func firstRestoredClarification(messages []*models.Message) *models.Message {
+	for _, message := range messages {
+		if message == nil || message.Type != models.MessageTypeClarificationRequest {
+			continue
+		}
+		if status, _ := message.Metadata["status"].(string); status == clarificationPendingStatus {
+			return message
+		}
+	}
 	return nil
 }

@@ -487,8 +487,6 @@
   "previewSound": "試聽聲音",
   "profileForTasksCreatedByAgents": "代理程式建立任務時使用的設定",
   "programming": "編程",
-  "profileFallbackWillBeUsed": "起始模型 {{model}} 已不可用，將使用備用模型 {{fallback}}。",
-  "profileStartModelUnavailable": "起始模型 {{model}} 已不可用，請在代理程式設定檔中更改。",
   "promptAdd": "新增提示詞",
   "promptContentPlaceholder": "提示詞內容",
   "promptCreateFailed": "無法建立提示詞",
