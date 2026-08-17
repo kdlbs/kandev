@@ -310,7 +310,7 @@ func TestFindBareToolReferences_DistinguishesSuffixedFromBare(t *testing.T) {
 }
 
 // askUserQuestionSchemaFacts pulls the load-bearing structural facts from the
-// registered ask_user_question_kandev tool schema: the top-level array param
+// registered ask_user_question_kandev tool schema: the questions array param
 // name, its min/max bounds, and the required sub-fields of each question
 // object. These are the facts the embedded prompt contexts must mirror.
 type askUserQuestionSchemaFacts struct {
@@ -335,28 +335,11 @@ func extractAskUserQuestionFacts(t *testing.T, s *Server) askUserQuestionSchemaF
 	props, ok := parsed["properties"].(map[string]any)
 	require.True(t, ok, "schema must expose 'properties'")
 
-	// Collect all top-level array params and assert exactly one exists.
-	// Using a collect-then-assert pattern (rather than break-on-first) makes
-	// the selection deterministic even if Go's map iteration visits properties
-	// in a different order between runs or Go versions.
-	var arrayParams []string
-	paramSpecs := make(map[string]map[string]any)
-	for name, spec := range props {
-		m, ok := spec.(map[string]any)
-		if !ok {
-			continue
-		}
-		if m["type"] == "array" {
-			arrayParams = append(arrayParams, name)
-			paramSpecs[name] = m
-		}
-	}
-	sort.Strings(arrayParams)
-	require.Len(t, arrayParams, 1,
-		"ask_user_question schema must have exactly one top-level array parameter; got %v", arrayParams)
-
-	arrayParam := arrayParams[0]
-	arraySpec := paramSpecs[arrayParam]
+	arrayParam := questionsArg
+	arraySpec, ok := props[arrayParam].(map[string]any)
+	require.True(t, ok, "ask_user_question schema must expose the %q parameter", arrayParam)
+	require.Equal(t, "array", arraySpec["type"],
+		"ask_user_question %q parameter must be an array", arrayParam)
 
 	minF, _ := arraySpec["minItems"].(float64)
 	maxF, _ := arraySpec["maxItems"].(float64)
