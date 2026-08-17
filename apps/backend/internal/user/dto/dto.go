@@ -67,6 +67,7 @@ type UserSettingsDTO struct {
 	TerminalFontFamily                string                              `json:"terminal_font_family"`
 	TerminalFontSize                  int                                 `json:"terminal_font_size"`
 	ChangesPanelLayout                string                              `json:"changes_panel_layout"`
+	LastSeenDisplay                   string                              `json:"last_seen_display"`
 	SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                                `json:"app_status_bar_enabled"`
 	AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
@@ -142,6 +143,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontFamily                *string                            `json:"terminal_font_family,omitempty"`
 	TerminalFontSize                  *int                               `json:"terminal_font_size,omitempty"`
 	ChangesPanelLayout                *string                            `json:"changes_panel_layout,omitempty"`
+	LastSeenDisplay                   *string                            `json:"last_seen_display,omitempty"`
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch `json:"system_metrics_display,omitempty"`
 	AppStatusBarEnabled               *bool                              `json:"app_status_bar_enabled,omitempty"`
 	AppStatusBarOrder                 *models.AppStatusBarOrder          `json:"app_status_bar_order,omitempty"`
@@ -291,6 +293,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		TerminalFontFamily:                settings.TerminalFontFamily,
 		TerminalFontSize:                  settings.TerminalFontSize,
 		ChangesPanelLayout:                settings.ChangesPanelLayout,
+		LastSeenDisplay:                   models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		SystemMetricsDisplay:              settings.SystemMetricsDisplay,
 		AppStatusBarEnabled:               settings.AppStatusBarEnabled,
 		AppStatusBarOrder:                 settings.AppStatusBarOrder,

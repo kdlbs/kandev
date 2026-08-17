@@ -37,7 +37,7 @@ function snapshotWithPendingAction(action: unknown): WorkflowSnapshot {
         title: "Task",
         description: "",
         state: "TODO",
-        priority: 0,
+        priority: "medium",
         primary_session_pending_action: action,
         created_at: now,
         updated_at: now,

@@ -11,6 +11,7 @@ import type {
   SavedLayout,
   ToolStatus,
   LspStatusLocation,
+  LastSeenDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
@@ -304,6 +305,7 @@ export type UserSettingsState = {
   terminalFontFamily: string | null;
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
+  lastSeenDisplay: LastSeenDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
   appStatusBarOrder: AppStatusBarOrderState;

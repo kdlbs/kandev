@@ -10,6 +10,15 @@ import { makeLocalStorageMock } from "@/hooks/local-storage-mock.test-helpers";
 import type { SettingsMenuNode } from "./settings-menu-branches";
 
 const WORKSPACE_ID = "ws-1";
+const BITBUCKET_PLUGIN_ID = "plugin-bitbucket";
+const BITBUCKET_INTEGRATION_ID = "bitbucket";
+const BITBUCKET_REGISTRATION = {
+  id: BITBUCKET_INTEGRATION_ID,
+  label: "Bitbucket",
+  description: "Configure Bitbucket.",
+  icon: () => null,
+  Component: () => null,
+};
 const OTHER_WORKSPACE_ID = "ws-2";
 
 const state = {
@@ -75,8 +84,8 @@ describe("useSettingsMenuBranches integration visibility", () => {
   });
 
   afterEach(() => {
-    pluginRegistry.unregisterPlugin("plugin-bitbucket");
-    // Restore the file-scoped state so no test inherits the previous one's
+    pluginRegistry.unregisterPlugin(BITBUCKET_PLUGIN_ID);
+    // Restore the file-scoped mock state so no test inherits the previous one's
     // toggles.
     hideDisabled.value = false;
     localStorageMock.clear();
@@ -137,26 +146,52 @@ describe("useSettingsMenuBranches integration visibility", () => {
   });
 
   it("adds and revokes registered provider integrations reactively", () => {
-    pluginRegistry.forPlugin("plugin-bitbucket").registerIntegrationSettings({
-      id: "bitbucket",
-      label: "Bitbucket",
-      description: "Configure Bitbucket.",
-      icon: () => null,
-      Component: () => null,
-    });
+    pluginRegistry
+      .forPlugin(BITBUCKET_PLUGIN_ID)
+      .registerIntegrationSettings(BITBUCKET_REGISTRATION);
     const { result } = renderHook(() => useSettingsMenuBranches("accordion"));
     const integrations = result.current[WORKSPACES_HREF]?.children?.[0].children?.find((node) =>
       node.href?.endsWith("/integrations"),
     );
 
-    expect(integrations?.children?.some((node) => node.href?.endsWith("/bitbucket"))).toBe(true);
+    expect(
+      integrations?.children?.some((node) => node.href?.endsWith(`/${BITBUCKET_INTEGRATION_ID}`)),
+    ).toBe(true);
 
-    act(() => pluginRegistry.unregisterPlugin("plugin-bitbucket"));
+    act(() => pluginRegistry.unregisterPlugin(BITBUCKET_PLUGIN_ID));
 
     const refreshed = result.current[WORKSPACES_HREF]?.children?.[0].children?.find((node) =>
       node.href?.endsWith("/integrations"),
     );
-    expect(refreshed?.children?.some((node) => node.href?.endsWith("/bitbucket"))).toBe(false);
+    expect(
+      refreshed?.children?.some((node) => node.href?.endsWith(`/${BITBUCKET_INTEGRATION_ID}`)),
+    ).toBe(false);
+  });
+
+  it("hides an explicitly disabled plugin integration while keeping unknown state visible", () => {
+    hideDisabled.value = true;
+    pluginRegistry
+      .forPlugin(BITBUCKET_PLUGIN_ID)
+      .registerIntegrationSettings(BITBUCKET_REGISTRATION);
+
+    const setIntegrationEnabled = pluginRegistry.setIntegrationEnabled.bind(
+      pluginRegistry,
+    ) as unknown as (
+      pluginId: string,
+      integrationId: string,
+      workspaceId: string,
+      enabled: boolean,
+    ) => void;
+    setIntegrationEnabled(BITBUCKET_PLUGIN_ID, BITBUCKET_INTEGRATION_ID, WORKSPACE_ID, false);
+
+    expect(listedIntegrations()).not.toContain(BITBUCKET_INTEGRATION_ID);
+
+    pluginRegistry.unregisterPlugin(BITBUCKET_PLUGIN_ID);
+    pluginRegistry
+      .forPlugin(BITBUCKET_PLUGIN_ID)
+      .registerIntegrationSettings(BITBUCKET_REGISTRATION);
+
+    expect(listedIntegrations()).toContain(BITBUCKET_INTEGRATION_ID);
   });
 
   it("leaves the flat menu without branches at all, whatever the toggles say", () => {

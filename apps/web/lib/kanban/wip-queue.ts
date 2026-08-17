@@ -1,10 +1,12 @@
+import type { TaskPriority } from "@/lib/types/http";
+
 export type WipQueueTask = {
   id: string;
   workflowStepId: string;
   queuedForStepId?: string | null;
   wipAdmitted?: boolean | null;
   position?: number | null;
-  priority?: string | number | null;
+  priority?: TaskPriority | null;
   queuedAt?: string | null;
   createdAt?: string | null;
 };
@@ -22,7 +24,6 @@ export type WipQueueStatus = {
 };
 
 function priorityRank(priority: WipQueueTask["priority"]): number {
-  if (typeof priority === "number" && Number.isFinite(priority)) return priority;
   switch (priority) {
     case "critical":
       return 0;

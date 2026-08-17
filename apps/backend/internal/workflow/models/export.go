@@ -29,8 +29,13 @@ type AgentProfilePortable struct {
 // AgentProfileResolver resolves an agent profile ID to its portable representation.
 type AgentProfileResolver func(profileID string) *AgentProfilePortable
 
-// AgentProfileMatcher finds a matching agent profile ID by agent name, model, and mode.
-type AgentProfileMatcher func(agentName, model, mode string) string
+// AgentProfileMatcher finds a matching agent profile ID by agent name, model,
+// and mode. currentID, when non-empty, is the profile already bound (e.g.
+// during workflow-sync reconciliation); implementations should keep it when
+// it still matches the descriptor even if the profile was since disabled -
+// disabling only hides a profile from new selection, it doesn't touch
+// existing bindings (docs/specs/agents/profile-disable.md).
+type AgentProfileMatcher func(agentName, model, mode, currentID string) string
 
 // WorkflowPortable is a workflow without instance-specific fields (IDs, timestamps).
 type WorkflowPortable struct {
@@ -322,7 +327,7 @@ func ConvertReviewProfileToID(events StepEvents, matchProfile AgentProfileMatche
 		agentName, _ := descriptor["agent_name"].(string)
 		model, _ := descriptor["model"].(string)
 		mode, _ := descriptor["mode"].(string)
-		profileID := matchProfile(agentName, model, mode)
+		profileID := matchProfile(agentName, model, mode, "")
 		if profileID == "" {
 			return nil, false
 		}

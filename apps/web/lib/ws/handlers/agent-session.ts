@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- session WebSocket handlers share one event registry. */
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
@@ -625,6 +626,7 @@ function applyCancellationPending(
   });
 }
 
+/** Prefers the event's active-subagent count, falling back to the existing session value. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function pickActiveSubagentCount(payload: any, existing: TaskSession): number {
   return payload.active_subagent_count !== undefined
@@ -632,6 +634,7 @@ function pickActiveSubagentCount(payload: any, existing: TaskSession): number {
     : (existing.active_subagent_count ?? 0);
 }
 
+/** Prefers the event's steering-support flag, falling back to the existing session value. */
 function pickSupportsSteering(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
@@ -642,10 +645,16 @@ function pickSupportsSteering(
     : existing.supports_steering;
 }
 
+/**
+ * Applies a workspace-sources adoption event: updates the session's
+ * workspace path and records the server-issued adoption boundary (WS envelope
+ * timestamp) so pre-adoption turns can never become active again.
+ */
 function handleWorkspaceSourcesUpdated(
   store: StoreApi<AppState>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
+  boundaryTimestamp?: string,
 ): void {
   const {
     session_id: sessionId,
@@ -656,7 +665,13 @@ function handleWorkspaceSourcesUpdated(
   if (existing && workspacePath) {
     store.getState().setTaskSession({ ...existing, workspace_path: workspacePath });
   }
-  store.getState().reconcileWorkspaceSourcesAdopted(adoptedSessionIds ?? [sessionId]);
+  // The adoption boundary must be SERVER time, so forward the WS envelope's
+  // server-issued timestamp — never a client-clock value (a browser clock
+  // ahead of the backend would reject legitimate new turn.started events
+  // until server time caught up).
+  store
+    .getState()
+    .reconcileWorkspaceSourcesAdopted(adoptedSessionIds ?? [sessionId], boundaryTimestamp);
   store.getState().bumpWorkspaceFilesRefresh(sessionId);
   store.getState().clearLegacyGitStatusEntry(sessionId);
   store.getState().bumpSessionCommitsRefetch(sessionId);
@@ -695,6 +710,7 @@ function handleQueueStatusChangedMessage(
   store.getState().setQueueEntries(payload.session_id, entries, { count, max, mergeEnabled });
 }
 
+/** Registers the task-session WebSocket handlers (state, messages, workspace sources, queue). */
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "message.queue.status_changed": (message) =>
@@ -802,6 +818,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       });
     },
     "session.workspace_sources.updated": (message) =>
-      handleWorkspaceSourcesUpdated(store, message.payload),
+      handleWorkspaceSourcesUpdated(store, message.payload, message.timestamp),
   };
 }

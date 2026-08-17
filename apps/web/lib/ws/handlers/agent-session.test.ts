@@ -347,6 +347,7 @@ describe("session.workspace_sources.updated handler", () => {
       id: "msg-workspace-sources",
       type: "notification",
       action: "session.workspace_sources.updated",
+      timestamp: "2026-07-23T10:03:00.000Z",
       payload: { task_id: "t-1", session_id: "s-1", workspace_path: "/new" },
     } as never);
 
@@ -354,7 +355,12 @@ describe("session.workspace_sources.updated handler", () => {
       expect.objectContaining({ id: "s-1", worktree_path: "/old", workspace_path: "/new" }),
     );
     expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
-    expect(store.getState().reconcileWorkspaceSourcesAdopted).toHaveBeenCalledWith(["s-1"]);
+    // The server-issued envelope timestamp is forwarded as the adoption
+    // boundary so the client clock can never retire legitimate turns.
+    expect(store.getState().reconcileWorkspaceSourcesAdopted).toHaveBeenCalledWith(
+      ["s-1"],
+      "2026-07-23T10:03:00.000Z",
+    );
   });
 
   it("does not clear the workspace root when a partial event omits it", () => {

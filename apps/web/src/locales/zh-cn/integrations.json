@@ -135,7 +135,6 @@
   "commentCount_other": "{{count}} 条评论",
   "commented": "已评论",
   "comments": "评论",
-  "disabled": "已禁用",
   "dismissed": "已忽略",
   "failed": "失败",
   "failedCount_one": "{{count}} 项失败",

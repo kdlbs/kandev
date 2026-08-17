@@ -85,7 +85,7 @@ function wrapper(tasks: Array<{ id: string; title: string }> = [], prompts: Cust
               id: t.id,
               title: t.title,
               workflow_step_id: "",
-              priority: 0,
+              priority: "medium",
               parent_id: undefined,
             })),
           } as unknown as never,
@@ -289,6 +289,9 @@ function renderAgentMessageWithSession(
         turns: {
           bySession: { "sess-1": turn ? [turn] : [] },
           activeBySession: { "sess-1": turn?.id ?? null },
+          loadedBySession: {},
+          reconcileEpochBySession: {},
+          settledBoundaryBySession: {},
         },
       }}
     >

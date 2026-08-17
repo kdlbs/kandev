@@ -1,4 +1,5 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
+import type { TaskPriority } from "@/lib/types/http";
 
 export type SessionIntent =
   | "prepare"
@@ -28,7 +29,7 @@ export type LaunchSessionRequest = {
   prompt?: string;
   plan_mode?: boolean;
   workflow_step_id?: string;
-  priority?: number;
+  priority?: TaskPriority;
   launch_workspace?: boolean;
   skip_message_record?: boolean;
   auto_start?: boolean;

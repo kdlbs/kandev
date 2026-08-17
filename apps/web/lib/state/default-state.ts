@@ -20,6 +20,7 @@ import {
 import { applyStoredQuickChatNames } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { HydrationState } from "./store";
+import { seedSettledSessionBoundaries } from "@/lib/state/slices/session/turn-actions";
 import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
 
 export const defaultState = {
@@ -242,6 +243,7 @@ function mergeAgentReviewArtifacts(initialState: HydrationState) {
   };
 }
 
+/** Merges the GitHub slices for initial (SSR/boot) hydration. */
 function mergeGitHubState(initialState: HydrationState) {
   return {
     githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
@@ -252,6 +254,39 @@ function mergeGitHubState(initialState: HydrationState) {
   };
 }
 
+/**
+ * Merges the turns slice for initial (SSR/boot) hydration. The server-side
+ * turn lists are complete per-session snapshots, so every session the payload
+ * installs is marked `loadedBySession`; without the marker, turn-derived UI
+ * would mistake WS-seeded live turns for the full history (the debug
+ * metadata dialog's `turn_metadata` regression). Settled sessions also seed
+ * their settled boundary from `updated_at` (monotonically) so an
+ * old/unknown delayed WS start arriving before any session-list refresh is
+ * rejected.
+ */
+function mergeTurnsState(
+  current: DefaultState["turns"],
+  incoming: HydrationState["turns"],
+  sessions: HydrationState["taskSessions"],
+): DefaultState["turns"] {
+  const merged = { ...current, ...incoming };
+  const settledBoundaryBySession = { ...merged.settledBoundaryBySession };
+  // One shared seeding invariant (turn-actions) with the production
+  // StateHydrator path, so the SSR and hydration boundary rules cannot drift.
+  seedSettledSessionBoundaries(settledBoundaryBySession, Object.values(sessions?.items ?? {}));
+  if (!incoming?.bySession) return { ...merged, settledBoundaryBySession };
+  const loadedBySession: Record<string, boolean> = {};
+  for (const sessionId of Object.keys(incoming.bySession)) {
+    loadedBySession[sessionId] = true;
+  }
+  return { ...merged, loadedBySession, settledBoundaryBySession };
+}
+
+/**
+ * Builds the full default state from the SSR/boot hydration payload, merging
+ * per-slice (kanban, turns, settings, ...) so partial payloads never clobber
+ * the client's live defaults.
+ */
 export function mergeInitialState(initialState?: HydrationState): DefaultState {
   if (!initialState) return defaultState;
   return {
@@ -281,7 +316,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     sleepInhibition: { ...defaultState.sleepInhibition, ...initialState.sleepInhibition },
     userSettings: { ...defaultState.userSettings, ...initialState.userSettings },
     messages: { ...defaultState.messages, ...initialState.messages },
-    turns: { ...defaultState.turns, ...initialState.turns },
+    turns: mergeTurnsState(defaultState.turns, initialState.turns, initialState.taskSessions),
     taskSessions: { ...defaultState.taskSessions, ...initialState.taskSessions },
     taskSessionsByTask: { ...defaultState.taskSessionsByTask, ...initialState.taskSessionsByTask },
     sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },
