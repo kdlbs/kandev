@@ -763,7 +763,8 @@ type httpCreateTaskRequest struct {
 	ProjectID          string `json:"project_id,omitempty"`
 	// ExternalID is a caller-supplied identity used for create-idempotency
 	// (docs/specs/tasks/external-id-idempotency/spec.md).
-	ExternalID string `json:"external_id,omitempty"`
+	ExternalID string   `json:"external_id,omitempty"`
+	Labels     []string `json:"labels,omitempty"`
 	// Office task-handoffs phase 5 — workspace policy. Optional; same
 	// shape as the MCP create_task_kandev fields.
 	WorkspaceMode         string `json:"workspace_mode,omitempty"`
@@ -796,6 +797,30 @@ var allowedAttachmentTypes = map[string]struct{}{
 	"image":    {},
 	"audio":    {},
 	"resource": {},
+}
+
+func encodeTaskLabels(labels []string) (string, error) {
+	normalized := make([]string, 0, len(labels))
+	seen := make(map[string]struct{}, len(labels))
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		normalized = append(normalized, label)
+	}
+	if len(normalized) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func validateAttachments(items []v1.MessageAttachment) error {
@@ -850,6 +875,12 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	var body httpCreateTaskRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	labels, err := encodeTaskLabels(body.Labels)
+	if err != nil {
+		h.logger.Error("failed to encode task labels", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode task labels"})
 		return
 	}
 	if err := validateAttachments(body.Attachments); err != nil {
@@ -929,6 +960,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		BlockedBy:          body.BlockedBy,
 		StartWhenUnblocked: body.StartWhenUnblocked,
 		ProjectID:          body.ProjectID,
+		Labels:             labels,
 		ExternalID:         body.ExternalID,
 	})
 	if err != nil {
