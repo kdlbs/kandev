@@ -409,6 +409,9 @@ const (
 	ActionMCPClarificationTimeout       = "mcp.clarification_timeout"
 	ActionMCPSetTaskTitle               = "mcp.set_task_title"
 	ActionMCPGetDiagnosticBundle        = "mcp.get_diagnostic_bundle"
+	ActionMCPListSessionWakes           = "mcp.list_session_wakes"
+	ActionMCPUpsertSessionWake          = "mcp.upsert_session_wake"
+	ActionMCPDeleteSessionWake          = "mcp.delete_session_wake"
 
 	// Office task handoffs (cross-task context).
 	ActionMCPListRelatedTasks  = "mcp.list_related_tasks"

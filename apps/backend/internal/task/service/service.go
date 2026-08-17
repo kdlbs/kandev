@@ -263,6 +263,7 @@ type Repos struct {
 	Attachments       repository.AttachmentRepository
 	Turns             repository.TurnRepository
 	Sessions          repository.SessionRepository
+	SessionWakes      repository.TaskSessionWakeRepository
 	GitSnapshots      repository.GitSnapshotRepository
 	RepoEntities      repository.RepositoryEntityRepository
 	RepositoryCleanup repository.RepositoryCleanupRepository
@@ -286,6 +287,7 @@ type Service struct {
 	attachments                     repository.AttachmentRepository
 	turns                           repository.TurnRepository
 	sessions                        repository.SessionRepository
+	sessionWakes                    repository.TaskSessionWakeRepository
 	gitSnapshots                    repository.GitSnapshotRepository
 	repoEntities                    repository.RepositoryEntityRepository
 	repositoryCleanup               repository.RepositoryCleanupRepository
@@ -417,6 +419,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		attachments:           repos.Attachments,
 		turns:                 repos.Turns,
 		sessions:              repos.Sessions,
+		sessionWakes:          repos.SessionWakes,
 		gitSnapshots:          repos.GitSnapshots,
 		repoEntities:          repos.RepoEntities,
 		repositoryCleanup:     repos.RepositoryCleanup,
