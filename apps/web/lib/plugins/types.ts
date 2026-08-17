@@ -92,6 +92,10 @@ export interface IntegrationSettingsRegistration {
   /** Curated icon name or plugin-owned component. */
   icon?: PluginSDK.PluginIcon;
   Component: ReactType.ComponentType<PluginIntegrationSettingsProps>;
+  /** Optional header action (e.g. an enable toggle) rendered in the host's
+   * SettingsSection header action slot, mirroring built-in integrations.
+   * Receives `{ workspaceId?: string }` so it can operate per-workspace. */
+  action?: ReactType.ComponentType<{ workspaceId?: string }>;
 }
 
 /**
@@ -226,9 +230,7 @@ export type PluginPresentation = "desktop" | "mobile";
 export type PluginComposerSurface = "task-chat" | "quick-chat" | "task-create" | "new-session";
 
 export type PluginComposerSubmitResult =
-  | { status: "submitted" }
-  | { status: "blocked"; reason?: string }
-  | { status: "unavailable" };
+  { status: "submitted" } | { status: "blocked"; reason?: string } | { status: "unavailable" };
 
 export interface PluginComposerCapability {
   insertText(text: string): { status: "inserted" | "ignored" | "unavailable" };

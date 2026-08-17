@@ -169,6 +169,10 @@ export function generationFencedHost(
     toast: generationFencedToast(host.toast, isCurrent, resources),
     utils: host.utils,
     storage: generationFencedStorage(host.storage, isCurrent, resources),
+    useSettingsSaveContributor: host.useSettingsSaveContributor,
+    setIntegrationEnabled: (workspaceId, enabled) => {
+      if (isCurrent()) host.setIntegrationEnabled(workspaceId, enabled);
+    },
   };
 }
 

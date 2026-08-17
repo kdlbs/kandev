@@ -78,7 +78,7 @@ export type SettingsMenuNode = {
    * here — it takes a network probe — so the node names the integration and the
    * renderer resolves the badge.
    */
-  integrationSlug?: IntegrationSlug;
+  integrationSlug?: IntegrationSlug | string;
   /**
    * Set on the Integrations row: its children need one shared probe of this
    * workspace, run only while the branch is open.
@@ -178,6 +178,7 @@ function integrationNodes(
     href: `${integrationsHref}/${id}`,
     label: { text: label } as const,
     icon,
+    integrationSlug: id,
   }));
   return [...builtIns, ...registered];
 }

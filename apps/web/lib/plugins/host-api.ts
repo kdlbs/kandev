@@ -124,6 +124,13 @@ import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
 import { IntegrationChangeRequestStatus } from "@/components/integrations/integration-change-request-status";
 import { IntegrationIcon } from "@/components/integrations/integration-icon";
 import { TaskChangeRequestLinkForm } from "@/components/integrations/task-change-request-link-form";
+import { IntegrationAuthStatusBanner } from "@/components/integrations/auth-status-banner";
+import { DraftedIntegrationEnabledControl } from "@/components/integrations/drafted-integration-enabled-control";
+import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import { getBackendConfig } from "@/lib/config";
 import { fetchJson } from "@/lib/api/client";
 import { i18n, normalizeLocale, t } from "@/lib/i18n";
@@ -136,6 +143,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { reviewItemId } from "@/components/task/review-selection";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { pluginModalManager } from "./modal-manager";
+import { pluginRegistry } from "./registry";
 import { readResolvedTheme, subscribeToThemeChanges } from "./theme";
 import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync";
 import { buildPluginContextApi } from "./plugin-context-api";
@@ -342,6 +350,11 @@ const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   //   pixel-identical to the Plan panel. See rich-text-editor.tsx.
   RichTextEditor,
   RichTextReadOnly,
+  IntegrationAuthStatusBanner,
+  IntegrationEnabledControl: DraftedIntegrationEnabledControl,
+  SettingsSection,
+  SettingsCard,
+  WorkspaceScopedSection,
 };
 
 /**
@@ -357,6 +370,7 @@ const PLUGIN_UTILS = {
   cn,
   formatRelativeTime,
   generateUUID,
+  integrationStatusRefreshMs: INTEGRATION_STATUS_REFRESH_MS,
 };
 
 /**
@@ -480,6 +494,9 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
     toast: createPluginToast(pluginId),
     utils: PLUGIN_UTILS,
     storage: buildStorageApi(pluginId),
+    useSettingsSaveContributor,
+    setIntegrationEnabled: (workspaceId, enabled) =>
+      pluginRegistry.setIntegrationEnabled(pluginId, workspaceId, enabled),
   };
 }
 
