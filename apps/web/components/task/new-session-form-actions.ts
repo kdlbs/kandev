@@ -51,6 +51,7 @@ export function useSessionLaunchSubmit({
   promptRef,
   taskId,
   selectedProfileId,
+  profileExplicit = true,
   executorId,
   contextValue,
   initialPrompt,
@@ -65,6 +66,7 @@ export function useSessionLaunchSubmit({
   promptRef: RefObject<TaskFormInputsHandle | null>;
   taskId: string;
   selectedProfileId: string;
+  profileExplicit?: boolean;
   executorId: string;
   contextValue: string;
   initialPrompt: string | null;
@@ -96,7 +98,7 @@ export function useSessionLaunchSubmit({
         const { request } = buildStartRequest(taskId, selectedProfileId, {
           executorId,
           prompt,
-          profileExplicit: true,
+          profileExplicit,
           attachments: toMessageAttachments(selectedAttachments),
         });
         const response = await launchSession(request);
@@ -127,6 +129,7 @@ export function useSessionLaunchSubmit({
       promptRef,
       taskId,
       selectedProfileId,
+      profileExplicit,
       executorId,
       contextValue,
       initialPrompt,
