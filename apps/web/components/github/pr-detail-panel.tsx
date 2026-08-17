@@ -449,17 +449,15 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
         </>
       }
       notice={
-        <>
-          <PRMergeabilityNotice
-            state={mergeableState}
-            mergeable={isMergeable}
-            isDraft={isDraft}
-            prState={liveState}
-            baseBranch={taskPR.base_branch}
-            onResolveConflicts={onResolveConflicts}
-            resolveDisabled={conflictQueued}
-          />
-        </>
+        <PRMergeabilityNotice
+          state={mergeableState}
+          mergeable={isMergeable}
+          isDraft={isDraft}
+          prState={liveState}
+          baseBranch={taskPR.base_branch}
+          onResolveConflicts={onResolveConflicts}
+          resolveDisabled={conflictQueued}
+        />
       }
     />
   );

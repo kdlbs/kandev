@@ -154,7 +154,7 @@ func TestLegacyTaskPRRebuildPreservesDetachedAt(t *testing.T) {
 }
 
 // TestLegacyTaskPRRebuildPreservesOutcomeColumns is the regression for
-// AC-07a/AC-40a: the legacy-constraint rebuild's CREATE TABLE and
+// AC-07a: the legacy-constraint rebuild's CREATE TABLE and
 // INSERT...SELECT copy list must both carry all five outcome-attribution
 // columns, or a real user database silently loses merged_by_login,
 // closed_by_login, is_draft, changed_files, and auto_merge_observed_at the
@@ -251,14 +251,6 @@ func TestLegacyTaskPRRebuildPreservesOutcomeColumns(t *testing.T) {
 		}
 		if got.AutoMergeObservedAt == nil || !got.AutoMergeObservedAt.Equal(autoMergeAt) {
 			t.Errorf("auto_merge_observed_at = %v, want %s", got.AutoMergeObservedAt, autoMergeAt)
-		}
-
-		cols, err := s.tableColumns("github_task_prs")
-		if err != nil {
-			t.Fatalf("read github_task_prs columns: %v", err)
-		}
-		if _, ok := cols["disposition"]; ok {
-			t.Error("github_task_prs still has a disposition column after rebuild (AC-40a)")
 		}
 	}
 

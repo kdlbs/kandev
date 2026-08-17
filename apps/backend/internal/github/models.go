@@ -485,8 +485,8 @@ type TaskPR struct {
 	//
 	// Every field below is NULL on any row that predates this feature's
 	// activation instant (kandev_meta key taskPROutcomeActivatedAtMetaKey)
-	// and stays NULL until a post-activation observation or explicit user
-	// action writes it. None has a non-NULL default, and none is ever
+	// and stays NULL until a post-activation observation writes it. None has a
+	// non-NULL default, and none is ever
 	// inferred, backfilled, or defaulted to a zero value. No `omitempty` on
 	// any of these json tags: AC-30 requires the keys to always be present,
 	// because `null` vs. absent is exactly the distinction this feature
