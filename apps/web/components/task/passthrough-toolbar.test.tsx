@@ -166,6 +166,7 @@ vi.mock("./chat/use-chat-panel-state", () => ({
     taskId: TASK_ID,
     task: { id: TASK_ID, title: "Task title" },
     taskDescription: "Task description",
+    isCompleted: mockSessionState === "COMPLETED",
     planModeEnabled: mockPlanModeEnabled,
     planModeAvailable: true,
     mcpServers: ["kandev"],
@@ -458,6 +459,23 @@ describe("PassthroughToolbar – composer toggle", () => {
     } finally {
       xterm.remove();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Completed session state
+// ---------------------------------------------------------------------------
+
+describe("PassthroughToolbar – completed session", () => {
+  beforeEach(resetMocks);
+  afterEach(cleanup);
+
+  it("passes completed session state to the passthrough composer", async () => {
+    mockSessionState = "COMPLETED";
+    renderToolbar();
+    await openComposer();
+
+    expect(latestChatInputProps().isCompleted).toBe(true);
   });
 });
 

@@ -101,6 +101,28 @@ describe("SessionStoppedBanner", () => {
     expect(mocks.request).not.toHaveBeenCalled();
   });
 
+  it("disables New Agent when no task is available", () => {
+    const onShowDialog = vi.fn();
+    render(
+      <TooltipProvider>
+        <SessionStoppedBanner
+          mode="completed"
+          showDialog={false}
+          onShowDialog={onShowDialog}
+          taskId={null}
+          sessionId={null}
+        />
+      </TooltipProvider>,
+    );
+
+    const button = screen.getByRole("button", { name: "New Agent" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+
+    fireEvent.click(button);
+
+    expect(onShowDialog).not.toHaveBeenCalled();
+  });
+
   it("keeps resume and fresh-start recovery actions for a recoverable session", async () => {
     render(<BannerHarness mode="recoverable" />);
 

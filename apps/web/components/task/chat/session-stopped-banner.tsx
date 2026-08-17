@@ -65,14 +65,13 @@ function RecoverableSessionActions({
   const [isResuming, setIsResuming] = useState(false);
   const [isStartingFresh, setIsStartingFresh] = useState(false);
 
-  const agentProfileId = useAppStore((s) =>
-    sessionId ? (s.taskSessions.items[sessionId]?.agent_profile_id ?? "") : "",
-  );
-  const profileExists = useAppStore(
-    (s) =>
-      agentProfileId !== "" &&
-      s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId),
-  );
+  const profileExists = useAppStore((s) => {
+    if (!sessionId) return false;
+    const agentProfileId = s.taskSessions.items[sessionId]?.agent_profile_id;
+    return (
+      !!agentProfileId && s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId)
+    );
+  });
 
   const handleRecover = useCallback(
     async (action: "resume" | "fresh_start") => {
@@ -180,7 +179,10 @@ export function SessionStoppedBanner({
               size="sm"
               data-testid="completed-session-new-agent-button"
               className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
-              onClick={() => onShowDialog(true)}
+              onClick={() => {
+                if (taskId) onShowDialog(true);
+              }}
+              disabled={!taskId}
             >
               <IconPlus className="h-3.5 w-3.5" />
               {t("task:newAgent")}
