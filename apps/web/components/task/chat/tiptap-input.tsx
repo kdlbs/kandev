@@ -10,6 +10,8 @@ import {
   useMemo,
 } from "react";
 import { EditorContent } from "@tiptap/react";
+import { exitSuggestion } from "@tiptap/suggestion";
+import type { Editor } from "@tiptap/core";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -34,6 +36,7 @@ import type { MentionItem } from "@/hooks/use-inline-mention";
 import type { SlashCommand } from "./slash-command-types";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import { useEntityReferenceComposer } from "./use-entity-reference-composer";
+import { EntityReferenceSuggestionPluginKey } from "./tiptap-entity-reference-suggestion";
 import type { ImagePasteIssue } from "./clipboard-attachments";
 import { useTranslation } from "react-i18next";
 
@@ -351,6 +354,15 @@ function useMenuHandlers() {
   };
 }
 
+function useEntityReferenceMenuClose(editor: Editor | null, close: () => void) {
+  return useCallback(() => {
+    if (editor) {
+      exitSuggestion(editor.view, EntityReferenceSuggestionPluginKey);
+    }
+    close();
+  }, [editor, close]);
+}
+
 // ── Component ───────────────────────────────────────────────────────
 
 export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(function TipTapInput(
@@ -412,6 +424,8 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     mentionSuggestion,
     slashSuggestion,
     entityReferenceSuggestion: entityReferences.suggestion,
+    onTextInput: entityReferences.onTextInput,
+    onBeforeInput: entityReferences.onBeforeInput,
     slashCommands,
     isSuggestionMenuOpen,
     getHistory,
@@ -420,6 +434,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     ref,
   });
   const { closeReverseSearch } = overlay;
+  const closeEntityReferenceMenu = useEntityReferenceMenuClose(editor, entityReferences.close);
   const handleReverseSearchSelect = useCallback(
     (index: number) => {
       applyHistoryEntry(index);
@@ -437,6 +452,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
         history={history}
         isDraining={isDraining}
         onReverseSearchSelect={handleReverseSearchSelect}
+        onEntityReferenceClose={closeEntityReferenceMenu}
       />
       <EditorContextProvider value={{ sessionId, taskId: taskId ?? null }}>
         <div ref={editorWrapperRef} className="h-full">
@@ -457,6 +473,7 @@ type TipTapPopupsProps = {
   history: readonly MessageHistoryEntry[];
   isDraining: boolean;
   onReverseSearchSelect: (index: number) => void;
+  onEntityReferenceClose: () => void;
 };
 
 function TipTapPopups({
@@ -466,6 +483,7 @@ function TipTapPopups({
   history,
   isDraining,
   onReverseSearchSelect,
+  onEntityReferenceClose,
 }: TipTapPopupsProps) {
   return (
     <>
@@ -490,7 +508,7 @@ function TipTapPopups({
         error={entityReferences.error}
         onRetry={entityReferences.retry}
         onSelect={entityReferences.selectReference}
-        onClose={entityReferences.close}
+        onClose={onEntityReferenceClose}
         setSelectedIndex={entityReferences.setSelectedIndex}
       />
       <SlashCommandMenu

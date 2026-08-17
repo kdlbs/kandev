@@ -265,6 +265,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [session-subscription-recovery](session-subscription-recovery/spec.md) | draft |
 | [npm-nightly-channel](npm-nightly-channel/spec.md) | shipped |
 | [scoop-release-automation](scoop-release-automation/spec.md) | shipped |
+| [release-pr-queue-bypass](release-pr-queue-bypass/spec.md) | shipped |
 | [agent-resume-runtime-recovery](agent-resume-runtime-recovery/spec.md) | shipped |
 | [agent-stall-recovery](agent-stall-recovery/spec.md) | approved |
 | [mcp-session-observability](mcp-session-observability/spec.md) | approved |

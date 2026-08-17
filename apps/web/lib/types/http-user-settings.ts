@@ -3,6 +3,7 @@ import type { WorkspaceId } from "./ids";
 export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
 export type StartupPage = "task_overview" | "last_task";
 export type LspStatusLocation = "toolbar" | "status_bar";
+export type LastSeenDisplay = "absolute" | "relative";
 
 export type SavedLayout = {
   id: string;
@@ -100,6 +101,7 @@ export type UserSettings = {
   terminal_font_family?: string;
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
+  last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
@@ -164,6 +166,7 @@ export type UserSettingsUpdatePayload = {
   terminal_font_family?: string;
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
+  last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;

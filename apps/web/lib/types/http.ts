@@ -28,6 +28,7 @@ export type {
   TaskCreateLastUsedApi,
   AppStatusBarOrderApi,
   LspStatusLocation,
+  LastSeenDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
   UserSettings,
