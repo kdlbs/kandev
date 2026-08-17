@@ -74,9 +74,10 @@ export type SettingsMenuNode = {
    */
   badge?: "active" | "disabled" | "not-installed";
   /**
-   * An integration row, by catalog slug. Whether it is connected is not known
-   * here — it takes a network probe — so the node names the integration and the
-   * renderer resolves the badge.
+   * An integration row, by a catalog slug or a plugin registration id. Whether
+   * it is connected is not known here — it takes a network probe or a plugin
+   * state lookup — so the node names the integration and the renderer resolves
+   * the badge.
    */
   integrationSlug?: IntegrationSlug | string;
   /**
@@ -99,6 +100,7 @@ export type SettingsMenuNode = {
 export type BranchWorkspace = { id: string; name: string };
 export type BranchIntegrationContribution = {
   id: string;
+  pluginId: string;
   label: string;
   icon: ComponentType<{ className?: string }>;
 };
@@ -159,6 +161,7 @@ function integrationNodes(
   integrationsHref: string,
   visibleSlugs?: ReadonlySet<IntegrationSlug>,
   contributions: ReadonlyArray<BranchIntegrationContribution> = [],
+  pluginEnabled?: (integrationId: string, workspaceId: string) => boolean | undefined,
 ): SettingsMenuNode[] {
   // Configured status gates the badge only, never the row itself — the branch
   // always lists every integration regardless of credentials, so the filter
@@ -173,13 +176,15 @@ function integrationNodes(
     icon: INTEGRATION_ICONS[slug],
     integrationSlug: slug,
   }));
-  const registered = contributions.map(({ id, label, icon }) => ({
-    key: `workspace:${workspaceId}:integrations:${id}`,
-    href: `${integrationsHref}/${id}`,
-    label: { text: label } as const,
-    icon,
-    integrationSlug: id,
-  }));
+  const registered = contributions
+    .filter(({ id }) => pluginEnabled?.(id, workspaceId) !== false)
+    .map(({ id, label, icon }) => ({
+      key: `workspace:${workspaceId}:integrations:${id}`,
+      href: `${integrationsHref}/${id}`,
+      label: { text: label } as const,
+      icon,
+      integrationSlug: id,
+    }));
   return [...builtIns, ...registered];
 }
 
@@ -202,6 +207,7 @@ export function buildWorkspacesBranch(
    */
   visibleIntegrationSlugs?: ReadonlySet<IntegrationSlug>,
   integrationContributions: ReadonlyArray<BranchIntegrationContribution> = [],
+  pluginIntegrationEnabled?: (integrationId: string, workspaceId: string) => boolean | undefined,
 ): SettingsMenuNode[] {
   return workspaces.map((workspace) => {
     const integrationsHref = workspaceSettingsHref(workspace.id, "integrations");
@@ -229,6 +235,7 @@ export function buildWorkspacesBranch(
                   integrationsHref,
                   visibleIntegrationSlugs,
                   integrationContributions,
+                  pluginIntegrationEnabled,
                 ),
                 integrationsWorkspaceId: workspace.id,
               }

@@ -71,8 +71,7 @@ export function IntegrationEnabledBadgeFor({ slug }: { slug: IntegrationSlug | s
 function PluginIntegrationEnabledBadge({ slug }: { slug: string }) {
   const registry = usePluginRegistry();
   const workspaceId = useContext(BadgeWorkspaceContext);
-  const owner = registry.getIntegrationSetting(slug)?.pluginId;
-  if (!owner || !workspaceId) return null;
-  if (!registry.isIntegrationEnabled(owner, workspaceId)) return null;
+  if (!workspaceId) return null;
+  if (!registry.isIntegrationEnabled(slug, workspaceId)) return null;
   return <IntegrationEnabledBadge />;
 }

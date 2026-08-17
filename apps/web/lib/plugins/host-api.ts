@@ -158,7 +158,7 @@ import type {
   PluginTaskReviewOptions,
   PluginTranslationOptions,
 } from "./types";
-import type { PluginUIApi } from "@kandev/plugin-sdk";
+import type { PluginUIApi, SettingsSaveContributor } from "@kandev/plugin-sdk";
 import {
   PluginStorageConflictError,
   type PluginStorageApi,
@@ -357,6 +357,33 @@ const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   WorkspaceScopedSection,
 };
 
+function pluginSettingsContributorId(pluginId: string, contributorId: string): string {
+  return `plugin:${pluginId}:${contributorId}`;
+}
+
+function createPluginSettingsSaveContributorHook(pluginId: string) {
+  return function usePluginSettingsSaveContributor(contributor: SettingsSaveContributor): void {
+    useSettingsSaveContributor({
+      ...contributor,
+      id: pluginSettingsContributorId(pluginId, contributor.id),
+    });
+  };
+}
+
+function createPluginUIApi(pluginId: string): PluginUIApi & Record<string, unknown> {
+  return {
+    ...PLUGIN_UI,
+    IntegrationEnabledControl: function PluginIntegrationEnabledControl(
+      props: React.ComponentProps<typeof DraftedIntegrationEnabledControl>,
+    ) {
+      return React.createElement(DraftedIntegrationEnabledControl, {
+        ...props,
+        id: pluginSettingsContributorId(pluginId, props.id),
+      });
+    },
+  };
+}
+
 /**
  * `host.utils` — plain functions, deliberately not on `host.ui` (a component
  * map). Shared rather than reimplemented per plugin: `cn` must be the host's
@@ -472,7 +499,7 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
         return getBackendConfig().apiBaseUrl;
       },
     },
-    ui: PLUGIN_UI,
+    ui: createPluginUIApi(pluginId),
     useResponsiveBreakpoint,
     // Getter, not a value captured at boot: a plugin built once at page load
     // would otherwise read the boot-time theme forever, and one that paints
@@ -494,9 +521,9 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
     toast: createPluginToast(pluginId),
     utils: PLUGIN_UTILS,
     storage: buildStorageApi(pluginId),
-    useSettingsSaveContributor,
-    setIntegrationEnabled: (workspaceId, enabled) =>
-      pluginRegistry.setIntegrationEnabled(pluginId, workspaceId, enabled),
+    useSettingsSaveContributor: createPluginSettingsSaveContributorHook(pluginId),
+    setIntegrationEnabled: (integrationId, workspaceId, enabled) =>
+      pluginRegistry.setIntegrationEnabled(pluginId, integrationId, workspaceId, enabled),
   };
 }
 

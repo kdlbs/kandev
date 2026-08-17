@@ -3,6 +3,8 @@ import type { Window as HappyDOMWindow } from "happy-dom";
 import { loadPlugins, unloadPlugin } from "./host";
 import { pluginModalManager } from "./modal-manager";
 import { pluginRegistry } from "./registry";
+import { buildPluginContextApi } from "./plugin-context-api";
+import { createAppStore } from "@/lib/state/store";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { ActivePlugin, PluginHostApi, PluginRegistry } from "./types";
 
@@ -26,22 +28,13 @@ const PLUGIN_REENABLE_A_PATH = "/plugin-reenable-a";
 const NAV_REENABLE_A_ID = "nav-reenable-a";
 
 function makeHostFactory(pluginId: string): PluginHostApi {
+  const store = createAppStore();
   return {
     pluginId,
     React: {} as PluginHostApi["React"],
     jsx: {} as PluginHostApi["jsx"],
-    store: {
-      getState: () => ({}) as never,
-      setState: () => {},
-      subscribe: () => () => {},
-    },
-    context: {
-      getActiveWorkspaceId: () => undefined,
-      subscribeActiveWorkspace: () => () => {},
-      getTaskCreationContext: () => null,
-      subscribeTaskCreationContext: () => () => {},
-      resolveRepositoryId: () => undefined,
-    },
+    store,
+    context: buildPluginContextApi(store),
     api: {
       fetch: async () => new Response(),
       invokeAction: async <TResponse>() => undefined as TResponse,

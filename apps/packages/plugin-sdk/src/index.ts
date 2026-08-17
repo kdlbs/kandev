@@ -98,6 +98,10 @@ export interface RepositoryIdentityInput {
 export interface PluginContextApi {
   getActiveWorkspaceId(): string | undefined;
   subscribeActiveWorkspace(listener: (workspaceId: string | undefined) => void): () => void;
+  /** Returns the ids of all workspaces currently available to the user. */
+  getWorkspaceIds(): readonly string[];
+  /** Notifies the plugin when the available workspace ids change. */
+  subscribeWorkspaces(listener: (workspaceIds: readonly string[]) => void): () => void;
   getTaskCreationContext(workspaceId: string): TaskCreationContext | null;
   subscribeTaskCreationContext(
     workspaceId: string,
@@ -592,7 +596,7 @@ export interface PluginHostApi {
    * persist the durable value yourself (e.g. `host.storage`) — this call
    * only updates live UI state.
    */
-  setIntegrationEnabled(workspaceId: string, enabled: boolean): void;
+  setIntegrationEnabled(integrationId: string, workspaceId: string, enabled: boolean): void;
   storage: PluginStorageApi;
 }
 

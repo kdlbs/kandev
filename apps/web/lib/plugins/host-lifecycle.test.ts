@@ -33,6 +33,8 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     context: {
       getActiveWorkspaceId: () => undefined,
       subscribeActiveWorkspace: () => () => {},
+      getWorkspaceIds: () => [],
+      subscribeWorkspaces: () => () => {},
       getTaskCreationContext: () => null,
       subscribeTaskCreationContext: () => () => {},
       resolveRepositoryId: () => undefined,
