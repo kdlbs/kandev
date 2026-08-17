@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	"github.com/kandev/kandev/internal/testutil"
@@ -86,12 +87,29 @@ func TestPostgresTaskLastActivityBatch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create postgres message: %v", err)
 	}
+	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("initialize postgres queue repository: %v", err)
+	}
+	queuedAt := base.Add(5 * time.Hour)
+	if err := queueRepo.Insert(ctx, &messagequeue.QueuedMessage{
+		ID: "queued-activity-postgres-user", SessionID: "session-activity-postgres", TaskID: "task-activity-postgres",
+		Content: "queued prompt", QueuedAt: queuedAt, QueuedBy: "user-1",
+	}, 10); err != nil {
+		t.Fatalf("insert postgres queued prompt: %v", err)
+	}
+	if err := queueRepo.Insert(ctx, &messagequeue.QueuedMessage{
+		ID: "queued-activity-postgres-agent", SessionID: "session-activity-postgres", TaskID: "task-activity-postgres",
+		Content: "queued agent prompt", QueuedAt: base.Add(6 * time.Hour), QueuedBy: messagequeue.QueuedByAgent,
+	}, 10); err != nil {
+		t.Fatalf("insert postgres queued agent prompt: %v", err)
+	}
 
 	got, err := repo.LoadTaskLastActivity(ctx, []string{"task-activity-postgres"})
 	if err != nil {
 		t.Fatalf("load postgres task activity: %v", err)
 	}
-	if gotAt, ok := got["task-activity-postgres"]; !ok || !gotAt.Equal(base.Add(4*time.Hour)) {
-		t.Fatalf("postgres activity = %v, %v; want %v", gotAt, ok, base.Add(4*time.Hour))
+	if gotAt, ok := got["task-activity-postgres"]; !ok || !gotAt.Equal(queuedAt) {
+		t.Fatalf("postgres activity = %v, %v; want %v", gotAt, ok, queuedAt)
 	}
 }

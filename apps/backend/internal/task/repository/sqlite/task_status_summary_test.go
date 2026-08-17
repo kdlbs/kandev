@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/statussummary"
 )
@@ -168,6 +169,25 @@ func TestTaskLastActivityBatch(t *testing.T) {
 	seedTaskAt("task-activity-turn", base, base.Add(time.Hour))
 	seedTaskAt("task-activity-active", base.Add(2*time.Hour), base.Add(3*time.Hour))
 	seedTaskAt("task-activity-no-session", base.Add(4*time.Hour), base.Add(5*time.Hour))
+	seedTaskAt("task-activity-queued", base.Add(4*time.Hour), base.Add(5*time.Hour))
+
+	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("initialize queue repository: %v", err)
+	}
+	queuedAt := base.Add(9 * time.Hour)
+	if err := queueRepo.Insert(ctx, &messagequeue.QueuedMessage{
+		ID: "queued-activity-user", SessionID: "session-activity-queued", TaskID: "task-activity-queued",
+		Content: "queued prompt", QueuedAt: queuedAt, QueuedBy: "user-1",
+	}, 10); err != nil {
+		t.Fatalf("insert queued user prompt: %v", err)
+	}
+	if err := queueRepo.Insert(ctx, &messagequeue.QueuedMessage{
+		ID: "queued-activity-agent", SessionID: "session-activity-queued", TaskID: "task-activity-queued",
+		Content: "queued agent prompt", QueuedAt: base.Add(12 * time.Hour), QueuedBy: messagequeue.QueuedByAgent,
+	}, 10); err != nil {
+		t.Fatalf("insert queued agent prompt: %v", err)
+	}
 
 	for _, session := range []*models.TaskSession{
 		{ID: "session-activity-turn", TaskID: "task-activity-turn"},
@@ -233,6 +253,7 @@ func TestTaskLastActivityBatch(t *testing.T) {
 		"task-activity-turn",
 		"task-activity-active",
 		"task-activity-no-session",
+		"task-activity-queued",
 		"missing-task",
 	})
 	if err != nil {
@@ -242,6 +263,7 @@ func TestTaskLastActivityBatch(t *testing.T) {
 		"task-activity-turn":       completedAt,
 		"task-activity-active":     base.Add(10 * time.Hour),
 		"task-activity-no-session": base.Add(5 * time.Hour),
+		"task-activity-queued":     queuedAt,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("activity rows = %#v, want %#v", got, want)

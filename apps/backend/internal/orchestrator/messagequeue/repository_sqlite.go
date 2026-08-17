@@ -1558,6 +1558,7 @@ func (r *sqliteRepository) MergeIntoAbove(ctx context.Context, sessionID, source
 	merged.Content = content
 	merged.Attachments = attachments
 	merged.Metadata = metadata
+	merged.QueuedAt = latestQueuedAt(target.QueuedAt, source.QueuedAt)
 	return &merged, nil
 }
 
@@ -1607,6 +1608,7 @@ func (r *sqliteRepository) AutoMergeIntoAbove(ctx context.Context, sessionID, so
 	target.Content = values.content
 	target.Attachments = values.attachments
 	target.Metadata = values.metadata
+	target.QueuedAt = values.queuedAt
 	return target, true, nil
 }
 
@@ -1671,15 +1673,16 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAbove(ctx context.Context, cand
 	// the head), violating FIFO drain order.
 	res, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE queued_messages
-		SET content = ?, attachments_json = ?, metadata_json = ?
+		SET content = ?, attachments_json = ?, metadata_json = ?, queued_at = ?
 		WHERE id = ? AND session_id = ?
 		  AND position = ?
 		  AND content = ?
 		  AND attachments_json = ?
 		  AND metadata_json = ?
-	`), values.content, attachmentsJSON, metadataJSON,
+		  AND queued_at = ?
+	`), values.content, attachmentsJSON, metadataJSON, values.queuedAt,
 		target.ID, candidate.SessionID, target.Position,
-		storedContent, storedAttachmentsJSON, storedMetadataJSON)
+		storedContent, storedAttachmentsJSON, storedMetadataJSON, target.QueuedAt)
 	if err != nil {
 		return nil, false, fmt.Errorf("update automatic candidate merge target: %w", err)
 	}
@@ -1700,6 +1703,7 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAbove(ctx context.Context, cand
 	target.Content = values.content
 	target.Attachments = values.attachments
 	target.Metadata = values.metadata
+	target.QueuedAt = values.queuedAt
 	return target, true, nil
 }
 
@@ -1865,11 +1869,12 @@ func applyMergeWrites(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, tar
 	if err != nil {
 		return err
 	}
+	queuedAt := latestQueuedAt(target.QueuedAt, source.QueuedAt)
 	res, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE queued_messages
-		SET content = ?, attachments_json = ?, metadata_json = ?
+		SET content = ?, attachments_json = ?, metadata_json = ?, queued_at = ?
 		WHERE id = ? AND session_id = ?
-	`), content, attachmentsJSON, metadataJSON, target.ID, sessionID)
+	`), content, attachmentsJSON, metadataJSON, queuedAt, target.ID, sessionID)
 	if err != nil {
 		return fmt.Errorf("update merge target: %w", err)
 	}

@@ -6,12 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -419,6 +421,10 @@ func TestStatusSummaryActivityRebuildBackfillsAndPreservesNewerStoredValue(t *te
 	svc, _, repo := createTestService(t)
 	svc.statusSummaries = repo
 	svc.taskActivity = repo
+	queueDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	if _, err := messagequeue.NewSQLiteRepository(queueDB, queueDB); err != nil {
+		t.Fatalf("initialize queue repository: %v", err)
+	}
 	ctx := context.Background()
 	createTaskWithoutRepositories(t, ctx, repo)
 	base := time.Date(2026, time.August, 17, 10, 0, 0, 0, time.UTC)

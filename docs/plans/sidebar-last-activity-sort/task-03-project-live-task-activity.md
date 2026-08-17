@@ -17,9 +17,10 @@ summary rows from the new batched source.
 
 - Summary JSON, equality, persistence, DTOs, and replacement events carry
   optional `last_activity_at` without changing `updated_at`.
-- Task creation, task update, state-only task transition, user-message, and turn
-  events advance activity by source time. Excluded background status and older
-  replay events do not advance it.
+- Task creation, task update, state-only task transition, user-message, user
+  queue admission, and turn events advance activity by source time. Queue
+  bookkeeping, excluded background status, and older replay events do not
+  advance it.
 - Initial hydration repairs missing values in batch and preserves newer stored
   activity through compare-and-set retries.
 
@@ -62,12 +63,16 @@ Task 02.
 
 - Added optional semantic `last_activity_at` to live summary replacement
   payloads and projector state, with durable loader rehydration.
-- Subscribed to task creation, state-only transitions, and turn start and
-  completion. User-authored message additions use their persisted creation
-  time; background status, provider, queue, agent-message, and older replay
-  events do not advance the monotonic maximum.
+- Subscribed to task creation, state-only transitions, user queue admission,
+  and turn start and completion. User-authored message additions and queued
+  admissions use their persisted source time; background status, provider,
+  queue bookkeeping, agent-message, and older replay events do not advance the
+  monotonic maximum. Queue merges retain the newest admission time.
 - Focused verification passed:
   - `go test ./internal/task/statussummary -run 'LastActivity'` (3 tests)
   - `go test ./internal/task/service -run 'StatusSummary.*LastActivity'` (no matching tests)
   - `go test ./internal/backendapp -run 'StatusSummary'` (7 tests)
-  - `go test ./internal/task/statussummary` (63 tests)
+  - `go test ./internal/task/statussummary` (64 tests)
+- Review fixup verification: affected backend packages passed 1,031 tests,
+  including live queued-prompt projection and SQLite/Postgres reconstruction
+  coverage.

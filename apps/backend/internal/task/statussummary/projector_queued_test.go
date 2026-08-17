@@ -39,6 +39,37 @@ func TestProjectorQueueEventUpdatesQueuedPromptCount(t *testing.T) {
 	}
 }
 
+func TestProjectorQueueEventTracksUserPromptActivity(t *testing.T) {
+	projector, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-queued-activity"
+	queuedAt := time.Date(2026, 8, 1, 19, 0, 0, 0, time.UTC)
+
+	projector.countQueuedPrompts = func(context.Context, string) (int, error) {
+		return 0, nil
+	}
+	publishProjectorEvent(t, eventBus, events.MessageQueueStatusChanged, events.MessageQueueStatusChanged, map[string]interface{}{
+		"task_id":   taskID,
+		"queued_by": "user-1",
+		"queued_at": queuedAt,
+	})
+
+	summary := store.summary(taskID)
+	if summary == nil || summary.LastActivityAt == nil || !summary.LastActivityAt.Equal(queuedAt) {
+		t.Fatalf("queued user activity = %+v, want %s", summary, queuedAt)
+	}
+
+	// Queue status events without a user-owned admission must remain count-only
+	// bookkeeping, even when they carry a newer timestamp-shaped value.
+	publishProjectorEvent(t, eventBus, events.MessageQueueStatusChanged, events.MessageQueueStatusChanged, map[string]interface{}{
+		"task_id":   taskID,
+		"queued_by": "agent",
+		"queued_at": queuedAt.Add(time.Hour),
+	})
+	if got := store.summary(taskID).LastActivityAt; got == nil || !got.Equal(queuedAt) {
+		t.Fatalf("agent queue activity changed last activity to %v, want %s", got, queuedAt)
+	}
+}
+
 func TestProjectorQueueEventWithUnchangedCountDoesNotRepublish(t *testing.T) {
 	projector, store, eventBus, updates, _ := newProjectorTest(t)
 	const taskID = "task-queued-unchanged"

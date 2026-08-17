@@ -77,7 +77,7 @@ func (r *Repository) LoadTaskLastActivity(ctx context.Context, taskIDs []string)
 		return result, nil
 	}
 
-	for _, chunk := range chunkIDs(taskIDs, sqliteMaxHostParams/5) {
+	for _, chunk := range chunkIDs(taskIDs, sqliteMaxHostParams/6) {
 		placeholders, ids := buildInPlaceholders(chunk)
 		query := `
 			WITH activity AS (
@@ -94,6 +94,11 @@ func (r *Repository) LoadTaskLastActivity(ctx context.Context, taskIDs []string)
 				WHERE task_id IN (` + placeholders + `)
 				  AND author_type = 'user'
 				UNION ALL
+				SELECT task_id, queued_at AS activity_at
+				FROM queued_messages
+				WHERE task_id IN (` + placeholders + `)
+				  AND queued_by NOT IN ('agent', 'workflow', 'server')
+				UNION ALL
 				SELECT task_id, started_at AS activity_at
 				FROM task_session_turns
 				WHERE task_id IN (` + placeholders + `)
@@ -107,8 +112,8 @@ func (r *Repository) LoadTaskLastActivity(ctx context.Context, taskIDs []string)
 			SELECT task_id, MAX(activity_at) AS activity_at
 			FROM activity
 			GROUP BY task_id`
-		args := make([]interface{}, 0, len(ids)*5)
-		for range 5 {
+		args := make([]interface{}, 0, len(ids)*6)
+		for range 6 {
 			args = append(args, ids...)
 		}
 		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)

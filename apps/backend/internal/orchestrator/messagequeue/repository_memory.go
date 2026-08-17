@@ -650,6 +650,7 @@ func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID
 	target.Content = content
 	target.Attachments = attachments
 	target.Metadata = metadata
+	target.QueuedAt = latestQueuedAt(target.QueuedAt, source.QueuedAt)
 	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.entries, sessionID)
@@ -694,6 +695,7 @@ func (r *memoryRepository) AutoMergeIntoAbove(_ context.Context, sessionID, sour
 	target.Content = values.content
 	target.Attachments = values.attachments
 	target.Metadata = values.metadata
+	target.QueuedAt = values.queuedAt
 	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
 	return cloneQueuedMessage(target), true, nil
 }
@@ -722,6 +724,7 @@ func (r *memoryRepository) AutoMergeCandidateIntoAbove(_ context.Context, candid
 	target.Content = values.content
 	target.Attachments = values.attachments
 	target.Metadata = values.metadata
+	target.QueuedAt = values.queuedAt
 	return cloneQueuedMessage(target), true, nil
 }
 

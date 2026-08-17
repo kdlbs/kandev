@@ -79,6 +79,11 @@ func applyTaskActivityEventLocked(state *projectionState, eventType string, data
 			return false
 		}
 		candidate = timeValue(data["created_at"])
+	case events.MessageQueueStatusChanged:
+		if !isUserQueuedPrompt(data) {
+			return false
+		}
+		candidate = timeValue(data["queued_at"])
 	case events.TurnStarted:
 		candidate = timeValue(data["started_at"])
 	case events.TurnCompleted:
@@ -87,6 +92,11 @@ func applyTaskActivityEventLocked(state *projectionState, eventType string, data
 		return false
 	}
 	return advanceTaskActivity(state, candidate)
+}
+
+func isUserQueuedPrompt(data map[string]interface{}) bool {
+	queuedBy := stringField(data, "queued_by")
+	return queuedBy != "" && queuedBy != "agent" && queuedBy != "workflow" && queuedBy != "server"
 }
 
 func advanceTaskActivity(state *projectionState, candidate time.Time) bool {

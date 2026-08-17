@@ -316,12 +316,17 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 	}
 
 	if event.Type == events.MessageQueueStatusChanged {
+		activityChanged := applyTaskActivityEventLocked(state, event.Type, data)
 		if p.loadPendingActions != nil && !state.pendingObserved {
 			pendingChanged, refreshErr := p.refreshPendingLocked(ctx, taskID, state)
 			if refreshErr != nil {
 				return refreshErr
 			}
-			if err := p.persistPendingRefreshLocked(ctx, taskID, state, pendingChanged, "", nil); err != nil {
+			if err := p.persistPendingRefreshLocked(ctx, taskID, state, pendingChanged || activityChanged, event.Type, data); err != nil {
+				return err
+			}
+		} else if activityChanged {
+			if err := p.persistPendingRefreshLocked(ctx, taskID, state, true, event.Type, data); err != nil {
 				return err
 			}
 		}

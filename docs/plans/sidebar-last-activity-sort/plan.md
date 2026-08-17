@@ -45,6 +45,7 @@ returns the maximum of:
 
 - `tasks.created_at` and `tasks.updated_at`
 - user-authored `task_session_messages.created_at`
+- non-reserved user-owned `queued_messages.queued_at`
 - `task_session_turns.started_at` and non-null `completed_at`
 
 The query accepts task IDs, returns one map, and uses the existing task/message
@@ -57,12 +58,13 @@ Add `lastActivityAt` to projector state and persisted semantic JSON. Rehydrate
 it from the stored summary and a narrow activity loader.
 
 Subscribe to `task.created`, `task.state_changed`, `turn.started`, and
-`turn.completed` in addition to the existing task and message events. Apply
-timestamps as follows:
+`turn.completed` in addition to the existing task, message, and queue events.
+Apply timestamps as follows:
 
 - `task.created`, `task.updated`, and `task.state_changed`: payload
   `updated_at`, with `created_at` as the creation fallback
 - `message.added`: `created_at` only for `author_type=user`
+- successful user-owned queue admission: `queued_at`
 - `turn.started`: `started_at`
 - `turn.completed`: `completed_at`
 

@@ -11,13 +11,14 @@ spec: "../../specs/ui/sidebar-last-activity-sort.md"
 # Task 02: Add durable activity reconstruction
 
 Create the authoritative batched read that reconstructs task activity from
-task, user-message, and turn records.
+task, user-message, queued-prompt, and turn records.
 
 ## Acceptance
 
 - One repository call returns the latest activity for every requested task ID.
-- The result includes task creation and mutation, user prompts, and turn start
-  or completion. It excludes agent messages and session metadata timestamps.
+- The result includes task creation and mutation, user prompts including
+  non-reserved queued prompts, and turn start or completion. It excludes agent
+  messages, reserved queue entries, and session metadata timestamps.
 - SQLite and Postgres behavior is covered without an N+1 query.
 
 ## Verification
@@ -54,3 +55,6 @@ None.
   passed (1 SQLite test). The Postgres counterpart is environment-gated.
 - GREEN: `go test ./internal/task/service -run
   'StatusSummary.*Activity.*Rebuild'` passed (1 rebuild test).
+- GREEN: queued user prompts are included in the same batched max query while
+  agent-owned queued rows remain excluded; affected repository, projector, and
+  handler packages passed 1,031 tests.
