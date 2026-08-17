@@ -126,10 +126,20 @@ type SubagentContextRecorder interface {
 // TurnService is an interface for managing session turns
 type TurnService interface {
 	StartTurn(ctx context.Context, sessionID string) (*models.Turn, error)
+	ReserveTurn(
+		ctx context.Context,
+		sessionID string,
+		recovery *models.PromptDispatchRecovery,
+	) (*models.Turn, error)
+	MarkReservedTurnDispatchAttempted(ctx context.Context, turn *models.Turn) error
+	PublishReservedTurn(ctx context.Context, turn *models.Turn) error
+	RollbackReservedTurn(ctx context.Context, sessionID, turnID string) (bool, error)
+	ReconcileUnpublishedPromptTurns(ctx context.Context) (int, error)
 	CompleteTurn(ctx context.Context, turnID string) error
 	GetTurn(ctx context.Context, turnID string) (*models.Turn, error)
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
+	PatchTurnMetadata(ctx context.Context, sessionID, turnID string, updates map[string]interface{}) error
 	// AbandonOpenTurns buries any open turns for a session by setting
 	// completed_at = started_at (zero duration), so a subsequent prompt starts
 	// a fresh turn instead of adopting one that was orphaned by a crash or
@@ -311,7 +321,7 @@ type sessionExecutorStore interface {
 	// prior launch failed before recordInitialMessage ran.
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	// Pending clarification rows — durable guard for on_turn_complete while the user is answering.
-	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
+	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment
@@ -347,6 +357,108 @@ func (s *Service) ClaimTaskTitleSession(ctx context.Context, taskID, sessionID s
 		s.publishTaskUpdated(ctx, claimedTask)
 	}
 	return owned, nil
+}
+
+type reservedPromptTurn struct {
+	id           string
+	done         chan struct{}
+	mu           sync.Mutex
+	resolved     bool
+	accepted     bool
+	afterResolve []reservedPromptCallback
+}
+
+type reservedPromptCallback struct {
+	owner *reservedPromptCallbackOwner
+	run   func(context.Context)
+}
+
+func newReservedPromptTurn(id string) *reservedPromptTurn {
+	return &reservedPromptTurn{id: id, done: make(chan struct{})}
+}
+
+func (r *reservedPromptTurn) resolve(accepted bool) []reservedPromptCallback {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.resolved {
+		return nil
+	}
+	r.resolved = true
+	r.accepted = accepted
+	close(r.done)
+	callbacks := r.afterResolve
+	r.afterResolve = nil
+	return callbacks
+}
+
+func (r *reservedPromptTurn) wait(ctx context.Context) (bool, error) {
+	select {
+	case <-r.done:
+		r.mu.Lock()
+		accepted := r.accepted
+		r.mu.Unlock()
+		return accepted, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+}
+
+func (r *reservedPromptTurn) deferUntilResolved(callback reservedPromptCallback) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.resolved {
+		return false
+	}
+	r.afterResolve = append(r.afterResolve, callback)
+	return true
+}
+
+// reservedPromptCallbackOwner gives deferred reservation reconciliation one
+// lifecycle owner. Stop prevents new launches, cancels the shared context, and
+// waits until every callback has observed cancellation and returned.
+type reservedPromptCallbackOwner struct {
+	mu      sync.Mutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	stopped bool
+	workers sync.WaitGroup
+}
+
+func newReservedPromptCallbackOwner() *reservedPromptCallbackOwner {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &reservedPromptCallbackOwner{ctx: ctx, cancel: cancel}
+}
+
+func (o *reservedPromptCallbackOwner) launch(callback func(context.Context)) bool {
+	if o == nil || callback == nil {
+		return false
+	}
+	o.mu.Lock()
+	if o.stopped {
+		o.mu.Unlock()
+		return false
+	}
+	ctx := o.ctx
+	o.workers.Add(1)
+	o.mu.Unlock()
+	go func() {
+		defer o.workers.Done()
+		callback(ctx)
+	}()
+	return true
+}
+
+func (o *reservedPromptCallbackOwner) stop() {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	if !o.stopped {
+		o.stopped = true
+		o.cancel()
+	}
+	o.mu.Unlock()
+	o.workers.Wait()
 }
 
 // Service is the main orchestrator service
@@ -595,6 +707,16 @@ type Service struct {
 
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
+	// reservedPromptTurns keeps durably created turns private until agentctl
+	// accepts their prompt. Each reservation broadcasts its accepted-or-rolled-
+	// back result so a concurrent ready event can wait, then revalidate prompt
+	// generation before touching turn or workflow state.
+	reservedPromptTurns sync.Map
+	// reservedPromptCallbacks owns the reconciliation callbacks released when
+	// a prompt reservation settles. The owner is replaced on Start and drained
+	// before scheduler/watcher teardown on Stop.
+	reservedPromptCallbacksMu sync.Mutex
+	reservedPromptCallbacks   *reservedPromptCallbackOwner
 
 	// dispatchingQueued tracks the pre-acceptance reservation for the exact
 	// queued message handed to an async worker. acceptedQueuedDispatch keeps
@@ -609,6 +731,9 @@ type Service struct {
 	// narrow interval after handleAgentReady releases its per-session guard
 	// and before it starts a deferred durable-lifecycle dispatch.
 	afterReadyLifecycleReservation func()
+	// agentReadyReservationWaitTimeout is a deterministic test seam. Zero uses
+	// the production timeout derived from the prompt dispatch budgets.
+	agentReadyReservationWaitTimeout time.Duration
 
 	// foregroundActivity tracks, per session, whether the open turn is actively
 	// generating in the foreground or only waiting on a spawned background task
@@ -861,6 +986,7 @@ func NewService(
 		messageQueue:                 msgQueue,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
+		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
 	}
@@ -1053,8 +1179,9 @@ func (s *Service) SetTaskGitCredentialPolicyResolver(resolver executor.TaskGitCr
 //
 // When to call: During orchestrator initialization, after creating the task service.
 //
-// If not set: Turns won't be tracked (orchestrator continues functioning normally, but
-// no timing data is recorded and turn IDs in messages will be empty).
+// This dependency must be set before Start. Startup reconciliation fails closed
+// without durable turn access because it cannot safely classify unpublished
+// prompt reservations.
 func (s *Service) SetTurnService(turnService TurnService) {
 	s.turnService = turnService
 }
@@ -1312,13 +1439,14 @@ func (s *Service) SetPromptReferenceExpander(e PromptReferenceExpander) {
 	s.promptExpander = e
 }
 
-// ClarificationCanceller detaches in-memory clarification waiters when an agent's
-// turn completes while questions are still pending in the DB.
+// ClarificationCanceller updates pending clarification ownership when an agent
+// turn detaches or its session becomes terminal.
 type ClarificationCanceller interface {
-	DetachSessionAndNotify(ctx context.Context, sessionID string) int
+	DetachSessionAndNotify(ctx context.Context, sessionID string) (int, error)
+	ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error)
 }
 
-// SetClarificationCanceller sets the canceller for cleaning up pending clarifications on turn complete.
+// SetClarificationCanceller sets the canceller for turn and terminal-session cleanup.
 func (s *Service) SetClarificationCanceller(c ClarificationCanceller) {
 	s.clarificationCanceller = c
 }
@@ -1435,42 +1563,135 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 // active turn. Callers that must compensate a failed dispatch may only close a
 // turn they created; an adopted turn belongs to an earlier dispatch.
 func (s *Service) startTurnForSessionWithOwnership(ctx context.Context, sessionID string) (string, bool) {
-	if s.turnService == nil {
-		return "", false
-	}
-
-	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
-		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
-			s.bindAcceptedDispatchTurn(sessionID, turnID)
-			return turnID, false
-		}
-	}
-
-	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); turn != nil {
-		s.activeTurns.Store(sessionID, turn.ID)
-		s.bindAcceptedDispatchTurn(sessionID, turn.ID)
-		return turn.ID, false
-	} else if err != nil {
-		// A real DB read failure here would otherwise be silently dropped, and
-		// we'd fall through to StartTurn — potentially writing a duplicate next
-		// to an existing open turn we couldn't see. Log it; the next sweep via
-		// completeTurnForSession will mop up any duplicate.
-		s.logger.Warn("failed to look up active turn before starting a new one",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
-
-	turn, err := s.turnService.StartTurn(ctx, sessionID)
+	turnID, created, _, err := s.startTurnForSessionWithOwnershipChecked(ctx, sessionID, false, nil)
 	if err != nil {
 		s.logger.Warn("failed to start turn",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return "", false
 	}
+	return turnID, created
+}
 
+// startTurnForSessionWithOwnershipChecked makes persistence failure part of
+// prompt admission. A caller may reserve a newly created turn so turn.started
+// is published only after the external dispatch is acknowledged.
+func (s *Service) startTurnForSessionWithOwnershipChecked(
+	ctx context.Context,
+	sessionID string,
+	reserve bool,
+	recovery *models.PromptDispatchRecovery,
+) (string, bool, *models.Turn, error) {
+	if s.turnService == nil {
+		return "", false, nil, nil
+	}
+	if reservedID := s.reservedPromptTurnID(sessionID); reservedID != "" {
+		return "", false, nil, fmt.Errorf(
+			"%w: session %s has unpublished reserved turn %s",
+			ErrAgentPromptInProgress,
+			sessionID,
+			reservedID,
+		)
+	}
+
+	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
+		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
+			s.bindAcceptedDispatchTurn(sessionID, turnID)
+			return turnID, false, nil, nil
+		}
+	}
+
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		return "", false, nil, fmt.Errorf("look up active turn: %w", err)
+	}
+	if turn != nil {
+		s.activeTurns.Store(sessionID, turn.ID)
+		s.bindAcceptedDispatchTurn(sessionID, turn.ID)
+		return turn.ID, false, nil, nil
+	}
+
+	if reserve {
+		turn, err = s.turnService.ReserveTurn(ctx, sessionID, recovery)
+	} else {
+		turn, err = s.turnService.StartTurn(ctx, sessionID)
+	}
+	if err != nil {
+		return "", false, nil, fmt.Errorf("persist turn: %w", err)
+	}
+
+	if reserve {
+		s.reservedPromptTurns.Store(sessionID, newReservedPromptTurn(turn.ID))
+		return turn.ID, true, turn, nil
+	}
 	s.activeTurns.Store(sessionID, turn.ID)
 	s.bindAcceptedDispatchTurn(sessionID, turn.ID)
-	return turn.ID, true
+	return turn.ID, true, nil, nil
+}
+
+func (s *Service) reservedPromptTurnID(sessionID string) string {
+	reservation := s.reservedPromptTurn(sessionID)
+	if reservation == nil {
+		return ""
+	}
+	return reservation.id
+}
+
+func (s *Service) reservedPromptTurn(sessionID string) *reservedPromptTurn {
+	value, ok := s.reservedPromptTurns.Load(sessionID)
+	if !ok {
+		return nil
+	}
+	reservation, _ := value.(*reservedPromptTurn)
+	return reservation
+}
+
+func (s *Service) resolveReservedPromptTurn(sessionID, turnID string, accepted bool) bool {
+	reservation := s.reservedPromptTurn(sessionID)
+	if reservation == nil || reservation.id != turnID {
+		return false
+	}
+	s.reservedPromptTurns.CompareAndDelete(sessionID, reservation)
+	callbacks := reservation.resolve(accepted)
+	for _, callback := range callbacks {
+		if callback.owner != nil {
+			callback.owner.launch(callback.run)
+		}
+	}
+	return true
+}
+
+func (s *Service) deferReservedPromptCallback(
+	reservation *reservedPromptTurn,
+	callback func(context.Context),
+) bool {
+	if reservation == nil || callback == nil {
+		return false
+	}
+	s.reservedPromptCallbacksMu.Lock()
+	owner := s.reservedPromptCallbacks
+	if owner == nil {
+		owner = newReservedPromptCallbackOwner()
+		s.reservedPromptCallbacks = owner
+	}
+	s.reservedPromptCallbacksMu.Unlock()
+	return reservation.deferUntilResolved(reservedPromptCallback{owner: owner, run: callback})
+}
+
+func (s *Service) resetReservedPromptCallbacks() {
+	next := newReservedPromptCallbackOwner()
+	s.reservedPromptCallbacksMu.Lock()
+	previous := s.reservedPromptCallbacks
+	s.reservedPromptCallbacks = next
+	s.reservedPromptCallbacksMu.Unlock()
+	previous.stop()
+}
+
+func (s *Service) stopReservedPromptCallbacks() {
+	s.reservedPromptCallbacksMu.Lock()
+	owner := s.reservedPromptCallbacks
+	s.reservedPromptCallbacksMu.Unlock()
+	owner.stop()
 }
 
 // completeTurnForSession closes any open turn for the session.
@@ -1727,6 +1948,9 @@ func (s *Service) getActiveTurnID(sessionID string) string {
 			return turnID
 		}
 	}
+	if turnID := s.reservedPromptTurnID(sessionID); turnID != "" {
+		return turnID
+	}
 	// No active turn exists - start one lazily
 	// This handles edge cases like resumed sessions or race conditions
 	return s.startTurnForSession(context.Background(), sessionID)
@@ -1802,12 +2026,28 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	s.logger.Info("starting orchestrator service")
+	s.resetReservedPromptCallbacks()
 	s.resetSendNowWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
 	// when the user opens them (via task.session.status → task.session.resume).
-	s.reconcileSessionsOnStartup(ctx)
+	if s.turnService == nil {
+		err := errors.New("reconcile unpublished prompt turns on startup: turn service is unavailable")
+		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		return err
+	}
+	if err := s.reconcileUnpublishedPromptTurnsOnStartup(ctx); err != nil {
+		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
+		s.mu.Lock()
+		s.running = false
+		s.mu.Unlock()
+		return err
+	}
+	s.reconcileExecutorSessionsOnStartup(ctx)
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
@@ -1889,6 +2129,7 @@ func (s *Service) Stop() error {
 
 	// Stop components in reverse order
 	var errs []error
+	s.stopReservedPromptCallbacks()
 
 	if err := s.scheduler.Stop(); err != nil {
 		s.logger.Error("failed to stop scheduler", zap.Error(err))
@@ -1925,8 +2166,29 @@ func (s *Service) Stop() error {
 //     clear stale execution IDs, fix task state, preserve ExecutorRunning record
 //  4. Pre-poll remote executor status for remote runtimes (sprites, remote_docker)
 //
-// Called by: Start() method during orchestrator initialization.
+// Tests and explicit reconciliation callers use this combined entrypoint;
+// Start calls both phases directly so prompt/clarification recovery errors are fatal.
 func (s *Service) reconcileSessionsOnStartup(ctx context.Context) {
+	if err := s.reconcileUnpublishedPromptTurnsOnStartup(ctx); err != nil {
+		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
+		return
+	}
+	s.reconcileExecutorSessionsOnStartup(ctx)
+}
+
+func (s *Service) reconcileUnpublishedPromptTurnsOnStartup(ctx context.Context) error {
+	if s.turnService != nil {
+		reconciled, reconcileErr := s.turnService.ReconcileUnpublishedPromptTurns(ctx)
+		if reconcileErr != nil {
+			return fmt.Errorf("reconcile unpublished prompt turns on startup: %w", reconcileErr)
+		} else if reconciled > 0 {
+			s.logger.Info("reconciled unpublished prompt turns on startup", zap.Int("count", reconciled))
+		}
+	}
+	return nil
+}
+
+func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 	runningExecutors, err := s.repo.ListExecutorsRunning(ctx)
 	if err != nil {
 		s.logger.Warn("failed to list executors running on startup", zap.Error(err))

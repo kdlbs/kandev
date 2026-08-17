@@ -233,6 +233,10 @@ type TaskDTO struct {
 	// It is loaded in batches and is absent when no projection exists yet; the
 	// existing coarse fields above remain the compatibility fallback.
 	StatusSummary *statussummary.TaskStatusSummary `json:"status_summary,omitempty"`
+	// StatusSummaryInvalidated distinguishes a known-stale summary from an
+	// ordinarily omitted partial projection so clients clear their cache and
+	// expose the coarse compatibility fallback.
+	StatusSummaryInvalidated bool `json:"status_summary_invalidated,omitempty"`
 }
 
 type TaskRepositoryDTO struct {
@@ -321,8 +325,9 @@ type TaskSessionDTO struct {
 	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
-	PendingAction       *string `json:"pending_action,omitempty"`
-	ActiveSubagentCount int     `json:"active_subagent_count"`
+	PendingAction         *string                       `json:"pending_action"`
+	PendingActionRevision *models.PendingActionRevision `json:"pending_action_revision,omitempty"`
+	ActiveSubagentCount   int                           `json:"active_subagent_count"`
 	// LastReadMessageID is the session's Slack-style read cursor — the id of
 	// the newest message the frontend has marked as read. Used by the
 	// transcript to position the unread ("New") divider.
@@ -379,9 +384,10 @@ type TaskSessionSummaryDTO struct {
 	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
-	PendingAction       *string `json:"pending_action"`
-	ActiveSubagentCount int     `json:"active_subagent_count"`
-	LastReadMessageID   string  `json:"last_read_message_id,omitempty"`
+	PendingAction         *string                       `json:"pending_action"`
+	PendingActionRevision *models.PendingActionRevision `json:"pending_action_revision,omitempty"`
+	ActiveSubagentCount   int                           `json:"active_subagent_count"`
+	LastReadMessageID     string                        `json:"last_read_message_id,omitempty"`
 	// CommandCount is the number of tool_call messages on this session,
 	// surfaced inline in the timeline entry header ("ran N commands").
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't
@@ -1099,11 +1105,13 @@ func TaskPlanRevisionMetaFromModel(rev *models.TaskPlanRevision) *TaskPlanRevisi
 	return meta
 }
 
+const turnTimestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
 // FromTurn converts a Turn model to a TurnDTO.
 func FromTurn(turn *models.Turn) TurnDTO {
 	var completedAt *string
 	if turn.CompletedAt != nil {
-		formatted := turn.CompletedAt.UTC().Format(time.RFC3339)
+		formatted := turn.CompletedAt.UTC().Format(turnTimestampLayout)
 		completedAt = &formatted
 	}
 
@@ -1111,10 +1119,10 @@ func FromTurn(turn *models.Turn) TurnDTO {
 		ID:          turn.ID,
 		SessionID:   turn.TaskSessionID,
 		TaskID:      turn.TaskID,
-		StartedAt:   turn.StartedAt.UTC().Format(time.RFC3339),
+		StartedAt:   turn.StartedAt.UTC().Format(turnTimestampLayout),
 		CompletedAt: completedAt,
 		Metadata:    turn.Metadata,
-		CreatedAt:   turn.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:   turn.UpdatedAt.UTC().Format(time.RFC3339),
+		CreatedAt:   turn.CreatedAt.UTC().Format(turnTimestampLayout),
+		UpdatedAt:   turn.UpdatedAt.UTC().Format(turnTimestampLayout),
 	}
 }

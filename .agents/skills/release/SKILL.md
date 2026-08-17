@@ -38,6 +38,22 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
 7. `update-scoop-bucket` pushes updated `bucket/kandev.json` to `kdlbs/scoop-kandev` via its SSH deploy key.
 
+## Release PR ruleset bypass
+
+A normal Stable release creates its branch and pull request with `GITHUB_TOKEN`.
+It uses `RELEASE_PR_BYPASS_TOKEN` only for an exact-head `gh pr merge --admin`.
+
+Store this fine-grained personal access token in the protected `release`
+environment. Its owner must remain an organization administrator. Select only
+`kdlbs/kandev` and grant `contents: write` repository permission.
+
+Record the token owner and expiration date. Rotate the environment secret before
+the token expires or the owner loses administrator access. The workflow must
+stop before tag creation when the token is missing or cannot bypass the ruleset.
+
+After the merge, use `GITHUB_TOKEN` to read the PR state. Tag only the merge
+commit that GitHub reports after it appears on `origin/main`.
+
 **Workflow-control invariant:** When a channel intentionally skips a job, every
 downstream job reachable through that dependency chain must use a status function
 such as `!cancelled()` plus explicit `needs.<job>.result == 'success'` checks.

@@ -3,6 +3,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"maps"
@@ -107,6 +108,8 @@ var (
 	agentPromptReadyTimeout  = 30 * time.Second
 	agentPromptReadyInterval = 100 * time.Millisecond
 )
+
+const promptFailureCleanupTimeout = 5 * time.Second
 
 const promptReadinessRecoveryStopReason = "prompt readiness recovery"
 
@@ -3512,11 +3515,92 @@ func (s *Service) persistSessionCommit(ctx context.Context, sessionID string, tr
 // If planMode is true, a plan mode prefix is prepended to the prompt.
 // Attachments (images) are passed through to the agent if provided.
 func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error) {
-	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, "", false, nil)
+	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, promptTaskOptions{})
 }
 
-// promptTask is PromptTask's implementation, taking an additional
-// claimEntryID parameter used only by queued dispatches. When non-empty, this
+type promptTaskOptions struct {
+	claimEntryID          string
+	lifecyclePrompt       bool
+	afterClaim            func() error
+	preservePromptContext bool
+	// reserveTurnUntilDispatch persists detached-resume ownership before agentctl
+	// dispatch, while delaying the visible turn.started event until acceptance.
+	reserveTurnUntilDispatch bool
+	promptDispatchRecovery   *models.PromptDispatchRecovery
+	expectedCurrentTurnID    string
+}
+
+type promptDispatchOutcome struct {
+	mu             sync.Mutex
+	accepted       bool
+	publicationErr error
+}
+
+func (o *promptDispatchOutcome) recordAccepted(publicationErr error) {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	o.accepted = true
+	o.publicationErr = publicationErr
+	o.mu.Unlock()
+}
+
+func (o *promptDispatchOutcome) snapshot() (bool, error) {
+	if o == nil {
+		return false, nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.accepted, o.publicationErr
+}
+
+// acceptedPromptDispatchError means agentctl accepted the prompt, but durable
+// publication or later transport handling failed. Detached clarification
+// callers must not reopen the already-delivered answer on this error.
+type acceptedPromptDispatchError struct {
+	err error
+}
+
+func (e *acceptedPromptDispatchError) Error() string {
+	return fmt.Sprintf("prompt accepted but post-dispatch handling failed: %v", e.err)
+}
+
+func (e *acceptedPromptDispatchError) Unwrap() error { return e.err }
+
+func (*acceptedPromptDispatchError) DetachedResumeAccepted() bool { return true }
+
+func wrapAcceptedPromptDispatchFailure(
+	dispatchAccepted bool,
+	failureErr, publicationErr error,
+) error {
+	if !dispatchAccepted {
+		return failureErr
+	}
+	combined := errors.Join(failureErr, publicationErr)
+	if combined == nil {
+		return nil
+	}
+	return &acceptedPromptDispatchError{err: combined}
+}
+
+func (options promptTaskOptions) executorContext(ctx context.Context) context.Context {
+	if options.preservePromptContext {
+		return ctx
+	}
+	return context.WithoutCancel(ctx)
+}
+
+func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	// Preserve a small bounded window for state rollback after either the
+	// dispatch deadline or an ordinary transport request expires; otherwise a
+	// cancelled caller context can leave RUNNING state behind.
+	return context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
+}
+
+// promptTask is PromptTask's implementation. Its options carry queued-dispatch
+// ownership and the bounded-context exception. When options.claimEntryID is
+// non-empty, this
 // acquires sessionID's cancelInFlight guard around a second ownership check
 // and the "mark the session RUNNING" step immediately before startTurnForSession
 // and the (potentially long-blocking) executor.Prompt call below it. The worker
@@ -3541,7 +3625,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 // executeQueuedMessage's own deferred cleanup instead
 // (clearQueuedDispatchInFlightIfCurrent), which is safe since none of them
 // block on an agent turn.
-func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, claimEntryID string, lifecyclePrompt bool, afterClaim func() error) (*PromptResult, error) {
+func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, options promptTaskOptions) (*PromptResult, error) {
 	s.logPromptTaskCall(taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly)
 	if err := s.validatePromptTaskStart(sessionID); err != nil {
 		return nil, err
@@ -3576,17 +3660,11 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// would call PromptAgent with the OLD execution ID and get ErrExecutionNotFound.
 	// Re-reading from the DB after ensureSessionRunning guarantees we use the
 	// freshly-persisted AgentExecutionID.
-	if reloaded, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && reloaded != nil {
-		session = reloaded
-		// Re-apply transforms in case metadata changed during ensureSessionRunning.
-		effectivePrompt = s.effectivePromptForSession(sessionID, prompt, planMode, session)
-	}
+	session = s.reloadPromptSession(ctx, sessionID, session)
+	// Re-apply transforms in case metadata changed during ensureSessionRunning.
+	effectivePrompt = s.effectivePromptForSession(sessionID, prompt, planMode, session)
 	activityExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
-	foregroundDispatch := s.beginForegroundDispatch(
-		sessionID,
-		foregroundClaim,
-		activityExecutionID,
-	)
+	foregroundDispatch := s.beginForegroundDispatch(sessionID, foregroundClaim, activityExecutionID)
 	if foregroundDispatch == nil {
 		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
 		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
@@ -3604,8 +3682,9 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	s.rememberTurnPrompt(sessionID, prompt, model, planMode, attachments)
 
 	session, rollback, err := s.claimPromptDispatch(
-		ctx, taskID, sessionID, claimEntryID, lifecyclePrompt,
-		afterClaim, session, foregroundClaim,
+		ctx, taskID, sessionID, options.claimEntryID, options.lifecyclePrompt,
+		options.reserveTurnUntilDispatch, options.promptDispatchRecovery,
+		options.afterClaim, foregroundClaim, options.expectedCurrentTurnID,
 	)
 	if err != nil {
 		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
@@ -3619,39 +3698,84 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
 
-	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the prompt.
-	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
-	// We still want to log and respond, but the prompt should continue regardless.
-	promptCtx := context.WithoutCancel(ctx)
-	if rollback.turnID != "" {
-		if setter, ok := s.agentManager.(executor.PromptTurnIDSetter); ok {
-			if err := setter.SetPromptTurnID(promptCtx, session.AgentExecutionID, rollback.turnID); err != nil {
-				s.logger.Warn("failed to bind prompt turn before dispatch",
-					zap.String("session_id", sessionID),
-					zap.String("turn_id", rollback.turnID),
-					zap.Error(err))
-			}
-		}
-	}
+	// Only bounded-ack callers preserve request context; ordinary prompts can take minutes.
+	promptCtx := options.executorContext(ctx)
+	s.bindPromptTurnID(promptCtx, session, rollback.turnID)
+	dispatchOutcome := &promptDispatchOutcome{}
+	onDispatched := s.promptDispatchCallback(
+		promptCtx, taskID, sessionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
+	)
 	result, err := s.executor.PromptWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
-		func() {
-			if s.acceptForegroundDispatch(foregroundDispatch) {
-				s.publishForegroundActivityChanged(promptCtx, taskID, sessionID)
-			}
-		}, session,
+		onDispatched, session,
 	)
+	dispatchAccepted, publicationErr := dispatchOutcome.snapshot()
 	if err != nil {
-		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
-		return s.handlePromptDispatchFailure(
-			ctx, taskID, sessionID, prompt, planMode, resumedForPrompt,
-			attachments, rollback, lifecyclePrompt, err,
+		return s.finishPromptDispatchFailure(
+			ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
+			rollback, options, err, foregroundDispatch, dispatchAccepted, publicationErr,
 		)
 	}
-	return &PromptResult{
-		StopReason:   result.StopReason,
-		AgentMessage: result.AgentMessage,
-	}, nil
+	if publicationErr != nil {
+		return nil, &acceptedPromptDispatchError{err: publicationErr}
+	}
+	return &PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage}, nil
+}
+
+func (s *Service) finishPromptDispatchFailure(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode, resumedForPrompt bool,
+	attachments []v1.MessageAttachment,
+	rollback promptClaimRollback,
+	options promptTaskOptions,
+	promptErr error,
+	foregroundDispatch *foregroundDispatch,
+	dispatchAccepted bool,
+	publicationErr error,
+) (*PromptResult, error) {
+	failureCtx, cancel := options.failureContext(ctx)
+	defer cancel()
+	s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
+	if dispatchAccepted && rollback.reservedTurn != nil {
+		// Agentctl acceptance made the turn authoritative. A later completion
+		// error may reconcile session state, but must not delete this turn.
+		rollback.reservedTurnAccepted = true
+	}
+	failureResult, failureErr := s.handlePromptDispatchFailure(
+		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt,
+		attachments, rollback, options.lifecyclePrompt, dispatchAccepted, promptErr,
+	)
+	return failureResult, wrapAcceptedPromptDispatchFailure(
+		dispatchAccepted,
+		failureErr,
+		publicationErr,
+	)
+}
+
+func (s *Service) reloadPromptSession(
+	ctx context.Context,
+	sessionID string,
+	fallback *models.TaskSession,
+) *models.TaskSession {
+	reloaded, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || reloaded == nil {
+		return fallback
+	}
+	return reloaded
+}
+
+func (s *Service) bindPromptTurnID(ctx context.Context, session *models.TaskSession, turnID string) {
+	setter, ok := s.agentManager.(executor.PromptTurnIDSetter)
+	if turnID == "" || session == nil || !ok {
+		return
+	}
+	if err := setter.SetPromptTurnID(ctx, session.AgentExecutionID, turnID); err != nil {
+		s.logger.Warn("failed to bind prompt turn before dispatch",
+			zap.String("session_id", session.ID),
+			zap.String("turn_id", turnID),
+			zap.Error(err))
+	}
 }
 
 func (s *Service) validatePromptTaskStart(sessionID string) error {
@@ -3727,6 +3851,45 @@ func (s *Service) rollbackForegroundDispatchOnFailure(
 	}
 }
 
+func (s *Service) promptDispatchCallback(
+	ctx context.Context,
+	taskID, sessionID string,
+	reservedTurn *models.Turn,
+	dispatch *foregroundDispatch,
+	outcome *promptDispatchOutcome,
+) func() {
+	return func() {
+		var publicationErr error
+		if reservedTurn != nil && s.turnService != nil {
+			// Agentctl has already accepted the prompt. Publication must not inherit
+			// an expiring HTTP context or the caller could receive success while the
+			// durable turn still looks unpublished at restart.
+			publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
+			publicationErr = s.turnService.PublishReservedTurn(publishCtx, reservedTurn)
+			cancel()
+			if publicationErr != nil {
+				s.logger.Error("failed to persist or publish accepted prompt turn",
+					zap.String("session_id", sessionID),
+					zap.String("turn_id", reservedTurn.ID),
+					zap.Error(publicationErr))
+			}
+			// The pre-dispatch attempt marker makes restart recovery and rollback
+			// fail closed even if this post-acceptance publication fails. Do not
+			// restore an active-turn cache entry when cancellation already made the
+			// reservation terminal or publication could not find it.
+			if reservedTurn.CompletedAt == nil && !errors.Is(publicationErr, sql.ErrNoRows) {
+				s.activeTurns.Store(sessionID, reservedTurn.ID)
+				s.bindAcceptedDispatchTurn(sessionID, reservedTurn.ID)
+			}
+			s.resolveReservedPromptTurn(sessionID, reservedTurn.ID, true)
+		}
+		outcome.recordAccepted(publicationErr)
+		if s.acceptForegroundDispatch(dispatch) {
+			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+		}
+	}
+}
+
 // trySwitchModelForPrompt keeps foreground admission consistent when a model
 // switch either dispatches the prompt itself or fails before reaching the agent.
 func (s *Service) trySwitchModelForPrompt(ctx context.Context, taskID, sessionID, model, prompt string, session *models.TaskSession, dispatch *foregroundDispatch) (*PromptResult, bool, error) {
@@ -3751,29 +3914,38 @@ type promptClaimRollback struct {
 	taskStateClaimed     bool
 	turnID               string
 	createdTurn          bool
+	reservedTurn         *models.Turn
+	reservedTurnAccepted bool
 }
 
 func (s *Service) claimPromptDispatch(
 	ctx context.Context,
 	taskID, sessionID, claimEntryID string,
 	lifecyclePrompt bool,
+	reserveTurnUntilDispatch bool,
+	promptDispatchRecovery *models.PromptDispatchRecovery,
 	afterClaim func() error,
-	session *models.TaskSession,
 	foregroundClaim *foregroundClaim,
+	expectedCurrentTurnID string,
 ) (*models.TaskSession, promptClaimRollback, error) {
 	if lifecyclePrompt {
 		return s.claimLifecyclePromptDispatch(
 			ctx, taskID, sessionID, claimEntryID, afterClaim,
 		)
 	}
-	rollback := promptClaimRollback{previousSessionState: session.State}
-	claimed, err := s.claimSessionRunningForPrompt(
-		ctx, taskID, sessionID, claimEntryID, session, foregroundClaim,
+	claimed, previousState, turnID, createdTurn, reservedTurn, err := s.claimSessionRunningForPrompt(
+		ctx, taskID, sessionID, claimEntryID, reserveTurnUntilDispatch,
+		promptDispatchRecovery, foregroundClaim, expectedCurrentTurnID,
 	)
 	if err != nil {
 		return nil, promptClaimRollback{}, err
 	}
-	rollback.turnID, rollback.createdTurn = s.startTurnForSessionWithOwnership(ctx, sessionID)
+	rollback := promptClaimRollback{
+		previousSessionState: previousState,
+		turnID:               turnID,
+		createdTurn:          createdTurn,
+		reservedTurn:         reservedTurn,
+	}
 	return claimed, rollback, nil
 }
 
@@ -3795,7 +3967,13 @@ func (s *Service) claimLifecyclePromptDispatch(
 	if err != nil {
 		return nil, promptClaimRollback{}, err
 	}
-	rollback.turnID, rollback.createdTurn = s.startTurnForSessionWithOwnership(ctx, sessionID)
+	rollback.turnID, rollback.createdTurn, _, err = s.startTurnForSessionWithOwnershipChecked(
+		ctx, sessionID, false, nil,
+	)
+	if err != nil {
+		s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)
+		return nil, promptClaimRollback{}, fmt.Errorf("persist lifecycle prompt turn: %w", err)
+	}
 	if err := s.acknowledgePromptClaim(ctx, taskID, sessionID, afterClaim, rollback); err != nil {
 		return nil, promptClaimRollback{}, err
 	}
@@ -3821,6 +3999,16 @@ func (s *Service) acknowledgePromptClaim(
 	return nil
 }
 
+func (s *Service) rollbackPromptClaimAfterAdmissionFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	rollback promptClaimRollback,
+) {
+	failureCtx, cancel := (promptTaskOptions{}).failureContext(ctx)
+	defer cancel()
+	s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
+}
+
 func (s *Service) rollbackPromptClaim(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -3831,7 +4019,44 @@ func (s *Service) rollbackPromptClaim(
 		s.restoreLifecycleTaskState(ctx, taskID, rollback.previousTaskState)
 	}
 	if rollback.createdTurn {
-		s.completeTurnIfCurrent(ctx, sessionID, rollback.turnID)
+		if rollback.reservedTurn != nil {
+			if !rollback.reservedTurnAccepted {
+				s.rollbackReservedPromptTurn(ctx, sessionID, rollback.turnID)
+			}
+		} else {
+			s.completeTurnIfCurrent(ctx, sessionID, rollback.turnID)
+		}
+	}
+}
+
+func (s *Service) rollbackReservedPromptTurn(ctx context.Context, sessionID, turnID string) {
+	if s.turnService == nil || turnID == "" {
+		return
+	}
+	// Publication removes the private reservation. A later transport/completion
+	// error must not delete a turn that agentctl already accepted.
+	if s.reservedPromptTurnID(sessionID) != turnID {
+		return
+	}
+	rolledBack, err := s.turnService.RollbackReservedTurn(ctx, sessionID, turnID)
+	if err != nil {
+		// The database outcome can be ambiguous (for example, a commit error).
+		// Keep the live reservation unresolved so ready handling waits and later
+		// prompts remain blocked until restart recovery reconciles durable state.
+		s.logger.Error("failed to roll back reserved prompt turn; session remains quarantined",
+			zap.String("session_id", sessionID),
+			zap.String("turn_id", turnID),
+			zap.Error(err))
+		return
+	}
+	s.resolveReservedPromptTurn(sessionID, turnID, false)
+	if rolledBack {
+		s.activeTurns.CompareAndDelete(sessionID, turnID)
+		return
+	}
+	active, lookupErr := s.turnService.GetActiveTurn(ctx, sessionID)
+	if lookupErr == nil && active != nil && active.ID == turnID {
+		s.activeTurns.Store(sessionID, turnID)
 	}
 }
 
@@ -3939,9 +4164,11 @@ func (s *Service) handlePromptDispatchFailure(
 	attachments []v1.MessageAttachment,
 	rollback promptClaimRollback,
 	lifecyclePrompt bool,
+	dispatchAccepted bool,
 	promptErr error,
 ) (*PromptResult, error) {
-	if resumedForPrompt && errors.Is(promptErr, executor.ErrExecutionNotFound) {
+	if resumedForPrompt && !dispatchAccepted && !rollback.reservedTurnAccepted && rollback.reservedTurn == nil &&
+		errors.Is(promptErr, executor.ErrExecutionNotFound) {
 		s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
@@ -3956,6 +4183,9 @@ func (s *Service) handlePromptDispatchFailure(
 	if lifecyclePrompt {
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
 		return nil, promptErr
+	}
+	if rollback.createdTurn && rollback.reservedTurn != nil && !rollback.reservedTurnAccepted {
+		s.rollbackReservedPromptTurn(ctx, sessionID, rollback.turnID)
 	}
 	return nil, s.handlePromptError(ctx, taskID, sessionID, rollback.previousSessionState, promptErr)
 }
@@ -4017,48 +4247,87 @@ func (e *lifecyclePromptReselectedError) Error() string {
 func (s *Service) claimSessionRunningForPrompt(
 	ctx context.Context,
 	taskID, sessionID, claimEntryID string,
-	session *models.TaskSession,
+	reserveTurnUntilDispatch bool,
+	promptDispatchRecovery *models.PromptDispatchRecovery,
 	foregroundClaim *foregroundClaim,
-) (*models.TaskSession, error) {
+	expectedCurrentTurnID string,
+) (*models.TaskSession, models.TaskSessionState, string, bool, *models.Turn, error) {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
 	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
-		return nil, err
+		return nil, "", "", false, nil, err
+	}
+	if expectedCurrentTurnID != "" {
+		if s.turnService == nil {
+			return nil, "", "", false, nil, errors.New("cannot verify expected prompt turn without turn service")
+		}
+		activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+		if err != nil {
+			return nil, "", "", false, nil, fmt.Errorf("verify expected prompt turn: %w", err)
+		}
+		if activeTurn == nil || activeTurn.ID != expectedCurrentTurnID {
+			return nil, "", "", false, nil, fmt.Errorf(
+				"clarification turn %s is no longer current",
+				expectedCurrentTurnID,
+			)
+		}
 	}
 
 	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
-		return nil, errQueuedDispatchSuperseded
+		return nil, "", "", false, nil, errQueuedDispatchSuperseded
 	}
 	freshSession, sessErr := s.repo.GetTaskSession(ctx, sessionID)
 	if sessErr != nil {
-		return nil, fmt.Errorf("reload session before claiming queued dispatch: %w", sessErr)
+		return nil, "", "", false, nil, fmt.Errorf("reload session before claiming queued dispatch: %w", sessErr)
 	}
 	if freshSession == nil {
-		return nil, errQueuedDispatchSuperseded
+		return nil, "", "", false, nil, errQueuedDispatchSuperseded
 	}
 	if promptErr := s.recheckPromptableWithForegroundClaim(
 		taskID, sessionID, freshSession.State, foregroundClaim,
 	); promptErr != nil {
-		return nil, promptErr
+		return nil, "", "", false, nil, promptErr
 	}
+	previousState := freshSession.State
 	s.setSessionRunning(ctx, taskID, sessionID, freshSession)
 	// setSessionRunning refreshes freshSession in place when its guarded write
 	// loses, so a cancellation landing after the promptability check is visible
 	// here as a terminal state.
 	if isTerminalSessionState(freshSession.State) && freshSession.State != models.TaskSessionStateCompleted {
-		return nil, &executor.SessionStateSupersededError{
+		return nil, "", "", false, nil, &executor.SessionStateSupersededError{
 			SessionID: freshSession.ID,
 			State:     freshSession.State,
+		}
+	}
+	turnID, createdTurn, reservedTurn, err := s.startTurnForSessionWithOwnershipChecked(
+		ctx, sessionID, reserveTurnUntilDispatch, promptDispatchRecovery,
+	)
+	if err != nil {
+		s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, promptClaimRollback{
+			previousSessionState: previousState,
+		})
+		return nil, "", "", false, nil, fmt.Errorf("persist prompt turn: %w", err)
+	}
+	if reservedTurn != nil && s.turnService != nil {
+		if err := s.turnService.MarkReservedTurnDispatchAttempted(ctx, reservedTurn); err != nil {
+			rollback := promptClaimRollback{
+				previousSessionState: previousState,
+				turnID:               turnID,
+				createdTurn:          createdTurn,
+				reservedTurn:         reservedTurn,
+			}
+			s.rollbackPromptClaimAfterAdmissionFailure(ctx, taskID, sessionID, rollback)
+			return nil, "", "", false, nil, fmt.Errorf("persist prompt dispatch attempt: %w", err)
 		}
 	}
 	reservation := s.queuedDispatchReservationForEntry(sessionID, claimEntryID)
 	if reservation != nil && reservation.liveEligible.Load() {
 		// A Send Now reservation becomes replaceable only after this guarded
-		// session claim. Start/adopt its turn under the same guard so the phase
-		// and turn ownership cannot be observed half-way through the handoff.
-		s.startTurnForSessionWithOwnership(ctx, sessionID)
+		// session claim. The turn was started/adopted under the same guard above,
+		// so the phase and turn ownership cannot be observed half-way through the
+		// handoff.
 		s.markAcceptedDispatchLiveLocked(sessionID, reservation)
 	}
 	// Remove only the pre-acceptance marker here. The accepted ownership record
@@ -4070,7 +4339,7 @@ func (s *Service) claimSessionRunningForPrompt(
 			s.queuedDispatchReservationForEntry(sessionID, claimEntryID),
 		)
 	}
-	return freshSession, nil
+	return freshSession, previousState, turnID, createdTurn, reservedTurn, nil
 }
 
 func (s *Service) claimLifecycleSessionRunning(
@@ -4535,6 +4804,45 @@ func (s *Service) acquireCancelInFlightGuard(sessionID string) (*sync.Mutex, fun
 		s.cancelInFlightMu.Unlock()
 	}
 	return &guard.mu, release
+}
+
+// lockedCancelInFlightGuard keeps the yield/reacquire protocol in one place
+// for operations that must release the session guard around lifecycle I/O.
+type lockedCancelInFlightGuard struct {
+	mutex      *sync.Mutex
+	releaseRef func()
+	locked     bool
+}
+
+func (s *Service) lockCancelInFlightGuard(sessionID string) *lockedCancelInFlightGuard {
+	mutex, release := s.acquireCancelInFlightGuard(sessionID)
+	mutex.Lock()
+	return &lockedCancelInFlightGuard{mutex: mutex, releaseRef: release, locked: true}
+}
+
+func (g *lockedCancelInFlightGuard) unlock() {
+	if g == nil || !g.locked {
+		return
+	}
+	g.mutex.Unlock()
+	g.locked = false
+}
+
+func (g *lockedCancelInFlightGuard) relock() {
+	if g == nil || g.locked {
+		return
+	}
+	g.mutex.Lock()
+	g.locked = true
+}
+
+func (g *lockedCancelInFlightGuard) release() {
+	if g == nil || g.releaseRef == nil {
+		return
+	}
+	g.unlock()
+	g.releaseRef()
+	g.releaseRef = nil
 }
 
 // claimCancellation establishes the single owner for every cancellation source

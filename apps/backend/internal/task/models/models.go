@@ -107,6 +107,9 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
+	// MetaKeyAppliedDeferredMoves stores deferred move IDs that have already
+	// been applied, preventing a stale queue rollback from replaying one.
+	MetaKeyAppliedDeferredMoves = "applied_deferred_moves"
 	// DeferredLaunchStartWhenUnblockedKey marks a deferred launch intent as
 	// belonging to a task dependency chain rather than to WIP overflow. The
 	// record itself is identical; the flag lets dependency resolution recognise
@@ -261,6 +264,48 @@ const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 // TurnMetaKeyWorkflowStepIDAtStart records the workflow step the turn's task
 // was in when the turn started. Absent when the task held no step.
 const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
+
+// TurnMetaKeyPromptDispatchPending marks a successor created before agentctl
+// acknowledges its prompt. Empty marked turns are not current-turn authority
+// unless dispatch ambiguity was recorded; publication clears the marker, while
+// a referencing message also proves ambiguous acceptance after a crash.
+const TurnMetaKeyPromptDispatchPending = "prompt_dispatch_pending"
+
+const (
+	TurnMetaKeyPromptDispatchAttempted               = "prompt_dispatch_attempted"
+	TurnMetaKeyPromptDispatchClarificationPendingID  = "prompt_dispatch_clarification_pending_id"
+	TurnMetaKeyPromptDispatchClarificationTurnID     = "prompt_dispatch_clarification_turn_id"
+	TurnMetaKeyPromptDispatchClarificationMessageIDs = "prompt_dispatch_clarification_message_ids"
+	// TurnMetaKeyPromptDispatchStartEventPending is a durable outbox marker.
+	// Startup recovery sets it after accepting an ambiguous reservation and
+	// clears it only after the task service replays the public turn events.
+	TurnMetaKeyPromptDispatchStartEventPending = "prompt_dispatch_start_event_pending"
+)
+
+var promptDispatchMetadataKeys = [...]string{
+	TurnMetaKeyPromptDispatchPending,
+	TurnMetaKeyPromptDispatchAttempted,
+	TurnMetaKeyPromptDispatchClarificationPendingID,
+	TurnMetaKeyPromptDispatchClarificationTurnID,
+	TurnMetaKeyPromptDispatchClarificationMessageIDs,
+	TurnMetaKeyPromptDispatchStartEventPending,
+}
+
+// ClearPromptDispatchMetadata removes every reservation-only field after live
+// publication or successful startup event replay.
+func ClearPromptDispatchMetadata(metadata map[string]interface{}) {
+	for _, key := range promptDispatchMetadataKeys {
+		delete(metadata, key)
+	}
+}
+
+// PromptDispatchRecovery identifies the exact clarification claim that an
+// unpublished successor reservation must restore after a backend restart.
+type PromptDispatchRecovery struct {
+	PendingID  string
+	TurnID     string
+	MessageIDs []string
+}
 
 // SessionRuntimeConfig is persisted as provider state or explicit overrides.
 // On resume, explicit values take precedence over the latest provider snapshot
@@ -1060,6 +1105,14 @@ const (
 // TaskPendingAction is the compact task-list projection for a session blocked
 // on user input.
 type TaskPendingAction string
+
+// PendingActionRevision is a logical clock shared by REST and WebSocket
+// pending-action projections. Epoch is a durable, monotonically allocated
+// backend generation; Sequence orders snapshots within that generation.
+type PendingActionRevision struct {
+	Epoch    string `json:"epoch"`
+	Sequence uint64 `json:"sequence"`
+}
 
 const (
 	TaskPendingActionClarification TaskPendingAction = "clarification"

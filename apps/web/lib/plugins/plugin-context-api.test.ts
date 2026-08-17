@@ -62,6 +62,40 @@ function createContextStore() {
 }
 
 describe("plugin host context", () => {
+  it("exposes all workspace ids and updates them when the workspace list changes", () => {
+    const store = createAppStore();
+    store.setState((state) => ({
+      ...state,
+      workspaces: {
+        ...state.workspaces,
+        items: [
+          { id: WORKSPACE_ID, name: "Main" },
+          { id: OTHER_WORKSPACE_ID, name: "Other" },
+        ] as never,
+      },
+    }));
+    const host = buildHostApi(PROVIDER_ID, store);
+    const context = host.context as unknown as {
+      getWorkspaceIds(): readonly string[];
+      subscribeWorkspaces(listener: (workspaceIds: readonly string[]) => void): () => void;
+    };
+    const listener = vi.fn();
+    const unsubscribe = context.subscribeWorkspaces(listener);
+
+    expect(context.getWorkspaceIds()).toEqual([WORKSPACE_ID, OTHER_WORKSPACE_ID]);
+
+    store.setState((state) => ({
+      ...state,
+      workspaces: {
+        ...state.workspaces,
+        items: [{ id: WORKSPACE_ID, name: "Main" }] as never,
+      },
+    }));
+
+    expect(listener).toHaveBeenCalledExactlyOnceWith([WORKSPACE_ID]);
+    unsubscribe();
+  });
+
   it("exposes provider-neutral workspace and task-creation context", () => {
     const host = buildHostApi(PROVIDER_ID, createContextStore());
 

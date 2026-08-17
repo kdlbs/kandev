@@ -487,8 +487,6 @@
   "previewSound": "试听声音",
   "profileForTasksCreatedByAgents": "智能体创建任务时使用的配置",
   "programming": "编程",
-  "profileFallbackWillBeUsed": "起始模型 {{model}} 已不可用，将使用备用模型 {{fallback}}。",
-  "profileStartModelUnavailable": "起始模型 {{model}} 已不可用，请在智能体配置中更改。",
   "promptAdd": "添加提示词",
   "promptContentPlaceholder": "提示词内容",
   "promptCreateFailed": "无法创建提示词",

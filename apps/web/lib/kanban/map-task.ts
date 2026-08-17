@@ -7,6 +7,7 @@ import type { KanbanState, TaskDependencyRef } from "@/lib/state/slices/kanban/t
 import type {
   ForegroundActivity,
   TaskPendingAction,
+  TaskPriority,
   TaskState,
   TaskSessionState,
 } from "@/lib/types/http";
@@ -34,7 +35,7 @@ export type TaskLike = {
   autopilot?: boolean;
   position?: number;
   state?: TaskState;
-  priority?: string | number;
+  priority?: TaskPriority;
   repositories?: Array<{
     id?: string;
     repository_id: string;
@@ -77,6 +78,7 @@ export type TaskLike = {
   metadata?: Record<string, unknown> | null;
   archived_at?: string | null;
   status_summary?: TaskStatusSummary | null;
+  status_summary_invalidated?: boolean;
 };
 
 export type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";

@@ -13,4 +13,12 @@ describe("buildStartRequest", () => {
 
     expect(request).toHaveProperty("profile_explicit", true);
   });
+
+  it("serializes a canonical task priority string", () => {
+    const { request } = buildStartRequest("task-1", "agent-1", {
+      priority: "critical",
+    });
+
+    expect(request.priority).toBe("critical");
+  });
 });

@@ -328,12 +328,54 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("CURRENT_REF: ${{ github.ref }}", guard)
         self.assertIn('if [ "$CURRENT_REF" != "refs/heads/main" ]', guard)
 
+    def test_normal_release_uses_admin_token_only_for_exact_head_merge(self) -> None:
+        create = step_block("Create release PR")
+        merge = step_block("Merge release PR with administrator token")
+        select = step_block("Select merged release commit")
+
+        for step in (create, merge, select):
+            self.assertIn(NORMAL_RELEASE_IF, step)
+
+        self.assertIn("id: release_pr", create)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", create)
+        self.assertIn('MSG="release: publish $NEXT"', create)
+        self.assertIn('HEAD_SHA="$(git rev-parse HEAD)"', create)
+        self.assertIn('echo "url=$PR_URL" >> "$GITHUB_OUTPUT"', create)
+        self.assertIn('echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"', create)
+        self.assertNotIn("RELEASE_PR_BYPASS_TOKEN", create)
+
+        self.assertIn(
+            "GH_TOKEN: ${{ secrets.RELEASE_PR_BYPASS_TOKEN }}",
+            merge,
+        )
+        self.assertIn("PR_URL: ${{ steps.release_pr.outputs.url }}", merge)
+        self.assertIn("EXPECTED_HEAD: ${{ steps.release_pr.outputs.head }}", merge)
+        self.assertIn('if [ -z "$GH_TOKEN" ]', merge)
+        self.assertIn("RELEASE_PR_BYPASS_TOKEN is required", merge)
+        self.assertIn('gh pr merge "$PR_URL"', merge)
+        self.assertIn("--admin", merge)
+        self.assertIn("--squash", merge)
+        self.assertIn('--match-head-commit "$EXPECTED_HEAD"', merge)
+        self.assertNotIn("--delete-branch", merge)
+        self.assertNotIn("--auto", merge)
+
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", select)
+        self.assertNotIn("RELEASE_PR_BYPASS_TOKEN", select)
+        self.assertIn("--json state,mergedAt,mergeCommit,headRefOid", select)
+        self.assertIn('if [ "$PR_STATE" != "MERGED" ]', select)
+        self.assertIn('if [ "$PR_HEAD" != "$EXPECTED_HEAD" ]', select)
+        self.assertIn('[[ "$MERGE_COMMIT" =~ ^[0-9a-f]{40}$ ]]', select)
+        self.assertIn('git merge-base --is-ancestor "$MERGE_COMMIT" origin/main', select)
+        self.assertIn('git checkout --detach "$MERGE_COMMIT"', select)
+
     def test_normal_release_preflights_and_revalidates_signing_key_around_merge(
         self,
     ) -> None:
         prepare = job_block("prepare")
         bump = step_block("Bump version + generate CHANGELOG (in working tree)")
-        merge = step_block("Create release PR + squash-merge")
+        create_pr = step_block("Create release PR")
+        merge = step_block("Merge release PR with administrator token")
+        select = step_block("Select merged release commit")
         preflight_public_key = step_block("Validate committed release signing public key")
         preflight = step_block("Preflight release tag signing fingerprint")
         merged_public_key = step_block("Validate merged release signing public key")
@@ -419,8 +461,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         self.assertLess(prepare.index(preflight_public_key), prepare.index(preflight))
         self.assertLess(prepare.index(preflight), prepare.index(bump))
-        self.assertLess(prepare.index(bump), prepare.index(merge))
-        self.assertLess(prepare.index(merge), prepare.index(merged_public_key))
+        self.assertLess(prepare.index(bump), prepare.index(create_pr))
+        self.assertLess(prepare.index(create_pr), prepare.index(merge))
+        self.assertLess(prepare.index(merge), prepare.index(select))
+        self.assertLess(prepare.index(select), prepare.index(merged_public_key))
         self.assertLess(prepare.index(merged_public_key), prepare.index(signing))
         self.assertLess(prepare.index(merge), prepare.index(signing))
         self.assertLess(prepare.index(signing), prepare.index(validate))
@@ -468,6 +512,17 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         self.assertIsNotNone(documented_fingerprint)
         self.assertEqual(primary_fingerprints[0], documented_fingerprint.group(1))
+
+    def test_release_documentation_declares_the_pr_bypass_token_contract(self) -> None:
+        for requirement in (
+            "RELEASE_PR_BYPASS_TOKEN",
+            "fine-grained personal access token",
+            "Contents: Read and write",
+            "organization administrator",
+            "Only select repositories",
+            "expiration date",
+        ):
+            self.assertIn(requirement, RELEASE_PROCESS)
 
     def test_release_contract_ci_runs_when_key_or_release_documentation_changes(self) -> None:
         """This contract must run on every change, not a listed subset.
@@ -574,7 +629,9 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         for name in (
             "Bump version + generate CHANGELOG (in working tree)",
-            "Create release PR + squash-merge",
+            "Create release PR",
+            "Merge release PR with administrator token",
+            "Select merged release commit",
             "Import release tag signing key",
             "Validate release tag signing identity",
             "Create and push signed release tag",

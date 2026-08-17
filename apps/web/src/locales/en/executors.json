@@ -161,7 +161,6 @@
   "portableConfigBundleGeneric": "Agent configuration ({{id}})",
   "portableConfigBundleMockSettings": "Copy mock-agent settings",
   "portableConfigBundleOpenCodeConfig": "Copy OpenCode configuration",
-  "portableConfigDescription": "Copy selected agent settings, which may contain secrets or commands, into newly provisioned or reset environments.",
   "portableConfigFileMapping": "{{source}} to {{target}}",
   "portableConfigInfoCopyTiming": "Kandev copies selected files without changes only during fresh provisioning or environment reset. A fresh copy can replace an existing target file. Warm resumes keep the existing environment.",
   "portableConfigInfoErrors": "Missing or unreadable optional files are skipped with a warning and do not block launch. Files can contain secrets or environment values.",

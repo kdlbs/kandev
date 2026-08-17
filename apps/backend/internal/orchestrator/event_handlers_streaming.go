@@ -1009,6 +1009,14 @@ func (s *Service) updateTaskSessionStateWithHook(
 	if onChanged != nil {
 		onChanged()
 	}
+	if isTerminalSessionState(nextState) {
+		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
+			s.logger.Error("failed to expire clarification on terminal session; response claims remain quarantined",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
 	// Work has resumed: a session entering STARTING/RUNNING clears the
 	// startup interruption marker and republishes the task so open clients
 	// drop the red interruption icon. No-op when the marker is absent.
@@ -1149,6 +1157,14 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if onChanged != nil {
 		onChanged()
+	}
+	if isTerminalSessionState(nextState) {
+		if err := s.expireTerminalClarificationWaiters(ctx, sessionID); err != nil {
+			s.logger.Error("failed to expire clarification on strict terminal transition; response claims remain quarantined",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 	s.publishTaskSessionStateChanged(
 		ctx,
@@ -2327,11 +2343,39 @@ func (s *Service) detachClarificationWaiters(ctx context.Context, sessionID stri
 	if s.clarificationCanceller == nil || sessionID == "" {
 		return
 	}
-	if n := s.clarificationCanceller.DetachSessionAndNotify(ctx, sessionID); n > 0 {
+	n, err := s.clarificationCanceller.DetachSessionAndNotify(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to detach pending clarifications on turn complete",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if n > 0 {
 		s.logger.Info("detached pending clarifications on turn complete",
 			zap.String("session_id", sessionID),
 			zap.Int("count", n))
 	}
+}
+
+func (s *Service) expireClarificationWaiters(ctx context.Context, sessionID string) error {
+	if s.clarificationCanceller == nil || sessionID == "" {
+		return nil
+	}
+	n, err := s.clarificationCanceller.ExpireSessionAndNotify(ctx, sessionID)
+	if n > 0 {
+		s.logger.Info("expired pending clarifications on terminal session",
+			zap.String("session_id", sessionID),
+			zap.Int("count", n))
+	}
+	return err
+}
+
+const terminalClarificationExpiryTimeout = 10 * time.Second
+
+func (s *Service) expireTerminalClarificationWaiters(ctx context.Context, sessionID string) error {
+	expireCtx, cancel := context.WithTimeout(ctx, terminalClarificationExpiryTimeout)
+	defer cancel()
+	return s.expireClarificationWaiters(expireCtx, sessionID)
 }
 
 // sessionStateString renders a session's state for logging, returning "" when
@@ -2633,22 +2677,19 @@ func (s *Service) persistPromptMetadataOnTurn(
 	turn *models.Turn,
 ) {
 	model, agentType := resolvePromptUsageLabels(payload, session)
-	metadata := turn.Metadata
-	if metadata == nil {
-		metadata = make(map[string]interface{})
+	updates := map[string]interface{}{
+		"prompt_usage": promptUsageMetadata(payload.Data.Usage),
 	}
-	metadata["prompt_usage"] = promptUsageMetadata(payload.Data.Usage)
 	if model != "" {
-		metadata[sessionModelConfigKey] = model
+		updates[sessionModelConfigKey] = model
 	}
 	if agentType != "" {
-		metadata["agent_type"] = agentType
+		updates["agent_type"] = agentType
 	}
 	if payload.AgentID != "" {
-		metadata["agent_id"] = payload.AgentID
+		updates["agent_id"] = payload.AgentID
 	}
-	turn.Metadata = metadata
-	if err := s.turnService.UpdateTurn(ctx, turn); err != nil {
+	if err := s.turnService.PatchTurnMetadata(ctx, turn.TaskSessionID, turn.ID, updates); err != nil {
 		s.logger.Warn("failed to persist prompt usage metadata on turn",
 			zap.String("turn_id", turn.ID),
 			zap.String("session_id", payload.SessionID),

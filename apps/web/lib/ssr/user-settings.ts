@@ -10,6 +10,7 @@ import { type UserSettingsState } from "@/lib/state/slices/settings/types";
 import type { SidebarTaskPrefsApi, UserSettings, UserSettingsResponse } from "@/lib/types/http";
 import type {
   LspStatusLocation,
+  LastSeenDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http-user-settings";
@@ -18,6 +19,7 @@ export type UserSettingsData = Omit<Partial<UserSettings>, "workspace_id"> & {
   workspace_id?: string;
 };
 
+/** Builds a fresh UserSettingsState with default values. */
 export function createDefaultUserSettings(): UserSettingsState {
   return {
     revision: null,
@@ -77,6 +79,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     terminalFontFamily: null,
     terminalFontSize: null,
     changesPanelLayout: "tree",
+    lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
@@ -85,28 +88,39 @@ export function createDefaultUserSettings(): UserSettingsState {
   };
 }
 
+/** Parses the terminal link behavior, defaulting to "new_tab". */
 export function parseTerminalLinkBehavior(value: string | undefined): "new_tab" | "browser_panel" {
   return value === "browser_panel" ? "browser_panel" : "new_tab";
 }
 
+/** Parses the changes panel layout, defaulting to "tree". */
 export function parseChangesPanelLayout(value: string | undefined): "flat" | "tree" {
   return value === "flat" ? "flat" : "tree";
 }
 
+/** Parses the last-seen display format, defaulting to "absolute". */
+export function parseLastSeenDisplay(value: string | undefined): LastSeenDisplay {
+  return value === "relative" ? "relative" : "absolute";
+}
+
+/** Parses the MCP task agent profile default, defaulting to "current_task". */
 export function parseMCPTaskAgentProfileDefault(
   value: string | undefined,
 ): MCPTaskAgentProfileDefault {
   return value === "workspace_default" ? "workspace_default" : "current_task";
 }
 
+/** Parses the startup page preference, defaulting to "task_overview". */
 export function parseStartupPage(value: string | undefined): StartupPage {
   return value === "last_task" ? "last_task" : "task_overview";
 }
 
+/** Parses the LSP status location, defaulting to "toolbar". */
 export function parseLspStatusLocation(value: string | undefined): LspStatusLocation {
   return value === "status_bar" ? "status_bar" : "toolbar";
 }
 
+/** Parses the system metrics display fields with defaults. */
 export function parseSystemMetricsDisplay(value: UserSettingsData["system_metrics_display"]) {
   return {
     showInTopbar: value?.show_in_topbar ?? false,
@@ -114,6 +128,7 @@ export function parseSystemMetricsDisplay(value: UserSettingsData["system_metric
   };
 }
 
+/** Parses the app status bar order fields with empty defaults. */
 export function parseAppStatusBarOrder(value: UserSettingsData["app_status_bar_order"]) {
   return {
     leftItemIds: value?.left_item_ids ?? [],
@@ -121,6 +136,7 @@ export function parseAppStatusBarOrder(value: UserSettingsData["app_status_bar_o
   };
 }
 
+/** Maps terminal-related API fields onto state, falling back to current values. */
 function buildTerminalFields(s: UserSettingsData, current: UserSettingsState) {
   return {
     terminalLinkBehavior:
@@ -140,6 +156,7 @@ function buildTerminalFields(s: UserSettingsData, current: UserSettingsState) {
   };
 }
 
+/** Maps the system metrics display field onto state, falling back to current. */
 function buildSystemMetricsDisplayFields(
   s: UserSettingsData | undefined,
   current: UserSettingsState,
@@ -152,6 +169,7 @@ function buildSystemMetricsDisplayFields(
   };
 }
 
+/** Parses sidebar task preferences with empty-array defaults. */
 function parseSidebarTaskPrefs(value: SidebarTaskPrefsApi | undefined) {
   return {
     pinnedTaskIds: value?.pinned_task_ids ?? [],
@@ -160,6 +178,7 @@ function parseSidebarTaskPrefs(value: SidebarTaskPrefsApi | undefined) {
   };
 }
 
+/** Returns true when the task-create last-used payload carries any value. */
 export function taskCreateLastUsedHasValue(
   value: UserSettingsData["task_create_last_used"] | undefined,
 ) {
@@ -172,6 +191,7 @@ export function taskCreateLastUsedHasValue(
   );
 }
 
+/** Parses task-create last-used fields, deriving the synced flag from presence. */
 function parseTaskCreateLastUsed(value: UserSettingsData["task_create_last_used"] | undefined) {
   return {
     repositoryId: value?.repository_id || null,
@@ -183,6 +203,7 @@ function parseTaskCreateLastUsed(value: UserSettingsData["task_create_last_used"
   };
 }
 
+/** Returns current when value is undefined, otherwise maps it. */
 function mapDefined<TInput, TOutput>(
   value: TInput | undefined,
   current: TOutput,
@@ -191,10 +212,12 @@ function mapDefined<TInput, TOutput>(
   return value === undefined ? current : map(value);
 }
 
+/** Maps an optional string, normalizing empty strings to null. */
 function mapNullableString(value: string | undefined, current: string | null) {
   return mapDefined(value, current, (defined) => defined || null);
 }
 
+/** Maps identity-related API fields onto state, falling back to current values. */
 function buildIdentityFields(s: UserSettingsData, current: UserSettingsState) {
   return {
     workspaceId: mapNullableString(s.workspace_id, current.workspaceId),
@@ -213,6 +236,7 @@ function buildIdentityFields(s: UserSettingsData, current: UserSettingsState) {
   };
 }
 
+/** Maps behavior-related API fields onto state, falling back to current values. */
 function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
   return {
     enablePreviewOnClick: s.enable_preview_on_click ?? current.enablePreviewOnClick,
@@ -233,6 +257,7 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
   };
 }
 
+/** Maps appearance-related API fields onto state, falling back to current values. */
 function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) {
   return {
     showAnchoredPromptBar: s.show_anchored_prompt_bar ?? current.showAnchoredPromptBar,
@@ -248,9 +273,11 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
       s.release_notes_last_seen_version,
       current.releaseNotesLastSeenVersion,
     ),
+    lastSeenDisplay: mapDefined(s.last_seen_display, current.lastSeenDisplay, parseLastSeenDisplay),
   };
 }
 
+/** Maps the core user-settings API fields onto state, falling back to current values. */
 export function buildCoreFields(
   s: UserSettingsData,
   current: UserSettingsState = createDefaultUserSettings(),
@@ -312,6 +339,7 @@ export function buildCoreFields(
   };
 }
 
+/** Maps LSP-related API fields onto state, falling back to current values. */
 export function buildLspFields(
   s: UserSettingsData | undefined,
   current: UserSettingsState = createDefaultUserSettings(),
@@ -327,6 +355,7 @@ export function buildLspFields(
   };
 }
 
+/** Maps API settings data onto a complete UserSettingsState, marking it loaded. */
 export function mapUserSettingsData(
   settings: UserSettingsData,
   current: UserSettingsState = createDefaultUserSettings(),

@@ -9,6 +9,7 @@ import type { KanbanState } from "@/lib/state/slices";
 import {
   buildArchivedValue,
   buildDebugEntries,
+  buildTaskFromKanban,
   hasResolvedTaskDetails,
   resolveEffectiveTask,
   resolveTaskContentState,
@@ -29,7 +30,7 @@ function makeArchivedTaskDetails(overrides: Partial<Task> = {}): Task {
     state: "TODO",
     workspace_id: "ws-1",
     workflow_id: "wf-1",
-    priority: 0,
+    priority: "medium",
     repositories: [],
     created_at: "",
     updated_at: ARCHIVED_AT,
@@ -290,6 +291,12 @@ describe("syncActiveTaskSession", () => {
 });
 
 describe("resolveEffectiveTask archived state", () => {
+  it("preserves a non-default priority for kanban-only tasks", () => {
+    const resolved = buildTaskFromKanban(makeKanbanTask({ priority: "high" }));
+
+    expect(resolved.priority).toBe("high");
+  });
+
   it("builds a kanban-only task with its metadata", () => {
     const metadata = { port_forwarding_enabled: true };
     const resolved = resolveEffectiveTask(null, null, makeKanbanTask({ metadata }), "task-1");

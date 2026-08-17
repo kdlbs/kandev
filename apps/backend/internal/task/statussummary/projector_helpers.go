@@ -1,12 +1,74 @@
 package statussummary
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/events"
 )
+
+func isPendingSensitiveEvent(eventType string, data map[string]interface{}) bool {
+	switch eventType {
+	case events.TaskUpdated,
+		events.TaskSessionStateChanged,
+		events.MessageAdded,
+		events.ClarificationAnswered,
+		events.ClarificationPrimaryAnswered,
+		events.ClarificationCancelled,
+		events.ClarificationStaleDismissed,
+		events.PermissionRequestReceived:
+		return true
+	case events.MessageUpdated, events.MessageDeleted:
+		messageType := strings.ToLower(stringField(data, "type"))
+		return pendingActionForMessage(messageType, boolValue(data["requests_input"])) != ""
+	default:
+		return false
+	}
+}
+
+func (p *Projector) refreshPendingLocked(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) (bool, error) {
+	actions, err := p.loadPendingActions(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("load pending actions for task status summary %q: %w", taskID, err)
+	}
+	next := make(map[string]string, len(actions))
+	for sessionID, action := range actions {
+		sessionID = strings.TrimSpace(sessionID)
+		action = strings.TrimSpace(action)
+		if sessionID == "" || (action != pendingClarification && action != pendingPermission) {
+			continue
+		}
+		next[sessionID] = action
+	}
+	changed := !pendingActionsEqual(state.pending, next)
+	previousTaskPending := state.taskPending
+	state.pendingObserved = true
+	state.pending = next
+	state.pendingRequests = make(map[string]pendingRequestIdentity)
+	recomputeTaskPending(state)
+	return changed || state.taskPending != previousTaskPending, nil
+}
+
+func pendingActionsEqual(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for sessionID, action := range left {
+		if right[sessionID] != action {
+			return false
+		}
+	}
+	return true
+}
 
 func (p *Projector) clearPendingLocked(state *projectionState, sessionID string) bool {
 	if sessionID == "" {
@@ -16,6 +78,9 @@ func (p *Projector) clearPendingLocked(state *projectionState, sessionID string)
 	_, existed := state.pending[sessionID]
 	delete(state.pending, sessionID)
 	delete(state.pendingRequests, sessionID)
+	// A restarted projector has only the aggregate taskPending baseline, not
+	// the original per-session entry. Recompute before deciding this is a no-op
+	// so stale-dismissed events still clear and persist that restored value.
 	previousTaskPending := state.taskPending
 	recomputeTaskPending(state)
 	return existed || previousTaskPending != state.taskPending

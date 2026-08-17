@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -24,15 +25,34 @@ import (
 const (
 	metaQuestionKey   = "question"
 	metaQuestionIDKey = "question_id"
+	metaStatusKey     = "status"
+	metaSessionIDKey  = "session_id"
+	metaTaskIDKey     = "task_id"
+	metaPendingIDKey  = "pending_id"
+	metaRejectedKey   = "rejected"
+
+	clarificationPersistenceTimeout = 30 * time.Second
 )
 
-// messageStore is the minimal task repository interface required by clarification handlers.
-type messageStore interface {
+// handlerMessageStore is the task repository surface used by HTTP handlers.
+type handlerMessageStore interface {
 	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
-	FindMessageByPendingID(ctx context.Context, pendingID string) (*taskmodels.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error)
-	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
-	UpdateMessage(ctx context.Context, message *taskmodels.Message) error
+}
+
+// cancellationMessageStore is the task repository surface used by session cancellation.
+type cancellationMessageStore interface {
+	FindActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
+	DetachActiveClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
+	ExpireActiveClarificationBundle(ctx context.Context, sessionID, pendingID string) ([]*taskmodels.Message, error)
+}
+
+type clarificationStore interface {
+	CreateRequest(req *Request) (string, bool)
+	GetRequest(pendingID string) (*Request, bool)
+	WaitForResponse(ctx context.Context, pendingID string) (*Response, error)
+	RespondWithDeliveryConfirmation(ctx context.Context, pendingID string, response *Response, confirm func() error) error
+	CancelRequest(pendingID string) bool
 }
 
 // Broadcaster interface for sending WebSocket notifications
@@ -52,6 +72,26 @@ type MessageCreator interface {
 	// status (and stores the matching answer if any) for a (pending_id, question_id)
 	// pair within the session.
 	UpdateClarificationMessage(ctx context.Context, sessionID, pendingID, questionID, status string, answer *Answer) error
+	// CompleteActiveClarificationBundle atomically transitions a bundle only
+	// when it still belongs to the session's current durable turn.
+	CompleteActiveClarificationBundle(ctx context.Context, pendingID, status string, responses map[string]interface{}) ([]*taskmodels.Message, bool, error)
+	// FinalizeClarificationResponseDelivery clears the durable recovery intent
+	// after the response reaches a live waiter or detached-resume boundary.
+	FinalizeClarificationResponseDelivery(
+		ctx context.Context,
+		pendingID, terminalStatus string,
+		claimedMessages []*taskmodels.Message,
+	) ([]*taskmodels.Message, bool, error)
+	// RestoreActiveClarificationBundle reopens a claimed bundle when detached
+	// resume acceptance fails and returns the committed pending rows for publication.
+	RestoreActiveClarificationBundle(
+		ctx context.Context,
+		pendingID, terminalStatus string,
+		claimedMessages []*taskmodels.Message,
+	) ([]*taskmodels.Message, bool, error)
+	// PublishClarificationBundleUpdates exposes committed terminal or restored-pending rows.
+	// Restored rows synchronously converge the durable task summary before publication.
+	PublishClarificationBundleUpdates(ctx context.Context, messages []*taskmodels.Message) error
 }
 
 // EventBus interface for publishing events.
@@ -59,31 +99,70 @@ type EventBus interface {
 	Publish(ctx context.Context, topic string, event *bus.Event) error
 }
 
+// DetachedClarificationResume contains the durable context required to resume
+// a session after its original clarification waiter has gone away.
+type DetachedClarificationResume struct {
+	TaskID              string
+	SessionID           string
+	PendingID           string
+	ClarificationTurnID string
+	ClaimedMessageIDs   []string
+	Question            string
+	AnswerText          string
+	Rejected            bool
+	RejectReason        string
+}
+
+// DetachedClarificationResumer acknowledges whether the orchestrator accepted
+// a detached answer before the handler exposes the bundle as terminal.
+type DetachedClarificationResumer interface {
+	ResumeDetachedClarification(ctx context.Context, request DetachedClarificationResume) error
+}
+
 // Handlers provides HTTP handlers for clarification requests.
 type Handlers struct {
-	store          *Store
-	hub            Broadcaster
-	messageCreator MessageCreator
-	repo           messageStore
-	eventBus       EventBus
-	logger         *logger.Logger
+	store           clarificationStore
+	hub             Broadcaster
+	messageCreator  MessageCreator
+	repo            handlerMessageStore
+	eventBus        EventBus
+	detachedResumer DetachedClarificationResumer
+	logger          *logger.Logger
 }
 
 // NewHandlers creates new clarification handlers.
-func NewHandlers(store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, eventBus EventBus, log *logger.Logger) *Handlers {
+func NewHandlers(
+	store *Store,
+	hub Broadcaster,
+	messageCreator MessageCreator,
+	repo handlerMessageStore,
+	eventBus EventBus,
+	detachedResumer DetachedClarificationResumer,
+	log *logger.Logger,
+) *Handlers {
 	return &Handlers{
-		store:          store,
-		hub:            hub,
-		messageCreator: messageCreator,
-		repo:           repo,
-		eventBus:       eventBus,
-		logger:         log.WithFields(zap.String("component", "clarification-handlers")),
+		store:           store,
+		hub:             hub,
+		messageCreator:  messageCreator,
+		repo:            repo,
+		eventBus:        eventBus,
+		detachedResumer: detachedResumer,
+		logger:          log.WithFields(zap.String("component", "clarification-handlers")),
 	}
 }
 
 // RegisterRoutes registers clarification HTTP routes.
-func RegisterRoutes(router *gin.Engine, store *Store, hub Broadcaster, messageCreator MessageCreator, repo messageStore, eventBus EventBus, log *logger.Logger) {
-	h := NewHandlers(store, hub, messageCreator, repo, eventBus, log)
+func RegisterRoutes(
+	router *gin.Engine,
+	store *Store,
+	hub Broadcaster,
+	messageCreator MessageCreator,
+	repo handlerMessageStore,
+	eventBus EventBus,
+	detachedResumer DetachedClarificationResumer,
+	log *logger.Logger,
+) {
+	h := NewHandlers(store, hub, messageCreator, repo, eventBus, detachedResumer, log)
 	api := router.Group("/api/v1/clarification")
 	api.POST("/request", h.httpCreateRequest)
 	api.GET("/:id", h.httpGetRequest)
@@ -254,57 +333,165 @@ type RespondBody struct {
 
 func (h *Handlers) httpRespond(c *gin.Context) {
 	pendingID := c.Param("id")
-
 	var body RespondBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload: " + err.Error()})
 		return
 	}
 
-	// Gate: when not rejecting, the user must have answered every question and
-	// each answer must reference a question id from the original bundle (no
-	// duplicates, no fabricated ids). We compare against the in-store request
-	// first; if the entry is gone (agent already moved on), fall back to the
-	// persisted messages so we still validate even after the in-memory cleanup.
+	writeCtx := context.WithoutCancel(c.Request.Context())
+	claim, statusCode, errorMessage := h.claimClarificationResponse(writeCtx, pendingID, body)
+	if statusCode != 0 {
+		c.JSON(statusCode, gin.H{"error": errorMessage})
+		return
+	}
+	statusCode, errorMessage = h.deliverClaimedClarificationResponse(writeCtx, pendingID, body, claim)
+	if statusCode != 0 {
+		c.JSON(statusCode, gin.H{"error": errorMessage})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+type clarificationResponseClaim struct {
+	response       *Response
+	terminalStatus string
+	// messages is immutable after claim construction. A delivery callback can
+	// outlive the responder's bounded wait, so callback results stay local.
+	messages []*taskmodels.Message
+}
+
+func (h *Handlers) claimClarificationResponse(
+	ctx context.Context,
+	pendingID string,
+	body RespondBody,
+) (*clarificationResponseClaim, int, string) {
+	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
 	if !body.Rejected {
-		if errMsg := h.validateRespondAnswers(c.Request.Context(), pendingID, body.Answers); errMsg != "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
-			return
+		if errMsg := h.validateRespondAnswers(persistenceCtx, pendingID, body.Answers); errMsg != "" {
+			return nil, http.StatusBadRequest, errMsg
 		}
 	}
-
-	resp := &Response{
-		PendingID:    pendingID,
-		Answers:      body.Answers,
-		Rejected:     body.Rejected,
-		RejectReason: body.RejectReason,
+	terminalStatus := string(StatusAnswered)
+	var responses map[string]interface{}
+	if body.Rejected {
+		terminalStatus = string(StatusRejected)
+	} else {
+		responses = make(map[string]interface{}, len(body.Answers))
+		for i := range body.Answers {
+			answer := body.Answers[i]
+			responses[answer.QuestionID] = answer
+		}
 	}
+	if h.messageCreator == nil {
+		return nil, http.StatusInternalServerError, "clarification message service unavailable"
+	}
+	completedMessages, claimed, claimErr := h.messageCreator.CompleteActiveClarificationBundle(
+		persistenceCtx,
+		pendingID,
+		terminalStatus,
+		responses,
+	)
+	if claimErr != nil {
+		h.logger.Error("failed to claim clarification response",
+			zap.String("pending_id", pendingID),
+			zap.Error(claimErr))
+		return nil, http.StatusInternalServerError, "failed to update clarification state"
+	}
+	if !claimed {
+		return nil, http.StatusConflict, "clarification request is no longer active"
+	}
+	return &clarificationResponseClaim{
+		response: &Response{
+			PendingID:    pendingID,
+			Answers:      body.Answers,
+			Rejected:     body.Rejected,
+			RejectReason: body.RejectReason,
+		},
+		terminalStatus: terminalStatus,
+		messages:       completedMessages,
+	}, 0, ""
+}
 
-	// Try the primary path: deliver via channel to blocking WaitForResponse.
-	// If the agent is still waiting, this unblocks the MCP handler and the
-	// answer is returned within the same agent turn (no extra cost).
-	err := h.store.Respond(pendingID, resp)
-
-	if err == nil {
-		// Primary path succeeded — agent will receive the answers directly.
-		h.applyAnswersToMessages(c, pendingID, body.Rejected, body.Answers)
-		h.publishPrimaryAnsweredEvent(c, pendingID, body.Answers, body.Rejected, body.RejectReason)
+func (h *Handlers) deliverClaimedClarificationResponse(
+	ctx context.Context,
+	pendingID string,
+	body RespondBody,
+	claim *clarificationResponseClaim,
+) (int, string) {
+	// Durable current-turn ownership is claimed before touching the live waiter.
+	// This closes the window where a newer turn exists but its canceller has not
+	// yet drained the superseded in-memory request.
+	deliveryCtx, cancelDelivery := context.WithTimeout(
+		context.WithoutCancel(ctx),
+		clarificationPersistenceTimeout+5*time.Second,
+	)
+	defer cancelDelivery()
+	// The callback may outlive this handler's bounded wait. Keep its result in
+	// callback-owned storage so the immutable claim remains safe for recovery.
+	finalizedMessages := make(chan []*taskmodels.Message, 1)
+	deliveryErr := h.store.RespondWithDeliveryConfirmation(
+		deliveryCtx,
+		pendingID,
+		claim.response,
+		func() error {
+			finalized, confirmErr := h.confirmLiveClarificationResponseDelivery(ctx, pendingID, claim)
+			if confirmErr == nil {
+				finalizedMessages <- finalized
+			}
+			return confirmErr
+		},
+	)
+	if deliveryErr == nil {
+		finalized := <-finalizedMessages
+		h.publishClarificationBundleUpdates(ctx, pendingID, finalized)
+		h.publishPrimaryAnsweredEvent(
+			ctx,
+			pendingID,
+			body.Answers,
+			body.Rejected,
+			body.RejectReason,
+			h.clarificationClaimTurnID(pendingID, finalized),
+		)
 		h.logger.Info("clarification answered via primary path (same turn)",
 			zap.String("pending_id", pendingID),
 			zap.Int("answers", len(body.Answers)),
 			zap.Bool("rejected", body.Rejected))
-		c.JSON(http.StatusOK, gin.H{"success": true})
-		return
+		return 0, ""
 	}
-
-	// Duplicate response — someone clicked twice quickly.
-	if errors.Is(err, ErrAlreadyResponded) {
-		h.logger.Warn("duplicate response attempt",
-			zap.String("pending_id", pendingID))
-		c.JSON(http.StatusConflict, gin.H{"error": "response already submitted"})
-		return
+	if errors.Is(deliveryErr, ErrAlreadyResponded) {
+		// Defensive only: the durable claim above is exclusive. Retain this as a
+		// safety net if the in-memory waiter ever diverges from durable state.
+		// Re-publishing these already-terminal rows is idempotent for connected
+		// clients and converges any client that missed the winner's publication.
+		if finalized, ok := h.finalizeClarificationResponseDelivery(ctx, pendingID, claim); ok {
+			h.publishClarificationBundleUpdates(ctx, pendingID, finalized)
+		}
+		h.logger.Warn("duplicate response attempt", zap.String("pending_id", pendingID))
+		return http.StatusConflict, "response already submitted"
 	}
+	if !errors.Is(deliveryErr, ErrNotFound) {
+		restored := h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
+		h.logger.Error("failed to deliver clarification response",
+			zap.String("pending_id", pendingID),
+			zap.Bool("restored", restored),
+			zap.Error(deliveryErr))
+		if restored {
+			return http.StatusInternalServerError, "failed to deliver clarification response; response can be retried"
+		}
+		return http.StatusInternalServerError, "failed to deliver clarification response and recover pending clarification state"
+	}
+	return h.deliverDetachedClarificationResponse(ctx, pendingID, body, claim, deliveryErr)
+}
 
+func (h *Handlers) deliverDetachedClarificationResponse(
+	ctx context.Context,
+	pendingID string,
+	body RespondBody,
+	claim *clarificationResponseClaim,
+	deliveryErr error,
+) (int, string) {
 	// Fallback path: entry not found (agent timed out, entry was cleaned up).
 	// If the user rejected (clicked X to dismiss), they're discarding a stale
 	// overlay — not continuing the conversation. Treat as a no-op so we don't
@@ -314,26 +501,127 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 	// We still need to mark the bundle rejected in the DB; otherwise the durable
 	// pending-clarification guard would keep blocking future workflow transitions.
 	if body.Rejected {
-		writeCtx := context.WithoutCancel(c.Request.Context())
-		h.applyAnswersToMessages(c, pendingID, true, nil)
-		h.publishStaleDismissedEvent(writeCtx, pendingID)
+		finalized, ok := h.finalizeClarificationResponseDelivery(ctx, pendingID, claim)
+		if !ok {
+			return http.StatusInternalServerError,
+				"clarification rejection was recorded, but delivery state could not be finalized"
+		}
+		h.publishStaleDismissedEvent(ctx, pendingID)
+		h.publishClarificationBundleUpdates(ctx, pendingID, finalized)
 		h.logger.Info("clarification rejected after agent moved on; no-op",
 			zap.String("pending_id", pendingID))
-		c.JSON(http.StatusOK, gin.H{"success": true})
-		return
+		return 0, ""
 	}
 
-	// User is providing an affirmative answer after the agent moved on. Update
-	// the clarification record and publish an event so the orchestrator resumes
-	// the agent with a new turn containing the answer.
-	h.logger.Info("clarification entry not found, using event fallback",
+	// User is providing an affirmative answer after the agent moved on. Ask the
+	// orchestrator to accept a new turn containing the answer before publishing
+	// the terminal clarification update.
+	h.logger.Info("clarification entry not found, using acknowledged resume fallback",
 		zap.String("pending_id", pendingID),
-		zap.String("error", err.Error()))
+		zap.String("error", deliveryErr.Error()))
 
-	h.applyAnswersToMessages(c, pendingID, body.Rejected, body.Answers)
-	h.respondViaEventFallback(c, pendingID, body.Answers, body.Rejected, body.RejectReason)
+	if err := h.resumeDetachedClarification(
+		ctx, pendingID, body.Answers, body.Rejected, body.RejectReason, claim.messages,
+	); err != nil {
+		if detachedResumeWasAccepted(err) {
+			// The prompt reached agentctl. Keep the durable answer terminal so an
+			// HTTP retry cannot dispatch it again, even though turn publication
+			// failed and the caller must receive a server error.
+			if finalized, ok := h.finalizeClarificationResponseDelivery(ctx, pendingID, claim); ok {
+				h.publishClarificationBundleUpdates(ctx, pendingID, finalized)
+			}
+			h.logger.Error("accepted clarification resume was not durably published",
+				zap.String("pending_id", pendingID),
+				zap.Error(err))
+			return http.StatusInternalServerError,
+				"clarification response was accepted, but dispatch state could not be finalized"
+		}
+		restored := h.restoreFailedClarificationClaim(ctx, pendingID, claim.terminalStatus, claim.messages)
+		h.logger.Error("failed to resume detached clarification",
+			zap.String("pending_id", pendingID),
+			zap.Error(err))
+		if restored {
+			return http.StatusInternalServerError, "failed to resume clarification; response can be retried"
+		}
+		return http.StatusInternalServerError, "failed to resume clarification and recover pending clarification state"
+	}
+	finalized, ok := h.finalizeClarificationResponseDelivery(ctx, pendingID, claim)
+	if !ok {
+		return http.StatusInternalServerError,
+			"clarification response was accepted, but delivery state could not be finalized"
+	}
+	h.publishClarificationBundleUpdates(ctx, pendingID, finalized)
+	return 0, ""
+}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+func (h *Handlers) publishClarificationBundleUpdates(
+	ctx context.Context,
+	pendingID string,
+	messages []*taskmodels.Message,
+) {
+	publishCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
+	if err := h.messageCreator.PublishClarificationBundleUpdates(publishCtx, messages); err != nil {
+		h.logger.Error("failed to publish clarification bundle updates",
+			zap.String("pending_id", pendingID),
+			zap.Error(err))
+	}
+}
+
+func detachedResumeWasAccepted(err error) bool {
+	var accepted interface{ DetachedResumeAccepted() bool }
+	return errors.As(err, &accepted) && accepted.DetachedResumeAccepted()
+}
+
+func (h *Handlers) restoreFailedClarificationClaim(
+	ctx context.Context,
+	pendingID, terminalStatus string,
+	claimedMessages []*taskmodels.Message,
+) bool {
+	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
+	restoredMessages, restored, err := h.messageCreator.RestoreActiveClarificationBundle(
+		persistenceCtx,
+		pendingID,
+		terminalStatus,
+		claimedMessages,
+	)
+	if err != nil {
+		h.logger.Error("failed to restore clarification after delivery failure",
+			zap.String("pending_id", pendingID),
+			zap.Error(err))
+		return false
+	}
+	if !restored {
+		h.logger.Warn("clarification claim was not restorable after delivery failure",
+			zap.String("pending_id", pendingID))
+		return false
+	}
+	if err := h.messageCreator.PublishClarificationBundleUpdates(persistenceCtx, restoredMessages); err != nil {
+		h.logger.Error("failed to converge restored clarification state",
+			zap.String("pending_id", pendingID),
+			zap.Error(err))
+		// The durable bundle is pending again, so retry remains safe even when
+		// its best-effort live projection could not be acknowledged.
+		return true
+	}
+	return true
+}
+
+func clarificationPersistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	// Each durability phase gets an independent bounded window so caller
+	// cancellation cannot interrupt an accepted write or its compensation. A
+	// failed detached response can sequence claim, resume, and restore phases,
+	// so its worst-case response latency may span three of these windows.
+	return context.WithTimeout(context.WithoutCancel(ctx), clarificationPersistenceTimeout)
+}
+
+func clarificationPersistenceContextPreservingDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
+	detached := context.WithoutCancel(ctx)
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < clarificationPersistenceTimeout {
+		return context.WithDeadline(detached, deadline)
+	}
+	return context.WithTimeout(detached, clarificationPersistenceTimeout)
 }
 
 // validateRespondAnswers enforces the all-required gate **and** the question-id
@@ -378,8 +666,8 @@ func (h *Handlers) validateRespondAnswers(ctx context.Context, pendingID string,
 }
 
 // expectedQuestionIDs returns the ordered question ids the user is expected to
-// answer for the given pending bundle. Falls back to the persisted messages if
-// the in-store request has been cleaned up.
+// answer for the given pending bundle. Persisted recovery includes only pending
+// siblings because an earlier partial write may have made other rows terminal.
 func (h *Handlers) expectedQuestionIDs(ctx context.Context, pendingID string) []string {
 	if req, ok := h.store.GetRequest(pendingID); ok && req != nil {
 		ids := make([]string, 0, len(req.Questions))
@@ -397,6 +685,10 @@ func (h *Handlers) expectedQuestionIDs(ctx context.Context, pendingID string) []
 	}
 	ids := make([]string, 0, len(msgs))
 	for _, m := range msgs {
+		status := stringFromMetadata(m.Metadata, metaStatusKey)
+		if status != "" && status != string(StatusPending) {
+			continue
+		}
 		if id := stringFromMetadata(m.Metadata, metaQuestionIDKey); id != "" {
 			ids = append(ids, id)
 		}
@@ -441,60 +733,6 @@ func (h *Handlers) httpCancelRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// applyAnswersToMessages flips per-question status (answered/rejected) on every
-// message that belongs to the bundle. When rejected, every question is marked
-// rejected; when answered, each answer updates the matching question's row.
-func (h *Handlers) applyAnswersToMessages(c *gin.Context, pendingID string, rejected bool, answers []Answer) {
-	if h.messageCreator == nil {
-		return
-	}
-	// Durable status writes must complete even if the HTTP request context is canceled.
-	writeCtx := context.WithoutCancel(c.Request.Context())
-	sessionID := h.lookupSessionForPendingCtx(writeCtx, pendingID)
-
-	if rejected {
-		// Mark every question in the bundle as rejected. Guard h.repo for
-		// parity with the sibling expectedQuestionIDs path; production wires
-		// both, but unit tests sometimes pass a nil repo.
-		if h.repo == nil {
-			return
-		}
-		msgs, err := h.repo.FindMessagesByPendingID(writeCtx, pendingID)
-		if err != nil || len(msgs) == 0 {
-			h.logger.Debug("rejected clarification: no messages to update",
-				zap.String("pending_id", pendingID),
-				zap.Error(err))
-			return
-		}
-		for _, msg := range msgs {
-			questionID := stringFromMetadata(msg.Metadata, "question_id")
-			if questionID == "" {
-				continue
-			}
-			if err := h.messageCreator.UpdateClarificationMessage(writeCtx, sessionID, pendingID, questionID, "rejected", nil); err != nil {
-				h.logger.Warn("failed to mark clarification question rejected",
-					zap.String("pending_id", pendingID),
-					zap.String("question_id", questionID),
-					zap.Error(err))
-			}
-		}
-		return
-	}
-
-	for i := range answers {
-		ans := answers[i]
-		if ans.QuestionID == "" {
-			continue
-		}
-		if err := h.messageCreator.UpdateClarificationMessage(writeCtx, sessionID, pendingID, ans.QuestionID, "answered", &ans); err != nil {
-			h.logger.Warn("failed to update clarification question",
-				zap.String("pending_id", pendingID),
-				zap.String("question_id", ans.QuestionID),
-				zap.Error(err))
-		}
-	}
-}
-
 func stringFromMetadata(meta map[string]any, key string) string {
 	if meta == nil {
 		return ""
@@ -505,54 +743,75 @@ func stringFromMetadata(meta map[string]any, key string) string {
 	return ""
 }
 
-// respondViaEventFallback publishes a ClarificationAnswered event for the orchestrator
-// to resume the agent with a new turn. Used when the agent timed out.
-func (h *Handlers) respondViaEventFallback(c *gin.Context, pendingID string, answers []Answer, rejected bool, rejectReason string) {
-	if h.eventBus == nil {
-		return
+// resumeDetachedClarification synchronously asks the orchestrator to accept a new
+// turn. Used when the original clarification waiter has gone away.
+func (h *Handlers) resumeDetachedClarification(
+	ctx context.Context,
+	pendingID string,
+	answers []Answer,
+	rejected bool,
+	rejectReason string,
+	claimedMessages []*taskmodels.Message,
+) error {
+	if h.detachedResumer == nil {
+		return errors.New("detached clarification resumer unavailable")
 	}
+	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
 
-	clarificationCtx, err := h.resolveClarificationEventContext(c.Request.Context(), pendingID)
+	clarificationCtx, err := h.resolveClarificationEventContext(persistenceCtx, pendingID)
 	if err != nil {
-		h.logger.Error("failed to resolve context for clarification fallback event",
-			zap.String("pending_id", pendingID),
-			zap.Error(err))
-		return
+		return fmt.Errorf("resolve clarification fallback context: %w", err)
 	}
 	if clarificationCtx.SessionID == "" || clarificationCtx.TaskID == "" {
-		h.logger.Error("missing session/task for clarification fallback event",
-			zap.String("pending_id", pendingID),
-			zap.String("session_id", clarificationCtx.SessionID),
-			zap.String("task_id", clarificationCtx.TaskID))
-		return
+		return fmt.Errorf(
+			"missing session/task for clarification fallback event: session=%q task=%q",
+			clarificationCtx.SessionID,
+			clarificationCtx.TaskID,
+		)
 	}
 
 	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
-
-	eventData := map[string]any{
-		"session_id":    clarificationCtx.SessionID,
-		"task_id":       clarificationCtx.TaskID,
-		"pending_id":    pendingID,
-		metaQuestionKey: clarificationCtx.QuestionSummary,
-		"answer_text":   answerText,
-		"rejected":      rejected,
-		"reject_reason": rejectReason,
-	}
-	if err := h.eventBus.Publish(c.Request.Context(), events.ClarificationAnswered, bus.NewEvent(
-		events.ClarificationAnswered,
-		"clarification-handlers",
-		eventData,
-	)); err != nil {
-		h.logger.Error("failed to publish clarification answered event",
-			zap.String("pending_id", pendingID),
-			zap.String("session_id", clarificationCtx.SessionID),
-			zap.Error(err))
+	clarificationTurnID, claimedMessageIDs, err := clarificationClaimRecovery(claimedMessages)
+	if err != nil {
+		return fmt.Errorf("build clarification claim recovery: %w", err)
 	}
 
-	h.logger.Info("clarification answered via event fallback (new turn)",
+	request := DetachedClarificationResume{
+		SessionID:           clarificationCtx.SessionID,
+		TaskID:              clarificationCtx.TaskID,
+		PendingID:           pendingID,
+		ClarificationTurnID: clarificationTurnID,
+		ClaimedMessageIDs:   claimedMessageIDs,
+		Question:            clarificationCtx.QuestionSummary,
+		AnswerText:          answerText,
+		Rejected:            rejected,
+		RejectReason:        rejectReason,
+	}
+	if err := h.detachedResumer.ResumeDetachedClarification(persistenceCtx, request); err != nil {
+		return fmt.Errorf("resume detached clarification: %w", err)
+	}
+
+	h.logger.Info("clarification answered via acknowledged fallback (new turn)",
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", clarificationCtx.SessionID),
 		zap.String("task_id", clarificationCtx.TaskID))
+	return nil
+}
+
+func clarificationClaimRecovery(messages []*taskmodels.Message) (string, []string, error) {
+	turnID, err := clarificationClaimTurnIdentity(messages)
+	if err != nil {
+		return "", nil, err
+	}
+	messageIDs := make([]string, 0, len(messages))
+	for _, message := range messages {
+		if message == nil || message.ID == "" {
+			continue
+		}
+		messageIDs = append(messageIDs, message.ID)
+	}
+	return turnID, messageIDs, nil
 }
 
 func (h *Handlers) publishCancelledEvent(c *gin.Context, pendingID string, req *Request) {
@@ -584,27 +843,13 @@ func (h *Handlers) publishCancelledEvent(c *gin.Context, pendingID string, req *
 	}
 }
 
-// lookupSessionForPendingCtx returns the session ID for a pending clarification.
-// Falls back to finding it from the database message.
-func (h *Handlers) lookupSessionForPendingCtx(ctx context.Context, pendingID string) string {
-	if req, ok := h.store.GetRequest(pendingID); ok {
-		return req.SessionID
-	}
-	if h.repo == nil {
-		return ""
-	}
-	msg, err := h.repo.FindMessageByPendingID(ctx, pendingID)
-	if err != nil {
-		return ""
-	}
-	return msg.TaskSessionID
-}
-
 func (h *Handlers) publishStaleDismissedEvent(ctx context.Context, pendingID string) {
 	if h.eventBus == nil {
 		return
 	}
-	clarificationCtx, err := h.resolveClarificationEventContext(ctx, pendingID)
+	persistenceCtx, cancel := clarificationPersistenceContext(ctx)
+	defer cancel()
+	clarificationCtx, err := h.resolveClarificationEventContext(persistenceCtx, pendingID)
 	if err != nil || clarificationCtx.SessionID == "" || clarificationCtx.TaskID == "" {
 		h.logger.Warn("failed to resolve context for stale-dismissed clarification event",
 			zap.String("pending_id", pendingID),
@@ -616,53 +861,12 @@ func (h *Handlers) publishStaleDismissedEvent(ctx context.Context, pendingID str
 		"task_id":    clarificationCtx.TaskID,
 		"pending_id": pendingID,
 	}
-	if err := h.eventBus.Publish(ctx, events.ClarificationStaleDismissed, bus.NewEvent(
+	if err := h.eventBus.Publish(persistenceCtx, events.ClarificationStaleDismissed, bus.NewEvent(
 		events.ClarificationStaleDismissed,
 		"clarification-handlers",
 		eventData,
 	)); err != nil {
 		h.logger.Warn("failed to publish stale-dismissed clarification event",
-			zap.String("pending_id", pendingID),
-			zap.String("session_id", clarificationCtx.SessionID),
-			zap.Error(err))
-	}
-}
-
-func (h *Handlers) publishPrimaryAnsweredEvent(c *gin.Context, pendingID string, answers []Answer, rejected bool, rejectReason string) {
-	if h.eventBus == nil {
-		return
-	}
-	clarificationCtx, err := h.resolveClarificationEventContext(c.Request.Context(), pendingID)
-	if err != nil {
-		h.logger.Warn("failed to resolve context for primary clarification event",
-			zap.String("pending_id", pendingID),
-			zap.Error(err))
-		return
-	}
-	if clarificationCtx.SessionID == "" || clarificationCtx.TaskID == "" {
-		h.logger.Warn("missing session/task for primary clarification event",
-			zap.String("pending_id", pendingID),
-			zap.String("session_id", clarificationCtx.SessionID),
-			zap.String("task_id", clarificationCtx.TaskID))
-		return
-	}
-
-	answerText := buildAnswerSummary(clarificationCtx.Questions, answers, rejected, rejectReason)
-	eventData := map[string]any{
-		"session_id":    clarificationCtx.SessionID,
-		"task_id":       clarificationCtx.TaskID,
-		"pending_id":    pendingID,
-		metaQuestionKey: clarificationCtx.QuestionSummary,
-		"answer_text":   answerText,
-		"rejected":      rejected,
-		"reject_reason": rejectReason,
-	}
-	if err := h.eventBus.Publish(c.Request.Context(), events.ClarificationPrimaryAnswered, bus.NewEvent(
-		events.ClarificationPrimaryAnswered,
-		"clarification-handlers",
-		eventData,
-	)); err != nil {
-		h.logger.Warn("failed to publish primary clarification event",
 			zap.String("pending_id", pendingID),
 			zap.String("session_id", clarificationCtx.SessionID),
 			zap.Error(err))

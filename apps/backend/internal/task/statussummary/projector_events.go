@@ -8,7 +8,6 @@ import (
 	"github.com/kandev/kandev/internal/events"
 )
 
-
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
 	switch eventType {
 	case events.TaskUpdated:
@@ -22,9 +21,27 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 	case events.MessageAdded, events.MessageUpdated, events.MessageDeleted:
 		return p.applyMessageEventLocked(state, eventType, data)
 	case events.ClarificationAnswered, events.ClarificationPrimaryAnswered,
-		events.ClarificationCancelled, events.ClarificationStaleDismissed:
+		events.ClarificationCancelled:
+		if p.loadPendingActions != nil {
+			return false
+		}
 		return p.clearPendingLocked(state, stringField(data, "session_id"))
+	case events.ClarificationStaleDismissed:
+		if p.loadPendingActions != nil {
+			return false
+		}
+		sessionID := stringField(data, "session_id")
+		dismissedID := stringField(data, "pending_id")
+		if dismissedID != "" {
+			if current, ok := state.pendingRequests[sessionID]; ok && current.pendingID != dismissedID {
+				return false
+			}
+		}
+		return p.clearPendingLocked(state, sessionID)
 	case events.PermissionRequestReceived:
+		if p.loadPendingActions != nil {
+			return false
+		}
 		return applyPermissionEventLocked(state, data)
 	case events.GitEvent:
 		return p.applyGitEventLocked(state, data)
@@ -58,6 +75,9 @@ func applyPermissionEventLocked(state *projectionState, data map[string]interfac
 
 func (p *Projector) applyTaskUpdatedEventLocked(state *projectionState, data map[string]interface{}) bool {
 	primarySessionID, primaryChanged := p.applyTaskPrimaryUpdateLocked(state, data)
+	if p.loadPendingActions != nil {
+		return primaryChanged
+	}
 	pendingChanged := applyTaskPendingUpdateLocked(state, data, primarySessionID)
 	return primaryChanged || pendingChanged
 }
@@ -206,11 +226,24 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 		return fmt.Errorf("load task status summary %q: %w", taskID, err)
 	}
 	summary := rows[taskID]
-	if summary == nil {
-		return nil
+	if summary != nil {
+		state.current = cloneSummary(summary)
+		state.revision = summary.Revision
+		applySummaryBaseline(state, summary)
 	}
-	state.current = cloneSummary(summary)
-	state.revision = summary.Revision
+	if err := p.restoreSessionObservations(ctx, taskID, state); err != nil {
+		return err
+	}
+	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
+		return err
+	}
+	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.queuedCount = summary.QueuedPromptCount
 	state.taskPending = summary.PendingAction
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -227,13 +260,89 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if summary.Git != nil {
 		copy := *summary.Git
 		state.gitBaseline = &copy
-		if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
-			return err
-		}
 	}
 	if summary.PullRequest != nil {
 		copy := *summary.PullRequest
 		state.prBaseline = &copy
+	}
+}
+
+// rebaseProjectionStateFromCurrent rebuilds all derived source state from the
+// summary that won a rejected compare-and-set. Pending authority and the
+// triggering source event are refreshed by the caller before retrying.
+func (p *Projector) rebaseProjectionStateFromCurrent(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) error {
+	if state.current == nil {
+		return nil
+	}
+	current := state.current
+	state.sessions = make(map[string]sessionObservation)
+	state.activityObserved = false
+	state.pending = make(map[string]string)
+	state.pendingRequests = make(map[string]pendingRequestIdentity)
+	state.pendingObserved = false
+	state.errors = make(map[string]*ActiveErrorSummary)
+	state.errorsObserved = false
+	state.git = make(map[string]GitSummary)
+	state.gitBaseline = nil
+	state.gitObserved = false
+	state.prs = make(map[string]pullRequestObservation)
+	state.prBaseline = nil
+	state.prObserved = false
+	applySummaryBaseline(state, current)
+	if err := p.restoreSessionObservations(ctx, taskID, state); err != nil {
+		return err
+	}
+	if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
+		return err
+	}
+	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *Projector) restoreSessionObservations(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) error {
+	if p.loadSessionObservations == nil {
+		return nil
+	}
+	snapshot, err := p.loadSessionObservations(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load session observations for task status summary %q: %w", taskID, err)
+	}
+	sessions := make(map[string]sessionObservation, len(snapshot.Sessions))
+	errorsBySession := make(map[string]*ActiveErrorSummary, len(snapshot.Sessions))
+	for _, input := range snapshot.Sessions {
+		sessionID := strings.TrimSpace(input.ID)
+		if sessionID == "" {
+			continue
+		}
+		sessions[sessionID] = sessionObservation{
+			id:                  sessionID,
+			state:               input.State,
+			isPrimary:           input.IsPrimary,
+			foregroundActivity:  input.ForegroundActivity,
+			activeSubagentCount: maxInt(input.ActiveSubagentCount, 0),
+		}
+		activeError := normalizeRebuildError(input.ActiveError, p.now().UTC())
+		if activeError == nil || state.clearedErrorStamps[sessionID] == activeError.Stamp {
+			continue
+		}
+		activeError.SessionID = sessionID
+		errorsBySession[sessionID] = activeError
+	}
+	state.sessions = sessions
+	state.activityObserved = snapshot.ActivityObserved
+	if snapshot.ErrorsObserved {
+		state.errors = errorsBySession
+		state.errorsObserved = true
 	}
 	return nil
 }
@@ -253,6 +362,25 @@ func (p *Projector) restoreGitObservations(ctx context.Context, taskID string, s
 		state.git[observation.Repository] = observation.Summary
 	}
 	state.gitObserved = true
+	return nil
+}
+
+func (p *Projector) restorePullRequestObservations(
+	ctx context.Context,
+	taskID string,
+	state *projectionState,
+) error {
+	if p.loadPullRequests == nil {
+		return nil
+	}
+	pullRequests, err := p.loadPullRequests(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load PR observations for task status summary %q: %w", taskID, err)
+	}
+	state.prs = make(map[string]pullRequestObservation, len(pullRequests))
+	state.prBaseline = nil
+	state.prObserved = true
+	applyPullRequestInputs(state, pullRequests)
 	return nil
 }
 
@@ -392,6 +520,9 @@ func (p *Projector) clearSupersededErrorFromMessageLocked(
 }
 
 func (p *Projector) applyPendingMessageLocked(state *projectionState, eventType string, data map[string]interface{}, sessionID string) bool {
+	if p.loadPendingActions != nil {
+		return false
+	}
 	messageType := strings.ToLower(stringField(data, "type"))
 	metadata, _ := data["metadata"].(map[string]interface{})
 	status := strings.ToLower(stringField(metadata, "status"))

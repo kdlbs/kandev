@@ -15,9 +15,34 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+func seedAutopilotTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, sessionState models.TaskSessionState) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", Title: "Test Task",
+		State: v1.TaskStateInProgress, ParentID: "parent-task", Autopilot: true,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create autopilot task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: sessionState, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task session: %v", err)
+	}
+}
 
 func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	ctx := context.Background()
@@ -106,6 +131,79 @@ func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	}
 }
 
+func TestAutoStartStepPrompt_ResetContextInjectsCompletionContractForReusedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedAutopilotTaskAndSession(t, repo, "task-reused", "session-reused", models.TaskSessionStateWaitingForInput)
+	task, err := repo.GetTask(ctx, "task-reused")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	session, _ := repo.GetTaskSession(ctx, "session-reused")
+	session.AgentExecutionID = "execution-reused"
+	session.AgentProfileID = "profile-review"
+	_ = repo.UpdateTaskSession(ctx, session)
+	seedExecutorRunning(t, repo, session.ID, task.ID, session.AgentExecutionID)
+	step := &wfmodels.WorkflowStep{ID: "step-review", WorkflowID: "wf1", Name: "Review", AutoAdvanceRequiresSignal: true, Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterResetAgentContext}, {Type: wfmodels.OnEnterAutoStartAgent}}}}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[step.ID] = step
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	messages := &mockMessageCreator{}
+	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
+	svc.messageCreator = messages
+	err = svc.autoStartStepPrompt(ctx, "task-reused", session, step, "Review the change", false, false)
+	if err != nil {
+		t.Fatalf("autoStartStepPrompt returned error: %v", err)
+	}
+	if len(messages.userMessages) != 1 || !strings.Contains(messages.userMessages[0].content, "step_complete_kandev") {
+		t.Fatalf("reused reset-context prompt lacks completion contract: %#v", messages.userMessages)
+	}
+	if len(agentMgr.capturedPromptCalls) != 1 || !strings.Contains(agentMgr.capturedPromptCalls[0].Prompt, "step_complete_kandev") {
+		t.Fatalf("executor prompt lacks completion contract: %#v", agentMgr.capturedPromptCalls)
+	}
+	if !strings.Contains(messages.userMessages[0].content, "ask_parent_question_kandev") || strings.Contains(messages.userMessages[0].content, "ask_user_question_kandev") {
+		t.Fatalf("reused autopilot prompt has the wrong question contract: %s", messages.userMessages[0].content)
+	}
+}
+
+func TestAutoStartStepPrompt_ResetContextPreservesOfficeModeForReusedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-office-reused", "session-office-reused", models.TaskSessionStateWaitingForInput)
+	task, err := repo.GetTask(ctx, "task-office-reused")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.ProjectID = "project-office"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("set Office ownership: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-office-reused")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentExecutionID = "execution-office-reused"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, task.ID, session.AgentExecutionID)
+	step := &wfmodels.WorkflowStep{ID: "step-office-reused", WorkflowID: "wf1", Name: "Office", Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterResetAgentContext}, {Type: wfmodels.OnEnterAutoStartAgent}}}}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[step.ID] = step
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	messages := &mockMessageCreator{}
+	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
+	svc.messageCreator = messages
+	if err := svc.autoStartStepPrompt(ctx, task.ID, session, step, "Run the Office task", false, false); err != nil {
+		t.Fatalf("autoStartStepPrompt returned error: %v", err)
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("recorded messages = %d, want 1", len(messages.userMessages))
+	}
+	if !strings.Contains(messages.userMessages[0].content, "KANDEV OFFICE MCP TOOLS") || strings.Contains(messages.userMessages[0].content, "list_workspaces_kandev") {
+		t.Fatalf("reused Office prompt has the wrong tool contract: %s", messages.userMessages[0].content)
+	}
+}
 func TestResolveStepAgentProfile(t *testing.T) {
 	t.Run("returns step profile when set", func(t *testing.T) {
 		svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())

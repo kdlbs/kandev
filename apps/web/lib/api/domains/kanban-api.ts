@@ -8,6 +8,7 @@ import type {
   AttachTaskWorkspaceSourcesRequest,
   AttachTaskWorkspaceSourcesResponse,
   Task,
+  TaskPriority,
   MoveTaskResponse,
 } from "@/lib/types/http";
 
@@ -109,7 +110,7 @@ export async function createTask(
     /** Explicitly opt out of (false) or into (true) the auto-start-on-unblock intent. */
     start_when_unblocked?: boolean;
     workspace_path?: string;
-    priority?: string;
+    priority?: TaskPriority;
     project_id?: string;
     metadata?: Record<string, unknown>;
     /** Office task-handoffs phase 4/5 — workspace policy. */

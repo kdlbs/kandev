@@ -69,7 +69,6 @@
   "deleteSavedQueryNamed": "Delete {{label}} saved query",
   "describeYourChanges": "Describe your changes...",
   "description": "Description",
-  "disabled": "Disabled",
   "dismissed": "Dismissed",
   "draftCreated": "Draft {{shortName}} created",
   "enableIntegrationNamed": "Enable {{name}}",
