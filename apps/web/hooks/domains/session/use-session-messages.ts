@@ -4,6 +4,7 @@ import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { TaskSessionState, Message } from "@/lib/types/http";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { ensureSessionTurnsLoaded } from "./use-session-turns-hydration";
 import {
   useUnknownSessionSubscriptionRetry,
   useUnknownSessionSubscriptionRetryEffect,
@@ -21,6 +22,8 @@ export {
 } from "./message-backfill";
 
 export { shouldRetryUnknownSessionSubscription } from "./use-session-subscription-retry";
+// Test seam: exported for direct unit coverage of hydration dedup/guards.
+export { ensureSessionTurnsLoaded } from "./use-session-turns-hydration";
 
 const INITIAL_FETCH_LIMIT = 100;
 const RUNNING_BACKFILL_INITIAL_DELAY_MS = 1200;
@@ -228,6 +231,11 @@ async function fetchAndStoreMessages(
   const readiness = client.getSessionSubscriptionReadiness(sessionId);
   await readiness;
   if (isActive && !isActive()) return [];
+  // The messages fetch is the session-entry chokepoint: any path that opens a
+  // session's transcript must also make its turns resolvable. Start it only
+  // after subscription acknowledgement so the REST snapshot cannot race the
+  // initial WebSocket subscription registration.
+  void ensureSessionTurnsLoaded(sessionId, store, { readiness });
   const seq = nextFetchSeq();
   const response = await requestSessionMessages(client, sessionId, readiness);
   if (isActive && !isActive()) return [];

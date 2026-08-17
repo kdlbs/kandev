@@ -29,6 +29,7 @@ export function deriveSessionFlags(session: TaskSession | null | undefined) {
   // background-idle) plus STARTING — it must stay up through (b).
   const isWorking = isStarting || isRunning || hasBackgroundWork;
   const isFailed = state === "FAILED" || state === "CANCELLED";
+  const isCompleted = state === "COMPLETED";
   const needsRecovery = state === "WAITING_FOR_INPUT" && !!errorMessage;
   return {
     inputMode,
@@ -37,6 +38,7 @@ export function deriveSessionFlags(session: TaskSession | null | undefined) {
     isAgentBusy,
     supportsSteering,
     isFailed,
+    isCompleted,
     needsRecovery,
   };
 }

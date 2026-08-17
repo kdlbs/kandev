@@ -628,6 +628,16 @@ export class SessionPage {
     return this.page.getByTestId("recovery-fresh-button");
   }
 
+  /** Terminal-state banner shown when the active session has completed. */
+  completedSessionBanner(): Locator {
+    return this.activeChat().getByTestId("completed-session-banner");
+  }
+
+  /** "New Agent" action shown for a completed session. */
+  completedSessionNewAgentButton(): Locator {
+    return this.completedSessionBanner().getByTestId("completed-session-new-agent-button");
+  }
+
   /** "Cancel" button shown on the yellow transient-retry (529 Overloaded) card. */
   recoveryCancelRetryButton(): Locator {
     return this.page.getByTestId("recovery-cancel-retry-button");

@@ -21,35 +21,43 @@ type settingsRepository struct {
 	settings *models.UserSettings
 }
 
+// GetUser returns an error, asserting the settings service never fetches users.
 func (r *settingsRepository) GetUser(context.Context, string) (*models.User, error) {
 	return nil, errors.New("unexpected GetUser call")
 }
 
+// GetDefaultUser returns an error, asserting the settings service never fetches the default user.
 func (r *settingsRepository) GetDefaultUser(context.Context) (*models.User, error) {
 	return nil, errors.New("unexpected GetDefaultUser call")
 }
 
+// GetUserSettings returns a copy of the repository's stored settings.
 func (r *settingsRepository) GetUserSettings(context.Context, string) (*models.UserSettings, error) {
 	copy := *r.settings
 	return &copy, nil
 }
 
+// UpsertUserSettingsPreservingTaskCreateLastUsed stores a copy of the settings and returns it.
 func (r *settingsRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
 	_ context.Context,
 	settings *models.UserSettings,
 	_ *models.TaskCreateLastUsed,
+	_ int64,
 ) (*models.UserSettings, error) {
 	copy := *settings
 	r.settings = &copy
 	return &copy, nil
 }
 
+// UpdateTaskCreateLastUsed returns an error, asserting the settings service never updates task-creation history directly.
 func (r *settingsRepository) UpdateTaskCreateLastUsed(context.Context, string, models.TaskCreateLastUsed) (*models.UserSettings, error) {
 	return nil, errors.New("unexpected UpdateTaskCreateLastUsed call")
 }
 
+// Close is a no-op, satisfying the repository interface.
 func (r *settingsRepository) Close() error { return nil }
 
+// TestUpdateUserSettingsMapsMCPTaskAgentProfileDefault verifies the controller persists an MCP task agent profile default patch.
 func TestUpdateUserSettingsMapsMCPTaskAgentProfileDefault(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -72,6 +80,7 @@ func TestUpdateUserSettingsMapsMCPTaskAgentProfileDefault(t *testing.T) {
 	}
 }
 
+// TestUpdateUserSettingsMapsLspStatusLocation verifies the controller persists an LSP status location patch.
 func TestUpdateUserSettingsMapsLspStatusLocation(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -94,6 +103,7 @@ func TestUpdateUserSettingsMapsLspStatusLocation(t *testing.T) {
 	}
 }
 
+// TestUpdateUserSettingsMapsStartupPage verifies the controller persists a startup page patch.
 func TestUpdateUserSettingsMapsStartupPage(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -116,6 +126,30 @@ func TestUpdateUserSettingsMapsStartupPage(t *testing.T) {
 	}
 }
 
+// TestUpdateUserSettingsMapsLastSeenDisplay verifies the controller persists a last-seen display patch.
+func TestUpdateUserSettingsMapsLastSeenDisplay(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &settingsRepository{settings: &models.UserSettings{
+		LastSeenDisplay: models.LastSeenDisplayAbsolute,
+	}}
+	controller := NewController(service.NewService(repo, nil, log))
+	want := models.LastSeenDisplayRelative
+
+	response, err := controller.UpdateUserSettings(context.Background(), dto.UpdateUserSettingsRequest{
+		LastSeenDisplay: &want,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if response.Settings.LastSeenDisplay != want {
+		t.Fatalf("LastSeenDisplay = %q, want %q", response.Settings.LastSeenDisplay, want)
+	}
+}
+
+// TestAzureDevOpsBrowsePreferencesRoundTripThroughSettingsAPI verifies Azure DevOps browse preferences survive update, read-back, omission, and null clearing.
 func TestAzureDevOpsBrowsePreferencesRoundTripThroughSettingsAPI(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -185,6 +219,7 @@ func TestAzureDevOpsBrowsePreferencesRoundTripThroughSettingsAPI(t *testing.T) {
 	}
 }
 
+// TestSystemMetricsDisplayPatch verifies systemMetricsDisplayPatch nil, explicit-value, and omitted-field handling.
 func TestSystemMetricsDisplayPatch(t *testing.T) {
 	t.Run("nil patch stays nil", func(t *testing.T) {
 		if got := systemMetricsDisplayPatch(nil); got != nil {

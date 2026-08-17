@@ -384,7 +384,11 @@ type recordingMessageQueuer struct {
 	calls []messagequeue.QueuedMessage
 }
 
-func (r *recordingMessageQueuer) QueueMessage(_ context.Context, sessionID, taskID, content, model, userID string, planMode bool, _ []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
+func (r *recordingMessageQueuer) QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error) {
+	return r.QueueMessageWithMetadata(ctx, sessionID, taskID, content, model, userID, planMode, attachments, nil)
+}
+
+func (r *recordingMessageQueuer) QueueMessageWithMetadata(_ context.Context, sessionID, taskID, content, model, userID string, planMode bool, _ []messagequeue.MessageAttachment, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error) {
 	msg := messagequeue.QueuedMessage{
 		SessionID: sessionID,
 		TaskID:    taskID,
@@ -392,6 +396,7 @@ func (r *recordingMessageQueuer) QueueMessage(_ context.Context, sessionID, task
 		Model:     model,
 		PlanMode:  planMode,
 		QueuedBy:  userID,
+		Metadata:  metadata,
 	}
 	r.calls = append(r.calls, msg)
 	return &msg, nil
@@ -465,7 +470,7 @@ func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
 	assert.Equal(t, "session-99", got.SessionID)
 	assert.Equal(t, "task-1", got.TaskID)
 	assert.Equal(t, "Please fix the failing test in foo_test.go", got.Content)
-	assert.Equal(t, "mcp-move-task", got.QueuedBy)
+	assert.Equal(t, messagequeue.QueuedByMoveTask, got.QueuedBy)
 	assert.False(t, got.PlanMode)
 	assert.Equal(t, "", got.Model)
 }
@@ -998,6 +1003,7 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 		"workflow_id":       "wf-defer3",
 		"workflow_step_id":  "dst-step3",
 		"position":          0,
+		"prompt":            "continue the work",
 		"sender_session_id": "sess-caller3",
 	})
 
@@ -1007,6 +1013,9 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	require.Len(t, queue.pendingMoves, 1)
 	assert.Equal(t, "dst-step3", queue.pendingMoves[0].WorkflowStepID)
 	assert.Equal(t, "sess-caller3", queue.pendingMoves[0].SenderSessionID)
+	assert.NotEmpty(t, queue.pendingMoves[0].MoveID)
+	require.Len(t, queue.calls, 1)
+	assert.Equal(t, queue.pendingMoves[0].MoveID, queue.calls[0].Metadata[messagequeue.MetadataDeferredMoveID])
 }
 
 func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {

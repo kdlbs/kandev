@@ -1564,6 +1564,7 @@
   "sessionActionSetPrimary": "Definir como principal",
   "sessionActionStop": "A parar sessão",
   "sessionActionSuccessful": "{{action}} concluído",
+  "sessionCompleted": "Esta sessão está concluída.",
   "advancedSettings": "Definições avançadas",
   "agentHasStopped": "Este agente parou.",
   "agentResponseChangedSelectAgain": "A resposta do agente mudou. Selecione o texto novamente.",

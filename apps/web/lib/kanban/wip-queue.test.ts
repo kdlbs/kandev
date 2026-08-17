@@ -84,6 +84,22 @@ describe("wip queue helper", () => {
     ]);
   });
 
+  it("sorts every canonical priority in backend order", () => {
+    const tasks = [
+      task({ id: "low", priority: "low" }),
+      task({ id: "medium", priority: "medium" }),
+      task({ id: "high", priority: "high" }),
+      task({ id: "critical", priority: "critical" }),
+    ];
+
+    expect(getDestinationQueue(tasks, "review").map((entry) => entry.task.id)).toEqual([
+      "critical",
+      "high",
+      "medium",
+      "low",
+    ]);
+  });
+
   it("orders missing timestamps deterministically without producing NaN", () => {
     const left = task({ id: "left", queuedAt: null, createdAt: null });
     const right = task({ id: "right", queuedAt: "not-a-date", createdAt: "not-a-date" });

@@ -1601,6 +1601,7 @@
   "sessionActionSetPrimary": "Set primary",
   "sessionActionStop": "Stopping session",
   "sessionActionSuccessful": "{{action}} successful",
+  "sessionCompleted": "This session is complete.",
   "composerPlaceholderRecovery": "Choose a recovery option above to continue...",
   "composerPlaceholderClarification": "Queue instructions while the question is pending...",
   "composerPlaceholderBusy": "Queue instructions to the agent...",

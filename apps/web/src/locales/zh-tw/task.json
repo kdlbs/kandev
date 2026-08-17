@@ -1564,6 +1564,7 @@
   "sessionActionSetPrimary": "設為主要工作階段",
   "sessionActionStop": "停止工作階段中",
   "sessionActionSuccessful": "{{action}}成功",
+  "sessionCompleted": "此工作階段已完成。",
   "advancedSettings": "進階設定",
   "agentHasStopped": "該代理程式已停止。",
   "agentResponseChangedSelectAgain": "代理程式的回覆已變化。請重新選擇文字。",

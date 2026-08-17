@@ -1564,6 +1564,7 @@
   "sessionActionSetPrimary": "设为主要会话",
   "sessionActionStop": "停止会话中",
   "sessionActionSuccessful": "{{action}}成功",
+  "sessionCompleted": "此会话已完成。",
   "advancedSettings": "高级设置",
   "agentHasStopped": "该智能体已停止。",
   "agentResponseChangedSelectAgain": "智能体的回复已变化。请重新选择文本。",

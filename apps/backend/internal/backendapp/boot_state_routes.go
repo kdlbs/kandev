@@ -520,6 +520,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"terminalFontFamily":                nullString(settings.TerminalFontFamily),
 		"terminalFontSize":                  nullInt(settings.TerminalFontSize),
 		"changesPanelLayout":                changesPanelLayout(settings.ChangesPanelLayout),
+		"lastSeenDisplay":                   lastSeenDisplay(settings.LastSeenDisplay),
 		"azureDevOpsBrowsePreferences":      settings.AzureDevOpsBrowsePreferences,
 		"systemMetricsDisplay": map[string]any{
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
@@ -887,6 +888,11 @@ func changesPanelLayout(value string) string {
 		return "flat"
 	}
 	return "tree"
+}
+
+// lastSeenDisplay normalizes the last-seen display to absolute or relative.
+func lastSeenDisplay(value string) string {
+	return usermodels.NormalizeLastSeenDisplay(value)
 }
 
 // logBootError logs a debug entry when optional boot data failed to load.

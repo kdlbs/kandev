@@ -107,6 +107,9 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
+	// MetaKeyAppliedDeferredMoves stores deferred move IDs that have already
+	// been applied, preventing a stale queue rollback from replaying one.
+	MetaKeyAppliedDeferredMoves = "applied_deferred_moves"
 	// DeferredLaunchStartWhenUnblockedKey marks a deferred launch intent as
 	// belonging to a task dependency chain rather than to WIP overflow. The
 	// record itself is identical; the flag lets dependency resolution recognise
