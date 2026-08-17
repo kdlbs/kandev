@@ -89,6 +89,29 @@ function isTaskPriorityMeta(value: PriorityMeta): value is PriorityMeta & { id: 
   return isTaskPriority(value.id);
 }
 
+export function buildPriorityOptions(
+  priorities: PriorityMeta[] | null | undefined,
+  translate: (key: string) => string,
+): PriorityOption[] {
+  if (!priorities) {
+    return FALLBACK_PRIORITY_OPTIONS.map((o) => ({
+      value: o.value,
+      label: translate(o.labelKey),
+      icon: o.icon,
+      className: o.className,
+    }));
+  }
+
+  // Exclude "none" from the creation picker. Labels come from the workspace's
+  // own priority metadata, so they travel as-is.
+  return priorities.filter(isTaskPriorityMeta).map((p) => ({
+    value: p.id,
+    label: p.label,
+    icon: PRIORITY_ICONS[p.id] ?? IconMinus,
+    className: p.color,
+  }));
+}
+
 type Props = {
   draft: IssueDraft;
   onUpdate: (patch: Partial<IssueDraft>) => void;
@@ -143,22 +166,7 @@ function StatusChip({ draft, onUpdate }: Props) {
 function usePriorityOptions(): PriorityOption[] {
   const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
-  if (!meta) {
-    return FALLBACK_PRIORITY_OPTIONS.map((o) => ({
-      value: o.value,
-      label: t(o.labelKey),
-      icon: o.icon,
-      className: o.className,
-    }));
-  }
-  // Exclude "none" from the creation picker. Labels come from the workspace's
-  // own priority metadata, so they travel as-is.
-  return meta.priorities.filter(isTaskPriorityMeta).map((p) => ({
-    value: p.id,
-    label: p.label,
-    icon: PRIORITY_ICONS[p.id] ?? IconMinus,
-    className: p.color,
-  }));
+  return buildPriorityOptions(meta?.priorities, t);
 }
 
 function PriorityChip({ draft, onUpdate }: Props) {

@@ -68,19 +68,11 @@ function task(overrides: Partial<Task>): Task {
   };
 }
 
-describe("TaskPriority", () => {
-  it("accepts the canonical wire values", () => {
-    const priorities: TaskPriority[] = ["critical", "high", "medium", "low"];
+expectTypeOf<TaskPriority>().toEqualTypeOf<"critical" | "high" | "medium" | "low">();
 
-    expect(priorities).toEqual(["critical", "high", "medium", "low"]);
-  });
-
-  expectTypeOf<TaskPriority>().toEqualTypeOf<"critical" | "high" | "medium" | "low">();
-
-  // @ts-expect-error Numeric task priorities are no longer part of the wire contract.
-  const numericPriority: TaskPriority = 0;
-  void numericPriority;
-});
+// @ts-expect-error Numeric task priorities are no longer part of the wire contract.
+const numericPriority: TaskPriority = 0;
+void numericPriority;
 
 describe("isFromOffice", () => {
   it("is false for null/undefined", () => {

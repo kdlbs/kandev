@@ -9,6 +9,7 @@ import type { KanbanState } from "@/lib/state/slices";
 import {
   buildArchivedValue,
   buildDebugEntries,
+  buildTaskFromKanban,
   hasResolvedTaskDetails,
   resolveEffectiveTask,
   resolveTaskContentState,
@@ -290,6 +291,12 @@ describe("syncActiveTaskSession", () => {
 });
 
 describe("resolveEffectiveTask archived state", () => {
+  it("preserves a non-default priority for kanban-only tasks", () => {
+    const resolved = buildTaskFromKanban(makeKanbanTask({ priority: "high" }));
+
+    expect(resolved.priority).toBe("high");
+  });
+
   it("builds a kanban-only task with its metadata", () => {
     const metadata = { port_forwarding_enabled: true };
     const resolved = resolveEffectiveTask(null, null, makeKanbanTask({ metadata }), "task-1");
