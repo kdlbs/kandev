@@ -62,7 +62,13 @@ function usePinnableTooltip() {
       closePinnedTooltip();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && pinnedRef.current) closePinnedTooltip();
+      if (event.key !== "Escape" || !pinnedRef.current) return;
+      // Claim the key here: once the pinned tooltip is closed, nothing
+      // further up the tree (e.g. a clarification panel's own
+      // Escape-collapses handler) should also react to the same keypress.
+      event.preventDefault();
+      event.stopPropagation();
+      closePinnedTooltip();
     };
 
     document.addEventListener("pointerdown", closeOnOutsidePointer);

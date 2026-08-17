@@ -267,6 +267,60 @@ describe("ClarificationInputOverlay — Escape defaultPrevented guard (F3/F4 reg
   });
 });
 
+// Mirrors quick-chat-modal.tsx's onEscapeKeyDown, itself invoked from Radix's
+// DismissableLayer document-capture listener: runs the guard predicate BEFORE
+// any target/bubble-phase consumer sees the event, so armedEventRef.current
+// really does equal the dispatched event by the time consumers run -- the
+// arrangement the round-4-only defaultPrevented/marker test at line 217
+// cannot produce (no provider there, so the predicate never runs and
+// armedEventRef stays null for every real dispatch).
+function attachCaptureGuard(getGuard: () => ClarificationEscapeGuardEntry) {
+  const onCapture = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    if (getGuard()?.test(event)) event.preventDefault();
+  };
+  document.addEventListener("keydown", onCapture, true);
+  return () => document.removeEventListener("keydown", onCapture, true);
+}
+
+describe("ClarificationInputOverlay — Quick Chat capture-phase ordering (F6 regression)", () => {
+  it("does not collapse when a consumer claims Escape via stopPropagation, even though the capture-phase guard armed it first (Quick Chat ordering)", () => {
+    // Stands in for one of the F3-fixed consumers (tiptap-entity-reference-suggestion,
+    // token-usage-display, message-history-search): an in-scope bubble-phase
+    // listener between the target and window that calls stopPropagation() once
+    // it claims the key. Unlike the F3 test at line 217 (preventDefault only,
+    // no provider), this one runs the real predicate first via document
+    // capture, so armedEventRef.current === the dispatched event -- the exact
+    // condition under which the defaultPrevented/marker bail-out in
+    // CarouselKeyboardShortcuts.onKey is a no-op (armedEventRef.current !== e
+    // is false). Only the consumer's own stopPropagation() can still protect
+    // the panel here, which is what this test actually proves.
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, scopeRef, onDismiss, getGuard } = renderOverlayWithGuard(messages);
+    const detachGuard = attachCaptureGuard(getGuard);
+    scopeRef.current!.addEventListener("keydown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    fireEvent.keyDown(composerRef.current!, { key: "Escape" });
+    detachGuard();
+
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("does collapse when the capture-phase guard arms the event and nothing downstream claims it (control case)", () => {
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, onDismiss, getGuard } = renderOverlayWithGuard(messages);
+    const detachGuard = attachCaptureGuard(getGuard);
+
+    fireEvent.keyDown(composerRef.current!, { key: "Escape" });
+    detachGuard();
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("ClarificationInputOverlay — labelled Skip button", () => {
   it("still POSTs a rejection when the Skip button is clicked", async () => {
     const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];

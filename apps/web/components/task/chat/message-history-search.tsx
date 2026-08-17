@@ -77,6 +77,10 @@ function handleOverlayKeyDown(event: React.KeyboardEvent, args: OverlayKeyArgs) 
   }
   if (event.key === "Escape") {
     event.preventDefault();
+    // Claim the key here: once the reverse-search overlay is closed, nothing
+    // further up the tree (e.g. a clarification panel's own
+    // Escape-collapses handler) should also react to the same keypress.
+    event.stopPropagation();
     onClose();
   }
 }
